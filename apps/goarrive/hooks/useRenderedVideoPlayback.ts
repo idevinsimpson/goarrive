@@ -49,6 +49,14 @@ export interface UseRenderedVideoPlaybackApi {
 // ---------------------------------------------------------------------------
 
 const SEEK_DRIFT_THRESHOLD_MS = 250;
+const PIP_POSITION_CALLBACK_INTERVAL_MS = 250;
+
+interface PendingPipExitReconcile {
+  blockId: string;
+  blockOffsetMs: number;
+  videoTimeMs: number;
+  isPlaying: boolean;
+}
 
 const NULL_STATE: RenderedVideoPlaybackState = {
   currentBlockId: null,
@@ -102,11 +110,25 @@ export function useRenderedVideoPlayback(
   // Track previous mode to detect transitions.
   const prevModeRef = useRef<PlaybackMode>(mode);
 
-  // Last position emitted by PiP listeners — dedup guard.
-  const lastPipBlockIdRef = useRef<string | null>(null);
-  const lastPipBlockOffsetMsRef = useRef<number>(0);
+  // PiP exit is a two-phase handoff: first report the video position, then
+  // resume normal syncing only after the parent publishes that position back
+  // as authoritative state.
+  const pendingPipExitRef = useRef<PendingPipExitReconcile | null>(null);
+
+  // Last position emitted by PiP listeners — session-scoped rate/dedup guard.
+  const lastPipPositionRef = useRef<{ blockId: string; blockOffsetMs: number } | null>(null);
 
   const isMetaReady = meta !== null && meta.status === 'ready';
+  const videoElementAtRender = videoRef.current;
+  const metaSessionKey = meta === null
+    ? 'none'
+    : JSON.stringify([
+        meta.url,
+        meta.version,
+        meta.status,
+        meta.durationMs,
+        meta.blocks.map((block) => [block.blockId, block.startMs, block.endMs]),
+      ]);
 
   // -------------------------------------------------------------------------
   // Mode transition: pip → normal
@@ -125,8 +147,23 @@ export function useRenderedVideoPlayback(
 
     const currentMs = video.currentTime * 1000;
     const lookup = lookupBlockAtVideoTime(m, currentMs);
-    onPipExitRef.current?.(lookup.blockId, lookup.blockOffsetMs);
-  }, [mode, videoRef]);
+    const reconcile = onPipExitRef.current;
+
+    if (reconcile) {
+      const isPlaying = !video.paused;
+      pendingPipExitRef.current = {
+        blockId: lookup.blockId,
+        blockOffsetMs: lookup.blockOffsetMs,
+        videoTimeMs: currentMs,
+        isPlaying,
+      };
+      prevAuthBlockIdRef.current = lookup.blockId || null;
+      reconcile(lookup.blockId, lookup.blockOffsetMs);
+      onPlayStateChangeRef.current?.(isPlaying);
+    } else {
+      pendingPipExitRef.current = null;
+    }
+  }, [mode, videoElementAtRender]);
 
   // -------------------------------------------------------------------------
   // Normal mode: sync video element to the authoritative state machine
@@ -144,6 +181,35 @@ export function useRenderedVideoPlayback(
     if (!video) return;
 
     const blockId = authoritativeBlockId;
+
+    const pendingPipExit = pendingPipExitRef.current;
+    if (pendingPipExit) {
+      const authoritativeVideoTimeMs = blockId === null
+        ? null
+        : videoTimeForBlock(meta!, blockId, authoritativeBlockOffsetMs);
+      const hasObservedReconciledAuthority = blockId === pendingPipExit.blockId
+        && authoritativeVideoTimeMs !== null
+        && Math.abs(authoritativeVideoTimeMs - pendingPipExit.videoTimeMs)
+          <= SEEK_DRIFT_THRESHOLD_MS
+        && authoritativeIsPlaying === pendingPipExit.isPlaying;
+
+      if (!hasObservedReconciledAuthority) {
+        const lookup = lookupBlockAtVideoTime(meta!, pendingPipExit.videoTimeMs);
+        stateRef.current = {
+          currentBlockId: lookup.blockId || null,
+          currentBlockIndex: lookup.blockIndex,
+          blockOffsetMs: pendingPipExit.blockOffsetMs,
+          videoTimeMs: pendingPipExit.videoTimeMs,
+          isPlaying: !video.paused,
+          mode: 'normal',
+        };
+        forceUpdate();
+        return;
+      }
+
+      pendingPipExitRef.current = null;
+      prevAuthBlockIdRef.current = blockId;
+    }
 
     // Null blockId (pre/post-workout warmup, cooldown, or rep-based gap) → pause and hold.
     if (blockId === null) {
@@ -210,33 +276,39 @@ export function useRenderedVideoPlayback(
     authoritativeBlockId,
     authoritativeBlockOffsetMs,
     authoritativeIsPlaying,
-    videoRef,
+    videoElementAtRender,
   ]);
 
   // -------------------------------------------------------------------------
   // PiP mode: mirror video element → state, emit position callbacks
   // -------------------------------------------------------------------------
-  // Listeners are attached once when entering PiP and removed on exit.
-  // metaRef / callback refs are used inside handlers so they always read the
-  // latest values without needing the listeners to be re-attached.
+  // Listeners are attached per PiP session and re-attached when the actual
+  // element or metadata contract changes. Callback refs keep callback identity
+  // churn from restarting the listener session.
   useEffect(() => {
     if (mode !== 'pip') return;
 
     const video = videoRef.current;
     if (!video) return;
+    const attachedVideo: HTMLVideoElement = video;
 
-    function handlePositionEvent() {
-      const v = videoRef.current;
+    // A PiP entry, metadata revision, or element replacement starts a new
+    // video-driven session. The first event must be observable even if it has
+    // the same position as the previous session.
+    lastPipPositionRef.current = null;
+    pendingPipExitRef.current = null;
+
+    function handlePositionEvent(forceEmit: boolean) {
       const m = metaRef.current;
-      if (!v || !m || m.status !== 'ready') return;
+      if (!m || m.status !== 'ready') return;
 
-      const currentMs = v.currentTime * 1000;
+      const currentMs = attachedVideo.currentTime * 1000;
       const lookup = lookupBlockAtVideoTime(m, currentMs);
       const { blockId, blockOffsetMs } = lookup;
 
-      // Capture previous values BEFORE any mutation for accurate comparison.
-      const prevBlockId = lastPipBlockIdRef.current;
-      const prevBlockOffsetMs = lastPipBlockOffsetMsRef.current;
+      const previousPosition = lastPipPositionRef.current;
+      const blockChanged = previousPosition === null
+        || blockId !== previousPosition.blockId;
 
       // Update the ref continuously so state.videoTimeMs is always fresh.
       stateRef.current = {
@@ -248,17 +320,32 @@ export function useRenderedVideoPlayback(
         mode: 'pip',
       };
 
-      // Emit callback and advance dedup tracking whenever position meaningfully changed.
-      if (blockId !== prevBlockId || blockOffsetMs !== prevBlockOffsetMs) {
-        lastPipBlockIdRef.current = blockId;
-        lastPipBlockOffsetMsRef.current = blockOffsetMs;
+      // Bound state-machine callbacks to 4 Hz during ordinary playback. A
+      // block boundary or explicit seek is always emitted immediately.
+      const offsetDeltaMs = previousPosition === null
+        ? Number.POSITIVE_INFINITY
+        : Math.abs(blockOffsetMs - previousPosition.blockOffsetMs);
+      if (
+        forceEmit
+        || blockChanged
+        || offsetDeltaMs >= PIP_POSITION_CALLBACK_INTERVAL_MS
+      ) {
+        lastPipPositionRef.current = { blockId, blockOffsetMs };
         onPositionChangeRef.current?.(blockId, blockOffsetMs);
       }
 
       // Re-render only on block-boundary crossing to avoid per-ms re-render perf kills.
-      if (blockId !== prevBlockId) {
+      if (blockChanged) {
         forceUpdate();
       }
+    }
+
+    function handleTimeUpdate() {
+      handlePositionEvent(false);
+    }
+
+    function handleSeeked() {
+      handlePositionEvent(true);
     }
 
     function handlePlay() {
@@ -273,18 +360,18 @@ export function useRenderedVideoPlayback(
       forceUpdate();
     }
 
-    video.addEventListener('timeupdate', handlePositionEvent);
-    video.addEventListener('seeked', handlePositionEvent);
-    video.addEventListener('play', handlePlay);
-    video.addEventListener('pause', handlePause);
+    attachedVideo.addEventListener('timeupdate', handleTimeUpdate);
+    attachedVideo.addEventListener('seeked', handleSeeked);
+    attachedVideo.addEventListener('play', handlePlay);
+    attachedVideo.addEventListener('pause', handlePause);
 
     return () => {
-      video.removeEventListener('timeupdate', handlePositionEvent);
-      video.removeEventListener('seeked', handlePositionEvent);
-      video.removeEventListener('play', handlePlay);
-      video.removeEventListener('pause', handlePause);
+      attachedVideo.removeEventListener('timeupdate', handleTimeUpdate);
+      attachedVideo.removeEventListener('seeked', handleSeeked);
+      attachedVideo.removeEventListener('play', handlePlay);
+      attachedVideo.removeEventListener('pause', handlePause);
     };
-  }, [mode, videoRef]);
+  }, [mode, videoElementAtRender, metaSessionKey]);
 
   // -------------------------------------------------------------------------
   // Imperative helpers

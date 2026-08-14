@@ -18,6 +18,13 @@ import {
   videoTimeForBlock,
 } from '../../utils/renderedVideoOffsetMap';
 import type { RenderedVideoMeta } from '../../utils/renderedVideoOffsetMap';
+import {
+  decodeRenderedVideoSegmentIdentity,
+  encodeRenderedVideoSegmentIdentity,
+  rendererSegmentId,
+  resolveRenderedVideoSegmentIdentity,
+} from '../../utils/renderedVideoSegmentIdentity';
+import type { RenderedVideoSegmentIdentity } from '../../utils/renderedVideoSegmentIdentity';
 import { useRenderedVideoPlayback } from '../useRenderedVideoPlayback';
 import type { UseRenderedVideoPlaybackParams } from '../useRenderedVideoPlayback';
 
@@ -83,23 +90,116 @@ function makeVideoRef(
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/**
- * Multi-segment fixture: two workout blocks (A, B), each with a movement
- * segment (#0) and a rest segment (#1). IDs use the segment-unique pattern
- * the fixed Phase 2 emitter will produce.
- */
-const multiSegMeta: RenderedVideoMeta = {
-  url: 'https://example.com/workout.mp4',
-  durationMs: 60000,
-  version: 1,
-  status: 'ready',
+type RendererFixtureMovement = {
+  durationSec: number;
+  restAfter: number;
+};
+
+type RendererFixtureBlock = {
+  id: string;
+  movements: RendererFixtureMovement[];
+  restDurationSeconds: number;
+};
+
+type RendererFixtureSegment = {
+  identity: RenderedVideoSegmentIdentity;
+  durationMs: number;
+};
+
+/** Representative input consumed by PR #262's current flattenWorkout emitter. */
+const rendererWorkoutFixture: { blocks: RendererFixtureBlock[] } = {
   blocks: [
-    { blockId: 'block-A#0', startMs: 0,     endMs: 20000 },
-    { blockId: 'block-A#1', startMs: 20000, endMs: 30000 },
-    { blockId: 'block-B#0', startMs: 30000, endMs: 50000 },
-    { blockId: 'block-B#1', startMs: 50000, endMs: 60000 },
+    {
+      id: 'block-a',
+      movements: [
+        { durationSec: 30, restAfter: 15 },
+        { durationSec: 30, restAfter: 15 },
+      ],
+      restDurationSeconds: 0,
+    },
+    {
+      id: 'block-b',
+      movements: [
+        { durationSec: 45, restAfter: 20 },
+        { durationSec: 60, restAfter: 0 },
+      ],
+      restDurationSeconds: 30,
+    },
   ],
 };
+
+/** Mirrors #262's movement → restAfter → block-rest segment order. */
+function emitRendererFixtureSegments(
+  workout: { blocks: RendererFixtureBlock[] },
+): RendererFixtureSegment[] {
+  const segments: RendererFixtureSegment[] = [];
+
+  workout.blocks.forEach((block) => {
+    let segmentIndex = 0;
+    block.movements.forEach((movement, movementIndex) => {
+      segments.push({
+        identity: {
+          parentBlockId: block.id,
+          segmentIndex: segmentIndex++,
+          phase: 'movement',
+          movementIndex,
+        },
+        durationMs: movement.durationSec * 1000,
+      });
+
+      if (movement.restAfter > 0) {
+        segments.push({
+          identity: {
+            parentBlockId: block.id,
+            segmentIndex: segmentIndex++,
+            phase: 'rest',
+            movementIndex,
+          },
+          durationMs: movement.restAfter * 1000,
+        });
+      }
+    });
+
+    if (block.restDurationSeconds > 0) {
+      segments.push({
+        identity: {
+          parentBlockId: block.id,
+          segmentIndex: segmentIndex++,
+          phase: 'rest',
+          movementIndex: null,
+        },
+        durationMs: block.restDurationSeconds * 1000,
+      });
+    }
+  });
+
+  return segments;
+}
+
+function buildRendererFixtureMeta(segments: RendererFixtureSegment[]): RenderedVideoMeta {
+  let startMs = 0;
+  const blocks = segments.map(({ identity, durationMs }) => {
+    const block = {
+      blockId: rendererSegmentId(identity),
+      startMs,
+      endMs: startMs + durationMs,
+    };
+    startMs = block.endMs;
+    return block;
+  });
+
+  return {
+    url: 'https://example.com/workout.mp4',
+    durationMs: startMs,
+    version: 1,
+    status: 'ready',
+    blocks,
+  };
+}
+
+const rendererSegments = emitRendererFixtureSegments(rendererWorkoutFixture);
+const rendererSegmentCatalog = rendererSegments.map(({ identity }) => identity);
+const rendererDerivedMeta = buildRendererFixtureMeta(rendererSegments);
 
 /** Simple 3-block meta for most other tests. */
 const simpleMeta: RenderedVideoMeta = {
@@ -133,44 +233,62 @@ function baseNormalParams(
 // Cross-contract: multi-segment fixture
 // ---------------------------------------------------------------------------
 
-describe('cross-contract: multi-segment fixture (Phase 2 ↔ Phase 3 ↔ Phase 4)', () => {
-  it('validateMeta accepts the fixture — no duplicate-blockId, no overlap, no out-of-order', () => {
-    const issues = validateMeta(multiSegMeta);
+describe('cross-contract: renderer-derived segments (Phase 2 ↔ Phase 3 ↔ Phase 4)', () => {
+  it('validateMeta accepts #262-derived offsets without duplicates or overlap', () => {
+    const issues = validateMeta(rendererDerivedMeta);
     expect(issues).toHaveLength(0);
   });
 
-  it('lookupBlockAtVideoTime at 10000ms → block-A#0 (inside segment 0)', () => {
-    const result = lookupBlockAtVideoTime(multiSegMeta, 10000);
-    expect(result.blockId).toBe('block-A#0');
-    expect(result.blockOffsetMs).toBe(10000);
-    expect(result.isBeforeFirstBlock).toBe(false);
-    expect(result.isAfterLastBlock).toBe(false);
+  it('resolves movement and rest segments using #262 wire ids', () => {
+    const movement = lookupBlockAtVideoTime(rendererDerivedMeta, 45000);
+    expect(movement.blockId).toBe('block-a#2');
+    expect(movement.blockOffsetMs).toBe(0);
+
+    const rest = lookupBlockAtVideoTime(rendererDerivedMeta, 35000);
+    expect(rest.blockId).toBe('block-a#1');
+    expect(rest.blockOffsetMs).toBe(5000);
+    expect(resolveRenderedVideoSegmentIdentity(rest.blockId, rendererSegmentCatalog)).toEqual({
+      parentBlockId: 'block-a',
+      segmentIndex: 1,
+      phase: 'rest',
+      movementIndex: 0,
+    });
   });
 
-  it('lookupBlockAtVideoTime at 25000ms → block-A#1 (inside segment 1)', () => {
-    const result = lookupBlockAtVideoTime(multiSegMeta, 25000);
-    expect(result.blockId).toBe('block-A#1');
-    expect(result.blockOffsetMs).toBe(5000);
+  it('retains full player context through player → video → player round trips', () => {
+    rendererSegmentCatalog.forEach((identity) => {
+      const playerKey = encodeRenderedVideoSegmentIdentity(identity);
+      const decodedPlayerIdentity = decodeRenderedVideoSegmentIdentity(playerKey);
+      expect(decodedPlayerIdentity).toEqual(identity);
+
+      const blockId = rendererSegmentId(decodedPlayerIdentity!);
+      const videoTimeMs = videoTimeForBlock(rendererDerivedMeta, blockId, 0);
+      expect(videoTimeMs).not.toBeNull();
+
+      const lookup = lookupBlockAtVideoTime(rendererDerivedMeta, videoTimeMs!);
+      const relocatedPlayerIdentity = resolveRenderedVideoSegmentIdentity(
+        lookup.blockId,
+        rendererSegmentCatalog,
+      );
+      expect(relocatedPlayerIdentity).toEqual(identity);
+      expect(encodeRenderedVideoSegmentIdentity(relocatedPlayerIdentity!)).toBe(playerKey);
+    });
   });
 
-  it('videoTimeForBlock(block-A#0, 500) → 500 (segment-0-start + 500)', () => {
-    expect(videoTimeForBlock(multiSegMeta, 'block-A#0', 500)).toBe(500);
+  it('videoTimeForBlock uses the renderer segment start plus local offset', () => {
+    expect(videoTimeForBlock(rendererDerivedMeta, 'block-a#2', 500)).toBe(45500);
   });
 
-  it('videoTimeForBlock(block-A#1, 0) → 20000 (segment-1-start)', () => {
-    expect(videoTimeForBlock(multiSegMeta, 'block-A#1', 0)).toBe(20000);
-  });
-
-  it('hook: block-A#0 → block-A#1 transition triggers hard-seek (block transition rule)', () => {
-    const video = makeMockVideo(0);
+  it('hook seeks across renderer movement/rest boundaries', () => {
+    const video = makeMockVideo(29000);
     const videoRef = makeVideoRef(video);
 
     let params: UseRenderedVideoPlaybackParams = {
-      meta: multiSegMeta,
+      meta: rendererDerivedMeta,
       videoRef,
       mode: 'normal',
-      authoritativeBlockId: 'block-A#0',
-      authoritativeBlockOffsetMs: 19000,
+      authoritativeBlockId: 'block-a#0',
+      authoritativeBlockOffsetMs: 29000,
       authoritativeIsPlaying: false,
     };
 
@@ -179,15 +297,15 @@ describe('cross-contract: multi-segment fixture (Phase 2 ↔ Phase 3 ↔ Phase 4
       { initialProps: params },
     );
 
-    // First render: seeks to block-A#0 start + 19000 = 19000ms (prevBlockId was null)
     video._currentTimeSetter.mockClear();
-
-    // Now position video at 19000ms and switch to block-A#1 at offset 0 → expectedMs = 20000ms
-    // drift = |19000 - 20000| = 1000 > 250ms, AND blockId changed → seeks
-    params = { ...params, authoritativeBlockId: 'block-A#1', authoritativeBlockOffsetMs: 0 };
+    params = {
+      ...params,
+      authoritativeBlockId: 'block-a#1',
+      authoritativeBlockOffsetMs: 0,
+    };
     rerender(params);
 
-    expect(video._currentTimeSetter).toHaveBeenCalledWith(20); // 20000ms / 1000
+    expect(video._currentTimeSetter).toHaveBeenCalledWith(30);
   });
 });
 
@@ -441,6 +559,162 @@ describe('pip mode — video-driven position callbacks', () => {
 
     expect(video._currentTimeSetter).not.toHaveBeenCalled();
   });
+
+  it('bounds ordinary timeupdate callbacks while seeked remains immediate', () => {
+    const video = makeMockVideo(5000);
+    const videoRef = makeVideoRef(video);
+    const onPositionChange = jest.fn();
+
+    renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      {
+        initialProps: {
+          meta: simpleMeta,
+          videoRef,
+          mode: 'pip' as const,
+          authoritativeBlockId: null,
+          authoritativeBlockOffsetMs: 0,
+          authoritativeIsPlaying: false,
+          onVideoDrivenPositionChange: onPositionChange,
+        },
+      },
+    );
+
+    act(() => {
+      video._fire('timeupdate');
+      video.currentTime = 5.1;
+      video._fire('timeupdate');
+      video.currentTime = 5.24;
+      video._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      video.currentTime = 5.25;
+      video._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(2);
+    expect(onPositionChange).toHaveBeenLastCalledWith('b1', 5250);
+
+    act(() => {
+      video.currentTime = 5.3;
+      video._fire('seeked');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(3);
+    expect(onPositionChange).toHaveBeenLastCalledWith('b1', 5300);
+  });
+
+  it('reattaches listeners when videoRef.current changes under a stable ref', () => {
+    const firstVideo = makeMockVideo(5000);
+    const secondVideo = makeMockVideo(25000);
+    const videoRef = makeVideoRef(firstVideo);
+    const onPositionChange = jest.fn();
+    const params: UseRenderedVideoPlaybackParams = {
+      meta: simpleMeta,
+      videoRef,
+      mode: 'pip',
+      authoritativeBlockId: null,
+      authoritativeBlockOffsetMs: 0,
+      authoritativeIsPlaying: false,
+      onVideoDrivenPositionChange: onPositionChange,
+    };
+
+    const { rerender } = renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      { initialProps: params },
+    );
+
+    videoRef.current = secondVideo as unknown as HTMLVideoElement;
+    rerender(params);
+
+    const removedFromFirst: string[] = firstVideo.removeEventListener.mock.calls.map(
+      (call: [string, ...unknown[]]) => call[0],
+    );
+    expect(removedFromFirst).toEqual(
+      expect.arrayContaining(['timeupdate', 'seeked', 'play', 'pause']),
+    );
+
+    act(() => {
+      firstVideo._fire('timeupdate');
+    });
+    expect(onPositionChange).not.toHaveBeenCalled();
+
+    act(() => {
+      secondVideo._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(1);
+    expect(onPositionChange).toHaveBeenCalledWith('b2', 5000);
+  });
+
+  it('resets position dedup when re-entering PiP at the same position', () => {
+    const video = makeMockVideo(5000);
+    const videoRef = makeVideoRef(video);
+    const onPositionChange = jest.fn();
+    let params: UseRenderedVideoPlaybackParams = {
+      meta: simpleMeta,
+      videoRef,
+      mode: 'pip',
+      authoritativeBlockId: 'b1',
+      authoritativeBlockOffsetMs: 5000,
+      authoritativeIsPlaying: false,
+      onVideoDrivenPositionChange: onPositionChange,
+    };
+
+    const { rerender } = renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      { initialProps: params },
+    );
+
+    act(() => {
+      video._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(1);
+
+    params = { ...params, mode: 'normal' };
+    rerender(params);
+    params = { ...params, mode: 'pip' };
+    rerender(params);
+
+    act(() => {
+      video._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(2);
+    expect(onPositionChange).toHaveBeenLastCalledWith('b1', 5000);
+  });
+
+  it('resets position dedup when rendered metadata changes', () => {
+    const video = makeMockVideo(5000);
+    const videoRef = makeVideoRef(video);
+    const onPositionChange = jest.fn();
+    let params: UseRenderedVideoPlaybackParams = {
+      meta: simpleMeta,
+      videoRef,
+      mode: 'pip',
+      authoritativeBlockId: null,
+      authoritativeBlockOffsetMs: 0,
+      authoritativeIsPlaying: false,
+      onVideoDrivenPositionChange: onPositionChange,
+    };
+
+    const { rerender } = renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      { initialProps: params },
+    );
+
+    act(() => {
+      video._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(1);
+
+    params = { ...params, meta: { ...simpleMeta, version: 2 } };
+    rerender(params);
+    act(() => {
+      video._fire('timeupdate');
+    });
+
+    expect(onPositionChange).toHaveBeenCalledTimes(2);
+    expect(onPositionChange).toHaveBeenLastCalledWith('b1', 5000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -499,6 +773,56 @@ describe('mode transitions', () => {
 
     expect(onPipExit).toHaveBeenCalledTimes(1);
     expect(onPipExit).toHaveBeenCalledWith('b2', 5000);
+  });
+
+  it('pip → normal: holds video until reconciled authority is observed', () => {
+    const video = makeMockVideo(25000);
+    video.paused = false;
+    const videoRef = makeVideoRef(video);
+    const onPipExit = jest.fn();
+    const onPlayState = jest.fn();
+    let params: UseRenderedVideoPlaybackParams = {
+      meta: simpleMeta,
+      videoRef,
+      mode: 'pip',
+      authoritativeBlockId: 'b1',
+      authoritativeBlockOffsetMs: 1000,
+      authoritativeIsPlaying: false,
+      onPipExitReconcile: onPipExit,
+      onVideoDrivenPlayStateChange: onPlayState,
+    };
+
+    const { rerender } = renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      { initialProps: params },
+    );
+
+    params = { ...params, mode: 'normal' };
+    rerender(params);
+
+    expect(onPipExit).toHaveBeenCalledWith('b2', 5000);
+    expect(onPlayState).toHaveBeenCalledWith(true);
+    expect(video._currentTimeSetter).not.toHaveBeenCalled();
+    expect(video.pause).not.toHaveBeenCalled();
+
+    params = {
+      ...params,
+      authoritativeBlockId: 'b2',
+      authoritativeBlockOffsetMs: 5000,
+    };
+    rerender(params);
+
+    expect(video._currentTimeSetter).not.toHaveBeenCalled();
+    expect(video.pause).not.toHaveBeenCalled();
+
+    params = {
+      ...params,
+      authoritativeIsPlaying: true,
+    };
+    rerender(params);
+
+    expect(video._currentTimeSetter).not.toHaveBeenCalled();
+    expect(video.play).toHaveBeenCalledTimes(1);
   });
 });
 
