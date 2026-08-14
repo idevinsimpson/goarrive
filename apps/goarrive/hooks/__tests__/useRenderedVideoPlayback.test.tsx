@@ -24,7 +24,7 @@ import {
   rendererSegmentId,
   resolveRenderedVideoSegmentIdentity,
 } from '../../utils/renderedVideoSegmentIdentity';
-import type { RenderedVideoSegmentIdentity } from '../../utils/renderedVideoSegmentIdentity';
+import type { RenderedVideoSegmentMetadata } from '../../utils/renderedVideoSegmentIdentity';
 import { useRenderedVideoPlayback } from '../useRenderedVideoPlayback';
 import type { UseRenderedVideoPlaybackParams } from '../useRenderedVideoPlayback';
 
@@ -90,116 +90,34 @@ function makeVideoRef(
 // Fixtures
 // ---------------------------------------------------------------------------
 
-type RendererFixtureMovement = {
-  durationSec: number;
-  restAfter: number;
+type RendererContractBlock = RenderedVideoSegmentMetadata & {
+  startMs: number;
+  endMs: number;
 };
 
-type RendererFixtureBlock = {
-  id: string;
-  movements: RendererFixtureMovement[];
-  restDurationSeconds: number;
-};
-
-type RendererFixtureSegment = {
-  identity: RenderedVideoSegmentIdentity;
-  durationMs: number;
-};
-
-/** Representative input consumed by PR #262's current flattenWorkout emitter. */
-const rendererWorkoutFixture: { blocks: RendererFixtureBlock[] } = {
-  blocks: [
-    {
-      id: 'block-a',
-      movements: [
-        { durationSec: 30, restAfter: 15 },
-        { durationSec: 30, restAfter: 15 },
-      ],
-      restDurationSeconds: 0,
-    },
-    {
-      id: 'block-b',
-      movements: [
-        { durationSec: 45, restAfter: 20 },
-        { durationSec: 60, restAfter: 0 },
-      ],
-      restDurationSeconds: 30,
-    },
-  ],
-};
-
-/** Mirrors #262's movement → restAfter → block-rest segment order. */
-function emitRendererFixtureSegments(
-  workout: { blocks: RendererFixtureBlock[] },
-): RendererFixtureSegment[] {
-  const segments: RendererFixtureSegment[] = [];
-
-  workout.blocks.forEach((block) => {
-    let segmentIndex = 0;
-    block.movements.forEach((movement, movementIndex) => {
-      segments.push({
-        identity: {
-          parentBlockId: block.id,
-          segmentIndex: segmentIndex++,
-          phase: 'movement',
-          movementIndex,
-        },
-        durationMs: movement.durationSec * 1000,
-      });
-
-      if (movement.restAfter > 0) {
-        segments.push({
-          identity: {
-            parentBlockId: block.id,
-            segmentIndex: segmentIndex++,
-            phase: 'rest',
-            movementIndex,
-          },
-          durationMs: movement.restAfter * 1000,
-        });
-      }
-    });
-
-    if (block.restDurationSeconds > 0) {
-      segments.push({
-        identity: {
-          parentBlockId: block.id,
-          segmentIndex: segmentIndex++,
-          phase: 'rest',
-          movementIndex: null,
-        },
-        durationMs: block.restDurationSeconds * 1000,
-      });
-    }
-  });
-
-  return segments;
-}
-
-function buildRendererFixtureMeta(segments: RendererFixtureSegment[]): RenderedVideoMeta {
-  let startMs = 0;
-  const blocks = segments.map(({ identity, durationMs }) => {
-    const block = {
-      blockId: rendererSegmentId(identity),
-      startMs,
-      endMs: startMs + durationMs,
-    };
-    startMs = block.endMs;
-    return block;
-  });
-
-  return {
-    url: 'https://example.com/workout.mp4',
-    durationMs: startMs,
-    version: 1,
-    status: 'ready',
-    blocks,
+type RendererContractFixture = {
+  omittedSegmentIndexes: number[];
+  expected: {
+    status: 'ready';
+    storagePath: string;
+    durationMs: number;
+    version: number;
+    sourceHash: string;
+    blocks: RendererContractBlock[];
   };
-}
+};
 
-const rendererSegments = emitRendererFixtureSegments(rendererWorkoutFixture);
-const rendererSegmentCatalog = rendererSegments.map(({ identity }) => identity);
-const rendererDerivedMeta = buildRendererFixtureMeta(rendererSegments);
+// #262's production contract test regenerates and compares this same fixture.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const rendererContractFixture = require(
+  '../../../../contracts/rendered-video/emitter-player-contract-v1.json',
+) as RendererContractFixture;
+
+const rendererSegmentCatalog = rendererContractFixture.expected.blocks;
+const rendererDerivedMeta: RenderedVideoMeta = {
+  ...rendererContractFixture.expected,
+  url: 'https://trusted-read.example.test/short-lived-url',
+};
 
 /** Simple 3-block meta for most other tests. */
 const simpleMeta: RenderedVideoMeta = {
@@ -239,25 +157,35 @@ describe('cross-contract: renderer-derived segments (Phase 2 ↔ Phase 3 ↔ Pha
     expect(issues).toHaveLength(0);
   });
 
-  it('resolves movement and rest segments using #262 wire ids', () => {
-    const movement = lookupBlockAtVideoTime(rendererDerivedMeta, 45000);
-    expect(movement.blockId).toBe('block-a#2');
-    expect(movement.blockOffsetMs).toBe(0);
+  it('retains global segment indexes when emitted media has a gap', () => {
+    expect(rendererSegmentCatalog.map((block) => block.segmentIndex)).toEqual([0, 1, 2, 4, 5, 6]);
+    expect(rendererSegmentCatalog.map((block) => block.segmentIndex)).not.toContain(
+      rendererContractFixture.omittedSegmentIndexes[0],
+    );
+  });
 
-    const rest = lookupBlockAtVideoTime(rendererDerivedMeta, 35000);
-    expect(rest.blockId).toBe('block-a#1');
+  it('resolves opaque renderer ids from rich offset metadata', () => {
+    const restOffset = rendererSegmentCatalog.find((block) => block.phase === 'movement-rest')!;
+    const rest = lookupBlockAtVideoTime(rendererDerivedMeta, restOffset.startMs + 5000);
+    expect(rest.blockId).toBe(restOffset.blockId);
+    expect(rest.blockId).toMatch(/^segment:/);
     expect(rest.blockOffsetMs).toBe(5000);
     expect(resolveRenderedVideoSegmentIdentity(rest.blockId, rendererSegmentCatalog)).toEqual({
-      parentBlockId: 'block-a',
-      segmentIndex: 1,
-      phase: 'rest',
+      blockId: restOffset.blockId,
+      parentBlockId: 'block#alpha',
+      blockIndex: 0,
+      segmentIndex: 2,
+      phase: 'movement-rest',
+      movementId: 'movement-a',
       movementIndex: 0,
     });
   });
 
   it('retains full player context through player → video → player round trips', () => {
-    rendererSegmentCatalog.forEach((identity) => {
-      const playerKey = encodeRenderedVideoSegmentIdentity(identity);
+    rendererSegmentCatalog.forEach((metadata) => {
+      const identity = resolveRenderedVideoSegmentIdentity(metadata.blockId, rendererSegmentCatalog);
+      expect(identity).not.toBeNull();
+      const playerKey = encodeRenderedVideoSegmentIdentity(identity!);
       const decodedPlayerIdentity = decodeRenderedVideoSegmentIdentity(playerKey);
       expect(decodedPlayerIdentity).toEqual(identity);
 
@@ -276,19 +204,22 @@ describe('cross-contract: renderer-derived segments (Phase 2 ↔ Phase 3 ↔ Pha
   });
 
   it('videoTimeForBlock uses the renderer segment start plus local offset', () => {
-    expect(videoTimeForBlock(rendererDerivedMeta, 'block-a#2', 500)).toBe(45500);
+    const workOffset = rendererSegmentCatalog.find((block) => block.phase === 'work')!;
+    expect(videoTimeForBlock(rendererDerivedMeta, workOffset.blockId, 500)).toBe(10500);
   });
 
   it('hook seeks across renderer movement/rest boundaries', () => {
-    const video = makeMockVideo(29000);
+    const workOffset = rendererSegmentCatalog.find((block) => block.phase === 'work')!;
+    const restOffset = rendererSegmentCatalog.find((block) => block.phase === 'movement-rest')!;
+    const video = makeMockVideo(workOffset.endMs - 1000);
     const videoRef = makeVideoRef(video);
 
     let params: UseRenderedVideoPlaybackParams = {
       meta: rendererDerivedMeta,
       videoRef,
       mode: 'normal',
-      authoritativeBlockId: 'block-a#0',
-      authoritativeBlockOffsetMs: 29000,
+      authoritativeBlockId: workOffset.blockId,
+      authoritativeBlockOffsetMs: workOffset.endMs - workOffset.startMs - 1000,
       authoritativeIsPlaying: false,
     };
 
@@ -300,12 +231,45 @@ describe('cross-contract: renderer-derived segments (Phase 2 ↔ Phase 3 ↔ Pha
     video._currentTimeSetter.mockClear();
     params = {
       ...params,
-      authoritativeBlockId: 'block-a#1',
+      authoritativeBlockId: restOffset.blockId,
       authoritativeBlockOffsetMs: 0,
     };
     rerender(params);
 
-    expect(video._currentTimeSetter).toHaveBeenCalledWith(30);
+    expect(video._currentTimeSetter).toHaveBeenCalledWith(restOffset.startMs / 1000);
+  });
+
+  it('PiP emits the opaque id and it relocates through the identity catalog', () => {
+    const restOffset = rendererSegmentCatalog.find((block) => block.phase === 'block-rest')!;
+    const video = makeMockVideo(restOffset.startMs);
+    const onPosition = jest.fn();
+
+    renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      {
+        initialProps: {
+          meta: rendererDerivedMeta,
+          videoRef: makeVideoRef(video),
+          mode: 'pip' as const,
+          authoritativeBlockId: null,
+          authoritativeBlockOffsetMs: 0,
+          authoritativeIsPlaying: false,
+          onVideoDrivenPositionChange: onPosition,
+        },
+      },
+    );
+
+    act(() => video._fire('timeupdate'));
+
+    expect(onPosition).toHaveBeenCalledWith(restOffset.blockId, 0);
+    expect(resolveRenderedVideoSegmentIdentity(
+      onPosition.mock.calls[0][0],
+      rendererSegmentCatalog,
+    )).toEqual(expect.objectContaining({
+      blockId: restOffset.blockId,
+      phase: 'block-rest',
+      segmentIndex: 4,
+    }));
   });
 });
 
