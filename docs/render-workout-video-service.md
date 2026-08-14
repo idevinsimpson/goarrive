@@ -101,9 +101,29 @@ The path is immutable and versioned:
 gs://BUCKET/rendered-videos/WORKOUT_ID/vVERSION/SOURCE_HASH.mp4
 ```
 
-Never persist a signed URL. A trusted read endpoint should mint a short-lived
-signed URL from `storagePath` and return a `ResolvedRenderedVideoMeta` object;
-the durable Firestore document remains a `PersistedRenderedVideoMeta` object.
+Never persist a signed URL. The authenticated `resolveRenderedWorkoutVideo`
+callable is the read-time boundary. It loads durable metadata from Firestore,
+reconstructs the only valid object path from the default bucket, workout ID,
+version, and source hash, then mints a V4 read URL that expires after 15
+minutes. The returned object includes `expiresAt`; the client must resolve
+again after that time rather than caching or persisting the URL.
+
+The callable accepts `workoutId` and at most one access proof:
+
+- no proof for the owning coach, a platform admin, or an authenticated coach
+  reading a shared workout;
+- `assignmentId` for the member who owns that exact workout assignment; or
+- `sessionInstanceId` for the member whose pinned or current playbook workout
+  is being played.
+
+The assignment/session IDs are verified against trusted documents. A caller
+cannot submit a storage path, bucket, URL, version, or source hash. Invalid or
+cross-workout durable metadata is rejected before Storage is called. The
+callable performs Firestore reads only and never writes the URL or credentials.
+
+App code calls `resolveRenderedVideoForPlayback` immediately before activating
+the continuous-video hook. Until a resolved response exists, the existing
+segment player remains the safe fallback.
 
 ## Verification before activation
 
@@ -114,6 +134,9 @@ the durable Firestore document remains a `PersistedRenderedVideoMeta` object.
 4. Enqueue one staging task and verify its OIDC audience is the service origin.
 5. Change the workout while a render is running and verify the older
    `{version, sourceHash}` cannot commit ready or failed state.
-6. Resolve the stored `gs://` path through the trusted read path and smoke-test
-   playback. Do not deploy or test this flow against production without explicit
-   authorization.
+6. Call `resolveRenderedWorkoutVideo` as the owner, assigned member, and session
+   member; verify each receives a URL with a 15-minute `expiresAt` value.
+7. Repeat with a different member and a mismatched assignment/session; verify
+   each request is denied before a Storage signature is minted.
+8. Smoke-test playback through `resolveRenderedVideoForPlayback`. Do not deploy
+   or test this flow against production without explicit authorization.

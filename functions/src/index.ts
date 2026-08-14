@@ -113,6 +113,10 @@ export { marcoHuddleTurn } from './huddle-bridge';
 // service. RENDER_SERVICE_URL must be the deployed default run.app URL.
 // See docs/render-workout-video-service.md for queue and IAM prerequisites.
 export { renderWorkoutVideo } from './renderWorkoutVideo';
+// Authenticated read-time boundary for rendered videos. It validates the
+// caller and immutable storage identity, then returns a short-lived URL
+// without persisting credentials or signed URLs.
+export { resolveRenderedWorkoutVideo } from './renderedVideoResolver';
 
 admin.initializeApp();
 
