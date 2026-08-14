@@ -11288,6 +11288,7 @@ exports.generateMusicVolumeVariants = (0, https_1.onCall)({
     region: 'us-central1',
     timeoutSeconds: 300,
     memory: '2GiB',
+    maxInstances: 10,
     invoker: 'public',
 }, async (request) => {
     var _a;

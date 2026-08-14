@@ -12981,6 +12981,7 @@ export const generateMusicVolumeVariants = onCall(
     region: 'us-central1',
     timeoutSeconds: 300,
     memory: '2GiB',
+    maxInstances: 10,
     invoker: 'public',
   },
   async (request) => {
