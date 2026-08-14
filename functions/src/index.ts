@@ -58,6 +58,7 @@ import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import Stripe from 'stripe';
+import { getStripeForCoach } from './stripeFixtureSwitch';
 import { google } from 'googleapis';
 import {
   getZoomProvider,
@@ -116,6 +117,8 @@ const messaging = admin.messaging();
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
 const stripeWebhookSecretConnect = defineSecret('STRIPE_WEBHOOK_SECRET_CONNECT');
+// Test-mode key for seed-coach fixture path. Requires sk_test_ prefix at runtime.
+const stripeTestKey = defineSecret('STRIPE_TEST_KEY');
 
 // ── Zoom Secrets ─────────────────────────────────────────────────────────────
 const zoomAccountId = defineSecret('ZOOM_ACCOUNT_ID');
@@ -931,7 +934,7 @@ export const createCheckoutSession = onCall(
  * TODO: Justin pricing — replace $19.99 hardcode with configurable price.
  */
 export const createFunnelCheckoutSession = onCall(
-  { secrets: [stripeSecretKey], invoker: 'public' },
+  { secrets: [stripeSecretKey, stripeTestKey], invoker: 'public' },
   async (request) => {
     const { submissionId, discountCode } = request.data as {
       submissionId: string;
@@ -974,7 +977,7 @@ export const createFunnelCheckoutSession = onCall(
         .get();
       const applicationFeePercent = getTierSplit(activePayingSnap.size);
 
-      const stripe = getStripe(stripeSecretKey.value());
+      const stripe = getStripeForCoach(coachId, stripeSecretKey.value(), stripeTestKey.value() || undefined);
       const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
 
       // ── Resolve discount code ──
@@ -12619,7 +12622,7 @@ export const pollMovementVariationJobs = onSchedule(
  * Params: { memberId: string, stripeSubscriptionId: string }
  */
 export const pauseStripeSubscription = onCall(
-  { secrets: [stripeSecretKey], invoker: 'public' },
+  { secrets: [stripeSecretKey, stripeTestKey], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -12638,7 +12641,7 @@ export const pauseStripeSubscription = onCall(
     if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
 
-    const stripe = getStripe(stripeSecretKey.value());
+    const stripe = getStripeForCoach(callerCoachId, stripeSecretKey.value(), stripeTestKey.value() || undefined);
     await stripe.subscriptions.update(stripeSubscriptionId, {
       pause_collection: { behavior: 'void' },
     });
@@ -12655,7 +12658,7 @@ export const pauseStripeSubscription = onCall(
  * Params: { memberId: string, stripeSubscriptionId: string }
  */
 export const resumeStripeSubscription = onCall(
-  { secrets: [stripeSecretKey], invoker: 'public' },
+  { secrets: [stripeSecretKey, stripeTestKey], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -12683,7 +12686,7 @@ export const resumeStripeSubscription = onCall(
 
     console.log(`[resumeStripeSubscription] extending subscription ${stripeSubscriptionId} for member ${memberId} (coach ${callerCoachId}): ${extendedDays} day(s)`);
 
-    const stripe = getStripe(stripeSecretKey.value());
+    const stripe = getStripeForCoach(callerCoachId, stripeSecretKey.value(), stripeTestKey.value() || undefined);
     // Empty string clears pause_collection and resumes billing.
     await stripe.subscriptions.update(stripeSubscriptionId, {
       pause_collection: '' as any,
