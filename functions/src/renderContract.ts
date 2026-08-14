@@ -45,6 +45,8 @@ export interface RenderedSegmentOffset {
   parentBlockId: string;
   blockIndex: number;
   phase: RenderSegmentPhase;
+  /** Original global renderer position; it is not renumbered when media is omitted. */
+  segmentIndex: number;
   movementId?: string;
   movementIndex?: number;
   startMs: number;
@@ -311,6 +313,7 @@ export function buildBlockOffsets(segments: Segment[]): RenderedSegmentOffset[] 
       parentBlockId: segment.parentBlockId,
       blockIndex: segment.blockIndex,
       phase: segment.phase,
+      segmentIndex: segment.segmentIndex,
       movementId: segment.movementId,
       movementIndex: segment.movementIndex,
       startMs: offsetMs,

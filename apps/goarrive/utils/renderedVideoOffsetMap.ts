@@ -11,20 +11,24 @@
 // Types
 // ---------------------------------------------------------------------------
 
+export type RenderedVideoSegmentPhase =
+  | 'intro'
+  | 'outro'
+  | 'follow-along'
+  | 'special'
+  | 'work'
+  | 'movement-rest'
+  | 'block-rest';
+
 export interface RenderedVideoBlockOffset {
   /** Segment-unique renderer id. */
   blockId: string;
   /** Original workout block id retained for player/state-machine mapping. */
   parentBlockId?: string;
   blockIndex?: number;
-  phase?:
-    | 'intro'
-    | 'outro'
-    | 'follow-along'
-    | 'special'
-    | 'work'
-    | 'movement-rest'
-    | 'block-rest';
+  phase?: RenderedVideoSegmentPhase;
+  /** Original global renderer position, including gaps for omitted segments. */
+  segmentIndex?: number;
   movementId?: string;
   movementIndex?: number;
   startMs: number;

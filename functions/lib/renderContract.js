@@ -201,6 +201,7 @@ function buildBlockOffsets(segments) {
             parentBlockId: segment.parentBlockId,
             blockIndex: segment.blockIndex,
             phase: segment.phase,
+            segmentIndex: segment.segmentIndex,
             movementId: segment.movementId,
             movementIndex: segment.movementIndex,
             startMs: offsetMs,
