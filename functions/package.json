@@ -5,7 +5,8 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "test:rules": "jest",
-    "test:contract": "jest --config jest.contract.config.cjs"
+    "test:contract": "jest --config jest.contract.config.cjs",
+    "test:unit": "jest --testMatch \"<rootDir>/src/**/__tests__/**/*.test.ts\""
   },
   "jest": {
     "preset": "ts-jest",

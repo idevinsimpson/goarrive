@@ -106,6 +106,7 @@ export {
 } from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
+import { projectCheckoutSubmission } from './checkoutSubmission';
 
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 export { slackEvents } from './slack';
@@ -1175,6 +1176,32 @@ export const getFunnelFolder = onCall({ invoker: 'public' }, async (request) => 
       brandColor: (coachData.brandColor as string) || null,
       funnelPhotoUrl: (coachData.funnelPhotoUrl as string) || null,
     },
+  };
+});
+
+// ─── getCheckoutSubmission ───────────────────────────────────────────────────
+/**
+ * Unauthenticated callable — returns a projected subset of an onboarding_submissions
+ * doc so the /checkout/[submissionId] page can render for anonymous funnel visitors.
+ * Replaces the direct client getDoc which fails with PERMISSION_DENIED (rules require
+ * isAuthenticated() on onboarding_submissions — locked by PR #240).
+ */
+export const getCheckoutSubmission = onCall({ invoker: 'public' }, async (request) => {
+  const { submissionId } = request.data as { submissionId?: string };
+
+  if (!submissionId || typeof submissionId !== 'string') {
+    throw new HttpsError('invalid-argument', 'submissionId is required');
+  }
+
+  const snap = await db.collection('onboarding_submissions').doc(submissionId).get();
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Submission not found');
+  }
+  const data = snap.data()!;
+
+  // Keep this public response to the exact non-PII fields checkout consumes.
+  return {
+    submission: projectCheckoutSubmission(data),
   };
 });
 
