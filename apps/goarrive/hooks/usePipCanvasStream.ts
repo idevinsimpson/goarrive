@@ -36,7 +36,6 @@ interface PipCanvasStreamResult {
   videoElRef: React.RefObject<HTMLVideoElement | null>;
   isReady: boolean;
   canvasElRef: React.RefObject<HTMLCanvasElement | null>;
-  hasWorkingCaptureStream: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -57,21 +56,13 @@ export function usePipCanvasStream({
   repsDone,
   progressPct,
   videoElRef,
-  canvasW = 1080,
-  canvasH = 1350,
+  canvasW = 540,
+  canvasH = 675,
   probeMode,
 }: PipCanvasStreamOptions): PipCanvasStreamResult {
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [isReady, setIsReady] = useState(false);
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
-
-  // UA-sniff for iOS Safari: captureStream() returns a stream whose video track
-  // never emits fresh frames (WebKit bug 181663). Fallback to direct canvas mirror.
-  const hasWorkingCaptureStream =
-    typeof navigator !== 'undefined'
-      ? !/iP(hone|od|ad)/.test(navigator.userAgent) ||
-        /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent)
-      : true;
 
   // Keep latest props accessible inside the rAF loop without re-creating it.
   const stateRef = useRef({
@@ -131,12 +122,26 @@ export function usePipCanvasStream({
     let lastFrameTime = 0;
     let rafId = 0;
 
+    // Measured-fps counter (1s window) drawn into the composite so a device
+    // tester can see whether the tile is holding up without opening DevTools.
+    let fpsWindowStart = 0;
+    let fpsWindowFrames = 0;
+    let currentFps = 0;
+
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
 
       // Throttle to ~30fps
       if (now - lastFrameTime < FRAME_INTERVAL) return;
       lastFrameTime = now;
+
+      fpsWindowFrames++;
+      if (fpsWindowStart === 0) fpsWindowStart = now;
+      if (now - fpsWindowStart >= 1000) {
+        currentFps = Math.round((fpsWindowFrames * 1000) / (now - fpsWindowStart));
+        fpsWindowFrames = 0;
+        fpsWindowStart = now;
+      }
 
       const {
         phase: ph,
@@ -212,9 +217,11 @@ export function usePipCanvasStream({
         drawRepCount(ctx, done, target, canvasW / 2, overlayY, Math.round(canvasW * 0.12));
       }
 
-      // Next up label (bottom area)
+      // Next-up label (bottom area). Show whenever a next movement exists —
+      // during work as well as rest — so the tile matches the on-screen
+      // "next" that members expect.
       const nextName = stateRef.current.next?.name;
-      if (nextName && ph === 'rest') {
+      if (nextName) {
         ctx.save();
         ctx.fillStyle = '#8A95A3';
         ctx.font = `500 ${Math.round(canvasW * 0.032)}px -apple-system, BlinkMacSystemFont, sans-serif`;
@@ -223,6 +230,15 @@ export function usePipCanvasStream({
         ctx.fillText(`NEXT: ${nextName}`, pad, barY - Math.round(canvasH * 0.02));
         ctx.restore();
       }
+
+      // FPS counter (bottom-right corner, above progress bar).
+      ctx.save();
+      ctx.fillStyle = 'rgba(240,244,248,0.55)';
+      ctx.font = `500 ${Math.round(canvasW * 0.028)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`${currentFps}fps`, canvasW - pad, barY - Math.round(canvasH * 0.005));
+      ctx.restore();
 
       // Progress bar (very bottom)
       drawProgressBar(ctx, pct, 0, barY, canvasW, barH);
@@ -244,5 +260,5 @@ export function usePipCanvasStream({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, canvasW, canvasH, probeMode]);
 
-  return { mediaStream, videoElRef, isReady, canvasElRef, hasWorkingCaptureStream };
+  return { mediaStream, videoElRef, isReady, canvasElRef };
 }

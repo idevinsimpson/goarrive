@@ -199,6 +199,13 @@ export default function WorkoutPlayer({
   // further down. The gate keeps the rAF loop + hidden video off the
   // foreground-workout hot path — they only spin up during PiP.
   const [isPiP, setIsPiP] = useState(false);
+  // Arming flag: onPressIn on the PiP button sets this true so the canvas
+  // hook + hidden video warm up during the ~100ms between touch-down and
+  // touch-up. requestPictureInPicture() must stay inside the gesture, and
+  // iOS won't accept the presentation without at least one canvas frame in
+  // the target video — arming buys that head start without leaving the tap.
+  // Cleared on PiP entry, PiP failure, or a 3s safety timeout.
+  const [pipArming, setPipArming] = useState(false);
   // Pass-2 mechanism probe: getPipProbeMode() = query > localStorage > default
   // 'full'. Staging-only via pipEnabled gate below. The probe runs inline with
   // a subset of the hook so a device tester can isolate which step starves the
@@ -214,8 +221,10 @@ export default function WorkoutPlayer({
   }, [phase, currentIndex]);
 
   const { mediaStream } = usePipCanvasStream({
-    // Probe is always on when pipEnabled (staging). Mode = subset selection.
-    enabled: pipEnabled && Platform.OS === 'web',
+    // Arm on intent: hook runs when the user is about to enter PiP (arming)
+    // or already in PiP. Keeps foreground music off the always-on canvas
+    // path (PR #289) while still buying the pre-tap head start iOS requires.
+    enabled: pipEnabled && Platform.OS === 'web' && (isPiP || pipArming),
     probeMode: pipProbeMode,
     phase,
     current: current as any,
@@ -228,15 +237,17 @@ export default function WorkoutPlayer({
     videoElRef: pipSourceVideoRef,
   });
 
-  // Hidden <video> that carries the canvas-stream MediaStream as srcObject.
-  // Created imperatively to avoid React Native JSX incompatibility with raw <video>.
-  // Probe-aware: only 'full' mode creates the hidden video; 'canvas' and 'audio'
-  // deliberately skip it so we can isolate the culprit (see pipProbeMode).
+  // Hidden <video> that carries the canvas-stream MediaStream as srcObject
+  // and is the PiP presentation target. Created imperatively so RN JSX doesn't
+  // choke on raw <video>. Exists eagerly whenever the feature is on (staging +
+  // full mode) so it's ready to receive srcObject the moment the hook arms.
+  //
+  // Event listeners live here so state transitions hook the same element that
+  // PiP presents (webkitpresentationmodechanged covers the iOS branch that
+  // never fires enter/leavepictureinpicture).
   const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || !pipEnabled) return;
-    // Only 'full' mode creates the hidden video; 'canvas' and 'audio' skip it
-    // so we can isolate the culprit (see pipProbeMode.ts).
     if (pipProbeMode !== 'full') return;
     const vid = document.createElement('video');
     vid.autoplay = true;
@@ -254,7 +265,26 @@ export default function WorkoutPlayer({
     });
     document.body.appendChild(vid);
     pipCanvasVideoRef.current = vid;
+
+    const onEnter = () => { setIsPiP(true); setPipArming(false); };
+    const onLeave = () => {
+      setIsPiP(false);
+      setPipArming(false);
+      try { vid.muted = true; } catch {}
+    };
+    const onWebkitModeChange = () => {
+      const mode = (vid as any).webkitPresentationMode;
+      if (mode === 'picture-in-picture') onEnter();
+      else onLeave();
+    };
+    vid.addEventListener('enterpictureinpicture', onEnter);
+    vid.addEventListener('leavepictureinpicture', onLeave);
+    vid.addEventListener('webkitpresentationmodechanged' as any, onWebkitModeChange);
+
     return () => {
+      vid.removeEventListener('enterpictureinpicture', onEnter);
+      vid.removeEventListener('leavepictureinpicture', onLeave);
+      vid.removeEventListener('webkitpresentationmodechanged' as any, onWebkitModeChange);
       vid.pause();
       (vid as any).srcObject = null;
       vid.parentNode?.removeChild(vid);
@@ -713,53 +743,58 @@ export default function WorkoutPlayer({
   // the movement guide in a floating tile while navigating other apps.
   // isPiP state is declared above the canvas-stream hook so it can gate it.
 
-  const getDomVideo = useCallback((): HTMLVideoElement | null => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
-    const expoEl = videoRef.current;
-    if (!expoEl) return null;
-    try {
-      const domVideo =
-        typeof expoEl._nativeRef?.current?.getVideoElement === 'function'
-          ? expoEl._nativeRef.current.getVideoElement()
-          : null;
-      return domVideo instanceof HTMLVideoElement ? domVideo : null;
-    } catch {
-      return null;
-    }
+  // Arm the canvas hook + hidden video ~100ms before requestPictureInPicture
+  // fires. Called from the PiP button's onPressIn (touch-down). The timeout
+  // is a safety net: if iOS silently refuses PiP (no error, no enter event),
+  // arming clears itself so the hook doesn't stay running and starve music.
+  const armPip = useCallback(() => {
+    if (Platform.OS !== 'web') return;
+    setPipArming(true);
+    window.setTimeout(() => setPipArming(false), 3000);
   }, []);
 
   const handlePiP = useCallback(async () => {
-    const domVideo = getDomVideo();
-    if (!domVideo) return;
-    try {
-      if ((document as any).pictureInPictureElement) {
-        await (document as any).exitPictureInPicture();
-      } else if ((domVideo as any).webkitPresentationMode === 'picture-in-picture') {
-        (domVideo as any).webkitSetPresentationMode('inline');
-      } else if ((document as any).pictureInPictureEnabled) {
-        await (domVideo as any).requestPictureInPicture();
-      } else if (typeof (domVideo as any).webkitSetPresentationMode === 'function') {
-        (domVideo as any).webkitSetPresentationMode('picture-in-picture');
-      }
-    } catch {
-      // PiP blocked (e.g. user gesture required on some browsers) — ignore.
+    // Exit path — if we're already in PiP, tear it down. Works for both the
+    // standard PiP element registry and the iOS webkit presentation mode.
+    if ((document as any).pictureInPictureElement) {
+      try { await (document as any).exitPictureInPicture(); } catch {}
+      return;
     }
-  }, [getDomVideo]);
-
-  // Track PiP state via events so the button icon stays accurate.
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const domVideo = getDomVideo();
-    if (!domVideo) return;
-    const onEnter = () => setIsPiP(true);
-    const onLeave = () => setIsPiP(false);
-    domVideo.addEventListener('enterpictureinpicture', onEnter);
-    domVideo.addEventListener('leavepictureinpicture', onLeave);
-    return () => {
-      domVideo.removeEventListener('enterpictureinpicture', onEnter);
-      domVideo.removeEventListener('leavepictureinpicture', onLeave);
-    };
-  }, [getDomVideo, phase]);
+    const canvasVideo = pipCanvasVideoRef.current;
+    if (canvasVideo && (canvasVideo as any).webkitPresentationMode === 'picture-in-picture') {
+      try { (canvasVideo as any).webkitSetPresentationMode('inline'); } catch {}
+      return;
+    }
+    if (!canvasVideo) {
+      console.warn('[PiP] canvas video ref is null — probe mode may not be "full"');
+      setPipArming(false);
+      return;
+    }
+    // Unmute inside the tap gesture — this is the seam iOS is strictest about.
+    // Log the failure loud rather than silently swallowing so a device tester
+    // sees the exact iOS rejection reason instead of a mystery silent tile.
+    try {
+      canvasVideo.muted = false;
+      canvasVideo.volume = 1;
+    } catch (err) {
+      console.warn('[PiP] unmute rejected:', err);
+    }
+    try {
+      if ((document as any).pictureInPictureEnabled) {
+        await (canvasVideo as any).requestPictureInPicture();
+      } else if (typeof (canvasVideo as any).webkitSetPresentationMode === 'function') {
+        (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
+      } else {
+        console.warn('[PiP] no PiP API available on this browser');
+        setPipArming(false);
+        try { canvasVideo.muted = true; } catch {}
+      }
+    } catch (err) {
+      console.warn('[PiP] request rejected:', err);
+      setPipArming(false);
+      try { canvasVideo.muted = true; } catch {}
+    }
+  }, []);
 
   const pipSupported = Platform.OS === 'web'
     && typeof document !== 'undefined'
@@ -2284,7 +2319,7 @@ export default function WorkoutPlayer({
                   <Text style={st.sharedOverlaySkipText}>Skip</Text>
                 </TouchableOpacity>
                 {pipSupported && displayedUrl && (
-                  <TouchableOpacity style={st.pipBtn} onPress={handlePiP}>
+                  <TouchableOpacity style={st.pipBtn} onPressIn={armPip} onPress={handlePiP}>
                     <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
                     <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>
                   </TouchableOpacity>
