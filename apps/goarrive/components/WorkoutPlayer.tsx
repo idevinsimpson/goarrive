@@ -63,7 +63,7 @@ import {
   type MusicHandoffVariant,
 } from '../utils/musicHandoffVariant';
 import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, type PipProbeMode } from '../utils/pipProbeMode';
-import { readHandoffLog } from '../utils/handoffLog';
+import { pushHandoffLog, readHandoffLog } from '../utils/handoffLog';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -212,15 +212,24 @@ export default function WorkoutPlayer({
   // foreground music path (see pipProbeMode.ts).
   const pipProbeMode = useMemo<PipProbeMode>(() => getPipProbeMode(), []);
   // Ref to the DOM video element for the currently-active workout video.
-  // Populated via effect when the expo-av Video mounts/changes.
+  // Populated via effect when the expo-av Video mounts/changes. Marked
+  // disablePictureInPicture so iOS Safari's own PiP affordance on this
+  // element does not compete with our canvas-composite tile — the movement
+  // video is a source for the canvas, not a presentation target.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const vid = videoRef.current?._nativeRef?.current?.getVideoElement?.() ?? null;
     pipSourceVideoRef.current = vid;
+    if (vid) {
+      try {
+        (vid as any).disablePictureInPicture = true;
+        vid.setAttribute('disablePictureInPicture', '');
+      } catch {}
+    }
   }, [phase, currentIndex]);
 
-  const { mediaStream } = usePipCanvasStream({
+  const { mediaStream, startStream } = usePipCanvasStream({
     // Arm on intent: hook runs when the user is about to enter PiP (arming)
     // or already in PiP. Keeps foreground music off the always-on canvas
     // path (PR #289) while still buying the pre-tap head start iOS requires.
@@ -743,53 +752,101 @@ export default function WorkoutPlayer({
   // the movement guide in a floating tile while navigating other apps.
   // isPiP state is declared above the canvas-stream hook so it can gate it.
 
-  // Arm the canvas hook + hidden video ~100ms before requestPictureInPicture
-  // fires. Called from the PiP button's onPressIn (touch-down). The timeout
-  // is a safety net: if iOS silently refuses PiP (no error, no enter event),
-  // arming clears itself so the hook doesn't stay running and starve music.
+  // Imperative arm: called from the PiP button's onPressIn (touch-down).
+  // React state + useEffect chain is too slow between onPressIn and onPress
+  // (~10ms) for iOS's gesture-scoped requestPictureInPicture() requirement,
+  // so we synchronously create the canvas MediaStream, assign srcObject on
+  // the hidden video, and start playback all inside the same call stack.
+  // pipArming is still set so the hook's enable path stays consistent and
+  // the 3s safety timeout clears state if iOS silently refuses.
+  //
+  // All diagnostic paths write to pushHandoffLog (COPY LOG buffer) so the
+  // tester can read what happened on an iPhone without DevTools.
   const armPip = useCallback(() => {
     if (Platform.OS !== 'web') return;
+    pushHandoffLog('[PiP] armPip fired');
     setPipArming(true);
     window.setTimeout(() => setPipArming(false), 3000);
-  }, []);
+
+    const stream = startStream();
+    if (!stream) {
+      pushHandoffLog('[PiP] armPip: startStream returned null');
+      return;
+    }
+    const vid = pipCanvasVideoRef.current;
+    if (!vid) {
+      pushHandoffLog('[PiP] armPip: pipCanvasVideoRef null (probe mode may not be "full")');
+      return;
+    }
+    try {
+      (vid as any).srcObject = stream;
+      pushHandoffLog('[PiP] armPip: srcObject assigned');
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] armPip: srcObject assign threw: ${err?.name || err}`);
+      return;
+    }
+    try {
+      const p = vid.play();
+      if (p && typeof (p as any).catch === 'function') {
+        (p as any).catch((e: any) => pushHandoffLog(`[PiP] armPip: play rejected: ${e?.name || e}`));
+      }
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] armPip: play threw: ${err?.name || err}`);
+    }
+  }, [startStream]);
 
   const handlePiP = useCallback(async () => {
+    pushHandoffLog('[PiP] handlePiP fired');
     // Exit path — if we're already in PiP, tear it down. Works for both the
     // standard PiP element registry and the iOS webkit presentation mode.
     if ((document as any).pictureInPictureElement) {
-      try { await (document as any).exitPictureInPicture(); } catch {}
+      pushHandoffLog('[PiP] handlePiP: exiting existing PiP');
+      try { await (document as any).exitPictureInPicture(); } catch (err: any) {
+        pushHandoffLog(`[PiP] exitPictureInPicture err: ${err?.name || err}`);
+      }
       return;
     }
     const canvasVideo = pipCanvasVideoRef.current;
     if (canvasVideo && (canvasVideo as any).webkitPresentationMode === 'picture-in-picture') {
-      try { (canvasVideo as any).webkitSetPresentationMode('inline'); } catch {}
+      pushHandoffLog('[PiP] handlePiP: exiting webkit PiP');
+      try { (canvasVideo as any).webkitSetPresentationMode('inline'); } catch (err: any) {
+        pushHandoffLog(`[PiP] webkitSetPresentationMode inline err: ${err?.name || err}`);
+      }
       return;
     }
     if (!canvasVideo) {
+      pushHandoffLog('[PiP] handlePiP: canvas video ref null — probe mode may not be "full"');
       console.warn('[PiP] canvas video ref is null — probe mode may not be "full"');
       setPipArming(false);
       return;
     }
+    // Report the presentation-target readiness state so a silent failure
+    // (readyState=0, srcObject=null) is diagnosable from COPY LOG alone.
+    const hasSrc = !!(canvasVideo as any).srcObject;
+    pushHandoffLog(`[PiP] handlePiP: srcObject=${hasSrc} readyState=${canvasVideo.readyState} paused=${canvasVideo.paused}`);
     // Unmute inside the tap gesture — this is the seam iOS is strictest about.
-    // Log the failure loud rather than silently swallowing so a device tester
-    // sees the exact iOS rejection reason instead of a mystery silent tile.
     try {
       canvasVideo.muted = false;
       canvasVideo.volume = 1;
-    } catch (err) {
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] unmute rejected: ${err?.name || err}`);
       console.warn('[PiP] unmute rejected:', err);
     }
     try {
       if ((document as any).pictureInPictureEnabled) {
         await (canvasVideo as any).requestPictureInPicture();
+        pushHandoffLog('[PiP] requestPictureInPicture resolved');
       } else if (typeof (canvasVideo as any).webkitSetPresentationMode === 'function') {
         (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
+        pushHandoffLog('[PiP] webkitSetPresentationMode picture-in-picture called');
       } else {
+        pushHandoffLog('[PiP] no PiP API available on this browser');
         console.warn('[PiP] no PiP API available on this browser');
         setPipArming(false);
         try { canvasVideo.muted = true; } catch {}
       }
-    } catch (err) {
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] request rejected: ${err?.name || err} — ${err?.message || ''}`);
       console.warn('[PiP] request rejected:', err);
       setPipArming(false);
       try { canvasVideo.muted = true; } catch {}
