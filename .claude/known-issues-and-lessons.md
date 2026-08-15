@@ -117,11 +117,44 @@ Commit `8ae995e` removed plaintext credentials from `.claude/relay-handoff.md`. 
 ### iOS Native Audio Element Ignores `element.volume`
 When `HTMLAudioElement` is played via the native pipeline (not wrapped in the Web Audio graph), iOS ignores programmatic changes to `element.volume` — the property appears to set but has no audible effect. This means the v3 blessed-shadow music handoff (#259) keeps music alive through app-backgrounding but plays at full track loudness regardless of the member's in-app slider. The accepted fix is the volume-bucket system (PRs #273/#276/#277): `generateMusicVolumeVariants` pre-renders multiple loudness variants of each Mubert track server-side, and the client picks the variant closest to the slider value at handoff time. Lesson: any audio feature that routes through the native `HTMLAudioElement` pipeline for iOS backgrounding survival must implement loudness control through pre-rendered variants, not `element.volume`.
 
-### pnpm 11 Blocks Postinstall Scripts by Default
-Cloud Build began failing with `ffmpeg-static` postinstall not running after pnpm was upgraded to v11. pnpm 11 introduced a default that blocks all lifecycle scripts for packages not explicitly allowlisted. The fix requires either adding `allowBuilds["ffmpeg-static"]=true` to `.npmrc` or pinning to `pnpm@9.15.9` in `.tool-versions` (the latter ensures the postinstall runs without an explicit allowlist change). PR #279 added the `allowBuilds` entry and PR #280 pinned the pnpm version. Lesson: when updating pnpm major versions in a project that uses native-binary npm packages (e.g. `ffmpeg-static`, `sharp`, `canvas`), verify that postinstall scripts still run — pnpm 11+ requires explicit allowlisting.
+### Modern pnpm Blocks Postinstall Scripts by Default
+Cloud Build began failing because `ffmpeg-static`'s postinstall never ran, so the binary
+was missing from the deployed package and `generateMusicVolumeVariants` failed at runtime
+with `ffmpeg ENOENT`. Recent pnpm majors block lifecycle scripts for packages that are not
+explicitly allowlisted.
 
-### V3 Shadow Element Must Be Warmed Before Backgrounding
-The v3 blessed-shadow music handoff (#259) creates a native `HTMLAudioElement` shadow that iOS keeps alive through app-backgrounding. However, if the shadow has never been `play()`'d within a user gesture before the user first backgrounds the app, iOS has not granted it autoplay permission and the handoff produces a silent gap. PR #284 fixes this by issuing a short silent play on the shadow element during the initial gesture that blesses all audio. Lesson: any secondary `HTMLAudioElement` that must take over playback under app-backgrounding must receive a gesture-blessed `play()` call during session initialization — not just at handoff time — or iOS will silently refuse to start it when needed.
+What actually fixed it, verified against the repo: **PR #280 pinned the package manager**,
+via the `packageManager` field — `functions/package.json:36` reads `"packageManager":
+"pnpm@9.15.9"`. **PR #279's allowlist approach did not take.** There is no `.npmrc` and no
+`.tool-versions` anywhere in this repository, so do not go looking for them; an earlier
+version of this entry cited both and sent readers after files that do not exist.
+
+Lesson: when a project depends on native-binary npm packages (`ffmpeg-static`, `sharp`,
+`canvas`), a pnpm major upgrade can silently stop their postinstall. Verify the binary
+exists in the built package before deploying — `test -x node_modules/ffmpeg-static/ffmpeg`
+— rather than trusting a green install.
+
+### A Paused Element That Must Take Over Instantly Needs a Warm Buffer
+The v3 blessed-shadow handoff (#259) keeps a native `HTMLAudioElement` paused in the
+foreground and starts it at the hide seam. Devin heard a ~1s silence on backgrounding.
+
+**The cause was buffering, not permission.** The shadow was already gesture-blessed — that
+`play()` shipped with #259 — so autoplay was never the issue. It was simply paused with no
+`preload`, so mobile Safari kept it at metadata-only; asking it at the seam to seek to an
+arbitrary mid-track position and play cost a range request plus a decode before any sound
+emerged. #284 set `preload='auto'` and made the position tick variant-aware.
+
+**The follow-on mistake is the more useful lesson.** #284's tick re-seeked whenever drift
+exceeded 100ms — but a *paused* element never advances, so drift grew a full second every
+tick and the condition was true every single time. Each seek restarted buffering before the
+previous fetch landed, so the element stayed permanently cold: a warm-up routine that
+guaranteed coldness. #285 replaced it with a check against what the element has *actually*
+buffered, plus a cooldown so it cannot re-seek mid-fetch.
+
+Lesson: keeping a paused media element ready means maintaining a *buffer* around the
+takeover position, not repeatedly assigning `currentTime`. Seeking on a timer defeats the
+buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
+it from the absence of a symptom.
 
 ## Known Performance Risks
 
