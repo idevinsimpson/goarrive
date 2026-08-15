@@ -162,6 +162,13 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   useEffect(() => { mutedRef.current = isMuted || musicMuted; }, [isMuted, musicMuted]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
+  // Hoisted above useMusicHandoff so the ref can be handed down as an option.
+  // Populated by the useEffect below once `advance` is defined. The initial
+  // noop is only ever called if the shadow's 'ended' fires before the first
+  // render commits — practically impossible, since primeShadow can't be
+  // called until startMusic runs.
+  const advanceRef = useRef<() => void>(() => {});
+
   // Music handoff adapter — owns visibilitychange/pageshow/focus resume for
   // all variants (byte-for-byte parity with the pre-adapter handler when
   // variant=off; verified on desktop Chrome tab-switch). On iOS Safari with
@@ -175,6 +182,9 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     musicPausedRef,
     musicHoldRef,
     musicOffRef,
+    // Backgrounded shadow's 'ended' drives advance — the audible's ended
+    // listener at ~L499 cannot fire while paused by the hide seam.
+    advanceRef,
   });
 
   const seedFor = useCallback(
@@ -408,7 +418,8 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     playIndex(style, next);
   }, [takeNextIndex, playIndex]);
 
-  const advanceRef = useRef(advance);
+  // advanceRef is declared above useMusicHandoff so the ref can be passed as
+  // an option; this effect keeps it in sync as `advance` re-memoizes.
   useEffect(() => { advanceRef.current = advance; }, [advance]);
 
   // ── Bootstrap: warm cache picture + first track during the ready screen ───

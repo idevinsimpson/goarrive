@@ -145,6 +145,50 @@ function hasBufferedRunway(el: HTMLMediaElement, pos: number, margin: number): b
 // iOS Safari devices (verified during device spike A/B/C).
 const RETURN_TIMEOUT_MS = 3000;
 
+/**
+ * First-ever backgrounded fresh-src play() attempt on the v3 shadow. iOS may
+ * refuse a play() that follows a src change outside a user gesture — load()
+ * resets readyState to HAVE_NOTHING and iOS treats that as new-media rather
+ * than a continuation. We log readyState + networkState alongside the promise
+ * outcome so a policy refusal (NotAllowedError) is distinguishable from a
+ * load stall (readyState stuck at HAVE_NOTHING / networkState NETWORK_LOADING).
+ * The two point at completely different fixes; the promise rejection alone
+ * can't tell them apart.
+ *
+ * Waits for `loadeddata` before calling play() so the play isn't racing an
+ * incomplete load. { once: true } — the listener drains itself; the general
+ * error handler installed in primeShadow still catches load failures.
+ */
+function attemptBgPlay(shadow: HTMLAudioElement): void {
+  const onLoaded = () => {
+    const snap = {
+      readyState: shadow.readyState,
+      networkState: shadow.networkState,
+      srcLen: shadow.src?.length ?? 0,
+    };
+    log('[HANDOFF/bgplay attempt]', snap);
+    try {
+      const p = shadow.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => log('[HANDOFF/bgplay ok]', snap))
+         .catch((e: Error) => log('[HANDOFF/bgplay refused]', { ...snap, name: e?.name, message: e?.message }));
+      }
+    } catch (e) {
+      log('[HANDOFF/bgplay throw]', { ...snap, err: String(e) });
+    }
+  };
+  try {
+    shadow.addEventListener('loadeddata', onLoaded, { once: true } as AddEventListenerOptions);
+  } catch {
+    // Older browsers may not support the options object — fall back to a manual removal.
+    const wrapped = () => {
+      shadow.removeEventListener('loadeddata', wrapped);
+      onLoaded();
+    };
+    shadow.addEventListener('loadeddata', wrapped);
+  }
+}
+
 export interface UseMusicHandoffOptions {
   /** Same as useWorkoutMusic.enabled — hook stays inert if false. */
   enabled: boolean;
@@ -160,6 +204,14 @@ export interface UseMusicHandoffOptions {
   musicHoldRef: MutableRefObject<boolean>;
   /** Music-off ref: true if user turned music off for the session. */
   musicOffRef: MutableRefObject<boolean>;
+  /**
+   * Playlist advance callback. Invoked from the v3 shadow's own 'ended' and
+   * 'error' handlers while backgrounded — the audible's ended listener in
+   * useWorkoutMusic cannot fire when the audible is paused by the hide seam,
+   * so nothing else moves the playlist forward between hide and return.
+   * Optional so tests without an advance path can omit it.
+   */
+  advanceRef?: MutableRefObject<() => void>;
 }
 
 export interface UseMusicHandoffReturn {
@@ -179,7 +231,7 @@ export interface UseMusicHandoffReturn {
 }
 
 export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffReturn {
-  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef } = opts;
+  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef, advanceRef } = opts;
 
   const variantRef = useRef<MusicHandoffVariant>('off');
   const audibleElRef = useRef<HTMLAudioElement | null>(null);
@@ -239,6 +291,22 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // ~1s silence when the member leaves the app. The position tick below
       // keeps the buffered window near the live playhead.
       try { shadow.preload = 'auto'; } catch {}
+      // Shadow drives advance while backgrounded — audible's 'ended' handler
+      // in useWorkoutMusic cannot fire when the hide seam has paused it, so
+      // without these the playlist stalls at the current track boundary.
+      // Identity guard matches audible's pattern (musicElRef.current !== el).
+      shadow.addEventListener('ended', () => {
+        if (shadowMusicElRef.current !== shadow) return;
+        if (!inBackgroundRef.current) return;
+        log('[HANDOFF/shadow ended]', { pos: shadow.currentTime, src: shadow.src.slice(-40) });
+        advanceRef?.current?.();
+      });
+      shadow.addEventListener('error', () => {
+        if (shadowMusicElRef.current !== shadow) return;
+        if (!inBackgroundRef.current) return;
+        log('[HANDOFF/shadow error]', { pos: shadow.currentTime, hasSrc: !!shadow.src });
+        advanceRef?.current?.();
+      });
       shadowMusicElRef.current = shadow;
       log('[HANDOFF/prime v3]', { hasShadow: !!shadowMusicElRef.current });
       return;
@@ -309,6 +377,14 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // so the warm-up tick may re-seek to the live playhead immediately.
       lastShadowSeekAtRef.current = 0;
       resumeIfV1();
+      // Background re-point on v3: audible is paused and silent, so if we
+      // don't play the shadow after src change the member hears nothing after
+      // an advance(). The upstream guard `!force && inBackgroundRef.current`
+      // returns before we get here on volume-driven re-points, so this only
+      // fires on genuine track changes (force=true) — no conflict with #285.
+      if (variant === 'v3' && force && inBackgroundRef.current) {
+        attemptBgPlay(shadow);
+      }
     };
 
     const variantUri = buildVariantGcsUri(url, bucketPicked);

@@ -24,21 +24,41 @@ const originalOS = Platform.OS;
 const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
 
 function makeAudio() {
+  const listeners: Record<string, Array<(ev?: Event) => void>> = {};
   const el: any = {
     currentTime: 0,
     muted: false,
     paused: true,
     src: '',
     volume: 1,
+    // readyState/networkState mirror the HTMLMediaElement spec constants:
+    // HAVE_NOTHING=0, HAVE_METADATA=1, HAVE_CURRENT_DATA=2, HAVE_FUTURE_DATA=3, HAVE_ENOUGH_DATA=4.
+    // Default HAVE_ENOUGH_DATA so bgplay tests can proceed without simulating a real load.
+    readyState: 4,
+    networkState: 1,
     load: vi.fn(),
     removeAttribute: vi.fn(),
+    addEventListener: vi.fn((event: string, cb: (ev?: Event) => void, _opts?: unknown) => {
+      (listeners[event] ??= []).push(cb);
+    }),
+    removeEventListener: vi.fn((event: string, cb: (ev?: Event) => void) => {
+      const arr = listeners[event];
+      if (!arr) return;
+      const i = arr.indexOf(cb);
+      if (i >= 0) arr.splice(i, 1);
+    }),
+    // Test helper — not part of the spec surface, but lets a test fire an
+    // event and assert the handler ran.
+    dispatch: (event: string) => {
+      (listeners[event] ?? []).slice().forEach((cb) => cb());
+    },
   };
   el.pause = vi.fn(() => { el.paused = true; });
   el.play = vi.fn(() => {
     el.paused = false;
     return Promise.resolve();
   });
-  return el as HTMLAudioElement;
+  return el as HTMLAudioElement & { dispatch: (event: string) => void };
 }
 
 describe('useMusicHandoff v3 shadow controls', () => {
@@ -75,13 +95,15 @@ describe('useMusicHandoff v3 shadow controls', () => {
   });
 
   function setup() {
-    const shadow = makeAudio();
-    const audible = makeAudio();
+    const shadow = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
+    const audible = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
     audible.src = 'https://example.com/music.mp3';
     audible.currentTime = 12;
     const musicPausedRef = { current: false };
     const musicHoldRef = { current: false };
     const musicOffRef = { current: false };
+    const advance = vi.fn();
+    const advanceRef = { current: advance };
     vi.mocked(createBlessedMusicPlayer).mockReturnValue(shadow);
 
     const hook = renderHook(
@@ -92,6 +114,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
           musicPausedRef,
           musicHoldRef,
           musicOffRef,
+          advanceRef,
         }),
       { initialProps: { isPaused: false, isMuted: false, volume: 0.25 } },
     );
@@ -103,7 +126,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    return { ...hook, audible, shadow, musicPausedRef };
+    return { ...hook, audible, shadow, musicPausedRef, advance };
   }
 
   test('propagates pause, mute, and effective volume while v3 is background-audible', () => {
@@ -161,6 +184,98 @@ describe('useMusicHandoff v3 shadow controls', () => {
     expect(audible.pause).toHaveBeenCalled();
     expect(audible.play).not.toHaveBeenCalled();
     unmount();
+  });
+
+  // ── Backgrounded advance (bug fix — v3 shadow drives playlist while hidden) ─
+  // Before this fix the audible's 'ended' listener was the only advance path,
+  // and the hide seam paused the audible — so music simply stopped at the
+  // current track boundary. The shadow now carries its own 'ended' handler.
+
+  test('shadow ended while backgrounded advances the playlist', () => {
+    const { shadow, advance, unmount } = setup();
+    // setup() leaves us backgrounded (inBackgroundRef=true, shadow playing).
+    advance.mockClear();
+
+    act(() => { (shadow as any).dispatch('ended'); });
+
+    expect(advance).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  test('shadow error while backgrounded advances the playlist (dead-CDN fallthrough)', () => {
+    const { shadow, advance, unmount } = setup();
+    advance.mockClear();
+
+    act(() => { (shadow as any).dispatch('error'); });
+
+    expect(advance).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  test('shadow ended while foreground does NOT advance (audible owns advance in fg)', () => {
+    const { shadow, advance, rerender, unmount } = setup();
+    // Return to foreground first.
+    act(() => {
+      visibilityState = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    advance.mockClear();
+    // Sanity: rerender to force an effect flush; state should be inBackground=false.
+    act(() => rerender({ isPaused: false, isMuted: false, volume: 0.25 }));
+
+    act(() => { (shadow as any).dispatch('ended'); });
+
+    expect(advance).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('backgrounded swapTrack fires bgplay attempt + ok log after loadeddata', async () => {
+    const { hook, shadow } = (function setupIsolated() {
+      const s = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
+      const a = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
+      a.src = 'https://example.com/music.mp3';
+      const musicPausedRef = { current: false };
+      const musicHoldRef = { current: false };
+      const musicOffRef = { current: false };
+      const advanceRef = { current: vi.fn() };
+      vi.mocked(createBlessedMusicPlayer).mockReturnValue(s);
+      const h = renderHook(
+        () => useMusicHandoff({
+          enabled: true, isPaused: false, isMuted: false, volume: 0.25,
+          musicPausedRef, musicHoldRef, musicOffRef, advanceRef,
+        }),
+        { initialProps: {} },
+      );
+      act(() => {
+        h.result.current.primeShadow(a);
+        h.result.current.swapTrack(a.src);
+        visibilityState = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      return { hook: h, shadow: s };
+    })();
+
+    vi.mocked(console.info).mockClear();
+
+    // Simulate the advance path: swap to a fresh track while backgrounded.
+    // Non-Firebase URL → no HEAD check, synchronous through applyBucket → point().
+    act(() => {
+      hook.result.current.swapTrack('https://example.com/new-track.mp3');
+    });
+
+    // load() was called; simulate loadeddata firing.
+    act(() => { (shadow as any).dispatch('loadeddata'); });
+    // Flush the play() promise microtask.
+    await act(async () => { await Promise.resolve(); });
+
+    const logs = vi.mocked(console.info).mock.calls.map((c: any[]) => c[0] as string);
+    expect(logs.some((l) => l.includes('[HANDOFF/bgplay attempt]'))).toBe(true);
+    expect(logs.some((l) => /"readyState":\s?\d/.test(l))).toBe(true);
+    expect(logs.some((l) => /"networkState":\s?\d/.test(l))).toBe(true);
+    expect(shadow.play).toHaveBeenCalled();
+    expect(logs.some((l) => l.includes('[HANDOFF/bgplay ok]'))).toBe(true);
+
+    hook.unmount();
   });
 });
 
