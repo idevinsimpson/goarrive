@@ -189,6 +189,11 @@ export default function WorkoutPlayer({
 
   // ── PiP canvas-stream (Phase 2, staging-only) ────────────────────────────
   const pipEnabled = isStagingHost() && workoutFlags.pipCanvasEnabled;
+  // Hoisted above the canvas hook so `enabled` can gate on it; setter is
+  // wired from the enterpictureinpicture / leavepictureinpicture listeners
+  // further down. The gate keeps the rAF loop + hidden video off the
+  // foreground-workout hot path — they only spin up during PiP.
+  const [isPiP, setIsPiP] = useState(false);
   // Ref to the DOM video element for the currently-active workout video.
   // Populated via effect when the expo-av Video mounts/changes.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -199,7 +204,7 @@ export default function WorkoutPlayer({
   }, [phase, currentIndex]);
 
   const { mediaStream } = usePipCanvasStream({
-    enabled: pipEnabled && Platform.OS === 'web',
+    enabled: pipEnabled && Platform.OS === 'web' && isPiP,
     phase,
     current: current as any,
     next: next as any,
@@ -215,7 +220,7 @@ export default function WorkoutPlayer({
   // Created imperatively to avoid React Native JSX incompatibility with raw <video>.
   const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
-    if (Platform.OS !== 'web' || !pipEnabled) return;
+    if (Platform.OS !== 'web' || !pipEnabled || !isPiP) return;
     const vid = document.createElement('video');
     vid.autoplay = true;
     vid.muted = true;
@@ -238,7 +243,7 @@ export default function WorkoutPlayer({
       vid.parentNode?.removeChild(vid);
       pipCanvasVideoRef.current = null;
     };
-  }, [pipEnabled]);
+  }, [pipEnabled, isPiP]);
 
   // Wire the canvas MediaStream into the hidden video when it's available.
   // volume=0 (not muted) so PiP still carries audio via the MediaStream track.
@@ -689,7 +694,7 @@ export default function WorkoutPlayer({
   // ── PiP (D) ──────────────────────────────────────────────────────────────
   // Picture-in-Picture for the movement demo video. Lets the member follow
   // the movement guide in a floating tile while navigating other apps.
-  const [isPiP, setIsPiP] = useState(false);
+  // isPiP state is declared above the canvas-stream hook so it can gate it.
 
   const getDomVideo = useCallback((): HTMLVideoElement | null => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
