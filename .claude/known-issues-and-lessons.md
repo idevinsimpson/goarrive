@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-08-15._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -68,6 +68,9 @@ Guest booking submissions could double-book on retry/refresh. Fixed by making `b
 ### Vitest vs Jest APIs
 The test suite runs on vitest; `jest.spyOn` in older player tests silently broke under the vitest runner and had to be converted to the vitest API. Write new tests against vitest (`vi.*`) only.
 
+### Decorative Test Files That Never Assert
+`useRenderedVideoPlayback.test.ts` (the Phase 4 continuous-video hook, PR #266) has never contained live assertions — the file fails to collect under vitest but the aggregate CI report shows green because the failure is silent at the suite level. The pattern: a test file that imports correctly and `describe`/`it` blocks are defined, but no `expect` calls exist, so the runner reports 0 tests passed and 0 failed, which aggregates as green. Fix: verify any new test file has at least one `expect` call before merging. A correction for this file is sequenced after #267 (resolved-URL player integration) lands.
+
 ### Expo Export in Git Worktrees
 `npx expo export` fails when `node_modules` is a symlink into the main checkout (Metro resolves through the symlink and escapes the project root). When building the web app from a secondary worktree, use a hardlink copy (`cp -al`) of `node_modules` instead of a symlink.
 
@@ -109,7 +112,13 @@ During Phase 2 PiP QA (PR #251), it was discovered that a canvas element with `d
 
 
 ### iOS Safari Web Audio Graph Suspends on App Backgrounding
-When an `HTMLAudioElement` is wrapped in the Web Audio graph via `createMediaElementSource`, iOS Safari suspends it the instant the user backgrounds the app (exits to the home screen or switches to another app). Tab-switching within Safari does not trigger the suspension. The Web Audio `AudioContext` is subject to iOS background-app suspension; the native `HTMLAudioElement` pipeline is not, because iOS keeps it alive via MediaSession. PR #258 moved voice-bus elements onto the native path. PR #259 then merged a v3 dual-element music handoff: foreground music stays on the graph for the player controls, while a gesture-blessed native shadow element takes over in the background. Exact-head staging and physical-iPhone Case D passed, but the test still observed an audible volume jump at the handoff; a fast-follow correction has not been built. Production handoff remains off by default, and the attempted production hotfix stopped on conflicts with the cherry-pick aborted and no deploy. Lesson: test continuity and perceived loudness separately across both handoff directions, and never equate a merge or physical-device proof with production activation.
+When an `HTMLAudioElement` is wrapped in the Web Audio graph via `createMediaElementSource`, iOS Safari suspends it the instant the user backgrounds the app (exits to the home screen or switches to another app). Tab-switching within Safari does not trigger the suspension. The Web Audio `AudioContext` is subject to iOS background-app suspension; the native `HTMLAudioElement` pipeline is not, because iOS keeps it alive via MediaSession. PR #258 moved voice-bus elements onto the native path. PR #259 then merged a v3 dual-element music handoff: foreground music stays on the graph for the player controls, while a gesture-blessed native shadow element takes over in the background. Exact-head staging and physical-iPhone Case D verified background-music continuity; v3 shipped to production as the default (2026-08-14 18:22 UTC push, back-ported to main via #274). Known accepted limitation at ship time: background music plays at full track loudness because iOS ignores `element.volume` on the native element; the volume-bucket feature (#273/#277/#285) is the remedy. Lesson: test continuity and perceived loudness separately across both handoff directions; never equate a merge or physical-device pass with production activation.
+
+### v3 Shadow Element Must Handle Its Own Playlist-Advancement Events
+When using a native `HTMLAudioElement` shadow for iOS backgrounded playback, the browser does not fire events (including `ended`) on the primary Web Audio-connected element while backgrounded — only on the shadow that is actually playing. PR #287 discovered that the v3 playlist was not advancing to the next track when the shadow element finished a song, because the `ended` listener was attached only to the foreground element. Fix: attach playlist-advancement logic directly to the shadow element's `ended` handler. Lesson: every playback event (ended, error, stall) that drives state forward must be duplicated on the shadow element; the foreground element's events are silent while the app is backgrounded.
+
+### Warm-Up Audio Can Create Stuck Background Loops
+The v3 shadow element uses a short warm-up clip to satisfy iOS's gesture-unlock requirement before handing off backgrounded playback. PR #285 found that the warm-up loop was not cancelled once the shadow transitioned to real music, causing it to keep cycling in the background — wasting audio resources and potentially interfering with playlist state. Fix: cancel the warm-up loop explicitly when the shadow moves to real playback. Lesson: any warm-up or unlock sequence that uses a looping audio element must be cancelled at a clearly defined handoff point; guard against the loop outliving its purpose by cancelling it on the first successful real-music play event.
 
 ### Plaintext Credentials Must Not Appear in Docs
 Commit `8ae995e` removed plaintext credentials from `.claude/relay-handoff.md`. No broader cleanup of seed scripts, setup guides, or service-account snippets is attributed to that commit without separate evidence. Lesson: docs in the repo are public — never include passwords, API keys, or service-account JSON snippets in any `.md` or doc file; reference environment variables or Secret Manager paths instead.
