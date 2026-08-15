@@ -145,6 +145,76 @@ function hasBufferedRunway(el: HTMLMediaElement, pos: number, margin: number): b
 // iOS Safari devices (verified during device spike A/B/C).
 const RETURN_TIMEOUT_MS = 3000;
 
+// Ceiling on the loadeddata wait before we attempt play() anyway. A silent
+// no-attempt path is the one outcome this probe cannot afford — an empty log
+// is indistinguishable from "handler never fired" on device.
+const BGPLAY_LOADEDDATA_TIMEOUT_MS = 4000;
+// Consecutive shadow errors we tolerate before disabling background advance.
+// Prevents burning the playlist in seconds if backgrounded play() is refused
+// and the next-src load errors immediately (error -> advance -> error -> ...).
+const BGPLAY_MAX_CONSECUTIVE_ERRORS = 3;
+const bgplayConsecutiveErrors = new WeakMap<HTMLAudioElement, number>();
+const bgplayGivenUp = new WeakMap<HTMLAudioElement, boolean>();
+
+/**
+ * First-ever backgrounded fresh-src play() attempt on the v3 shadow. iOS may
+ * refuse a play() that follows a src change outside a user gesture — load()
+ * resets readyState to HAVE_NOTHING and iOS treats that as new-media rather
+ * than a continuation. We log readyState + networkState alongside the promise
+ * outcome so a policy refusal (NotAllowedError) is distinguishable from a
+ * load stall (readyState stuck at HAVE_NOTHING / networkState NETWORK_LOADING).
+ *
+ * Waits for `loadeddata` before calling play() so the play isn't racing an
+ * incomplete load — but only for BGPLAY_LOADEDDATA_TIMEOUT_MS. If loadeddata
+ * never fires (dead CDN, iOS deprioritizing a backgrounded tab), we log the
+ * stall explicitly and still attempt play() so the log is never silent.
+ */
+function attemptBgPlay(shadow: HTMLAudioElement): void {
+  let attempted = false;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  const runPlay = (stalled: boolean) => {
+    if (attempted) return;
+    attempted = true;
+    if (stallTimer !== null) { clearTimeout(stallTimer); stallTimer = null; }
+    const snap = {
+      readyState: shadow.readyState,
+      networkState: shadow.networkState,
+      srcLen: shadow.src?.length ?? 0,
+      stalled,
+    };
+    log('[HANDOFF/bgplay attempt]', snap);
+    try {
+      const p = shadow.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => log('[HANDOFF/bgplay ok]', snap))
+         .catch((e: Error) => log('[HANDOFF/bgplay refused]', { ...snap, name: e?.name, message: e?.message }));
+      }
+    } catch (e) {
+      log('[HANDOFF/bgplay throw]', { ...snap, err: String(e) });
+    }
+  };
+  const onLoaded = () => runPlay(false);
+  try {
+    shadow.addEventListener('loadeddata', onLoaded, { once: true } as AddEventListenerOptions);
+  } catch {
+    const wrapped = () => {
+      shadow.removeEventListener('loadeddata', wrapped);
+      onLoaded();
+    };
+    shadow.addEventListener('loadeddata', wrapped);
+  }
+  stallTimer = setTimeout(() => {
+    if (attempted) return;
+    log('[HANDOFF/bgplay stall]', {
+      readyState: shadow.readyState,
+      networkState: shadow.networkState,
+      srcLen: shadow.src?.length ?? 0,
+      timeoutMs: BGPLAY_LOADEDDATA_TIMEOUT_MS,
+    });
+    runPlay(true);
+  }, BGPLAY_LOADEDDATA_TIMEOUT_MS);
+}
+
 export interface UseMusicHandoffOptions {
   /** Same as useWorkoutMusic.enabled — hook stays inert if false. */
   enabled: boolean;
@@ -160,6 +230,14 @@ export interface UseMusicHandoffOptions {
   musicHoldRef: MutableRefObject<boolean>;
   /** Music-off ref: true if user turned music off for the session. */
   musicOffRef: MutableRefObject<boolean>;
+  /**
+   * Playlist advance callback. Invoked from the v3 shadow's own 'ended' and
+   * 'error' handlers while backgrounded — the audible's ended listener in
+   * useWorkoutMusic cannot fire when the audible is paused by the hide seam,
+   * so nothing else moves the playlist forward between hide and return.
+   * Optional so tests without an advance path can omit it.
+   */
+  advanceRef?: MutableRefObject<() => void>;
 }
 
 export interface UseMusicHandoffReturn {
@@ -179,7 +257,7 @@ export interface UseMusicHandoffReturn {
 }
 
 export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffReturn {
-  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef } = opts;
+  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef, advanceRef } = opts;
 
   const variantRef = useRef<MusicHandoffVariant>('off');
   const audibleElRef = useRef<HTMLAudioElement | null>(null);
@@ -239,6 +317,34 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // ~1s silence when the member leaves the app. The position tick below
       // keeps the buffered window near the live playhead.
       try { shadow.preload = 'auto'; } catch {}
+      // Shadow drives advance while backgrounded — audible's 'ended' handler
+      // in useWorkoutMusic cannot fire when the hide seam has paused it, so
+      // without these the playlist stalls at the current track boundary.
+      // Identity guard matches audible's pattern (musicElRef.current !== el).
+      shadow.addEventListener('ended', () => {
+        if (shadowMusicElRef.current !== shadow) return;
+        if (!inBackgroundRef.current) return;
+        // A track that plays to completion is proof that background advance is
+        // working — reset the runaway counter so a later isolated load error
+        // isn't judged against ancient failures.
+        bgplayConsecutiveErrors.set(shadow, 0);
+        log('[HANDOFF/shadow ended]', { pos: shadow.currentTime, src: shadow.src.slice(-40) });
+        advanceRef?.current?.();
+      });
+      shadow.addEventListener('error', () => {
+        if (shadowMusicElRef.current !== shadow) return;
+        if (!inBackgroundRef.current) return;
+        if (bgplayGivenUp.get(shadow)) return;
+        const failures = (bgplayConsecutiveErrors.get(shadow) ?? 0) + 1;
+        bgplayConsecutiveErrors.set(shadow, failures);
+        log('[HANDOFF/shadow error]', { pos: shadow.currentTime, hasSrc: !!shadow.src, failures });
+        if (failures >= BGPLAY_MAX_CONSECUTIVE_ERRORS) {
+          bgplayGivenUp.set(shadow, true);
+          log('[HANDOFF/shadow giveup]', { failures, max: BGPLAY_MAX_CONSECUTIVE_ERRORS });
+          return;
+        }
+        advanceRef?.current?.();
+      });
       shadowMusicElRef.current = shadow;
       log('[HANDOFF/prime v3]', { hasShadow: !!shadowMusicElRef.current });
       return;
@@ -309,6 +415,14 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // so the warm-up tick may re-seek to the live playhead immediately.
       lastShadowSeekAtRef.current = 0;
       resumeIfV1();
+      // Background re-point on v3: audible is paused and silent, so if we
+      // don't play the shadow after src change the member hears nothing after
+      // an advance(). The upstream guard `!force && inBackgroundRef.current`
+      // returns before we get here on volume-driven re-points, so this only
+      // fires on genuine track changes (force=true) — no conflict with #285.
+      if (variant === 'v3' && force && inBackgroundRef.current) {
+        attemptBgPlay(shadow);
+      }
     };
 
     const variantUri = buildVariantGcsUri(url, bucketPicked);
