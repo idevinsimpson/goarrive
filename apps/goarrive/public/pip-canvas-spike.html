@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Canvas PiP Spike — GoArrive</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 16px 16px 48px;
+    background: #0E1117; color: #F0F4F8;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #8A95A3; font-size: 13px; margin: 0 0 18px; }
+  .step { border: 1px solid #232A36; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .step h2 { font-size: 14px; margin: 0 0 10px; color: #F5A623; letter-spacing: .04em; text-transform: uppercase; }
+  button {
+    display: block; width: 100%; padding: 15px; margin: 0 0 10px;
+    font: 600 16px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #F5A623; color: #14181F; border: 0; border-radius: 10px;
+  }
+  button:disabled { background: #2A3140; color: #6B7686; }
+  button.secondary { background: #232A36; color: #F0F4F8; }
+  canvas, video {
+    display: block; width: 100%; max-width: 320px; margin: 0 auto 10px;
+    background: #000; border-radius: 10px;
+  }
+  .label { color: #8A95A3; font-size: 12px; text-align: center; margin: 0 0 12px; }
+  #log {
+    background: #080B10; border: 1px solid #232A36; border-radius: 10px;
+    padding: 10px; height: 230px; overflow-y: auto;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .ok   { color: #4ADE80; }
+  .bad  { color: #F87171; }
+  .warn { color: #FBBF24; }
+  .dim  { color: #6B7686; }
+  .verdict { font-weight: 700; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: none; }
+  .verdict.pass { display: block; background: #10331F; color: #4ADE80; border: 1px solid #256B3E; }
+  .verdict.fail { display: block; background: #331414; color: #F87171; border: 1px solid #6B2525; }
+</style>
+</head>
+<body>
+
+<h1>Canvas PiP Spike</h1>
+<p class="sub">
+  Answers one question: can a <code>&lt;video&gt;</code> play a canvas
+  <code>captureStream()</code> and then enter Picture-in-Picture on this device,
+  with the frames still moving and the audio still audible?
+  Dependency-free — a failure here is the platform, not the GoArrive app.
+</p>
+
+<div class="step">
+  <h2>Step 1 — Start</h2>
+  <button id="btnStart">Start canvas + audio</button>
+  <div id="verdictInline" class="verdict"></div>
+  <canvas id="cv" width="360" height="640"></canvas>
+  <p class="label">↑ the canvas itself (source of truth)</p>
+  <video id="vid" playsinline webkit-playsinline controls></video>
+  <p class="label">↑ the &lt;video&gt; playing its captureStream — <b>must show the same moving counter</b></p>
+</div>
+
+<div class="step">
+  <h2>Step 2 — Enter PiP</h2>
+  <button id="btnPip" disabled>Enter Picture-in-Picture</button>
+  <button id="btnExit" class="secondary" disabled>Exit PiP</button>
+  <div id="verdictPip" class="verdict"></div>
+  <p class="label dim">
+    Watch the floating tile. Digits still counting = live. Frozen or black = dead.
+    Listen for the beep once per second.
+  </p>
+</div>
+
+<div class="step">
+  <h2>Log</h2>
+  <div id="log"></div>
+  <button id="btnCopy" class="secondary" style="margin-top:10px">Copy log</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var vid = document.getElementById('vid');
+  var logEl = document.getElementById('log');
+  var btnStart = document.getElementById('btnStart');
+  var btnPip = document.getElementById('btnPip');
+  var btnExit = document.getElementById('btnExit');
+  var btnCopy = document.getElementById('btnCopy');
+  var verdictInline = document.getElementById('verdictInline');
+  var verdictPip = document.getElementById('verdictPip');
+
+  var lines = [];
+  var t0 = Date.now();
+
+  function log(msg, cls) {
+    var t = ((Date.now() - t0) / 1000).toFixed(2);
+    var line = t + 's  ' + msg;
+    lines.push(line);
+    var span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = line + '\n';
+    logEl.appendChild(span);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function verdict(el, pass, text) {
+    el.className = 'verdict ' + (pass ? 'pass' : 'fail');
+    el.textContent = (pass ? 'PASS — ' : 'FAIL — ') + text;
+  }
+
+  // ── Environment, logged before anything is attempted ──────────────────────
+  log('userAgent: ' + navigator.userAgent, 'dim');
+  log('canvas.captureStream present: ' +
+      ('captureStream' in HTMLCanvasElement.prototype), 'dim');
+  log('document.pictureInPictureEnabled: ' +
+      (document.pictureInPictureEnabled === true), 'dim');
+  log('video.requestPictureInPicture present: ' +
+      (typeof vid.requestPictureInPicture === 'function'), 'dim');
+  log('video.webkitSetPresentationMode present: ' +
+      (typeof vid.webkitSetPresentationMode === 'function'), 'dim');
+  if (typeof vid.webkitSupportsPresentationMode === 'function') {
+    var sup = false;
+    try { sup = vid.webkitSupportsPresentationMode('picture-in-picture'); } catch (e) {}
+    log('webkitSupportsPresentationMode("picture-in-picture"): ' + sup, 'dim');
+  }
+
+  // ── Canvas animation ──────────────────────────────────────────────────────
+  // Deliberately unmistakable: a large frame counter, a seconds counter, a
+  // sweeping bar and a cycling hue. A frozen tile is obvious at a glance;
+  // a looping-but-stale tile would repeat numbers, which is also obvious.
+  var ctx = cv.getContext('2d');
+  var frames = 0;
+  var rafId = 0;
+
+  function draw() {
+    rafId = requestAnimationFrame(draw);
+    frames++;
+    var secs = (Date.now() - t0) / 1000;
+    var hue = (frames * 2) % 360;
+
+    ctx.fillStyle = '#0E1117';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+
+    // Sweeping bar — motion is visible even if digits are unreadable at tile size.
+    var barY = (frames * 4) % cv.height;
+    ctx.fillStyle = 'hsl(' + hue + ',85%,55%)';
+    ctx.fillRect(0, barY, cv.width, 8);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '700 96px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillText(String(frames % 1000).padStart(3, '0'), cv.width / 2, cv.height / 2);
+
+    ctx.font = '600 34px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = '#F5A623';
+    ctx.fillText(secs.toFixed(1) + 's', cv.width / 2, cv.height / 2 + 56);
+
+    ctx.font = '500 18px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = '#8A95A3';
+    ctx.fillText('FRAMES', cv.width / 2, cv.height / 2 - 78);
+  }
+
+  // ── Audio: oscillator → gain → MediaStreamDestination ─────────────────────
+  // One short beep per second. Silence in the PiP tile is as informative as a
+  // frozen frame, and a countable beep distinguishes "stopped" from "quiet".
+  var audioCtx = null;
+  var beepTimer = 0;
+
+  function startAudio(stream) {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) { log('no AudioContext — audio half of this test cannot run', 'warn'); return; }
+    audioCtx = new Ctx();
+    var dest = audioCtx.createMediaStreamDestination();
+    var gain = audioCtx.createGain();
+    gain.gain.value = 0;
+    var osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 660;
+    osc.connect(gain);
+    gain.connect(dest);
+    // Also to the speakers directly, so we can tell "the tone exists" from
+    // "the tone reached the MediaStream".
+    gain.connect(audioCtx.destination);
+    osc.start();
+
+    beepTimer = setInterval(function () {
+      var now = audioCtx.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    }, 1000);
+
+    var tracks = dest.stream.getAudioTracks();
+    log('audio tracks created: ' + tracks.length, tracks.length ? 'ok' : 'bad');
+    tracks.forEach(function (tr) { stream.addTrack(tr); });
+    log('AudioContext state: ' + audioCtx.state, audioCtx.state === 'running' ? 'ok' : 'warn');
+  }
+
+  // ── Start ─────────────────────────────────────────────────────────────────
+  btnStart.addEventListener('click', function () {
+    btnStart.disabled = true;
+    log('--- START (user gesture) ---');
+
+    if (!('captureStream' in HTMLCanvasElement.prototype)) {
+      log('captureStream is not available on this device — cannot proceed', 'bad');
+      verdict(verdictInline, false, 'canvas.captureStream() does not exist here.');
+      return;
+    }
+
+    draw();
+    log('canvas rAF loop started', 'ok');
+
+    var stream;
+    try {
+      stream = cv.captureStream(30);
+    } catch (err) {
+      log('captureStream() THREW: ' + err.name + ' — ' + err.message, 'bad');
+      verdict(verdictInline, false, 'captureStream() threw ' + err.name);
+      return;
+    }
+    var vTracks = stream.getVideoTracks();
+    log('video tracks: ' + vTracks.length +
+        (vTracks[0] ? ' (readyState=' + vTracks[0].readyState + ')' : ''),
+        vTracks.length ? 'ok' : 'bad');
+
+    startAudio(stream);
+
+    vid.srcObject = stream;
+    vid.play().then(function () {
+      log('video.play() RESOLVED', 'ok');
+    })['catch'](function (err) {
+      log('video.play() REJECTED: ' + err.name + ' — ' + err.message, 'bad');
+      verdict(verdictInline, false, 'video.play() rejected with ' + err.name);
+    });
+
+    // The real assertion: currentTime must advance. A stream whose track
+    // exists but emits no frames leaves currentTime pinned at 0 — which is
+    // exactly the WebKit failure this spike exists to detect.
+    var samples = 0;
+    var lastTime = -1;
+    var advanced = 0;
+    var sampler = setInterval(function () {
+      samples++;
+      var ct = vid.currentTime;
+      if (ct > lastTime + 0.001) advanced++;
+      lastTime = ct;
+      if (samples === 6) {
+        clearInterval(sampler);
+        log('after 3s — currentTime=' + ct.toFixed(2) +
+            '  advanced ' + advanced + '/6 samples' +
+            '  videoWidth=' + vid.videoWidth + '  videoHeight=' + vid.videoHeight +
+            '  readyState=' + vid.readyState);
+        if (advanced >= 4 && vid.videoWidth > 0) {
+          verdict(verdictInline, true,
+            'the <video> is playing live canvas frames. Now try Step 2.');
+          log('STEP 1 PASS — live frames in the video element', 'ok');
+        } else {
+          verdict(verdictInline, false,
+            'the <video> is not receiving live frames (currentTime not advancing). ' +
+            'The canvas path is dead on this device regardless of PiP.');
+          log('STEP 1 FAIL — no live frames; PiP result below is moot', 'bad');
+        }
+        btnPip.disabled = false;
+      }
+    }, 500);
+  });
+
+  // ── Enter PiP ─────────────────────────────────────────────────────────────
+  btnPip.addEventListener('click', function () {
+    log('--- ENTER PiP (user gesture) ---');
+    var before = vid.currentTime;
+
+    function afterEnter(how) {
+      btnExit.disabled = false;
+      log('PiP entered via ' + how, 'ok');
+      setTimeout(function () {
+        var delta = vid.currentTime - before;
+        log('3s inside PiP — currentTime advanced ' + delta.toFixed(2) + 's');
+        if (delta > 1.5) {
+          verdict(verdictPip, true,
+            'PiP is showing live frames. Confirm by eye that the digits are ' +
+            'still counting in the floating tile, and say whether you hear the beep.');
+          log('STEP 2 PASS — frames advancing inside PiP', 'ok');
+        } else {
+          verdict(verdictPip, false,
+            'PiP opened but the stream stalled (currentTime barely moved). ' +
+            'This is the frozen-tile failure.');
+          log('STEP 2 FAIL — stream stalled inside PiP', 'bad');
+        }
+      }, 3000);
+    }
+
+    if (typeof vid.requestPictureInPicture === 'function' && document.pictureInPictureEnabled) {
+      vid.requestPictureInPicture().then(function () {
+        afterEnter('requestPictureInPicture()');
+      })['catch'](function (err) {
+        log('requestPictureInPicture() REJECTED: ' + err.name + ' — ' + err.message, 'bad');
+        verdict(verdictPip, false, 'requestPictureInPicture() rejected with ' + err.name);
+      });
+    } else if (typeof vid.webkitSetPresentationMode === 'function') {
+      try {
+        vid.webkitSetPresentationMode('picture-in-picture');
+        // Synchronous API with no promise — confirm the mode actually took.
+        setTimeout(function () {
+          var mode = vid.webkitPresentationMode;
+          log('webkitPresentationMode after call: ' + mode,
+              mode === 'picture-in-picture' ? 'ok' : 'bad');
+          if (mode === 'picture-in-picture') {
+            afterEnter('webkitSetPresentationMode()');
+          } else {
+            verdict(verdictPip, false,
+              'iOS silently refused PiP for this MediaStream video — the call ' +
+              'did not throw, but presentation mode never changed.');
+            log('STEP 2 FAIL — silent refusal, mode stayed "' + mode + '"', 'bad');
+          }
+        }, 600);
+      } catch (err) {
+        log('webkitSetPresentationMode() THREW: ' + err.name + ' — ' + err.message, 'bad');
+        verdict(verdictPip, false, 'webkitSetPresentationMode() threw ' + err.name);
+      }
+    } else {
+      log('no PiP API available on this device', 'bad');
+      verdict(verdictPip, false, 'this device exposes no Picture-in-Picture API at all.');
+    }
+  });
+
+  btnExit.addEventListener('click', function () {
+    if (document.pictureInPictureElement && document.exitPictureInPicture) {
+      document.exitPictureInPicture()['catch'](function () {});
+    } else if (typeof vid.webkitSetPresentationMode === 'function') {
+      try { vid.webkitSetPresentationMode('inline'); } catch (e) {}
+    }
+    log('exit PiP requested');
+  });
+
+  vid.addEventListener('enterpictureinpicture', function () { log('event: enterpictureinpicture', 'ok'); });
+  vid.addEventListener('leavepictureinpicture', function () { log('event: leavepictureinpicture'); });
+  vid.addEventListener('webkitpresentationmodechanged', function () {
+    log('event: webkitpresentationmodechanged → ' + vid.webkitPresentationMode);
+  });
+  vid.addEventListener('stalled', function () { log('event: video stalled', 'warn'); });
+  vid.addEventListener('error', function () {
+    log('event: video error ' + (vid.error ? vid.error.code : '?'), 'bad');
+  });
+
+  // ── Copy ──────────────────────────────────────────────────────────────────
+  btnCopy.addEventListener('click', function () {
+    var text = '=== canvas PiP spike ===\n' + lines.join('\n') + '\n=== end ===';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        btnCopy.textContent = 'Copied';
+        setTimeout(function () { btnCopy.textContent = 'Copy log'; }, 1500);
+      })['catch'](function () { fallbackCopy(text); });
+    } else {
+      fallbackCopy(text);
+    }
+  });
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:10px;left:10px;width:90%;height:220px;z-index:9999';
+    document.body.appendChild(ta);
+    ta.select();
+    btnCopy.textContent = 'Select the text above and copy';
+  }
+
+  window.addEventListener('pagehide', function () {
+    if (rafId) cancelAnimationFrame(rafId);
+    if (beepTimer) clearInterval(beepTimer);
+  });
+})();
+</script>
+</body>
+</html>
