@@ -172,3 +172,93 @@ segment player remains the safe fallback.
    each request is denied before a Storage signature is minted.
 8. Smoke-test playback through `resolveRenderedVideoForPlayback`. Do not deploy
    or test this flow against production without explicit authorization.
+
+## Render throughput: what is measured, and where the headroom is
+
+Recorded 2026-08-15. Devin's stated requirement is a **3-minute turnaround** from
+coach edit to usable video. The naive pipeline does not come close; two
+optimizations together plausibly do. Measured figures and projections are
+labelled separately — do not quote a projection as a measurement.
+
+### Measured
+
+One real render: workout `Ny1Uz92tXN6LzUb3vT1x`, 8m40s of content, **250.5s** —
+roughly **2× realtime**. A design-review estimate of 4–8× realtime predates this
+and was wrong in the optimistic direction; it should not be quoted again.
+
+Synthetic benchmark on identical 60s 1080×1920 input, using the real filter
+chains from `renderFfmpeg.ts`:
+
+```
+Current settings   720x1440 canvas, 30fps, -preset fast, crf23   15.3s
+PiP-grade          360x640 flat,    15fps, -preset veryfast      4.8s
+Decode-only floor  same input, no encode                          2.1s
+Output size        11.96 MB  ->  1.19 MB
+```
+
+**Encode alone is ~4.9× faster; total is only ~3.2×.** The 2.1s decode floor does
+not move, because output settings change the output, not the input. That gap
+widens in the real pipeline, which also pays source download, **one ffmpeg
+process spawn per segment**, concat and faststart — none of which shrink.
+
+### The headroom is repetition, not resolution
+
+A workout is mostly the same content repeated. "Rick H - Legs + Chest & Back"
+(`eiJ9oMt4AmA9MloCkfig`) is **86 segments across 2,500s** — 37 movement-video,
+47 rest, 2 image — but only **12 unique movements**, because every block is
+`N movements × 3 rounds`. Each movement is currently encoded three times for
+byte-identical output.
+
+This works **because the burned-in timer is segment-local**. `generateAss` emits
+`${fmtTime(sec)} / ${totalWorkoutStr}` for movements and a local countdown for
+rests — both restart per segment. Two instances of the same movement at the same
+duration therefore produce an identical ASS file and identical encoded output.
+Had the timer shown running workout-elapsed time, none of this would be possible.
+
+The concat step is already `-c copy`, and **the concat demuxer accepts the same
+file path multiple times** — so reuse costs nothing at stitch time. Key each
+segment by `(sourceMedia, durationSec, type, label, totalWorkoutStr, geometry)`,
+encode each unique key once, reference it N times.
+
+*Projection, not measurement:* ~660s of unique content against a 2,500s timeline
+is a **~3.8× reduction in encode work**, which compounds with the 3.2× above to
+roughly 12× — landing this workout near 1.5–3 minutes.
+
+### The edit case is what the requirement is actually about
+
+A coach editing one movement should not re-render the whole workout. If segment
+files are **content-addressed and cached in Storage**, an edit invalidates only
+that movement's segments and everything else is a cache hit — a 60-segment
+workout where one exercise changed re-encodes about four segments. Movements
+shared across a coach's library warm the cache for each other.
+
+**One design flaw would silently defeat that cache:** `totalWorkoutStr` is baked
+into every movement overlay, so adding or removing a block changes the workout's
+total duration, which changes *every* movement segment's overlay text and
+invalidates everything — the exact edit a coach makes most often. **Drop
+`/ total` from the burned-in overlay** (segment-local time only) before relying
+on the cache. That single change is the difference between a cache that works and
+one that looks fine until the first structural edit.
+
+### Source selection
+
+Download is the floor that output settings cannot touch, so it is worth attacking
+directly. Movements carry `gifLowUrl` / `gifHighUrl` / poster / thumbnail
+derivatives — **note these are GIFs and stills, not a low-resolution MP4**; there
+is one H.264 `videoUrl`. On the Rick H workout **11 of 12** movements have
+`gifLowUrl` populated.
+
+**Hazard:** `Dumbbell Seated Bent Over Row` (`et9OHXhJJuKE1u321VWu`) has
+`gifLowUrl` present **as an empty string**. Key the fallback on *truthiness*, not
+on `in` or `!== undefined`, or ffmpeg receives an empty path — and fall back to
+`videoUrl` rather than failing the segment.
+
+Whether GIF decode actually beats MP4 decode is **unmeasured**; palettized GIF is
+not automatically cheaper. The download saving is the real argument.
+
+### Related open item
+
+Stored `estimatedDurationMin` (47) disagrees with the computed segment sum
+(41.7 min) on this workout. If the stored value feeds `totalWorkoutStr`, the
+burned-in timer will disagree with the video's actual length by five minutes.
+Dropping `/ total` per above resolves this and the cache problem together.
