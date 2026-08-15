@@ -22,6 +22,13 @@ interface PipCanvasStreamOptions {
   videoElRef: React.RefObject<HTMLVideoElement | null>;
   canvasW?: number;
   canvasH?: number;
+  // Pass-2 mechanism probe (staging-only). Runs the hook inline with a
+  // subset of components so the caller can isolate which step starves the
+  // foreground music path.
+  //   'canvas' → rAF + canvas draws, NO audio track merge
+  //   'audio'  → rAF + canvas + audio merge (caller still skips hidden video)
+  //   'full'   → everything, including caller-owned hidden video
+  probeMode?: 'canvas' | 'audio' | 'full';
 }
 
 interface PipCanvasStreamResult {
@@ -52,6 +59,7 @@ export function usePipCanvasStream({
   videoElRef,
   canvasW = 1080,
   canvasH = 1350,
+  probeMode,
 }: PipCanvasStreamOptions): PipCanvasStreamResult {
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -142,8 +150,10 @@ export function usePipCanvasStream({
       const videoEl = videoElRef.current;
       const movName = cur?.name ?? '';
 
-      // Try to attach audio tracks if not yet done
-      if (!audioAttached) {
+      // Try to attach audio tracks if not yet done.
+      // Skipped entirely in probeMode='canvas' — the audio merge itself is
+      // one of the three candidate culprits for foreground-music starvation.
+      if (!audioAttached && probeMode !== 'canvas') {
         const audioStream = getPipAudioStream();
         if (audioStream) {
           const audioTracks = audioStream.getAudioTracks();
@@ -232,7 +242,7 @@ export function usePipCanvasStream({
       setIsReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, canvasW, canvasH]);
+  }, [enabled, canvasW, canvasH, probeMode]);
 
   return { mediaStream, videoElRef, isReady, canvasElRef, hasWorkingCaptureStream };
 }

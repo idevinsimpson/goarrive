@@ -194,6 +194,15 @@ export default function WorkoutPlayer({
   // further down. The gate keeps the rAF loop + hidden video off the
   // foreground-workout hot path — they only spin up during PiP.
   const [isPiP, setIsPiP] = useState(false);
+  // Pass-2 mechanism probe: ?pipprobe=canvas|audio|full forces the hook to
+  // run inline with a subset of components, so Devin can isolate which step
+  // starves foreground music. Absent param → normal isPiP-gated behavior.
+  const pipProbeMode = useMemo<'canvas' | 'audio' | 'full' | null>(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+    const v = new URLSearchParams(window.location.search).get('pipprobe');
+    return v === 'canvas' || v === 'audio' || v === 'full' ? v : null;
+  }, []);
+  const isPipProbing = pipProbeMode !== null;
   // Ref to the DOM video element for the currently-active workout video.
   // Populated via effect when the expo-av Video mounts/changes.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -204,7 +213,8 @@ export default function WorkoutPlayer({
   }, [phase, currentIndex]);
 
   const { mediaStream } = usePipCanvasStream({
-    enabled: pipEnabled && Platform.OS === 'web' && isPiP,
+    enabled: pipEnabled && Platform.OS === 'web' && (isPiP || isPipProbing),
+    probeMode: pipProbeMode ?? undefined,
     phase,
     current: current as any,
     next: next as any,
@@ -218,9 +228,13 @@ export default function WorkoutPlayer({
 
   // Hidden <video> that carries the canvas-stream MediaStream as srcObject.
   // Created imperatively to avoid React Native JSX incompatibility with raw <video>.
+  // Probe-aware: only 'full' mode creates the hidden video; 'canvas' and 'audio'
+  // deliberately skip it so we can isolate the culprit (see pipProbeMode).
   const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
-    if (Platform.OS !== 'web' || !pipEnabled || !isPiP) return;
+    if (Platform.OS !== 'web' || !pipEnabled) return;
+    const shouldCreate = isPipProbing ? pipProbeMode === 'full' : isPiP;
+    if (!shouldCreate) return;
     const vid = document.createElement('video');
     vid.autoplay = true;
     vid.muted = true;
@@ -243,7 +257,7 @@ export default function WorkoutPlayer({
       vid.parentNode?.removeChild(vid);
       pipCanvasVideoRef.current = null;
     };
-  }, [pipEnabled, isPiP]);
+  }, [pipEnabled, isPiP, isPipProbing, pipProbeMode]);
 
   // Wire the canvas MediaStream into the hidden video when it's available.
   // volume=0 (not muted) so PiP still carries audio via the MediaStream track.
