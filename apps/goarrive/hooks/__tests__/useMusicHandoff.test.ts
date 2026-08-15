@@ -277,6 +277,92 @@ describe('useMusicHandoff v3 shadow controls', () => {
 
     hook.unmount();
   });
+
+  test('bgplay stall: loadeddata never fires → timeout logs stall + still attempts play', async () => {
+    vi.useFakeTimers();
+    try {
+      const { hook, shadow } = (function setupIsolated() {
+        const s = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
+        const a = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
+        a.src = 'https://example.com/music.mp3';
+        const musicPausedRef = { current: false };
+        const musicHoldRef = { current: false };
+        const musicOffRef = { current: false };
+        const advanceRef = { current: vi.fn() };
+        vi.mocked(createBlessedMusicPlayer).mockReturnValue(s);
+        const h = renderHook(
+          () => useMusicHandoff({
+            enabled: true, isPaused: false, isMuted: false, volume: 0.25,
+            musicPausedRef, musicHoldRef, musicOffRef, advanceRef,
+          }),
+          { initialProps: {} },
+        );
+        act(() => {
+          h.result.current.primeShadow(a);
+          h.result.current.swapTrack(a.src);
+          visibilityState = 'hidden';
+          document.dispatchEvent(new Event('visibilitychange'));
+        });
+        return { hook: h, shadow: s };
+      })();
+
+      vi.mocked(console.info).mockClear();
+      vi.mocked(shadow.play).mockClear();
+
+      // Swap while backgrounded — this registers loadeddata + arms the stall timer.
+      act(() => { hook.result.current.swapTrack('https://example.com/new-track.mp3'); });
+
+      // Do NOT dispatch loadeddata — simulate a dead-CDN / iOS-throttled load.
+      // Fast-forward past the timeout ceiling.
+      act(() => { vi.advanceTimersByTime(5000); });
+      await act(async () => { await Promise.resolve(); });
+
+      const logs = vi.mocked(console.info).mock.calls.map((c: any[]) => c[0] as string);
+      expect(logs.some((l) => l.includes('[HANDOFF/bgplay stall]'))).toBe(true);
+      expect(logs.some((l) => l.includes('[HANDOFF/bgplay attempt]') && l.includes('"stalled":true'))).toBe(true);
+      expect(shadow.play).toHaveBeenCalledTimes(1);
+
+      hook.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('runaway guard: 3rd consecutive shadow error stops advancing + logs giveup', () => {
+    const { shadow, advance, unmount } = setup();
+    advance.mockClear();
+    vi.mocked(console.info).mockClear();
+
+    act(() => { (shadow as any).dispatch('error'); }); // 1st: advance
+    act(() => { (shadow as any).dispatch('error'); }); // 2nd: advance
+    act(() => { (shadow as any).dispatch('error'); }); // 3rd: giveup
+
+    expect(advance).toHaveBeenCalledTimes(2);
+    const logs = vi.mocked(console.info).mock.calls.map((c: any[]) => c[0] as string);
+    expect(logs.some((l) => l.includes('[HANDOFF/shadow giveup]'))).toBe(true);
+
+    // A 4th error stays inert — the giveup latch holds.
+    act(() => { (shadow as any).dispatch('error'); });
+    expect(advance).toHaveBeenCalledTimes(2);
+
+    unmount();
+  });
+
+  test('runaway guard reset: a successful ended between errors clears the counter', () => {
+    const { shadow, advance, unmount } = setup();
+    advance.mockClear();
+
+    act(() => { (shadow as any).dispatch('error'); }); // 1st error → advance
+    act(() => { (shadow as any).dispatch('error'); }); // 2nd error → advance
+    act(() => { (shadow as any).dispatch('ended'); }); // ended → advance + reset
+    act(() => { (shadow as any).dispatch('error'); }); // counter reset → advance
+    act(() => { (shadow as any).dispatch('error'); }); // 2nd error post-reset → advance
+
+    // 2 errors + 1 ended + 2 errors = 5 advances, no giveup.
+    expect(advance).toHaveBeenCalledTimes(5);
+
+    unmount();
+  });
 });
 
 // ── pickNearestBucket unit tests ──────────────────────────────────────────────

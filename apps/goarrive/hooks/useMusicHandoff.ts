@@ -145,6 +145,17 @@ function hasBufferedRunway(el: HTMLMediaElement, pos: number, margin: number): b
 // iOS Safari devices (verified during device spike A/B/C).
 const RETURN_TIMEOUT_MS = 3000;
 
+// Ceiling on the loadeddata wait before we attempt play() anyway. A silent
+// no-attempt path is the one outcome this probe cannot afford — an empty log
+// is indistinguishable from "handler never fired" on device.
+const BGPLAY_LOADEDDATA_TIMEOUT_MS = 4000;
+// Consecutive shadow errors we tolerate before disabling background advance.
+// Prevents burning the playlist in seconds if backgrounded play() is refused
+// and the next-src load errors immediately (error -> advance -> error -> ...).
+const BGPLAY_MAX_CONSECUTIVE_ERRORS = 3;
+const bgplayConsecutiveErrors = new WeakMap<HTMLAudioElement, number>();
+const bgplayGivenUp = new WeakMap<HTMLAudioElement, boolean>();
+
 /**
  * First-ever backgrounded fresh-src play() attempt on the v3 shadow. iOS may
  * refuse a play() that follows a src change outside a user gesture — load()
@@ -152,19 +163,24 @@ const RETURN_TIMEOUT_MS = 3000;
  * than a continuation. We log readyState + networkState alongside the promise
  * outcome so a policy refusal (NotAllowedError) is distinguishable from a
  * load stall (readyState stuck at HAVE_NOTHING / networkState NETWORK_LOADING).
- * The two point at completely different fixes; the promise rejection alone
- * can't tell them apart.
  *
  * Waits for `loadeddata` before calling play() so the play isn't racing an
- * incomplete load. { once: true } — the listener drains itself; the general
- * error handler installed in primeShadow still catches load failures.
+ * incomplete load — but only for BGPLAY_LOADEDDATA_TIMEOUT_MS. If loadeddata
+ * never fires (dead CDN, iOS deprioritizing a backgrounded tab), we log the
+ * stall explicitly and still attempt play() so the log is never silent.
  */
 function attemptBgPlay(shadow: HTMLAudioElement): void {
-  const onLoaded = () => {
+  let attempted = false;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  const runPlay = (stalled: boolean) => {
+    if (attempted) return;
+    attempted = true;
+    if (stallTimer !== null) { clearTimeout(stallTimer); stallTimer = null; }
     const snap = {
       readyState: shadow.readyState,
       networkState: shadow.networkState,
       srcLen: shadow.src?.length ?? 0,
+      stalled,
     };
     log('[HANDOFF/bgplay attempt]', snap);
     try {
@@ -177,16 +193,26 @@ function attemptBgPlay(shadow: HTMLAudioElement): void {
       log('[HANDOFF/bgplay throw]', { ...snap, err: String(e) });
     }
   };
+  const onLoaded = () => runPlay(false);
   try {
     shadow.addEventListener('loadeddata', onLoaded, { once: true } as AddEventListenerOptions);
   } catch {
-    // Older browsers may not support the options object — fall back to a manual removal.
     const wrapped = () => {
       shadow.removeEventListener('loadeddata', wrapped);
       onLoaded();
     };
     shadow.addEventListener('loadeddata', wrapped);
   }
+  stallTimer = setTimeout(() => {
+    if (attempted) return;
+    log('[HANDOFF/bgplay stall]', {
+      readyState: shadow.readyState,
+      networkState: shadow.networkState,
+      srcLen: shadow.src?.length ?? 0,
+      timeoutMs: BGPLAY_LOADEDDATA_TIMEOUT_MS,
+    });
+    runPlay(true);
+  }, BGPLAY_LOADEDDATA_TIMEOUT_MS);
 }
 
 export interface UseMusicHandoffOptions {
@@ -298,13 +324,25 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       shadow.addEventListener('ended', () => {
         if (shadowMusicElRef.current !== shadow) return;
         if (!inBackgroundRef.current) return;
+        // A track that plays to completion is proof that background advance is
+        // working — reset the runaway counter so a later isolated load error
+        // isn't judged against ancient failures.
+        bgplayConsecutiveErrors.set(shadow, 0);
         log('[HANDOFF/shadow ended]', { pos: shadow.currentTime, src: shadow.src.slice(-40) });
         advanceRef?.current?.();
       });
       shadow.addEventListener('error', () => {
         if (shadowMusicElRef.current !== shadow) return;
         if (!inBackgroundRef.current) return;
-        log('[HANDOFF/shadow error]', { pos: shadow.currentTime, hasSrc: !!shadow.src });
+        if (bgplayGivenUp.get(shadow)) return;
+        const failures = (bgplayConsecutiveErrors.get(shadow) ?? 0) + 1;
+        bgplayConsecutiveErrors.set(shadow, failures);
+        log('[HANDOFF/shadow error]', { pos: shadow.currentTime, hasSrc: !!shadow.src, failures });
+        if (failures >= BGPLAY_MAX_CONSECUTIVE_ERRORS) {
+          bgplayGivenUp.set(shadow, true);
+          log('[HANDOFF/shadow giveup]', { failures, max: BGPLAY_MAX_CONSECUTIVE_ERRORS });
+          return;
+        }
         advanceRef?.current?.();
       });
       shadowMusicElRef.current = shadow;
