@@ -241,8 +241,54 @@ third only surface once the first is cleared:
 
 **Done means the assertions pass, not that the file collects.** If they fail once they run,
 that is a real defect in already-merged code and must be resolved before more render work
-stacks on top. Sequence after PR #267 merges — #267 touches both this test file and
-`useRenderedVideoPlayback.ts`. (`vitest.config.ts` is *not* in #267's diff.)
+stacks on top.
+
+~~Sequence after PR #267 merges~~ — **this sequencing is stale as of 2026-08-15 and would
+block indefinitely.** #267 is still an open draft whose base branch is
+`feat/render-pipeline-phase2` — the branch of #262, which **merged to `main` at
+2026-08-14 21:04 UTC and is now closed**. #267's recorded base SHA `10a10b62` is not in
+`main`, so its diff is measured against an absorbed base and it carries its own copies of
+already-merged #262/#266 content. Merging it into a combined branch produces conflicts that
+are pointless to resolve by hand (hit twice on 2026-08-14, skipped both times).
+
+The collision concern itself is still real — #267 does touch this test file and
+`useRenderedVideoPlayback.ts` — but waiting on a PR stranded on a dead base is not a plan.
+**#267 needs its base retargeted to `main` first**, which would collapse its diff to its own
+five files. That materially changes someone's draft PR, so it is **Devin's call, not an
+agent's**, and must not be done mid-deploy. Until it is decided, either sequence this test
+work against the retarget or accept the conflict on the two overlapping files.
+(`vitest.config.ts` and `test-setup.ts` are *not* in #267's diff, so those are free either
+way — though per the entry above, neither is needed for the fix.)
+
+### 2026-08-15 — no job-level recovery for a stuck render (#262, merged)
+
+The 2026-08-14 audit on #262 asked for a render-timeout guard before merge. What landed
+bounds each **FFmpeg invocation** — `renderJob.ts` passes `timeout` on all four execs
+(300s per segment, 120s rest fallback, 600s concat, 300s faststart). That is real
+protection against a wedged encode and should not be re-litigated.
+
+What did **not** land is anything at the **job** level. Verified on merged `main`:
+
+- `createTask` in `renderWorkoutVideo.ts` sets no `dispatchDeadline`.
+- `docs/render-workout-video-service.md` documents no queue retry policy, `max-attempts`,
+  or dead-letter configuration — so whoever provisions `render-workout-video` gets Cloud
+  Tasks defaults by accident rather than by design.
+- Nothing sweeps documents left at `renderedVideo.status === 'rendering'`.
+
+Failure mode: if the Cloud Run container dies between claiming the render identity and
+writing terminal state (OOM, eviction, instance kill), the workout stays `rendering`
+indefinitely. Terminal writes still accept `rendering`/`failed` (`renderState.ts:66,90`),
+so a later task *could* complete it — but once Cloud Tasks stops retrying, nothing ever
+issues one. This surfaces as "this workout has been rendering for three days," not as an
+error anyone gets paged for.
+
+- [ ] Set an explicit `dispatchDeadline` on the enqueued task.
+- [ ] Document the queue's retry / `max-attempts` / dead-letter policy in the runbook so it
+      is provisioned deliberately.
+- [ ] Add a reaper (or a client-visible staleness rule) for docs stuck at `rendering`.
+
+Not urgent — the pipeline is not deployed (see the 2026-08-14 entry above). This must be
+closed before the render service is switched on, not before the next Hosting release.
 
 ### 2026-08-11 — PR #237 prod flags
 
