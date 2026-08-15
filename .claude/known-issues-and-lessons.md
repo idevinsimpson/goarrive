@@ -107,6 +107,19 @@ The Phase 4 onboarding wizard and checkout page needed to read `playbook_folders
 ### iOS Safari Canvas PiP: Hidden Canvas Does Not Populate MediaStream
 During Phase 2 PiP QA (PR #251), it was discovered that a canvas element with `display:none` or `visibility:hidden` does not produce frames in its `captureStream()` MediaStream on iOS Safari's WKWebView — the stream exists but carries no video. The capture canvas therefore remains off-screen but present in the rendering tree. PR #271 later removed the visible green debug thumbnail and its rAF mirror from `WorkoutPlayer` while preserving the off-screen capture canvas, hidden video handoff, and PiP stream; the current `usePipCanvasStream` API has no debug-visibility flag. Lesson: keep the capture source renderable for iOS, but separate that requirement from temporary user-visible QA overlays and remove those overlays after verification.
 
+### `/ship` Still Mandates a Retired Relay Smoke Test — Documented Deadlock
+**`.claude/commands/ship.md` and `.claude/relay-handoff.md` directly contradict each other, and following the former as written cannot terminate.** Found 2026-08-15; **not fixed here**, because editing a command that governs deploys is a process change.
+
+`relay-handoff.md:3` records Devin's own decision verbatim: *"Relay/Manus automated smoke tests are RETIRED (Devin, #goarrive-notes, 2026-08-11 ~11:40 AM ET: 'Relay no longer does smoke tests. Devin will do them.'). Do NOT mention `<@U0B1YQS8L12>` (Relay) after staging deploys — **it will not respond**."* Line 38 repeats it: *"Never ping Relay — retired 2026-08-11."*
+
+`ship.md` was not updated to match. Step 4b is headed **"Trigger Relay Smoke Test (MANDATORY — do not skip)"**, line 79 posts `<@U0B1YQS8L12> smoke test —`, and the step then says *"Wait for Relay's response in the thread"* and *"Do not create a PR until the smoke test passes."* Step 4a is likewise **MANDATORY** and still runs `scripts/update-briefing-doc.js` to prepare context for Manus (the script does still exist).
+
+**The failure mode is a guaranteed hang, not a wrong result.** An agent following `/ship` literally will deploy to staging, ping a bot that is documented as never responding, wait on a thread reply that cannot arrive, and then refuse to open a PR — with every blocking step labelled MANDATORY. Nothing in `ship.md` provides a timeout or an escape.
+
+In practice the requirement is already dead: the 2026-08-14/15 staging deploys were carried out and reported without any Relay step, and no one noticed the omission. That is precisely how a stale mandatory instruction stays dangerous — it is silently ignored until someone follows it faithfully, and the person who does is usually a fresh agent with no context for why everyone else skips step 4.
+
+**Lesson: retiring a workflow means removing it from the files that execute it, not only from the files that describe it.** The retirement note landed in the handoff doc, which is read for context; it never reached the command file, which is read for instructions. When a decision retires a step, grep for the step's identifying token — here `U0B1YQS8L12` — and fix every hit, or the retirement is only half-applied.
+
 ### Canvas PiP Is Gated Twice on iOS, and One Gate Rests on a False Premise
 `usePipCanvasStream` disables itself on iOS Safari through **two independent gates**, and they are not equally justified. Recorded 2026-08-15 while deciding between the canvas-PiP and pre-rendered-video architectures.
 
