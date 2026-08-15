@@ -290,6 +290,46 @@ error anyone gets paged for.
 Not urgent — the pipeline is not deployed (see the 2026-08-14 entry above). This must be
 closed before the render service is switched on, not before the next Hosting release.
 
+### 2026-08-15 — the rendered video is SILENT, which cuts against the PiP rationale
+
+`renderFfmpeg.ts:74` passes **`-an`** on every segment, and both the concat and faststart
+stages are `-c copy`. **The rendered MP4 therefore carries no audio track at all.**
+
+That is worth stating plainly because part of the stated case for continuous video was
+solving PiP audio. The recorded position was that iOS hands the audio session to whatever
+enters PiP *even when it carries no audio*, so chasing the handoff was declared a dead end
+and "the answer is the continuous video with baked-in audio." **The renderer as built does
+not bake in audio**, so entering PiP with today's artifact would still kill the music, and
+the v3 shadow work stays load-bearing rather than being superseded.
+
+This is a design decision to make deliberately, not a bug to fix silently — either path is
+defensible, but they lead to very different places:
+
+- [ ] **Decide whether the render mixes audio.** Baking in voice cues and music makes the
+      video self-sufficient in PiP and on the lock screen, but freezes the music selection
+      at render time — a member could no longer change style or volume mid-workout, and the
+      whole `music_cache` volume-bucket system (#273/#277) becomes irrelevant for rendered
+      playback. Leaving it silent keeps live audio flexible and keeps PiP audio unsolved.
+- [ ] If audio is baked in, decide what happens to **per-member personalization** (style
+      choice, volume, coach voice) — a single rendered artifact per workout version cannot
+      vary per member without re-rendering.
+
+### 2026-08-15 — render throughput is ~2× realtime, not the 4–8× estimated
+
+The only real measurement to date: workout `Ny1Uz92tXN6LzUb3vT1x`, 8m40s of content,
+rendered in **250.5s** — roughly **2× realtime**. The pre-build estimate recorded in the
+design review was 4–8× realtime; the measured figure is materially slower.
+
+Extrapolated, a 60-minute workout is **~29 minutes of render**, not the 8–15 minutes the
+design doc assumed. Caveat honestly: this is one data point on an atypical workout (1
+movement video, 9 images, 9 rest segments), so image/rest-heavy content may not predict
+video-heavy content in either direction.
+
+- [ ] **Re-benchmark on a video-heavy workout** before promising any coach-facing turnaround
+      time. The 4–8× figure should not be quoted again until it is re-measured.
+- [ ] Decide whether ~30 minutes is acceptable for the coach-edits-then-trains flow, or
+      whether it forces a priority queue, a coarser preset, or a "still rendering" UX state.
+
 ### 2026-08-11 — PR #237 prod flags
 
 _(Preserve whatever Devin logged in the #237 thread — capture here on next PR-237
