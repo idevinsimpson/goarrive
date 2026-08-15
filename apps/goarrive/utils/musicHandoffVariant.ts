@@ -74,3 +74,14 @@ export function getMusicHandoffVariant(): MusicHandoffVariant {
   } catch {}
   return 'v3';
 }
+
+/**
+ * Persist a variant to localStorage. Paired with the on-screen AUDIO pill so
+ * Devin can cycle variants without typing ?handoff= on an iPhone keyboard —
+ * three device sessions have been lost to that trap. Caller reloads after
+ * this so the next boot reads the new value cleanly.
+ */
+export function setMusicHandoffVariant(v: MusicHandoffVariant): void {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.setItem(STORAGE_KEY, v); } catch {}
+}

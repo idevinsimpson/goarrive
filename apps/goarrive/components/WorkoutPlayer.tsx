@@ -57,7 +57,12 @@ import MusicSettingsSheet from './MusicSettingsSheet';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
-import { getMusicHandoffVariant } from '../utils/musicHandoffVariant';
+import {
+  getMusicHandoffVariant,
+  setMusicHandoffVariant,
+  type MusicHandoffVariant,
+} from '../utils/musicHandoffVariant';
+import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, type PipProbeMode } from '../utils/pipProbeMode';
 import { readHandoffLog } from '../utils/handoffLog';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
@@ -194,15 +199,11 @@ export default function WorkoutPlayer({
   // further down. The gate keeps the rAF loop + hidden video off the
   // foreground-workout hot path — they only spin up during PiP.
   const [isPiP, setIsPiP] = useState(false);
-  // Pass-2 mechanism probe: ?pipprobe=canvas|audio|full forces the hook to
-  // run inline with a subset of components, so Devin can isolate which step
-  // starves foreground music. Absent param → normal isPiP-gated behavior.
-  const pipProbeMode = useMemo<'canvas' | 'audio' | 'full' | null>(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
-    const v = new URLSearchParams(window.location.search).get('pipprobe');
-    return v === 'canvas' || v === 'audio' || v === 'full' ? v : null;
-  }, []);
-  const isPipProbing = pipProbeMode !== null;
+  // Pass-2 mechanism probe: getPipProbeMode() = query > localStorage > default
+  // 'full'. Staging-only via pipEnabled gate below. The probe runs inline with
+  // a subset of the hook so a device tester can isolate which step starves the
+  // foreground music path (see pipProbeMode.ts).
+  const pipProbeMode = useMemo<PipProbeMode>(() => getPipProbeMode(), []);
   // Ref to the DOM video element for the currently-active workout video.
   // Populated via effect when the expo-av Video mounts/changes.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -213,8 +214,9 @@ export default function WorkoutPlayer({
   }, [phase, currentIndex]);
 
   const { mediaStream } = usePipCanvasStream({
-    enabled: pipEnabled && Platform.OS === 'web' && (isPiP || isPipProbing),
-    probeMode: pipProbeMode ?? undefined,
+    // Probe is always on when pipEnabled (staging). Mode = subset selection.
+    enabled: pipEnabled && Platform.OS === 'web',
+    probeMode: pipProbeMode,
     phase,
     current: current as any,
     next: next as any,
@@ -233,8 +235,9 @@ export default function WorkoutPlayer({
   const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || !pipEnabled) return;
-    const shouldCreate = isPipProbing ? pipProbeMode === 'full' : isPiP;
-    if (!shouldCreate) return;
+    // Only 'full' mode creates the hidden video; 'canvas' and 'audio' skip it
+    // so we can isolate the culprit (see pipProbeMode.ts).
+    if (pipProbeMode !== 'full') return;
     const vid = document.createElement('video');
     vid.autoplay = true;
     vid.muted = true;
@@ -257,7 +260,7 @@ export default function WorkoutPlayer({
       vid.parentNode?.removeChild(vid);
       pipCanvasVideoRef.current = null;
     };
-  }, [pipEnabled, isPiP, isPipProbing, pipProbeMode]);
+  }, [pipEnabled, pipProbeMode]);
 
   // Wire the canvas MediaStream into the hidden video when it's available.
   // volume=0 (not muted) so PiP still carries audio via the MediaStream track.
@@ -2321,17 +2324,38 @@ export default function WorkoutPlayer({
       </View>
       </View>
 
-      {/* Music-handoff variant badge — staging only. Tiny pill in the bottom-
-          left showing the active ?handoff= variant so the on-device tester
-          can tell baseline (off) from fix (v1/v2/v3) at a glance. Never renders
-          in production because isStagingHost() is host-based. */}
+      {/* Staging-only debug pills. AUDIO cycles the ?handoff= variant, PROBE
+          cycles the pass-2 pipprobe mode. Both write localStorage + reload —
+          this is durable test infra, not scaffolding: four device sessions
+          today were lost to invisible query-param preconditions. Never
+          renders in production because isStagingHost() is host-based. */}
       {isStagingHost() && (
         <View style={st.audioVariantRow}>
-          <View pointerEvents="none" style={st.audioVariantBadge}>
+          <Pressable
+            style={st.audioVariantBadge}
+            onPress={() => {
+              const order: MusicHandoffVariant[] = ['v3', 'v1', 'v2', 'off'];
+              const cur = getMusicHandoffVariant();
+              const next = order[(order.indexOf(cur) + 1) % order.length];
+              setMusicHandoffVariant(next);
+              try { window.location.reload(); } catch {}
+            }}
+          >
             <Text style={st.audioVariantBadgeText}>
               AUDIO: {getMusicHandoffVariant().toUpperCase()}
             </Text>
-          </View>
+          </Pressable>
+          <Pressable
+            style={st.audioVariantBadge}
+            onPress={() => {
+              setPipProbeMode(nextPipProbeMode(getPipProbeMode()));
+              try { window.location.reload(); } catch {}
+            }}
+          >
+            <Text style={st.audioVariantBadgeText}>
+              PROBE: {getPipProbeMode().toUpperCase()}
+            </Text>
+          </Pressable>
           <Pressable
             style={st.copyLogBtn}
             onPress={() => {
