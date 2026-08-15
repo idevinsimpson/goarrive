@@ -87,8 +87,37 @@ git diff origin/main..<deployed-hotfix> -- apps/goarrive/hooks/useWorkoutMusic.t
   the next full production deploy from `main`; no separate action needed, but do not
   re-diagnose it as new.
 
+- [ ] **Production runs v3 *without* #287, so backgrounded music stops at the first track
+  boundary.** This is a live member-facing defect in the feature that release shipped, and
+  it is not the loudness limitation Devin accepted. Recorded 2026-08-15.
+
+  The release went out at **18:22:55 UTC**. The three follow-on audio fixes all landed on
+  `main` outside it:
+
+  ```
+  #284  9a608ba  2026-08-14 17:55 UTC   shadow warm-up      (branch cut from 45491ef, not main → excluded)
+  #285  5bc29d2  2026-08-14 19:16 UTC   slider-driven bucket + treadmill fix   (after the push)
+  #287  4b7d041  2026-08-14 21:36 UTC   shadow `ended` drives advance          (after the push)
+  ```
+
+  #287 is the one that matters to members. Production has the v3 handoff (#259) and the
+  default flip, so music *does* survive backgrounding — then the shadow plays the current
+  track to its end and nothing advances the playlist, because the `ended` listener driving
+  `advance()` sits on the **audible** element, which the hide seam has paused, and a paused
+  element never fires `ended`. The member hears one track and then silence until they
+  re-open the app. Device-confirmed on staging via the #287 field log (`bgplay ok`,
+  2026-08-15).
+
+  **Why this needs a decision rather than a note:** the loudness trade-off in this release
+  was accepted by Devin explicitly and in advance. This one was not — #287 was diagnosed and
+  fixed *after* the production push, so nobody has ever weighed it. The fix is merged,
+  device-verified, and client-only. Shipping it is a production release and therefore
+  Devin's call alone.
+
 All four deployed audio components verified present on `main` as of `3073f94`
-(#258, #259, #231, #235, plus the default flip via #274). No prod-only code remains.
+(#258, #259, #231, #235, plus the default flip via #274). No prod-only code remains — but
+see the item above: the inverse is now true, and `main` carries three audio fixes that
+production does not.
 
 ### 2026-08-14 — iOS volume-bucket feature: prod-readiness gates
 
@@ -115,7 +144,8 @@ Before the client picker reaches members (needs Devin's typed go for a Hosting d
   intended steady state before wide rollout.
 
 - [x] **Pre-render warms only 2 of 5 buckets.** ~~`attachTrack` fire-and-forget requests the
-  current-slider bucket plus the `0.12` default.~~ **Fixed on PR #285 (pending merge).**
+  current-slider bucket plus the `0.12` default.~~ **Fixed by #285, merged `5bc29d2`
+  2026-08-14 19:16 UTC. On `main`; not in production** — see the v3/#287 item above.
   Confirmed live, not theoretical: a 2026-08-14 Storage audit (18 styles × tracks 1–24 ×
   five buckets, HEAD per object) found `edm/track_2` holding exactly `gain_025` + `gain_012`
   and nothing else — the precise fingerprint of the two-bucket warm. `attachTrack` now warms
@@ -133,7 +163,8 @@ Before the client picker reaches members (needs Devin's typed go for a Hosting d
   `maxInstances=10` bounds the blast radius but does not remove the waste.
 
 - [x] **Dedup guard records attempts, not successes** (`useWorkoutMusic.ts`).
-  **Fixed on PR #285 (pending merge)** — the keys are now released when the callable
+  **Fixed by #285, merged `5bc29d2` 2026-08-14 19:16 UTC (on `main`, not in production)**
+  — the keys are now released when the callable
   rejects, mirroring `fetchTrack:220`. The same Storage audit found `edm/track_15` with
   **zero** buckets despite having a full-volume source, which is what this bug produces:
   one transient failure marks the track done for the session and it never retries.
