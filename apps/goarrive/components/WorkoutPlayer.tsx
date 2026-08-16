@@ -229,11 +229,14 @@ export default function WorkoutPlayer({
     }
   }, [phase, currentIndex]);
 
-  const { mediaStream, startStream } = usePipCanvasStream({
-    // Arm on intent: hook runs when the user is about to enter PiP (arming)
-    // or already in PiP. Keeps foreground music off the always-on canvas
-    // path (PR #289) while still buying the pre-tap head start iOS requires.
-    enabled: pipEnabled && Platform.OS === 'web' && (isPiP || pipArming),
+  const { mediaStream, startStream, attachAudioTracks } = usePipCanvasStream({
+    // Pass-4 keep-warm: stream comes up on workout mount and stays up so
+    // readyState reaches 4 well before the user taps PiP. Pass-3 rebuilt on
+    // every arm and 24/26 taps landed on readyState=0 (InvalidStateError).
+    // 'audio' probeMode keeps the audio bus OFF the continuously-playing
+    // element (PR #289 mechanism) — armPip calls attachAudioTracks() inside
+    // the tap gesture. 'full' merges audio from mount (original path).
+    enabled: pipEnabled && Platform.OS === 'web',
     probeMode: pipProbeMode,
     phase,
     current: current as any,
@@ -257,7 +260,9 @@ export default function WorkoutPlayer({
   const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || !pipEnabled) return;
-    if (pipProbeMode !== 'full') return;
+    // Pass-4: hidden video exists for AUDIO + FULL modes. CANVAS mode is the
+    // no-audio control and has no presentation target.
+    if (pipProbeMode === 'canvas') return;
     const vid = document.createElement('video');
     vid.autoplay = true;
     vid.muted = true;
@@ -274,6 +279,12 @@ export default function WorkoutPlayer({
     });
     document.body.appendChild(vid);
     pipCanvasVideoRef.current = vid;
+    // Identity marker: a re-init between arms would break the "first tap
+    // after load" pattern seen in 08/15 device test. If two mount logs land
+    // between a workout start and a tap, the element identity changed.
+    const idTag = Math.floor(Math.random() * 1e6).toString(36);
+    (vid as any).__pipIdTag = idTag;
+    pushHandoffLog(`[PiP] pipCanvasVideo mounted id=${idTag} probe=${pipProbeMode}`);
 
     const onEnter = () => { setIsPiP(true); setPipArming(false); };
     const onLeave = () => {
@@ -291,6 +302,7 @@ export default function WorkoutPlayer({
     vid.addEventListener('webkitpresentationmodechanged' as any, onWebkitModeChange);
 
     return () => {
+      pushHandoffLog(`[PiP] pipCanvasVideo unmounted id=${idTag}`);
       vid.removeEventListener('enterpictureinpicture', onEnter);
       vid.removeEventListener('leavepictureinpicture', onLeave);
       vid.removeEventListener('webkitpresentationmodechanged' as any, onWebkitModeChange);
@@ -768,22 +780,38 @@ export default function WorkoutPlayer({
     setPipArming(true);
     window.setTimeout(() => setPipArming(false), 3000);
 
+    // Pass-4: stream is warm from mount; startStream() is idempotent so this
+    // returns the existing MediaStream. attachAudioTracks() is the load-bearing
+    // call for probe=audio — adds audio tracks to the already-playing stream
+    // inside the tap gesture, just before requestPictureInPicture unmutes.
     const stream = startStream();
     if (!stream) {
       pushHandoffLog('[PiP] armPip: startStream returned null');
       return;
     }
+    // Canvas mode is the no-audio control — never merge the music bus into it.
+    if (pipProbeMode !== 'canvas') {
+      const audioResult = attachAudioTracks();
+      pushHandoffLog(`[PiP] armPip: attachAudioTracks=${audioResult}`);
+    }
     const vid = pipCanvasVideoRef.current;
     if (!vid) {
-      pushHandoffLog('[PiP] armPip: pipCanvasVideoRef null (probe mode may not be "full")');
+      pushHandoffLog('[PiP] armPip: pipCanvasVideoRef null (probe=canvas has no target)');
       return;
     }
-    try {
-      (vid as any).srcObject = stream;
-      pushHandoffLog('[PiP] armPip: srcObject assigned');
-    } catch (err: any) {
-      pushHandoffLog(`[PiP] armPip: srcObject assign threw: ${err?.name || err}`);
-      return;
+    // srcObject may already be assigned from the keep-warm effect below; only
+    // reassign if it's a different stream (identity check avoids Safari's
+    // "reset readyState on srcObject set" behavior).
+    if ((vid as any).srcObject !== stream) {
+      try {
+        (vid as any).srcObject = stream;
+        pushHandoffLog('[PiP] armPip: srcObject assigned');
+      } catch (err: any) {
+        pushHandoffLog(`[PiP] armPip: srcObject assign threw: ${err?.name || err}`);
+        return;
+      }
+    } else {
+      pushHandoffLog(`[PiP] armPip: srcObject already set readyState=${vid.readyState}`);
     }
     try {
       const p = vid.play();
@@ -793,7 +821,7 @@ export default function WorkoutPlayer({
     } catch (err: any) {
       pushHandoffLog(`[PiP] armPip: play threw: ${err?.name || err}`);
     }
-  }, [startStream]);
+  }, [startStream, attachAudioTracks, pipProbeMode]);
 
   const handlePiP = useCallback(async () => {
     pushHandoffLog('[PiP] handlePiP fired');
@@ -2375,7 +2403,7 @@ export default function WorkoutPlayer({
                   <Icon name="skip-forward" size={fs(18)} color="#F5A623" />
                   <Text style={st.sharedOverlaySkipText}>Skip</Text>
                 </TouchableOpacity>
-                {pipSupported && displayedUrl && (
+                {pipSupported && pipEnabled && (
                   <TouchableOpacity style={st.pipBtn} onPressIn={armPip} onPress={handlePiP}>
                     <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
                     <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>

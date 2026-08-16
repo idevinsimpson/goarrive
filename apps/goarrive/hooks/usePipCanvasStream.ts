@@ -42,6 +42,11 @@ interface PipCanvasStreamResult {
   // inside the same tap-gesture stack. Idempotent — safe to call twice.
   startStream: () => MediaStream | null;
   stopStream: () => void;
+  // Pass-4 deferred-audio: 'audio' probeMode warms a video-only stream so the
+  // continuously-playing hidden element never carries our music/voice bus.
+  // armPip calls this inside the tap gesture to attach audio just-in-time.
+  // Returns true if audio tracks were added (or already present).
+  attachAudioTracks: () => boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -141,11 +146,14 @@ export function usePipCanvasStream({
     const mergedStream = new MediaStream();
     if (videoTrack) mergedStream.addTrack(videoTrack);
 
-    // Attach audio synchronously if the shared graph is up. Skipped in
-    // probeMode='canvas' — the audio merge itself is one of the three
-    // candidate culprits for foreground-music starvation.
+    // Attach audio synchronously ONLY in probeMode='full' — pass-4 splits the
+    // audio path so we can test PM's hypothesis: warm-stream starvation comes
+    // from the continuously-playing element carrying our audio bus, not from
+    // the canvas draws. 'audio' mode leaves the stream video-only and exposes
+    // attachAudioTracks() for armPip to call in-gesture. 'canvas' never
+    // attaches audio at all — control mode for the mechanism.
     let audioAttached = false;
-    if (pm !== 'canvas') {
+    if (pm === 'full') {
       const audioStream = getPipAudioStream();
       if (audioStream) {
         const audioTracks = audioStream.getAudioTracks();
@@ -165,9 +173,18 @@ export function usePipCanvasStream({
     let fpsWindowStart = 0;
     let fpsWindowFrames = 0;
     let currentFps = 0;
+    let firstFrameLogged = false;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
+
+      if (!firstFrameLogged) {
+        firstFrameLogged = true;
+        const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
+        const videoEl = videoElRef.current;
+        const vrs = videoEl?.readyState ?? -1;
+        pushHandoffLog(`[PiP] drawFrame#1 canvasParent=${parentTag} videoRS=${vrs}`);
+      }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;
       lastFrameTime = now;
@@ -192,10 +209,10 @@ export function usePipCanvasStream({
       const videoEl = videoElRef.current;
       const movName = cur?.name ?? '';
 
-      // Retry audio attach each frame until the shared graph is up (audio may
-      // not have been primed by the time armPip fires — first-frame attach
-      // still counts as arriving before iOS opens PiP).
-      if (!audioAttached && pm !== 'canvas') {
+      // Retry audio attach each frame until the shared graph is up. Only in
+      // 'full' mode — 'audio' defers audio to armPip's in-gesture call, and
+      // 'canvas' never attaches. Same conditional as the initial merge above.
+      if (!audioAttached && pm === 'full') {
         const audioStream = getPipAudioStream();
         if (audioStream) {
           const audioTracks = audioStream.getAudioTracks();
@@ -293,16 +310,42 @@ export function usePipCanvasStream({
     if (cleanup) cleanup();
   }, []);
 
-  // React to enabled changes. startStream is idempotent so an armPip that
-  // already ran does not double-create; stopStream fires when PiP exits.
-  useEffect(() => {
-    if (!enabled) {
-      stopStream();
-      return;
+  // Pass-4 late-attach: 'audio' probeMode leaves the warm stream video-only so
+  // the continuously-playing hidden element never carries the music/voice bus.
+  // armPip calls this inside the tap gesture — same MediaStream the element is
+  // already playing gets audio tracks added just-in-time. Safari has been seen
+  // to honor addTrack() on an active srcObject; if it doesn't, the log will say.
+  const attachAudioTracks = useCallback((): boolean => {
+    const stream = streamRef.current;
+    if (!stream) {
+      pushHandoffLog('[PiP] attachAudioTracks: no stream');
+      return false;
     }
-    startStream();
-    return () => { stopStream(); };
-  }, [enabled, startStream, stopStream]);
+    if (stream.getAudioTracks().length > 0) return true;
+    const audioStream = getPipAudioStream();
+    if (!audioStream) {
+      pushHandoffLog('[PiP] attachAudioTracks: getPipAudioStream null');
+      return false;
+    }
+    const audioTracks = audioStream.getAudioTracks();
+    for (const track of audioTracks) stream.addTrack(track);
+    if (audioTracks.length > 0) {
+      pushHandoffLog(`[PiP] attachAudioTracks: added ${audioTracks.length} track(s)`);
+      setIsReady(true);
+      return true;
+    }
+    pushHandoffLog('[PiP] attachAudioTracks: audioStream had 0 tracks');
+    return false;
+  }, []);
 
-  return { mediaStream, videoElRef, isReady, canvasElRef, startStream, stopStream };
+  // Pass-4 keep-warm: startStream once on enabled=true and DON'T tear down on
+  // enabled=false. Pass-3 rebuilt every ~3s (pipArming timeout) which starved
+  // readyState between arms. Teardown now only on unmount.
+  useEffect(() => {
+    if (!enabled) return;
+    startStream();
+  }, [enabled, startStream]);
+  useEffect(() => () => stopStream(), [stopStream]);
+
+  return { mediaStream, videoElRef, isReady, canvasElRef, startStream, stopStream, attachAudioTracks };
 }
