@@ -235,6 +235,21 @@ export default function WorkoutPlayer({
     }
   }, [phase, currentIndex]);
 
+  // Pass 12: publish a window flag while this player is mounted. The SW
+  // auto-reload handler injected in inject_pwa_meta.py reads this flag
+  // on controllerchange — if truthy, it defers the reload rather than
+  // nuking the workout mid-session. The Aug 16 pass-10 log caught
+  // exactly that footprint (17:44:23 backgrounded → 17:44:37 fresh
+  // PAGE-INIT with workout restarted from ready). Gate on mount, not
+  // on "timer running," so pause and rest are covered too.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    (window as any).__goarrivePlayerMounted = true;
+    return () => {
+      (window as any).__goarrivePlayerMounted = false;
+    };
+  }, []);
+
   // Pass-7: presentation-target ref declared before the hook call so it can
   // be threaded into usePipCanvasStream for the .currentTime sample log.
   // The element itself is created imperatively in the useEffect below.
@@ -720,6 +735,20 @@ export default function WorkoutPlayer({
           ? el._nativeRef.current.getVideoElement()
           : null;
         if (node?.setAttribute) {
+          // Pass 12: crossOrigin=anonymous BEFORE src prevents canvas taint
+          // when the movement <video> is drawn into the PiP canvas.
+          // captureStream() from a tainted canvas silently stops delivering
+          // frames — the on-page canvas keeps painting but the PiP tile
+          // freezes. Same class as useWorkoutTTS.ts:176's audio-graph
+          // lesson. Firebase Storage already serves CORS headers (the audio
+          // path proves it). If expo-av set src before the ref callback
+          // fired, load() forces a CORS-enabled refetch.
+          if ((node as HTMLVideoElement).crossOrigin !== 'anonymous') {
+            const hadSrc = !!(node as HTMLVideoElement).currentSrc || !!(node as HTMLVideoElement).src;
+            (node as HTMLVideoElement).crossOrigin = 'anonymous';
+            node.setAttribute('crossorigin', 'anonymous');
+            if (hadSrc) { try { (node as HTMLVideoElement).load(); } catch { /* best-effort */ } }
+          }
           node.playsInline = true;
           node.setAttribute('playsinline', '');
           node.setAttribute('webkit-playsinline', '');

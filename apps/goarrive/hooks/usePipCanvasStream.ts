@@ -303,6 +303,16 @@ export function usePipCanvasStream({
     let currentFps = 0;
     let firstFrameLogged = false;
     let totalFrameCount = 0;
+    // Pass 12: taint tripwire flag. captureStream() from a canvas that
+    // has been drawn with cross-origin (non-CORS) video silently stops
+    // delivering frames while ctx.drawImage keeps working — on-page
+    // canvas paints, PiP tile freezes. Root fix lives in WorkoutPlayer
+    // registerVideo (crossOrigin=anonymous BEFORE src). This flag is
+    // the second-line defence: getImageData throws once tainted, we
+    // log CANVAS TAINTED once, and subsequent frames skip video draws
+    // in favour of a poster/text fallback so one bad element can never
+    // kill the whole tile again.
+    let pipCanvasTainted = false;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
@@ -424,7 +434,29 @@ export function usePipCanvasStream({
       ctx.fillStyle = '#0E1117';
       ctx.fillRect(0, 0, cw, ch);
 
-      drawVideoFrame(ctx, videoEl, videoX, videoY, videoW, videoH, movName);
+      // Pass 12: taint-guarded video draw. Skip once tainted. On each
+      // untainted draw verify with getImageData(1x1); log the first
+      // hit and switch to fallback for the rest of the session.
+      if (!pipCanvasTainted) {
+        drawVideoFrame(ctx, videoEl, videoX, videoY, videoW, videoH, movName);
+        try {
+          ctx.getImageData(0, 0, 1, 1);
+        } catch (e) {
+          pipCanvasTainted = true;
+          pushHandoffLog(`[PiP] CANVAS TAINTED — getImageData rejected after video draw (${(e as Error)?.name ?? 'unknown'}) — captureStream will silently stop delivering frames; falling back to poster for rest of session. Root cause: movement <video> loaded without crossOrigin=anonymous BEFORE src.`);
+        }
+      }
+      if (pipCanvasTainted) {
+        ctx.save();
+        ctx.fillStyle = '#111';
+        ctx.fillRect(videoX, videoY, videoW, videoH);
+        ctx.fillStyle = '#8A95A3';
+        ctx.font = `500 ${Math.round(cw * 0.03)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('(video unavailable)', videoX + videoW / 2, videoY + videoH / 2);
+        ctx.restore();
+      }
 
       ctx.fillStyle = 'rgba(14,17,23,0.65)';
       ctx.fillRect(0, 0, cw, videoY);

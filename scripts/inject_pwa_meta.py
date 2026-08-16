@@ -317,18 +317,62 @@ SW_INJECT = """
       // An already-open SPA tab keeps its in-memory JS bundle forever (iOS
       // Safari resume/bfcache makes this constant), so when a new SW takes
       // control after a deploy we do a one-time reload to pick up new code.
+      //
+      // Pass 12: reload is gated on window.__goarrivePlayerMounted (set by
+      // WorkoutPlayer). If a workout session is active, defer the reload
+      // until the player unmounts — the Aug 16 pass-10 log caught the
+      // exact footprint of this bug (17:44:23 backgrounded → 17:44:37
+      // fresh PAGE-INIT with workout restarted from ready) and confirmed
+      // members were eating an in-session reload on every deploy day.
+      // Gate is on mount, not on "timer running," so pause and rest are
+      // covered too.
       if ('serviceWorker' in navigator) {
         var swHadController = !!navigator.serviceWorker.controller;
         var swReloading = false;
+        var swPendingReload = false;
+        var swPipLog = function(line) {
+          try {
+            var raw = window.sessionStorage.getItem('goarrive.handoffLog');
+            var arr = raw ? JSON.parse(raw) : [];
+            arr.push(new Date().toISOString() + ' ' + line);
+            while (arr.length > 2000) arr.shift();
+            window.sessionStorage.setItem('goarrive.handoffLog', JSON.stringify(arr));
+          } catch (e) {}
+        };
+        var isPlayerMounted = function() {
+          return !!window.__goarrivePlayerMounted;
+        };
+        var doSwReload = function() {
+          if (swReloading) return;
+          swReloading = true;
+          console.log('[SW] New service worker took control — reloading for fresh bundle');
+          swPipLog('[SW] reload firing (workout not active)');
+          window.location.reload();
+        };
+        var maybeSwReload = function() {
+          if (swPendingReload && !isPlayerMounted()) {
+            swPendingReload = false;
+            doSwReload();
+          }
+        };
         navigator.serviceWorker.addEventListener('controllerchange', function() {
-          // Only reload if a previous controller existed (i.e. this is an
-          // update taking over, not the very first registration claiming).
+          // Only act if a previous controller existed (an update taking over,
+          // not the very first registration claiming).
           if (swHadController && !swReloading) {
-            swReloading = true;
-            console.log('[SW] New service worker took control — reloading for fresh bundle');
-            window.location.reload();
+            if (isPlayerMounted()) {
+              swPendingReload = true;
+              console.log('[SW] update deferred (workout active)');
+              swPipLog('[SW] update deferred (workout active)');
+            } else {
+              doSwReload();
+            }
           }
           swHadController = true;
+        });
+        // If a reload was deferred and the player later unmounts, catch the
+        // next visibility flip and fire it then.
+        document.addEventListener('visibilitychange', function() {
+          if (document.visibilityState === 'visible') maybeSwReload();
         });
 
         window.addEventListener('load', function() {
