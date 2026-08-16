@@ -33,6 +33,12 @@ type PipFeed = {
   repsDone: number;
   progressPct: number;
   videoEl: HTMLVideoElement | null;
+  // Pass-14 Fix 1: draw-loop-callable resolver. WorkoutPlayer installs a
+  // function that scans videosRef for the best <video> candidate and
+  // logs the pick to the COPY LOG. drawFrame invokes it whenever its
+  // bound videoEl is null-or-paused during a work-like phase, so a
+  // stale binding self-corrects on the next rAF tick.
+  resolveVideo: (() => HTMLVideoElement | null) | null;
 };
 let latestPipFeed: PipFeed | null = null;
 
@@ -58,6 +64,12 @@ interface PipCanvasStreamOptions {
   repsDone: number;
   progressPct: number;
   videoElRef: React.RefObject<HTMLVideoElement | null>;
+  // Pass-14 Fix 1: self-healing pipSource resolver. drawFrame invokes
+  // this whenever its bound videoEl is null-or-paused during a work-like
+  // phase so the loop can retry element selection on the next rAF tick
+  // without waiting for another effect trigger. Owner (WorkoutPlayer)
+  // is responsible for logging every rebind to the COPY LOG.
+  pipSourceResolverRef?: React.RefObject<(() => HTMLVideoElement | null) | null>;
   // Pass-7: presentation-target video (the hidden element with
   // srcObject = mergedStream). Read in the periodic drawFrame log to
   // sample .currentTime + .readyState — direct evidence of whether the
@@ -120,6 +132,7 @@ export function usePipCanvasStream({
   repsDone,
   progressPct,
   videoElRef,
+  pipSourceResolverRef,
   canvasVideoElRef,
   canvasW = 540,
   canvasH = 675,
@@ -138,6 +151,7 @@ export function usePipCanvasStream({
     latestPipFeed = {
       phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct,
       videoEl: videoElRef.current,
+      resolveVideo: pipSourceResolverRef?.current ?? null,
     };
   });
 
@@ -381,7 +395,18 @@ export function usePipCanvasStream({
       const repBased = feed?.isRepBased ?? false;
       const done = feed?.repsDone ?? 0;
       const pct = feed?.progressPct ?? 0;
-      const videoEl = feed?.videoEl ?? null;
+      let videoEl = feed?.videoEl ?? null;
+      // Pass-14 Fix 1: self-healing binding. If the published videoEl is
+      // null or paused during a phase where the movement video should be
+      // playing, ask the resolver for the best current candidate. The
+      // resolver mutates pipSourceVideoRef and logs any change; drawing
+      // this frame from the returned element covers the case where the
+      // publish effect has not yet flushed the new binding.
+      const workLikePhase = ph === 'work' || ph === 'transition' || ph === 'grabEquipment' || ph === 'waterBreak' || ph === 'demo';
+      if (workLikePhase && (!videoEl || videoEl.paused)) {
+        const resolved = feed?.resolveVideo?.() ?? null;
+        if (resolved) videoEl = resolved;
+      }
       const isRest = ph === 'rest';
       // Pass-10: REST tile mirrors the player — show "Next: <name>" as the
       // primary label instead of leaving the previous movement's name in

@@ -298,6 +298,27 @@ export function setMusicVolume(v: number): void {
   }
 }
 
+// Pass-14 Fix 2: linear-ramp the music bus over a small window so the
+// pause/resume seam doesn't produce a syllable-repeat stutter. A hard
+// gain.value = 0 (or el.pause() alone) can leave a partial buffered
+// sample in the graph that the next play() replays as an audible pop
+// or repeat. Cancelling pending automation before writing the ramp
+// prevents step accumulation when pause and resume fire back-to-back.
+// Duration is passed in ms for caller ergonomics; converted to seconds
+// for the WebAudio scheduler.
+export function rampMusicVolume(target: number, durationMs: number): void {
+  const clamped = Math.min(1, Math.max(0, target));
+  musicVolumeGain = clamped;
+  if (!musicGain || !audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const current = musicGain.gain.value;
+    musicGain.gain.cancelScheduledValues(now);
+    musicGain.gain.setValueAtTime(current, now);
+    musicGain.gain.linearRampToValueAtTime(clamped, now + Math.max(0.001, durationMs / 1000));
+  } catch {}
+}
+
 // Returns the MediaStream carrying both voice and music output, for use as
 // the audio source of the canvas-stream PiP video element (Phase 2+).
 // Returns null before the audio graph is initialized.

@@ -227,6 +227,18 @@ export default function WorkoutPlayer({
   // videoRef and videosRef are declared) so it can watch displayedUrl —
   // without that dep the ref stays null after the first layer swap and
   // PiP renders a frozen tile (pass-12 bug 4).
+  //
+  // Pass-14: the pass-13 one-shot effect regressed the tile (permanent
+  // videoRS=-1 after 23:05:07 in the device log). The effect ran once
+  // per (phase, currentIndex, displayedUrl) tuple and picked whatever
+  // element existed at that instant — often paused mid-transition.
+  // Self-healing resolver: the draw loop calls this every frame when
+  // its current binding is null or paused, so a bad pick self-corrects
+  // on the next rAF tick. Scanning all layer:* entries beats trusting
+  // videoRef.current, which the ref callback may not have refreshed
+  // yet after a layer swap. Every rebind is logged via pushHandoffLog
+  // (device tester copies COPY LOG; console.warn was invisible on iOS).
+  const pipSourceResolverRef = useRef<(() => HTMLVideoElement | null) | null>(null);
 
   // Pass 12: publish a window flag while this player is mounted. The SW
   // auto-reload handler injected in inject_pwa_meta.py reads this flag
@@ -269,6 +281,10 @@ export default function WorkoutPlayer({
     // Pass-7: expose the presentation-target video so the periodic
     // drawFrame log can sample .currentTime + .readyState.
     canvasVideoElRef: pipCanvasVideoRef,
+    // Pass-14 Fix 1: self-healing resolver. drawFrame calls this when
+    // its bound videoEl is null-or-paused during a work-like phase so
+    // a stale pick auto-corrects on the next rAF tick.
+    pipSourceResolverRef,
   });
 
   // Hidden <video> that carries the canvas-stream MediaStream as srcObject
@@ -1459,32 +1475,86 @@ export default function WorkoutPlayer({
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
 
-  // Populate pipSourceVideoRef (declared at top of component) whenever the
-  // displayed layer changes. Two-step resolution: prefer videoRef.current
-  // (the ref callback sets it on the currently-displayed layer); fall back
-  // to scanning videosRef for `layer:${displayedUrl}` if the ref hasn't
-  // been refreshed yet (React can batch the callback after the effect).
-  // Watching displayedUrl (not just phase/currentIndex) is what re-arms
-  // this effect when a fresh layer promotes — without it, the ref stays
-  // null after the first work→rest transition and PiP renders a frozen
-  // tile through every subsequent phase (pass-12 bug 4, videoRS=-1 seen
-  // from 22:00:16 onward in the Aug 16 log).
+  // Pass-14 Fix 1: self-healing resolver + one-shot bind on displayedUrl.
+  //
+  // The resolver ranks candidate <video> elements from videosRef and picks
+  // the best one for the PiP canvas source. Preference order:
+  //   1. layer:${displayedUrl} that reports !paused && readyState >= 3
+  //      (the promoted layer, actively decoding — first-class hit).
+  //   2. Any layer:* that reports !paused && readyState >= 3
+  //      (a sibling layer is decoding while displayedUrl stalled — better
+  //      to draw a fresh moving frame than a null tile).
+  //   3. layer:${displayedUrl} even if paused (the correct element, will
+  //      hopefully unpause soon; drawing its last decoded frame beats a
+  //      black tile).
+  //   4. videoRef.current (legacy — the ref-callback path). Last resort.
+  //
+  // Every rebind is logged to the COPY LOG via pushHandoffLog with the
+  // picked key, paused, readyState. Pass-13 used console.warn which the
+  // device tester cannot see on iOS.
+  //
+  // Effect keeps its one-shot bind so the ref is warm on transitions
+  // where the resolver has not yet been called by the draw loop. Deps
+  // include displayedUrl because that is what promotes on layer swap.
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    let vid: HTMLVideoElement | null = videoRef.current?._nativeRef?.current?.getVideoElement?.() ?? null;
-    if (!vid && displayedUrl) {
-      const el: any = videosRef.current.get(`layer:${displayedUrl}`);
-      vid = el?._nativeRef?.current?.getVideoElement?.() ?? null;
-    }
-    pipSourceVideoRef.current = vid;
-    if (vid) {
-      try {
-        (vid as any).disablePictureInPicture = true;
-        vid.setAttribute('disablePictureInPicture', '');
-      } catch {}
-    } else {
-      console.warn('[PiP] pipSource=null', { phase, currentIndex, displayedUrl });
-    }
+
+    const resolve = (): HTMLVideoElement | null => {
+      const map = videosRef.current;
+      const preferredKey = displayedUrl ? `layer:${displayedUrl}` : null;
+      let pick: { key: string; el: HTMLVideoElement; paused: boolean; rs: number } | null = null;
+
+      const readVideoEl = (el: any): HTMLVideoElement | null => {
+        try { return el?._nativeRef?.current?.getVideoElement?.() ?? null; } catch { return null; }
+      };
+
+      if (preferredKey) {
+        const el = readVideoEl(map.get(preferredKey));
+        if (el && !el.paused && el.readyState >= 3) {
+          pick = { key: preferredKey, el, paused: el.paused, rs: el.readyState };
+        }
+      }
+      if (!pick) {
+        for (const [key, entry] of map.entries()) {
+          if (!key.startsWith('layer:')) continue;
+          const el = readVideoEl(entry);
+          if (el && !el.paused && el.readyState >= 3) {
+            pick = { key, el, paused: el.paused, rs: el.readyState };
+            break;
+          }
+        }
+      }
+      if (!pick && preferredKey) {
+        const el = readVideoEl(map.get(preferredKey));
+        if (el) pick = { key: preferredKey, el, paused: el.paused, rs: el.readyState };
+      }
+      if (!pick) {
+        const el = readVideoEl(videoRef.current);
+        if (el) pick = { key: 'videoRef', el, paused: el.paused, rs: el.readyState };
+      }
+
+      const prev = pipSourceVideoRef.current;
+      if (pick) {
+        if (prev !== pick.el) {
+          pipSourceVideoRef.current = pick.el;
+          try {
+            (pick.el as any).disablePictureInPicture = true;
+            pick.el.setAttribute('disablePictureInPicture', '');
+          } catch {}
+          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} phase=${phase} displayedUrl=${displayedUrl ?? 'null'}`);
+        }
+        return pick.el;
+      }
+      if (prev !== null) {
+        pipSourceVideoRef.current = null;
+        pushHandoffLog(`[PiP] pipSource rebind key=null (no candidate) phase=${phase} displayedUrl=${displayedUrl ?? 'null'} layerKeys=${Array.from(map.keys()).filter((k) => k.startsWith('layer:')).length}`);
+      }
+      return null;
+    };
+
+    pipSourceResolverRef.current = resolve;
+    resolve();
+    return () => { pipSourceResolverRef.current = null; };
   }, [phase, currentIndex, displayedUrl]);
 
   // URLs whose <Video> reported a load/decode error. Failed layers are
