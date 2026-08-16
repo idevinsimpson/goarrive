@@ -64,3 +64,19 @@ export function nextPipProbeMode(current: PipProbeMode): PipProbeMode {
   const i = CYCLE.indexOf(current);
   return CYCLE[(i + 1) % CYCLE.length];
 }
+
+/**
+ * Human-readable strategy label for the on-screen probe pill. The internal
+ * mode names ('canvas' / 'audio' / 'full') are opaque to a device tester —
+ * pass-4 log showed the pill saying FULL while behavior was ambiguous
+ * (initial merge failed because getPipAudioStream was cold, then attach-at-tap
+ * succeeded, making FULL and AUDIO indistinguishable in the log). Word labels
+ * name the *strategy*, not the mode, so the pill and behavior can't disagree.
+ */
+export function pipProbeModeLabel(m: PipProbeMode): string {
+  switch (m) {
+    case 'canvas': return 'NO-AUDIO';
+    case 'audio':  return 'AUDIO@TAP';
+    case 'full':   return 'AUDIO@MOUNT';
+  }
+}

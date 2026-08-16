@@ -153,16 +153,24 @@ export function usePipCanvasStream({
     // attachAudioTracks() for armPip to call in-gesture. 'canvas' never
     // attaches audio at all — control mode for the mechanism.
     let audioAttached = false;
+    let initialMergeOutcome: string;
     if (pm === 'full') {
       const audioStream = getPipAudioStream();
-      if (audioStream) {
+      if (!audioStream) {
+        initialMergeOutcome = 'full:getPipAudioStream=null';
+      } else {
         const audioTracks = audioStream.getAudioTracks();
         for (const track of audioTracks) mergedStream.addTrack(track);
         if (audioTracks.length > 0) {
           audioAttached = true;
           setIsReady(true);
+          initialMergeOutcome = `full:merged ${audioTracks.length} track(s)`;
+        } else {
+          initialMergeOutcome = 'full:audioStream had 0 tracks';
         }
       }
+    } else {
+      initialMergeOutcome = `${pm}:no initial merge (by design)`;
     }
 
     const TARGET_FPS = 30;
@@ -300,7 +308,7 @@ export function usePipCanvasStream({
       setIsReady(false);
     };
 
-    pushHandoffLog(`[PiP] startStream primed video+${audioAttached ? 'audio' : 'noaudio'}`);
+    pushHandoffLog(`[PiP] startStream primed video+${audioAttached ? 'audio' : 'noaudio'} probe=${pm} outcome=${initialMergeOutcome}`);
     return mergedStream;
   }, []);
 

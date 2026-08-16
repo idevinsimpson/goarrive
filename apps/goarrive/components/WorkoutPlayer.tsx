@@ -62,7 +62,7 @@ import {
   setMusicHandoffVariant,
   type MusicHandoffVariant,
 } from '../utils/musicHandoffVariant';
-import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, type PipProbeMode } from '../utils/pipProbeMode';
+import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, pipProbeModeLabel, type PipProbeMode } from '../utils/pipProbeMode';
 import { pushHandoffLog, readHandoffLog } from '../utils/handoffLog';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
@@ -851,7 +851,10 @@ export default function WorkoutPlayer({
     // Report the presentation-target readiness state so a silent failure
     // (readyState=0, srcObject=null) is diagnosable from COPY LOG alone.
     const hasSrc = !!(canvasVideo as any).srcObject;
-    pushHandoffLog(`[PiP] handlePiP: srcObject=${hasSrc} readyState=${canvasVideo.readyState} paused=${canvasVideo.paused}`);
+    const dpip = (canvasVideo as any).disablePictureInPicture;
+    const dpipAttr = canvasVideo.hasAttribute('disablePictureInPicture');
+    const idTag = (canvasVideo as any).__pipIdTag ?? '?';
+    pushHandoffLog(`[PiP] handlePiP: srcObject=${hasSrc} readyState=${canvasVideo.readyState} paused=${canvasVideo.paused} dpip=${dpip} dpipAttr=${dpipAttr} id=${idTag}`);
     // Unmute inside the tap gesture — this is the seam iOS is strictest about.
     try {
       canvasVideo.muted = false;
@@ -860,13 +863,21 @@ export default function WorkoutPlayer({
       pushHandoffLog(`[PiP] unmute rejected: ${err?.name || err}`);
       console.warn('[PiP] unmute rejected:', err);
     }
+    // Pass-5: prefer webkitSetPresentationMode on iOS. Pass-4 device test
+    // reported deterministic NotSupportedError from requestPictureInPicture
+    // even with readyState=4. The spike that proved MediaStream+PiP works on
+    // this device used webkitSetPresentationMode (iOS's canonical API);
+    // Safari's standard-API implementation is documented to reject MediaStream
+    // sources with NotSupportedError. Fall back to the standard API for
+    // desktop Chrome/Firefox where webkit isn't there.
+    const hasWebkit = typeof (canvasVideo as any).webkitSetPresentationMode === 'function';
     try {
-      if ((document as any).pictureInPictureEnabled) {
+      if (hasWebkit) {
+        (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
+        pushHandoffLog('[PiP] webkitSetPresentationMode picture-in-picture called (preferred)');
+      } else if ((document as any).pictureInPictureEnabled) {
         await (canvasVideo as any).requestPictureInPicture();
         pushHandoffLog('[PiP] requestPictureInPicture resolved');
-      } else if (typeof (canvasVideo as any).webkitSetPresentationMode === 'function') {
-        (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
-        pushHandoffLog('[PiP] webkitSetPresentationMode picture-in-picture called');
       } else {
         pushHandoffLog('[PiP] no PiP API available on this browser');
         console.warn('[PiP] no PiP API available on this browser');
@@ -2473,7 +2484,7 @@ export default function WorkoutPlayer({
             }}
           >
             <Text style={st.audioVariantBadgeText}>
-              PROBE: {getPipProbeMode().toUpperCase()}
+              PROBE: {pipProbeModeLabel(getPipProbeMode())}
             </Text>
           </Pressable>
           <Pressable
