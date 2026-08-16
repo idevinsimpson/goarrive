@@ -10,6 +10,43 @@ import {
   drawProgressBar,
 } from './usePipCanvasStream.helpers';
 
+// Pass-10 fingerprint fix. Pass-9 device log showed the tile RENDERED but
+// FROZE state at a phase boundary: "WORK / Swiss Ball Lunge With Twist /
+// 0:00" persisted across multiple later WORK phases while the fps counter
+// stayed live (20-22fps) and `cvCT` kept advancing. Read: the draw loop
+// is alive and frames flow, but its state feed is severed — the loop
+// captured refs belonging to a component instance that detached at a
+// phase boundary. The singleton loop keeps drawing that dead instance's
+// refs forever: frozen state, null videoRS=-1, live fps.
+//
+// Fix shape: state and video are published to module-level pointers on
+// every render. Draw loop reads THIS, never captured refs. If the hook
+// remounts (subtree swap, fast-refresh, key change), the new mount rebinds
+// the pointers and the loop keeps tracking the live workout.
+type PipFeed = {
+  phase: string;
+  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string } | null;
+  next: { name?: string } | null;
+  timeLeft: number;
+  isPaused: boolean;
+  isRepBased: boolean;
+  repsDone: number;
+  progressPct: number;
+  videoEl: HTMLVideoElement | null;
+};
+let latestPipFeed: PipFeed | null = null;
+
+// True on iOS Safari (WebKit). Pass-10 fork-insensitive stutter fix: on
+// iOS the PiP stream carries NO music — video-only. Music path stays on
+// the proven v3 shadow via the hide seam. This resolves both the (A)
+// standdown-never-engaged branch and the (B) element-stall-under-graph
+// branch without waiting for the discriminator log.
+function isIOSSafariUA(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /iP(hone|od|ad)/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+}
+
 interface PipCanvasStreamOptions {
   enabled: boolean;
   phase: string;
@@ -94,20 +131,15 @@ export function usePipCanvasStream({
   const streamRef = useRef<MediaStream | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
-  // Keep latest props accessible inside the rAF loop without re-creating it.
-  const stateRef = useRef({
-    phase,
-    current,
-    next,
-    timeLeft,
-    isPaused,
-    isRepBased,
-    repsDone,
-    progressPct,
-  });
+  // Pass-10: publish to the module-level feed on every render so the
+  // singleton draw loop reads live state even if this hook instance
+  // detaches and a new one takes over. No dep array — publish always.
   useEffect(() => {
-    stateRef.current = { phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct };
-  }, [phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct]);
+    latestPipFeed = {
+      phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct,
+      videoEl: videoElRef.current,
+    };
+  });
 
   // Keep options that startStream reads from a stable ref so armPip's callback
   // identity doesn't churn on every prop change.
@@ -194,15 +226,21 @@ export function usePipCanvasStream({
     // the canvas draws. 'audio' mode leaves the stream video-only and exposes
     // attachAudioTracks() for armPip to call in-gesture. 'canvas' never
     // attaches audio at all — control mode for the mechanism.
+    // Pass 10: iOS fork-insensitive fix — the PiP stream on iOS is
+    // VIDEO-ONLY. Music path stays on the v3 shadow via the hide seam.
+    // Two-part change: (1) skip audio merge here on iOS regardless of
+    // probeMode, (2) drop the standdown in useMusicHandoff so hide seam
+    // runs normally. Kills both stutter branches without waiting for the
+    // A/B discriminator log. Non-iOS keeps the graph-audio path.
+    const iOS = isIOSSafariUA();
     let audioAttached = false;
     let initialMergeOutcome: string;
-    if (pm === 'full') {
+    if (iOS) {
+      initialMergeOutcome = 'iOS:VIDEO-ONLY (music via shadow hide-seam, not stream)';
+      setIsReady(true);
+    } else if (pm === 'full') {
       const audioStream = getPipAudioStream();
       if (!audioStream) {
-        // Pass 8: pass-7 session never once logged 'added N track(s)' — the
-        // audio graph was cold at prime AND at every arm. Naming this branch
-        // AUDIO-NULL@prime so the grep target is distinct from the arm-time
-        // null (see attachAudioTracks below).
         initialMergeOutcome = 'full:AUDIO-NULL@prime (getPipAudioStream()=null at startStream)';
       } else {
         const audioTracks = audioStream.getAudioTracks();
@@ -237,15 +275,20 @@ export function usePipCanvasStream({
       if (!firstFrameLogged) {
         firstFrameLogged = true;
         const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
-        const videoEl = videoElRef.current;
+        // Pass-10: read the movement video via the module-level feed so
+        // the log names the element the loop actually draws from, not the
+        // possibly-stale prop capture.
+        const videoEl = latestPipFeed?.videoEl ?? null;
         const vrs = videoEl?.readyState ?? -1;
-        pushHandoffLog(`[PiP] drawFrame#1 canvasId=${canvasId} canvasParent=${parentTag} videoRS=${vrs}`);
+        const feedTag = latestPipFeed ? 'live' : 'null';
+        pushHandoffLog(`[PiP] drawFrame#1 canvasId=${canvasId} canvasParent=${parentTag} videoRS=${vrs} feed=${feedTag}`);
       }
       if (totalFrameCount % 60 === 0) {
         const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
-        const videoEl = videoElRef.current;
+        const videoEl = latestPipFeed?.videoEl ?? null;
         const vrs = videoEl?.readyState ?? -1;
         const vpaused = videoEl?.paused ?? true;
+        const feedPhase = latestPipFeed?.phase ?? 'null';
         // Divergence check: closure canvasId vs the id of whatever canvas is
         // currently in canvasElRef. Same id = single canvas, stale-closure
         // hypothesis dead. Different id = orphan rAF loop, srcObject is
@@ -260,7 +303,7 @@ export function usePipCanvasStream({
         const canvasVideoEl = canvasVideoElRef?.current;
         const cvCT = canvasVideoEl ? canvasVideoEl.currentTime.toFixed(2) : 'null';
         const cvRS = canvasVideoEl?.readyState ?? -1;
-        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS}`);
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS} feedPhase=${feedPhase}`);
       }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;
@@ -274,22 +317,29 @@ export function usePipCanvasStream({
         fpsWindowStart = now;
       }
 
-      const {
-        phase: ph,
-        current: cur,
-        timeLeft: tl,
-        isRepBased: repBased,
-        repsDone: done,
-        progressPct: pct,
-      } = stateRef.current;
-
-      const videoEl = videoElRef.current;
-      const movName = cur?.name ?? '';
+      // Pass-10: read live state through the module-level pointer so a
+      // stale hook instance can't freeze the loop. If the pointer is null
+      // (first frame before publish effect runs), fall back to a paused
+      // placeholder so drawing never crashes.
+      const feed = latestPipFeed;
+      const ph = feed?.phase ?? 'ready';
+      const cur = feed?.current ?? null;
+      const nx = feed?.next ?? null;
+      const tl = feed?.timeLeft ?? 0;
+      const repBased = feed?.isRepBased ?? false;
+      const done = feed?.repsDone ?? 0;
+      const pct = feed?.progressPct ?? 0;
+      const videoEl = feed?.videoEl ?? null;
+      const isRest = ph === 'rest';
+      // Pass-10: REST tile mirrors the player — show "Next: <name>" as the
+      // primary label instead of leaving the previous movement's name in
+      // place. Fall through to cur.name during WORK/other phases.
+      const movName = isRest && nx?.name ? `Next: ${nx.name}` : (cur?.name ?? '');
 
       // Retry audio attach each frame until the shared graph is up. Only in
-      // 'full' mode — 'audio' defers audio to armPip's in-gesture call, and
-      // 'canvas' never attaches. Same conditional as the initial merge above.
-      if (!audioAttached && pm === 'full') {
+      // 'full' mode AND non-iOS — pass-10 makes iOS video-only. 'audio'
+      // defers to armPip's in-gesture call, 'canvas' never attaches.
+      if (!audioAttached && pm === 'full' && !iOS) {
         const audioStream = getPipAudioStream();
         if (audioStream) {
           const audioTracks = audioStream.getAudioTracks();
@@ -306,17 +356,33 @@ export function usePipCanvasStream({
       }
 
       const pad = Math.round(cw * 0.04);
-      const videoH = Math.round(ch * 0.55);
-      const videoY = Math.round(ch * 0.12);
       const timerFontPx = Math.round(cw * 0.09);
       const barH = Math.round(ch * 0.012);
       const barY = ch - barH - Math.round(ch * 0.03);
+      // Pass-10: movement region is 4:5 (house media ratio). Fit inside a
+      // middle band with room above for header/name and below for rep
+      // count / next label / progress bar. Center horizontally.
+      const topBand = Math.round(ch * 0.13);
+      const bottomBand = Math.round(ch * 0.25);
+      const availH = ch - topBand - bottomBand;
+      const availW = cw - 2 * pad;
+      const RATIO_W_H = 4 / 5;
+      let videoW = availH * RATIO_W_H;
+      let videoH = availH;
+      if (videoW > availW) {
+        videoW = availW;
+        videoH = videoW / RATIO_W_H;
+      }
+      videoW = Math.round(videoW);
+      videoH = Math.round(videoH);
+      const videoX = Math.round((cw - videoW) / 2);
+      const videoY = topBand + Math.round((availH - videoH) / 2);
       const overlayY = videoY + videoH + Math.round(ch * 0.025);
 
       ctx.fillStyle = '#0E1117';
       ctx.fillRect(0, 0, cw, ch);
 
-      drawVideoFrame(ctx, videoEl, 0, videoY, cw, videoH, movName);
+      drawVideoFrame(ctx, videoEl, videoX, videoY, videoW, videoH, movName);
 
       ctx.fillStyle = 'rgba(14,17,23,0.65)';
       ctx.fillRect(0, 0, cw, videoY);
@@ -342,8 +408,11 @@ export function usePipCanvasStream({
         drawRepCount(ctx, done, target, cw / 2, overlayY, Math.round(cw * 0.12));
       }
 
-      const nextName = stateRef.current.next?.name;
-      if (nextName) {
+      // Bottom "NEXT:" pill hidden during REST — the primary label already
+      // shows "Next: <name>" per the player's convention. During WORK/other
+      // phases it stays as the up-next hint.
+      const nextName = nx?.name;
+      if (nextName && !isRest) {
         ctx.save();
         ctx.fillStyle = '#8A95A3';
         ctx.font = `500 ${Math.round(cw * 0.032)}px -apple-system, BlinkMacSystemFont, sans-serif`;
@@ -397,6 +466,13 @@ export function usePipCanvasStream({
   // already playing gets audio tracks added just-in-time. Safari has been seen
   // to honor addTrack() on an active srcObject; if it doesn't, the log will say.
   const attachAudioTracks = useCallback((): boolean => {
+    // Pass-10 iOS fork-insensitive: PiP stream is video-only on iOS.
+    // No-op the tap-time attach so the merged stream stays clean and the
+    // v3 shadow (via hide seam) is the sole music path.
+    if (isIOSSafariUA()) {
+      pushHandoffLog('[PiP] attachAudioTracks: iOS skip (video-only stream, music via shadow)');
+      return false;
+    }
     const stream = streamRef.current;
     if (!stream) {
       pushHandoffLog('[PiP] attachAudioTracks: no stream');

@@ -757,15 +757,24 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // Music-hold means the intro is playing; we should NOT start music yet
       // just because the page hid. Same for user-paused / muted.
       if (musicHoldRef.current || musicPausedRef.current) return;
-      // PiP standdown: the canvas PiP stream carries our music via a
-      // MediaStreamAudioDestinationNode, and Safari keeps that stream
-      // audible across backgrounding on its own. Running the shadow flip
-      // here would layer a second, latency-offset source under the PiP
-      // audio — the beat-echo Devin heard on pass-5 device test. Leaving
-      // the shadow silent means PiP is the sole background source.
-      if (isPiPRef?.current) {
+      // PiP standdown (non-iOS only): the canvas PiP stream on desktop
+      // Safari and Chrome carries our music via a MediaStreamAudioDestination
+      // Node, and running the shadow flip here would layer a second
+      // latency-offset source under the PiP audio — the beat-echo Devin
+      // heard on pass-5. On iOS (pass-10 fork-insensitive fix) the PiP
+      // stream is video-only: the hide seam MUST run the shadow so the
+      // proven v3 shadow keeps carrying backgrounded music. Skipping
+      // standdown on iOS kills both stutter branches without waiting for
+      // the A/B discriminator.
+      const iOS = typeof navigator !== 'undefined'
+        && /iP(hone|od|ad)/.test(navigator.userAgent)
+        && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+      if (isPiPRef?.current && !iOS) {
         pushHandoffLog('[HANDOFF/hide skipped isPiP]');
         return;
+      }
+      if (isPiPRef?.current && iOS) {
+        pushHandoffLog('[HANDOFF/hide iOS: PiP open but standdown skipped — stream is video-only, shadow carries music]');
       }
       const pos = audible.currentTime;
 
