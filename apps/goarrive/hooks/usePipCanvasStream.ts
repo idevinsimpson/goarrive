@@ -21,6 +21,16 @@ interface PipCanvasStreamOptions {
   repsDone: number;
   progressPct: number;
   videoElRef: React.RefObject<HTMLVideoElement | null>;
+  // Pass-7: presentation-target video (the hidden element with
+  // srcObject = mergedStream). Read in the periodic drawFrame log to
+  // sample .currentTime + .readyState — direct evidence of whether the
+  // canvas captureStream is producing video frames the video element can
+  // consume. If currentTime advances while the PiP tile is black, frames
+  // are flowing and the black tile is downstream of the stream (PiP window
+  // rendering). If currentTime stays 0.00, the stream carries no video
+  // and the invisible-canvas hypothesis (known-issues-and-lessons #251)
+  // holds.
+  canvasVideoElRef?: React.RefObject<HTMLVideoElement | null>;
   canvasW?: number;
   canvasH?: number;
   // Pass-2 mechanism probe (staging-only). Runs the hook inline with a
@@ -73,6 +83,7 @@ export function usePipCanvasStream({
   repsDone,
   progressPct,
   videoElRef,
+  canvasVideoElRef,
   canvasW = 540,
   canvasH = 675,
   probeMode,
@@ -128,12 +139,25 @@ export function usePipCanvasStream({
     (canvas as any).__pipCanvasId = canvasId;
     canvas.width = cw;
     canvas.height = ch;
+    // Pass-7 visibility fix: iOS WKWebView does not populate frames into
+    // an invisible canvas's captureStream MediaStream (known-issues-and-
+    // lessons #251 — display:none/visibility:hidden confirmed; pass-6b
+    // evidence extends this to opacity:0 + left:-10000px). Pass 6 proved
+    // one canvas, one draw loop, frame counter to #5100 — yet the tile
+    // stays black. Working theory: iOS treats "effectively invisible"
+    // the same way, regardless of the specific CSS mechanism. Small
+    // visible thumbnail top-left is #251's exact remedy. Prove painting
+    // fixes it first, then dial visibility down as its own follow-up.
     Object.assign(canvas.style, {
       position: 'fixed',
-      left: '-10000px',
-      top: '0',
-      opacity: '0',
+      top: '8px',
+      left: '8px',
+      width: '80px',
+      height: '100px',
+      zIndex: '1',
+      opacity: '1',
       pointerEvents: 'none',
+      border: '1px solid #F5A623',
     });
     document.body.appendChild(canvas);
     canvasElRef.current = canvas;
@@ -225,7 +249,14 @@ export function usePipCanvasStream({
         // creation site for the full theory.
         const refCanvasId = (canvasElRef.current as any)?.__pipCanvasId ?? 'null';
         const divergent = refCanvasId !== canvasId ? ' DIVERGENT' : '';
-        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused}`);
+        // Pass-7 direct measure: canvas video's currentTime is the ground
+        // truth for "did the stream produce frames?" Advancing = yes;
+        // stuck at 0.00 = the captureStream carries no video (invisible-
+        // canvas hypothesis alive).
+        const canvasVideoEl = canvasVideoElRef?.current;
+        const cvCT = canvasVideoEl ? canvasVideoEl.currentTime.toFixed(2) : 'null';
+        const cvRS = canvasVideoEl?.readyState ?? -1;
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS}`);
       }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;

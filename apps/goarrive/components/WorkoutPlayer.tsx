@@ -235,6 +235,11 @@ export default function WorkoutPlayer({
     }
   }, [phase, currentIndex]);
 
+  // Pass-7: presentation-target ref declared before the hook call so it can
+  // be threaded into usePipCanvasStream for the .currentTime sample log.
+  // The element itself is created imperatively in the useEffect below.
+  const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
+
   const { mediaStream, startStream, attachAudioTracks, detachAudioTracks } = usePipCanvasStream({
     // Pass-4 keep-warm: stream comes up on workout mount and stays up so
     // readyState reaches 4 well before the user taps PiP. Pass-3 rebuilt on
@@ -253,6 +258,9 @@ export default function WorkoutPlayer({
     repsDone: 0,
     progressPct,
     videoElRef: pipSourceVideoRef,
+    // Pass-7: expose the presentation-target video so the periodic
+    // drawFrame log can sample .currentTime + .readyState.
+    canvasVideoElRef: pipCanvasVideoRef,
   });
 
   // Hidden <video> that carries the canvas-stream MediaStream as srcObject
@@ -263,7 +271,6 @@ export default function WorkoutPlayer({
   // Event listeners live here so state transitions hook the same element that
   // PiP presents (webkitpresentationmodechanged covers the iOS branch that
   // never fires enter/leavepictureinpicture).
-  const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || !pipEnabled) return;
     // Pass-4: hidden video exists for AUDIO + FULL modes. CANVAS mode is the
@@ -309,6 +316,11 @@ export default function WorkoutPlayer({
     };
     const onWebkitModeChange = () => {
       const mode = (vid as any).webkitPresentationMode;
+      // Pass-7: webkitSetPresentationMode is silent — the log needs the
+      // outcome, not just the call. This handler + the 500ms re-read in
+      // handlePiP together give us both the async event path (if it fires)
+      // and a direct snapshot.
+      pushHandoffLog(`[PiP] webkitpresentationmodechanged mode=${mode}`);
       if (mode === 'picture-in-picture') onEnter();
       else onLeave();
     };
@@ -894,6 +906,21 @@ export default function WorkoutPlayer({
       if (hasWebkit) {
         (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
         pushHandoffLog('[PiP] webkitSetPresentationMode picture-in-picture called (preferred)');
+        // Pass-7 outcome probe: the webkit API is silent — it neither
+        // resolves nor throws to tell us whether PiP actually entered.
+        // The spike used a 500ms re-read to verify success. Same here.
+        // Mode after 500ms:
+        //   'picture-in-picture' → PiP window opened
+        //   'inline'             → call silently rejected
+        //   undefined            → element lost the API somehow
+        window.setTimeout(() => {
+          try {
+            const modeAfter = (canvasVideo as any).webkitPresentationMode;
+            pushHandoffLog(`[PiP] webkitPresentationMode@500ms=${modeAfter}`);
+          } catch (err: any) {
+            pushHandoffLog(`[PiP] webkitPresentationMode@500ms read err: ${err?.name || err}`);
+          }
+        }, 500);
       } else if ((document as any).pictureInPictureEnabled) {
         await (canvasVideo as any).requestPictureInPicture();
         pushHandoffLog('[PiP] requestPictureInPicture resolved');
