@@ -72,10 +72,17 @@ export function nextPipProbeMode(current: PipProbeMode): PipProbeMode {
  * (initial merge failed because getPipAudioStream was cold, then attach-at-tap
  * succeeded, making FULL and AUDIO indistinguishable in the log). Word labels
  * name the *strategy*, not the mode, so the pill and behavior can't disagree.
+ *
+ * 'canvas' = NO-PIP — no hidden target video created, PiP is impossible
+ *            (control condition, not a PiP strategy).
+ * 'audio'  = AUDIO@TAP — video-only warm stream + late-attach audio at tap.
+ * 'full'   = AUDIO@MOUNT — merged audio from mount when the audio graph is
+ *            hot; falls back to tap-attach if getPipAudioStream() returned
+ *            null at mount (verified pass-4 behavior).
  */
 export function pipProbeModeLabel(m: PipProbeMode): string {
   switch (m) {
-    case 'canvas': return 'NO-AUDIO';
+    case 'canvas': return 'NO-PIP';
     case 'audio':  return 'AUDIO@TAP';
     case 'full':   return 'AUDIO@MOUNT';
   }

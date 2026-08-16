@@ -2415,10 +2415,17 @@ export default function WorkoutPlayer({
                   <Text style={st.sharedOverlaySkipText}>Skip</Text>
                 </TouchableOpacity>
                 {pipSupported && pipEnabled && (
-                  <TouchableOpacity style={st.pipBtn} onPressIn={armPip} onPress={handlePiP}>
-                    <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
-                    <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>
-                  </TouchableOpacity>
+                  pipProbeMode === 'full' ? (
+                    <TouchableOpacity style={st.pipBtn} onPressIn={armPip} onPress={handlePiP}>
+                      <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
+                      <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[st.pipBtn, { opacity: 0.35 }]}>
+                      <Icon name="alert-circle" size={fs(16)} color="#F0F4F8" />
+                      <Text style={st.pipBtnText}>PiP off ({pipProbeModeLabel(pipProbeMode)})</Text>
+                    </View>
+                  )
                 )}
               </View>
             </View>
