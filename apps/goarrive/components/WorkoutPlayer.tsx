@@ -229,7 +229,7 @@ export default function WorkoutPlayer({
     }
   }, [phase, currentIndex]);
 
-  const { mediaStream, startStream, attachAudioTracks } = usePipCanvasStream({
+  const { mediaStream, startStream, attachAudioTracks, detachAudioTracks } = usePipCanvasStream({
     // Pass-4 keep-warm: stream comes up on workout mount and stays up so
     // readyState reaches 4 well before the user taps PiP. Pass-3 rebuilt on
     // every arm and 24/26 taps landed on readyState=0 (InvalidStateError).
@@ -291,6 +291,10 @@ export default function WorkoutPlayer({
       setIsPiP(false);
       setPipArming(false);
       try { vid.muted = true; } catch {}
+      // Pass-5 exit path: strip audio tracks so the warm hidden element does
+      // not keep carrying merged audio inline (P0 starves foreground music).
+      // Video track stays so the next arm is still fast.
+      detachAudioTracks();
     };
     const onWebkitModeChange = () => {
       const mode = (vid as any).webkitPresentationMode;
@@ -311,7 +315,7 @@ export default function WorkoutPlayer({
       vid.parentNode?.removeChild(vid);
       pipCanvasVideoRef.current = null;
     };
-  }, [pipEnabled, pipProbeMode]);
+  }, [pipEnabled, pipProbeMode, detachAudioTracks]);
 
   // Wire the canvas MediaStream into the hidden video when it's available.
   // volume=0 (not muted) so PiP still carries audio via the MediaStream track.
@@ -889,8 +893,12 @@ export default function WorkoutPlayer({
       console.warn('[PiP] request rejected:', err);
       setPipArming(false);
       try { canvasVideo.muted = true; } catch {}
+      // Pass-5 exit path: a failed entry leaves the hidden video carrying
+      // merged audio inline for the rest of the session — the P0 config that
+      // starves foreground music. Strip audio tracks so inline music returns.
+      detachAudioTracks();
     }
-  }, []);
+  }, [detachAudioTracks]);
 
   const pipSupported = Platform.OS === 'web'
     && typeof document !== 'undefined'

@@ -47,6 +47,12 @@ interface PipCanvasStreamResult {
   // armPip calls this inside the tap gesture to attach audio just-in-time.
   // Returns true if audio tracks were added (or already present).
   attachAudioTracks: () => boolean;
+  // Pass-5 exit path: on PiP exit AND on failed PiP entry, remove any audio
+  // tracks from the merged stream. Video track stays warm so the next arm is
+  // still fast. Without this, the P0-known "hidden element carrying merged
+  // audio starves foreground music" configuration persists inline for the
+  // rest of the session after any arm attempt (successful OR failed).
+  detachAudioTracks: () => number;
 }
 
 function formatTime(seconds: number): string {
@@ -355,6 +361,24 @@ export function usePipCanvasStream({
     return false;
   }, []);
 
+  // Pass-5 exit path (see interface doc). Idempotent: returns 0 if nothing to
+  // remove. Keeps the video track — only audio is stripped so the next arm's
+  // attach is still cheap.
+  const detachAudioTracks = useCallback((): number => {
+    const stream = streamRef.current;
+    if (!stream) {
+      pushHandoffLog('[PiP] detachAudioTracks: no stream');
+      return 0;
+    }
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) return 0;
+    for (const track of audioTracks) {
+      try { stream.removeTrack(track); } catch {}
+    }
+    pushHandoffLog(`[PiP] detachAudioTracks: removed ${audioTracks.length} track(s)`);
+    return audioTracks.length;
+  }, []);
+
   // Pass-4 keep-warm: startStream once on enabled=true and DON'T tear down on
   // enabled=false. Pass-3 rebuilt every ~3s (pipArming timeout) which starved
   // readyState between arms. Teardown now only on unmount.
@@ -364,5 +388,5 @@ export function usePipCanvasStream({
   }, [enabled, startStream]);
   useEffect(() => () => stopStream(), [stopStream]);
 
-  return { mediaStream, videoElRef, isReady, canvasElRef, startStream, stopStream, attachAudioTracks };
+  return { mediaStream, videoElRef, isReady, canvasElRef, startStream, stopStream, attachAudioTracks, detachAudioTracks };
 }
