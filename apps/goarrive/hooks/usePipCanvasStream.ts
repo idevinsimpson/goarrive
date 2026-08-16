@@ -113,7 +113,19 @@ export function usePipCanvasStream({
 
     const { canvasW: cw, canvasH: ch, probeMode: pm } = optsRef.current;
 
+    // Pass-6 canvas-identity tag. Blank-tile hypothesis: startStream could be
+    // called twice under some ref/effect ordering, leaving an orphan rAF loop
+    // drawing to canvas A while the srcObject was rebuilt from canvas B. The
+    // drawFrame closure captures canvas.__pipCanvasId at creation; canvasElRef
+    // is reassigned every startStream. If the periodic drawFrame log shows a
+    // different id than canvasElRef.current.__pipCanvasId, we have proof of
+    // a stale-closure double-canvas — the video's srcObject is fed by a
+    // canvas nobody draws into, so the tile presents transparent (i.e. black).
+    // Identical ids means the tile-black cause is elsewhere (e.g. drawVideoFrame
+    // shortcut, ctx.reset, off-screen composite).
+    const canvasId = Math.random().toString(36).slice(2, 8);
     const canvas = document.createElement('canvas');
+    (canvas as any).__pipCanvasId = canvasId;
     canvas.width = cw;
     canvas.height = ch;
     Object.assign(canvas.style, {
@@ -199,14 +211,21 @@ export function usePipCanvasStream({
         const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
         const videoEl = videoElRef.current;
         const vrs = videoEl?.readyState ?? -1;
-        pushHandoffLog(`[PiP] drawFrame#1 canvasParent=${parentTag} videoRS=${vrs}`);
+        pushHandoffLog(`[PiP] drawFrame#1 canvasId=${canvasId} canvasParent=${parentTag} videoRS=${vrs}`);
       }
       if (totalFrameCount % 60 === 0) {
         const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
         const videoEl = videoElRef.current;
         const vrs = videoEl?.readyState ?? -1;
         const vpaused = videoEl?.paused ?? true;
-        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused}`);
+        // Divergence check: closure canvasId vs the id of whatever canvas is
+        // currently in canvasElRef. Same id = single canvas, stale-closure
+        // hypothesis dead. Different id = orphan rAF loop, srcObject is
+        // fed by canvasElRef.current which nobody draws into. See canvas
+        // creation site for the full theory.
+        const refCanvasId = (canvasElRef.current as any)?.__pipCanvasId ?? 'null';
+        const divergent = refCanvasId !== canvasId ? ' DIVERGENT' : '';
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused}`);
       }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;
@@ -323,7 +342,7 @@ export function usePipCanvasStream({
       setIsReady(false);
     };
 
-    pushHandoffLog(`[PiP] startStream primed video+${audioAttached ? 'audio' : 'noaudio'} probe=${pm} outcome=${initialMergeOutcome}`);
+    pushHandoffLog(`[PiP] startStream primed video+${audioAttached ? 'audio' : 'noaudio'} probe=${pm} outcome=${initialMergeOutcome} canvasId=${canvasId}`);
     return mergedStream;
   }, []);
 

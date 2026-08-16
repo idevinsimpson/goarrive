@@ -91,6 +91,14 @@ export interface UseWorkoutMusicOptions {
   uid: string | null;
   workoutId: string | null;
   coachId: string | null;
+  /**
+   * True while a PiP session is active. Threaded straight through to
+   * useMusicHandoff so its visibilitychange hide seam can skip starting
+   * the shadow — the canvas PiP stream is already carrying our music via
+   * MediaStreamAudioDestinationNode and layering a second source under it
+   * caused the beat-echo Devin heard on pass-5 device test.
+   */
+  isPiPRef?: MutableRefObject<boolean>;
 }
 
 export interface UseWorkoutMusicReturn {
@@ -120,7 +128,7 @@ export interface UseWorkoutMusicReturn {
 }
 
 export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicReturn {
-  const { enabled, visible, phase, isPaused, isMuted, initialStyle, initialVolume, uid, workoutId, coachId } = opts;
+  const { enabled, visible, phase, isPaused, isMuted, initialStyle, initialVolume, uid, workoutId, coachId, isPiPRef } = opts;
 
   const [musicMuted, setMusicMuted] = useState(false);
   const [musicOff, setMusicOff] = useState(false);
@@ -185,6 +193,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     // Backgrounded shadow's 'ended' drives advance — the audible's ended
     // listener at ~L499 cannot fire while paused by the hide seam.
     advanceRef,
+    isPiPRef,
   });
 
   const seedFor = useCallback(

@@ -238,6 +238,18 @@ export interface UseMusicHandoffOptions {
    * Optional so tests without an advance path can omit it.
    */
   advanceRef?: MutableRefObject<() => void>;
+  /**
+   * True while a PiP session is active. When PiP is on, the canvas hook's
+   * merged MediaStream is already carrying music (via getPipAudioStream's
+   * MediaStreamAudioDestinationNode) and Safari keeps that stream audible
+   * across backgrounding on its own. If the hide seam ALSO starts the
+   * shadow, the member hears two sources offset by stream latency — a
+   * beat-echo. Skipping the hide seam when this ref is true keeps the PiP
+   * stream as the sole background source. The return seam is a no-op in
+   * this case because inBackgroundRef stays false. Optional; omit for
+   * non-PiP callers.
+   */
+  isPiPRef?: MutableRefObject<boolean>;
 }
 
 export interface UseMusicHandoffReturn {
@@ -257,7 +269,7 @@ export interface UseMusicHandoffReturn {
 }
 
 export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffReturn {
-  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef, advanceRef } = opts;
+  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef, advanceRef, isPiPRef } = opts;
 
   const variantRef = useRef<MusicHandoffVariant>('off');
   const audibleElRef = useRef<HTMLAudioElement | null>(null);
@@ -745,6 +757,16 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // Music-hold means the intro is playing; we should NOT start music yet
       // just because the page hid. Same for user-paused / muted.
       if (musicHoldRef.current || musicPausedRef.current) return;
+      // PiP standdown: the canvas PiP stream carries our music via a
+      // MediaStreamAudioDestinationNode, and Safari keeps that stream
+      // audible across backgrounding on its own. Running the shadow flip
+      // here would layer a second, latency-offset source under the PiP
+      // audio — the beat-echo Devin heard on pass-5 device test. Leaving
+      // the shadow silent means PiP is the sole background source.
+      if (isPiPRef?.current) {
+        pushHandoffLog('[HANDOFF/hide skipped isPiP]');
+        return;
+      }
       const pos = audible.currentTime;
 
       if (variant === 'v3') {

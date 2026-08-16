@@ -199,6 +199,12 @@ export default function WorkoutPlayer({
   // further down. The gate keeps the rAF loop + hidden video off the
   // foreground-workout hot path — they only spin up during PiP.
   const [isPiP, setIsPiP] = useState(false);
+  // Pass-6 handoff-standdown gate: PiP-active ref threaded into useWorkoutMusic
+  // → useMusicHandoff so the visibilitychange hide seam skips starting the
+  // shadow when PiP is presenting. Written synchronously in onEnter/onLeave
+  // below (before setIsPiP) so the ref is correct at the moment the browser's
+  // visibilitychange fires from a rapid PiP→home-screen gesture.
+  const pipActiveRef = useRef(false);
   // Arming flag: onPressIn on the PiP button sets this true so the canvas
   // hook + hidden video warm up during the ~100ms between touch-down and
   // touch-up. requestPictureInPicture() must stay inside the gesture, and
@@ -286,8 +292,13 @@ export default function WorkoutPlayer({
     (vid as any).__pipIdTag = idTag;
     pushHandoffLog(`[PiP] pipCanvasVideo mounted id=${idTag} probe=${pipProbeMode}`);
 
-    const onEnter = () => { setIsPiP(true); setPipArming(false); };
+    const onEnter = () => {
+      pipActiveRef.current = true;
+      setIsPiP(true);
+      setPipArming(false);
+    };
     const onLeave = () => {
+      pipActiveRef.current = false;
       setIsPiP(false);
       setPipArming(false);
       try { vid.muted = true; } catch {}
@@ -397,6 +408,10 @@ export default function WorkoutPlayer({
     uid: user?.uid ?? null,
     workoutId: typeof workout?.id === 'string' ? workout.id : null,
     coachId: typeof workout?.coachId === 'string' ? workout.coachId : null,
+    // Pass-6: PiP standdown for handoff. When PiP is active, the canvas
+    // stream is the sole background audio source; the shadow flip would
+    // double it (beat-echo on device 08/15).
+    isPiPRef: pipActiveRef,
   });
   // Local aliases keep the announcement/start call sites identical to the
   // pre-hook implementation.
