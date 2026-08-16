@@ -894,37 +894,52 @@ export default function WorkoutPlayer({
       pushHandoffLog(`[PiP] unmute rejected: ${err?.name || err}`);
       console.warn('[PiP] unmute rejected:', err);
     }
-    // Pass-5: prefer webkitSetPresentationMode on iOS. Pass-4 device test
-    // reported deterministic NotSupportedError from requestPictureInPicture
-    // even with readyState=4. The spike that proved MediaStream+PiP works on
-    // this device used webkitSetPresentationMode (iOS's canonical API);
-    // Safari's standard-API implementation is documented to reject MediaStream
-    // sources with NotSupportedError. Fall back to the standard API for
-    // desktop Chrome/Firefox where webkit isn't there.
+    // Pass-8: flip entry order — standard requestPictureInPicture() FIRST,
+    // webkit fallback second. Pass 7 showed webkitSetPresentationMode
+    // silently refused 15/15 attempts (modeAfter=inline, event never fired)
+    // even though frames were flowing at 1x realtime with a visible canvas.
+    // Two reasons for the flip:
+    //   1) Standard API rejects with a NAMED error (NotSupportedError,
+    //      NotAllowedError, InvalidStateError). Silent refusals become
+    //      diagnosis; even total failure names its cause.
+    //   2) The 08/13 spike — the one time end-to-end worked on this device
+    //      — entered via requestPictureInPicture, not the webkit call.
+    //      Visible canvas is the other half of the spike's recipe.
+    // Webkit fallback preserved because pass 5 showed the standard API can
+    // reject with NotSupportedError on MediaStream sources on some builds.
     const hasWebkit = typeof (canvasVideo as any).webkitSetPresentationMode === 'function';
+    const hasStandard = !!(document as any).pictureInPictureEnabled
+      && typeof (canvasVideo as any).requestPictureInPicture === 'function';
+    const runWebkitProbe = () => {
+      window.setTimeout(() => {
+        try {
+          const modeAfter = (canvasVideo as any).webkitPresentationMode;
+          pushHandoffLog(`[PiP] webkitPresentationMode@500ms=${modeAfter}`);
+        } catch (err: any) {
+          pushHandoffLog(`[PiP] webkitPresentationMode@500ms read err: ${err?.name || err}`);
+        }
+      }, 500);
+    };
     try {
-      if (hasWebkit) {
+      let attempted = false;
+      if (hasStandard) {
+        try {
+          await (canvasVideo as any).requestPictureInPicture();
+          pushHandoffLog('[PiP] requestPictureInPicture resolved (preferred)');
+          attempted = true;
+        } catch (err: any) {
+          pushHandoffLog(`[PiP] requestPictureInPicture rejected: ${err?.name || 'unknown'} — ${err?.message || ''}`);
+          if (!hasWebkit) throw err;
+          // else fall through to webkit fallback
+        }
+      }
+      if (!attempted && hasWebkit) {
         (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
-        pushHandoffLog('[PiP] webkitSetPresentationMode picture-in-picture called (preferred)');
-        // Pass-7 outcome probe: the webkit API is silent — it neither
-        // resolves nor throws to tell us whether PiP actually entered.
-        // The spike used a 500ms re-read to verify success. Same here.
-        // Mode after 500ms:
-        //   'picture-in-picture' → PiP window opened
-        //   'inline'             → call silently rejected
-        //   undefined            → element lost the API somehow
-        window.setTimeout(() => {
-          try {
-            const modeAfter = (canvasVideo as any).webkitPresentationMode;
-            pushHandoffLog(`[PiP] webkitPresentationMode@500ms=${modeAfter}`);
-          } catch (err: any) {
-            pushHandoffLog(`[PiP] webkitPresentationMode@500ms read err: ${err?.name || err}`);
-          }
-        }, 500);
-      } else if ((document as any).pictureInPictureEnabled) {
-        await (canvasVideo as any).requestPictureInPicture();
-        pushHandoffLog('[PiP] requestPictureInPicture resolved');
-      } else {
+        pushHandoffLog(`[PiP] webkitSetPresentationMode picture-in-picture called (${hasStandard ? 'fallback after standard rejected' : 'no standard API'})`);
+        runWebkitProbe();
+        attempted = true;
+      }
+      if (!attempted) {
         pushHandoffLog('[PiP] no PiP API available on this browser');
         console.warn('[PiP] no PiP API available on this browser');
         setPipArming(false);

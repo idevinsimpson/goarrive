@@ -199,7 +199,11 @@ export function usePipCanvasStream({
     if (pm === 'full') {
       const audioStream = getPipAudioStream();
       if (!audioStream) {
-        initialMergeOutcome = 'full:getPipAudioStream=null';
+        // Pass 8: pass-7 session never once logged 'added N track(s)' — the
+        // audio graph was cold at prime AND at every arm. Naming this branch
+        // AUDIO-NULL@prime so the grep target is distinct from the arm-time
+        // null (see attachAudioTracks below).
+        initialMergeOutcome = 'full:AUDIO-NULL@prime (getPipAudioStream()=null at startStream)';
       } else {
         const audioTracks = audioStream.getAudioTracks();
         for (const track of audioTracks) mergedStream.addTrack(track);
@@ -293,6 +297,10 @@ export function usePipCanvasStream({
           if (audioTracks.length > 0) {
             audioAttached = true;
             setIsReady(true);
+            // Pass 8: name the moment the per-frame retry succeeds so we
+            // can tell "audio came online mid-stream at frame N" from
+            // "audio was never attached". Silent success was invisible.
+            pushHandoffLog(`[PiP] audio attached mid-stream retry frame=${totalFrameCount} tracks=${audioTracks.length}`);
           }
         }
       }
@@ -394,10 +402,20 @@ export function usePipCanvasStream({
       pushHandoffLog('[PiP] attachAudioTracks: no stream');
       return false;
     }
-    if (stream.getAudioTracks().length > 0) return true;
+    const existingCount = stream.getAudioTracks().length;
+    if (existingCount > 0) {
+      // Pass 8: name the pass-through so the log distinguishes
+      // "attach found tracks already merged at prime" from silent success.
+      pushHandoffLog(`[PiP] attachAudioTracks: stream already has ${existingCount} audio track(s) — no-op`);
+      return true;
+    }
     const audioStream = getPipAudioStream();
     if (!audioStream) {
-      pushHandoffLog('[PiP] attachAudioTracks: getPipAudioStream null');
+      // Pass 8: pass-7 session never once logged 'added N track(s)'. If we
+      // land here it means (a) the initial prime merge failed with
+      // AUDIO-NULL@prime AND (b) the audio graph is STILL cold at tap time.
+      // Distinctive prefix so this failure names itself in the log grep.
+      pushHandoffLog('[PiP] AUDIO-NULL@arm: attachAudioTracks called but getPipAudioStream()=null — no music track on merged stream');
       return false;
     }
     const audioTracks = audioStream.getAudioTracks();
