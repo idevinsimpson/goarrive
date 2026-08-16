@@ -252,3 +252,34 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+
+### Device Tests Fail on Preconditions the Tester Cannot See
+**2026-08-15: five on-device sessions in one day; three of them lost time to a precondition that was invisible on the phone.** The pattern is worth more than any individual instance, because each looked like a different bug at the time.
+
+What actually happened, in order:
+
+1. **A spike URL without the `.html` extension.** `firebase.json` ends in a catch-all rewrite to `/index.html`, so `/pip-canvas-spike` did not 404 — it silently served the workout app. The tester ran what looked like a test page, saw the player, and reported "no FRAMES lines." *A missing static file presents as a working page.*
+2. **`?handoff=` persists to `localStorage`** (`utils/musicHandoffVariant.ts:64-75`). A variant chosen once silently governs every later load with no param. A test believed to be running on `off` was actually on `v3`; the resulting "contradiction" consumed a full investigation round and was only killed by a screenshot of the on-screen badge.
+3. **A reading taken with the player paused.** Music pauses with the player (`useWorkoutMusic.ts`), so the observation could not have shown anything either way.
+4. **Probe modes sampled at different workout phases** — the one mode that mattered was read during a rest phase with 8 seconds left, while the others were read during grab-equipment. Different phases run different code.
+5. **`handlePiP` logged its failures to `console.warn`.** On iOS with no DevTools those lines do not exist. *Loud logging into a surface the tester cannot read is indistinguishable from silent failure.*
+
+**Rules that follow, and they are cheap:**
+
+- **If a test depends on a flag, put the flag on screen and make it tappable.** Not a URL parameter. The `AUDIO: <variant>` and `PROBE: <mode>` pills in `WorkoutPlayer.tsx` are the pattern — they *display* the active value and *set* it, which fixes both halves at once. A URL param is invisible once the page has loaded and sticky once stored.
+- **Name the exact readback token in the ask.** "Tell me what the badge says" beats "confirm you're on v3." The tester should never have to know how the flag resolves.
+- **Route diagnostics to the surface the tester actually has.** Anything that could explain a failed device test belongs in the exportable log buffer, not the console.
+- **Specify the phase, not just the action.** "Let it reach a real movement and listen for twenty seconds" rather than "start a workout and listen."
+
+The cost of skipping any of these is one round-trip to a human with a phone — the most expensive and least repeatable resource in this project.
+
+### Recover a Test Baseline From the Deployed Artifact, Not From a PR List
+**2026-08-15.** A staging comparison was scoped as "build from the same PR set as the channel under test." That phrasing is subtly wrong and it broke two comparisons in one day.
+
+**A PR list is a *model* of what is deployed. It diverges from reality the moment a listed PR merges to `main`.** #285 and #287 merged overnight, so reproducing "the Aug-14 PR set" would have *removed* two merged audio fixes from the baseline — changing the very subsystem under test, in the name of holding it constant.
+
+**The method that worked:** probe the deployed JS bundle for known code markers, identify the source commit, and build from that commit. `staging-combined-20260815-0110` @ `235eb76` was recovered this way and confirmed against markers the tester had independently captured on device. The resulting single-variable test was the only unambiguous one of the day.
+
+**The failure mode when it is skipped:** the follow-up probe was built off `main` instead of `235eb76`, so a clean three-mode device reading could not be interpreted at all — the result was consistent with "the suspect is innocent," "the suspect needs an accomplice," and "the test never switched modes," with no way to separate them.
+
+**Lesson: the deployed bundle is the fact; a branch list is a hypothesis about it.** When a comparison must hold everything constant but one variable, derive the baseline from the artifact.
