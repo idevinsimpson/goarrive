@@ -182,9 +182,11 @@ export function usePipCanvasStream({
     let fpsWindowFrames = 0;
     let currentFps = 0;
     let firstFrameLogged = false;
+    let totalFrameCount = 0;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
+      totalFrameCount++;
 
       if (!firstFrameLogged) {
         firstFrameLogged = true;
@@ -192,6 +194,13 @@ export function usePipCanvasStream({
         const videoEl = videoElRef.current;
         const vrs = videoEl?.readyState ?? -1;
         pushHandoffLog(`[PiP] drawFrame#1 canvasParent=${parentTag} videoRS=${vrs}`);
+      }
+      if (totalFrameCount % 60 === 0) {
+        const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
+        const videoEl = videoElRef.current;
+        const vrs = videoEl?.readyState ?? -1;
+        const vpaused = videoEl?.paused ?? true;
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused}`);
       }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;
