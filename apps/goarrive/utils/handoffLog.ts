@@ -1,10 +1,14 @@
 const KEY = 'goarrive.handoffLog';
-// Pass 11: cap raised from 500 to 2000 entries. Devin reported the buffer
-// growth is a secondary reclaim risk on iOS (contributor to the pass-10
-// page-teardown seen at 17:44:23 → 17:44:37); an explicit ring cap here
-// keeps the copy-log payload bounded (~400KB max at ~200 chars/line) and
-// still gives ~10 minutes of session history at pass-10 log density.
-const MAX = 2000;
+// Pass 14: cap raised from 2000 to 5000 entries. Pass-13 device log
+// rotated past the leave-with-PiP event (Devin's "no music after you
+// leave the app" — zero HANDOFF lines in the copied window). At the
+// pass-11 density of ~200 chars/line this is ~1MB payload cap and
+// buys ~25 minutes of session history so the leave event survives
+// even when the tester takes a few beats before copying. Note: this
+// only helps if visibilitychange actually fires under PiP; if it
+// doesn't, no ring size makes the event appear — pass-14's seam-exit
+// reason logs cover that branch.
+const MAX = 5000;
 
 export function pushHandoffLog(line: string) {
   if (typeof window === 'undefined') return;

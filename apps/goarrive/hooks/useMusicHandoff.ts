@@ -48,6 +48,7 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { Platform } from 'react-native';
 import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer } from './useWorkoutTTS';
+import { getLivenessCtxState } from './usePipCanvasStream';
 import {
   getMusicHandoffVariant,
   type MusicHandoffVariant,
@@ -748,15 +749,22 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // Fires synchronously from the visibilitychange event — no awaits
       // before the mute-flip / play() call. iOS gives us ~1s of grace after
       // backgrounding; anything asynchronous risks running after freeze.
+      //
+      // Pass-14 instrumentation: every early-return names its skip reason
+      // to the COPY LOG so a fired-but-declined seam is distinguishable
+      // from a visibilitychange that never fired at all. Without this the
+      // pass-13 log's silence on the "no music after leaving with PiP"
+      // path (zero HANDOFF/hide lines) is uninterpretable.
       const audible = audibleElRef.current;
       const variant = variantRef.current;
-      if (variant === 'off') return;
-      if (!audible) return;
-      if (!enabledRef.current) return;
-      if (musicOffRef.current) return;
+      if (variant === 'off') { pushHandoffLog('[HANDOFF/hide skip variant-off]'); return; }
+      if (!audible) { pushHandoffLog('[HANDOFF/hide skip no-audible]'); return; }
+      if (!enabledRef.current) { pushHandoffLog('[HANDOFF/hide skip disabled]'); return; }
+      if (musicOffRef.current) { pushHandoffLog('[HANDOFF/hide skip music-off]'); return; }
       // Music-hold means the intro is playing; we should NOT start music yet
       // just because the page hid. Same for user-paused / muted.
-      if (musicHoldRef.current || musicPausedRef.current) return;
+      if (musicHoldRef.current) { pushHandoffLog('[HANDOFF/hide skip hold]'); return; }
+      if (musicPausedRef.current) { pushHandoffLog('[HANDOFF/hide skip paused]'); return; }
       // PiP standdown (non-iOS only): the canvas PiP stream on desktop
       // Safari and Chrome carries our music via a MediaStreamAudioDestination
       // Node, and running the shadow flip here would layer a second
@@ -788,6 +796,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         try {
           bufferedEnd = shadow.buffered.length ? shadow.buffered.end(shadow.buffered.length - 1) : 0;
         } catch {}
+        const seamWall = Date.now();
         log('[HANDOFF/hide v3]', JSON.stringify({
           pos: audible.currentTime,
           src: !!shadow.src,
@@ -802,6 +811,36 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         if (p) p.catch((err: unknown) => log('[HANDOFF/hide v3 err]', String(err)));
         audible.pause();
         inBackgroundRef.current = true;
+        // Pass-14 instrumentation: post-seam autopsy at ~2s. A late-firing
+        // timer exposes a frozen page (wall-clock delta will be much more
+        // than 2000ms); a normal delta with shadow.paused=true means iOS
+        // paused our shadow after we told it to play (media-session
+        // competition with the PiP element — the pass-15 fork). Shadow
+        // advancing but silent means route/mute/volume; those fields ride
+        // the same line so no cross-referencing is needed.
+        setTimeout(() => {
+          try {
+            const wallDelta = Date.now() - seamWall;
+            const audibleNow = audibleElRef.current;
+            const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+            log('[HANDOFF/autopsy]', JSON.stringify({
+              wallDeltaMs: wallDelta,
+              shadow: {
+                paused: shadow.paused,
+                currentTime: Number(shadow.currentTime.toFixed(3)),
+                readyState: shadow.readyState,
+                muted: shadow.muted,
+                volume: Number(shadow.volume.toFixed(3)),
+              },
+              audible: { paused: audibleNow?.paused ?? null },
+              mainCtx: getAudioContextState(),
+              livenessCtx: getLivenessCtxState(),
+              visState: vs,
+            }));
+          } catch (err: any) {
+            log('[HANDOFF/autopsy err]', String(err?.name || err));
+          }
+        }, 2000);
         return;
       }
 

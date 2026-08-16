@@ -42,6 +42,17 @@ type PipFeed = {
 };
 let latestPipFeed: PipFeed | null = null;
 
+// Pass-14 instrumentation: expose the liveness AudioContext so the
+// autopsy in useMusicHandoff and the PiP presentation-change listeners
+// in WorkoutPlayer can sample its state. iOS may suspend the liveness
+// ctx on background (a finding of its own — it means the "no active AV
+// session" reclaim theory is one layer deeper than we thought).
+let latestLivenessCtx: AudioContext | null = null;
+export function getLivenessCtxState(): string {
+  if (!latestLivenessCtx) return 'not-initialized';
+  return latestLivenessCtx.state;
+}
+
 // True on iOS Safari (WebKit). Pass-10 fork-insensitive stutter fix: on
 // iOS the PiP stream carries NO music — video-only. Music path stays on
 // the proven v3 shadow via the hide seam. This resolves both the (A)
@@ -281,8 +292,21 @@ export function usePipCanvasStream({
         for (const track of livenessDest.stream.getAudioTracks()) {
           mergedStream.addTrack(track);
         }
+        // Pass-14 instrumentation: publish to module-level pointer + attach
+        // statechange listener. If iOS suspends the liveness ctx on
+        // background, that's a finding on its own — the video-only stream
+        // that looks like "no active AV session" is upstream of the
+        // suspend, and pass-15 needs to lift music INTO the stream.
+        latestLivenessCtx = livenessCtx;
+        try {
+          const ctxRef = livenessCtx;
+          ctxRef.addEventListener('statechange', () => {
+            const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+            pushHandoffLog(`[PiP] livenessCtx statechange state=${ctxRef.state} visState=${vs}`);
+          });
+        } catch {}
         initialMergeOutcome = `iOS:VIDEO+LIVENESS (silent osc gain=1e-5 freq=20Hz — spike topology, music via shadow hide-seam)`;
-        pushHandoffLog(`[PiP] iOS liveness track attached: silent oscillator gain=1e-5 freq=20Hz tracks=${livenessDest.stream.getAudioTracks().length}`);
+        pushHandoffLog(`[PiP] iOS liveness track attached: silent oscillator gain=1e-5 freq=20Hz tracks=${livenessDest.stream.getAudioTracks().length} state=${livenessCtx.state}`);
       } catch (e) {
         initialMergeOutcome = `iOS:VIDEO-ONLY (liveness osc failed: ${(e as Error)?.name ?? 'unknown'}) music via shadow hide-seam`;
         pushHandoffLog(`[PiP] iOS liveness track FAILED: ${(e as Error)?.name ?? 'unknown'} — stream is video-only (tab-reclaim risk remains)`);
@@ -551,6 +575,7 @@ export function usePipCanvasStream({
       try { livenessCtx?.close(); } catch {}
       livenessOsc = null;
       livenessDest = null;
+      if (latestLivenessCtx === livenessCtx) latestLivenessCtx = null;
       livenessCtx = null;
       canvas.parentNode?.removeChild(canvas);
       canvasElRef.current = null;

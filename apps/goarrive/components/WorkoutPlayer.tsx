@@ -45,8 +45,8 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
-import { usePipCanvasStream } from '../hooks/usePipCanvasStream';
+import { useWorkoutTTS, unlockAudioPlayback, getAudioContextState } from '../hooks/useWorkoutTTS';
+import { usePipCanvasStream, getLivenessCtxState } from '../hooks/usePipCanvasStream';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -337,10 +337,20 @@ export default function WorkoutPlayer({
     (vid as any).__pipIdTag = idTag;
     pushHandoffLog(`[PiP] pipCanvasVideo mounted id=${idTag} probe=${pipProbeMode}`);
 
+    // Pass-14 instrumentation: enrich every presentation transition with
+    // visState + both AudioContext states (main via getAudioContextState,
+    // liveness via getLivenessCtxState). If iOS suspends the liveness ctx
+    // at PiP enter (or leave), that transition is visible in the log
+    // instead of an inferred silence.
+    const logPresentationChange = (tag: string, extra?: string) => {
+      const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+      pushHandoffLog(`[PiP] ${tag} visState=${vs} mainCtx=${getAudioContextState()} livenessCtx=${getLivenessCtxState()}${extra ? ' ' + extra : ''}`);
+    };
     const onEnter = () => {
       pipActiveRef.current = true;
       setIsPiP(true);
       setPipArming(false);
+      logPresentationChange('enterpictureinpicture');
       // Pass 9: log the video element's actual on-screen box at PiP entry.
       // If pass 9 does NOT fill the tile, this rules the styling hypothesis
       // in or out without another guess — 0×0 means the visibility change
@@ -356,6 +366,7 @@ export default function WorkoutPlayer({
       pipActiveRef.current = false;
       setIsPiP(false);
       setPipArming(false);
+      logPresentationChange('leavepictureinpicture');
       try { vid.muted = true; } catch {}
       // Pass-5 exit path: strip audio tracks so the warm hidden element does
       // not keep carrying merged audio inline (P0 starves foreground music).
@@ -381,7 +392,7 @@ export default function WorkoutPlayer({
       // outcome, not just the call. This handler + the 500ms re-read in
       // handlePiP together give us both the async event path (if it fires)
       // and a direct snapshot.
-      pushHandoffLog(`[PiP] webkitpresentationmodechanged mode=${mode}`);
+      logPresentationChange('webkitpresentationmodechanged', `mode=${mode}`);
       if (mode === 'picture-in-picture') onEnter();
       else onLeave();
     };
