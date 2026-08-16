@@ -223,17 +223,10 @@ export default function WorkoutPlayer({
   // element does not compete with our canvas-composite tile — the movement
   // video is a source for the canvas, not a presentation target.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const vid = videoRef.current?._nativeRef?.current?.getVideoElement?.() ?? null;
-    pipSourceVideoRef.current = vid;
-    if (vid) {
-      try {
-        (vid as any).disablePictureInPicture = true;
-        vid.setAttribute('disablePictureInPicture', '');
-      } catch {}
-    }
-  }, [phase, currentIndex]);
+  // NOTE: the populating effect lives further down (after displayedUrl,
+  // videoRef and videosRef are declared) so it can watch displayedUrl —
+  // without that dep the ref stays null after the first layer swap and
+  // PiP renders a frozen tile (pass-12 bug 4).
 
   // Pass 12: publish a window flag while this player is mounted. The SW
   // auto-reload handler injected in inject_pwa_meta.py reads this flag
@@ -1362,12 +1355,13 @@ export default function WorkoutPlayer({
   //
   // Exception: swap-sides movements stay on the current movement during the L-side
   // lookahead (the R side of the same movement is coming next, not a new item).
-  const { activeVideoUrl, activeThumbUrl, isInRevealWindow } = useMemo<{
+  const { activeVideoUrl, activeThumbUrl, isInRevealWindow, revealDisplayItem } = useMemo<{
     activeVideoUrl: string | null;
     activeThumbUrl: string | null;
     isInRevealWindow: boolean;
+    revealDisplayItem: any;
   }>(() => {
-    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isInRevealWindow: false };
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isInRevealWindow: false, revealDisplayItem: null };
 
     // Resolve a timeline item to a displayable {video, thumb} pair, falling back
     // to the next exercise's media if the item itself has none (e.g. waterBreak,
@@ -1436,7 +1430,11 @@ export default function WorkoutPlayer({
       inRevealWindow = true;
     }
 
-    return { ...pickAsset(displayItem, displayIndex), isInRevealWindow: inRevealWindow };
+    return {
+      ...pickAsset(displayItem, displayIndex),
+      isInRevealWindow: inRevealWindow,
+      revealDisplayItem: inRevealWindow ? displayItem : null,
+    };
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Double-buffered video layers, with eager preload ─────────────────
@@ -1460,6 +1458,34 @@ export default function WorkoutPlayer({
 
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
+
+  // Populate pipSourceVideoRef (declared at top of component) whenever the
+  // displayed layer changes. Two-step resolution: prefer videoRef.current
+  // (the ref callback sets it on the currently-displayed layer); fall back
+  // to scanning videosRef for `layer:${displayedUrl}` if the ref hasn't
+  // been refreshed yet (React can batch the callback after the effect).
+  // Watching displayedUrl (not just phase/currentIndex) is what re-arms
+  // this effect when a fresh layer promotes — without it, the ref stays
+  // null after the first work→rest transition and PiP renders a frozen
+  // tile through every subsequent phase (pass-12 bug 4, videoRS=-1 seen
+  // from 22:00:16 onward in the Aug 16 log).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let vid: HTMLVideoElement | null = videoRef.current?._nativeRef?.current?.getVideoElement?.() ?? null;
+    if (!vid && displayedUrl) {
+      const el: any = videosRef.current.get(`layer:${displayedUrl}`);
+      vid = el?._nativeRef?.current?.getVideoElement?.() ?? null;
+    }
+    pipSourceVideoRef.current = vid;
+    if (vid) {
+      try {
+        (vid as any).disablePictureInPicture = true;
+        vid.setAttribute('disablePictureInPicture', '');
+      } catch {}
+    } else {
+      console.warn('[PiP] pipSource=null', { phase, currentIndex, displayedUrl });
+    }
+  }, [phase, currentIndex, displayedUrl]);
 
   // URLs whose <Video> reported a load/decode error. Failed layers are
   // unmounted and never re-mounted, so the poster/thumbnail fallback renders
@@ -2154,6 +2180,48 @@ export default function WorkoutPlayer({
                       ]}
                     />
                   </>
+                ) : activeVideoUrl ? (
+                  // Fall through to the upcoming exercise's video so the member
+                  // sees what they're about to do (pickAsset walks forward for
+                  // non-exercise items). Dark overlay keeps the "get ready"
+                  // framing so it doesn't feel like the workout has started.
+                  <>
+                    <Video
+                      ref={(el: any) => registerVideo('grabEquipment', el)}
+                      key={activeVideoUrl}
+                      source={getVideoSource(activeVideoUrl)}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      shouldPlay={!isPaused}
+                      isMuted
+                      style={[st.videoPlayer, { borderRadius: fs(12) }]}
+                      videoStyle={
+                        Platform.OS === 'web'
+                          ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                          : undefined
+                      }
+                    />
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: fs(12) },
+                      ]}
+                    />
+                  </>
+                ) : activeThumbUrl ? (
+                  <>
+                    <Image
+                      source={{ uri: activeThumbUrl }}
+                      style={[st.videoPlayer, { borderRadius: fs(12) }]}
+                      resizeMode="cover"
+                    />
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: fs(12) },
+                      ]}
+                    />
+                  </>
                 ) : (
                   <View style={[st.videoPlayer, st.equipmentPanel]}>
                     <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
@@ -2302,22 +2370,28 @@ export default function WorkoutPlayer({
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
-            {phase === 'work' && renderTitleTimerSlot(
+            {phase === 'work' && (() => {
+              // During the 3.5s reveal window the video swaps to `next`; keep
+              // the title in sync so both flip together instead of the title
+              // lagging by REVEAL_LEAD_SECONDS behind the video.
+              const titleItem = isInRevealWindow && revealDisplayItem ? revealDisplayItem : current;
+              const titleHasSwapBadge = titleItem === current && current.swapSides;
+              return renderTitleTimerSlot(
               <>
-                {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
+                {renderAutoFitTitle(composePrescriptionLabel(titleItem.name, titleItem.weight, titleItem.reps), {
                   hasTimer: !isRepBased,
                   // Swap-sides movements stack the FULL/SPLIT badge (~30 base
                   // units incl. margin) under the title inside the fixed
                   // 112-unit module — shrink the title budget so the pair
                   // never overflows into the logo above.
-                  maxLines: current.swapSides ? 2 : NAME_MAX_LINES,
-                  maxHeight: current.swapSides ? 82 : undefined,
+                  maxLines: titleHasSwapBadge ? 2 : NAME_MAX_LINES,
+                  maxHeight: titleHasSwapBadge ? 82 : undefined,
                 })}
                 {/* Swap-mode badge stacks naturally below the title — the */}
                 {/* title column is center-aligned, so it appears centered  */}
                 {/* directly under the movement name without overlapping    */}
                 {/* the media frame.                                        */}
-                {current.swapSides && (() => {
+                {titleHasSwapBadge && (() => {
                   const mode = (current as any).swapMode === 'duplicate' ? 'duplicate' : 'split';
                   const win = typeof (current as any).swapWindowSec === 'number'
                     ? (current as any).swapWindowSec : 5;
@@ -2332,7 +2406,8 @@ export default function WorkoutPlayer({
                 })()}
               </>,
               !isRepBased ? renderGoldTimer(formatTime(timeLeft)) : null,
-            )}
+            );
+            })()}
             {phase === 'rest' && renderTitleTimerSlot(
               <>
                 <Text style={st.restPhaseLabel}>REST</Text>

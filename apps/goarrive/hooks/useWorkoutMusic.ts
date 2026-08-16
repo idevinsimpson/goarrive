@@ -563,12 +563,34 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   }, []);
 
   // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
+  //
+  // Pass-13 debounce: on iOS the pause tap sometimes double-flips isPaused
+  // within a few ms (shadow-hide seam + foreground pause both touch the
+  // audible element), which caused a single-syllable stutter — the audible
+  // element toggled pause→play→pause faster than the decoder could settle.
+  // A 120ms trailing debounce collapses those bounces into one transition
+  // and is short enough that the user doesn't perceive it as latency.
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     musicPausedRef.current = isPaused;
     const el = musicElRef.current;
     if (!el || !el.src) return;
-    if (isPaused) el.pause();
-    else if (!musicHoldRef.current && !musicOffRef.current) el.play().catch(() => {});
+    if (pauseTimerRef.current) {
+      clearTimeout(pauseTimerRef.current);
+      pauseTimerRef.current = null;
+    }
+    pauseTimerRef.current = setTimeout(() => {
+      pauseTimerRef.current = null;
+      // Re-read musicPausedRef in case another flip landed while we waited.
+      if (musicPausedRef.current) el.pause();
+      else if (!musicHoldRef.current && !musicOffRef.current) el.play().catch(() => {});
+    }, 120);
+    return () => {
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current);
+        pauseTimerRef.current = null;
+      }
+    };
   }, [isPaused]);
   useEffect(() => {
     if (musicElRef.current) musicElRef.current.muted = isMuted || musicMuted;
