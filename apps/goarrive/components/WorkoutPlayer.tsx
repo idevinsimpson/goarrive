@@ -281,14 +281,28 @@ export default function WorkoutPlayer({
     vid.muted = true;
     vid.playsInline = true;
     vid.setAttribute('playsinline', '');
+    // Pass 9: give the hidden video the same visibility treatment pass 7 gave
+    // the capture canvas. Pass-8 log proved entry works (PiP resolved 2/2,
+    // held 53s) but the tile stayed black while cvCT advanced 52.80 → 105.05
+    // — frames flowed INTO this element, they did not reach the PiP window.
+    // The 08/13 spike (only full end-to-end success) had its video fully
+    // visible; the app's is 1px × 1px at left:-10000px. That's the ONE
+    // remaining property where the app diverges from the spike. Same iOS
+    // "doesn't render what it can't see" rule that bit the canvas, one
+    // element downstream. Blue border so Devin can tell the two thumbnails
+    // apart at a glance (canvas = orange, video = blue). Parked beside the
+    // canvas: canvas is at left:8 width:80 → video at left:96 (80+8+8 gap).
     Object.assign(vid.style, {
       position: 'fixed',
-      left: '-10000px',
-      top: '0',
-      opacity: '0',
+      top: '8px',
+      left: '96px',
+      width: '80px',
+      height: '100px',
+      zIndex: '1',
+      opacity: '1',
       pointerEvents: 'none',
-      width: '1px',
-      height: '1px',
+      border: '1px solid #3B82F6',
+      background: '#000',
     });
     document.body.appendChild(vid);
     pipCanvasVideoRef.current = vid;
@@ -303,6 +317,16 @@ export default function WorkoutPlayer({
       pipActiveRef.current = true;
       setIsPiP(true);
       setPipArming(false);
+      // Pass 9: log the video element's actual on-screen box at PiP entry.
+      // If pass 9 does NOT fill the tile, this rules the styling hypothesis
+      // in or out without another guess — 0×0 means the visibility change
+      // didn't apply; 80×100 (or spike-sized) means the visibility change
+      // applied but iOS still refused to composite frames into the window.
+      try {
+        pushHandoffLog(`[PiP] onEnter videoBox offsetWidth=${vid.offsetWidth} offsetHeight=${vid.offsetHeight} clientRect=${JSON.stringify({ w: Math.round(vid.getBoundingClientRect().width), h: Math.round(vid.getBoundingClientRect().height), x: Math.round(vid.getBoundingClientRect().x), y: Math.round(vid.getBoundingClientRect().y) })}`);
+      } catch (err: any) {
+        pushHandoffLog(`[PiP] onEnter videoBox read err: ${err?.name || err}`);
+      }
     };
     const onLeave = () => {
       pipActiveRef.current = false;
@@ -313,6 +337,19 @@ export default function WorkoutPlayer({
       // not keep carrying merged audio inline (P0 starves foreground music).
       // Video track stays so the next arm is still fast.
       detachAudioTracks();
+      // Pass 9: after external PiP close, iOS pauses the element and cvCT
+      // freezes until the next arm re-plays it. Pass-8 log confirmed:
+      // cvCT stuck at 105.05 after mode=inline. Re-play here so the warm
+      // stream keeps ticking and the next arm doesn't have to cold-start.
+      try {
+        const p = vid.play();
+        if (p && typeof (p as any).catch === 'function') {
+          (p as any).catch((e: any) => pushHandoffLog(`[PiP] onLeave replay rejected: ${e?.name || e}`));
+        }
+        pushHandoffLog('[PiP] onLeave replay issued');
+      } catch (err: any) {
+        pushHandoffLog(`[PiP] onLeave replay threw: ${err?.name || err}`);
+      }
     };
     const onWebkitModeChange = () => {
       const mode = (vid as any).webkitPresentationMode;
