@@ -235,8 +235,44 @@ export function usePipCanvasStream({
     const iOS = isIOSSafariUA();
     let audioAttached = false;
     let initialMergeOutcome: string;
+    // Pass 11: iOS silent-oscillator liveness track. Pass-10 device log
+    // caught spontaneous mid-PiP page teardown (17:44:23 mode=inline →
+    // 17:44:37 fresh startStream/canvasId/videoId/HANDOFF/init all again)
+    // — iOS is reclaiming the tab because a video-only MediaStream reads
+    // as "no active AV session". The 08/13 spike, which survived swipe-
+    // home for 59s with frames flowing, always carried an oscillator
+    // audio track in the stream. That track was the liveness signal, not
+    // the music. Pass 11 restores exactly that topology minus audibility:
+    // near-zero-gain oscillator → MediaStreamAudioDestinationNode → audio
+    // track on the merged stream. Music path stays on the v3 shadow
+    // (pass-10 hide seam remains). References stashed on the merged
+    // stream itself so cleanup can close the context on stopStream.
+    let livenessOsc: OscillatorNode | null = null;
+    let livenessCtx: AudioContext | null = null;
+    let livenessDest: MediaStreamAudioDestinationNode | null = null;
     if (iOS) {
-      initialMergeOutcome = 'iOS:VIDEO-ONLY (music via shadow hide-seam, not stream)';
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        livenessCtx = new AudioCtx();
+        livenessDest = livenessCtx.createMediaStreamDestination();
+        const osc = livenessCtx.createOscillator();
+        const gain = livenessCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 20; // sub-audible
+        gain.gain.value = 0.00001; // effectively silent
+        osc.connect(gain);
+        gain.connect(livenessDest);
+        osc.start();
+        livenessOsc = osc;
+        for (const track of livenessDest.stream.getAudioTracks()) {
+          mergedStream.addTrack(track);
+        }
+        initialMergeOutcome = `iOS:VIDEO+LIVENESS (silent osc gain=1e-5 freq=20Hz — spike topology, music via shadow hide-seam)`;
+        pushHandoffLog(`[PiP] iOS liveness track attached: silent oscillator gain=1e-5 freq=20Hz tracks=${livenessDest.stream.getAudioTracks().length}`);
+      } catch (e) {
+        initialMergeOutcome = `iOS:VIDEO-ONLY (liveness osc failed: ${(e as Error)?.name ?? 'unknown'}) music via shadow hide-seam`;
+        pushHandoffLog(`[PiP] iOS liveness track FAILED: ${(e as Error)?.name ?? 'unknown'} — stream is video-only (tab-reclaim risk remains)`);
+      }
       setIsReady(true);
     } else if (pm === 'full') {
       const audioStream = getPipAudioStream();
@@ -303,7 +339,13 @@ export function usePipCanvasStream({
         const canvasVideoEl = canvasVideoElRef?.current;
         const cvCT = canvasVideoEl ? canvasVideoEl.currentTime.toFixed(2) : 'null';
         const cvRS = canvasVideoEl?.readyState ?? -1;
-        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS} feedPhase=${feedPhase}`);
+        // Pass 11: visState — document.visibilityState at the sample. Lets
+        // the log distinguish "rAF still firing while page hidden" (iOS
+        // sometimes throttles background rAF to 1Hz, sometimes freezes it)
+        // from "page went visible and reload took over". Combined with
+        // PAGE-INIT the tab lifecycle is fully observable in one grep.
+        const visState = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS} feedPhase=${feedPhase} visState=${visState}`);
       }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;
@@ -443,6 +485,16 @@ export function usePipCanvasStream({
       try {
         for (const track of mergedStream.getTracks()) track.stop();
       } catch {}
+      // Pass 11: tear down the liveness oscillator + AudioContext so we
+      // don't leak an AudioContext across unmounts (Safari caps them per
+      // origin at 6).
+      try { livenessOsc?.stop(); } catch {}
+      try { livenessOsc?.disconnect(); } catch {}
+      try { livenessDest?.disconnect(); } catch {}
+      try { livenessCtx?.close(); } catch {}
+      livenessOsc = null;
+      livenessDest = null;
+      livenessCtx = null;
       canvas.parentNode?.removeChild(canvas);
       canvasElRef.current = null;
       streamRef.current = null;
@@ -509,6 +561,15 @@ export function usePipCanvasStream({
   // remove. Keeps the video track — only audio is stripped so the next arm's
   // attach is still cheap.
   const detachAudioTracks = useCallback((): number => {
+    // Pass 11: iOS no-op. The only audio track on the iOS stream is the
+    // silent liveness oscillator; ripping it out would kill the exact
+    // signal that keeps iOS treating the tab as an active AV session
+    // (the pass-10 mid-PiP reload cause). Music is never on this stream
+    // on iOS, so there is nothing to detach for the P0 starvation guard.
+    if (isIOSSafariUA()) {
+      pushHandoffLog('[PiP] detachAudioTracks: iOS skip (liveness track must persist across arms)');
+      return 0;
+    }
     const stream = streamRef.current;
     if (!stream) {
       pushHandoffLog('[PiP] detachAudioTracks: no stream');
