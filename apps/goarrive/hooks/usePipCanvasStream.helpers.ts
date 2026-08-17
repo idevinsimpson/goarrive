@@ -11,7 +11,14 @@ export function drawVideoFrame(
   h: number,
   movementName: string,
 ): void {
-  if (videoEl && !videoEl.paused && videoEl.readyState >= 2) {
+  // Pass-16: relax the paused gate. A paused element with rs>=2 still
+  // has a decoded frame that drawImage can lift — that frozen frame is
+  // exactly what the main app shows during rest (the app pauses the
+  // next-movement's preview once it's ready, then unpauses at work).
+  // Gating on !paused made the tile fall to the text card while the
+  // main area kept displaying the video. Text card fires only when
+  // there is no decoded frame at all (readyState < 2 or no element).
+  if (videoEl && videoEl.readyState >= 2) {
     // 4:5 crop: center-crop the source video into the target rect.
     const srcW = videoEl.videoWidth || videoEl.clientWidth || w;
     const srcH = videoEl.videoHeight || videoEl.clientHeight || h;

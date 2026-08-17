@@ -46,7 +46,7 @@ import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback, getAudioContextState } from '../hooks/useWorkoutTTS';
-import { usePipCanvasStream, getLivenessCtxState } from '../hooks/usePipCanvasStream';
+import { usePipCanvasStream, getLivenessCtxState, resumeLivenessCtx } from '../hooks/usePipCanvasStream';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -924,7 +924,14 @@ export default function WorkoutPlayer({
   // tester can read what happened on an iPhone without DevTools.
   const armPip = useCallback(() => {
     if (Platform.OS !== 'web') return;
-    pushHandoffLog('[PiP] armPip fired');
+    // Pass-16 Fix 2: gesture-blessed resume of the liveness ctx. Pass-15
+    // caught PiP entry with livenessCtx=suspended after a voice-cue
+    // suspend/interrupt storm; a resume() attempted from a non-gesture
+    // path can be rejected by iOS. armPip's onPressIn is the earliest
+    // point in the tap flow we hold a gesture, so we spend it here
+    // unconditionally — noop if already running.
+    resumeLivenessCtx('armPip');
+    pushHandoffLog(`[PiP] armPip fired livenessCtx=${getLivenessCtxState()}`);
     setPipArming(true);
     window.setTimeout(() => setPipArming(false), 3000);
 
@@ -1554,11 +1561,23 @@ export default function WorkoutPlayer({
   useEffect(() => {
     if (Platform.OS !== 'web') return;
 
+    // Pass-16: log the full /videos/<file> segment (not just the coach
+    // prefix). Pass-15 truncated to 32 chars which cut off exactly at
+    // the shared coach-prefix `movements%2F<coachId>%2F...`, making
+    // every rebind's expected= look identical in the log even when the
+    // actual URLs differed. Grab the segment starting at `videos%2F`
+    // if present (Firebase Storage URL shape), else the last two path
+    // components — that always includes the discriminating filename.
     const shortUrl = (u: string | null): string => {
       if (!u) return 'null';
-      const idx = u.lastIndexOf('/');
-      const tail = idx >= 0 ? u.slice(idx + 1) : u;
-      return tail.length > 32 ? tail.slice(0, 32) : tail;
+      const vIdx = u.indexOf('videos%2F');
+      if (vIdx >= 0) {
+        const tail = u.slice(vIdx);
+        const qIdx = tail.indexOf('?');
+        return qIdx >= 0 ? tail.slice(0, qIdx) : tail;
+      }
+      const slashIdx = u.lastIndexOf('/', u.lastIndexOf('/') - 1);
+      return slashIdx >= 0 ? u.slice(slashIdx + 1) : u;
     };
 
     const resolve = (): HTMLVideoElement | null => {
@@ -1625,14 +1644,15 @@ export default function WorkoutPlayer({
             (pick.el as any).disablePictureInPicture = true;
             pick.el.setAttribute('disablePictureInPicture', '');
           } catch {}
-          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} match=${pick.matches} expected=${shortUrl(expected)} phase=${phase} displayedUrl=${displayedUrl ?? 'null'} cands=${cands.length}`);
+          const pickedSrc = pick.el.currentSrc || pick.el.src || '';
+          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} match=${pick.matches} expected=${shortUrl(expected)} picked=${shortUrl(pickedSrc)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length}`);
         }
         return pick.el;
       }
       if (prev !== null) {
         pipSourceVideoRef.current = null;
         const missMs = expectedMissAtRef.current.ts === 0 ? 0 : Math.round(now - expectedMissAtRef.current.ts);
-        pushHandoffLog(`[PiP] pipSource rebind key=null match=false expected=${shortUrl(expected)} phase=${phase} displayedUrl=${displayedUrl ?? 'null'} cands=${cands.length} missMs=${missMs}`);
+        pushHandoffLog(`[PiP] pipSource rebind key=null match=false expected=${shortUrl(expected)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length} missMs=${missMs}`);
       }
       return null;
     };

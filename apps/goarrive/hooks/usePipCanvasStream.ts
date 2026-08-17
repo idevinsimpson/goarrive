@@ -53,6 +53,43 @@ export function getLivenessCtxState(): string {
   return latestLivenessCtx.state;
 }
 
+// Pass-16 Fix 2: gesture-blessed resume() for the liveness AudioContext.
+// Pass-15 device log showed a suspended/interrupted storm at 00:07:54→
+// 00:08:41 (voice cues seizing the audio session) and PiP entering with
+// livenessCtx=suspended — the keep-alive track was luck-dependent.
+// Throttle to 1s min interval so a burst of statechange events can't spam
+// resume() calls (some browsers reject rapid resume attempts). Callable
+// from anywhere with an active user gesture on the stack.
+let lastLivenessResumeAt = 0;
+export function resumeLivenessCtx(reason: string): void {
+  if (!latestLivenessCtx) {
+    pushHandoffLog(`[PiP] livenessCtx resume skip reason=${reason} state=not-initialized`);
+    return;
+  }
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (now - lastLivenessResumeAt < 1000) return;
+  lastLivenessResumeAt = now;
+  const ctx = latestLivenessCtx;
+  const before = ctx.state;
+  if (before === 'running') {
+    pushHandoffLog(`[PiP] livenessCtx resume noop reason=${reason} state=running`);
+    return;
+  }
+  try {
+    const p = ctx.resume();
+    if (p && typeof p.then === 'function') {
+      p.then(
+        () => pushHandoffLog(`[PiP] livenessCtx resume ok reason=${reason} before=${before} after=${ctx.state}`),
+        (err: unknown) => pushHandoffLog(`[PiP] livenessCtx resume fail reason=${reason} before=${before} err=${(err as Error)?.name ?? 'unknown'}`),
+      );
+    } else {
+      pushHandoffLog(`[PiP] livenessCtx resume sync reason=${reason} before=${before} after=${ctx.state}`);
+    }
+  } catch (e) {
+    pushHandoffLog(`[PiP] livenessCtx resume throw reason=${reason} before=${before} err=${(e as Error)?.name ?? 'unknown'}`);
+  }
+}
+
 // True on iOS Safari (WebKit). Pass-10 fork-insensitive stutter fix: on
 // iOS the PiP stream carries NO music — video-only. Music path stays on
 // the proven v3 shadow via the hide seam. This resolves both the (A)
@@ -303,6 +340,16 @@ export function usePipCanvasStream({
           ctxRef.addEventListener('statechange', () => {
             const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
             pushHandoffLog(`[PiP] livenessCtx statechange state=${ctxRef.state} visState=${vs}`);
+            // Pass-16 Fix 2: self-heal — whenever the ctx drops off
+            // 'running' (interrupted, suspended by another audio session,
+            // etc.) attempt an immediate resume. Throttled inside
+            // resumeLivenessCtx so a burst of state flips can't spam
+            // resume() calls. Without this the ctx sits suspended until
+            // the next user gesture, which is exactly the state Devin's
+            // pass-15 log caught on PiP entry (livenessCtx=suspended).
+            if (ctxRef.state !== 'running') {
+              resumeLivenessCtx('statechange');
+            }
           });
         } catch {}
         initialMergeOutcome = `iOS:VIDEO+LIVENESS (silent osc gain=1e-5 freq=20Hz — spike topology, music via shadow hide-seam)`;
@@ -341,6 +388,15 @@ export function usePipCanvasStream({
     let currentFps = 0;
     let firstFrameLogged = false;
     let totalFrameCount = 0;
+    // Pass-16: switch drawFrame periodic log from frame-count throttle
+    // (every 60 frames = ~2s @ 30fps) to wall-clock throttle (every 5s).
+    // The COPY LOG ring is 5000 entries; the pass-15 capture window
+    // consumed the ring in <60s and lost the PiP-leave event on three
+    // consecutive runs. Cutting cadence 2.5× buys ~5× wall-clock coverage
+    // per copy (leave events fire once, at unpredictable moments in the
+    // PiP-background window).
+    let lastPeriodicLogAt = 0;
+    const PERIODIC_LOG_INTERVAL_MS = 5000;
     // Pass 12: taint tripwire flag. captureStream() from a canvas that
     // has been drawn with cross-origin (non-CORS) video silently stops
     // delivering frames while ctx.drawImage keeps working — on-page
@@ -367,7 +423,8 @@ export function usePipCanvasStream({
         const feedTag = latestPipFeed ? 'live' : 'null';
         pushHandoffLog(`[PiP] drawFrame#1 canvasId=${canvasId} canvasParent=${parentTag} videoRS=${vrs} feed=${feedTag}`);
       }
-      if (totalFrameCount % 60 === 0) {
+      if (now - lastPeriodicLogAt >= PERIODIC_LOG_INTERVAL_MS) {
+        lastPeriodicLogAt = now;
         const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
         const videoEl = latestPipFeed?.videoEl ?? null;
         const vrs = videoEl?.readyState ?? -1;
@@ -393,7 +450,10 @@ export function usePipCanvasStream({
         // from "page went visible and reload took over". Combined with
         // PAGE-INIT the tab lifecycle is fully observable in one grep.
         const visState = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
-        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS} feedPhase=${feedPhase} visState=${visState}`);
+        // Pass-16: sample liveness ctx state on every periodic tick — if
+        // the self-heal misses a beat we can see it here alongside cvCT.
+        const lvCtx = latestLivenessCtx?.state ?? 'null';
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS} feedPhase=${feedPhase} visState=${visState} livenessCtx=${lvCtx}`);
       }
 
       if (now - lastFrameTime < FRAME_INTERVAL) return;
@@ -420,14 +480,25 @@ export function usePipCanvasStream({
       const done = feed?.repsDone ?? 0;
       const pct = feed?.progressPct ?? 0;
       let videoEl = feed?.videoEl ?? null;
-      // Pass-14 Fix 1: self-healing binding. If the published videoEl is
-      // null or paused during a phase where the movement video should be
-      // playing, ask the resolver for the best current candidate. The
-      // resolver mutates pipSourceVideoRef and logs any change; drawing
-      // this frame from the returned element covers the case where the
-      // publish effect has not yet flushed the new binding.
-      const workLikePhase = ph === 'work' || ph === 'transition' || ph === 'grabEquipment' || ph === 'waterBreak' || ph === 'demo';
-      if (workLikePhase && (!videoEl || videoEl.paused)) {
+      // Pass-14 Fix 1 / Pass-16 extension: self-healing binding across
+      // work AND rest. Pass-15 excluded rest from resolver calls so the
+      // tile lost its bind at every rest and fell to the text-card
+      // fallback while the main app kept showing the next movement's
+      // preview (Devin's rest screenshot: video visible in the player,
+      // text card in the PiP tile — same time, same URL). Adding rest
+      // + demoing-like phases to the visual-phase set lets the picker
+      // stay bound to the correct element through rest and into the
+      // next work.
+      //
+      // Also drop the `!videoEl.paused` gate: pass-16 relaxes
+      // drawVideoFrame to draw paused rs>=2 frames (a frozen frame is
+      // what the main area shows during rest — better than a text
+      // card). If the bound element is null we still need the resolver,
+      // otherwise we keep the current bind and let the resolver run
+      // when either (a) the expected URL changes (miss window resets)
+      // or (b) the picked candidate goes null.
+      const visualPhase = ph === 'work' || ph === 'rest' || ph === 'swap' || ph === 'transition' || ph === 'grabEquipment' || ph === 'waterBreak' || ph === 'demo';
+      if (visualPhase) {
         const resolved = feed?.resolveVideo?.() ?? null;
         if (resolved) videoEl = resolved;
       }
