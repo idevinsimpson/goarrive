@@ -64,6 +64,8 @@ import {
 } from '../utils/musicHandoffVariant';
 import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, pipProbeModeLabel, type PipProbeMode } from '../utils/pipProbeMode';
 import { pushHandoffLog, readHandoffLog } from '../utils/handoffLog';
+import { isDiagOn, toggleDiag } from '../utils/diagMode';
+import { startPerfProbe } from '../utils/perfProbe';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -212,6 +214,11 @@ export default function WorkoutPlayer({
   // the target video — arming buys that head start without leaving the tap.
   // Cleared on PiP entry, PiP failure, or a 3s safety timeout.
   const [pipArming, setPipArming] = useState(false);
+  // Pass-21 Cut #3: DIAG toggle state mirror. The module cache lives in
+  // diagMode.ts (survives across mounts); this state exists so the pill's
+  // label re-renders on tap without a page reload — DIAG is a runtime flag
+  // and the whole point is flipping it live while investigating.
+  const [diagOn, setDiagOn] = useState<boolean>(() => isDiagOn());
   // Pass-2 mechanism probe: getPipProbeMode() = query > localStorage > default
   // 'full'. Staging-only via pipEnabled gate below. The probe runs inline with
   // a subset of the hook so a device tester can isolate which step starves the
@@ -281,6 +288,17 @@ export default function WorkoutPlayer({
     return () => {
       (window as any).__goarrivePlayerMounted = false;
     };
+  }, []);
+
+  // Pass-21 Cut #0: perfProbe tripwire on the MAIN thread. Cheap rAF gap
+  // sampler emitting one summary line per 30s (mean/p95/max gap + count of
+  // >100ms stalls). Rides every build regardless of DIAG so cuts #1-#5 get
+  // before/after numbers and future regressions trip loudly in the COPY
+  // LOG. Web-only; no-op on native (rAF is a DOM API).
+  // perfProbe=1
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    return startPerfProbe();
   }, []);
 
   // Pass-7: presentation-target ref declared before the hook call so it can
@@ -3084,6 +3102,22 @@ export default function WorkoutPlayer({
           >
             <Text style={st.audioVariantBadgeText}>
               PROBE: {pipProbeModeLabel(getPipProbeMode())}
+            </Text>
+          </Pressable>
+          {/* Pass-21 Cut #3: DIAG toggle. Flips the runtime gate on the
+              default pushHandoffLog path — off means the sessionStorage
+              ring writes stop entirely, on restores the pre-cut trace. No
+              reload: the diagMode cache is a module var updated on tap.
+              pipDiag=1 */}
+          <Pressable
+            style={st.audioVariantBadge}
+            onPress={() => {
+              const next = toggleDiag();
+              setDiagOn(next);
+            }}
+          >
+            <Text style={st.audioVariantBadgeText}>
+              DIAG: {diagOn ? 'ON' : 'OFF'}
             </Text>
           </Pressable>
           <Pressable

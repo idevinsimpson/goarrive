@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getPipAudioStream } from './useWorkoutTTS';
-import { pushHandoffLog } from '../utils/handoffLog';
+import { pushHandoffLog, pushHandoffLogAlways } from '../utils/handoffLog';
 import {
   drawVideoFrame,
   drawFallbackGradient,
@@ -229,6 +229,14 @@ export function usePipCanvasStream({
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  // Pass-21 Cut #1: lazy-gate. armedRef flips true once startStream succeeds
+  // (i.e. the user tapped PiP and the tap-gesture stack ran the pipeline
+  // setup). While false the hook does the minimum: no rAF loop, no capture-
+  // Stream, no oscillator/livenessCtx, no hidden-video srcObject, no draw
+  // work. Only the one-line-per-minute cold heartbeat runs, so a normal
+  // no-PiP workout leaves zero PiP overhead in the frame budget.
+  // pipGateIdle=1
+  const armedRef = useRef(false);
 
   // Pass-10: publish to the module-level feed on every render so the
   // singleton draw loop reads live state even if this hook instance
@@ -245,7 +253,13 @@ export function usePipCanvasStream({
   // same name, restore from prev and increment feedFlapTotal. Emit a log
   // on each restore so the flap is measurable, not anecdotal.
   // pipFeedFlap=1
+  //
+  // Pass-21 Cut #1: skip the publish work while the pipeline is cold. The
+  // draw loop that reads latestPipFeed isn't running until startStream
+  // arms, so publishing before then is dead work — one PipFeed allocation
+  // per render × every workout, including workouts that never touch PiP.
   useEffect(() => {
+    if (!armedRef.current) return;
     const prev = latestPipFeed;
     let curOut = current as PipFeed['current'];
     let nxOut = next as PipFeed['next'];
@@ -1176,9 +1190,16 @@ export function usePipCanvasStream({
     rafId = requestAnimationFrame(drawFrame);
 
     streamRef.current = mergedStream;
+    // Pass-21 Cut #1: flag the pipeline as armed so the cold heartbeat
+    // stops and the publish effect starts pushing to latestPipFeed. First
+    // successful startStream is the transition — subsequent idempotent
+    // returns skip this (streamRef.current early-return above them).
+    armedRef.current = true;
+    pushHandoffLogAlways(`[PiP] pipGateIdle=0 armed=true probe=${pm} canvasId=${canvasId}`);
     setMediaStream(mergedStream);
 
     cleanupRef.current = () => {
+      armedRef.current = false;
       cancelAnimationFrame(rafId);
       try {
         for (const track of mergedStream.getTracks()) track.stop();
@@ -1283,13 +1304,33 @@ export function usePipCanvasStream({
     return audioTracks.length;
   }, []);
 
-  // Pass-4 keep-warm: startStream once on enabled=true and DON'T tear down on
-  // enabled=false. Pass-3 rebuilt every ~3s (pipArming timeout) which starved
-  // readyState between arms. Teardown now only on unmount.
+  // Pass-21 Cut #1: no auto-start. The pass-4 keep-warm useEffect used to
+  // call startStream() on enabled=true so readyState was hot before the PiP
+  // tap. That eagerness cost every no-PiP workout the full pipeline
+  // (rAF+captureStream+oscillator+hidden video decoding a live MediaStream).
+  // armPip's onPressIn already runs startStream() inside the tap-gesture
+  // stack — that path stays load-bearing, so iOS's gesture-scoped
+  // requestPictureInPicture() still gets a hot stream. The trade-off is a
+  // couple hundred ms of first-arm latency for the ~always-on savings.
+  // pipGateIdle=1
   useEffect(() => {
     if (!enabled) return;
-    startStream();
-  }, [enabled, startStream]);
+    if (typeof window === 'undefined') return;
+    if (armedRef.current) return;
+    pushHandoffLogAlways('[PiP] pipGateIdle=1 armed=false initial');
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      if (armedRef.current) {
+        try { window.clearInterval(id); } catch {}
+        return;
+      }
+      const uptimeSec = Math.round((Date.now() - startedAt) / 1000);
+      pushHandoffLogAlways(`[PiP] pipGateIdle=1 armed=false uptime=${uptimeSec}s`);
+    }, 60_000);
+    return () => {
+      try { window.clearInterval(id); } catch {}
+    };
+  }, [enabled]);
   useEffect(() => () => stopStream(), [stopStream]);
 
   return { mediaStream, videoElRef, isReady, canvasElRef, startStream, stopStream, attachAudioTracks, detachAudioTracks };
