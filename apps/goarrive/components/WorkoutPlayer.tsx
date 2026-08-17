@@ -238,7 +238,28 @@ export default function WorkoutPlayer({
   // videoRef.current, which the ref callback may not have refreshed
   // yet after a layer swap. Every rebind is logged via pushHandoffLog
   // (device tester copies COPY LOG; console.warn was invisible on iOS).
+  //
+  // Pass-15: resolver is now expected-URL-driven. Pass-14 selection
+  // quality landed (paused=false picks) but targeting broke — Class 1
+  // (empty registry, no retry, 30s+ text-only) and Class 2 (single
+  // stale layer held 90s+ across movements) proved the picker had no
+  // concept of what SHOULD play. Pass-15 uses activeVideoUrl as the
+  // expected URL, prefers expected+!paused, retries for up to 3s on
+  // no-match, and widens scan beyond `layer:*` (transition/
+  // grabEquipment videos register under phase-name keys).
   const pipSourceResolverRef = useRef<(() => HTMLVideoElement | null) | null>(null);
+  // Pass-15: expected-URL pointer. activeVideoUrl already encodes the
+  // reveal walk-forward (during rest/reveal it's the next movement's
+  // video), so the resolver can prefer the intended layer over any
+  // stale in-registry candidate. Ref lets the resolver read the latest
+  // value without churning effect deps.
+  const expectedUrlRef = useRef<string | null>(null);
+  // Pass-15: first-miss timestamp per expected URL. When the resolver
+  // finds no candidate matching the expected URL, we retry (return null)
+  // rather than binding a stale/wrong element. The 3s cap bounds the
+  // black-tile window — after that, any playing candidate beats a
+  // frozen black tile. Reset whenever expected URL changes.
+  const expectedMissAtRef = useRef<{ url: string | null; ts: number }>({ url: null, ts: 0 });
 
   // Pass 12: publish a window flag while this player is mounted. The SW
   // auto-reload handler injected in inject_pwa_meta.py reads this flag
@@ -393,8 +414,18 @@ export default function WorkoutPlayer({
       // handlePiP together give us both the async event path (if it fires)
       // and a direct snapshot.
       logPresentationChange('webkitpresentationmodechanged', `mode=${mode}`);
-      if (mode === 'picture-in-picture') onEnter();
-      else onLeave();
+      // Pass-15 dedupe: on newer WebKit, `enterpictureinpicture` /
+      // `leavepictureinpicture` fire alongside webkitpresentationmodechanged.
+      // Pass-14 log showed duplicate onEnter/onLeave bodies per real
+      // transition (two `videoBox` and two `replay issued` lines).
+      // Trivially safe: guard on pipActiveRef so the enter/leave body
+      // runs at most once per state flip, while the webkit tag log
+      // above still records the raw event for observability.
+      if (mode === 'picture-in-picture') {
+        if (!pipActiveRef.current) onEnter();
+      } else {
+        if (pipActiveRef.current) onLeave();
+      }
     };
     vid.addEventListener('enterpictureinpicture', onEnter);
     vid.addEventListener('leavepictureinpicture', onLeave);
@@ -1486,62 +1517,104 @@ export default function WorkoutPlayer({
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
 
-  // Pass-14 Fix 1: self-healing resolver + one-shot bind on displayedUrl.
+  // Pass-15 Fix 1: expected-URL-driven resolver + bounded retry.
   //
-  // The resolver ranks candidate <video> elements from videosRef and picks
-  // the best one for the PiP canvas source. Preference order:
-  //   1. layer:${displayedUrl} that reports !paused && readyState >= 3
-  //      (the promoted layer, actively decoding — first-class hit).
-  //   2. Any layer:* that reports !paused && readyState >= 3
-  //      (a sibling layer is decoding while displayedUrl stalled — better
-  //      to draw a fresh moving frame than a null tile).
-  //   3. layer:${displayedUrl} even if paused (the correct element, will
-  //      hopefully unpause soon; drawing its last decoded frame beats a
-  //      black tile).
-  //   4. videoRef.current (legacy — the ref-callback path). Last resort.
+  // Pass-14 selection quality worked (picker preferred !paused && rs>=3)
+  // but targeting failed. Two classes of miss showed up on device:
+  //   Class 1 — empty registry (layerKeys=0) at movement start: resolver
+  //     bound null once, drawFrame kept calling but the "no candidate"
+  //     branch only re-logs on state change so we saw ~30s of text-only
+  //     tile with no rebind entries.
+  //   Class 2 — single stale layer held for 90+ seconds across multiple
+  //     movements: picker had no concept of what SHOULD play, so any
+  //     playing candidate was "good enough" even when it was the wrong
+  //     movement's video.
   //
-  // Every rebind is logged to the COPY LOG via pushHandoffLog with the
-  // picked key, paused, readyState. Pass-13 used console.warn which the
-  // device tester cannot see on iOS.
+  // Pass-15 fixes both:
+  //   1. expected = activeVideoUrl (encodes reveal walk-forward — during
+  //      rest it's already the next movement's URL). Prefer expected
+  //      match && !paused && rs>=3 first, expected match paused second.
+  //      A non-matching stale layer is worse than a short retry window.
+  //   2. On no-match: track first-miss timestamp per expected URL.
+  //      Return null (retry) for up to 3s before falling back to any
+  //      playing candidate. drawFrame calls the resolver every rAF tick
+  //      when videoEl is null/paused, so retries are automatic.
+  //   3. Widen scan beyond `layer:*` — transition/grabEquipment/
+  //      waterBreak/followAlong/intro/outro register under phase-name
+  //      keys (WorkoutPlayer.tsx registerVideo call sites). Read
+  //      el.currentSrc to match the URL regardless of the map key
+  //      format. That closes the "layerKeys=0 while movement plays on
+  //      screen" gap: the visible element IS in videosRef, just under
+  //      a phase-name key.
+  //   4. Every rebind log carries expected=<shortUrl> + match=true/false
+  //      so wrong-binds are visible in the log immediately.
   //
-  // Effect keeps its one-shot bind so the ref is warm on transitions
-  // where the resolver has not yet been called by the draw loop. Deps
-  // include displayedUrl because that is what promotes on layer swap.
+  // Effect keeps deps on phase/currentIndex/displayedUrl so the log
+  // closure captures fresh values for the rebind context fields.
   useEffect(() => {
     if (Platform.OS !== 'web') return;
 
+    const shortUrl = (u: string | null): string => {
+      if (!u) return 'null';
+      const idx = u.lastIndexOf('/');
+      const tail = idx >= 0 ? u.slice(idx + 1) : u;
+      return tail.length > 32 ? tail.slice(0, 32) : tail;
+    };
+
     const resolve = (): HTMLVideoElement | null => {
       const map = videosRef.current;
-      const preferredKey = displayedUrl ? `layer:${displayedUrl}` : null;
-      let pick: { key: string; el: HTMLVideoElement; paused: boolean; rs: number } | null = null;
+      const expected = expectedUrlRef.current;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
       const readVideoEl = (el: any): HTMLVideoElement | null => {
         try { return el?._nativeRef?.current?.getVideoElement?.() ?? null; } catch { return null; }
       };
 
-      if (preferredKey) {
-        const el = readVideoEl(map.get(preferredKey));
-        if (el && !el.paused && el.readyState >= 3) {
-          pick = { key: preferredKey, el, paused: el.paused, rs: el.readyState };
-        }
+      // Reset the miss window whenever expected URL changes so each
+      // new movement gets its own fresh 3s retry budget.
+      if (expectedMissAtRef.current.url !== expected) {
+        expectedMissAtRef.current = { url: expected, ts: 0 };
       }
+
+      // Widened scan: read el.currentSrc to match the URL, ignoring
+      // whether the map key is `layer:` or a phase-name (transition,
+      // grabEquipment, etc.).
+      type Cand = { key: string; el: HTMLVideoElement; paused: boolean; rs: number; matches: boolean };
+      const cands: Cand[] = [];
+      for (const [key, entry] of map.entries()) {
+        const el = readVideoEl(entry);
+        if (!el) continue;
+        const src = el.currentSrc || el.src || '';
+        const matches = !!expected && src === expected;
+        cands.push({ key, el, paused: el.paused, rs: el.readyState, matches });
+      }
+
+      // Preference order:
+      //   1. expected match + playing + decoded (first-class hit)
+      //   2. expected match at all (correct element even if paused —
+      //      its last decoded frame > wrong content, and it will
+      //      unpause imminently on shouldPlay flip)
+      //   3. after 3s no-match cap: any playing decoded candidate
+      //      (visible motion beats a black tile once we've lost the
+      //      race)
+      let pick: Cand | null = null;
+      pick = cands.find((c) => c.matches && !c.paused && c.rs >= 3) ?? null;
+      if (!pick) pick = cands.find((c) => c.matches) ?? null;
+
       if (!pick) {
-        for (const [key, entry] of map.entries()) {
-          if (!key.startsWith('layer:')) continue;
-          const el = readVideoEl(entry);
-          if (el && !el.paused && el.readyState >= 3) {
-            pick = { key, el, paused: el.paused, rs: el.readyState };
-            break;
+        if (expectedMissAtRef.current.ts === 0) expectedMissAtRef.current.ts = now;
+        const missElapsedMs = now - expectedMissAtRef.current.ts;
+        if (missElapsedMs >= 3000) {
+          pick = cands.find((c) => !c.paused && c.rs >= 3) ?? null;
+          if (!pick) {
+            const el = readVideoEl(videoRef.current);
+            if (el) pick = { key: 'videoRef', el, paused: el.paused, rs: el.readyState, matches: false };
           }
         }
-      }
-      if (!pick && preferredKey) {
-        const el = readVideoEl(map.get(preferredKey));
-        if (el) pick = { key: preferredKey, el, paused: el.paused, rs: el.readyState };
-      }
-      if (!pick) {
-        const el = readVideoEl(videoRef.current);
-        if (el) pick = { key: 'videoRef', el, paused: el.paused, rs: el.readyState };
+      } else {
+        // Reset the miss clock; the URL slot stays associated so a
+        // fresh miss under the same expected restarts from zero.
+        expectedMissAtRef.current.ts = 0;
       }
 
       const prev = pipSourceVideoRef.current;
@@ -1552,13 +1625,14 @@ export default function WorkoutPlayer({
             (pick.el as any).disablePictureInPicture = true;
             pick.el.setAttribute('disablePictureInPicture', '');
           } catch {}
-          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} phase=${phase} displayedUrl=${displayedUrl ?? 'null'}`);
+          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} match=${pick.matches} expected=${shortUrl(expected)} phase=${phase} displayedUrl=${displayedUrl ?? 'null'} cands=${cands.length}`);
         }
         return pick.el;
       }
       if (prev !== null) {
         pipSourceVideoRef.current = null;
-        pushHandoffLog(`[PiP] pipSource rebind key=null (no candidate) phase=${phase} displayedUrl=${displayedUrl ?? 'null'} layerKeys=${Array.from(map.keys()).filter((k) => k.startsWith('layer:')).length}`);
+        const missMs = expectedMissAtRef.current.ts === 0 ? 0 : Math.round(now - expectedMissAtRef.current.ts);
+        pushHandoffLog(`[PiP] pipSource rebind key=null match=false expected=${shortUrl(expected)} phase=${phase} displayedUrl=${displayedUrl ?? 'null'} cands=${cands.length} missMs=${missMs}`);
       }
       return null;
     };
@@ -1567,6 +1641,13 @@ export default function WorkoutPlayer({
     resolve();
     return () => { pipSourceResolverRef.current = null; };
   }, [phase, currentIndex, displayedUrl]);
+
+  // Pass-15: keep expectedUrlRef in sync with activeVideoUrl. Ref
+  // update lets the resolver read the latest expected URL without
+  // triggering the resolver-install effect on every reveal flip.
+  useEffect(() => {
+    expectedUrlRef.current = activeVideoUrl;
+  }, [activeVideoUrl]);
 
   // URLs whose <Video> reported a load/decode error. Failed layers are
   // unmounted and never re-mounted, so the poster/thumbnail fallback renders
