@@ -457,6 +457,15 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 // through the pre-blessed generic players by swapping .src — a blessed
 // element stays blessed across src changes.
 const blessedElements = new WeakSet<HTMLAudioElement>();
+// Pass-21-b2: per-element attempt counter for the residual bless retry
+// (see scheduleBlessRetry). WeakMap because the count survives the retry
+// queue draining/re-queueing — if we tracked attempts on the queue entry
+// itself, a drain would reset the count and a permanently-broken element
+// could retry forever. Cap = 2 total retries (initial bless + 2 = 3 tries),
+// then give up. bless-by-use short-circuits by clearing the entry on a
+// successful pumpQueue `reason==='ended'`, so a working element never
+// consumes retries.
+const blessAttempts = new WeakMap<HTMLAudioElement, number>();
 // Elements whose bless play() promise hasn't settled yet. They are muted
 // mid-bless, so pumpQueue must never play them directly — resolvePlayableElement
 // routes to a generic player instead. Without this, the grabEquipment entry
@@ -655,47 +664,125 @@ function stopKeepalive(): void {
   }
 }
 
-// Pass-21 B audio-4: idle-retry scheduler for failed blesses. Uses
-// requestIdleCallback where available (all modern browsers except Safari
-// as of 2026) and falls back to setTimeout(1500) for Safari. Elements
-// with 3 prior attempts are dropped from the queue and logged.
+// Pass-21-b2: bless retry with hard busy-guard, capped attempts, and no
+// label chaining.
+//
+// PRIOR (pass-21 B audio) shipped a periodic drain that unconditionally
+// called `blessElement` on every queued element. `blessElement` sets
+// `el.src = SILENT_WAV` and fires `play()` — if the element was mid-clip
+// with a real voice, the src swap aborted playback with mediaError:3
+// (Devin's 22:05-22:07 device log: every clip died at ~1.2s exactly
+// twice, `generic_0_retry_retry_...` label chain 40+ deep, 19 simultaneous
+// re-blesses of the whole pool mid-workout). Contributor: pass-21 B
+// trimmed generic players 3→1, so every real voice routed through the
+// same `generic_0` element that the drain kept attacking.
+//
+// The rewrite:
+//  1. Bless-by-use in pumpQueue onDone (see reason==='ended' handler)
+//     covers the common case — a real playthrough IS the strongest
+//     possible bless. blessedByUse short-circuits any pending retry.
+//  2. blessElement itself has a busy-guard at entry — no timer path can
+//     ever touch a playing element (see the blessElement wrapper below).
+//  3. This scheduler's drain body ALSO checks `el.paused` before calling
+//     blessElement, and re-queues (without incrementing attempts) any
+//     element that is currently busy. Prevents attempt-cap burn on
+//     elements that just happen to be playing when the tick fires.
+//  4. Attempt count lives in `blessAttempts` (WeakMap keyed by el) so a
+//     drain doesn't reset the counter. Cap = 2 retries (initial bless +
+//     2 = 3 total tries), then give up with a loud warn.
+//  5. Label stays constant. NO `_retry_retry_...` chaining. The label is
+//     always the ORIGINAL one from unlock (e.g. `generic_0`,
+//     `music-shadow`), so failure grouping in the log stays clean.
+//  6. Backoff: if any element was requeued as busy, next tick fires after
+//     3s (not the fast 1.5s cadence) — gives real playback room to
+//     finish, and starves the log if playback is heavy.
+//
+// Guard proof (per feedback_media_timer_busy_guard.md):
+//   - blessElement checks `if (!el.paused && !blessingInFlight.has(el))
+//     return;` at entry — the ONE place that ever swaps src + play()s.
+//   - Drain body checks `if (!retryEl.paused) { requeue; continue; }`
+//     before ever calling blessElement.
+//   - Two independent gates. Neither path can fire against busy playback.
 function scheduleBlessRetry(el: HTMLAudioElement, label: string): void {
   if (typeof window === 'undefined') return;
-  const existing = blessRetryQueue.find((e) => e.el === el);
-  if (existing) {
-    existing.attempts += 1;
-    if (existing.attempts >= 3) {
-      const idx = blessRetryQueue.indexOf(existing);
-      if (idx >= 0) blessRetryQueue.splice(idx, 1);
-      console.warn('[VOICE-AUDIT] blessRetry giving up', { label, attempts: existing.attempts });
-      return;
-    }
-  } else {
-    blessRetryQueue.push({ el, label, attempts: 1 });
+  if (blessedElements.has(el)) return;
+  const priorAttempts = blessAttempts.get(el) || 0;
+  if (priorAttempts >= 2) {
+    console.warn('[VOICE-AUDIT] blessRetry giving up (cap reached)', { label, attempts: priorAttempts });
+    return;
   }
+  // De-dup: same element already queued — the tick will pick it up.
+  if (blessRetryQueue.find((e) => e.el === el)) return;
+  blessRetryQueue.push({ el, label, attempts: priorAttempts });
+  ensureBlessRetryTick(1500);
+}
+
+function ensureBlessRetryTick(delayMs: number): void {
+  if (typeof window === 'undefined') return;
   if (blessRetryScheduled) return;
+  if (blessRetryQueue.length === 0) return;
   blessRetryScheduled = true;
   const runRetries = () => {
     blessRetryScheduled = false;
     const drained = blessRetryQueue.splice(0, blessRetryQueue.length);
-    console.info('[VOICE-AUDIT] blessRetry draining', {
-      count: drained.length,
-      labels: drained.map((d) => d.label),
-    });
-    for (const { el: retryEl, label: retryLabel } of drained) {
-      if (blessedElements.has(retryEl)) continue;
-      blessElement(retryEl, `${retryLabel}_retry`);
+    const requeuedBusy: typeof drained = [];
+    let attempted = 0;
+    let gaveUp = 0;
+    for (const entry of drained) {
+      const { el: retryEl, label: retryLabel } = entry;
+      if (blessedElements.has(retryEl)) {
+        console.info('[VOICE-AUDIT] blessRetryBusyGuard skipped — already blessed by use', { label: retryLabel });
+        continue;
+      }
+      if (!retryEl.paused) {
+        // Element is playing real content — MUST NOT touch. Re-queue
+        // without incrementing attempts so a busy-tick doesn't burn the cap.
+        console.info('[VOICE-AUDIT] blessRetryBusyGuard skipped — element playing', { label: retryLabel });
+        requeuedBusy.push(entry);
+        continue;
+      }
+      const priorAttempts = blessAttempts.get(retryEl) || 0;
+      if (priorAttempts >= 2) {
+        console.warn('[VOICE-AUDIT] blessRetry giving up (cap reached)', { label: retryLabel, attempts: priorAttempts });
+        gaveUp++;
+        continue;
+      }
+      blessAttempts.set(retryEl, priorAttempts + 1);
+      attempted++;
+      blessElement(retryEl, retryLabel); // SAME label — no _retry chain
+    }
+    if (attempted > 0 || requeuedBusy.length > 0 || gaveUp > 0) {
+      console.info('[VOICE-AUDIT] blessRetry draining', {
+        attempted, requeuedBusy: requeuedBusy.length, gaveUp,
+      });
+    }
+    for (const entry of requeuedBusy) blessRetryQueue.push(entry);
+    if (blessRetryQueue.length > 0) {
+      ensureBlessRetryTick(3000); // backoff — 3s if busy elements deferred us
     }
   };
   const rIC = (window as any).requestIdleCallback;
   if (typeof rIC === 'function') {
-    rIC(runRetries, { timeout: 2000 });
+    rIC(runRetries, { timeout: delayMs + 1000 });
   } else {
-    setTimeout(runRetries, 1500);
+    setTimeout(runRetries, delayMs);
   }
 }
 
 function blessElement(el: HTMLAudioElement, label: string): void {
+  // Pass-21-b2: HARD busy-guard. blessElement's only mechanism is to swap
+  // `el.src = SILENT_WAV` and call `play()` — that unconditionally aborts
+  // any in-progress real playback (mediaError:3 → PLAY ENDED EARLY
+  // reason=error, killed at ~1.2s in Devin's 22:05-22:07 log). Any caller
+  // that hits a playing element is buggy: skip loudly, and rely on
+  // bless-by-use in pumpQueue onDone to mark the element blessed the
+  // next time it plays a real clip end-to-end. `blessingInFlight` is
+  // whitelisted so the SILENT_WAV play() itself doesn't fail its own
+  // guard (that path IS the bless).
+  if (!el.paused && !blessingInFlight.has(el)) {
+    console.info('[VOICE-AUDIT] blessRetryBusyGuard skipped — element playing at bless entry', { label });
+    return;
+  }
   try {
     // Bless by playing the 4-byte silent WAV, not the element's real clip.
     // muted alone is not a guarantee of silence: iOS Safari can ignore the
@@ -816,7 +903,7 @@ export function unlockAudioPlayback(): void {
   }
   startKeepalive();
   startGraphKeepalive();
-  console.info('[VOICE-AUDIT] unlockAudioPlayback ran', {
+  console.info('[VOICE-AUDIT] unlockAudioPlayback ran pass21b2=1', {
     pooledBlessed: Object.keys(audioPool).length,
     genericPlayers: blessedGenericPlayers.length,
   });
@@ -1035,6 +1122,12 @@ export function useWorkoutTTS({
   // Cache for grab-equipment voice URLs: normalized-text-hash → Storage URL (or null on failure)
   const grabEquipVoiceCacheRef = useRef<Record<string, string | null>>({});
   const grabEquipGeneratingRef = useRef<Set<string>>(new Set());
+  // Pass-21-b2: promise map so concurrent callers of resolveGrabEquipVoice
+  // (mount-time warm effect + phase-arrival branch) await the SAME in-flight
+  // callable instead of the phase-time caller early-returning on an
+  // immediately-resolved promise and reading `undefined` from the cache
+  // (the "get ready twice" bug from Devin's 22:05-22:07 log).
+  const grabEquipInflightPromiseRef = useRef<Record<string, Promise<void>>>({});
   // Pass-21 B audio-1: counters the mount-time warmup emits with the summary
   // line so a "would have generated on the critical path" number rides the
   // log without needing per-request server logging. warmDone flips once so
@@ -1202,6 +1295,19 @@ export function useWorkoutTTS({
         try { ac.abort(); } catch {}
       }
       if (reason === 'ended') {
+        // Pass-21-b2: bless-by-use. A clean 'ended' is the strongest
+        // possible proof the element is playable — mark it blessed and
+        // clear any pending residual retry so no idle-tick touches it
+        // later. Covers `generic_0` (workhorse for all cue voices post
+        // pass-21 B audio's 3→1 trim) and any pool element that plays a
+        // real clip end-to-end.
+        if (!blessedElements.has(audio)) {
+          blessedElements.add(audio);
+          blessAttempts.delete(audio);
+          const stale = blessRetryQueue.findIndex((e) => e.el === audio);
+          if (stale >= 0) blessRetryQueue.splice(stale, 1);
+          console.info('[VOICE-AUDIT] blessedByUse', { context: item.context });
+        }
         console.info('[VOICE-AUDIT] PLAY ENDED', { context: item.context, started });
       } else {
         console.warn('[VOICE-AUDIT] PLAY ENDED EARLY', {
@@ -1538,42 +1644,58 @@ export function useWorkoutTTS({
   const resolveGrabEquipVoice = useCallback(
     async (cacheKey: string, normalized: string, storagePath: string): Promise<void> => {
       if (grabEquipVoiceCacheRef.current[cacheKey] !== undefined) return;
-      if (grabEquipGeneratingRef.current.has(cacheKey)) return;
-      grabEquipGeneratingRef.current.add(cacheKey);
-      try {
-        const fns = getFunctions(undefined, 'us-central1');
-        const generateVoiceFn = httpsCallable<
-          {
-            text: string; voice: string; storagePath: string;
-            provider: string; engine: string; languageCode: string;
-            sampleRate: string; effect: string; masterSpeed: string;
-            masterPitch: string; masterVolume: string; fileStore: number;
-          },
-          { url: string; path: string }
-        >(fns, 'generateVoice');
-        const result = await generateVoiceFn({
-          text: normalized,
-          voice: TTS_VOICE_ID,
-          storagePath,
-          provider: TTS_PROVIDER,
-          engine: TTS_ENGINE,
-          languageCode: TTS_LANGUAGE_CODE,
-          sampleRate: TTS_SAMPLE_RATE,
-          effect: TTS_VOICE_EFFECT,
-          masterSpeed: TTS_MASTER_SPEED,
-          masterPitch: TTS_MASTER_PITCH,
-          masterVolume: TTS_MASTER_VOLUME,
-          fileStore: TTS_FILE_STORE_HOURS,
-        });
-        grabEquipVoiceCacheRef.current[cacheKey] = result.data?.url || null;
-      } catch (err: any) {
-        console.warn('[VOICE-AUDIT] grab-equipment: generateVoice THREW (warm/inline)', {
-          code: err?.code, message: err?.message,
-        });
-        grabEquipVoiceCacheRef.current[cacheKey] = null;
-      } finally {
-        grabEquipGeneratingRef.current.delete(cacheKey);
+      // Pass-21-b2: subscribe to the in-flight promise instead of early-return.
+      // PRIOR (pass-21 B audio) returned an immediately-resolved promise when
+      // an in-flight generateVoice was already pending — so the phase-time
+      // caller's `.then()` fired instantly with `undefined` still in the
+      // cache, fell through to the get_ready fallback cue, then the real
+      // instruction arrived later and (with pass-21 B's `key`-gating) was
+      // dropped, producing "get ready" instead of the coach's text.
+      const existing = grabEquipInflightPromiseRef.current[cacheKey];
+      if (existing) {
+        await existing;
+        return;
       }
+      const p = (async () => {
+        grabEquipGeneratingRef.current.add(cacheKey);
+        try {
+          const fns = getFunctions(undefined, 'us-central1');
+          const generateVoiceFn = httpsCallable<
+            {
+              text: string; voice: string; storagePath: string;
+              provider: string; engine: string; languageCode: string;
+              sampleRate: string; effect: string; masterSpeed: string;
+              masterPitch: string; masterVolume: string; fileStore: number;
+            },
+            { url: string; path: string }
+          >(fns, 'generateVoice');
+          const result = await generateVoiceFn({
+            text: normalized,
+            voice: TTS_VOICE_ID,
+            storagePath,
+            provider: TTS_PROVIDER,
+            engine: TTS_ENGINE,
+            languageCode: TTS_LANGUAGE_CODE,
+            sampleRate: TTS_SAMPLE_RATE,
+            effect: TTS_VOICE_EFFECT,
+            masterSpeed: TTS_MASTER_SPEED,
+            masterPitch: TTS_MASTER_PITCH,
+            masterVolume: TTS_MASTER_VOLUME,
+            fileStore: TTS_FILE_STORE_HOURS,
+          });
+          grabEquipVoiceCacheRef.current[cacheKey] = result.data?.url || null;
+        } catch (err: any) {
+          console.warn('[VOICE-AUDIT] grab-equipment: generateVoice THREW (warm/inline)', {
+            code: err?.code, message: err?.message,
+          });
+          grabEquipVoiceCacheRef.current[cacheKey] = null;
+        } finally {
+          grabEquipGeneratingRef.current.delete(cacheKey);
+          delete grabEquipInflightPromiseRef.current[cacheKey];
+        }
+      })();
+      grabEquipInflightPromiseRef.current[cacheKey] = p;
+      await p;
     },
     [],
   );
@@ -1777,14 +1899,38 @@ export function useWorkoutTTS({
             }
           } else {
             // Warmup hasn't populated this cacheKey yet (workout opened without
-            // warm, or steps arrived after mount). Fire the shared resolver
-            // and enqueue on completion. resolveGrabEquipVoice de-dupes so
-            // repeat phase entries collapse.
+            // warm, or steps arrived after mount, or the mount-time Promise.all
+            // is still in flight when the phase arrives). Pass-21-b2: hard 3s
+            // deadline — if the resolver hasn't landed by then, play the
+            // fallback cue AND flip `resolved` so a late resolution can't
+            // double-play the instruction on top of the fallback. Devin's
+            // pass-21 A log: warmup took 4.9s (3 cold generations), phase
+            // arrived at 3.2s — the real instruction landed ~1.6s after
+            // phase, so 3s is a comfortable envelope that catches all but
+            // the coldest first-ever runs.
             const capturedKey = key;
             const textHash = hashTtsText(cacheKey);
             const storagePath = `voice_cache/movements/grab-equip-${TTS_VOICE_SLUG}-${textHash}.mp3`;
-            console.info('[VOICE-AUDIT] grab-equipment: calling generateVoice (inline miss)', { normalized: normalized.slice(0, 60), storagePath });
+            const alreadyInflight = grabEquipGeneratingRef.current.has(cacheKey);
+            console.info('[VOICE-AUDIT] grab-equipment: calling generateVoice (inline miss)', {
+              normalized: normalized.slice(0, 60),
+              storagePath,
+              grabEquipInflightWait: alreadyInflight,
+            });
+            let resolved = false;
+            const timeoutId = setTimeout(() => {
+              if (resolved) return;
+              resolved = true;
+              if (lastSpokenRef.current !== capturedKey) return;
+              console.warn('[VOICE-AUDIT] grab-equipment: inline miss TIMED OUT — playing fallback cue', {
+                cacheKey, waitedMs: 3000,
+              });
+              enqueueCue('get_ready', capturedKey);
+            }, 3000);
             resolveGrabEquipVoice(cacheKey, normalized, storagePath).then(() => {
+              if (resolved) return;
+              resolved = true;
+              clearTimeout(timeoutId);
               const url = grabEquipVoiceCacheRef.current[cacheKey];
               if (lastSpokenRef.current !== capturedKey) return;
               if (url) {
