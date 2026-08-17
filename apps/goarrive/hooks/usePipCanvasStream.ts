@@ -702,8 +702,8 @@ export function usePipCanvasStream({
       const isRest = ph === 'rest';
       // Pass-10: REST tile mirrors the player — show "Next: <name>" as the
       // primary label instead of leaving the previous movement's name in
-      // place. Fall through to cur.name during WORK/other phases.
-      const movName = isRest && nx?.name ? `Next: ${nx.name}` : (cur?.name ?? '');
+      // place. Non-rest movName is derived from drawTarget below so the
+      // 3-2-1 reveal flips the name in the same frame the tile flips.
 
       // Retry audio attach each frame until the shared graph is up. Only in
       // 'full' mode AND non-iOS — pass-10 makes iOS video-only. 'audio'
@@ -776,23 +776,22 @@ export function usePipCanvasStream({
       //
       // pipPrepCut=1 pipPrepCutR4v2=1 pipR7Reveal=1
       let prepDrawn = false;
-      // Pass-20 R8 reveal-ahead for no-video next steps. If WorkoutPlayer
-      // is inside the reveal window (last REVEAL_LEAD_SECONDS of a timed
-      // non-rest phase — the 3-2-1 countdown) AND next is an exercise
-      // with no OWN videoUrl, override drawTarget=nx so the placeholder
-      // appears at the same moment a video-reveal would swap in the next
-      // movement's video. REST already swaps via `ph === 'rest' && nx`.
-      // Decision inputs: `nx.videoUrl` (own field, trustworthy per every
-      // R4v2 boundaryStart log) + `nx.stepType === 'exercise'`. Never
-      // resolver-derived — that's the line separating this from de10448.
+      // Pass-21 pipR8b: unify tile drawTarget with the main player's reveal
+      // window. `isInRevealWindow` (from WorkoutPlayer.isInPipRevealWindow,
+      // built from REVEAL_LEAD_SECONDS against timeLeft — the SAME source
+      // that drives the main title's `titleItem` swap) flips drawTarget to
+      // `nx` at the same frame the main title flips, regardless of whether
+      // current OR next has a video. This closes the (no-video-cur →
+      // no-video-nx) case Pass-20 R8 missed: the previous gate required
+      // `nx.stepType === 'exercise' && !nx.videoUrl` which fired but the
+      // downstream `movName` still read from `cur`; simplifying here lets
+      // downstream (name-card, prep screens, movName below) key off
+      // drawTarget uniformly. REST is redundant in the OR since
+      // isInPipRevealWindow already returns true for rest — kept for
+      // belt-and-suspenders per spec.
       const revealAhead = feed?.isInRevealWindow ?? false;
-      const isRevealSwap =
-        revealAhead
-        && ph !== 'rest'
-        && !!nx
-        && nx.stepType === 'exercise'
-        && !nx.videoUrl;
-      const drawTarget: any = (ph === 'rest' && nx) ? nx : isRevealSwap ? nx : cur;
+      const isRevealSwap = (revealAhead || ph === 'rest') && !!nx;
+      const drawTarget: any = isRevealSwap ? nx : cur;
       const targetStepType: string = drawTarget?.stepType ?? '';
       const targetVideoUrl: string = drawTarget?.videoUrl ?? '';
       const isPrepTarget =
@@ -801,16 +800,25 @@ export function usePipCanvasStream({
         || targetStepType === 'demo'
         || targetStepType === 'transition';
 
-      // R8 reveal-boundary tracker: fire pipR7Reveal=1 once per entry into a
-      // reveal-swap for a distinct next step. Independent of prepCut boundary
-      // so the two tallies don't conflate. Exit clears the sig so the next
-      // reveal starts a fresh entry.
-      if (isRevealSwap) {
+      // Non-rest movName follows drawTarget so the tile's header + name
+      // card both flip in the same frame as the main title. REST keeps
+      // the "Next: <name>" convention (verified correct in device logs).
+      const movName = isRest && nx?.name
+        ? `Next: ${nx.name}`
+        : (drawTarget?.name ?? '');
+
+      // pipR7Reveal boundary tracker: fire once per entry into a distinct
+      // reveal-swap (non-rest, so we don't conflate with the existing
+      // REST swap). Includes `curHasVideo` so the log discriminates the
+      // (a) video-cur → no-video-nx and (b) no-video-cur → no-video-nx
+      // cases both being covered by pipR8b.
+      const inNonRestReveal = isRevealSwap && ph !== 'rest';
+      if (inNonRestReveal) {
         const revealSig = `${nx?.name ?? ''}|${nx?.stepType ?? ''}`;
         if (revealSig !== revealLastSig) {
           revealLastSig = revealSig;
           revealTotal++;
-          pushHandoffLog(`[PiP] pipR7Reveal=1 revealTotal=${revealTotal} target=${nx?.name ?? ''} stepType=${nx?.stepType ?? ''} phase=${ph} timeLeft=${tl.toFixed(1)} frame=${totalFrameCount}`);
+          pushHandoffLog(`[PiP] pipR7Reveal=1 pipR8b=1 revealTotal=${revealTotal} target=${nx?.name ?? ''} stepType=${nx?.stepType ?? ''} phase=${ph} timeLeft=${tl.toFixed(1)} curHasVideo=${!!cur?.videoUrl} nxHasVideo=${!!nx?.videoUrl} frame=${totalFrameCount}`);
         }
       } else if (revealLastSig !== '') {
         revealLastSig = '';
