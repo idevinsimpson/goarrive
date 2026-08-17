@@ -527,6 +527,7 @@ export function usePipCanvasStream({
     let lastPaintedVideoSrc = '';
     let tileMode: 'prep' | 'video' | 'placeholder' = 'placeholder';
     let tileModeFlipTotal = 0;
+    let hysteresisHoldTotal = 0;
     const HYSTERESIS_FRAMES = 6;
     function flipTileMode(next: 'prep' | 'video' | 'placeholder', reason: string): void {
       if (next === tileMode) return;
@@ -939,10 +940,16 @@ export function usePipCanvasStream({
             && lastPaintedVideoEl
           ) {
             consecNoDrawableFrames++;
+            hysteresisHoldTotal++;
             drawVideoFrame(ctx, lastPaintedVideoEl, videoX, videoY, videoW, videoH, movName);
             // Stay in video mode — no flip logged. This is the whole point
             // of the latch: brief no-drawable dropouts don't break the
-            // continuity of the "video is playing" state.
+            // continuity of the "video is playing" state. First-hit +
+            // every-30 log carries pipHysteresis=1 marker so device-log
+            // greps can size the flap magnitude that the latch absorbed.
+            if (hysteresisHoldTotal === 1 || hysteresisHoldTotal % 30 === 0) {
+              pushHandoffLog(`[PiP] pipHysteresis=1 hysteresisHoldTotal=${hysteresisHoldTotal} consec=${consecNoDrawableFrames} frame=${totalFrameCount}`);
+            }
           } else {
             drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
             const reason = wouldHaveCovered
