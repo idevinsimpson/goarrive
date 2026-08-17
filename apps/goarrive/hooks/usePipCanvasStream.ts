@@ -447,6 +447,14 @@ export function usePipCanvasStream({
     let prepPhaseFirstDrawLogged = false;
     let prepTextFirstDrawLogged = false;
     let demoMotionFirstDrawLogged = false;
+    // Pass-20 R4 prep-cut: per-boundary suppression counter. Signature is
+    // (targetStepType | name | videoUrl); a change means we entered a new
+    // no-video boundary. On boundary end we log the count of frames the
+    // hard-cut saved from painting a stale previous-movement frame.
+    // pipPrepCut=1
+    let prepCutLastBoundarySig = '';
+    let prepCutBoundarySuppressed = 0;
+    let prepCutFirstHitLogged = false;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
@@ -598,16 +606,60 @@ export function usePipCanvasStream({
       ctx.fillStyle = '#0E1117';
       ctx.fillRect(0, 0, cw, ch);
 
-      // Pass-19 R4: phase-specific media slot drawing. Image phases draw
-      // static assets; all others fall through to the taint-guarded video
-      // draw below. A phase with NO asset (no image URL, no video ready)
-      // gets the fallback gradient + title only — never a black rectangle.
+      // Pass-19 R4 + Pass-20 R4 prep-cut: per-frame draw gate for no-video
+      // steps. Runs BEFORE the taint-guarded video path so the previous
+      // movement's still-bound element can never paint through at the reveal
+      // boundary. Asymmetric on purpose: with-video → with-video keeps the
+      // R3v2 blip cover (desired for smooth handoff); only no-video / prep
+      // targets get the hard cut.
+      //
+      // Draw target: during REST the timer keeps cur=finished + nx=incoming
+      // and WorkoutPlayer's reveal shows next throughout. Gating on cur
+      // during REST would evaluate the OLD movement's stepType and let the
+      // stale video keep drawing. Use drawTarget instead so no-video
+      // detection fires the same frame the incoming step's data is
+      // published — before any resolver rebind can land.
+      //
+      // pipPrepCut=1
       let prepDrawn = false;
+      const drawTarget: any = ph === 'rest' && nx ? nx : cur;
+      const targetStepType: string = drawTarget?.stepType ?? '';
+      const targetVideoUrl: string = drawTarget?.videoUrl ?? '';
+      const isNoVideoTarget =
+        targetStepType === 'grabEquipment'
+        || targetStepType === 'waterBreak'
+        || targetStepType === 'demo'
+        || targetStepType === 'transition'
+        || (targetStepType === 'exercise' && !targetVideoUrl);
 
-      if (ph === 'grabEquipment') {
-        const imgUrl: string | undefined = (cur as any)?.grabEquipmentImageUrl;
-        if (imgUrl) {
-          const img = getOrLoadPipImage(imgUrl);
+      // Boundary tracker: log the count of suppressed frames every time we
+      // leave a no-video boundary. Devin's finding — "the previous movement
+      // sometimes flashes" — becomes measurable here as "how many frames
+      // the hard-cut caught for each countdown-into-prep boundary."
+      const boundarySig = isNoVideoTarget
+        ? `${targetStepType}|${drawTarget?.name ?? ''}|${targetVideoUrl}`
+        : '';
+      if (boundarySig !== prepCutLastBoundarySig) {
+        if (prepCutLastBoundarySig !== '' && prepCutBoundarySuppressed > 0) {
+          pushHandoffLog(`[PiP] pipPrepCut=1 boundaryEnd sig=${prepCutLastBoundarySig} suppressedFrames=${prepCutBoundarySuppressed}`);
+        }
+        prepCutBoundarySuppressed = 0;
+        prepCutLastBoundarySig = boundarySig;
+        if (isNoVideoTarget) {
+          pushHandoffLog(`[PiP] pipPrepCut=1 boundaryStart target=${targetStepType} phase=${ph} name=${drawTarget?.name ?? ''} frame=${totalFrameCount}`);
+        }
+      }
+
+      if (isNoVideoTarget) {
+        prepCutBoundarySuppressed++;
+        if (!prepCutFirstHitLogged) {
+          prepCutFirstHitLogged = true;
+          pushHandoffLog(`[PiP] pipPrepCut=1 firstHit target=${targetStepType} phase=${ph} frame=${totalFrameCount}`);
+        }
+
+        if (targetStepType === 'grabEquipment') {
+          const imgUrl: string | undefined = drawTarget?.grabEquipmentImageUrl;
+          const img = imgUrl ? getOrLoadPipImage(imgUrl) : null;
           if (img && img.complete && img.naturalWidth > 0) {
             try {
               const iAsp = img.naturalWidth / img.naturalHeight;
@@ -621,73 +673,78 @@ export function usePipCanvasStream({
               ctx.clip();
               ctx.drawImage(img, sx, sy, sw, sh, videoX, videoY, videoW, videoH);
               ctx.restore();
-              prepDrawn = true;
-              if (!prepPhaseFirstDrawLogged) {
-                prepPhaseFirstDrawLogged = true;
-                pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} imgReady=true frame=${totalFrameCount}`);
-              }
-            } catch {}
-          } else if (img) {
-            // Image is loading — paint slate + title placeholder
-            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
-            prepDrawn = true;
-            if (!prepPhaseFirstDrawLogged) {
-              prepPhaseFirstDrawLogged = true;
-              pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} imgReady=false frame=${totalFrameCount}`);
+            } catch {
+              drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
             }
+          } else {
+            // Image missing or still loading — slate + title. Never a black
+            // rectangle, and never the previous movement's frozen frame.
+            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
           }
-        }
-      } else if (ph === 'demo') {
-        const demos: any[] = (cur as any)?.demoMovements ?? [];
-        if (demos.length > 0) {
-          const cols = demos.length <= 4 ? 2 : 3;
-          const rows = Math.ceil(demos.length / cols);
-          const gutter = 4;
-          const cellW = Math.floor((videoW - gutter * (cols - 1)) / cols);
-          const cellH = Math.floor((videoH - gutter * (rows - 1)) / rows);
-          for (let i = 0; i < demos.length; i++) {
-            const col = i % cols;
-            const row = Math.floor(i / cols);
-            const mx = videoX + col * (cellW + gutter);
-            const my = videoY + row * (cellH + gutter);
-            // Pass-19 R4 follow-up: prefer thumbnailUrl (animated GIF) over
-            // posterUrl (still) so the tile shows movements in motion — same
-            // priority the main player's PosterThumb uses (gifUrl first).
-            // Marker pipPass19R4Motion=1 fires when a GIF is drawn.
-            const gifUrl: string | undefined = demos[i].thumbnailUrl;
-            const posterUrl: string | undefined = demos[i].posterUrl;
-            const drawUrl = gifUrl || posterUrl;
-            ctx.save();
-            ctx.beginPath();
-            ctx.roundRect(mx, my, cellW, cellH, 4);
-            ctx.clip();
-            if (drawUrl) {
-              const img = getOrLoadPipImage(drawUrl);
-              if (img && img.complete && img.naturalWidth > 0) {
-                try { ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, mx, my, cellW, cellH); } catch {}
+          if (!prepPhaseFirstDrawLogged) {
+            prepPhaseFirstDrawLogged = true;
+            const imgReady = !!(img && img.complete && img.naturalWidth > 0);
+            pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 target=grabEquipment imgReady=${imgReady} frame=${totalFrameCount}`);
+          }
+        } else if (targetStepType === 'demo') {
+          const demos: any[] = drawTarget?.demoMovements ?? [];
+          if (demos.length > 0) {
+            const cols = demos.length <= 4 ? 2 : 3;
+            const rows = Math.ceil(demos.length / cols);
+            const gutter = 4;
+            const cellW = Math.floor((videoW - gutter * (cols - 1)) / cols);
+            const cellH = Math.floor((videoH - gutter * (rows - 1)) / rows);
+            for (let i = 0; i < demos.length; i++) {
+              const col = i % cols;
+              const row = Math.floor(i / cols);
+              const mx = videoX + col * (cellW + gutter);
+              const my = videoY + row * (cellH + gutter);
+              // Prefer thumbnailUrl (GIF) over posterUrl (still) — same
+              // priority as PosterThumb. Marker pipPass19R4Motion=1 fires
+              // when a GIF is drawn.
+              const gifUrl: string | undefined = demos[i].thumbnailUrl;
+              const posterUrl: string | undefined = demos[i].posterUrl;
+              const drawUrl = gifUrl || posterUrl;
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(mx, my, cellW, cellH, 4);
+              ctx.clip();
+              if (drawUrl) {
+                const img = getOrLoadPipImage(drawUrl);
+                if (img && img.complete && img.naturalWidth > 0) {
+                  try { ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, mx, my, cellW, cellH); } catch {}
+                } else {
+                  ctx.fillStyle = '#1A2030';
+                  ctx.fillRect(mx, my, cellW, cellH);
+                }
               } else {
                 ctx.fillStyle = '#1A2030';
                 ctx.fillRect(mx, my, cellW, cellH);
               }
-            } else {
-              ctx.fillStyle = '#1A2030';
-              ctx.fillRect(mx, my, cellW, cellH);
+              ctx.restore();
             }
-            ctx.restore();
-          }
-          prepDrawn = true;
-          if (!prepPhaseFirstDrawLogged) {
-            prepPhaseFirstDrawLogged = true;
-            pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} demos=${demos.length} frame=${totalFrameCount}`);
-          }
-          if (!demoMotionFirstDrawLogged) {
-            const hasGif = demos.some((d: any) => !!d.thumbnailUrl);
-            if (hasGif) {
-              demoMotionFirstDrawLogged = true;
-              pushHandoffLog(`[PiP] pipPass19R4Motion=1 phase=demo gifTiles=${demos.filter((d: any) => !!d.thumbnailUrl).length}/${demos.length} frame=${totalFrameCount}`);
+            if (!prepPhaseFirstDrawLogged) {
+              prepPhaseFirstDrawLogged = true;
+              pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 target=demo demos=${demos.length} frame=${totalFrameCount}`);
             }
+            if (!demoMotionFirstDrawLogged) {
+              const hasGif = demos.some((d: any) => !!d.thumbnailUrl);
+              if (hasGif) {
+                demoMotionFirstDrawLogged = true;
+                pushHandoffLog(`[PiP] pipPass19R4Motion=1 target=demo gifTiles=${demos.filter((d: any) => !!d.thumbnailUrl).length}/${demos.length} frame=${totalFrameCount}`);
+              }
+            }
+          } else {
+            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
           }
+        } else {
+          // waterBreak / transition / no-video exercise → gradient + centered
+          // name. The old code let these fall through to the video draw path,
+          // which is exactly where the previous movement flashed.
+          drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
         }
+
+        prepDrawn = true;
       }
 
       // Pass 12: taint-guarded video draw. Skip once tainted. On each
@@ -788,17 +845,19 @@ export function usePipCanvasStream({
       ctx.restore();
 
       const nameMaxW = cw * 0.6;
-      // Pass-19 R4 follow-up: for grabEquipment, mirror the main player's
-      // title (grabEquipmentText || name — see WorkoutPlayer L2425) so the
-      // tile shows the instruction ("Grab 35 pound Dumbbells & a Swiss Ball")
-      // above the image instead of just the block name. Marker:
-      // pipPass19R4Text=1 for served-JS verification.
-      const nameText = ph === 'grabEquipment'
-        ? ((cur as any)?.grabEquipmentText || movName)
+      // Pass-19 R4 follow-up + Pass-20 R4: for grabEquipment, mirror the
+      // main player's title (grabEquipmentText || name — see WorkoutPlayer
+      // L2425) so the tile shows the instruction ("Grab 35 pound Dumbbells
+      // & a Swiss Ball") above the image instead of just the block name.
+      // Use targetStepType so this also fires during REST heading INTO a
+      // grabEquipment step — same frame the prep-cut renders the image.
+      // Marker pipPass19R4Text=1 stays for served-JS verification.
+      const nameText = targetStepType === 'grabEquipment'
+        ? (drawTarget?.grabEquipmentText || movName)
         : movName;
-      if (ph === 'grabEquipment' && !prepTextFirstDrawLogged && nameText && nameText !== movName) {
+      if (targetStepType === 'grabEquipment' && !prepTextFirstDrawLogged && nameText && nameText !== movName) {
         prepTextFirstDrawLogged = true;
-        pushHandoffLog(`[PiP] pipPass19R4Text=1 phase=grabEquipment textLen=${nameText.length} frame=${totalFrameCount}`);
+        pushHandoffLog(`[PiP] pipPass19R4Text=1 target=grabEquipment textLen=${nameText.length} frame=${totalFrameCount}`);
       }
       drawMovementName(ctx, nameText, pad, Math.round(ch * 0.075), nameMaxW);
 
