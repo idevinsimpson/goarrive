@@ -260,6 +260,13 @@ export default function WorkoutPlayer({
   // black-tile window — after that, any playing candidate beats a
   // frozen black tile. Reset whenever expected URL changes.
   const expectedMissAtRef = useRef<{ url: string | null; ts: number }>({ url: null, ts: 0 });
+  // Pass-19 R1: retry count for canplay/loadeddata events fired on low-readyState
+  // candidates. Incremented each time a listener fires and re-invokes the resolver.
+  const r1RetryCountRef = useRef(0);
+  // Pass-19 R1: WeakSet of elements that already have a canplay listener attached.
+  // Prevents duplicate listeners when the resolver is called multiple rAF ticks
+  // before the element fires canplay.
+  const r1ListenersAttachedRef = useRef(typeof WeakSet !== 'undefined' ? new WeakSet<HTMLVideoElement>() : null);
 
   // Pass 12: publish a window flag while this player is mounted. The SW
   // auto-reload handler injected in inject_pwa_meta.py reads this flag
@@ -1657,16 +1664,22 @@ export default function WorkoutPlayer({
         cands.push({ key, el, paused: el.paused, rs: el.readyState, matches });
       }
 
+      // Pass-19 R2: when multiple candidates match the expected URL
+      // (e.g. INCOMING and current share a movement URL during transition),
+      // prefer the element registered under the exact `layer:${expected}`
+      // key before falling to any-match. This prevents the INCOMING element
+      // from stealing the bind away from the already-decoded current layer.
       // Preference order:
-      //   1. expected match + playing + decoded (first-class hit)
-      //   2. expected match at all (correct element even if paused —
-      //      its last decoded frame > wrong content, and it will
-      //      unpause imminently on shouldPlay flip)
-      //   3. after 3s no-match cap: any playing decoded candidate
-      //      (visible motion beats a black tile once we've lost the
-      //      race)
+      //   1a. layer:${expected} key + playing + decoded (exact-key first-class)
+      //   1b. any match + playing + decoded (first-class hit)
+      //   2a. layer:${expected} key at all (correct element even if paused)
+      //   2b. any match at all (correct URL even if paused)
+      //   3.  after 3s no-match cap: any playing decoded candidate
+      const exactLayerKey = expected ? `layer:${expected}` : null;
       let pick: Cand | null = null;
-      pick = cands.find((c) => c.matches && !c.paused && c.rs >= 3) ?? null;
+      pick = cands.find((c) => c.matches && !c.paused && c.rs >= 3 && c.key === exactLayerKey) ?? null;
+      if (!pick) pick = cands.find((c) => c.matches && !c.paused && c.rs >= 3) ?? null;
+      if (!pick) pick = cands.find((c) => c.matches && c.key === exactLayerKey) ?? null;
       if (!pick) pick = cands.find((c) => c.matches) ?? null;
 
       if (!pick) {
@@ -1687,6 +1700,28 @@ export default function WorkoutPlayer({
 
       const prev = pipSourceVideoRef.current;
       if (pick) {
+        // Pass-19 R1: if the picked element has readyState < 2, attach a
+        // one-shot canplay/loadeddata listener so we re-invoke the resolver
+        // as soon as the element becomes drawable — faster than waiting for
+        // the next rAF tick. Deduped by r1ListenersAttachedRef.
+        // pipPass19R1Retry=1
+        if (Platform.OS === 'web' && pick.rs < 2) {
+          const ws = r1ListenersAttachedRef.current;
+          if (ws && !ws.has(pick.el)) {
+            ws.add(pick.el);
+            const el = pick.el;
+            const onReady = () => {
+              el.removeEventListener('canplay', onReady);
+              el.removeEventListener('loadeddata', onReady);
+              r1RetryCountRef.current++;
+              pushHandoffLog(`[PiP] pipPass19R1Retry=1 retryCount=${r1RetryCountRef.current} rs=${el.readyState} resolving`);
+              try { pipSourceResolverRef.current?.(); } catch {}
+            };
+            el.addEventListener('canplay', onReady, { once: true });
+            el.addEventListener('loadeddata', onReady, { once: true });
+            pushHandoffLog(`[PiP] R1 listener attached rs=${pick.rs} key=${pick.key}`);
+          }
+        }
         if (prev !== pick.el) {
           pipSourceVideoRef.current = pick.el;
           try {
@@ -1694,7 +1729,10 @@ export default function WorkoutPlayer({
             pick.el.setAttribute('disablePictureInPicture', '');
           } catch {}
           const pickedSrc = pick.el.currentSrc || pick.el.src || '';
-          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} match=${pick.matches} expected=${shortUrl(expected)} picked=${shortUrl(pickedSrc)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length}`);
+          // Pass-19 R2: log elementSwitch=1 when the bound element changes
+          // (not first bind). pipPass19R2Switch=1
+          const elementSwitch = prev !== null ? 1 : 0;
+          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} match=${pick.matches} elementSwitch=${elementSwitch} pipPass19R2Switch=1 expected=${shortUrl(expected)} picked=${shortUrl(pickedSrc)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length}`);
         }
         return pick.el;
       }

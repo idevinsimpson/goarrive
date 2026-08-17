@@ -4,6 +4,7 @@ import { getPipAudioStream } from './useWorkoutTTS';
 import { pushHandoffLog } from '../utils/handoffLog';
 import {
   drawVideoFrame,
+  drawFallbackGradient,
   drawTimer,
   drawMovementName,
   drawRepCount,
@@ -88,6 +89,22 @@ export function resumeLivenessCtx(reason: string): void {
   } catch (e) {
     pushHandoffLog(`[PiP] livenessCtx resume throw reason=${reason} before=${before} err=${(e as Error)?.name ?? 'unknown'}`);
   }
+}
+
+// Pass-19 R4: module-level image cache for prep-phase static assets
+// (grabEquipment image, demo movement posters). Keyed by URL. Cache persists
+// across workout phases so a poster loaded during demo is free during the
+// next visit. Eviction: none (bounded by session poster count, not a concern).
+const pipImageCache = new Map<string, HTMLImageElement>();
+function getOrLoadPipImage(url: string): HTMLImageElement | null {
+  if (!url || typeof Image === 'undefined') return null;
+  const cached = pipImageCache.get(url);
+  if (cached) return cached;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+  pipImageCache.set(url, img);
+  return img;
 }
 
 // True on iOS Safari (WebKit). Pass-10 fork-insensitive stutter fix: on
@@ -407,6 +424,14 @@ export function usePipCanvasStream({
     // in favour of a poster/text fallback so one bad element can never
     // kill the whole tile again.
     let pipCanvasTainted = false;
+    // Pass-19 R3: hold last decoded video element so a brief rebind gap
+    // (new element readyState < 2 for one or more frames) paints the frozen
+    // last frame instead of the fallback gradient. blipCoveredTotal tracks
+    // how many frames were covered for the probe log.
+    let lastDecodedVideoEl: HTMLVideoElement | null = null;
+    let blipCoveredTotal = 0;
+    // Pass-19: one-time log on first prep-phase draw (bundle marker for grep)
+    let prepPhaseFirstDrawLogged = false;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
@@ -497,7 +522,11 @@ export function usePipCanvasStream({
       // otherwise we keep the current bind and let the resolver run
       // when either (a) the expected URL changes (miss window resets)
       // or (b) the picked candidate goes null.
-      const visualPhase = ph === 'work' || ph === 'rest' || ph === 'swap' || ph === 'transition' || ph === 'grabEquipment' || ph === 'waterBreak' || ph === 'demo';
+      // Pass-19 R4: add intro + followAlongVideo so their video elements are
+      // resolved by the picker. Image-only phases (demo, grabEquipment with
+      // static image) also need the phase in this set so the resolver runs and
+      // produces probe log lines even when the draw slot uses an image instead.
+      const visualPhase = ph === 'work' || ph === 'rest' || ph === 'swap' || ph === 'transition' || ph === 'grabEquipment' || ph === 'waterBreak' || ph === 'demo' || ph === 'intro' || ph === 'followAlongVideo';
       if (visualPhase) {
         const resolved = feed?.resolveVideo?.() ?? null;
         if (resolved) videoEl = resolved;
@@ -554,28 +583,128 @@ export function usePipCanvasStream({
       ctx.fillStyle = '#0E1117';
       ctx.fillRect(0, 0, cw, ch);
 
+      // Pass-19 R4: phase-specific media slot drawing. Image phases draw
+      // static assets; all others fall through to the taint-guarded video
+      // draw below. A phase with NO asset (no image URL, no video ready)
+      // gets the fallback gradient + title only — never a black rectangle.
+      let prepDrawn = false;
+
+      if (ph === 'grabEquipment') {
+        const imgUrl: string | undefined = (cur as any)?.grabEquipmentImageUrl;
+        if (imgUrl) {
+          const img = getOrLoadPipImage(imgUrl);
+          if (img && img.complete && img.naturalWidth > 0) {
+            try {
+              const iAsp = img.naturalWidth / img.naturalHeight;
+              const dAsp = videoW / videoH;
+              let sx = 0; let sy = 0; let sw = img.naturalWidth; let sh = img.naturalHeight;
+              if (iAsp > dAsp) { sw = img.naturalHeight * dAsp; sx = (img.naturalWidth - sw) / 2; }
+              else { sh = img.naturalWidth / dAsp; sy = (img.naturalHeight - sh) / 2; }
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(videoX, videoY, videoW, videoH, Math.round(videoW * 0.04));
+              ctx.clip();
+              ctx.drawImage(img, sx, sy, sw, sh, videoX, videoY, videoW, videoH);
+              ctx.restore();
+              prepDrawn = true;
+              if (!prepPhaseFirstDrawLogged) {
+                prepPhaseFirstDrawLogged = true;
+                pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} imgReady=true frame=${totalFrameCount}`);
+              }
+            } catch {}
+          } else if (img) {
+            // Image is loading — paint slate + title placeholder
+            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            prepDrawn = true;
+            if (!prepPhaseFirstDrawLogged) {
+              prepPhaseFirstDrawLogged = true;
+              pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} imgReady=false frame=${totalFrameCount}`);
+            }
+          }
+        }
+      } else if (ph === 'demo') {
+        const demos: any[] = (cur as any)?.demoMovements ?? [];
+        if (demos.length > 0) {
+          const cols = demos.length <= 4 ? 2 : 3;
+          const rows = Math.ceil(demos.length / cols);
+          const gutter = 4;
+          const cellW = Math.floor((videoW - gutter * (cols - 1)) / cols);
+          const cellH = Math.floor((videoH - gutter * (rows - 1)) / rows);
+          for (let i = 0; i < demos.length; i++) {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const mx = videoX + col * (cellW + gutter);
+            const my = videoY + row * (cellH + gutter);
+            const posterUrl: string | undefined = demos[i].posterUrl || demos[i].thumbnailUrl;
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(mx, my, cellW, cellH, 4);
+            ctx.clip();
+            if (posterUrl) {
+              const img = getOrLoadPipImage(posterUrl);
+              if (img && img.complete && img.naturalWidth > 0) {
+                try { ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, mx, my, cellW, cellH); } catch {}
+              } else {
+                ctx.fillStyle = '#1A2030';
+                ctx.fillRect(mx, my, cellW, cellH);
+              }
+            } else {
+              ctx.fillStyle = '#1A2030';
+              ctx.fillRect(mx, my, cellW, cellH);
+            }
+            ctx.restore();
+          }
+          prepDrawn = true;
+          if (!prepPhaseFirstDrawLogged) {
+            prepPhaseFirstDrawLogged = true;
+            pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} demos=${demos.length} frame=${totalFrameCount}`);
+          }
+        }
+      }
+
       // Pass 12: taint-guarded video draw. Skip once tainted. On each
       // untainted draw verify with getImageData(1x1); log the first
       // hit and switch to fallback for the rest of the session.
-      if (!pipCanvasTainted) {
-        drawVideoFrame(ctx, videoEl, videoX, videoY, videoW, videoH, movName);
-        try {
-          ctx.getImageData(0, 0, 1, 1);
-        } catch (e) {
-          pipCanvasTainted = true;
-          pushHandoffLog(`[PiP] CANVAS TAINTED — getImageData rejected after video draw (${(e as Error)?.name ?? 'unknown'}) — captureStream will silently stop delivering frames; falling back to poster for rest of session. Root cause: movement <video> loaded without crossOrigin=anonymous BEFORE src.`);
+      // Pass-19 R3: hold last decoded video element so a rebind gap
+      // (new element readyState < 2 for one or more frames) paints the
+      // last decoded frame instead of the fallback gradient.
+      // pipPass19R3Blip=1
+      if (!prepDrawn) {
+        if (!pipCanvasTainted) {
+          // R3: update lastDecodedVideoEl when current element is decoded
+          if (videoEl && videoEl.readyState >= 2) {
+            lastDecodedVideoEl = videoEl;
+          }
+          // R3: use lastDecodedVideoEl as blip cover when current el not ready
+          const blipEl = (!videoEl || videoEl.readyState < 2) && lastDecodedVideoEl && lastDecodedVideoEl.readyState >= 2
+            ? lastDecodedVideoEl
+            : null;
+          const drawEl = blipEl ?? videoEl;
+          if (blipEl) {
+            blipCoveredTotal++;
+            if (blipCoveredTotal === 1 || blipCoveredTotal % 30 === 0) {
+              pushHandoffLog(`[PiP] pipPass19R3Blip=1 blipCoveredTotal=${blipCoveredTotal} frame=${totalFrameCount}`);
+            }
+          }
+          drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, movName);
+          try {
+            ctx.getImageData(0, 0, 1, 1);
+          } catch (e) {
+            pipCanvasTainted = true;
+            pushHandoffLog(`[PiP] CANVAS TAINTED — getImageData rejected after video draw (${(e as Error)?.name ?? 'unknown'}) — captureStream will silently stop delivering frames; falling back to poster for rest of session. Root cause: movement <video> loaded without crossOrigin=anonymous BEFORE src.`);
+          }
         }
-      }
-      if (pipCanvasTainted) {
-        ctx.save();
-        ctx.fillStyle = '#111';
-        ctx.fillRect(videoX, videoY, videoW, videoH);
-        ctx.fillStyle = '#8A95A3';
-        ctx.font = `500 ${Math.round(cw * 0.03)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('(video unavailable)', videoX + videoW / 2, videoY + videoH / 2);
-        ctx.restore();
+        if (pipCanvasTainted) {
+          ctx.save();
+          ctx.fillStyle = '#111';
+          ctx.fillRect(videoX, videoY, videoW, videoH);
+          ctx.fillStyle = '#8A95A3';
+          ctx.font = `500 ${Math.round(cw * 0.03)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('(video unavailable)', videoX + videoW / 2, videoY + videoH / 2);
+          ctx.restore();
+        }
       }
 
       ctx.fillStyle = 'rgba(14,17,23,0.65)';
