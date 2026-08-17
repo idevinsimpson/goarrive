@@ -796,14 +796,38 @@ export default function WorkoutPlayer({
     // work: the delayed check finds the entry unchanged (or already
     // replaced by something new) and skips only when identity matches.
     // pipRegDedup=1
+    //
+    // Pass-20 R6 (2026-08-17): the microtask-defer alone does not catch
+    // React's inline-arrow churn. On churn React fires oldRef(null) then
+    // newRef(same-el) synchronously in the same commit; the microtask
+    // sees `get(key) === currentEl` still true (identity unchanged) and
+    // proceeds to delete. Device log at 17:02–17:09 showed cands going
+    // 1→0→1 at ~1Hz for the whole session, producing a ~1s placeholder
+    // flash on every empty beat and a 55s straight stretch at 17:07–08.
+    //
+    // Verify death via isConnected in the microtask: on real unmount
+    // React removes the DOM node after commit so isConnected flips to
+    // false; on churn the DOM node stays in the tree so isConnected
+    // stays true. Skip the delete when connected — the null was churn.
+    // pipRegDedupR6=1
+    const readDomEl = (entry: any): HTMLVideoElement | null => {
+      try { return entry?._nativeRef?.current?.getVideoElement?.() ?? null; } catch { return null; }
+    };
     if (!el) {
       const currentEl = videosRef.current.get(key);
       if (!currentEl) return;
       if (typeof queueMicrotask === 'function') {
         queueMicrotask(() => {
-          if (videosRef.current.get(key) === currentEl) {
-            videosRef.current.delete(key);
+          if (videosRef.current.get(key) !== currentEl) return;
+          const domEl = readDomEl(currentEl);
+          if (domEl && domEl.isConnected) {
+            if (!(currentEl as any).__pipRegDedupR6SkipLogged) {
+              (currentEl as any).__pipRegDedupR6SkipLogged = true;
+              pushHandoffLog(`[PiP] pipRegDedupR6=1 skipDelete key=${key} isConnected=true`);
+            }
+            return;
           }
+          videosRef.current.delete(key);
         });
       } else {
         videosRef.current.delete(key);
@@ -1651,6 +1675,15 @@ export default function WorkoutPlayer({
   useEffect(() => {
     if (Platform.OS !== 'web') return;
 
+    // Pass-20 R6 keepPrev log throttle. R5 device log had the keepPrev
+    // path running per-frame from 17:04:09→17:06:15 (hundreds of lines
+    // at 20Hz) — visually fine but flooded the 5000-entry ring buffer.
+    // One line per second with count-since-last preserves signal
+    // without ring pressure. Vars live in the effect closure so a
+    // phase change (which re-runs the effect) resets the throttle.
+    let keepPrevLastLogAt = 0;
+    let keepPrevSinceLastLogCount = 0;
+
     // Pass-16: log the full /videos/<file> segment (not just the coach
     // prefix). Pass-15 truncated to 32 chars which cut off exactly at
     // the shared coach-prefix `movements%2F<coachId>%2F...`, making
@@ -1736,12 +1769,25 @@ export default function WorkoutPlayer({
       // Pass-20 R4v2 keep-bound: on no-match, keep the previous binding
       // rather than nulling it. The prior code unbound on every mismatch,
       // which combined with ref-callback identity churn caused the tile
-      // to blink black across reveals. Only null when the map is empty —
-      // i.e. no elements are mounted at all. Log match=false so the
-      // wrong-URL condition remains visible in the copy log.
-      // pipKeepBound=1
-      if (!pick && prev && cands.length > 0) {
-        pushHandoffLog(`[PiP] pipKeepBound=1 keepPrev match=false expected=${shortUrl(expected)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length}`);
+      // to blink black across reveals.
+      //
+      // Pass-20 R6: extend keepPrev to cover cands=0 too. R5 device log
+      // showed the registry itself oscillating (cands 1→0→1 at ~1Hz);
+      // every empty beat previously nulled the binding under the old
+      // `cands.length > 0` gate, driving the visible flicker. New rule:
+      // keep prev whenever the bound element is still alive
+      // (isConnected && !paused), regardless of cands count. The alive-
+      // check protects against holding a dead element after a real
+      // unmount. Log throttled to ≤1/s with count (see R6 flood note
+      // in the effect header). pipKeepBound=1 pipKeepBoundR6=1
+      const prevAlive = prev !== null && prev.isConnected && !prev.paused;
+      if (!pick && prevAlive) {
+        keepPrevSinceLastLogCount++;
+        if (now - keepPrevLastLogAt >= 1000) {
+          pushHandoffLog(`[PiP] pipKeepBound=1 pipKeepBoundR6=1 keepPrev expected=${shortUrl(expected)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length} countSinceLast=${keepPrevSinceLastLogCount}`);
+          keepPrevLastLogAt = now;
+          keepPrevSinceLastLogCount = 0;
+        }
         return prev;
       }
       if (pick) {
