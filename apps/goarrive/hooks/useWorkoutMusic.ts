@@ -38,6 +38,8 @@ import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
 import { rampMusicVolume, setMusicVolume, wireToGain } from './useWorkoutTTS';
 // iOS background-music handoff adapter — see hook file for full contract.
 import { useMusicHandoff } from './useMusicHandoff';
+// Pass-21 B: firstAudio timestamp for the cold-start waterfall summary.
+import { markFirstAudioPlaying } from '../utils/perfProbe';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -333,9 +335,31 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
       el.src = url;
       el.load();
     } catch {}
-    // Mirror onto the handoff shadow so the swap is invisible on the
-    // background-audible side. No-op for variant=off / non-web.
-    swapTrack(url);
+    // Pass-21 B shadow-prime timing surgery: defer swapTrack (shadow src
+    // set + HEAD-check for gain variant) until the audible fires 'playing'.
+    // The pre-pass timing ran shadow src load in parallel with audible's
+    // first-track fetch — bandwidth contention during Devin's slow cold
+    // start. Waiting for audible 'playing' means:
+    //   1. Audible's first-track fetch owns the pipe until it lands.
+    //   2. Shadow's variant HEAD + load fires against a warm HTTP cache
+    //      (Firebase Storage variants are keyed off the audible track path).
+    //   3. Same guarded stale-attach check as attachTrack itself — if a
+    //      skip/advance replaced the track before 'playing' fired, the
+    //      deferred swap is dropped and the next attach's listener owns it.
+    // Also marks firstAudio for the coldStart waterfall — 'playing' is the
+    // "audible music is producing sound" moment, matching Devin's ear.
+    const onPlaying = () => {
+      markFirstAudioPlaying();
+      const c = currentTrackRef.current;
+      if (!c || c.style !== style || c.index !== index) return;
+      swapTrack(url);
+    };
+    try {
+      el.addEventListener('playing', onPlaying, { once: true } as AddEventListenerOptions);
+    } catch {
+      const wrapped = () => { el.removeEventListener('playing', wrapped); onPlaying(); };
+      el.addEventListener('playing', wrapped);
+    }
     currentTrackRef.current = { style, index };
     setCurrentTrack({ style, index });
     setTrackStatus('playing');

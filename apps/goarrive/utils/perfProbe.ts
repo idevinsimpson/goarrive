@@ -112,3 +112,100 @@ export function stopPerfProbe(): void {
   stallsInWindow = 0;
   lastFrameAt = 0;
 }
+
+// ── Cold-start waterfall (pass-21 B) ────────────────────────────────────────
+//
+// One-shot waterfall from workoutOpen → grab-equipment image visible →
+// first audible music 'playing' → first movement video readyState=4. Devin's
+// pass-21 A device verdict: steady-state slowness gone, cold start still
+// felt slow — "first grab-equipment image slow, audio slow at beginning,
+// first movement video slow." Cold-start summary rides in the log next to
+// perfProbe so every future spin has a before/after number for the three
+// items he actually feels.
+//
+// Contract: markColdStartBegin() resets state (fires on WorkoutPlayer mount).
+// Each mark stores its ms delta from begin. Summary emits once all three
+// have fired, OR after COLD_START_TIMEOUT_MS as a partial. A prior in-flight
+// cold start (e.g. navigation to another workout) is superseded — only the
+// most recent begin owns the timeline.
+//
+// Marker: coldStart
+
+const COLD_START_TIMEOUT_MS = 15_000;
+
+let coldStartBeginAt: number | null = null;
+let grabEquipAt: number | null = null;
+let firstAudioAt: number | null = null;
+let firstVideoAt: number | null = null;
+let coldStartFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function nowMs(): number {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function flushColdStart(reason: 'complete' | 'timeout'): void {
+  if (coldStartBeginAt === null) return;
+  const grab = grabEquipAt !== null ? Math.round(grabEquipAt - coldStartBeginAt) : -1;
+  const audio = firstAudioAt !== null ? Math.round(firstAudioAt - coldStartBeginAt) : -1;
+  const video = firstVideoAt !== null ? Math.round(firstVideoAt - coldStartBeginAt) : -1;
+  const grabStr = grab >= 0 ? `${grab}ms` : 'n/a';
+  const audioStr = audio >= 0 ? `${audio}ms` : 'n/a';
+  const videoStr = video >= 0 ? `${video}ms` : 'n/a';
+  pushHandoffLogAlways(
+    `[Perf] coldStart grabEquip=${grabStr} firstAudio=${audioStr} firstVideo=${videoStr} reason=${reason}`,
+  );
+  coldStartBeginAt = null;
+  grabEquipAt = null;
+  firstAudioAt = null;
+  firstVideoAt = null;
+  if (coldStartFlushTimer !== null) {
+    try { clearTimeout(coldStartFlushTimer); } catch {}
+    coldStartFlushTimer = null;
+  }
+}
+
+function maybeFlushColdStart(): void {
+  if (coldStartBeginAt === null) return;
+  if (grabEquipAt !== null && firstAudioAt !== null && firstVideoAt !== null) {
+    flushColdStart('complete');
+  }
+}
+
+export function markColdStartBegin(): void {
+  if (coldStartFlushTimer !== null) {
+    try { clearTimeout(coldStartFlushTimer); } catch {}
+    coldStartFlushTimer = null;
+  }
+  coldStartBeginAt = nowMs();
+  grabEquipAt = null;
+  firstAudioAt = null;
+  firstVideoAt = null;
+  pushHandoffLogAlways('[Perf] coldStart begin');
+  if (typeof setTimeout === 'function') {
+    coldStartFlushTimer = setTimeout(() => {
+      coldStartFlushTimer = null;
+      flushColdStart('timeout');
+    }, COLD_START_TIMEOUT_MS);
+  }
+}
+
+export function markGrabEquipVisible(): void {
+  if (coldStartBeginAt === null || grabEquipAt !== null) return;
+  grabEquipAt = nowMs();
+  maybeFlushColdStart();
+}
+
+export function markFirstAudioPlaying(): void {
+  if (coldStartBeginAt === null || firstAudioAt !== null) return;
+  firstAudioAt = nowMs();
+  maybeFlushColdStart();
+}
+
+export function markFirstVideoRS4(): void {
+  if (coldStartBeginAt === null || firstVideoAt !== null) return;
+  firstVideoAt = nowMs();
+  maybeFlushColdStart();
+}

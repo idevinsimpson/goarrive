@@ -8,10 +8,24 @@
  * movement's video using a hidden <video> preload (web) or expo-av preload
  * (native) so the video is fully buffered before the member transitions.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Image } from 'react-native';
 import { getUpcomingMovements } from './mediaPrefetch.helpers';
 import { isImageUrl } from '../utils/mediaKind';
+
+// Pass-21 B: how long the speculative prefetch and next-movement preload
+// wait after the player mounts before they're allowed to fire. Devin's
+// device verdict on pass-21 A was that steady-state slowness was fixed
+// but cold start still felt slow: grab-equipment image, first music, and
+// first movement video were the three things he actually felt. Those
+// three are handled elsewhere (Image render, useWorkoutMusic bootstrap,
+// countdown/ready video preload) — the speculative fetches from this
+// hook were competing with them for bandwidth right at the moment the
+// first work phase kicked in. A 2.5s hold lets the critical three land
+// first, then the speculative fetches proceed normally. Chose 2.5s not
+// requestIdleCallback because Safari doesn't ship rIC; a fixed delay is
+// portable and deterministic on the device we care about.
+const SPECULATIVE_DELAY_MS = 2500;
 
 interface PrefetchableMovement {
   videoUrl?: string;
@@ -35,6 +49,15 @@ export function useMediaPrefetch(
   // <link rel=prefetch> elements appended to document.head, removed on unmount
   // so they don't accumulate for the lifetime of a long web session.
   const prefetchLinksRef = useRef<HTMLLinkElement[]>([]);
+  // Pass-21 B: speculative fetches (standard prefetch, aggressive next-video
+  // preload) hold until this flips true. See SPECULATIVE_DELAY_MS above for
+  // motivation. Countdown/ready preload of the CURRENT first movement is
+  // NOT gated by this — it's part of the critical three.
+  const [speculativeAllowed, setSpeculativeAllowed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSpeculativeAllowed(true), SPECULATIVE_DELAY_MS);
+    return () => { try { clearTimeout(t); } catch {} };
+  }, []);
 
   const preloadHiddenVideo = (videoUrl: string) => {
     const video = document.createElement('video');
@@ -83,8 +106,12 @@ export function useMediaPrefetch(
   }, []);
 
   // ── Standard prefetch: link rel=prefetch for next 1-3 movements ──────
+  // Pass-21 B: gated on speculativeAllowed so the first work phase doesn't
+  // race the first movement <Video>'s own fetch. Re-fires when the flag
+  // flips because it's in the dep array.
   useEffect(() => {
     if (!isActive && !isResting) return;
+    if (!speculativeAllowed) return;
     // Clamp against list length so we never touch sparse/undefined entries
     // near the end of the workout.
     const upcoming = getUpcomingMovements(movements, currentIndex, 3);
@@ -106,7 +133,7 @@ export function useMediaPrefetch(
         }
       });
     });
-  }, [currentIndex, isActive, isResting, movements]);
+  }, [currentIndex, isActive, isResting, movements, speculativeAllowed]);
 
   // ── Preload CURRENT movement video during countdown ─────────────────
   // When the countdown screen is showing, the member isn't watching video
@@ -139,8 +166,13 @@ export function useMediaPrefetch(
   // video. On web, we create a hidden <video> element with preload="auto"
   // which forces the browser to download the full file. On native, we use
   // fetch to warm the cache.
+  //
+  // Pass-21 B: also gated on speculativeAllowed. The first work phase used
+  // to spawn a hidden preload for movement 1 the instant movement 0
+  // started, doubling the bandwidth demand at the worst possible moment.
   useEffect(() => {
     if (!isResting && !isActive) return;
+    if (!speculativeAllowed) return;
 
     const nextMovement = currentIndex + 1 < movements.length ? movements[currentIndex + 1] : undefined;
     const videoUrl = nextMovement?.videoUrl;
@@ -156,5 +188,5 @@ export function useMediaPrefetch(
       // expo-av will benefit from the cached response
       fetch(videoUrl, { method: 'GET' }).catch(() => {});
     }
-  }, [isResting, isActive, currentIndex, movements]);
+  }, [isResting, isActive, currentIndex, movements, speculativeAllowed]);
 }

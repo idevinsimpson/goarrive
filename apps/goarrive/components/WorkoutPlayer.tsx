@@ -65,7 +65,7 @@ import {
 import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, pipProbeModeLabel, type PipProbeMode } from '../utils/pipProbeMode';
 import { pushHandoffLog, readHandoffLog } from '../utils/handoffLog';
 import { isDiagOn, toggleDiag } from '../utils/diagMode';
-import { startPerfProbe } from '../utils/perfProbe';
+import { markColdStartBegin, markFirstVideoRS4, markGrabEquipVisible, startPerfProbe } from '../utils/perfProbe';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -295,9 +295,16 @@ export default function WorkoutPlayer({
   // >100ms stalls). Rides every build regardless of DIAG so cuts #1-#5 get
   // before/after numbers and future regressions trip loudly in the COPY
   // LOG. Web-only; no-op on native (rAF is a DOM API).
-  // perfProbe=1
+  //
+  // Pass-21 B: also start the cold-start waterfall clock — the summary
+  // line emits once grab-equipment image + first audible music playing +
+  // first movement Video readyState=4 have all landed (or the 15s partial
+  // timeout fires). One begin per WorkoutPlayer mount so navigating to a
+  // different workout resets the timeline.
+  // perfProbe=1 coldStart=1
   useEffect(() => {
     if (Platform.OS !== 'web') return;
+    markColdStartBegin();
     return startPerfProbe();
   }, []);
 
@@ -942,6 +949,28 @@ export default function WorkoutPlayer({
               pushHandoffLog(`[PiP] video auto-resume key=${key} rs=${domNode.readyState}`);
               el.playAsync?.().catch(() => {});
             });
+          }
+          // Pass-21 B: firstVideo mark for the coldStart waterfall.
+          // Only layer:* keys count as "movement video" — grabEquipment /
+          // transition / followAlong / waterBreak are ceremony frames and
+          // land under phase-name keys. markFirstVideoRS4 itself is
+          // idempotent (only the first call after markColdStartBegin
+          // records), so a later layer re-register can't overwrite. The
+          // __firstVideoRS4Attached guard just avoids stacking listeners
+          // on the same DOM node across re-registers.
+          if (key.startsWith('layer:') && !(node as any).__firstVideoRS4Attached) {
+            (node as any).__firstVideoRS4Attached = true;
+            const dn = node as HTMLVideoElement;
+            if (dn.readyState >= 4) {
+              markFirstVideoRS4();
+            } else {
+              try {
+                dn.addEventListener('canplaythrough', () => markFirstVideoRS4(), { once: true } as AddEventListenerOptions);
+              } catch {
+                const wrapped = () => { dn.removeEventListener('canplaythrough', wrapped); markFirstVideoRS4(); };
+                dn.addEventListener('canplaythrough', wrapped);
+              }
+            }
           }
         }
       } catch { /* best-effort */ }
@@ -2576,6 +2605,7 @@ export default function WorkoutPlayer({
                       source={{ uri: current.grabEquipmentImageUrl }}
                       style={[st.videoPlayer, { borderRadius: fs(12) }]}
                       resizeMode="cover"
+                      onLoad={markGrabEquipVisible}
                     />
                     <View
                       style={[
