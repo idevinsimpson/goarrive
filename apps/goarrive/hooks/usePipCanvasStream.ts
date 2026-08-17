@@ -443,6 +443,7 @@ export function usePipCanvasStream({
     // Pass-19: one-time log on first prep-phase draw (bundle marker for grep)
     let prepPhaseFirstDrawLogged = false;
     let prepTextFirstDrawLogged = false;
+    let demoMotionFirstDrawLogged = false;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
@@ -646,13 +647,19 @@ export function usePipCanvasStream({
             const row = Math.floor(i / cols);
             const mx = videoX + col * (cellW + gutter);
             const my = videoY + row * (cellH + gutter);
-            const posterUrl: string | undefined = demos[i].posterUrl || demos[i].thumbnailUrl;
+            // Pass-19 R4 follow-up: prefer thumbnailUrl (animated GIF) over
+            // posterUrl (still) so the tile shows movements in motion — same
+            // priority the main player's PosterThumb uses (gifUrl first).
+            // Marker pipPass19R4Motion=1 fires when a GIF is drawn.
+            const gifUrl: string | undefined = demos[i].thumbnailUrl;
+            const posterUrl: string | undefined = demos[i].posterUrl;
+            const drawUrl = gifUrl || posterUrl;
             ctx.save();
             ctx.beginPath();
             ctx.roundRect(mx, my, cellW, cellH, 4);
             ctx.clip();
-            if (posterUrl) {
-              const img = getOrLoadPipImage(posterUrl);
+            if (drawUrl) {
+              const img = getOrLoadPipImage(drawUrl);
               if (img && img.complete && img.naturalWidth > 0) {
                 try { ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, mx, my, cellW, cellH); } catch {}
               } else {
@@ -669,6 +676,13 @@ export function usePipCanvasStream({
           if (!prepPhaseFirstDrawLogged) {
             prepPhaseFirstDrawLogged = true;
             pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 phase=${ph} demos=${demos.length} frame=${totalFrameCount}`);
+          }
+          if (!demoMotionFirstDrawLogged) {
+            const hasGif = demos.some((d: any) => !!d.thumbnailUrl);
+            if (hasGif) {
+              demoMotionFirstDrawLogged = true;
+              pushHandoffLog(`[PiP] pipPass19R4Motion=1 phase=demo gifTiles=${demos.filter((d: any) => !!d.thumbnailUrl).length}/${demos.length} frame=${totalFrameCount}`);
+            }
           }
         }
       }
