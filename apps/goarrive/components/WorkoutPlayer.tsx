@@ -321,6 +321,18 @@ export default function WorkoutPlayer({
   // phase, both include REST as continuously in-window, both suppress
   // during rep-based and swap-sides work-L). If you change the reveal
   // rule, update both.
+  //
+  // Pass-21 R8c: the `timeLeft <= 0` false-out is DELIBERATELY dropped.
+  // useWorkoutTimer's 250ms interval sets timeLeft=0 on tick, and the
+  // step only advances in the hit-zero transition effect the next
+  // commit. Between those two commits, timeLeft<=0 while phase/current/
+  // next still describe the OLD step. If we false-out here on tl<=0,
+  // the reveal window collapses for that one commit and drawTarget
+  // steps backward from nx to old cur — the ¼s (~HYSTERESIS_FRAMES/24fps)
+  // boundary blip Devin caught. Holding through 0 keeps drawTarget on
+  // nx until the next commit publishes new cur = old nx, at which point
+  // isRevealSwap flips to false (no more nx) and drawTarget = new cur —
+  // same identity as previous frame. Seamless.
   const isInPipRevealWindow = useMemo<boolean>(() => {
     if (!current || !next) return false;
     if (phase === 'rest') return true;
@@ -332,9 +344,27 @@ export default function WorkoutPlayer({
     const stayingOnSameMovement =
       phase === 'work' && (current as any)?.swapSides === true && swapSide === 'L';
     if (stayingOnSameMovement) return false;
-    if (typeof timeLeft !== 'number' || timeLeft <= 0) return false;
+    if (typeof timeLeft !== 'number') return false;
     return timeLeft <= REVEAL_LEAD_SECONDS;
   }, [phase, timeLeft, current, next, isRepBased, swapSide]);
+
+  // Pass-21 R8c pipRevealHold=1 marker — fires once per boundary when
+  // the reveal window holds through the zero-crossing tick (tl<=0 but
+  // memo still returns true). Confirms the tl<=0 guard drop is doing
+  // its job at boundaries; a device log grep for `pipRevealHold` should
+  // show ONE entry per timed-phase → next-step transition.
+  const pipRevealHoldLastSigRef = useRef<string>('');
+  useEffect(() => {
+    if (!isInPipRevealWindow) return;
+    if (typeof timeLeft !== 'number' || timeLeft > 0) return;
+    if (!current || !next) return;
+    const curName = (current as any)?.name ?? '';
+    const nxName = (next as any)?.name ?? '';
+    const sig = `${phase}|${curName}|${nxName}`;
+    if (sig === pipRevealHoldLastSigRef.current) return;
+    pipRevealHoldLastSigRef.current = sig;
+    pushHandoffLog(`[PiP] pipRevealHold=1 phase=${phase} tl=${timeLeft.toFixed(2)} cur=${curName} nx=${nxName}`);
+  }, [isInPipRevealWindow, timeLeft, current, next, phase]);
 
   const { mediaStream, startStream, attachAudioTracks, detachAudioTracks } = usePipCanvasStream({
     // Pass-4 keep-warm: stream comes up on workout mount and stays up so
@@ -1672,11 +1702,17 @@ export default function WorkoutPlayer({
       isTimedRevealPhase
       && !isRepBased
       && !stayingOnSameMovement
-      && timeLeft > 0
       && timeLeft <= REVEAL_LEAD_SECONDS
       && next
     ) {
       // Last 3.5s of any timed phase: preview the next timeline item.
+      // Pass-21 R8c: kept in sync with isInPipRevealWindow at :335 —
+      // the `timeLeft > 0` guard is DELIBERATELY dropped so the reveal
+      // window holds through the zero-crossing tick (see full note at
+      // the hoisted memo). Prevents the main title from blipping back
+      // to `current` for the one commit where useWorkoutTimer has set
+      // timeLeft=0 but the transition effect hasn't yet advanced the
+      // step. Same fix that closes the ¼s tile flash Devin caught.
       displayItem = next;
       displayIndex = currentIndex + 1;
       inRevealWindow = true;

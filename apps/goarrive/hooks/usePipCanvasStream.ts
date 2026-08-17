@@ -594,6 +594,20 @@ export function usePipCanvasStream({
     let revealLastSig = '';
     let revealTotal = 0;
 
+    // Pass-21 R8c pipBackstep=1 tripwire — log-only detector for
+    // zero-crossing regressions of the class the R8c memo-guard drop
+    // fixes upstream. Tracks the last two distinct drawTarget
+    // identities (name|stepType). A "backstep" is when the current
+    // frame's identity flips to what we saw TWO flips ago (A → B → A)
+    // — the exact shape produced when the reveal window collapses for
+    // one commit and drawTarget snaps from nx back to old cur before
+    // the transition effect advances. Never changes render behavior;
+    // grep the device log for `pipBackstep` to catch any future
+    // reintroduction of this bug class.
+    let drawTargetPrevSig = '';
+    let drawTargetPrevPrevSig = '';
+    let pipBackstepTotal = 0;
+
     function flipTileMode(next: 'prep' | 'video' | 'placeholder', reason: string): void {
       if (next === tileMode) return;
       tileModeFlipTotal++;
@@ -800,6 +814,24 @@ export function usePipCanvasStream({
         || targetStepType === 'demo'
         || targetStepType === 'transition';
 
+      // pipBackstep tripwire (see module-level comment). Two-frame
+      // history — if the current identity equals the identity two flips
+      // ago, we've stepped BACKWARD (A → B → A) which is the zero-
+      // crossing regression shape. Log-only, no behavior change.
+      const currentDrawSig = `${drawTarget?.name ?? ''}|${targetStepType}`;
+      if (currentDrawSig !== drawTargetPrevSig) {
+        if (
+          drawTarget
+          && currentDrawSig !== ''
+          && currentDrawSig === drawTargetPrevPrevSig
+        ) {
+          pipBackstepTotal++;
+          pushHandoffLog(`[PiP] pipBackstep=1 total=${pipBackstepTotal} sig=${currentDrawSig} prev=${drawTargetPrevSig} prevPrev=${drawTargetPrevPrevSig} phase=${ph} tl=${tl.toFixed(2)} frame=${totalFrameCount}`);
+        }
+        drawTargetPrevPrevSig = drawTargetPrevSig;
+        drawTargetPrevSig = currentDrawSig;
+      }
+
       // Non-rest movName follows drawTarget so the tile's header + name
       // card both flip in the same frame as the main title. REST keeps
       // the "Next: <name>" convention (verified correct in device logs).
@@ -818,7 +850,7 @@ export function usePipCanvasStream({
         if (revealSig !== revealLastSig) {
           revealLastSig = revealSig;
           revealTotal++;
-          pushHandoffLog(`[PiP] pipR7Reveal=1 pipR8b=1 revealTotal=${revealTotal} target=${nx?.name ?? ''} stepType=${nx?.stepType ?? ''} phase=${ph} timeLeft=${tl.toFixed(1)} curHasVideo=${!!cur?.videoUrl} nxHasVideo=${!!nx?.videoUrl} frame=${totalFrameCount}`);
+          pushHandoffLog(`[PiP] pipR7Reveal=1 pipR8b=1 pipR8c=1 revealTotal=${revealTotal} target=${nx?.name ?? ''} stepType=${nx?.stepType ?? ''} phase=${ph} timeLeft=${tl.toFixed(1)} curHasVideo=${!!cur?.videoUrl} nxHasVideo=${!!nx?.videoUrl} frame=${totalFrameCount}`);
         }
       } else if (revealLastSig !== '') {
         revealLastSig = '';
