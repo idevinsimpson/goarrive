@@ -428,18 +428,21 @@ export function usePipCanvasStream({
     // (new element readyState < 2 for one or more frames) paints the frozen
     // last frame instead of the fallback gradient. blipCoveredTotal tracks
     // how many frames were covered for the probe log.
+    //
+    // Pass-19 R3v2 (2026-08-17): pin cache to the element's src URL — NOT to
+    // cur.name. During REST, feed.current still points to the FINISHED
+    // movement (WorkoutTimer keeps cur=prev, next=incoming through rest), so
+    // a name-based key can't tell "next movement's element still loading"
+    // from "same movement, brief decode hiccup." The name check evaluated
+    // true across rest boundaries and the tile froze on the prior movement's
+    // frame while the main player showed the incoming preview (Lawn Mower
+    // report, IMG_5117). Src-based invalidation asks the right question:
+    // "does the cached frame belong to the URL we're now trying to draw?"
+    // If not, drop the cover and let the gradient placeholder render.
     let lastDecodedVideoEl: HTMLVideoElement | null = null;
-    // Pass-19 R3 follow-up: pin the cached frame to the movement it came
-    // from. When cur.name changes AND the new movement has no ready video,
-    // the pass-19 shipped code kept painting the previous movement's frozen
-    // frame indefinitely (Devin 2026-08-17 screenshot: PiP tile showed prior
-    // squat frame while main player showed the GoArrive placeholder for a
-    // movement with no videoUrl). Tracking the source movement's name lets
-    // us invalidate the cache on boundary and fall through to the gradient +
-    // name placeholder. Marker: pipPass19R3Reset=1.
-    let lastDecodedCurName: string | undefined = undefined;
     let blipResetTotal = 0;
     let blipCoveredTotal = 0;
+    let blipSkipStaleTotal = 0;
     // Pass-19: one-time log on first prep-phase draw (bundle marker for grep)
     let prepPhaseFirstDrawLogged = false;
     let prepTextFirstDrawLogged = false;
@@ -696,35 +699,60 @@ export function usePipCanvasStream({
       // pipPass19R3Blip=1
       if (!prepDrawn) {
         if (!pipCanvasTainted) {
-          // R3: update lastDecodedVideoEl when current element is decoded.
-          // Pin to cur.name so the cache is only valid for the same movement.
+          // R3v2: update cache whenever the current picked element is decoded.
           if (videoEl && videoEl.readyState >= 2) {
             lastDecodedVideoEl = videoEl;
-            lastDecodedCurName = cur?.name;
           }
-          // R3 follow-up: invalidate cache on movement boundary when the new
-          // movement has no ready video — otherwise the tile would freeze on
-          // the prior movement's frame. Marker pipPass19R3Reset=1.
-          const curName = cur?.name;
-          const movementChanged =
-            lastDecodedCurName != null && curName != null && curName !== lastDecodedCurName;
-          if (movementChanged && (!videoEl || videoEl.readyState < 2)) {
+          // R3v2: src-based cache invalidation. Compare the URL the cached
+          // element is playing to the URL the current pick points at. If
+          // they diverge (different movements), the cache is stale — drop it
+          // so blip cover falls through to the fallback gradient with
+          // "Next: <name>" instead of freezing on the prior movement's
+          // frame. Marker pipPass19R3SrcReset=1 (bundle-grep).
+          const cachedSrc = lastDecodedVideoEl
+            ? (lastDecodedVideoEl.currentSrc || lastDecodedVideoEl.src || '')
+            : '';
+          const currentSrc = videoEl ? (videoEl.currentSrc || videoEl.src || '') : '';
+          const srcDiverged = cachedSrc !== '' && currentSrc !== '' && cachedSrc !== currentSrc;
+          if (srcDiverged) {
             lastDecodedVideoEl = null;
-            lastDecodedCurName = undefined;
             blipResetTotal++;
             if (blipResetTotal === 1 || blipResetTotal % 10 === 0) {
-              pushHandoffLog(`[PiP] pipPass19R3Reset=1 blipResetTotal=${blipResetTotal} newCur=${curName} frame=${totalFrameCount}`);
+              pushHandoffLog(`[PiP] pipPass19R3SrcReset=1 blipResetTotal=${blipResetTotal} frame=${totalFrameCount}`);
             }
           }
-          // R3: use lastDecodedVideoEl as blip cover when current el not ready
-          const blipEl = (!videoEl || videoEl.readyState < 2) && lastDecodedVideoEl && lastDecodedVideoEl.readyState >= 2
-            ? lastDecodedVideoEl
-            : null;
+          // R3v2: blip cover only when cache is FOR THE SAME URL as the
+          // current pick. Same-URL cache = same movement, brief decode
+          // hiccup — safe to cover. Different-URL or empty-current cache
+          // = wrong content, skip cover (fall through to gradient). This
+          // is the fix for the Lawn Mower report: REST with next=Lawn
+          // Mower kept painting the finished movement's cached frame
+          // because name-based comparison couldn't see the URL change.
+          const cachedSameContent =
+            cachedSrc !== '' && currentSrc !== '' && cachedSrc === currentSrc;
+          const blipEl =
+            (!videoEl || videoEl.readyState < 2)
+            && lastDecodedVideoEl
+            && lastDecodedVideoEl.readyState >= 2
+            && cachedSameContent
+              ? lastDecodedVideoEl
+              : null;
+          const wouldHaveCovered =
+            (!videoEl || videoEl.readyState < 2)
+            && lastDecodedVideoEl
+            && lastDecodedVideoEl.readyState >= 2
+            && !cachedSameContent;
           const drawEl = blipEl ?? videoEl;
           if (blipEl) {
             blipCoveredTotal++;
             if (blipCoveredTotal === 1 || blipCoveredTotal % 30 === 0) {
               pushHandoffLog(`[PiP] pipPass19R3Blip=1 blipCoveredTotal=${blipCoveredTotal} frame=${totalFrameCount}`);
+            }
+          }
+          if (wouldHaveCovered) {
+            blipSkipStaleTotal++;
+            if (blipSkipStaleTotal === 1 || blipSkipStaleTotal % 30 === 0) {
+              pushHandoffLog(`[PiP] pipPass19R3SkipStale=1 blipSkipStaleTotal=${blipSkipStaleTotal} frame=${totalFrameCount}`);
             }
           }
           drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, movName);
