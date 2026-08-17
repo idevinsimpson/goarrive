@@ -283,3 +283,17 @@ The cost of skipping any of these is one round-trip to a human with a phone — 
 **The failure mode when it is skipped:** the follow-up probe was built off `main` instead of `235eb76`, so a clean three-mode device reading could not be interpreted at all — the result was consistent with "the suspect is innocent," "the suspect needs an accomplice," and "the test never switched modes," with no way to separate them.
 
 **Lesson: the deployed bundle is the fact; a branch list is a hypothesis about it.** When a comparison must hold everything constant but one variable, derive the baseline from the artifact.
+
+### iOS Withholds `visibilitychange` Under Active PiP — the AudioContext Interruption IS the Backgrounding Signal
+**2026-08-17, device-proven and ear-confirmed.** Background music under the canvas-composite PiP died for the whole probe arc while every rescue was keyed to `visibilitychange`. Five device sessions (passes 14–18) captured zero leave events; the sixth captured two and settled it: **with an active PiP presentation, iOS keeps `document.visibilityState === 'visible'` through an app-switch — `visibilitychange` never fires.** Every drawFrame sampled during confirmed background shows `visState=visible`. The hide seam's only trigger was a signal iOS does not send in exactly the scenario the feature exists for.
+
+**The trigger that works:** subscribe to the main `AudioContext` `statechange`. A transition to `interrupted`/`suspended` while PiP is active *is* the backgrounding signal — the very event that kills graph-wired audio announces the moment the rescue must run. `shadow.play()` from that handler works in background (blessed-element rules; no gesture needed). Return keys on ctx `running` or `focus`, with an `inBackgroundRef` guard so duplicate triggers no-op. Device log 16:41:33 / 16:42:25 UTC: both leaves fired `trigger mainCtx state=interrupted` → `HANDOFF/hide v3`; the +2s autopsy on the second shows the textbook end state (shadow `paused=false`, `currentTime` advancing, `rs=4`; audible paused). Owner-confirmed by ear the same day.
+
+**Rules that follow:**
+- **Never key background behavior to `visibilitychange` alone when PiP can be active.** Treat the audio-session interruption as a first-class lifecycle signal.
+- **`blur` fires but must stay log-only** — it also fires in-foreground (e.g. tapping the PiP overlay); as a seam trigger it would false-positive.
+- **Log every candidate lifecycle signal unconditionally.** Silence in the log then becomes evidence about the platform, not a gap in instrumentation — this is what finally separated "seam declined" from "signal never sent."
+- **Keep the +2s autopsy** (element + ctx snapshot after any hide) in any future audio seam; it converts "no music" into a named mechanism in one capture.
+- **Corner case, covered, keep the cover:** the shadow's track can *end* seconds after handoff; the bgplay retry (`attempt` → `ok`) recovered it live.
+
+**Open follow-up (deliberate-policy item, not a bug):** swap-back position reconciliation — returns measured `drift` of 8.7s and 83.9s between audible and shadow; decide whose clock wins and why.
