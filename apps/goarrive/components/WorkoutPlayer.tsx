@@ -777,6 +777,14 @@ export default function WorkoutPlayer({
       videosRef.current.delete(key);
       return;
     }
+    // Pass-18 Fix 1: event-driven rebind wake signal. Time-capped retry can't
+    // cover the 62-second hole pass-16 caught at 00:23:44 (rebind key=null
+    // layerKeys=0 → tile text-only across work→rest→work until a natural
+    // displayedUrl change rescued it). The registry itself is the wake:
+    // when a NEW layer entry lands and the current binding is null or its
+    // src doesn't match expectedUrlRef, invoke the resolver immediately.
+    // Only layer:* keys — phase-name entries already ride the widened scan.
+    const isNewEntry = !videosRef.current.has(key);
     videosRef.current.set(key, el);
     // iOS Safari needs the legacy webkit-playsinline attribute (expo-av only
     // sets the modern playsInline prop) or playback hijacks into fullscreen.
@@ -845,6 +853,24 @@ export default function WorkoutPlayer({
       // webkit-playsinline attribute older iOS Safari needs for inline play.
       const domVideo = el._nativeRef?.current?.getVideoElement?.();
       domVideo?.setAttribute?.('webkit-playsinline', '');
+    }
+    // Pass-18 Fix 1: fire the resolver on new layer registration if the
+    // current binding is null or mismatched. This is the wake signal —
+    // no polling, no cap, no waiting for the next rAF.
+    if (
+      Platform.OS === 'web'
+      && isNewEntry
+      && key.startsWith('layer:')
+      && pipSourceResolverRef.current
+    ) {
+      const bound = pipSourceVideoRef.current;
+      const expected = expectedUrlRef.current;
+      const boundSrc = bound?.currentSrc || bound?.src || '';
+      const mismatched = !bound || (!!expected && boundSrc !== expected);
+      if (mismatched) {
+        pushHandoffLog(`[PiP] registerVideo trigger key=${key} boundNull=${!bound} matchExpected=${!!expected && boundSrc === expected}`);
+        try { pipSourceResolverRef.current(); } catch {}
+      }
     }
   }, []);
 

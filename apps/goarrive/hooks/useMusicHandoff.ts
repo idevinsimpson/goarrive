@@ -47,7 +47,7 @@
  */
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { Platform } from 'react-native';
-import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer } from './useWorkoutTTS';
+import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer, subscribeMainCtxStatechange } from './useWorkoutTTS';
 import { getLivenessCtxState } from './usePipCanvasStream';
 import {
   getMusicHandoffVariant,
@@ -865,7 +865,15 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     };
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      // Pass-18: log every visibilitychange unconditionally so a fired-but-
+      // guarded event is distinguishable from an event that never fired at
+      // all. Four consecutive pass-14→17 sessions captured zero PiP-leave
+      // events; the leading theory is WebKit keeps document 'visible' under
+      // active PiP presentation and this handler never runs. Log first, then
+      // dispatch.
+      const vs = document.visibilityState;
+      pushHandoffLog(`[PiP] trigger visibilitychange visState=${vs} bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+      if (vs === 'visible') {
         runReturnSeam();
       } else {
         runHideSeam();
@@ -874,16 +882,53 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     // pageshow + focus mirror the pre-adapter handler so bfcache restores and
     // iOS overlay dismissals (call-in overlays, Face ID, etc.) still resume
     // playback. These paths NEVER hide, so they always dispatch to return.
-    const onPageShow = () => runReturnSeam();
-    const onFocus = () => runReturnSeam();
+    const onPageShow = () => {
+      pushHandoffLog(`[PiP] trigger pageshow bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+      runReturnSeam();
+    };
+    const onFocus = () => {
+      pushHandoffLog(`[PiP] trigger focus bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+      runReturnSeam();
+    };
+    // Pass-18: window.blur is LOG-ONLY. Blur fires spuriously in-foreground
+    // (dev tools focus, popover open) so it must never trigger the seam;
+    // but its presence in the log helps disambiguate "iOS never told the tab
+    // anything" from "iOS fired blur but not visibilitychange".
+    const onBlur = () => {
+      pushHandoffLog(`[PiP] trigger blur logOnly bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+    };
+
+    // Pass-18: mainCtx statechange is the actual leave signal when WebKit
+    // withholds visibilitychange under PiP. iOS suspends the AudioContext
+    // when Safari backgrounds; the ctx state transition to suspended/
+    // interrupted IS the backgrounding event. Guarded by inBackgroundRef
+    // so a duplicate trigger (if visibilitychange also fires) is a no-op —
+    // runHideSeam owns its own idempotence via inBackgroundRef.
+    const unsubMainCtx = subscribeMainCtxStatechange((state) => {
+      pushHandoffLog(`[PiP] trigger mainCtx state=${state} bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current} vs=${document.visibilityState}`);
+      if (state === 'suspended' || state === 'interrupted') {
+        if (!inBackgroundRef.current && isPiPRef?.current) {
+          runHideSeam();
+        }
+        return;
+      }
+      if (state === 'running') {
+        if (inBackgroundRef.current) {
+          runReturnSeam();
+        }
+      }
+    });
 
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+      unsubMainCtx();
       if (tapRetryCleanupRef.current) {
         tapRetryCleanupRef.current();
         tapRetryCleanupRef.current = null;

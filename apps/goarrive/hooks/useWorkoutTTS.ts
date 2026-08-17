@@ -204,6 +204,10 @@ function ensureAudioGraph(): void {
     mediaStreamDest = audioCtx.createMediaStreamDestination();
     voiceGain.connect(mediaStreamDest);
     musicGain.connect(mediaStreamDest);
+    // Pass-18: attach the statechange fan-out now that audioCtx exists.
+    // Any subscribers that registered before the graph came online are
+    // already in mainCtxStatechangeSubscribers, ready to receive events.
+    attachMainCtxStatechange();
     console.info('[VOICE-AUDIT] audio graph online', {
       state: audioCtx.state, voiceGain: voiceVolume, musicGain: musicVolumeGain,
     });
@@ -462,6 +466,32 @@ export type AudioGraphState = AudioContextState | 'not-initialized';
 export function getAudioContextState(): AudioGraphState {
   if (!audioCtx) return 'not-initialized';
   return audioCtx.state;
+}
+
+// Pass-18: statechange fan-out for the main AudioContext. Music handoff needs
+// to observe suspended/interrupted transitions on the ctx because WebKit
+// withholds visibilitychange while a PiP window is active (four consecutive
+// sessions captured zero PiP-leave events). The ctx-suspend on backgrounding
+// IS the leave signal when visibility is silent. Subscribers registered
+// before the ctx exists are queued and attached in ensureAudioGraph.
+const mainCtxStatechangeSubscribers = new Set<(state: AudioGraphState) => void>();
+let mainCtxStatechangeAttached = false;
+function attachMainCtxStatechange(): void {
+  if (mainCtxStatechangeAttached || !audioCtx) return;
+  audioCtx.addEventListener('statechange', () => {
+    const s = getAudioContextState();
+    for (const h of mainCtxStatechangeSubscribers) {
+      try { h(s); } catch {}
+    }
+  });
+  mainCtxStatechangeAttached = true;
+}
+export function subscribeMainCtxStatechange(
+  handler: (state: AudioGraphState) => void,
+): () => void {
+  mainCtxStatechangeSubscribers.add(handler);
+  attachMainCtxStatechange();
+  return () => { mainCtxStatechangeSubscribers.delete(handler); };
 }
 
 // ── Graph-level oscillator keepalive (B) ─────────────────────────────
