@@ -529,6 +529,26 @@ export function usePipCanvasStream({
     let tileModeFlipTotal = 0;
     let hysteresisHoldTotal = 0;
     const HYSTERESIS_FRAMES = 6;
+
+    // Pass-20 R7 freeze fix (Devin device log 2026-08-17): the R3v2 blip
+    // cover repaints lastDecodedVideoEl indefinitely when the current step
+    // legitimately has no video — the resolver correctly unbinds
+    // (pipSource rebind key=null, expected=null) but the cover keeps
+    // painting the prior movement's last frame (blipCoveredTotal climbed
+    // past 1200 with no cutoff). Two fixes:
+    //   • Fix 1: identify no-video steps via targetVideoUrl && !isPrepTarget
+    //     and short-circuit straight to the placeholder with reason=noVideo,
+    //     mirroring the prep-cut boundary-start path for grabEquipment
+    //     with hasVideoUrl=false.
+    //   • Fix 2: hard cap continuous blip cover at BLIP_CAP_FRAMES (~833ms
+    //     at 30fps) as a safety net for any case where `expected` is stale
+    //     or wrong. Force placeholder with reason=blipCap past the cap.
+    // pipR7NoVideo=1 pipR7BlipCap=1
+    let consecBlipCoverFrames = 0;
+    let noVideoTotal = 0;
+    let blipCapTotal = 0;
+    const BLIP_CAP_FRAMES = 25;
+
     function flipTileMode(next: 'prep' | 'video' | 'placeholder', reason: string): void {
       if (next === tileMode) return;
       tileModeFlipTotal++;
@@ -849,6 +869,15 @@ export function usePipCanvasStream({
       // pipPass19R3Blip=1
       if (!prepDrawn) {
         if (!pipCanvasTainted) {
+          // R7 Fix 1: legit no-video step detection. The prep-cut branch
+          // above handles named prep types (grabEquipment / waterBreak /
+          // demo / transition). This catches exercises with no videoUrl
+          // that fall through to the video-draw path — the resolver
+          // unbinds videoEl, and the R3v2 blip cover would otherwise
+          // freeze on the prior movement's cached frame indefinitely.
+          // pipR7NoVideo=1
+          const isNoVideoStep = !targetVideoUrl && !isPrepTarget;
+
           // R3v2: update cache whenever the current picked element is decoded.
           if (videoEl && videoEl.readyState >= 2) {
             lastDecodedVideoEl = videoEl;
@@ -869,10 +898,13 @@ export function usePipCanvasStream({
             // — we don't want to hold Movement A's last frame across a real
             // transition into Movement B. Reset the counter so the new
             // movement's first-drawable-frame flips cleanly to video mode.
+            // R7: also reset consecBlipCoverFrames so a real transition
+            // doesn't count leftover cover frames from the prior movement.
             lastDecodedVideoEl = null;
             lastPaintedVideoEl = null;
             lastPaintedVideoSrc = '';
             consecNoDrawableFrames = 0;
+            consecBlipCoverFrames = 0;
             blipResetTotal++;
             if (blipResetTotal === 1 || blipResetTotal % 10 === 0) {
               pushHandoffLog(`[PiP] pipPass19R3SrcReset=1 blipResetTotal=${blipResetTotal} frame=${totalFrameCount}`);
@@ -886,24 +918,32 @@ export function usePipCanvasStream({
           // (both non-empty AND actually different). Input dropouts →
           // srcDiverged=false → keep drawing the cached frame. That's
           // the entire mechanism for surviving 1-render feed flaps.
+          // R7 Fix 1: also skip cover entirely when the current step has
+          // no video — no cached frame is EVER the right thing to paint
+          // for a legitimately video-less movement.
           const blipEl =
-            (!videoEl || videoEl.readyState < 2)
+            !isNoVideoStep
+            && (!videoEl || videoEl.readyState < 2)
             && lastDecodedVideoEl
             && lastDecodedVideoEl.readyState >= 2
             && !srcDiverged
               ? lastDecodedVideoEl
               : null;
           const wouldHaveCovered =
-            (!videoEl || videoEl.readyState < 2)
+            !isNoVideoStep
+            && (!videoEl || videoEl.readyState < 2)
             && lastDecodedVideoEl
             && lastDecodedVideoEl.readyState >= 2
             && srcDiverged;
           const drawEl = blipEl ?? videoEl;
           if (blipEl) {
             blipCoveredTotal++;
+            consecBlipCoverFrames++;
             if (blipCoveredTotal === 1 || blipCoveredTotal % 30 === 0) {
-              pushHandoffLog(`[PiP] pipPass19R3Blip=1 blipCoveredTotal=${blipCoveredTotal} frame=${totalFrameCount}`);
+              pushHandoffLog(`[PiP] pipPass19R3Blip=1 blipCoveredTotal=${blipCoveredTotal} consec=${consecBlipCoverFrames} frame=${totalFrameCount}`);
             }
+          } else {
+            consecBlipCoverFrames = 0;
           }
           if (wouldHaveCovered) {
             blipSkipStaleTotal++;
@@ -911,12 +951,17 @@ export function usePipCanvasStream({
               pushHandoffLog(`[PiP] pipPass19R3SkipStale=1 blipSkipStaleTotal=${blipSkipStaleTotal} frame=${totalFrameCount}`);
             }
           }
-          // R5 Fix 1 hysteresis + Fix 4 tileModeFlip. Three-way decision:
-          //   canPaintNow → refresh snapshot, paint fresh, flip to video.
-          //   in video mode & counter under gate & snapshot still paintable
-          //     & snapshot's currentSrc unchanged → paint snapshot, stay.
-          //   else → gradient + flip to placeholder with named reason.
-          // pipHysteresis=1 tileModeFlip=1
+          // R7 Fix 2 safety net: hard cap continuous blip cover at
+          // BLIP_CAP_FRAMES (~833ms at 30fps). If we've been covering
+          // longer than that, `expected` is almost certainly stale — force
+          // the placeholder regardless. pipR7BlipCap=1
+          const blipCapExceeded = consecBlipCoverFrames > BLIP_CAP_FRAMES;
+
+          // Paint decision. R7 adds two leading branches:
+          //   isNoVideoStep → placeholder + reset hysteresis + reason=noVideo.
+          //   blipCapExceeded → placeholder + reset hysteresis + reason=blipCap.
+          // Then the R5 three-way (canPaintNow / hysteresis hold / placeholder).
+          // pipR7NoVideo=1 pipR7BlipCap=1 pipHysteresis=1 tileModeFlip=1
           const canPaintNow = !!(drawEl && drawEl.readyState >= 2);
           const cachedStillMatches = !!(
             lastPaintedVideoEl
@@ -927,7 +972,29 @@ export function usePipCanvasStream({
             cachedStillMatches
             && lastPaintedVideoEl !== null
             && lastPaintedVideoEl.readyState >= 2;
-          if (canPaintNow && drawEl) {
+          if (isNoVideoStep) {
+            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            lastDecodedVideoEl = null;
+            lastPaintedVideoEl = null;
+            lastPaintedVideoSrc = '';
+            consecNoDrawableFrames = 0;
+            consecBlipCoverFrames = 0;
+            noVideoTotal++;
+            if (noVideoTotal === 1 || noVideoTotal % 60 === 0) {
+              pushHandoffLog(`[PiP] pipR7NoVideo=1 noVideoTotal=${noVideoTotal} target=${targetStepType} phase=${ph} frame=${totalFrameCount}`);
+            }
+            flipTileMode('placeholder', 'noVideo');
+          } else if (blipCapExceeded) {
+            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            lastDecodedVideoEl = null;
+            lastPaintedVideoEl = null;
+            lastPaintedVideoSrc = '';
+            consecNoDrawableFrames = 0;
+            consecBlipCoverFrames = 0;
+            blipCapTotal++;
+            pushHandoffLog(`[PiP] pipR7BlipCap=1 blipCapTotal=${blipCapTotal} cap=${BLIP_CAP_FRAMES} frame=${totalFrameCount}`);
+            flipTileMode('placeholder', 'blipCap');
+          } else if (canPaintNow && drawEl) {
             consecNoDrawableFrames = 0;
             lastPaintedVideoEl = drawEl;
             lastPaintedVideoSrc = drawEl.currentSrc || drawEl.src || '';
