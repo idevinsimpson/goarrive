@@ -432,6 +432,7 @@ export function usePipCanvasStream({
     let blipCoveredTotal = 0;
     // Pass-19: one-time log on first prep-phase draw (bundle marker for grep)
     let prepPhaseFirstDrawLogged = false;
+    let prepTextFirstDrawLogged = false;
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
@@ -719,7 +720,19 @@ export function usePipCanvasStream({
       ctx.restore();
 
       const nameMaxW = cw * 0.6;
-      drawMovementName(ctx, movName, pad, Math.round(ch * 0.075), nameMaxW);
+      // Pass-19 R4 follow-up: for grabEquipment, mirror the main player's
+      // title (grabEquipmentText || name — see WorkoutPlayer L2425) so the
+      // tile shows the instruction ("Grab 35 pound Dumbbells & a Swiss Ball")
+      // above the image instead of just the block name. Marker:
+      // pipPass19R4Text=1 for served-JS verification.
+      const nameText = ph === 'grabEquipment'
+        ? ((cur as any)?.grabEquipmentText || movName)
+        : movName;
+      if (ph === 'grabEquipment' && !prepTextFirstDrawLogged && nameText && nameText !== movName) {
+        prepTextFirstDrawLogged = true;
+        pushHandoffLog(`[PiP] pipPass19R4Text=1 phase=grabEquipment textLen=${nameText.length} frame=${totalFrameCount}`);
+      }
+      drawMovementName(ctx, nameText, pad, Math.round(ch * 0.075), nameMaxW);
 
       if (!repBased) {
         const timerStr = formatTime(tl);
