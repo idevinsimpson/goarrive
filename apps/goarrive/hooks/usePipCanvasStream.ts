@@ -429,6 +429,16 @@ export function usePipCanvasStream({
     // last frame instead of the fallback gradient. blipCoveredTotal tracks
     // how many frames were covered for the probe log.
     let lastDecodedVideoEl: HTMLVideoElement | null = null;
+    // Pass-19 R3 follow-up: pin the cached frame to the movement it came
+    // from. When cur.name changes AND the new movement has no ready video,
+    // the pass-19 shipped code kept painting the previous movement's frozen
+    // frame indefinitely (Devin 2026-08-17 screenshot: PiP tile showed prior
+    // squat frame while main player showed the GoArrive placeholder for a
+    // movement with no videoUrl). Tracking the source movement's name lets
+    // us invalidate the cache on boundary and fall through to the gradient +
+    // name placeholder. Marker: pipPass19R3Reset=1.
+    let lastDecodedCurName: string | undefined = undefined;
+    let blipResetTotal = 0;
     let blipCoveredTotal = 0;
     // Pass-19: one-time log on first prep-phase draw (bundle marker for grep)
     let prepPhaseFirstDrawLogged = false;
@@ -672,9 +682,25 @@ export function usePipCanvasStream({
       // pipPass19R3Blip=1
       if (!prepDrawn) {
         if (!pipCanvasTainted) {
-          // R3: update lastDecodedVideoEl when current element is decoded
+          // R3: update lastDecodedVideoEl when current element is decoded.
+          // Pin to cur.name so the cache is only valid for the same movement.
           if (videoEl && videoEl.readyState >= 2) {
             lastDecodedVideoEl = videoEl;
+            lastDecodedCurName = cur?.name;
+          }
+          // R3 follow-up: invalidate cache on movement boundary when the new
+          // movement has no ready video — otherwise the tile would freeze on
+          // the prior movement's frame. Marker pipPass19R3Reset=1.
+          const curName = cur?.name;
+          const movementChanged =
+            lastDecodedCurName != null && curName != null && curName !== lastDecodedCurName;
+          if (movementChanged && (!videoEl || videoEl.readyState < 2)) {
+            lastDecodedVideoEl = null;
+            lastDecodedCurName = undefined;
+            blipResetTotal++;
+            if (blipResetTotal === 1 || blipResetTotal % 10 === 0) {
+              pushHandoffLog(`[PiP] pipPass19R3Reset=1 blipResetTotal=${blipResetTotal} newCur=${curName} frame=${totalFrameCount}`);
+            }
           }
           // R3: use lastDecodedVideoEl as blip cover when current el not ready
           const blipEl = (!videoEl || videoEl.readyState < 2) && lastDecodedVideoEl && lastDecodedVideoEl.readyState >= 2
