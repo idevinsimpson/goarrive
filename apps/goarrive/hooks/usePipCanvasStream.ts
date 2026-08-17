@@ -26,8 +26,8 @@ import {
 // the pointers and the loop keeps tracking the live workout.
 type PipFeed = {
   phase: string;
-  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string } | null;
-  next: { name?: string } | null;
+  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[] } | null;
+  next: { name?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[] } | null;
   timeLeft: number;
   isPaused: boolean;
   isRepBased: boolean;
@@ -42,6 +42,13 @@ type PipFeed = {
   resolveVideo: (() => HTMLVideoElement | null) | null;
 };
 let latestPipFeed: PipFeed | null = null;
+
+// Pass-20 R5: total count of publishes that were about to lose a step's
+// videoUrl for a step whose name matched the previous publish. Restored
+// from prev so the draw loop never sees a partially-populated snapshot
+// mid-transition. Module-level so a diagnostic grep of the log can
+// summarize the whole session. pipFeedFlap=1
+let feedFlapTotal = 0;
 
 // Pass-14 instrumentation: expose the liveness AudioContext so the
 // autopsy in useMusicHandoff and the PiP presentation-change listeners
@@ -212,9 +219,51 @@ export function usePipCanvasStream({
   // Pass-10: publish to the module-level feed on every render so the
   // singleton draw loop reads live state even if this hook instance
   // detaches and a new one takes over. No dep array — publish always.
+  //
+  // Pass-20 R5 feed-flap absorber: WorkoutPlayer's `next` occasionally
+  // publishes with videoUrl undefined for one render — the flatten memo
+  // must be recomputing with a transient input. That partial-populated
+  // snapshot flowed into the draw loop and made the R3v2 src comparison
+  // decide the tile should switch to placeholder (~1 Hz strobe on device,
+  // Devin: "movement video flickering off and back on"). Rule of thumb:
+  // for the SAME step-name, videoUrl-presence must only monotonically
+  // GAIN across publishes. If it would drop from truthy to falsy for the
+  // same name, restore from prev and increment feedFlapTotal. Emit a log
+  // on each restore so the flap is measurable, not anecdotal.
+  // pipFeedFlap=1
   useEffect(() => {
+    const prev = latestPipFeed;
+    let curOut = current as PipFeed['current'];
+    let nxOut = next as PipFeed['next'];
+
+    if (prev?.current && curOut && prev.current.name && prev.current.name === curOut.name) {
+      const prevHas = !!prev.current.videoUrl;
+      const nowHas = !!curOut.videoUrl;
+      if (prevHas && !nowHas) {
+        feedFlapTotal++;
+        pushHandoffLog(`[PiP] pipFeedFlap=1 slot=current name=${curOut.name} total=${feedFlapTotal}`);
+        curOut = { ...curOut, videoUrl: prev.current.videoUrl };
+      }
+    }
+    if (prev?.next && nxOut && prev.next.name && prev.next.name === nxOut.name) {
+      const prevHas = !!prev.next.videoUrl;
+      const nowHas = !!nxOut.videoUrl;
+      if (prevHas && !nowHas) {
+        feedFlapTotal++;
+        pushHandoffLog(`[PiP] pipFeedFlap=1 slot=next name=${nxOut.name} total=${feedFlapTotal}`);
+        nxOut = { ...nxOut, videoUrl: prev.next.videoUrl };
+      }
+    }
+
     latestPipFeed = {
-      phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct,
+      phase,
+      current: curOut,
+      next: nxOut,
+      timeLeft,
+      isPaused,
+      isRepBased,
+      repsDone,
+      progressPct,
       videoEl: videoElRef.current,
       resolveVideo: pipSourceResolverRef?.current ?? null,
     };
@@ -455,6 +504,36 @@ export function usePipCanvasStream({
     let prepCutLastBoundarySig = '';
     let prepCutBoundarySuppressed = 0;
     let prepCutFirstHitLogged = false;
+
+    // Pass-20 R5 latch-don't-sample: hysteresis + tile-mode tracking.
+    // Symptom (Devin, 2026-08-17): "a lot of movement video flickering off
+    // and back on revealing the movement title placeholder" while the main
+    // app player renders cleanly. Diagnosis: the video-draw decision path
+    // was SAMPLING the flapping feed/videoEl every frame instead of
+    // LATCHING through brief input dropouts. Fix shape:
+    //   • Fix 1 (this block): after a successful paint we snapshot the
+    //     element+src as lastPaintedVideoEl / lastPaintedVideoSrc. If the
+    //     next frame can't paint fresh, we keep drawing that snapshot for
+    //     up to HYSTERESIS_FRAMES (≈250ms at 24fps) before switching to
+    //     the fallback gradient. Placeholder→video switches back on the
+    //     very first paintable frame — asymmetric on purpose.
+    //   • Fix 4: tileMode + tileModeFlipTotal make every video↔placeholder
+    //     transition emit exactly one log line with the deciding reason
+    //     (live/skipStale/noBound/rsLow/hysteresisEnd/prepCut) so the
+    //     device log can count flips vs boundaries.
+    // pipHysteresis=1 tileModeFlip=1
+    let consecNoDrawableFrames = 0;
+    let lastPaintedVideoEl: HTMLVideoElement | null = null;
+    let lastPaintedVideoSrc = '';
+    let tileMode: 'prep' | 'video' | 'placeholder' = 'placeholder';
+    let tileModeFlipTotal = 0;
+    const HYSTERESIS_FRAMES = 6;
+    function flipTileMode(next: 'prep' | 'video' | 'placeholder', reason: string): void {
+      if (next === tileMode) return;
+      tileModeFlipTotal++;
+      pushHandoffLog(`[PiP] tileModeFlip=1 from=${tileMode} to=${next} reason=${reason} frame=${totalFrameCount} total=${tileModeFlipTotal}`);
+      tileMode = next;
+    }
 
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
@@ -753,6 +832,10 @@ export function usePipCanvasStream({
           drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
         }
 
+        // R5 Fix 4: log the prep entry too. Reason 'prepCut' makes a device
+        // log measurable — total tileModeFlip count should be ~boundary
+        // count only, never per-frame. tileModeFlip=1
+        flipTileMode('prep', 'prepCut');
         prepDrawn = true;
       }
 
@@ -781,33 +864,39 @@ export function usePipCanvasStream({
           const currentSrc = videoEl ? (videoEl.currentSrc || videoEl.src || '') : '';
           const srcDiverged = cachedSrc !== '' && currentSrc !== '' && cachedSrc !== currentSrc;
           if (srcDiverged) {
+            // R5 Fix 1: content-change also invalidates the hysteresis cache
+            // — we don't want to hold Movement A's last frame across a real
+            // transition into Movement B. Reset the counter so the new
+            // movement's first-drawable-frame flips cleanly to video mode.
             lastDecodedVideoEl = null;
+            lastPaintedVideoEl = null;
+            lastPaintedVideoSrc = '';
+            consecNoDrawableFrames = 0;
             blipResetTotal++;
             if (blipResetTotal === 1 || blipResetTotal % 10 === 0) {
               pushHandoffLog(`[PiP] pipPass19R3SrcReset=1 blipResetTotal=${blipResetTotal} frame=${totalFrameCount}`);
             }
           }
-          // R3v2: blip cover only when cache is FOR THE SAME URL as the
-          // current pick. Same-URL cache = same movement, brief decode
-          // hiccup — safe to cover. Different-URL or empty-current cache
-          // = wrong content, skip cover (fall through to gradient). This
-          // is the fix for the Lawn Mower report: REST with next=Lawn
-          // Mower kept painting the finished movement's cached frame
-          // because name-based comparison couldn't see the URL change.
-          const cachedSameContent =
-            cachedSrc !== '' && currentSrc !== '' && cachedSrc === currentSrc;
+          // R5 Fix 2: SkipStale only on a GENUINELY DIFFERENT src. The
+          // previous rule keyed on `cachedSameContent` (both srcs non-empty
+          // AND equal), which meant an empty currentSrc — the input dropout
+          // that produces Devin's flicker — evaluated as "different" and
+          // killed the blip cover. New rule: cover unless `srcDiverged`
+          // (both non-empty AND actually different). Input dropouts →
+          // srcDiverged=false → keep drawing the cached frame. That's
+          // the entire mechanism for surviving 1-render feed flaps.
           const blipEl =
             (!videoEl || videoEl.readyState < 2)
             && lastDecodedVideoEl
             && lastDecodedVideoEl.readyState >= 2
-            && cachedSameContent
+            && !srcDiverged
               ? lastDecodedVideoEl
               : null;
           const wouldHaveCovered =
             (!videoEl || videoEl.readyState < 2)
             && lastDecodedVideoEl
             && lastDecodedVideoEl.readyState >= 2
-            && !cachedSameContent;
+            && srcDiverged;
           const drawEl = blipEl ?? videoEl;
           if (blipEl) {
             blipCoveredTotal++;
@@ -821,7 +910,50 @@ export function usePipCanvasStream({
               pushHandoffLog(`[PiP] pipPass19R3SkipStale=1 blipSkipStaleTotal=${blipSkipStaleTotal} frame=${totalFrameCount}`);
             }
           }
-          drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, movName);
+          // R5 Fix 1 hysteresis + Fix 4 tileModeFlip. Three-way decision:
+          //   canPaintNow → refresh snapshot, paint fresh, flip to video.
+          //   in video mode & counter under gate & snapshot still paintable
+          //     & snapshot's currentSrc unchanged → paint snapshot, stay.
+          //   else → gradient + flip to placeholder with named reason.
+          // pipHysteresis=1 tileModeFlip=1
+          const canPaintNow = !!(drawEl && drawEl.readyState >= 2);
+          const cachedStillMatches = !!(
+            lastPaintedVideoEl
+            && lastPaintedVideoSrc !== ''
+            && (lastPaintedVideoEl.currentSrc || lastPaintedVideoEl.src || '') === lastPaintedVideoSrc
+          );
+          const canPaintCached =
+            cachedStillMatches
+            && lastPaintedVideoEl !== null
+            && lastPaintedVideoEl.readyState >= 2;
+          if (canPaintNow && drawEl) {
+            consecNoDrawableFrames = 0;
+            lastPaintedVideoEl = drawEl;
+            lastPaintedVideoSrc = drawEl.currentSrc || drawEl.src || '';
+            drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, movName);
+            flipTileMode('video', 'live');
+          } else if (
+            tileMode === 'video'
+            && consecNoDrawableFrames < HYSTERESIS_FRAMES
+            && canPaintCached
+            && lastPaintedVideoEl
+          ) {
+            consecNoDrawableFrames++;
+            drawVideoFrame(ctx, lastPaintedVideoEl, videoX, videoY, videoW, videoH, movName);
+            // Stay in video mode — no flip logged. This is the whole point
+            // of the latch: brief no-drawable dropouts don't break the
+            // continuity of the "video is playing" state.
+          } else {
+            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            const reason = wouldHaveCovered
+              ? 'skipStale'
+              : !videoEl
+                ? 'noBound'
+                : videoEl.readyState < 2
+                  ? 'rsLow'
+                  : 'hysteresisEnd';
+            flipTileMode('placeholder', reason);
+          }
           try {
             ctx.getImageData(0, 0, 1, 1);
           } catch (e) {
