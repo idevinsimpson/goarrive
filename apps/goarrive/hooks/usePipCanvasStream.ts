@@ -607,36 +607,44 @@ export function usePipCanvasStream({
       ctx.fillRect(0, 0, cw, ch);
 
       // Pass-19 R4 + Pass-20 R4 prep-cut: per-frame draw gate for no-video
-      // steps. Runs BEFORE the taint-guarded video path so the previous
+      // prep steps. Runs BEFORE the taint-guarded video path so the previous
       // movement's still-bound element can never paint through at the reveal
       // boundary. Asymmetric on purpose: with-video → with-video keeps the
-      // R3v2 blip cover (desired for smooth handoff); only no-video / prep
-      // targets get the hard cut.
+      // R3v2 blip cover (desired for smooth handoff); only PREP step-types
+      // get the hard cut.
+      //
+      // Pass-20 R4v2: restricted to the 4 prep step-types ONLY —
+      // grabEquipment / waterBreak / demo / transition. The initial R4
+      // included `exercise && !videoUrl` which misfired on real exercises
+      // (device log: 1265 frames suppressed on "Dumbbell Seated Bent Over
+      // Row") because the flattened `nx.videoUrl` occasionally reads as
+      // falsy through the module-level feed. Real exercises without a
+      // video should fall through to the fallback gradient via the
+      // existing video-draw path — never through prep-cut.
       //
       // Draw target: during REST the timer keeps cur=finished + nx=incoming
       // and WorkoutPlayer's reveal shows next throughout. Gating on cur
       // during REST would evaluate the OLD movement's stepType and let the
-      // stale video keep drawing. Use drawTarget instead so no-video
-      // detection fires the same frame the incoming step's data is
-      // published — before any resolver rebind can land.
+      // stale video keep drawing. Use drawTarget so no-video detection
+      // fires the same frame the incoming step's data is published —
+      // before any resolver rebind can land.
       //
-      // pipPrepCut=1
+      // pipPrepCut=1 pipPrepCutR4v2=1
       let prepDrawn = false;
       const drawTarget: any = ph === 'rest' && nx ? nx : cur;
       const targetStepType: string = drawTarget?.stepType ?? '';
       const targetVideoUrl: string = drawTarget?.videoUrl ?? '';
-      const isNoVideoTarget =
+      const isPrepTarget =
         targetStepType === 'grabEquipment'
         || targetStepType === 'waterBreak'
         || targetStepType === 'demo'
-        || targetStepType === 'transition'
-        || (targetStepType === 'exercise' && !targetVideoUrl);
+        || targetStepType === 'transition';
 
       // Boundary tracker: log the count of suppressed frames every time we
-      // leave a no-video boundary. Devin's finding — "the previous movement
+      // leave a prep-cut boundary. Devin's finding — "the previous movement
       // sometimes flashes" — becomes measurable here as "how many frames
       // the hard-cut caught for each countdown-into-prep boundary."
-      const boundarySig = isNoVideoTarget
+      const boundarySig = isPrepTarget
         ? `${targetStepType}|${drawTarget?.name ?? ''}|${targetVideoUrl}`
         : '';
       if (boundarySig !== prepCutLastBoundarySig) {
@@ -645,12 +653,13 @@ export function usePipCanvasStream({
         }
         prepCutBoundarySuppressed = 0;
         prepCutLastBoundarySig = boundarySig;
-        if (isNoVideoTarget) {
-          pushHandoffLog(`[PiP] pipPrepCut=1 boundaryStart target=${targetStepType} phase=${ph} name=${drawTarget?.name ?? ''} frame=${totalFrameCount}`);
+        if (isPrepTarget) {
+          const hasVideoUrl = !!targetVideoUrl;
+          pushHandoffLog(`[PiP] pipPrepCut=1 boundaryStart target=${targetStepType} phase=${ph} name=${drawTarget?.name ?? ''} hasVideoUrl=${hasVideoUrl} frame=${totalFrameCount}`);
         }
       }
 
-      if (isNoVideoTarget) {
+      if (isPrepTarget) {
         prepCutBoundarySuppressed++;
         if (!prepCutFirstHitLogged) {
           prepCutFirstHitLogged = true;

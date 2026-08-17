@@ -780,10 +780,38 @@ export default function WorkoutPlayer({
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   const registerVideo = useCallback((key: string, el: any | null) => {
+    // Pass-20 R4v2 dedup: the ref callbacks at the JSX call sites are
+    // inline arrow functions, so React sees a "new" ref every render and
+    // fires the OLD callback with null then the NEW callback with the
+    // element on EVERY commit. WorkoutPlayer re-renders on every timeLeft
+    // tick (~1 Hz), so every mounted <Video> got a null→set churn per
+    // second — driving pushHandoffLog spam AND repeated playAsync() /
+    // pause() / crossOrigin-load() cycles that could stall decode.
+    //
+    // Guardrail: if the incoming element is the same DOM node we already
+    // hold under this key, no-op. If the incoming is null but the map
+    // already holds an element, defer the delete via queueMicrotask —
+    // React fires null THEN set within the same commit, so the same-el
+    // set will land first and cancel the delete. Genuine unmounts still
+    // work: the delayed check finds the entry unchanged (or already
+    // replaced by something new) and skips only when identity matches.
+    // pipRegDedup=1
     if (!el) {
-      videosRef.current.delete(key);
+      const currentEl = videosRef.current.get(key);
+      if (!currentEl) return;
+      if (typeof queueMicrotask === 'function') {
+        queueMicrotask(() => {
+          if (videosRef.current.get(key) === currentEl) {
+            videosRef.current.delete(key);
+          }
+        });
+      } else {
+        videosRef.current.delete(key);
+      }
       return;
     }
+    const existing = videosRef.current.get(key);
+    if (existing === el) return;
     // Pass-18 Fix 1: event-driven rebind wake signal. Time-capped retry can't
     // cover the 62-second hole pass-16 caught at 00:23:44 (rebind key=null
     // layerKeys=0 → tile text-only across work→rest→work until a natural
@@ -791,7 +819,7 @@ export default function WorkoutPlayer({
     // when a NEW layer entry lands and the current binding is null or its
     // src doesn't match expectedUrlRef, invoke the resolver immediately.
     // Only layer:* keys — phase-name entries already ride the widened scan.
-    const isNewEntry = !videosRef.current.has(key);
+    const isNewEntry = !existing;
     videosRef.current.set(key, el);
     // iOS Safari needs the legacy webkit-playsinline attribute (expo-av only
     // sets the modern playsInline prop) or playback hijacks into fullscreen.
@@ -1699,6 +1727,17 @@ export default function WorkoutPlayer({
       }
 
       const prev = pipSourceVideoRef.current;
+      // Pass-20 R4v2 keep-bound: on no-match, keep the previous binding
+      // rather than nulling it. The prior code unbound on every mismatch,
+      // which combined with ref-callback identity churn caused the tile
+      // to blink black across reveals. Only null when the map is empty —
+      // i.e. no elements are mounted at all. Log match=false so the
+      // wrong-URL condition remains visible in the copy log.
+      // pipKeepBound=1
+      if (!pick && prev && cands.length > 0) {
+        pushHandoffLog(`[PiP] pipKeepBound=1 keepPrev match=false expected=${shortUrl(expected)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length}`);
+        return prev;
+      }
       if (pick) {
         // Pass-19 R1: if the picked element has readyState < 2, attach a
         // one-shot canplay/loadeddata listener so we re-invoke the resolver
