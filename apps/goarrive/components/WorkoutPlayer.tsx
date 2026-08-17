@@ -811,7 +811,13 @@ export default function WorkoutPlayer({
       return;
     }
     const existing = videosRef.current.get(key);
-    if (existing === el) return;
+    if (existing === el) {
+      if (!(el as any).__pipRegDedupLogged) {
+        (el as any).__pipRegDedupLogged = true;
+        pushHandoffLog(`[PiP] pipRegDedup=1 firstHit key=${key}`);
+      }
+      return;
+    }
     // Pass-18 Fix 1: event-driven rebind wake signal. Time-capped retry can't
     // cover the 62-second hole pass-16 caught at 00:23:44 (rebind key=null
     // layerKeys=0 → tile text-only across work→rest→work until a natural

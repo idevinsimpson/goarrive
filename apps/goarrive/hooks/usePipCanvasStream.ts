@@ -655,7 +655,7 @@ export function usePipCanvasStream({
         prepCutLastBoundarySig = boundarySig;
         if (isPrepTarget) {
           const hasVideoUrl = !!targetVideoUrl;
-          pushHandoffLog(`[PiP] pipPrepCut=1 boundaryStart target=${targetStepType} phase=${ph} name=${drawTarget?.name ?? ''} hasVideoUrl=${hasVideoUrl} frame=${totalFrameCount}`);
+          pushHandoffLog(`[PiP] pipPrepCut=1 pipPrepCutR4v2=1 boundaryStart target=${targetStepType} phase=${ph} name=${drawTarget?.name ?? ''} hasVideoUrl=${hasVideoUrl} frame=${totalFrameCount}`);
         }
       }
 
