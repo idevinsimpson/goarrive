@@ -288,6 +288,29 @@ export default function WorkoutPlayer({
   // The element itself is created imperatively in the useEffect below.
   const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Pass-20 R8 reveal-ahead for no-video next steps. Mirror of the big
+  // reveal memo further down (line ~1537) that produces `isInRevealWindow`
+  // for the main player's double-buffered video swap. Hoisted here so the
+  // PiP hook call can consume it — the two calculations MUST stay in sync
+  // (both apply REVEAL_LEAD_SECONDS to the last of any timed non-rest
+  // phase, both include REST as continuously in-window, both suppress
+  // during rep-based and swap-sides work-L). If you change the reveal
+  // rule, update both.
+  const isInPipRevealWindow = useMemo<boolean>(() => {
+    if (!current || !next) return false;
+    if (phase === 'rest') return true;
+    const isTimedRevealPhase =
+      phase === 'work' || phase === 'transition' || phase === 'waterBreak'
+      || phase === 'grabEquipment' || phase === 'demo';
+    if (!isTimedRevealPhase) return false;
+    if (isRepBased) return false;
+    const stayingOnSameMovement =
+      phase === 'work' && (current as any)?.swapSides === true && swapSide === 'L';
+    if (stayingOnSameMovement) return false;
+    if (typeof timeLeft !== 'number' || timeLeft <= 0) return false;
+    return timeLeft <= REVEAL_LEAD_SECONDS;
+  }, [phase, timeLeft, current, next, isRepBased, swapSide]);
+
   const { mediaStream, startStream, attachAudioTracks, detachAudioTracks } = usePipCanvasStream({
     // Pass-4 keep-warm: stream comes up on workout mount and stays up so
     // readyState reaches 4 well before the user taps PiP. Pass-3 rebuilt on
@@ -305,6 +328,9 @@ export default function WorkoutPlayer({
     isRepBased,
     repsDone: 0,
     progressPct,
+    // Pass-20 R8: hand the reveal-window flag to the PiP draw loop so it
+    // can early-cut to next's placeholder when next is a no-video exercise.
+    isInRevealWindow: isInPipRevealWindow,
     videoElRef: pipSourceVideoRef,
     // Pass-7: expose the presentation-target video so the periodic
     // drawFrame log can sample .currentTime + .readyState.

@@ -34,6 +34,12 @@ type PipFeed = {
   repsDone: number;
   progressPct: number;
   videoEl: HTMLVideoElement | null;
+  // Pass-20 R8: WorkoutPlayer publishes its reveal-window flag so the draw
+  // loop can early-cut to the next step's placeholder when the next step is
+  // a no-video exercise. Mirrors the video-reveal double-buffer swap timing
+  // (~last REVEAL_LEAD_SECONDS of a timed non-rest phase). REST is already
+  // handled by the drawTarget=nx swap.
+  isInRevealWindow: boolean;
   // Pass-14 Fix 1: draw-loop-callable resolver. WorkoutPlayer installs a
   // function that scans videosRef for the best <video> candidate and
   // logs the pick to the COPY LOG. drawFrame invokes it whenever its
@@ -135,6 +141,13 @@ interface PipCanvasStreamOptions {
   isRepBased: boolean;
   repsDone: number;
   progressPct: number;
+  // Pass-20 R8: reveal-ahead flag from WorkoutPlayer's revealDisplayItem
+  // memo. When true, the last REVEAL_LEAD_SECONDS of the current timed
+  // phase (and all of REST) show `next` in the main player. The draw loop
+  // uses it to also swap to `next` early when `next` is a no-video
+  // exercise — so the placeholder appears at the same time video reveals
+  // start swapping in the double-buffered video layer.
+  isInRevealWindow: boolean;
   videoElRef: React.RefObject<HTMLVideoElement | null>;
   // Pass-14 Fix 1: self-healing pipSource resolver. drawFrame invokes
   // this whenever its bound videoEl is null-or-paused during a work-like
@@ -203,6 +216,7 @@ export function usePipCanvasStream({
   isRepBased,
   repsDone,
   progressPct,
+  isInRevealWindow,
   videoElRef,
   pipSourceResolverRef,
   canvasVideoElRef,
@@ -266,6 +280,7 @@ export function usePipCanvasStream({
       progressPct,
       videoEl: videoElRef.current,
       resolveVideo: pipSourceResolverRef?.current ?? null,
+      isInRevealWindow,
     };
   });
 
@@ -549,6 +564,22 @@ export function usePipCanvasStream({
     let blipCapTotal = 0;
     const BLIP_CAP_FRAMES = 25;
 
+    // Pass-20 R8 reveal-ahead for no-video next steps. Video reveals swap
+    // WorkoutPlayer's displayed video ~REVEAL_LEAD_SECONDS before the
+    // current phase ends (the 3-2-1 window). No-video next steps had no
+    // parallel — the tile stayed on the current movement's video until
+    // REST began and blipCap eventually kicked in ~1.2s late (Devin log
+    // 18:18:09, 18:23:16, 18:28:23, 18:32:04). R8 mirrors the video-reveal
+    // timing: when `next` is an exercise with no `videoUrl`, override
+    // drawTarget=next during the reveal window so the placeholder appears
+    // at the same moment video reveals do. Decision input is next.videoUrl
+    // (the step's OWN flattened field — proven trustworthy on every prep
+    // boundaryStart log), never derived resolver state. That's the line
+    // separating this from the pass-20 regression (de10448).
+    // pipR7Reveal=1
+    let revealLastSig = '';
+    let revealTotal = 0;
+
     function flipTileMode(next: 'prep' | 'video' | 'placeholder', reason: string): void {
       if (next === tileMode) return;
       tileModeFlipTotal++;
@@ -729,9 +760,25 @@ export function usePipCanvasStream({
       // fires the same frame the incoming step's data is published —
       // before any resolver rebind can land.
       //
-      // pipPrepCut=1 pipPrepCutR4v2=1
+      // pipPrepCut=1 pipPrepCutR4v2=1 pipR7Reveal=1
       let prepDrawn = false;
-      const drawTarget: any = ph === 'rest' && nx ? nx : cur;
+      // Pass-20 R8 reveal-ahead for no-video next steps. If WorkoutPlayer
+      // is inside the reveal window (last REVEAL_LEAD_SECONDS of a timed
+      // non-rest phase — the 3-2-1 countdown) AND next is an exercise
+      // with no OWN videoUrl, override drawTarget=nx so the placeholder
+      // appears at the same moment a video-reveal would swap in the next
+      // movement's video. REST already swaps via `ph === 'rest' && nx`.
+      // Decision inputs: `nx.videoUrl` (own field, trustworthy per every
+      // R4v2 boundaryStart log) + `nx.stepType === 'exercise'`. Never
+      // resolver-derived — that's the line separating this from de10448.
+      const revealAhead = feed?.isInRevealWindow ?? false;
+      const isRevealSwap =
+        revealAhead
+        && ph !== 'rest'
+        && !!nx
+        && nx.stepType === 'exercise'
+        && !nx.videoUrl;
+      const drawTarget: any = (ph === 'rest' && nx) ? nx : isRevealSwap ? nx : cur;
       const targetStepType: string = drawTarget?.stepType ?? '';
       const targetVideoUrl: string = drawTarget?.videoUrl ?? '';
       const isPrepTarget =
@@ -739,6 +786,21 @@ export function usePipCanvasStream({
         || targetStepType === 'waterBreak'
         || targetStepType === 'demo'
         || targetStepType === 'transition';
+
+      // R8 reveal-boundary tracker: fire pipR7Reveal=1 once per entry into a
+      // reveal-swap for a distinct next step. Independent of prepCut boundary
+      // so the two tallies don't conflate. Exit clears the sig so the next
+      // reveal starts a fresh entry.
+      if (isRevealSwap) {
+        const revealSig = `${nx?.name ?? ''}|${nx?.stepType ?? ''}`;
+        if (revealSig !== revealLastSig) {
+          revealLastSig = revealSig;
+          revealTotal++;
+          pushHandoffLog(`[PiP] pipR7Reveal=1 revealTotal=${revealTotal} target=${nx?.name ?? ''} stepType=${nx?.stepType ?? ''} phase=${ph} timeLeft=${tl.toFixed(1)} frame=${totalFrameCount}`);
+        }
+      } else if (revealLastSig !== '') {
+        revealLastSig = '';
+      }
 
       // Boundary tracker: log the count of suppressed frames every time we
       // leave a prep-cut boundary. Devin's finding — "the previous movement
