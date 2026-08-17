@@ -51,14 +51,27 @@ import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer, subsc
 import { getLivenessCtxState } from './usePipCanvasStream';
 import {
   getMusicHandoffVariant,
+  getMusicHandoffVariantSource,
   type MusicHandoffVariant,
 } from '../utils/musicHandoffVariant';
-import { pushHandoffLog } from '../utils/handoffLog';
+import { pushHandoffLog, pushHandoffLogAlways } from '../utils/handoffLog';
 
 function log(...args: any[]) {
   const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
   console.info(line);
   pushHandoffLog(line);
+}
+
+// Pass-21 R8c hardening: seam telemetry is P0 — a leave failure with a
+// silent COPY LOG is uninterpretable (see the pass-13 trap the pass-14
+// instrumentation existed to prevent). Every line on the leave path
+// (init, mainCtx trigger, hide/skip reasons, hide v3, autopsy, visible)
+// routes through logAlways so DIAG-off doesn't strand us in darkness
+// again. Event-driven, ~10 lines per leave, no perf cost.
+function logAlways(...args: any[]) {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  console.info(line);
+  pushHandoffLogAlways(line);
 }
 
 // ── Volume-bucket picker ──────────────────────────────────────────────────────
@@ -302,7 +315,13 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     variantRef.current = getMusicHandoffVariant();
-    log('[HANDOFF/init]', JSON.stringify({ variant: variantRef.current }));
+    // handoffHardening=1 beacon; source discriminates a session with a
+    // deliberate query/pill override from a fresh boot on the v3 default.
+    logAlways('[HANDOFF/init]', JSON.stringify({
+      variant: variantRef.current,
+      source: getMusicHandoffVariantSource(),
+      handoffHardening: 1,
+    }));
   }, []);
 
   // ── Shadow lifecycle ──────────────────────────────────────────────────────
@@ -692,7 +711,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       }
 
       resumeAudioGraph();
-      log('[HANDOFF/visible v3]', JSON.stringify({ state: getAudioContextState() }));
+      logAlways('[HANDOFF/visible v3]', JSON.stringify({ state: getAudioContextState() }));
 
       // Log ctx state at t+0, +500ms, +2s so the device spike (test case C)
       // has evidence of whether resume() succeeds without a user gesture.
@@ -709,7 +728,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         if (getAudioContextState() === 'running') {
           window.clearTimeout(t500);
           window.clearTimeout(t2000);
-          log('[HANDOFF/visible]', JSON.stringify({
+          logAlways('[HANDOFF/visible]', JSON.stringify({
             variant,
             state: 'running',
             timeline: marks.join(' '),
@@ -718,7 +737,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
           return;
         }
         if (Date.now() > deadline) {
-          log('[HANDOFF/timeout]', JSON.stringify({
+          logAlways('[HANDOFF/timeout]', JSON.stringify({
             variant,
             timeline: marks.join(' '),
             note: 'ctx still suspended after 3s — waiting for user tap',
@@ -757,14 +776,14 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // path (zero HANDOFF/hide lines) is uninterpretable.
       const audible = audibleElRef.current;
       const variant = variantRef.current;
-      if (variant === 'off') { pushHandoffLog('[HANDOFF/hide skip variant-off]'); return; }
-      if (!audible) { pushHandoffLog('[HANDOFF/hide skip no-audible]'); return; }
-      if (!enabledRef.current) { pushHandoffLog('[HANDOFF/hide skip disabled]'); return; }
-      if (musicOffRef.current) { pushHandoffLog('[HANDOFF/hide skip music-off]'); return; }
+      if (variant === 'off') { pushHandoffLogAlways('[HANDOFF/hide skip variant-off]'); return; }
+      if (!audible) { pushHandoffLogAlways('[HANDOFF/hide skip no-audible]'); return; }
+      if (!enabledRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip disabled]'); return; }
+      if (musicOffRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip music-off]'); return; }
       // Music-hold means the intro is playing; we should NOT start music yet
       // just because the page hid. Same for user-paused / muted.
-      if (musicHoldRef.current) { pushHandoffLog('[HANDOFF/hide skip hold]'); return; }
-      if (musicPausedRef.current) { pushHandoffLog('[HANDOFF/hide skip paused]'); return; }
+      if (musicHoldRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip hold]'); return; }
+      if (musicPausedRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip paused]'); return; }
       // PiP standdown (non-iOS only): the canvas PiP stream on desktop
       // Safari and Chrome carries our music via a MediaStreamAudioDestination
       // Node, and running the shadow flip here would layer a second
@@ -778,17 +797,24 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         && /iP(hone|od|ad)/.test(navigator.userAgent)
         && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
       if (isPiPRef?.current && !iOS) {
-        pushHandoffLog('[HANDOFF/hide skipped isPiP]');
+        pushHandoffLogAlways('[HANDOFF/hide skipped isPiP]');
         return;
       }
       if (isPiPRef?.current && iOS) {
-        pushHandoffLog('[HANDOFF/hide iOS: PiP open but standdown skipped — stream is video-only, shadow carries music]');
+        pushHandoffLogAlways('[HANDOFF/hide iOS: PiP open but standdown skipped — stream is video-only, shadow carries music]');
       }
       const pos = audible.currentTime;
 
       if (variant === 'v3') {
         const shadow = shadowMusicElRef.current;
-        if (!shadow) return;
+        if (!shadow) {
+          // Pass-21 R8c: every decline names itself. A silent return here
+          // masked the leave failure Devin caught — a shadow that never
+          // primed is indistinguishable in the log from a seam that ran
+          // cleanly.
+          pushHandoffLogAlways('[HANDOFF/hide v3 skip no-shadow]');
+          return;
+        }
         // bufferedEnd proves whether the shadow was warm at the seam. If it is
         // at or ahead of pos, play() resumes from memory and the member hears
         // no gap; if it is 0 or behind, the seek is cold and a silence follows.
@@ -797,7 +823,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
           bufferedEnd = shadow.buffered.length ? shadow.buffered.end(shadow.buffered.length - 1) : 0;
         } catch {}
         const seamWall = Date.now();
-        log('[HANDOFF/hide v3]', JSON.stringify({
+        logAlways('[HANDOFF/hide v3]', JSON.stringify({
           pos: audible.currentTime,
           src: !!shadow.src,
           bufferedEnd,
@@ -808,7 +834,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         shadow.muted = isMutedRef.current;
         shadow.volume = volumeRef.current;
         const p = shadow.play();
-        if (p) p.catch((err: unknown) => log('[HANDOFF/hide v3 err]', String(err)));
+        if (p) p.catch((err: unknown) => logAlways('[HANDOFF/hide v3 err]', String(err)));
         audible.pause();
         inBackgroundRef.current = true;
         // Pass-14 instrumentation: post-seam autopsy at ~2s. A late-firing
@@ -823,7 +849,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
             const wallDelta = Date.now() - seamWall;
             const audibleNow = audibleElRef.current;
             const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
-            log('[HANDOFF/autopsy]', JSON.stringify({
+            logAlways('[HANDOFF/autopsy]', JSON.stringify({
               wallDeltaMs: wallDelta,
               shadow: {
                 paused: shadow.paused,
@@ -838,7 +864,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
               visState: vs,
             }));
           } catch (err: any) {
-            log('[HANDOFF/autopsy err]', String(err?.name || err));
+            logAlways('[HANDOFF/autopsy err]', String(err?.name || err));
           }
         }, 2000);
         return;
@@ -856,7 +882,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         try { audible.pause(); } catch {}
       }
       inBackgroundRef.current = true;
-      log('[HANDOFF/hide]', JSON.stringify({
+      logAlways('[HANDOFF/hide]', JSON.stringify({
         variant,
         pos: Number(pos.toFixed(3)),
         shadowPlaying: !shadow.paused,
@@ -905,7 +931,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     // so a duplicate trigger (if visibilitychange also fires) is a no-op —
     // runHideSeam owns its own idempotence via inBackgroundRef.
     const unsubMainCtx = subscribeMainCtxStatechange((state) => {
-      pushHandoffLog(`[PiP] trigger mainCtx state=${state} bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current} vs=${document.visibilityState}`);
+      pushHandoffLogAlways(`[PiP] trigger mainCtx state=${state} bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current} vs=${document.visibilityState}`);
       if (state === 'suspended' || state === 'interrupted') {
         if (!inBackgroundRef.current && isPiPRef?.current) {
           runHideSeam();

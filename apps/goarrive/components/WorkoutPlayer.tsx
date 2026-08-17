@@ -3145,8 +3145,16 @@ export default function WorkoutPlayer({
           renders in production because isStagingHost() is host-based. */}
       {isStagingHost() && (
         <View style={st.audioVariantRow}>
+          {/* Pass-21 R8c hardening: pill goes LOUD (red/inverted) when the
+              variant is anything other than v3. A mis-tap during pill-heavy
+              testing that leaves the tab stuck on v1/v2/off is the exact
+              silent-fail Devin diagnosed for the music-on-leave regression;
+              the inverted style is impossible to miss glancing at the
+              screen mid-workout. Persistence moved to sessionStorage so a
+              fresh session self-heals; the pill still lets you cycle within
+              a session. */}
           <Pressable
-            style={st.audioVariantBadge}
+            style={getMusicHandoffVariant() === 'v3' ? st.audioVariantBadge : st.audioVariantBadgeLoud}
             onPress={() => {
               const order: MusicHandoffVariant[] = ['v3', 'v1', 'v2', 'off'];
               const cur = getMusicHandoffVariant();
@@ -3155,7 +3163,7 @@ export default function WorkoutPlayer({
               try { window.location.reload(); } catch {}
             }}
           >
-            <Text style={st.audioVariantBadgeText}>
+            <Text style={getMusicHandoffVariant() === 'v3' ? st.audioVariantBadgeText : st.audioVariantBadgeTextLoud}>
               AUDIO: {getMusicHandoffVariant().toUpperCase()}
             </Text>
           </Pressable>
@@ -4040,6 +4048,14 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 3,
   },
+  audioVariantBadgeLoud: {
+    backgroundColor: '#E53E3E',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
   copyLogBtn: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     borderWidth: 1,
@@ -4050,6 +4066,13 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
   },
   audioVariantBadgeText: {
     color: '#F5A623',
+    fontFamily: FB,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  audioVariantBadgeTextLoud: {
+    color: '#FFFFFF',
     fontFamily: FB,
     fontSize: 10,
     fontWeight: '700',
