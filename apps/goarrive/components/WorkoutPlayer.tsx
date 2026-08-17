@@ -803,6 +803,29 @@ export default function WorkoutPlayer({
           node.playsInline = true;
           node.setAttribute('playsinline', '');
           node.setAttribute('webkit-playsinline', '');
+          // Pass-17: auto-resume when iOS pauses the element under us. The
+          // pass-15 device log showed the bound PiP element with vpaused=
+          // true throughout every rest EXCEPT rest #1 (the only rest with
+          // no preceding work→rest transition). Rest #1 the element stayed
+          // vpaused=false and rolled seamlessly into work #1. Every later
+          // rest was frozen. The most parsimonious explanation is iOS
+          // pauses <video> elements when the audio session is interrupted
+          // by the end-of-work TTS cue — expo-av's shouldPlay prop is
+          // unchanged so it never re-issues play(). Mirror the visibility-
+          // change resume pattern at line 847 but per-element: whenever a
+          // layer pauses while the user hasn't paused, re-issue play(). No
+          // loop — the pause event only fires on actual pause transitions.
+          // Guarded by __pipAutoResumeAttached so re-registers don't
+          // stack listeners on the same element.
+          if (!(node as any).__pipAutoResumeAttached) {
+            (node as any).__pipAutoResumeAttached = true;
+            const domNode = node as HTMLVideoElement;
+            domNode.addEventListener('pause', () => {
+              if (isPausedRef.current) return;
+              pushHandoffLog(`[PiP] video auto-resume key=${key} rs=${domNode.readyState}`);
+              el.playAsync?.().catch(() => {});
+            });
+          }
         }
       } catch { /* best-effort */ }
     }
