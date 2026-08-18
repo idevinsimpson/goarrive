@@ -241,6 +241,18 @@ function attemptBgPlay(shadow: HTMLAudioElement): void {
 // timeout logs `timeout:true` so a genuinely bad network shows itself instead
 // of hanging the leave. pass21r9=1
 const WARM_TIMEOUT_MS = 15000;
+// Metadata wait ceiling for warmShadowV3. point() calls shadow.load()
+// synchronously and returns; if warm's play() races that in-flight load, the
+// browser rejects the play promise with AbortError ("play() request was
+// interrupted by a call to load()"). Devin's 2026-08-18 R9a log surfaced
+// exactly this: the very first warm returned err=AbortError after 12ms and
+// never re-armed, leaving leaves #1 and #2 cold. Waiting for the
+// `loadedmetadata` event (readyState reaches HAVE_METADATA=1) sequences the
+// play() after load has produced metadata — the same readiness gate WebKit
+// uses to allow a fresh-source play(). 2s covers Firebase Storage TTFB on
+// slow cell hookup; fail-open past that so warm still attempts play() rather
+// than never running at all. pass21r10=1
+const WARM_META_TIMEOUT_MS = 2000;
 
 /**
  * Muted-play warm-buffer for the v3 shadow. Fires immediately after `swapTrack`
@@ -263,21 +275,86 @@ const WARM_TIMEOUT_MS = 15000;
 async function warmShadowV3(
   shadow: HTMLAudioElement,
   isStale: () => boolean,
-): Promise<{ ms: number; bufferedEnd: number; timeout?: boolean; err?: string }> {
+): Promise<{ ms: number; bufferedEnd: number; timeout?: boolean; err?: string; retried?: boolean; metaWaitMs?: number }> {
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
   const t0 = now();
   const wasMuted = shadow.muted;
   try { shadow.muted = true; } catch {}
 
-  try {
-    const p = shadow.play();
-    if (p && typeof p.then === 'function') await p;
-  } catch (err: any) {
+  // R10 gate: sequence play() after the shadow has HAVE_METADATA. See
+  // WARM_META_TIMEOUT_MS comment for the race this avoids.
+  let metaWaitMs = 0;
+  if (shadow.readyState < 1) {
+    const tm0 = now();
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(t);
+        try { shadow.removeEventListener('loadedmetadata', onMeta); } catch {}
+        resolve();
+      };
+      const onMeta = () => finish();
+      try {
+        shadow.addEventListener('loadedmetadata', onMeta, { once: true } as AddEventListenerOptions);
+      } catch {
+        shadow.addEventListener('loadedmetadata', onMeta);
+      }
+      const t = setTimeout(finish, WARM_META_TIMEOUT_MS);
+    });
+    metaWaitMs = Math.round(now() - tm0);
+    if (isStale()) {
+      try { shadow.muted = wasMuted; } catch {}
+      return { ms: Math.round(now() - t0), bufferedEnd: 0, metaWaitMs, err: 'staleAfterMeta' };
+    }
+  }
+
+  // R10 retry: AbortError on the first play() usually means load() was still
+  // in flight past the metadata gate (rare but observed once in Devin's R9
+  // log). A single retry after re-awaiting metadata clears it without a full
+  // re-swap. Any non-AbortError bails immediately.
+  let retried = false;
+  let playErr: any;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const p = shadow.play();
+      if (p && typeof p.then === 'function') await p;
+      playErr = undefined;
+      break;
+    } catch (err: any) {
+      playErr = err;
+      if (isStale() || err?.name !== 'AbortError' || attempt >= 1) break;
+      retried = true;
+      if (shadow.readyState < 1) {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(t);
+            try { shadow.removeEventListener('loadedmetadata', onMeta); } catch {}
+            resolve();
+          };
+          const onMeta = () => finish();
+          try {
+            shadow.addEventListener('loadedmetadata', onMeta, { once: true } as AddEventListenerOptions);
+          } catch {
+            shadow.addEventListener('loadedmetadata', onMeta);
+          }
+          const t = setTimeout(finish, WARM_META_TIMEOUT_MS);
+        });
+      }
+    }
+  }
+  if (playErr) {
     if (!isStale()) { try { shadow.muted = wasMuted; } catch {} }
     return {
       ms: Math.round(now() - t0),
       bufferedEnd: 0,
-      err: err?.name || String(err).slice(0, 40),
+      metaWaitMs,
+      ...(retried ? { retried: true } : {}),
+      err: playErr?.name || String(playErr).slice(0, 40),
     };
   }
 
@@ -320,6 +397,8 @@ async function warmShadowV3(
   return {
     ms: Math.round(now() - t0),
     bufferedEnd,
+    metaWaitMs,
+    ...(retried ? { retried: true } : {}),
     ...(timedOut ? { timeout: true } : {}),
   };
 }
@@ -565,7 +644,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         void warmShadowV3(shadow, () => (
           currentUrlRef.current !== guardedUrl || inBackgroundRef.current
         )).then((result) => {
-          logAlways('[HANDOFF/warm]', JSON.stringify({ ...result, pass21r9: 1 }));
+          logAlways('[HANDOFF/warm]', JSON.stringify({ ...result, pass21r9: 1, pass21r10: 1 }));
         });
       }
     };
