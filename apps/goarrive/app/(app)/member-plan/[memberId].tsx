@@ -2588,6 +2588,97 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               )}
             </View>
 
+            {/* ── Commit to Save (coach controls: apply discount + amounts) ── */}
+            <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
+              <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>COMMIT TO SAVE</Text>
+              {(() => {
+                const ctsActive = plan.commitToSave?.active ?? plan.commitToSaveAddOnActive ?? true;
+                const ctsSavings = plan.commitToSave?.monthlySavings ?? plan.commitToSaveMonthlySavings ?? 100;
+                const ctsMissedFee = plan.commitToSave?.missedSessionFee ?? plan.commitToSaveMissedSessionFee ?? 50;
+                const ctsDefaults = { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: false, active: true };
+                const base = Math.round(pricing.baseMonthlyPrice);
+                const postCts = Math.max(0, base - ctsSavings);
+                const displayed = Math.round(pricing.displayMonthlyPrice);
+                return (
+                  <>
+                    {/* Active toggle */}
+                    <Pressable
+                      onPress={() => onChange({
+                        commitToSave: {
+                          ...ctsDefaults,
+                          ...(plan.commitToSave || {}),
+                          active: !ctsActive,
+                        },
+                      })}
+                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={{ color: '#FFF', fontSize: 14 }}>Apply Commit to Save discount</Text>
+                        <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>Turns the discount on/off in pricing (different from member visibility below)</Text>
+                      </View>
+                      <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: ctsActive ? GOLD : BORDER, backgroundColor: ctsActive ? GOLD : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                        {ctsActive && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                      </View>
+                    </Pressable>
+
+                    {/* Amount fields (visible when active) */}
+                    {ctsActive && (
+                      <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BORDER, marginTop: 4 }}>
+                        <NumericField
+                          label="Discount per month"
+                          value={ctsSavings}
+                          onChange={(v) => onChange({
+                            commitToSave: {
+                              ...ctsDefaults,
+                              ...(plan.commitToSave || {}),
+                              active: true,
+                              monthlySavings: v,
+                            },
+                          })}
+                          prefix="$" suffix="/mo" icon="💸"
+                        />
+                        <NumericField
+                          label="Missed session fee"
+                          value={ctsMissedFee}
+                          onChange={(v) => onChange({
+                            commitToSave: {
+                              ...ctsDefaults,
+                              ...(plan.commitToSave || {}),
+                              missedSessionFee: v,
+                            },
+                          })}
+                          prefix="$" suffix="/mo" icon="⚠️"
+                        />
+                      </View>
+                    )}
+
+                    {/* Legibility chain — makes the "Monthly price" number make sense */}
+                    {ctsActive && !plan.isManualOverride && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: GOLD_BG, borderRadius: 8, borderWidth: 1, borderColor: GOLD_BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                          {formatCurrency(base)} base − {formatCurrency(ctsSavings)} CTS = <Text style={{ color: GOLD, fontWeight: '700' }}>{formatCurrency(postCts)}/mo member rate</Text>
+                        </Text>
+                      </View>
+                    )}
+                    {ctsActive && plan.isManualOverride && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: GOLD_BG, borderRadius: 8, borderWidth: 1, borderColor: GOLD_BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                          Manual override active: member rate is <Text style={{ color: '#FFF', fontWeight: '700' }}>{formatCurrency(displayed)}/mo</Text>. CTS is on but does not change this price while overridden.
+                        </Text>
+                      </View>
+                    )}
+                    {!ctsActive && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                          Discount is off. Member rate uses the base {formatCurrency(base)}/mo{plan.isManualOverride ? ` (currently overridden to ${formatCurrency(displayed)}/mo)` : ''}.
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
+            </View>
+
             {/* ── Member Visibility Controls ── */}
             <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
               <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>MEMBER VISIBILITY</Text>
@@ -2613,7 +2704,10 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                 })}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
               >
-                <Text style={{ color: '#FFF', fontSize: 14 }}>Show Commit to Save to member</Text>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={{ color: '#FFF', fontSize: 14 }}>Show Commit to Save card to member</Text>
+                  <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>Visibility only — the discount above is what actually applies</Text>
+                </View>
                 <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.commitToSave?.enabled ? ACCENT : BORDER, backgroundColor: plan.commitToSave?.enabled ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
                   {plan.commitToSave?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
                 </View>
