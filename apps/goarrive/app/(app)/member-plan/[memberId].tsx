@@ -3411,8 +3411,13 @@ export default function MemberPlanScreen() {
       const newScen: Scenario = { ...scenData, id: newRef.id } as unknown as Scenario;
       setScenarios(prev => [...prev, newScen]);
       selectScenarioTab(newRef.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[createScenario] Error:', err);
+      const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+      const msg = isPermDenied
+        ? 'Cannot create scenario yet — Firestore rules for scenarios have not been deployed. Ask Devin to approve the rules deploy in the Pass A thread.'
+        : `Could not create scenario: ${err?.message || 'unknown error'}`;
+      if (typeof alert !== 'undefined') alert(msg);
     }
   }, [memberId, plan, coachUid, selectScenarioTab]);
 
@@ -3425,8 +3430,14 @@ export default function MemberPlanScreen() {
       if (selectedScenarioIdRef.current === scenId) {
         selectScenarioTab(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[deleteScenario] Error:', err);
+      const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+      if (typeof alert !== 'undefined') {
+        alert(isPermDenied
+          ? 'Cannot delete scenario yet — rules deploy pending.'
+          : `Could not delete scenario: ${err?.message || 'unknown error'}`);
+      }
     }
   }, [memberId, selectScenarioTab]);
 
@@ -3436,8 +3447,14 @@ export default function MemberPlanScreen() {
     try {
       await setDoc(doc(db, 'member_plans', key, 'scenarios', scenId), { name: newName.trim() }, { merge: true });
       setScenarios(prev => prev.map(s => s.id === scenId ? { ...s, name: newName.trim() } : s));
-    } catch (err) {
+    } catch (err: any) {
       console.error('[renameScenario] Error:', err);
+      const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+      if (typeof alert !== 'undefined') {
+        alert(isPermDenied
+          ? 'Cannot rename scenario yet — rules deploy pending.'
+          : `Could not rename scenario: ${err?.message || 'unknown error'}`);
+      }
     }
   }, [memberId]);
 
@@ -3595,15 +3612,18 @@ export default function MemberPlanScreen() {
         </View>
       )}
 
-      {/* ─── SCENARIO TAB STRIP (coach-only) ─────────────────────────────── */}
-      {tab === 'plan' && isCoachMode && (
+      {/* ─── SCENARIO TAB STRIP (coach editor page — shown in both toggle modes; never on member's /my-plan) */}
+      {tab === 'plan' && (
         <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
           {/* Header row: label + caret */}
           <Pressable
             onPress={() => setTabStripCollapsed(c => !c)}
+            hitSlop={8}
             style={{ flexDirection: 'row', alignItems: 'center', marginBottom: tabStripCollapsed ? 0 : 6 }}>
             <Text style={{ color: MUTED, fontSize: 11, fontWeight: '600', fontFamily: FH, flex: 1 }}>SCENARIOS</Text>
-            <Icon name={tabStripCollapsed ? 'chevron-down' : 'chevron-up'} size={14} color={MUTED} />
+            <Text style={{ color: MUTED, fontSize: 12, fontWeight: '700', paddingHorizontal: 4 }}>
+              {tabStripCollapsed ? '▼' : '▲'}
+            </Text>
           </Pressable>
           {!tabStripCollapsed && (
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexWrap: 'wrap', rowGap: 6 }}>
