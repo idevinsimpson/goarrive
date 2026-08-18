@@ -98,6 +98,10 @@ describe('useMediaPrefetch — web platform', () => {
       useMediaPrefetch(movements, 0, false, /* isResting */ true, false, false),
     );
 
+    // Pass-21 B: speculativeAllowed flips 2.5s after mount, gating the
+    // aggressive next-video preload — advance timers to release it.
+    vi.advanceTimersByTime(2500);
+
     expect(createdVideos.length).toBeGreaterThan(0);
     const videoEl = createdVideos[0];
     expect(videoEl).toBeDefined();
@@ -124,6 +128,9 @@ describe('useMediaPrefetch — web platform', () => {
     renderHook(() =>
       useMediaPrefetch(movements, 0, false, true, false, false),
     );
+
+    // Pass-21 B: same speculative-gate release as the sibling test above.
+    vi.advanceTimersByTime(2500);
 
     expect(appendedBodyElements).toContain(createdVideos[0]);
   });

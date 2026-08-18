@@ -1,27 +1,189 @@
 /// <reference lib="dom" />
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getPipAudioStream } from './useWorkoutTTS';
+import { pushHandoffLog, pushHandoffLogAlways } from '../utils/handoffLog';
 import {
+  TILE_W,
+  TILE_H,
+  fsPx,
+  computeTileLayout,
   drawVideoFrame,
-  drawTimer,
-  drawMovementName,
-  drawRepCount,
-  drawProgressBar,
+  drawPlaceholderIcon,
+  drawTimerBox,
+  drawTimerDigit,
+  drawWrappedTitle,
+  drawRestLabel,
+  drawNextUpCard,
+  drawProgressTrack,
+  drawProgressFill,
+  drawLogoContain,
+  FONT_HEADLINE,
 } from './usePipCanvasStream.helpers';
+import { pickNameTier } from '../components/WorkoutPlayer.helpers';
 
-interface PipCanvasStreamOptions {
-  enabled: boolean;
+// Pass-10 fingerprint fix. Pass-9 device log showed the tile RENDERED but
+// FROZE state at a phase boundary: "WORK / Swiss Ball Lunge With Twist /
+// 0:00" persisted across multiple later WORK phases while the fps counter
+// stayed live (20-22fps) and `cvCT` kept advancing. Read: the draw loop
+// is alive and frames flow, but its state feed is severed — the loop
+// captured refs belonging to a component instance that detached at a
+// phase boundary. The singleton loop keeps drawing that dead instance's
+// refs forever: frozen state, null videoRS=-1, live fps.
+//
+// Fix shape: state and video are published to module-level pointers on
+// every render. Draw loop reads THIS, never captured refs. If the hook
+// remounts (subtree swap, fast-refresh, key change), the new mount rebinds
+// the pointers and the loop keeps tracking the live workout.
+type PipFeed = {
   phase: string;
-  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string } | null;
-  next: { name?: string } | null;
+  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[]; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; originalBlockType?: string } | null;
+  next: { name?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[]; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; reps?: string; originalBlockType?: string } | null;
   timeLeft: number;
   isPaused: boolean;
   isRepBased: boolean;
   repsDone: number;
   progressPct: number;
+  videoEl: HTMLVideoElement | null;
+  // Pass-20 R8: WorkoutPlayer publishes its reveal-window flag so the draw
+  // loop can early-cut to the next step's placeholder when the next step is
+  // a no-video exercise. Mirrors the video-reveal double-buffer swap timing
+  // (~last REVEAL_LEAD_SECONDS of a timed non-rest phase). REST is already
+  // handled by the drawTarget=nx swap.
+  isInRevealWindow: boolean;
+  // Pass-14 Fix 1: draw-loop-callable resolver. WorkoutPlayer installs a
+  // function that scans videosRef for the best <video> candidate and
+  // logs the pick to the COPY LOG. drawFrame invokes it whenever its
+  // bound videoEl is null-or-paused during a work-like phase, so a
+  // stale binding self-corrects on the next rAF tick.
+  resolveVideo: (() => HTMLVideoElement | null) | null;
+};
+let latestPipFeed: PipFeed | null = null;
+
+// Pass-20 R5: total count of publishes that were about to lose a step's
+// videoUrl for a step whose name matched the previous publish. Restored
+// from prev so the draw loop never sees a partially-populated snapshot
+// mid-transition. Module-level so a diagnostic grep of the log can
+// summarize the whole session. pipFeedFlap=1
+let feedFlapTotal = 0;
+
+// Pass-14 instrumentation: expose the liveness AudioContext so the
+// autopsy in useMusicHandoff and the PiP presentation-change listeners
+// in WorkoutPlayer can sample its state. iOS may suspend the liveness
+// ctx on background (a finding of its own — it means the "no active AV
+// session" reclaim theory is one layer deeper than we thought).
+let latestLivenessCtx: AudioContext | null = null;
+export function getLivenessCtxState(): string {
+  if (!latestLivenessCtx) return 'not-initialized';
+  return latestLivenessCtx.state;
+}
+
+// Pass-16 Fix 2: gesture-blessed resume() for the liveness AudioContext.
+// Pass-15 device log showed a suspended/interrupted storm at 00:07:54→
+// 00:08:41 (voice cues seizing the audio session) and PiP entering with
+// livenessCtx=suspended — the keep-alive track was luck-dependent.
+// Throttle to 1s min interval so a burst of statechange events can't spam
+// resume() calls (some browsers reject rapid resume attempts). Callable
+// from anywhere with an active user gesture on the stack.
+let lastLivenessResumeAt = 0;
+export function resumeLivenessCtx(reason: string): void {
+  if (!latestLivenessCtx) {
+    pushHandoffLog(`[PiP] livenessCtx resume skip reason=${reason} state=not-initialized`);
+    return;
+  }
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (now - lastLivenessResumeAt < 1000) return;
+  lastLivenessResumeAt = now;
+  const ctx = latestLivenessCtx;
+  const before = ctx.state;
+  if (before === 'running') {
+    pushHandoffLog(`[PiP] livenessCtx resume noop reason=${reason} state=running`);
+    return;
+  }
+  try {
+    const p = ctx.resume();
+    if (p && typeof p.then === 'function') {
+      p.then(
+        () => pushHandoffLog(`[PiP] livenessCtx resume ok reason=${reason} before=${before} after=${ctx.state}`),
+        (err: unknown) => pushHandoffLog(`[PiP] livenessCtx resume fail reason=${reason} before=${before} err=${(err as Error)?.name ?? 'unknown'}`),
+      );
+    } else {
+      pushHandoffLog(`[PiP] livenessCtx resume sync reason=${reason} before=${before} after=${ctx.state}`);
+    }
+  } catch (e) {
+    pushHandoffLog(`[PiP] livenessCtx resume throw reason=${reason} before=${before} err=${(e as Error)?.name ?? 'unknown'}`);
+  }
+}
+
+// Pass-19 R4: module-level image cache for prep-phase static assets
+// (grabEquipment image, demo movement posters). Keyed by URL. Cache persists
+// across workout phases so a poster loaded during demo is free during the
+// next visit. Eviction: none (bounded by session poster count, not a concern).
+const pipImageCache = new Map<string, HTMLImageElement>();
+function getOrLoadPipImage(url: string): HTMLImageElement | null {
+  if (!url || typeof Image === 'undefined') return null;
+  const cached = pipImageCache.get(url);
+  if (cached) return cached;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+  pipImageCache.set(url, img);
+  return img;
+}
+
+// True on iOS Safari (WebKit). Pass-10 fork-insensitive stutter fix: on
+// iOS the PiP stream carries NO music — video-only. Music path stays on
+// the proven v3 shadow via the hide seam. This resolves both the (A)
+// standdown-never-engaged branch and the (B) element-stall-under-graph
+// branch without waiting for the discriminator log.
+function isIOSSafariUA(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /iP(hone|od|ad)/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+}
+
+interface PipCanvasStreamOptions {
+  enabled: boolean;
+  phase: string;
+  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; originalBlockType?: string; stepType?: string } | null;
+  next: { name?: string; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; reps?: string; originalBlockType?: string; stepType?: string } | null;
+  timeLeft: number;
+  isPaused: boolean;
+  isRepBased: boolean;
+  repsDone: number;
+  progressPct: number;
+  // Pass-20 R8: reveal-ahead flag from WorkoutPlayer's revealDisplayItem
+  // memo. When true, the last REVEAL_LEAD_SECONDS of the current timed
+  // phase (and all of REST) show `next` in the main player. The draw loop
+  // uses it to also swap to `next` early when `next` is a no-video
+  // exercise — so the placeholder appears at the same time video reveals
+  // start swapping in the double-buffered video layer.
+  isInRevealWindow: boolean;
   videoElRef: React.RefObject<HTMLVideoElement | null>;
+  // Pass-14 Fix 1: self-healing pipSource resolver. drawFrame invokes
+  // this whenever its bound videoEl is null-or-paused during a work-like
+  // phase so the loop can retry element selection on the next rAF tick
+  // without waiting for another effect trigger. Owner (WorkoutPlayer)
+  // is responsible for logging every rebind to the COPY LOG.
+  pipSourceResolverRef?: React.RefObject<(() => HTMLVideoElement | null) | null>;
+  // Pass-7: presentation-target video (the hidden element with
+  // srcObject = mergedStream). Read in the periodic drawFrame log to
+  // sample .currentTime + .readyState — direct evidence of whether the
+  // canvas captureStream is producing video frames the video element can
+  // consume. If currentTime advances while the PiP tile is black, frames
+  // are flowing and the black tile is downstream of the stream (PiP window
+  // rendering). If currentTime stays 0.00, the stream carries no video
+  // and the invisible-canvas hypothesis (known-issues-and-lessons #251)
+  // holds.
+  canvasVideoElRef?: React.RefObject<HTMLVideoElement | null>;
   canvasW?: number;
   canvasH?: number;
+  // Pass-2 mechanism probe (staging-only). Runs the hook inline with a
+  // subset of components so the caller can isolate which step starves the
+  // foreground music path.
+  //   'canvas' → rAF + canvas draws, NO audio track merge
+  //   'audio'  → rAF + canvas + audio merge (caller still skips hidden video)
+  //   'full'   → everything, including caller-owned hidden video
+  probeMode?: 'canvas' | 'audio' | 'full';
 }
 
 interface PipCanvasStreamResult {
@@ -29,14 +191,26 @@ interface PipCanvasStreamResult {
   videoElRef: React.RefObject<HTMLVideoElement | null>;
   isReady: boolean;
   canvasElRef: React.RefObject<HTMLCanvasElement | null>;
-  hasWorkingCaptureStream: boolean;
+  // Imperative start: creates canvas + captureStream + audio merge and returns
+  // the MediaStream synchronously so a caller (armPip) can assign srcObject
+  // inside the same tap-gesture stack. Idempotent — safe to call twice.
+  startStream: () => MediaStream | null;
+  stopStream: () => void;
+  // Pass-4 deferred-audio: 'audio' probeMode warms a video-only stream so the
+  // continuously-playing hidden element never carries our music/voice bus.
+  // armPip calls this inside the tap gesture to attach audio just-in-time.
+  // Returns true if audio tracks were added (or already present).
+  attachAudioTracks: () => boolean;
+  // Pass-5 exit path: on PiP exit AND on failed PiP entry, remove any audio
+  // tracks from the merged stream. Video track stays warm so the next arm is
+  // still fast. Without this, the P0-known "hidden element carrying merged
+  // audio starves foreground music" configuration persists inline for the
+  // rest of the session after any arm attempt (successful OR failed).
+  detachAudioTracks: () => number;
 }
 
 function formatTime(seconds: number): string {
-  const s = Math.max(0, Math.ceil(seconds));
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}:${rem.toString().padStart(2, '0')}`;
+  return String(Math.max(0, Math.ceil(seconds)));
 }
 
 export function usePipCanvasStream({
@@ -49,52 +223,145 @@ export function usePipCanvasStream({
   isRepBased,
   repsDone,
   progressPct,
+  isInRevealWindow,
   videoElRef,
-  canvasW = 1080,
-  canvasH = 1350,
+  pipSourceResolverRef,
+  canvasVideoElRef,
+  canvasW = TILE_W,
+  canvasH = TILE_H,
+  probeMode,
 }: PipCanvasStreamOptions): PipCanvasStreamResult {
+  // Pass-22 cosmetics: font readiness state. document.fonts.load fires at arm
+  // time; the log surface records `fontsLoaded=<full|partial|none>` so a
+  // regression to system-font weights is visible on the device log without
+  // needing a screenshot. Draw helpers accept it and downgrade weights
+  // gracefully (800→700, 700→600) so a partial load never blocks arm.
+  const fontsLoadedRef = useRef<'full' | 'partial' | 'none'>('none');
+  const logoImgRef = useRef<HTMLImageElement | null>(null);
+  const iconImgRef = useRef<HTMLImageElement | null>(null);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [isReady, setIsReady] = useState(false);
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+  // Pass-21 Cut #1: lazy-gate. armedRef flips true once startStream succeeds
+  // (i.e. the user tapped PiP and the tap-gesture stack ran the pipeline
+  // setup). While false the hook does the minimum: no rAF loop, no capture-
+  // Stream, no oscillator/livenessCtx, no hidden-video srcObject, no draw
+  // work. Only the one-line-per-minute cold heartbeat runs, so a normal
+  // no-PiP workout leaves zero PiP overhead in the frame budget.
+  // pipGateIdle=1
+  const armedRef = useRef(false);
 
-  // UA-sniff for iOS Safari: captureStream() returns a stream whose video track
-  // never emits fresh frames (WebKit bug 181663). Fallback to direct canvas mirror.
-  const hasWorkingCaptureStream =
-    typeof navigator !== 'undefined'
-      ? !/iP(hone|od|ad)/.test(navigator.userAgent) ||
-        /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent)
-      : true;
+  // Pass-10: publish to the module-level feed on every render so the
+  // singleton draw loop reads live state even if this hook instance
+  // detaches and a new one takes over. No dep array — publish always.
+  //
+  // Pass-20 R5 feed-flap absorber: WorkoutPlayer's `next` occasionally
+  // publishes with videoUrl undefined for one render — the flatten memo
+  // must be recomputing with a transient input. That partial-populated
+  // snapshot flowed into the draw loop and made the R3v2 src comparison
+  // decide the tile should switch to placeholder (~1 Hz strobe on device,
+  // Devin: "movement video flickering off and back on"). Rule of thumb:
+  // for the SAME step-name, videoUrl-presence must only monotonically
+  // GAIN across publishes. If it would drop from truthy to falsy for the
+  // same name, restore from prev and increment feedFlapTotal. Emit a log
+  // on each restore so the flap is measurable, not anecdotal.
+  // pipFeedFlap=1
+  //
+  // Pass-21 Cut #1: skip the publish work while the pipeline is cold. The
+  // draw loop that reads latestPipFeed isn't running until startStream
+  // arms, so publishing before then is dead work — one PipFeed allocation
+  // per render × every workout, including workouts that never touch PiP.
+  useEffect(() => {
+    if (!armedRef.current) return;
+    const prev = latestPipFeed;
+    let curOut = current as PipFeed['current'];
+    let nxOut = next as PipFeed['next'];
 
-  // Keep latest props accessible inside the rAF loop without re-creating it.
-  const stateRef = useRef({
-    phase,
-    current,
-    next,
-    timeLeft,
-    isPaused,
-    isRepBased,
-    repsDone,
-    progressPct,
+    if (prev?.current && curOut && prev.current.name && prev.current.name === curOut.name) {
+      const prevHas = !!prev.current.videoUrl;
+      const nowHas = !!curOut.videoUrl;
+      if (prevHas && !nowHas) {
+        feedFlapTotal++;
+        pushHandoffLog(`[PiP] pipFeedFlap=1 slot=current name=${curOut.name} total=${feedFlapTotal}`);
+        curOut = { ...curOut, videoUrl: prev.current.videoUrl };
+      }
+    }
+    if (prev?.next && nxOut && prev.next.name && prev.next.name === nxOut.name) {
+      const prevHas = !!prev.next.videoUrl;
+      const nowHas = !!nxOut.videoUrl;
+      if (prevHas && !nowHas) {
+        feedFlapTotal++;
+        pushHandoffLog(`[PiP] pipFeedFlap=1 slot=next name=${nxOut.name} total=${feedFlapTotal}`);
+        nxOut = { ...nxOut, videoUrl: prev.next.videoUrl };
+      }
+    }
+
+    latestPipFeed = {
+      phase,
+      current: curOut,
+      next: nxOut,
+      timeLeft,
+      isPaused,
+      isRepBased,
+      repsDone,
+      progressPct,
+      videoEl: videoElRef.current,
+      resolveVideo: pipSourceResolverRef?.current ?? null,
+      isInRevealWindow,
+    };
   });
-  useEffect(() => {
-    stateRef.current = { phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct };
-  }, [phase, current, next, timeLeft, isPaused, isRepBased, repsDone, progressPct]);
 
-  useEffect(() => {
-    // Guard: only run on web with captureStream support
-    if (!enabled) return;
-    if (typeof window === 'undefined') return;
-    if (!('captureStream' in HTMLCanvasElement.prototype)) return;
+  // Keep options that startStream reads from a stable ref so armPip's callback
+  // identity doesn't churn on every prop change.
+  const optsRef = useRef({ canvasW, canvasH, probeMode });
+  useEffect(() => { optsRef.current = { canvasW, canvasH, probeMode }; }, [canvasW, canvasH, probeMode]);
 
+  const startStream = useCallback((): MediaStream | null => {
+    if (streamRef.current) return streamRef.current;
+    if (typeof window === 'undefined') return null;
+    if (!('captureStream' in HTMLCanvasElement.prototype)) {
+      pushHandoffLog('[PiP] startStream: captureStream unsupported');
+      return null;
+    }
+
+    const { canvasW: cw, canvasH: ch, probeMode: pm } = optsRef.current;
+
+    // Pass-6 canvas-identity tag. Blank-tile hypothesis: startStream could be
+    // called twice under some ref/effect ordering, leaving an orphan rAF loop
+    // drawing to canvas A while the srcObject was rebuilt from canvas B. The
+    // drawFrame closure captures canvas.__pipCanvasId at creation; canvasElRef
+    // is reassigned every startStream. If the periodic drawFrame log shows a
+    // different id than canvasElRef.current.__pipCanvasId, we have proof of
+    // a stale-closure double-canvas — the video's srcObject is fed by a
+    // canvas nobody draws into, so the tile presents transparent (i.e. black).
+    // Identical ids means the tile-black cause is elsewhere (e.g. drawVideoFrame
+    // shortcut, ctx.reset, off-screen composite).
+    const canvasId = Math.random().toString(36).slice(2, 8);
     const canvas = document.createElement('canvas');
-    canvas.width = canvasW;
-    canvas.height = canvasH;
+    (canvas as any).__pipCanvasId = canvasId;
+    canvas.width = cw;
+    canvas.height = ch;
+    // Pass-7 visibility fix: iOS WKWebView does not populate frames into
+    // an invisible canvas's captureStream MediaStream (known-issues-and-
+    // lessons #251 — display:none/visibility:hidden confirmed; pass-6b
+    // evidence extends this to opacity:0 + left:-10000px). Pass 6 proved
+    // one canvas, one draw loop, frame counter to #5100 — yet the tile
+    // stays black. Working theory: iOS treats "effectively invisible"
+    // the same way, regardless of the specific CSS mechanism. Small
+    // visible thumbnail top-left is #251's exact remedy. Prove painting
+    // fixes it first, then dial visibility down as its own follow-up.
     Object.assign(canvas.style, {
       position: 'fixed',
-      left: '-10000px',
-      top: '0',
-      opacity: '0',
+      top: '8px',
+      left: '8px',
+      width: '80px',
+      height: '100px',
+      zIndex: '1',
+      opacity: '1',
       pointerEvents: 'none',
+      border: '1px solid #F5A623',
     });
     document.body.appendChild(canvas);
     canvasElRef.current = canvas;
@@ -102,137 +369,1274 @@ export function usePipCanvasStream({
     const ctxRaw = canvas.getContext('2d');
     if (!ctxRaw) {
       canvas.parentNode?.removeChild(canvas);
-      return;
+      canvasElRef.current = null;
+      pushHandoffLog('[PiP] startStream: 2d ctx null');
+      return null;
     }
-    // Narrow to non-null for use inside rAF closure (TS can't narrow through lambdas).
     const ctx: CanvasRenderingContext2D = ctxRaw;
 
-    // Capture video track from canvas at 30fps
+    // Draw one frame synchronously so captureStream has content the moment
+    // the caller assigns srcObject. Without this, iOS Safari may reject
+    // requestPictureInPicture (video readyState = HAVE_NOTHING).
+    ctx.fillStyle = '#0E1117';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = '#F5A623';
+    ctx.font = `700 ${Math.round(cw * 0.045)}px ${FONT_HEADLINE}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('LOADING…', cw / 2, ch / 2);
+
+    // Pass-22 cosmetics: font readiness. document.fonts.load kicks the browser
+    // to fetch + parse each face we intend to draw. Not awaited — we log the
+    // outcome, flip fontsLoadedRef, and let the next frame's drawFrame pick
+    // up the ready glyphs. Missing 800 falls back to 700; missing everything
+    // falls back to system-ui. NEVER blocks arm. pipCosmetic=1 fontsLoaded
+    if (typeof document !== 'undefined' && (document as any).fonts?.load) {
+      const faces = [
+        `800 20px 'Space Grotesk'`,
+        `700 20px 'Space Grotesk'`,
+        `600 20px 'Space Grotesk'`,
+        `500 20px 'DM Sans'`,
+        `400 20px 'DM Sans'`,
+      ];
+      Promise.allSettled(faces.map((f) => (document as any).fonts.load(f)))
+        .then((results) => {
+          const check = (fam: string, w: string): boolean => {
+            try { return (document as any).fonts.check(`${w} 20px '${fam}'`); } catch { return false; }
+          };
+          const sg800 = check('Space Grotesk', '800');
+          const sg700 = check('Space Grotesk', '700');
+          const dm400 = check('DM Sans', '400');
+          const state: 'full' | 'partial' | 'none' =
+            sg800 && sg700 && dm400 ? 'full'
+              : (sg700 || dm400) ? 'partial'
+              : 'none';
+          fontsLoadedRef.current = state;
+          const settledOk = results.filter(r => r.status === 'fulfilled').length;
+          pushHandoffLogAlways(`[PiP] pipCosmetic=1 pipCosmeticB=1 canvas=${cw}x${ch} fontsLoaded=${state} sg800=${sg800} sg700=${sg700} dm400=${dm400} settled=${settledOk}/${faces.length}`);
+        })
+        .catch(() => {
+          pushHandoffLogAlways(`[PiP] pipCosmetic=1 pipCosmeticB=1 canvas=${cw}x${ch} fontsLoaded=none reason=allSettledReject`);
+        });
+    } else {
+      pushHandoffLogAlways(`[PiP] pipCosmetic=1 pipCosmeticB=1 canvas=${cw}x${ch} fontsLoaded=none reason=noFontsAPI`);
+    }
+
+    // Pass-22 cosmetics: logo image. Load once from the public folder — the
+    // asset ships at /goarrive-logo.png in every Hosting build, so no bundle
+    // require() needed. Cross-origin anonymous so the canvas never taints on
+    // draw. Never blocks arm; the chrome layer redraws when it's ready.
+    if (!logoImgRef.current && typeof Image !== 'undefined') {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.src = '/goarrive-logo.png';
+        img.onload = () => {
+          pushHandoffLog(`[PiP] pipCosmetic=1 logoReady w=${img.naturalWidth} h=${img.naturalHeight}`);
+        };
+        img.onerror = () => {
+          pushHandoffLog('[PiP] pipCosmetic=1 logoError src=/goarrive-logo.png');
+        };
+        logoImgRef.current = img;
+      } catch {}
+    }
+
+    // Pass-22b cosmetics: no-video placeholder icon. Mirrors WorkoutPlayer's
+    // st.placeholderLogo — goarrive-icon.png cover-fit across the media box
+    // in place of the fallback gradient + name text. Same taint rule as the
+    // logo (same-origin + crossOrigin=anonymous). Preloaded once per arm so
+    // the first placeholder frame paints the icon, not a black hole.
+    if (!iconImgRef.current && typeof Image !== 'undefined') {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.src = '/goarrive-icon.png';
+        img.onload = () => {
+          pushHandoffLog(`[PiP] pipCosmeticB=1 iconReady w=${img.naturalWidth} h=${img.naturalHeight}`);
+        };
+        img.onerror = () => {
+          pushHandoffLog('[PiP] pipCosmeticB=1 iconError src=/goarrive-icon.png');
+        };
+        iconImgRef.current = img;
+      } catch {}
+    }
+
     const canvasStream: MediaStream = (canvas as any).captureStream(30);
     const videoTrack = canvasStream.getVideoTracks()[0];
 
-    // Build the merged MediaStream (video + audio). Audio may not be available
-    // yet on first frame — retry each frame until it's connected.
     const mergedStream = new MediaStream();
     if (videoTrack) mergedStream.addTrack(videoTrack);
 
+    // Attach audio synchronously ONLY in probeMode='full' — pass-4 splits the
+    // audio path so we can test PM's hypothesis: warm-stream starvation comes
+    // from the continuously-playing element carrying our audio bus, not from
+    // the canvas draws. 'audio' mode leaves the stream video-only and exposes
+    // attachAudioTracks() for armPip to call in-gesture. 'canvas' never
+    // attaches audio at all — control mode for the mechanism.
+    // Pass 10: iOS fork-insensitive fix — the PiP stream on iOS is
+    // VIDEO-ONLY. Music path stays on the v3 shadow via the hide seam.
+    // Two-part change: (1) skip audio merge here on iOS regardless of
+    // probeMode, (2) drop the standdown in useMusicHandoff so hide seam
+    // runs normally. Kills both stutter branches without waiting for the
+    // A/B discriminator log. Non-iOS keeps the graph-audio path.
+    const iOS = isIOSSafariUA();
     let audioAttached = false;
+    let initialMergeOutcome: string;
+    // Pass 11: iOS silent-oscillator liveness track. Pass-10 device log
+    // caught spontaneous mid-PiP page teardown (17:44:23 mode=inline →
+    // 17:44:37 fresh startStream/canvasId/videoId/HANDOFF/init all again)
+    // — iOS is reclaiming the tab because a video-only MediaStream reads
+    // as "no active AV session". The 08/13 spike, which survived swipe-
+    // home for 59s with frames flowing, always carried an oscillator
+    // audio track in the stream. That track was the liveness signal, not
+    // the music. Pass 11 restores exactly that topology minus audibility:
+    // near-zero-gain oscillator → MediaStreamAudioDestinationNode → audio
+    // track on the merged stream. Music path stays on the v3 shadow
+    // (pass-10 hide seam remains). References stashed on the merged
+    // stream itself so cleanup can close the context on stopStream.
+    let livenessOsc: OscillatorNode | null = null;
+    let livenessCtx: AudioContext | null = null;
+    let livenessDest: MediaStreamAudioDestinationNode | null = null;
+    if (iOS) {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        livenessCtx = new AudioCtx();
+        livenessDest = livenessCtx.createMediaStreamDestination();
+        const osc = livenessCtx.createOscillator();
+        const gain = livenessCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 20; // sub-audible
+        gain.gain.value = 0.00001; // effectively silent
+        osc.connect(gain);
+        gain.connect(livenessDest);
+        osc.start();
+        livenessOsc = osc;
+        for (const track of livenessDest.stream.getAudioTracks()) {
+          mergedStream.addTrack(track);
+        }
+        // Pass-14 instrumentation: publish to module-level pointer + attach
+        // statechange listener. If iOS suspends the liveness ctx on
+        // background, that's a finding on its own — the video-only stream
+        // that looks like "no active AV session" is upstream of the
+        // suspend, and pass-15 needs to lift music INTO the stream.
+        latestLivenessCtx = livenessCtx;
+        try {
+          const ctxRef = livenessCtx;
+          ctxRef.addEventListener('statechange', () => {
+            const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+            pushHandoffLog(`[PiP] livenessCtx statechange state=${ctxRef.state} visState=${vs}`);
+            // Pass-16 Fix 2: self-heal — whenever the ctx drops off
+            // 'running' (interrupted, suspended by another audio session,
+            // etc.) attempt an immediate resume. Throttled inside
+            // resumeLivenessCtx so a burst of state flips can't spam
+            // resume() calls. Without this the ctx sits suspended until
+            // the next user gesture, which is exactly the state Devin's
+            // pass-15 log caught on PiP entry (livenessCtx=suspended).
+            if (ctxRef.state !== 'running') {
+              resumeLivenessCtx('statechange');
+            }
+          });
+        } catch {}
+        initialMergeOutcome = `iOS:VIDEO+LIVENESS (silent osc gain=1e-5 freq=20Hz — spike topology, music via shadow hide-seam)`;
+        pushHandoffLog(`[PiP] iOS liveness track attached: silent oscillator gain=1e-5 freq=20Hz tracks=${livenessDest.stream.getAudioTracks().length} state=${livenessCtx.state}`);
+      } catch (e) {
+        initialMergeOutcome = `iOS:VIDEO-ONLY (liveness osc failed: ${(e as Error)?.name ?? 'unknown'}) music via shadow hide-seam`;
+        pushHandoffLog(`[PiP] iOS liveness track FAILED: ${(e as Error)?.name ?? 'unknown'} — stream is video-only (tab-reclaim risk remains)`);
+      }
+      setIsReady(true);
+    } else if (pm === 'full') {
+      const audioStream = getPipAudioStream();
+      if (!audioStream) {
+        initialMergeOutcome = 'full:AUDIO-NULL@prime (getPipAudioStream()=null at startStream)';
+      } else {
+        const audioTracks = audioStream.getAudioTracks();
+        for (const track of audioTracks) mergedStream.addTrack(track);
+        if (audioTracks.length > 0) {
+          audioAttached = true;
+          setIsReady(true);
+          initialMergeOutcome = `full:merged ${audioTracks.length} track(s)`;
+        } else {
+          initialMergeOutcome = 'full:audioStream had 0 tracks';
+        }
+      }
+    } else {
+      initialMergeOutcome = `${pm}:no initial merge (by design)`;
+    }
 
     const TARGET_FPS = 30;
     const FRAME_INTERVAL = 1000 / TARGET_FPS;
     let lastFrameTime = 0;
     let rafId = 0;
 
+    let fpsWindowStart = 0;
+    let fpsWindowFrames = 0;
+    let currentFps = 0;
+    let firstFrameLogged = false;
+    let totalFrameCount = 0;
+    // Pass-16: switch drawFrame periodic log from frame-count throttle
+    // (every 60 frames = ~2s @ 30fps) to wall-clock throttle (every 5s).
+    // The COPY LOG ring is 5000 entries; the pass-15 capture window
+    // consumed the ring in <60s and lost the PiP-leave event on three
+    // consecutive runs. Cutting cadence 2.5× buys ~5× wall-clock coverage
+    // per copy (leave events fire once, at unpredictable moments in the
+    // PiP-background window).
+    let lastPeriodicLogAt = 0;
+    const PERIODIC_LOG_INTERVAL_MS = 5000;
+    // Pass 12: taint tripwire flag. captureStream() from a canvas that
+    // has been drawn with cross-origin (non-CORS) video silently stops
+    // delivering frames while ctx.drawImage keeps working — on-page
+    // canvas paints, PiP tile freezes. Root fix lives in WorkoutPlayer
+    // registerVideo (crossOrigin=anonymous BEFORE src). This flag is
+    // the second-line defence: getImageData throws once tainted, we
+    // log CANVAS TAINTED once, and subsequent frames skip video draws
+    // in favour of a poster/text fallback so one bad element can never
+    // kill the whole tile again.
+    let pipCanvasTainted = false;
+    // Pass-19 R3: hold last decoded video element so a brief rebind gap
+    // (new element readyState < 2 for one or more frames) paints the frozen
+    // last frame instead of the fallback gradient. blipCoveredTotal tracks
+    // how many frames were covered for the probe log.
+    //
+    // Pass-19 R3v2 (2026-08-17): pin cache to the element's src URL — NOT to
+    // cur.name. During REST, feed.current still points to the FINISHED
+    // movement (WorkoutTimer keeps cur=prev, next=incoming through rest), so
+    // a name-based key can't tell "next movement's element still loading"
+    // from "same movement, brief decode hiccup." The name check evaluated
+    // true across rest boundaries and the tile froze on the prior movement's
+    // frame while the main player showed the incoming preview (Lawn Mower
+    // report, IMG_5117). Src-based invalidation asks the right question:
+    // "does the cached frame belong to the URL we're now trying to draw?"
+    // If not, drop the cover and let the gradient placeholder render.
+    let lastDecodedVideoEl: HTMLVideoElement | null = null;
+    let blipResetTotal = 0;
+    let blipCoveredTotal = 0;
+    let blipSkipStaleTotal = 0;
+    // Pass-19: one-time log on first prep-phase draw (bundle marker for grep)
+    let prepPhaseFirstDrawLogged = false;
+    let prepTextFirstDrawLogged = false;
+    let demoMotionFirstDrawLogged = false;
+    // Pass-20 R4 prep-cut: per-boundary suppression counter. Signature is
+    // (targetStepType | name | videoUrl); a change means we entered a new
+    // no-video boundary. On boundary end we log the count of frames the
+    // hard-cut saved from painting a stale previous-movement frame.
+    // pipPrepCut=1
+    let prepCutLastBoundarySig = '';
+    let prepCutBoundarySuppressed = 0;
+    let prepCutFirstHitLogged = false;
+
+    // Pass-20 R5 latch-don't-sample: hysteresis + tile-mode tracking.
+    // Symptom (Devin, 2026-08-17): "a lot of movement video flickering off
+    // and back on revealing the movement title placeholder" while the main
+    // app player renders cleanly. Diagnosis: the video-draw decision path
+    // was SAMPLING the flapping feed/videoEl every frame instead of
+    // LATCHING through brief input dropouts. Fix shape:
+    //   • Fix 1 (this block): after a successful paint we snapshot the
+    //     element+src as lastPaintedVideoEl / lastPaintedVideoSrc. If the
+    //     next frame can't paint fresh, we keep drawing that snapshot for
+    //     up to HYSTERESIS_FRAMES (≈250ms at 24fps) before switching to
+    //     the fallback gradient. Placeholder→video switches back on the
+    //     very first paintable frame — asymmetric on purpose.
+    //   • Fix 4: tileMode + tileModeFlipTotal make every video↔placeholder
+    //     transition emit exactly one log line with the deciding reason
+    //     (live/skipStale/noBound/rsLow/hysteresisEnd/prepCut) so the
+    //     device log can count flips vs boundaries.
+    // pipHysteresis=1 tileModeFlip=1
+    let consecNoDrawableFrames = 0;
+    let lastPaintedVideoEl: HTMLVideoElement | null = null;
+    let lastPaintedVideoSrc = '';
+    let tileMode: 'prep' | 'video' | 'placeholder' = 'placeholder';
+    let tileModeFlipTotal = 0;
+    let hysteresisHoldTotal = 0;
+    const HYSTERESIS_FRAMES = 6;
+
+    // Pass-20 R7 freeze fix (Devin device log 2026-08-17): the R3v2 blip
+    // cover repaints lastDecodedVideoEl indefinitely when the current step
+    // legitimately has no video — the resolver correctly unbinds
+    // (pipSource rebind key=null, expected=null) but the cover keeps
+    // painting the prior movement's last frame (blipCoveredTotal climbed
+    // past 1200 with no cutoff). Two fixes:
+    //   • Fix 1: identify no-video steps via targetVideoUrl && !isPrepTarget
+    //     and short-circuit straight to the placeholder with reason=noVideo,
+    //     mirroring the prep-cut boundary-start path for grabEquipment
+    //     with hasVideoUrl=false.
+    //   • Fix 2: hard cap continuous blip cover at BLIP_CAP_FRAMES (~833ms
+    //     at 30fps) as a safety net for any case where `expected` is stale
+    //     or wrong. Force placeholder with reason=blipCap past the cap.
+    // pipR7NoVideo=1 pipR7BlipCap=1
+    let consecBlipCoverFrames = 0;
+    let noVideoTotal = 0;
+    let blipCapTotal = 0;
+    const BLIP_CAP_FRAMES = 25;
+
+    // Pass-20 R8 reveal-ahead for no-video next steps. Video reveals swap
+    // WorkoutPlayer's displayed video ~REVEAL_LEAD_SECONDS before the
+    // current phase ends (the 3-2-1 window). No-video next steps had no
+    // parallel — the tile stayed on the current movement's video until
+    // REST began and blipCap eventually kicked in ~1.2s late (Devin log
+    // 18:18:09, 18:23:16, 18:28:23, 18:32:04). R8 mirrors the video-reveal
+    // timing: when `next` is an exercise with no `videoUrl`, override
+    // drawTarget=next during the reveal window so the placeholder appears
+    // at the same moment video reveals do. Decision input is next.videoUrl
+    // (the step's OWN flattened field — proven trustworthy on every prep
+    // boundaryStart log), never derived resolver state. That's the line
+    // separating this from the pass-20 regression (de10448).
+    // pipR7Reveal=1
+    let revealLastSig = '';
+    let revealTotal = 0;
+
+    // Pass-21 R8c pipBackstep=1 tripwire — log-only detector for
+    // zero-crossing regressions of the class the R8c memo-guard drop
+    // fixes upstream. Tracks the last two distinct drawTarget
+    // identities (name|stepType). A "backstep" is when the current
+    // frame's identity flips to what we saw TWO flips ago (A → B → A)
+    // — the exact shape produced when the reveal window collapses for
+    // one commit and drawTarget snaps from nx back to old cur before
+    // the transition effect advances. Never changes render behavior;
+    // grep the device log for `pipBackstep` to catch any future
+    // reintroduction of this bug class.
+    let drawTargetPrevSig = '';
+    let drawTargetPrevPrevSig = '';
+    let pipBackstepTotal = 0;
+
+    function flipTileMode(next: 'prep' | 'video' | 'placeholder', reason: string): void {
+      if (next === tileMode) return;
+      tileModeFlipTotal++;
+      pushHandoffLog(`[PiP] tileModeFlip=1 from=${tileMode} to=${next} reason=${reason} frame=${totalFrameCount} total=${tileModeFlipTotal}`);
+      tileMode = next;
+    }
+
+    // Pass-22 cosmetics: static-chrome offscreen canvas. Contains everything
+    // that doesn't change per frame — background wash, logo, title text,
+    // timer BOX (not digits), next-up card + label/name/meta/thumb, and the
+    // progress bar TRACK (not the fill). The main canvas per-frame draw
+    // composites this via drawImage, then paints the video, timer digits,
+    // and progress fill on top. Redraw is triggered only when the identity
+    // signature changes (phase, drawTarget identity, next identity, thumb
+    // readiness, fonts readiness). Perf goal: 24-30fps target on iOS Safari.
+    // pipCosmetic=1 pipStaticChrome=1
+    const layout = computeTileLayout();
+    const chromeCanvas = document.createElement('canvas');
+    chromeCanvas.width = layout.W;
+    chromeCanvas.height = layout.H;
+    const chromeCtxRaw = chromeCanvas.getContext('2d');
+    if (!chromeCtxRaw) {
+      pushHandoffLog('[PiP] chromeCtx null — will paint direct without offscreen composite');
+    }
+    const chromeCtx: CanvasRenderingContext2D | null = chromeCtxRaw;
+    let lastChromeSig = '';
+    let chromeRedrawTotal = 0;
+    let lastLoggedFontsLoaded: 'full' | 'partial' | 'none' | 'never' = 'never';
+    // Thumb cache for the next-up card. Keyed by URL; single-slot LRU is
+    // fine — we only ever need `next`'s thumb. `crossOrigin='anonymous'` so
+    // the canvas never taints when the image draws.
+    let nextThumbImg: HTMLImageElement | null = null;
+    let nextThumbUrl = '';
+    function ensureNextThumb(url: string | undefined): HTMLImageElement | null {
+      if (!url) { nextThumbImg = null; nextThumbUrl = ''; return null; }
+      if (url === nextThumbUrl && nextThumbImg) return nextThumbImg;
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.src = url;
+        nextThumbImg = img;
+        nextThumbUrl = url;
+      } catch { nextThumbImg = null; nextThumbUrl = ''; }
+      return nextThumbImg;
+    }
+
+    function redrawChrome(
+      isRest: boolean,
+      titleText: string,
+      nx: PipFeed['next'],
+      thumbImg: HTMLImageElement | null,
+      fontsLoaded: 'full' | 'partial' | 'none',
+    ): void {
+      if (!chromeCtx) return;
+      const cc = chromeCtx;
+      // Full clear — this canvas is only touched by redrawChrome so a plain
+      // fill of the tile bg is enough.
+      cc.fillStyle = '#0E1117';
+      cc.fillRect(0, 0, layout.W, layout.H);
+
+      // Logo slot (contain-fit).
+      drawLogoContain(cc, logoImgRef.current, layout.logoX, layout.logoY, layout.logoW, layout.logoH);
+
+      // Title band. REST composition: small "REST" label above the wrapped
+      // "Next: <name>" so the tile matches the main player's rest treatment.
+      // Non-rest: title = drawTarget name (or grabEquipmentText for grab).
+      //
+      // Pass-22b: use pickNameTier(text, baseMediaW-152, 3) so titles wrap to
+      // up to 3 lines matching the player. baseAvailWidth is 152 BASE units
+      // (baseMediaW - timer - gap - pad). maxHeight scopes the tier to the
+      // remaining title slot height so a 40/44 tier never spills over the
+      // media clip in rest mode.
+      const titleX = layout.titleColX + layout.titleColPadX;
+      const titleW = layout.titleColW - layout.titleColPadX * 2;
+      const titleY = layout.titleRowY;
+      const titleH = layout.titleRowH;
+      const baseAvailWidth = layout.baseMediaW - 152;
+      if (isRest) {
+        const labelH = fsPx(18);
+        const labelGap = fsPx(4);
+        drawRestLabel(cc, 'REST', titleX, titleY + fsPx(6), titleW, fontsLoaded);
+        const nameY = titleY + fsPx(6) + labelH + labelGap;
+        const nameH = titleH - (nameY - titleY) - fsPx(4);
+        const restAvailBaseH = Math.max(1, Math.round(nameH / 1.5));
+        const t = pickNameTier(titleText, baseAvailWidth, 3, undefined, restAvailBaseH);
+        drawWrappedTitle(cc, titleText, titleX, nameY, titleW, nameH, fsPx(t.size), fsPx(t.line), 3, '#F0F4F8', fontsLoaded);
+      } else {
+        const baseTitleH = Math.max(1, Math.round(titleH / 1.5));
+        const t = pickNameTier(titleText, baseAvailWidth, 3, undefined, baseTitleH);
+        drawWrappedTitle(cc, titleText, titleX, titleY, titleW, titleH, fsPx(t.size), fsPx(t.line), 3, '#F0F4F8', fontsLoaded);
+      }
+
+      // Timer box (background only — digits per frame). During REST the
+      // timer visually pauses on 0:00; the box carries the rest tone
+      // instead of the work-tone gold so the change is legible at a glance.
+      drawTimerBox(cc, layout.timerX, layout.timerY, layout.timerW, layout.timerH, isRest);
+
+      // Next-up card. Pass-22b: during REST the player passes null next-up
+      // content — the slot stays empty (height already reserved by layout).
+      // Drawing an empty translucent card frame shipped a phantom thumb
+      // square in the pass-22 device screenshots. Non-rest: card carries
+      // name + meta + thumb.
+      if (isRest || !nx) {
+        // Reserved-slot: draw NOTHING. The chrome bg fill already covers
+        // the slot so height + rhythm stay stable across the rest boundary.
+      } else {
+        const nxName = nx.stepType === 'exercise'
+          ? composeNextLabel(nx.name, nx.weight, nx.reps)
+          : (nx.originalBlockType || nx.name || '');
+        const metaBits: string[] = [];
+        if (nx.blockName) metaBits.push(nx.blockName);
+        if (nx.duration != null && nx.duration > 0) metaBits.push(`${nx.duration}s`);
+        const nxMeta = metaBits.join(' · ');
+        drawNextUpCard(
+          cc,
+          layout.nextUpX,
+          layout.nextUpY,
+          layout.nextUpW,
+          layout.nextUpH,
+          layout.nextUpRadius,
+          layout.nextUpPadX,
+          layout.nextUpPadY,
+          layout.nextUpThumbSize,
+          layout.nextUpThumbRadius,
+          nxName || '',
+          nxMeta,
+          thumbImg,
+          fontsLoaded,
+        );
+      }
+
+      // Progress bar track (fill per-frame).
+      const progW = layout.W - layout.progressPadX * 2;
+      drawProgressTrack(cc, layout.progressPadX, layout.progressY, progW, layout.progressH, layout.progressRadius);
+    }
+
+    function composeNextLabel(name: string | undefined, weight?: string, reps?: string): string {
+      const n = name || '';
+      const w = (weight || '').trim();
+      const r = (reps || '').trim();
+      const parts: string[] = [];
+      if (w) parts.push(/^\d+(\.\d+)?$/.test(w) ? `${w} lbs` : w);
+      if (r) parts.push(/^\d+$/.test(r) ? `${r} reps` : r);
+      return parts.length === 0 ? n : `${n}, ${parts.join(', ')}`;
+    }
+
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
+      totalFrameCount++;
 
-      // Throttle to ~30fps
+      if (!firstFrameLogged) {
+        firstFrameLogged = true;
+        const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
+        // Pass-10: read the movement video via the module-level feed so
+        // the log names the element the loop actually draws from, not the
+        // possibly-stale prop capture.
+        const videoEl = latestPipFeed?.videoEl ?? null;
+        const vrs = videoEl?.readyState ?? -1;
+        const feedTag = latestPipFeed ? 'live' : 'null';
+        pushHandoffLog(`[PiP] drawFrame#1 canvasId=${canvasId} canvasParent=${parentTag} videoRS=${vrs} feed=${feedTag}`);
+      }
+      if (now - lastPeriodicLogAt >= PERIODIC_LOG_INTERVAL_MS) {
+        lastPeriodicLogAt = now;
+        const parentTag = canvas.parentNode?.nodeName ?? 'DETACHED';
+        const videoEl = latestPipFeed?.videoEl ?? null;
+        const vrs = videoEl?.readyState ?? -1;
+        const vpaused = videoEl?.paused ?? true;
+        const feedPhase = latestPipFeed?.phase ?? 'null';
+        // Divergence check: closure canvasId vs the id of whatever canvas is
+        // currently in canvasElRef. Same id = single canvas, stale-closure
+        // hypothesis dead. Different id = orphan rAF loop, srcObject is
+        // fed by canvasElRef.current which nobody draws into. See canvas
+        // creation site for the full theory.
+        const refCanvasId = (canvasElRef.current as any)?.__pipCanvasId ?? 'null';
+        const divergent = refCanvasId !== canvasId ? ' DIVERGENT' : '';
+        // Pass-7 direct measure: canvas video's currentTime is the ground
+        // truth for "did the stream produce frames?" Advancing = yes;
+        // stuck at 0.00 = the captureStream carries no video (invisible-
+        // canvas hypothesis alive).
+        const canvasVideoEl = canvasVideoElRef?.current;
+        const cvCT = canvasVideoEl ? canvasVideoEl.currentTime.toFixed(2) : 'null';
+        const cvRS = canvasVideoEl?.readyState ?? -1;
+        // Pass 11: visState — document.visibilityState at the sample. Lets
+        // the log distinguish "rAF still firing while page hidden" (iOS
+        // sometimes throttles background rAF to 1Hz, sometimes freezes it)
+        // from "page went visible and reload took over". Combined with
+        // PAGE-INIT the tab lifecycle is fully observable in one grep.
+        const visState = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+        // Pass-16: sample liveness ctx state on every periodic tick — if
+        // the self-heal misses a beat we can see it here alongside cvCT.
+        const lvCtx = latestLivenessCtx?.state ?? 'null';
+        pushHandoffLog(`[PiP] drawFrame#${totalFrameCount} canvasId=${canvasId} refCanvasId=${refCanvasId}${divergent} canvasParent=${parentTag} videoRS=${vrs} vpaused=${vpaused} cvCT=${cvCT} cvRS=${cvRS} feedPhase=${feedPhase} visState=${visState} livenessCtx=${lvCtx}`);
+      }
+
       if (now - lastFrameTime < FRAME_INTERVAL) return;
       lastFrameTime = now;
 
-      const {
-        phase: ph,
-        current: cur,
-        timeLeft: tl,
-        isRepBased: repBased,
-        repsDone: done,
-        progressPct: pct,
-      } = stateRef.current;
+      fpsWindowFrames++;
+      if (fpsWindowStart === 0) fpsWindowStart = now;
+      if (now - fpsWindowStart >= 1000) {
+        currentFps = Math.round((fpsWindowFrames * 1000) / (now - fpsWindowStart));
+        fpsWindowFrames = 0;
+        fpsWindowStart = now;
+      }
 
-      const videoEl = videoElRef.current;
-      const movName = cur?.name ?? '';
+      // Pass-10: read live state through the module-level pointer so a
+      // stale hook instance can't freeze the loop. If the pointer is null
+      // (first frame before publish effect runs), fall back to a paused
+      // placeholder so drawing never crashes.
+      const feed = latestPipFeed;
+      const ph = feed?.phase ?? 'ready';
+      const cur = feed?.current ?? null;
+      const nx = feed?.next ?? null;
+      const tl = feed?.timeLeft ?? 0;
+      const repBased = feed?.isRepBased ?? false;
+      const done = feed?.repsDone ?? 0;
+      const pct = feed?.progressPct ?? 0;
+      let videoEl = feed?.videoEl ?? null;
+      // Pass-14 Fix 1 / Pass-16 extension: self-healing binding across
+      // work AND rest. Pass-15 excluded rest from resolver calls so the
+      // tile lost its bind at every rest and fell to the text-card
+      // fallback while the main app kept showing the next movement's
+      // preview (Devin's rest screenshot: video visible in the player,
+      // text card in the PiP tile — same time, same URL). Adding rest
+      // + demoing-like phases to the visual-phase set lets the picker
+      // stay bound to the correct element through rest and into the
+      // next work.
+      //
+      // Also drop the `!videoEl.paused` gate: pass-16 relaxes
+      // drawVideoFrame to draw paused rs>=2 frames (a frozen frame is
+      // what the main area shows during rest — better than a text
+      // card). If the bound element is null we still need the resolver,
+      // otherwise we keep the current bind and let the resolver run
+      // when either (a) the expected URL changes (miss window resets)
+      // or (b) the picked candidate goes null.
+      // Pass-19 R4: add intro + followAlongVideo so their video elements are
+      // resolved by the picker. Image-only phases (demo, grabEquipment with
+      // static image) also need the phase in this set so the resolver runs and
+      // produces probe log lines even when the draw slot uses an image instead.
+      const visualPhase = ph === 'work' || ph === 'rest' || ph === 'swap' || ph === 'transition' || ph === 'grabEquipment' || ph === 'waterBreak' || ph === 'demo' || ph === 'intro' || ph === 'followAlongVideo';
+      if (visualPhase) {
+        const resolved = feed?.resolveVideo?.() ?? null;
+        if (resolved) videoEl = resolved;
+      }
+      const isRest = ph === 'rest';
+      // Pass-10: REST tile mirrors the player — show "Next: <name>" as the
+      // primary label instead of leaving the previous movement's name in
+      // place. Non-rest movName is derived from drawTarget below so the
+      // 3-2-1 reveal flips the name in the same frame the tile flips.
 
-      // Try to attach audio tracks if not yet done
-      if (!audioAttached) {
+      // Retry audio attach each frame until the shared graph is up. Only in
+      // 'full' mode AND non-iOS — pass-10 makes iOS video-only. 'audio'
+      // defers to armPip's in-gesture call, 'canvas' never attaches.
+      if (!audioAttached && pm === 'full' && !iOS) {
         const audioStream = getPipAudioStream();
         if (audioStream) {
           const audioTracks = audioStream.getAudioTracks();
-          for (const track of audioTracks) {
-            mergedStream.addTrack(track);
-          }
+          for (const track of audioTracks) mergedStream.addTrack(track);
           if (audioTracks.length > 0) {
             audioAttached = true;
             setIsReady(true);
+            // Pass 8: name the moment the per-frame retry succeeds so we
+            // can tell "audio came online mid-stream at frame N" from
+            // "audio was never attached". Silent success was invisible.
+            pushHandoffLog(`[PiP] audio attached mid-stream retry frame=${totalFrameCount} tracks=${audioTracks.length}`);
           }
         }
       }
 
-      // Layout constants (proportional to canvas size)
-      const pad = Math.round(canvasW * 0.04);
-      const videoH = Math.round(canvasH * 0.55);
-      const videoY = Math.round(canvasH * 0.12);
-      const timerFontPx = Math.round(canvasW * 0.09);
-      const barH = Math.round(canvasH * 0.012);
-      const barY = canvasH - barH - Math.round(canvasH * 0.03);
-      const overlayY = videoY + videoH + Math.round(canvasH * 0.025);
+      // Pass-22 cosmetics: layout comes from computeTileLayout (BASE-unit
+      // grid mirrored from WorkoutPlayer at TILE_SCALE=1.5). Decision-code
+      // aliases (videoX/Y/W/H, pad, barY, barH) preserved so the ~400-line
+      // paint-decision block below stays byte-identical. pipCosmetic=1
+      const videoX = layout.mediaX;
+      const videoY = layout.mediaY;
+      const videoW = layout.mediaW;
+      const videoH = layout.mediaH;
+      const pad = layout.progressPadX;
+      const barY = layout.progressY;
+      const barH = layout.progressH;
 
-      // Clear background
-      ctx.fillStyle = '#0E1117';
-      ctx.fillRect(0, 0, canvasW, canvasH);
+      // Pass-19 R4 + Pass-20 R4 prep-cut: per-frame draw gate for no-video
+      // prep steps. Runs BEFORE the taint-guarded video path so the previous
+      // movement's still-bound element can never paint through at the reveal
+      // boundary. Asymmetric on purpose: with-video → with-video keeps the
+      // R3v2 blip cover (desired for smooth handoff); only PREP step-types
+      // get the hard cut.
+      //
+      // Pass-20 R4v2: restricted to the 4 prep step-types ONLY —
+      // grabEquipment / waterBreak / demo / transition. The initial R4
+      // included `exercise && !videoUrl` which misfired on real exercises
+      // (device log: 1265 frames suppressed on "Dumbbell Seated Bent Over
+      // Row") because the flattened `nx.videoUrl` occasionally reads as
+      // falsy through the module-level feed. Real exercises without a
+      // video should fall through to the fallback gradient via the
+      // existing video-draw path — never through prep-cut.
+      //
+      // Draw target: during REST the timer keeps cur=finished + nx=incoming
+      // and WorkoutPlayer's reveal shows next throughout. Gating on cur
+      // during REST would evaluate the OLD movement's stepType and let the
+      // stale video keep drawing. Use drawTarget so no-video detection
+      // fires the same frame the incoming step's data is published —
+      // before any resolver rebind can land.
+      //
+      // pipPrepCut=1 pipPrepCutR4v2=1 pipR7Reveal=1
+      let prepDrawn = false;
+      // Pass-21 pipR8b: unify tile drawTarget with the main player's reveal
+      // window. `isInRevealWindow` (from WorkoutPlayer.isInPipRevealWindow,
+      // built from REVEAL_LEAD_SECONDS against timeLeft — the SAME source
+      // that drives the main title's `titleItem` swap) flips drawTarget to
+      // `nx` at the same frame the main title flips, regardless of whether
+      // current OR next has a video. This closes the (no-video-cur →
+      // no-video-nx) case Pass-20 R8 missed: the previous gate required
+      // `nx.stepType === 'exercise' && !nx.videoUrl` which fired but the
+      // downstream `movName` still read from `cur`; simplifying here lets
+      // downstream (name-card, prep screens, movName below) key off
+      // drawTarget uniformly. REST is redundant in the OR since
+      // isInPipRevealWindow already returns true for rest — kept for
+      // belt-and-suspenders per spec.
+      const revealAhead = feed?.isInRevealWindow ?? false;
+      const isRevealSwap = (revealAhead || ph === 'rest') && !!nx;
+      const drawTarget: any = isRevealSwap ? nx : cur;
+      const targetStepType: string = drawTarget?.stepType ?? '';
+      const targetVideoUrl: string = drawTarget?.videoUrl ?? '';
+      const isPrepTarget =
+        targetStepType === 'grabEquipment'
+        || targetStepType === 'waterBreak'
+        || targetStepType === 'demo'
+        || targetStepType === 'transition';
 
-      // Video frame or fallback
-      drawVideoFrame(ctx, videoEl, 0, videoY, canvasW, videoH, movName);
-
-      // Semi-transparent header bar for timer/name readability
-      ctx.fillStyle = 'rgba(14,17,23,0.65)';
-      ctx.fillRect(0, 0, canvasW, videoY);
-
-      // Phase label (small, top-left)
-      ctx.save();
-      ctx.fillStyle = '#8A95A3';
-      ctx.font = `500 ${Math.round(canvasW * 0.035)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(ph.toUpperCase(), pad, Math.round(canvasH * 0.06));
-      ctx.restore();
-
-      // Movement name (left side of header)
-      const nameMaxW = canvasW * 0.6;
-      drawMovementName(ctx, movName, pad, Math.round(canvasH * 0.075), nameMaxW);
-
-      // Timer (right side of header)
-      if (!repBased) {
-        const timerStr = formatTime(tl);
-        drawTimer(ctx, timerStr, canvasW - pad, Math.round(canvasH * 0.02), timerFontPx);
+      // pipBackstep tripwire (see module-level comment). Two-frame
+      // history — if the current identity equals the identity two flips
+      // ago, we've stepped BACKWARD (A → B → A) which is the zero-
+      // crossing regression shape. Log-only, no behavior change.
+      const currentDrawSig = `${drawTarget?.name ?? ''}|${targetStepType}`;
+      if (currentDrawSig !== drawTargetPrevSig) {
+        if (
+          drawTarget
+          && currentDrawSig !== ''
+          && currentDrawSig === drawTargetPrevPrevSig
+        ) {
+          pipBackstepTotal++;
+          pushHandoffLog(`[PiP] pipBackstep=1 total=${pipBackstepTotal} sig=${currentDrawSig} prev=${drawTargetPrevSig} prevPrev=${drawTargetPrevPrevSig} phase=${ph} tl=${tl.toFixed(2)} frame=${totalFrameCount}`);
+        }
+        drawTargetPrevPrevSig = drawTargetPrevSig;
+        drawTargetPrevSig = currentDrawSig;
       }
 
-      // Rep count (center overlay below video)
+      // Non-rest movName follows drawTarget so the tile's header + name
+      // card both flip in the same frame as the main title. REST keeps
+      // the "Next: <name>" convention (verified correct in device logs).
+      const movName = isRest && nx?.name
+        ? `Next: ${nx.name}`
+        : (drawTarget?.name ?? '');
+
+      // Pass-22 cosmetics chrome paint. Identity-keyed redraw of the static
+      // offscreen canvas (bg + logo + title/REST + timer box + next-up +
+      // progress track). Per-frame overhead is one drawImage composite.
+      // Chrome REST uses nx name directly (drawRestLabel already shows
+      // "REST"). Non-rest uses movName (drawTarget name / grabEquipmentText
+      // handling happens later against movName's downstream nameText). The
+      // chrome then acts as the tile's canvas wash: no `fillRect(0,0,cw,ch)`
+      // wash needed since chrome fully covers the background.
+      // Pass-22b: match WorkoutPlayer's rest text exactly — label "REST" +
+      // "Next: <name>". Previous chromeTitle dropped the "Next: " prefix
+      // during rest even though movName already carried it. Reuse movName so
+      // work + rest go through the same variable.
+      const chromeTitle = movName;
+      const thumbUrl = nx?.thumbnailUrl || nx?.posterUrl;
+      const thumbImg = ensureNextThumb(thumbUrl);
+      const thumbReady = !!(thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0);
+      const chromeSig = `${ph}|${drawTarget?.name ?? ''}|${targetStepType}|${nx?.name ?? ''}|${nx?.stepType ?? ''}|${nx?.blockName ?? ''}|${nx?.duration ?? 0}|${nx?.weight ?? ''}|${nx?.reps ?? ''}|${nx?.originalBlockType ?? ''}|${thumbReady ? '1' : '0'}|${fontsLoadedRef.current}`;
+      if (chromeSig !== lastChromeSig) {
+        lastChromeSig = chromeSig;
+        chromeRedrawTotal++;
+        redrawChrome(isRest, chromeTitle, nx, thumbImg, fontsLoadedRef.current);
+        if (chromeRedrawTotal === 1 || chromeRedrawTotal % 50 === 0) {
+          pushHandoffLog(`[PiP] pipCosmeticRedraw=1 total=${chromeRedrawTotal} phase=${ph} target=${drawTarget?.name ?? ''} thumbReady=${thumbReady} fontsLoaded=${fontsLoadedRef.current} frame=${totalFrameCount}`);
+        }
+        if (fontsLoadedRef.current !== lastLoggedFontsLoaded) {
+          lastLoggedFontsLoaded = fontsLoadedRef.current;
+          pushHandoffLog(`[PiP] pipCosmeticFonts=1 fontsLoaded=${fontsLoadedRef.current} frame=${totalFrameCount}`);
+        }
+      }
+      if (chromeCtx) {
+        ctx.drawImage(chromeCanvas, 0, 0);
+      } else {
+        ctx.fillStyle = '#0E1117';
+        ctx.fillRect(0, 0, cw, ch);
+      }
+
+      // pipR7Reveal boundary tracker: fire once per entry into a distinct
+      // reveal-swap (non-rest, so we don't conflate with the existing
+      // REST swap). Includes `curHasVideo` so the log discriminates the
+      // (a) video-cur → no-video-nx and (b) no-video-cur → no-video-nx
+      // cases both being covered by pipR8b.
+      const inNonRestReveal = isRevealSwap && ph !== 'rest';
+      if (inNonRestReveal) {
+        const revealSig = `${nx?.name ?? ''}|${nx?.stepType ?? ''}`;
+        if (revealSig !== revealLastSig) {
+          revealLastSig = revealSig;
+          revealTotal++;
+          pushHandoffLog(`[PiP] pipR7Reveal=1 pipR8b=1 pipR8c=1 revealTotal=${revealTotal} target=${nx?.name ?? ''} stepType=${nx?.stepType ?? ''} phase=${ph} timeLeft=${tl.toFixed(1)} curHasVideo=${!!cur?.videoUrl} nxHasVideo=${!!nx?.videoUrl} frame=${totalFrameCount}`);
+        }
+      } else if (revealLastSig !== '') {
+        revealLastSig = '';
+      }
+
+      // Boundary tracker: log the count of suppressed frames every time we
+      // leave a prep-cut boundary. Devin's finding — "the previous movement
+      // sometimes flashes" — becomes measurable here as "how many frames
+      // the hard-cut caught for each countdown-into-prep boundary."
+      const boundarySig = isPrepTarget
+        ? `${targetStepType}|${drawTarget?.name ?? ''}|${targetVideoUrl}`
+        : '';
+      if (boundarySig !== prepCutLastBoundarySig) {
+        if (prepCutLastBoundarySig !== '' && prepCutBoundarySuppressed > 0) {
+          pushHandoffLog(`[PiP] pipPrepCut=1 boundaryEnd sig=${prepCutLastBoundarySig} suppressedFrames=${prepCutBoundarySuppressed}`);
+        }
+        prepCutBoundarySuppressed = 0;
+        prepCutLastBoundarySig = boundarySig;
+        if (isPrepTarget) {
+          const hasVideoUrl = !!targetVideoUrl;
+          pushHandoffLog(`[PiP] pipPrepCut=1 pipPrepCutR4v2=1 boundaryStart target=${targetStepType} phase=${ph} name=${drawTarget?.name ?? ''} hasVideoUrl=${hasVideoUrl} frame=${totalFrameCount}`);
+        }
+      }
+
+      if (isPrepTarget) {
+        prepCutBoundarySuppressed++;
+        if (!prepCutFirstHitLogged) {
+          prepCutFirstHitLogged = true;
+          pushHandoffLog(`[PiP] pipPrepCut=1 firstHit target=${targetStepType} phase=${ph} frame=${totalFrameCount}`);
+        }
+
+        if (targetStepType === 'grabEquipment') {
+          const imgUrl: string | undefined = drawTarget?.grabEquipmentImageUrl;
+          const img = imgUrl ? getOrLoadPipImage(imgUrl) : null;
+          if (img && img.complete && img.naturalWidth > 0) {
+            try {
+              const iAsp = img.naturalWidth / img.naturalHeight;
+              const dAsp = videoW / videoH;
+              let sx = 0; let sy = 0; let sw = img.naturalWidth; let sh = img.naturalHeight;
+              if (iAsp > dAsp) { sw = img.naturalHeight * dAsp; sx = (img.naturalWidth - sw) / 2; }
+              else { sh = img.naturalWidth / dAsp; sy = (img.naturalHeight - sh) / 2; }
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(videoX, videoY, videoW, videoH, Math.round(videoW * 0.04));
+              ctx.clip();
+              ctx.drawImage(img, sx, sy, sw, sh, videoX, videoY, videoW, videoH);
+              ctx.restore();
+            } catch {
+              drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+            }
+          } else {
+            // Image missing or still loading — slate + title. Never a black
+            // rectangle, and never the previous movement's frozen frame.
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+          }
+          if (!prepPhaseFirstDrawLogged) {
+            prepPhaseFirstDrawLogged = true;
+            const imgReady = !!(img && img.complete && img.naturalWidth > 0);
+            pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 target=grabEquipment imgReady=${imgReady} frame=${totalFrameCount}`);
+          }
+        } else if (targetStepType === 'demo') {
+          const demos: any[] = drawTarget?.demoMovements ?? [];
+          if (demos.length > 0) {
+            const cols = demos.length <= 4 ? 2 : 3;
+            const rows = Math.ceil(demos.length / cols);
+            const gutter = 4;
+            const cellW = Math.floor((videoW - gutter * (cols - 1)) / cols);
+            const cellH = Math.floor((videoH - gutter * (rows - 1)) / rows);
+            for (let i = 0; i < demos.length; i++) {
+              const col = i % cols;
+              const row = Math.floor(i / cols);
+              const mx = videoX + col * (cellW + gutter);
+              const my = videoY + row * (cellH + gutter);
+              // Prefer thumbnailUrl (GIF) over posterUrl (still) — same
+              // priority as PosterThumb. Marker pipPass19R4Motion=1 fires
+              // when a GIF is drawn.
+              const gifUrl: string | undefined = demos[i].thumbnailUrl;
+              const posterUrl: string | undefined = demos[i].posterUrl;
+              const drawUrl = gifUrl || posterUrl;
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(mx, my, cellW, cellH, 4);
+              ctx.clip();
+              if (drawUrl) {
+                const img = getOrLoadPipImage(drawUrl);
+                if (img && img.complete && img.naturalWidth > 0) {
+                  try { ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, mx, my, cellW, cellH); } catch {}
+                } else {
+                  ctx.fillStyle = '#1A2030';
+                  ctx.fillRect(mx, my, cellW, cellH);
+                }
+              } else {
+                ctx.fillStyle = '#1A2030';
+                ctx.fillRect(mx, my, cellW, cellH);
+              }
+              ctx.restore();
+            }
+            if (!prepPhaseFirstDrawLogged) {
+              prepPhaseFirstDrawLogged = true;
+              pushHandoffLog(`[PiP] pipPass19R4PrepScreen=1 target=demo demos=${demos.length} frame=${totalFrameCount}`);
+            }
+            if (!demoMotionFirstDrawLogged) {
+              const hasGif = demos.some((d: any) => !!d.thumbnailUrl);
+              if (hasGif) {
+                demoMotionFirstDrawLogged = true;
+                pushHandoffLog(`[PiP] pipPass19R4Motion=1 target=demo gifTiles=${demos.filter((d: any) => !!d.thumbnailUrl).length}/${demos.length} frame=${totalFrameCount}`);
+              }
+            }
+          } else {
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+          }
+        } else {
+          // waterBreak / transition / no-video exercise → gradient + centered
+          // name. The old code let these fall through to the video draw path,
+          // which is exactly where the previous movement flashed.
+          drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+        }
+
+        // R5 Fix 4: log the prep entry too. Reason 'prepCut' makes a device
+        // log measurable — total tileModeFlip count should be ~boundary
+        // count only, never per-frame. tileModeFlip=1
+        flipTileMode('prep', 'prepCut');
+        prepDrawn = true;
+      }
+
+      // Pass 12: taint-guarded video draw. Skip once tainted. On each
+      // untainted draw verify with getImageData(1x1); log the first
+      // hit and switch to fallback for the rest of the session.
+      // Pass-19 R3: hold last decoded video element so a rebind gap
+      // (new element readyState < 2 for one or more frames) paints the
+      // last decoded frame instead of the fallback gradient.
+      // pipPass19R3Blip=1
+      if (!prepDrawn) {
+        if (!pipCanvasTainted) {
+          // R7 Fix 1: legit no-video step detection. The prep-cut branch
+          // above handles named prep types (grabEquipment / waterBreak /
+          // demo / transition). This catches exercises with no videoUrl
+          // that fall through to the video-draw path — the resolver
+          // unbinds videoEl, and the R3v2 blip cover would otherwise
+          // freeze on the prior movement's cached frame indefinitely.
+          // pipR7NoVideo=1
+          const isNoVideoStep = !targetVideoUrl && !isPrepTarget;
+
+          // R3v2: update cache whenever the current picked element is decoded.
+          if (videoEl && videoEl.readyState >= 2) {
+            lastDecodedVideoEl = videoEl;
+          }
+          // R3v2: src-based cache invalidation. Compare the URL the cached
+          // element is playing to the URL the current pick points at. If
+          // they diverge (different movements), the cache is stale — drop it
+          // so blip cover falls through to the fallback gradient with
+          // "Next: <name>" instead of freezing on the prior movement's
+          // frame. Marker pipPass19R3SrcReset=1 (bundle-grep).
+          const cachedSrc = lastDecodedVideoEl
+            ? (lastDecodedVideoEl.currentSrc || lastDecodedVideoEl.src || '')
+            : '';
+          const currentSrc = videoEl ? (videoEl.currentSrc || videoEl.src || '') : '';
+          const srcDiverged = cachedSrc !== '' && currentSrc !== '' && cachedSrc !== currentSrc;
+          if (srcDiverged) {
+            // R5 Fix 1: content-change also invalidates the hysteresis cache
+            // — we don't want to hold Movement A's last frame across a real
+            // transition into Movement B. Reset the counter so the new
+            // movement's first-drawable-frame flips cleanly to video mode.
+            // R7: also reset consecBlipCoverFrames so a real transition
+            // doesn't count leftover cover frames from the prior movement.
+            lastDecodedVideoEl = null;
+            lastPaintedVideoEl = null;
+            lastPaintedVideoSrc = '';
+            consecNoDrawableFrames = 0;
+            consecBlipCoverFrames = 0;
+            blipResetTotal++;
+            if (blipResetTotal === 1 || blipResetTotal % 10 === 0) {
+              pushHandoffLog(`[PiP] pipPass19R3SrcReset=1 blipResetTotal=${blipResetTotal} frame=${totalFrameCount}`);
+            }
+          }
+          // R5 Fix 2: SkipStale only on a GENUINELY DIFFERENT src. The
+          // previous rule keyed on `cachedSameContent` (both srcs non-empty
+          // AND equal), which meant an empty currentSrc — the input dropout
+          // that produces Devin's flicker — evaluated as "different" and
+          // killed the blip cover. New rule: cover unless `srcDiverged`
+          // (both non-empty AND actually different). Input dropouts →
+          // srcDiverged=false → keep drawing the cached frame. That's
+          // the entire mechanism for surviving 1-render feed flaps.
+          // R7 Fix 1: also skip cover entirely when the current step has
+          // no video — no cached frame is EVER the right thing to paint
+          // for a legitimately video-less movement.
+          const blipEl =
+            !isNoVideoStep
+            && (!videoEl || videoEl.readyState < 2)
+            && lastDecodedVideoEl
+            && lastDecodedVideoEl.readyState >= 2
+            && !srcDiverged
+              ? lastDecodedVideoEl
+              : null;
+          const wouldHaveCovered =
+            !isNoVideoStep
+            && (!videoEl || videoEl.readyState < 2)
+            && lastDecodedVideoEl
+            && lastDecodedVideoEl.readyState >= 2
+            && srcDiverged;
+          const drawEl = blipEl ?? videoEl;
+          if (blipEl) {
+            blipCoveredTotal++;
+            consecBlipCoverFrames++;
+            if (blipCoveredTotal === 1 || blipCoveredTotal % 30 === 0) {
+              pushHandoffLog(`[PiP] pipPass19R3Blip=1 blipCoveredTotal=${blipCoveredTotal} consec=${consecBlipCoverFrames} frame=${totalFrameCount}`);
+            }
+          } else {
+            consecBlipCoverFrames = 0;
+          }
+          if (wouldHaveCovered) {
+            blipSkipStaleTotal++;
+            if (blipSkipStaleTotal === 1 || blipSkipStaleTotal % 30 === 0) {
+              pushHandoffLog(`[PiP] pipPass19R3SkipStale=1 blipSkipStaleTotal=${blipSkipStaleTotal} frame=${totalFrameCount}`);
+            }
+          }
+          // R7 Fix 2 safety net: hard cap continuous blip cover at
+          // BLIP_CAP_FRAMES (~833ms at 30fps). If we've been covering
+          // longer than that, `expected` is almost certainly stale — force
+          // the placeholder regardless. pipR7BlipCap=1
+          const blipCapExceeded = consecBlipCoverFrames > BLIP_CAP_FRAMES;
+
+          // Paint decision. R7 adds two leading branches:
+          //   isNoVideoStep → placeholder + reset hysteresis + reason=noVideo.
+          //   blipCapExceeded → placeholder + reset hysteresis + reason=blipCap.
+          // Then the R5 three-way (canPaintNow / hysteresis hold / placeholder).
+          // pipR7NoVideo=1 pipR7BlipCap=1 pipHysteresis=1 tileModeFlip=1
+          const canPaintNow = !!(drawEl && drawEl.readyState >= 2);
+          const cachedStillMatches = !!(
+            lastPaintedVideoEl
+            && lastPaintedVideoSrc !== ''
+            && (lastPaintedVideoEl.currentSrc || lastPaintedVideoEl.src || '') === lastPaintedVideoSrc
+          );
+          const canPaintCached =
+            cachedStillMatches
+            && lastPaintedVideoEl !== null
+            && lastPaintedVideoEl.readyState >= 2;
+          if (isNoVideoStep) {
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+            lastDecodedVideoEl = null;
+            lastPaintedVideoEl = null;
+            lastPaintedVideoSrc = '';
+            consecNoDrawableFrames = 0;
+            consecBlipCoverFrames = 0;
+            noVideoTotal++;
+            if (noVideoTotal === 1 || noVideoTotal % 60 === 0) {
+              pushHandoffLog(`[PiP] pipR7NoVideo=1 noVideoTotal=${noVideoTotal} target=${targetStepType} phase=${ph} frame=${totalFrameCount}`);
+            }
+            flipTileMode('placeholder', 'noVideo');
+          } else if (blipCapExceeded) {
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+            lastDecodedVideoEl = null;
+            lastPaintedVideoEl = null;
+            lastPaintedVideoSrc = '';
+            consecNoDrawableFrames = 0;
+            consecBlipCoverFrames = 0;
+            blipCapTotal++;
+            pushHandoffLog(`[PiP] pipR7BlipCap=1 blipCapTotal=${blipCapTotal} cap=${BLIP_CAP_FRAMES} frame=${totalFrameCount}`);
+            flipTileMode('placeholder', 'blipCap');
+          } else if (canPaintNow && drawEl) {
+            consecNoDrawableFrames = 0;
+            lastPaintedVideoEl = drawEl;
+            lastPaintedVideoSrc = drawEl.currentSrc || drawEl.src || '';
+            drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, iconImgRef.current);
+            flipTileMode('video', 'live');
+          } else if (
+            tileMode === 'video'
+            && consecNoDrawableFrames < HYSTERESIS_FRAMES
+            && canPaintCached
+            && lastPaintedVideoEl
+          ) {
+            consecNoDrawableFrames++;
+            hysteresisHoldTotal++;
+            drawVideoFrame(ctx, lastPaintedVideoEl, videoX, videoY, videoW, videoH, iconImgRef.current);
+            // Stay in video mode — no flip logged. This is the whole point
+            // of the latch: brief no-drawable dropouts don't break the
+            // continuity of the "video is playing" state. First-hit +
+            // every-30 log carries pipHysteresis=1 marker so device-log
+            // greps can size the flap magnitude that the latch absorbed.
+            if (hysteresisHoldTotal === 1 || hysteresisHoldTotal % 30 === 0) {
+              pushHandoffLog(`[PiP] pipHysteresis=1 hysteresisHoldTotal=${hysteresisHoldTotal} consec=${consecNoDrawableFrames} frame=${totalFrameCount}`);
+            }
+          } else {
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
+            const reason = wouldHaveCovered
+              ? 'skipStale'
+              : !videoEl
+                ? 'noBound'
+                : videoEl.readyState < 2
+                  ? 'rsLow'
+                  : 'hysteresisEnd';
+            flipTileMode('placeholder', reason);
+          }
+          try {
+            ctx.getImageData(0, 0, 1, 1);
+          } catch (e) {
+            pipCanvasTainted = true;
+            pushHandoffLog(`[PiP] CANVAS TAINTED — getImageData rejected after video draw (${(e as Error)?.name ?? 'unknown'}) — captureStream will silently stop delivering frames; falling back to poster for rest of session. Root cause: movement <video> loaded without crossOrigin=anonymous BEFORE src.`);
+          }
+        }
+        if (pipCanvasTainted) {
+          ctx.save();
+          ctx.fillStyle = '#111';
+          ctx.fillRect(videoX, videoY, videoW, videoH);
+          ctx.fillStyle = '#8A95A3';
+          ctx.font = `500 ${Math.round(cw * 0.03)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('(video unavailable)', videoX + videoW / 2, videoY + videoH / 2);
+          ctx.restore();
+        }
+      }
+
+      // Pass-22 cosmetics per-frame paint. Chrome (bg + logo + title/REST +
+      // timer box + next-up + progress track) is already composited from
+      // the offscreen canvas above. Media region has already been painted
+      // by the decision-code branches. This block layers only the two
+      // per-frame elements: timer digit (or rep count text in the same box
+      // for repBased steps) + progress fill. Legacy WORK label + top-band
+      // wash + separate NEXT pill + fps meter are gone — the chrome
+      // handles all of that with the new BASE-unit layout.
+      //
+      // Marker pipPass19R4Text=1 fires here so served-JS verification of
+      // the grabEquipment text handoff still lights up even though the
+      // text itself is drawn inside chrome (redrawChrome uses chromeTitle
+      // which follows movName; the below just logs the FIRST time we hit
+      // a grabEquipment step so the log trail matches prior passes).
+      const nameText = targetStepType === 'grabEquipment'
+        ? (drawTarget?.grabEquipmentText || movName)
+        : movName;
+      if (targetStepType === 'grabEquipment' && !prepTextFirstDrawLogged && nameText && nameText !== movName) {
+        prepTextFirstDrawLogged = true;
+        pushHandoffLog(`[PiP] pipPass19R4Text=1 target=grabEquipment textLen=${nameText.length} frame=${totalFrameCount}`);
+      }
+
+      // Timer digit or rep count text — both share the timer box slot so
+      // the box height stays stable across timed/rep steps. During REST
+      // the timer visually pauses at 0:00 with the rest-tone box.
       if (repBased) {
         const target = Number(cur?.reps ?? 0);
-        drawRepCount(ctx, done, target, canvasW / 2, overlayY, Math.round(canvasW * 0.12));
+        drawTimerDigit(
+          ctx,
+          target > 0 ? `${done}/${target}` : `${done}`,
+          layout.timerX,
+          layout.timerY,
+          layout.timerW,
+          layout.timerH,
+          isRest,
+          fontsLoadedRef.current,
+        );
+      } else {
+        drawTimerDigit(
+          ctx,
+          formatTime(tl),
+          layout.timerX,
+          layout.timerY,
+          layout.timerW,
+          layout.timerH,
+          isRest,
+          fontsLoadedRef.current,
+        );
       }
 
-      // Next up label (bottom area)
-      const nextName = stateRef.current.next?.name;
-      if (nextName && ph === 'rest') {
+      // Progress fill — track is in chrome, fill is per-frame gold.
+      const progW = layout.W - layout.progressPadX * 2;
+      drawProgressFill(
+        ctx,
+        pct,
+        layout.progressPadX,
+        layout.progressY,
+        progW,
+        layout.progressH,
+        layout.progressRadius,
+      );
+
+      // DIAG-only fps meter. Off in production tiles; a `?pipDiag=1` query
+      // string or `window.__pipDiag = true` flips it on for perf probes.
+      if (typeof window !== 'undefined' && ((window as any).__pipDiag || (typeof location !== 'undefined' && location.search && location.search.indexOf('pipDiag=1') >= 0))) {
         ctx.save();
-        ctx.fillStyle = '#8A95A3';
-        ctx.font = `500 ${Math.round(canvasW * 0.032)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(240,244,248,0.55)';
+        ctx.font = `500 ${fsPx(12)}px ${FONT_HEADLINE}`;
+        ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(`NEXT: ${nextName}`, pad, barY - Math.round(canvasH * 0.02));
+        ctx.fillText(`${currentFps}fps`, layout.W - pad, layout.progressY - fsPx(4));
         ctx.restore();
       }
-
-      // Progress bar (very bottom)
-      drawProgressBar(ctx, pct, 0, barY, canvasW, barH);
     }
 
     rafId = requestAnimationFrame(drawFrame);
+
+    streamRef.current = mergedStream;
+    // Pass-21 Cut #1: flag the pipeline as armed so the cold heartbeat
+    // stops and the publish effect starts pushing to latestPipFeed. First
+    // successful startStream is the transition — subsequent idempotent
+    // returns skip this (streamRef.current early-return above them).
+    armedRef.current = true;
+    pushHandoffLogAlways(`[PiP] pipGateIdle=0 armed=true probe=${pm} canvasId=${canvasId}`);
     setMediaStream(mergedStream);
 
-    return () => {
+    cleanupRef.current = () => {
+      armedRef.current = false;
       cancelAnimationFrame(rafId);
       try {
         for (const track of mergedStream.getTracks()) track.stop();
       } catch {}
+      // Pass 11: tear down the liveness oscillator + AudioContext so we
+      // don't leak an AudioContext across unmounts (Safari caps them per
+      // origin at 6).
+      try { livenessOsc?.stop(); } catch {}
+      try { livenessOsc?.disconnect(); } catch {}
+      try { livenessDest?.disconnect(); } catch {}
+      try { livenessCtx?.close(); } catch {}
+      livenessOsc = null;
+      livenessDest = null;
+      if (latestLivenessCtx === livenessCtx) latestLivenessCtx = null;
+      livenessCtx = null;
       canvas.parentNode?.removeChild(canvas);
       canvasElRef.current = null;
+      streamRef.current = null;
       setMediaStream(null);
       setIsReady(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, canvasW, canvasH]);
 
-  return { mediaStream, videoElRef, isReady, canvasElRef, hasWorkingCaptureStream };
+    pushHandoffLog(`[PiP] startStream primed video+${audioAttached ? 'audio' : 'noaudio'} probe=${pm} outcome=${initialMergeOutcome} canvasId=${canvasId}`);
+    return mergedStream;
+  }, []);
+
+  const stopStream = useCallback(() => {
+    const cleanup = cleanupRef.current;
+    cleanupRef.current = null;
+    if (cleanup) cleanup();
+  }, []);
+
+  // Pass-4 late-attach: 'audio' probeMode leaves the warm stream video-only so
+  // the continuously-playing hidden element never carries the music/voice bus.
+  // armPip calls this inside the tap gesture — same MediaStream the element is
+  // already playing gets audio tracks added just-in-time. Safari has been seen
+  // to honor addTrack() on an active srcObject; if it doesn't, the log will say.
+  const attachAudioTracks = useCallback((): boolean => {
+    // Pass-10 iOS fork-insensitive: PiP stream is video-only on iOS.
+    // No-op the tap-time attach so the merged stream stays clean and the
+    // v3 shadow (via hide seam) is the sole music path.
+    if (isIOSSafariUA()) {
+      pushHandoffLog('[PiP] attachAudioTracks: iOS skip (video-only stream, music via shadow)');
+      return false;
+    }
+    const stream = streamRef.current;
+    if (!stream) {
+      pushHandoffLog('[PiP] attachAudioTracks: no stream');
+      return false;
+    }
+    const existingCount = stream.getAudioTracks().length;
+    if (existingCount > 0) {
+      // Pass 8: name the pass-through so the log distinguishes
+      // "attach found tracks already merged at prime" from silent success.
+      pushHandoffLog(`[PiP] attachAudioTracks: stream already has ${existingCount} audio track(s) — no-op`);
+      return true;
+    }
+    const audioStream = getPipAudioStream();
+    if (!audioStream) {
+      // Pass 8: pass-7 session never once logged 'added N track(s)'. If we
+      // land here it means (a) the initial prime merge failed with
+      // AUDIO-NULL@prime AND (b) the audio graph is STILL cold at tap time.
+      // Distinctive prefix so this failure names itself in the log grep.
+      pushHandoffLog('[PiP] AUDIO-NULL@arm: attachAudioTracks called but getPipAudioStream()=null — no music track on merged stream');
+      return false;
+    }
+    const audioTracks = audioStream.getAudioTracks();
+    for (const track of audioTracks) stream.addTrack(track);
+    if (audioTracks.length > 0) {
+      pushHandoffLog(`[PiP] attachAudioTracks: added ${audioTracks.length} track(s)`);
+      setIsReady(true);
+      return true;
+    }
+    pushHandoffLog('[PiP] attachAudioTracks: audioStream had 0 tracks');
+    return false;
+  }, []);
+
+  // Pass-5 exit path (see interface doc). Idempotent: returns 0 if nothing to
+  // remove. Keeps the video track — only audio is stripped so the next arm's
+  // attach is still cheap.
+  const detachAudioTracks = useCallback((): number => {
+    // Pass 11: iOS no-op. The only audio track on the iOS stream is the
+    // silent liveness oscillator; ripping it out would kill the exact
+    // signal that keeps iOS treating the tab as an active AV session
+    // (the pass-10 mid-PiP reload cause). Music is never on this stream
+    // on iOS, so there is nothing to detach for the P0 starvation guard.
+    if (isIOSSafariUA()) {
+      pushHandoffLog('[PiP] detachAudioTracks: iOS skip (liveness track must persist across arms)');
+      return 0;
+    }
+    const stream = streamRef.current;
+    if (!stream) {
+      pushHandoffLog('[PiP] detachAudioTracks: no stream');
+      return 0;
+    }
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) return 0;
+    for (const track of audioTracks) {
+      try { stream.removeTrack(track); } catch {}
+    }
+    pushHandoffLog(`[PiP] detachAudioTracks: removed ${audioTracks.length} track(s)`);
+    return audioTracks.length;
+  }, []);
+
+  // Pass-21 Cut #1: no auto-start. The pass-4 keep-warm useEffect used to
+  // call startStream() on enabled=true so readyState was hot before the PiP
+  // tap. That eagerness cost every no-PiP workout the full pipeline
+  // (rAF+captureStream+oscillator+hidden video decoding a live MediaStream).
+  // armPip's onPressIn already runs startStream() inside the tap-gesture
+  // stack — that path stays load-bearing, so iOS's gesture-scoped
+  // requestPictureInPicture() still gets a hot stream. The trade-off is a
+  // couple hundred ms of first-arm latency for the ~always-on savings.
+  // pipGateIdle=1
+  useEffect(() => {
+    if (!enabled) return;
+    if (typeof window === 'undefined') return;
+    if (armedRef.current) return;
+    pushHandoffLogAlways('[PiP] pipGateIdle=1 armed=false initial');
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      if (armedRef.current) {
+        try { window.clearInterval(id); } catch {}
+        return;
+      }
+      const uptimeSec = Math.round((Date.now() - startedAt) / 1000);
+      pushHandoffLogAlways(`[PiP] pipGateIdle=1 armed=false uptime=${uptimeSec}s`);
+    }, 60_000);
+    return () => {
+      try { window.clearInterval(id); } catch {}
+    };
+  }, [enabled]);
+  useEffect(() => () => stopStream(), [stopStream]);
+
+  return { mediaStream, videoElRef, isReady, canvasElRef, startStream, stopStream, attachAudioTracks, detachAudioTracks };
 }

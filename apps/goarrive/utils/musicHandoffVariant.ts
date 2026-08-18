@@ -49,10 +49,22 @@ function isStagingLikeHost(): boolean {
   return false;
 }
 
+/** Where the returned variant came from. Logged on [HANDOFF/init] so a
+ *  device session can see, at a glance, whether it's running the default
+ *  or a session override. */
+export type MusicHandoffVariantSource = 'query' | 'stored' | 'default';
+
 /**
- * Resolve the current variant. Query param wins; localStorage persists the
- * last query-param choice so the tester can navigate between pages without
- * re-appending the flag.
+ * Resolve the current variant. Query param wins; sessionStorage persists the
+ * last query-param choice for the duration of the tab so the tester can
+ * navigate between pages without re-appending the flag.
+ *
+ * Persistence lives in sessionStorage (NOT localStorage) so a mis-tap on
+ * the on-screen AUDIO pill during pill-heavy testing SELF-HEALS on the next
+ * fresh session — otherwise a stored non-v3 value silently overrides the v3
+ * default forever on that origin and produces the exact symptom Devin saw
+ * (in-app music perfect, background music dead) with zero clue in the log.
+ * Pass-21 R8c hardening (see feedback_media_timer_busy_guard.md context).
  *
  * Default policy:
  *   - v3 is the default everywhere (staging and production). Devin's device
@@ -65,12 +77,46 @@ export function getMusicHandoffVariant(): MusicHandoffVariant {
   if (typeof window === 'undefined') return 'off';
   const fromQuery = parseQuery(window.location.search);
   if (fromQuery) {
-    try { window.localStorage.setItem(STORAGE_KEY, fromQuery); } catch {}
+    try { window.sessionStorage.setItem(STORAGE_KEY, fromQuery); } catch {}
     return fromQuery;
   }
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.sessionStorage.getItem(STORAGE_KEY);
     if (stored === 'v1' || stored === 'v2' || stored === 'v3' || stored === 'off') return stored;
   } catch {}
   return 'v3';
+}
+
+/** Companion to getMusicHandoffVariant — same resolution order, returns the
+ *  provenance without triggering another write. Used by the [HANDOFF/init]
+ *  telemetry so a session with a stored override is obvious in the COPY LOG. */
+export function getMusicHandoffVariantSource(): MusicHandoffVariantSource {
+  if (typeof window === 'undefined') return 'default';
+  if (parseQuery(window.location.search)) return 'query';
+  try {
+    const stored = window.sessionStorage.getItem(STORAGE_KEY);
+    if (stored === 'v1' || stored === 'v2' || stored === 'v3' || stored === 'off') return 'stored';
+  } catch {}
+  return 'default';
+}
+
+/**
+ * Persist a variant to sessionStorage. Paired with the on-screen AUDIO pill so
+ * Devin can cycle variants without typing ?handoff= on an iPhone keyboard —
+ * three device sessions have been lost to that trap. Caller reloads after
+ * this so the next boot reads the new value cleanly. sessionStorage so a
+ * mis-tap self-heals on the next fresh session (see get comment).
+ */
+export function setMusicHandoffVariant(v: MusicHandoffVariant): void {
+  if (typeof window === 'undefined') return;
+  try { window.sessionStorage.setItem(STORAGE_KEY, v); } catch {}
+}
+
+/** Best-effort cleanup: any pre-hardening localStorage entry left over from
+ *  a session before this pass shipped would still trap the tester across
+ *  reloads. Clear it once on module load so the first boot on the new build
+ *  boots v3 cleanly regardless of prior history. Idempotent, silent on
+ *  environments without storage. */
+if (typeof window !== 'undefined') {
+  try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
 }
