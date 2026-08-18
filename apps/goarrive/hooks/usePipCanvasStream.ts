@@ -8,7 +8,7 @@ import {
   fsPx,
   computeTileLayout,
   drawVideoFrame,
-  drawFallbackGradient,
+  drawPlaceholderIcon,
   drawTimerBox,
   drawTimerDigit,
   drawWrappedTitle,
@@ -19,6 +19,7 @@ import {
   drawLogoContain,
   FONT_HEADLINE,
 } from './usePipCanvasStream.helpers';
+import { pickNameTier } from '../components/WorkoutPlayer.helpers';
 
 // Pass-10 fingerprint fix. Pass-9 device log showed the tile RENDERED but
 // FROZE state at a phase boundary: "WORK / Swiss Ball Lunge With Twist /
@@ -209,10 +210,7 @@ interface PipCanvasStreamResult {
 }
 
 function formatTime(seconds: number): string {
-  const s = Math.max(0, Math.ceil(seconds));
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}:${rem.toString().padStart(2, '0')}`;
+  return String(Math.max(0, Math.ceil(seconds)));
 }
 
 export function usePipCanvasStream({
@@ -240,6 +238,7 @@ export function usePipCanvasStream({
   // gracefully (800→700, 700→600) so a partial load never blocks arm.
   const fontsLoadedRef = useRef<'full' | 'partial' | 'none'>('none');
   const logoImgRef = useRef<HTMLImageElement | null>(null);
+  const iconImgRef = useRef<HTMLImageElement | null>(null);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [isReady, setIsReady] = useState(false);
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
@@ -414,13 +413,13 @@ export function usePipCanvasStream({
               : 'none';
           fontsLoadedRef.current = state;
           const settledOk = results.filter(r => r.status === 'fulfilled').length;
-          pushHandoffLogAlways(`[PiP] pipCosmetic=1 canvas=${cw}x${ch} fontsLoaded=${state} sg800=${sg800} sg700=${sg700} dm400=${dm400} settled=${settledOk}/${faces.length}`);
+          pushHandoffLogAlways(`[PiP] pipCosmetic=1 pipCosmeticB=1 canvas=${cw}x${ch} fontsLoaded=${state} sg800=${sg800} sg700=${sg700} dm400=${dm400} settled=${settledOk}/${faces.length}`);
         })
         .catch(() => {
-          pushHandoffLogAlways(`[PiP] pipCosmetic=1 canvas=${cw}x${ch} fontsLoaded=none reason=allSettledReject`);
+          pushHandoffLogAlways(`[PiP] pipCosmetic=1 pipCosmeticB=1 canvas=${cw}x${ch} fontsLoaded=none reason=allSettledReject`);
         });
     } else {
-      pushHandoffLogAlways(`[PiP] pipCosmetic=1 canvas=${cw}x${ch} fontsLoaded=none reason=noFontsAPI`);
+      pushHandoffLogAlways(`[PiP] pipCosmetic=1 pipCosmeticB=1 canvas=${cw}x${ch} fontsLoaded=none reason=noFontsAPI`);
     }
 
     // Pass-22 cosmetics: logo image. Load once from the public folder — the
@@ -440,6 +439,27 @@ export function usePipCanvasStream({
           pushHandoffLog('[PiP] pipCosmetic=1 logoError src=/goarrive-logo.png');
         };
         logoImgRef.current = img;
+      } catch {}
+    }
+
+    // Pass-22b cosmetics: no-video placeholder icon. Mirrors WorkoutPlayer's
+    // st.placeholderLogo — goarrive-icon.png cover-fit across the media box
+    // in place of the fallback gradient + name text. Same taint rule as the
+    // logo (same-origin + crossOrigin=anonymous). Preloaded once per arm so
+    // the first placeholder frame paints the icon, not a black hole.
+    if (!iconImgRef.current && typeof Image !== 'undefined') {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.src = '/goarrive-icon.png';
+        img.onload = () => {
+          pushHandoffLog(`[PiP] pipCosmeticB=1 iconReady w=${img.naturalWidth} h=${img.naturalHeight}`);
+        };
+        img.onerror = () => {
+          pushHandoffLog('[PiP] pipCosmeticB=1 iconError src=/goarrive-icon.png');
+        };
+        iconImgRef.current = img;
       } catch {}
     }
 
@@ -745,21 +765,32 @@ export function usePipCanvasStream({
       drawLogoContain(cc, logoImgRef.current, layout.logoX, layout.logoY, layout.logoW, layout.logoH);
 
       // Title band. REST composition: small "REST" label above the wrapped
-      // next name so the tile matches the main player's rest treatment.
+      // "Next: <name>" so the tile matches the main player's rest treatment.
       // Non-rest: title = drawTarget name (or grabEquipmentText for grab).
+      //
+      // Pass-22b: use pickNameTier(text, baseMediaW-152, 3) so titles wrap to
+      // up to 3 lines matching the player. baseAvailWidth is 152 BASE units
+      // (baseMediaW - timer - gap - pad). maxHeight scopes the tier to the
+      // remaining title slot height so a 40/44 tier never spills over the
+      // media clip in rest mode.
       const titleX = layout.titleColX + layout.titleColPadX;
       const titleW = layout.titleColW - layout.titleColPadX * 2;
       const titleY = layout.titleRowY;
       const titleH = layout.titleRowH;
+      const baseAvailWidth = layout.baseMediaW - 152;
       if (isRest) {
         const labelH = fsPx(18);
         const labelGap = fsPx(4);
         drawRestLabel(cc, 'REST', titleX, titleY + fsPx(6), titleW, fontsLoaded);
         const nameY = titleY + fsPx(6) + labelH + labelGap;
         const nameH = titleH - (nameY - titleY) - fsPx(4);
-        drawWrappedTitle(cc, titleText, titleX, nameY, titleW, nameH, fsPx(28), fsPx(32), 2, '#F0F4F8', fontsLoaded);
+        const restAvailBaseH = Math.max(1, Math.round(nameH / 1.5));
+        const t = pickNameTier(titleText, baseAvailWidth, 3, undefined, restAvailBaseH);
+        drawWrappedTitle(cc, titleText, titleX, nameY, titleW, nameH, fsPx(t.size), fsPx(t.line), 3, '#F0F4F8', fontsLoaded);
       } else {
-        drawWrappedTitle(cc, titleText, titleX, titleY, titleW, titleH, fsPx(28), fsPx(32), 2, '#F0F4F8', fontsLoaded);
+        const baseTitleH = Math.max(1, Math.round(titleH / 1.5));
+        const t = pickNameTier(titleText, baseAvailWidth, 3, undefined, baseTitleH);
+        drawWrappedTitle(cc, titleText, titleX, titleY, titleW, titleH, fsPx(t.size), fsPx(t.line), 3, '#F0F4F8', fontsLoaded);
       }
 
       // Timer box (background only — digits per frame). During REST the
@@ -767,29 +798,14 @@ export function usePipCanvasStream({
       // instead of the work-tone gold so the change is legible at a glance.
       drawTimerBox(cc, layout.timerX, layout.timerY, layout.timerW, layout.timerH, isRest);
 
-      // Next-up card. REST composition per spec: the SLOT height stays
-      // reserved but the card contents are empty (the next name has been
-      // hoisted into the title band). Non-rest: card carries name + meta +
-      // thumb.
+      // Next-up card. Pass-22b: during REST the player passes null next-up
+      // content — the slot stays empty (height already reserved by layout).
+      // Drawing an empty translucent card frame shipped a phantom thumb
+      // square in the pass-22 device screenshots. Non-rest: card carries
+      // name + meta + thumb.
       if (isRest || !nx) {
-        // Reserved-slot: draw a translucent card frame with no contents,
-        // so the tile height + rhythm doesn't shift between rest and work.
-        drawNextUpCard(
-          cc,
-          layout.nextUpX,
-          layout.nextUpY,
-          layout.nextUpW,
-          layout.nextUpH,
-          layout.nextUpRadius,
-          layout.nextUpPadX,
-          layout.nextUpPadY,
-          layout.nextUpThumbSize,
-          layout.nextUpThumbRadius,
-          '',
-          '',
-          null,
-          fontsLoaded,
-        );
+        // Reserved-slot: draw NOTHING. The chrome bg fill already covers
+        // the slot so height + rhythm stay stable across the rest boundary.
       } else {
         const nxName = nx.stepType === 'exercise'
           ? composeNextLabel(nx.name, nx.weight, nx.reps)
@@ -1048,7 +1064,11 @@ export function usePipCanvasStream({
       // handling happens later against movName's downstream nameText). The
       // chrome then acts as the tile's canvas wash: no `fillRect(0,0,cw,ch)`
       // wash needed since chrome fully covers the background.
-      const chromeTitle = isRest ? (nx?.name ?? '') : movName;
+      // Pass-22b: match WorkoutPlayer's rest text exactly — label "REST" +
+      // "Next: <name>". Previous chromeTitle dropped the "Next: " prefix
+      // during rest even though movName already carried it. Reuse movName so
+      // work + rest go through the same variable.
+      const chromeTitle = movName;
       const thumbUrl = nx?.thumbnailUrl || nx?.posterUrl;
       const thumbImg = ensureNextThumb(thumbUrl);
       const thumbReady = !!(thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0);
@@ -1132,12 +1152,12 @@ export function usePipCanvasStream({
               ctx.drawImage(img, sx, sy, sw, sh, videoX, videoY, videoW, videoH);
               ctx.restore();
             } catch {
-              drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+              drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
             }
           } else {
             // Image missing or still loading — slate + title. Never a black
             // rectangle, and never the previous movement's frozen frame.
-            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
           }
           if (!prepPhaseFirstDrawLogged) {
             prepPhaseFirstDrawLogged = true;
@@ -1193,13 +1213,13 @@ export function usePipCanvasStream({
               }
             }
           } else {
-            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
           }
         } else {
           // waterBreak / transition / no-video exercise → gradient + centered
           // name. The old code let these fall through to the video draw path,
           // which is exactly where the previous movement flashed.
-          drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+          drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
         }
 
         // R5 Fix 4: log the prep entry too. Reason 'prepCut' makes a device
@@ -1322,7 +1342,7 @@ export function usePipCanvasStream({
             && lastPaintedVideoEl !== null
             && lastPaintedVideoEl.readyState >= 2;
           if (isNoVideoStep) {
-            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
             lastDecodedVideoEl = null;
             lastPaintedVideoEl = null;
             lastPaintedVideoSrc = '';
@@ -1334,7 +1354,7 @@ export function usePipCanvasStream({
             }
             flipTileMode('placeholder', 'noVideo');
           } else if (blipCapExceeded) {
-            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
             lastDecodedVideoEl = null;
             lastPaintedVideoEl = null;
             lastPaintedVideoSrc = '';
@@ -1347,7 +1367,7 @@ export function usePipCanvasStream({
             consecNoDrawableFrames = 0;
             lastPaintedVideoEl = drawEl;
             lastPaintedVideoSrc = drawEl.currentSrc || drawEl.src || '';
-            drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, movName);
+            drawVideoFrame(ctx, drawEl, videoX, videoY, videoW, videoH, iconImgRef.current);
             flipTileMode('video', 'live');
           } else if (
             tileMode === 'video'
@@ -1357,7 +1377,7 @@ export function usePipCanvasStream({
           ) {
             consecNoDrawableFrames++;
             hysteresisHoldTotal++;
-            drawVideoFrame(ctx, lastPaintedVideoEl, videoX, videoY, videoW, videoH, movName);
+            drawVideoFrame(ctx, lastPaintedVideoEl, videoX, videoY, videoW, videoH, iconImgRef.current);
             // Stay in video mode — no flip logged. This is the whole point
             // of the latch: brief no-drawable dropouts don't break the
             // continuity of the "video is playing" state. First-hit +
@@ -1367,7 +1387,7 @@ export function usePipCanvasStream({
               pushHandoffLog(`[PiP] pipHysteresis=1 hysteresisHoldTotal=${hysteresisHoldTotal} consec=${consecNoDrawableFrames} frame=${totalFrameCount}`);
             }
           } else {
-            drawFallbackGradient(ctx, videoX, videoY, videoW, videoH, movName);
+            drawPlaceholderIcon(ctx, iconImgRef.current, videoX, videoY, videoW, videoH);
             const reason = wouldHaveCovered
               ? 'skipStale'
               : !videoEl

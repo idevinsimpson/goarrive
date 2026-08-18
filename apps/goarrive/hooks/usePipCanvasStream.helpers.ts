@@ -169,12 +169,13 @@ export function drawVideoFrame(
   y: number,
   w: number,
   h: number,
-  movementName: string,
+  iconImg: HTMLImageElement | null,
   radius: number = fsPx(12),
 ): void {
   // Pass-22: rounded-clip the media region so the tile matches the player's
   // mediaInner (radius 12 BASE). Pass-16 semantics unchanged — a paused
-  // rs>=2 element still paints its decoded frame.
+  // rs>=2 element still paints its decoded frame. Pass-22b: fallback is
+  // the icon placeholder (never a name-text gradient) to match the player.
   if (videoEl && videoEl.readyState >= 2) {
     const srcW = videoEl.videoWidth || videoEl.clientWidth || w;
     const srcH = videoEl.videoHeight || videoEl.clientHeight || h;
@@ -198,54 +199,42 @@ export function drawVideoFrame(
         ctx.drawImage(videoEl as CanvasImageSource, sx, sy, sw, sh, x, y, w, h);
       });
     } catch {
-      drawFallbackGradient(ctx, x, y, w, h, movementName, radius);
+      drawPlaceholderIcon(ctx, iconImg, x, y, w, h, radius);
     }
   } else {
-    drawFallbackGradient(ctx, x, y, w, h, movementName, radius);
+    drawPlaceholderIcon(ctx, iconImg, x, y, w, h, radius);
   }
 }
 
-export function drawFallbackGradient(
+// Pass-22b: match WorkoutPlayer's st.placeholderLogo/placeholderLogoFrame —
+// a flat #0E1117 media frame with goarrive-icon.png cover-fit at 100%×100%.
+// The movement name lives in the title band, never mid-media.
+export function drawPlaceholderIcon(
   ctx: CanvasRenderingContext2D,
+  iconImg: HTMLImageElement | null,
   x: number,
   y: number,
   w: number,
   h: number,
-  movementName: string,
   radius: number = fsPx(12),
 ): void {
   withRoundedMediaClip(ctx, x, y, w, h, radius, () => {
-    const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, '#0E1117');
-    grad.addColorStop(1, '#1A2030');
-    ctx.fillStyle = grad;
+    ctx.fillStyle = '#0E1117';
     ctx.fillRect(x, y, w, h);
-    if (movementName) {
-      const fontSize = Math.round(w * 0.07);
-      ctx.fillStyle = '#F0F4F8';
-      ctx.font = `800 ${fontSize}px ${FONT_HEADLINE}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const words = movementName.split(' ');
-      const maxLineW = w * 0.85;
-      const lines: string[] = [];
-      let line = '';
-      for (const word of words) {
-        const candidate = line ? `${line} ${word}` : word;
-        if (ctx.measureText(candidate).width > maxLineW && line) {
-          lines.push(line);
-          line = word;
-        } else {
-          line = candidate;
-        }
+    if (!iconImg || !iconImg.complete || iconImg.naturalWidth <= 0) return;
+    try {
+      const iAsp = iconImg.naturalWidth / iconImg.naturalHeight;
+      const dAsp = w / h;
+      let sx = 0; let sy = 0; let sw = iconImg.naturalWidth; let sh = iconImg.naturalHeight;
+      if (iAsp > dAsp) {
+        sw = iconImg.naturalHeight * dAsp;
+        sx = (iconImg.naturalWidth - sw) / 2;
+      } else {
+        sh = iconImg.naturalWidth / dAsp;
+        sy = (iconImg.naturalHeight - sh) / 2;
       }
-      if (line) lines.push(line);
-      const lineH = fontSize * 1.3;
-      const startY = y + h / 2 - ((lines.length - 1) * lineH) / 2;
-      for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i], x + w / 2, startY + i * lineH);
-      }
-    }
+      ctx.drawImage(iconImg, sx, sy, sw, sh, x, y, w, h);
+    } catch {}
   });
 }
 
