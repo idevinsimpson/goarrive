@@ -474,6 +474,9 @@ export interface MemberPlanData {
   // Shareable link
   shareToken?: string;
 
+  // Scenario presentation (set by coach when presenting a specific scenario to member)
+  presentedScenarioId?: string | null;
+
   // ── Legacy / backward-compat aliases ──
   contractLengthMonths?: number;
   pricingInputs?: PricingInputs;
@@ -502,6 +505,26 @@ export interface MemberPlanData {
   weekPlan3?: DayPlan[];
   weekPlan2?: DayPlan[];
   weeklyPlan?: DayPlan[];
+}
+
+// ─── Scenario (coach-private plan alternate) ──────────────────────────────────
+
+type ScenarioExcludedKeys =
+  | 'acceptedSnapshotId'
+  | 'stripeCustomerId'
+  | 'checkoutStatus'
+  | 'acceptedAt'
+  | 'contractStartAt'
+  | 'contractEndAt'
+  | 'shareToken'
+  | 'presentedScenarioId'
+  | 'createdAt';
+
+export interface Scenario extends Omit<MemberPlanData, ScenarioExcludedKeys> {
+  id: string;
+  name: string;
+  createdAt: FirestoreTimestamp | string;
+  coachId: string;
 }
 
 // ─── Pricing engine ───────────────────────────────────────────────────────────
