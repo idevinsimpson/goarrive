@@ -3606,7 +3606,11 @@ export default function MemberPlanScreen() {
             <Icon name={tabStripCollapsed ? 'chevron-down' : 'chevron-up'} size={14} color={MUTED} />
           </Pressable>
           {!tabStripCollapsed && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ flexGrow: 0 }}
+              contentContainerStyle={{ flexDirection: 'row', alignItems: 'flex-start' }}>
               {/* Base plan tab (Plan 1, undeletable) */}
               <Pressable
                 onPress={() => selectScenarioTab(null)}
