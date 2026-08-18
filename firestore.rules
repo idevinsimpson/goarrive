@@ -251,6 +251,18 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // PLAN SCENARIOS (coach CRUD; member read only for presented scenario)
+    // ─────────────────────────────────────────────
+    match /member_plans/{planId}/scenarios/{scenarioId} {
+      // Coach full CRUD
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update, delete: if resource != null && isCoachOrBootstrap(resource.data.coachId);
+      // Coach read (all scenarios) OR member read (only the presented one)
+      allow read: if (resource != null && isCoachOrBootstrap(resource.data.coachId))
+                  || get(/databases/$(database)/documents/member_plans/$(planId)).data.presentedScenarioId == scenarioId;
+    }
+
+    // ─────────────────────────────────────────────
     // RULE VERSIONS (read: all authenticated; write: Cloud Functions only via Admin SDK)
     // ─────────────────────────────────────────────
 

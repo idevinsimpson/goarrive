@@ -474,6 +474,9 @@ export interface MemberPlanData {
   // Shareable link
   shareToken?: string;
 
+  // Scenario presentation — which scenario is shown to the member (null = base plan)
+  presentedScenarioId?: string | null;
+
   // ── Legacy / backward-compat aliases ──
   contractLengthMonths?: number;
   pricingInputs?: PricingInputs;
@@ -503,6 +506,19 @@ export interface MemberPlanData {
   weekPlan2?: DayPlan[];
   weeklyPlan?: DayPlan[];
 }
+
+// ─── Scenario (coach-side plan variant, subcollection of member_plans) ────────
+
+export type Scenario = Omit<MemberPlanData,
+  'acceptedSnapshotId' | 'stripeCustomerId' | 'checkoutStatus' |
+  'acceptedAt' | 'contractStartAt' | 'contractEndAt' |
+  'shareToken' | 'presentedScenarioId'
+> & {
+  id: string;
+  name: string;
+  createdAt: any;
+  coachId: string;
+};
 
 // ─── Pricing engine ───────────────────────────────────────────────────────────
 

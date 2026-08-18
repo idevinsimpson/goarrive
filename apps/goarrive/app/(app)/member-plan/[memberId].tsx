@@ -34,18 +34,18 @@ import { CtsOptInModal } from '../../../components/CtsOptInModal';
 import ReactDOM from 'react-dom';
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
-  Platform, Modal, Animated, Dimensions, Image, ActivityIndicator,
+  Platform, Modal, Animated, Dimensions, Image, ActivityIndicator, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
 import ContinuationCard from '../../../components/ContinuationCard';
 import {
-  MemberPlanData, DayPlan, SessionType, Phase,
+  MemberPlanData, Scenario, DayPlan, SessionType, Phase,
   SessionTypeGuidance, GuidanceLevel, PricingResult, PostContract, ContinuationPricing,
   calculatePricing, formatCurrency, monthsToWeeks,
   createDefaultPlan, createDefaultSchedule, createDefaultPhases,
@@ -2192,10 +2192,12 @@ const bd = StyleSheet.create({
 // PLAN CONTROLS DRAWER (bottom sheet)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
+function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange, onPresent, basePlanStatus }: {
   visible: boolean; onClose: () => void;
   plan: MemberPlanData; pricing: PricingResult;
   onChange: (updates: Partial<MemberPlanData>) => void;
+  onPresent?: () => void;
+  basePlanStatus?: string;
 }) {
   const [showGuidance, setShowGuidance] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
@@ -2513,24 +2515,24 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               </View>
             )}
 
-            {/* Present Plan */}
-            {plan.status === 'draft' && (
+            {/* Present Plan — always reflects BASE plan status, writes presentedScenarioId to base plan */}
+            {(basePlanStatus ?? plan.status) === 'draft' && (
               <Pressable
-                onPress={() => onChange({ status: 'presented' })}
+                onPress={() => onPresent ? onPresent() : onChange({ status: 'presented' })}
                 style={{ backgroundColor: PRIMARY, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 20 }}
               >
                 <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>Present Plan to Member</Text>
               </Pressable>
             )}
 
-            {plan.status === 'presented' && (
+            {(basePlanStatus ?? plan.status) === 'presented' && (
               <View style={{ marginTop: 20, padding: 12, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(91,155,213,0.25)' }}>
                 <Text style={{ color: PRIMARY, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>Plan Presented</Text>
                 <Text style={{ color: MUTED, fontSize: 13 }}>The plan has been presented to the member. They will see an option to accept it on their end.</Text>
               </View>
             )}
 
-            {plan.status === 'accepted' && (
+            {(basePlanStatus ?? plan.status) === 'accepted' && (
               <View style={{ marginTop: 20, padding: 12, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(110,187,122,0.25)' }}>
                 <Text style={{ color: ACCENT, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>Plan Accepted!</Text>
                 <Text style={{ color: MUTED, fontSize: 13 }}>The member has accepted this plan. It is now active.</Text>
@@ -2975,6 +2977,24 @@ export default function MemberPlanScreen() {
   const saveStatusTimer = useRef<any>(null);
   const planKeyRef = useRef<string>(memberId || '');
 
+  // Scenario state
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const selectedScenarioIdRef = useRef<string | null>(null);
+  const [scenarioStripExpanded, setScenarioStripExpanded] = useState(true);
+  const scenarioSaveTimer = useRef<any>(null);
+  const [renamingScenarioId, setRenamingScenarioId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
+
+  useEffect(() => { selectedScenarioIdRef.current = selectedScenarioId; }, [selectedScenarioId]);
+
+  // Snapshot exclusions — fields that live ONLY on the base plan, never cloned to a scenario
+  const SCENARIO_EXCLUSIONS: (keyof MemberPlanData)[] = [
+    'acceptedSnapshotId', 'stripeCustomerId', 'checkoutStatus',
+    'acceptedAt', 'contractStartAt', 'contractEndAt',
+    'shareToken', 'presentedScenarioId',
+  ];
+
   // Load data
   useEffect(() => {
     if (!memberId || !user) return;
@@ -3182,6 +3202,17 @@ export default function MemberPlanScreen() {
     // PR-K: Surface paymentStatus for lapse banner
     setMemberPaymentStatus((finalPlan as any).paymentStatus as string | undefined);
     setPlan(finalPlan);
+
+    // ── Step 6: Load scenarios subcollection ─────────────────────────────
+    try {
+      const scenSnap = await getDocs(collection(db, 'member_plans', planKey, 'scenarios'));
+      const loadedScenarios = scenSnap.docs.map(d => ({ ...d.data(), id: d.id })) as Scenario[];
+      loadedScenarios.sort((a, b) => a.name.localeCompare(b.name));
+      setScenarios(loadedScenarios);
+    } catch (err) {
+      console.warn('[loadData] Could not load scenarios:', err);
+    }
+
     setLoading(false);
   };
 
@@ -3232,16 +3263,120 @@ export default function MemberPlanScreen() {
     });
   }, [memberId, user]);
 
-  // Pricing (memoized)
-  const pricing = useMemo(() => {
-    if (!plan) return null;
+  // Scenario content change — writes to scenario doc instead of base plan
+  const handleScenarioChange = useCallback((updates: Partial<MemberPlanData>) => {
+    const scenarioId = selectedScenarioIdRef.current;
+    if (!scenarioId) return;
+    setScenarios(prev => prev.map(s => s.id === scenarioId ? { ...s, ...updates } as Scenario : s));
+    if (scenarioSaveTimer.current) clearTimeout(scenarioSaveTimer.current);
+    scenarioSaveTimer.current = setTimeout(async () => {
+      const key = planKeyRef.current || memberId!;
+      try {
+        await setDoc(
+          doc(db, 'member_plans', key, 'scenarios', scenarioId),
+          sanitizeForFirestore({ ...updates, updatedAt: serverTimestamp() }),
+          { merge: true }
+        );
+      } catch (err) {
+        console.error('[handleScenarioChange] Error saving:', err);
+      }
+    }, 800);
+  }, [memberId]);
+
+  // Create a new scenario — clones currently active plan minus snapshot exclusions
+  const handleCreateScenario = async () => {
+    const key = planKeyRef.current || memberId!;
+    if (!key || !plan) return;
+    const source = activePlanRef.current ?? plan;
+    const cloneData: Record<string, any> = {};
+    for (const [k, v] of Object.entries(source)) {
+      if (!SCENARIO_EXCLUSIONS.includes(k as keyof MemberPlanData) && v !== undefined) {
+        cloneData[k] = v;
+      }
+    }
+    // Name: "Plan N" where N = next integer (base is "Plan 1" implicitly)
+    const existingNums = scenarios.map(s => {
+      const m = s.name.match(/^Plan (\d+)$/);
+      return m ? parseInt(m[1]) : 0;
+    });
+    const maxN = Math.max(1, ...existingNums);
+    const name = `Plan ${maxN + 1}`;
+    const newScenario = sanitizeForFirestore({
+      ...cloneData,
+      name,
+      coachId: plan.coachId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
     try {
-      return calculatePricing(plan);
+      const ref = await addDoc(collection(db, 'member_plans', key, 'scenarios'), newScenario);
+      const created: Scenario = { ...cloneData, name, coachId: plan.coachId, createdAt: null, id: ref.id } as Scenario;
+      setScenarios(prev => [...prev, created]);
+      setSelectedScenarioId(ref.id);
+    } catch (err) {
+      console.error('[handleCreateScenario] Error:', err);
+    }
+  };
+
+  // Delete a scenario with confirmation
+  const handleDeleteScenario = (scenarioId: string) => {
+    Alert.alert('Delete Scenario', 'Delete this scenario? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          const key = planKeyRef.current || memberId!;
+          try {
+            await deleteDoc(doc(db, 'member_plans', key, 'scenarios', scenarioId));
+            setScenarios(prev => prev.filter(s => s.id !== scenarioId));
+            if (selectedScenarioId === scenarioId) setSelectedScenarioId(null);
+            if (plan?.presentedScenarioId === scenarioId) {
+              handlePlanChange({ presentedScenarioId: null });
+            }
+          } catch (err) {
+            console.error('[handleDeleteScenario] Error:', err);
+          }
+        },
+      },
+    ]);
+  };
+
+  // Rename a scenario (saves immediately)
+  const handleRenameScenario = async (scenarioId: string, newName: string) => {
+    const key = planKeyRef.current || memberId!;
+    setScenarios(prev => prev.map(s => s.id === scenarioId ? { ...s, name: newName } : s));
+    setRenamingScenarioId(null);
+    try {
+      await setDoc(doc(db, 'member_plans', key, 'scenarios', scenarioId), { name: newName }, { merge: true });
+    } catch (err) {
+      console.error('[handleRenameScenario] Error:', err);
+    }
+  };
+
+  // Present — always writes to base plan; sets presentedScenarioId + status
+  const handlePresentPlan = () => {
+    handlePlanChange({ status: 'presented', presentedScenarioId: selectedScenarioIdRef.current ?? null });
+  };
+
+  // Active plan: scenario data when on a scenario tab, base plan otherwise
+  const selectedScenario = selectedScenarioId ? scenarios.find(s => s.id === selectedScenarioId) ?? null : null;
+  const activePlan = plan ? (selectedScenario ? selectedScenario as unknown as MemberPlanData : plan) : null;
+  const activeOnChange = selectedScenarioId ? handleScenarioChange : handlePlanChange;
+  // Ref for cloning in handleCreateScenario (avoids stale closure)
+  const activePlanRef = useRef<MemberPlanData | null>(null);
+  activePlanRef.current = activePlan;
+
+  // Pricing (memoized) — uses active plan so drawer shows correct scenario pricing
+  const pricing = useMemo(() => {
+    const src = plan ? (selectedScenario ? selectedScenario as unknown as MemberPlanData : plan) : null;
+    if (!src) return null;
+    try {
+      return calculatePricing(src);
     } catch (err) {
       console.error('Pricing calculation error:', err);
       return null;
     }
-  }, [plan]);
+  }, [plan, selectedScenario]);
 
   // Share link
   // Share Payment Link — generates a Stripe checkout URL and copies it
@@ -3375,6 +3510,80 @@ export default function MemberPlanScreen() {
         </View>
       )}
 
+      {/* ─── SCENARIO TABS ─────────────────────────────────────────────────── */}
+      {tab === 'plan' && isCoachMode && (
+        <View style={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: BORDER }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 36 }}>
+            {/* Caret: collapse / expand the tab strip */}
+            <Pressable onPress={() => setScenarioStripExpanded(e => !e)} style={{ padding: 6, marginRight: 4 }}>
+              <Icon name={scenarioStripExpanded ? 'expand-less' : 'expand-more'} size={18} color={MUTED} />
+            </Pressable>
+            {scenarioStripExpanded && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {/* Base tab — always first, named "Plan 1" */}
+                {renamingScenarioId === 'base' ? (
+                  <TextInput
+                    value={renameText}
+                    onChangeText={setRenameText}
+                    onBlur={() => setRenamingScenarioId(null)}
+                    onSubmitEditing={() => setRenamingScenarioId(null)}
+                    autoFocus
+                    style={{ backgroundColor: '#1A2035', color: '#FFF', fontSize: 13, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: ACCENT, minWidth: 70 }}
+                  />
+                ) : (
+                  <Pressable
+                    onPress={() => setSelectedScenarioId(null)}
+                    onLongPress={() => { setRenamingScenarioId('base'); setRenameText('Plan 1'); }}
+                    style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: selectedScenarioId === null ? ACCENT : '#1A2035', borderWidth: 1, borderColor: selectedScenarioId === null ? ACCENT : BORDER }}
+                  >
+                    <Text style={{ color: selectedScenarioId === null ? '#000' : MUTED, fontSize: 13, fontWeight: '600' }}>
+                      Plan 1{plan?.presentedScenarioId == null ? ' ●' : ''}
+                    </Text>
+                  </Pressable>
+                )}
+
+                {/* Scenario tabs */}
+                {scenarios.map(scenario => (
+                  <View key={scenario.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                    {renamingScenarioId === scenario.id ? (
+                      <TextInput
+                        value={renameText}
+                        onChangeText={setRenameText}
+                        onBlur={() => { if (renameText.trim()) handleRenameScenario(scenario.id, renameText.trim()); else setRenamingScenarioId(null); }}
+                        onSubmitEditing={() => { if (renameText.trim()) handleRenameScenario(scenario.id, renameText.trim()); else setRenamingScenarioId(null); }}
+                        autoFocus
+                        style={{ backgroundColor: '#1A2035', color: '#FFF', fontSize: 13, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: PRIMARY, minWidth: 70 }}
+                      />
+                    ) : (
+                      <Pressable
+                        onPress={() => setSelectedScenarioId(scenario.id)}
+                        onLongPress={() => { setRenamingScenarioId(scenario.id); setRenameText(scenario.name); }}
+                        style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: selectedScenarioId === scenario.id ? PRIMARY : '#1A2035', borderWidth: 1, borderColor: selectedScenarioId === scenario.id ? PRIMARY : BORDER }}
+                      >
+                        <Text style={{ color: selectedScenarioId === scenario.id ? '#FFF' : MUTED, fontSize: 13, fontWeight: '600' }}>
+                          {scenario.name}{plan?.presentedScenarioId === scenario.id ? ' ●' : ''}
+                        </Text>
+                      </Pressable>
+                    )}
+                    {/* Delete (hidden while renaming) */}
+                    {renamingScenarioId !== scenario.id && (
+                      <Pressable onPress={() => handleDeleteScenario(scenario.id)} style={{ padding: 3 }}>
+                        <Icon name="close" size={14} color={MUTED} />
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+
+                {/* + button — always last */}
+                <Pressable onPress={handleCreateScenario} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#1A2035', borderWidth: 1, borderColor: BORDER }}>
+                  <Text style={{ color: MUTED, fontSize: 15, fontWeight: '700', lineHeight: 18 }}>+</Text>
+                </Pressable>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      )}
+
       {/* ─── PR-K: PAYMENT LAPSE BANNER ───────────────────────────────────── */}
       {memberPaymentStatus === 'lapsed' && (
         <View style={{ marginHorizontal: 16, marginBottom: 8, backgroundColor: 'rgba(224,82,82,0.12)', borderWidth: 1, borderColor: 'rgba(224,82,82,0.3)', borderRadius: 10, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -3393,6 +3602,10 @@ export default function MemberPlanScreen() {
           memberId={memberId || ''}
           onSaved={(updated) => setQuestionnaire(updated)}
         />
+      ) : activePlan ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 280 }}>
+          <PlanView plan={activePlan} isCoach={isCoachMode} onChange={activeOnChange} />
+        </ScrollView>
       ) : plan ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 280 }}>
           <PlanView plan={plan} isCoach={isCoachMode} onChange={handlePlanChange} />
@@ -3422,13 +3635,15 @@ export default function MemberPlanScreen() {
       )}
 
       {/* ─── PLAN CONTROLS DRAWER ─────────────────────────────────────────── */}
-      {plan && pricing && (
+      {activePlan && pricing && (
         <PlanControlsDrawer
           visible={showControls}
           onClose={() => setShowControls(false)}
-          plan={plan}
+          plan={activePlan}
           pricing={pricing}
-          onChange={handlePlanChange}
+          onChange={activeOnChange}
+          onPresent={handlePresentPlan}
+          basePlanStatus={plan?.status}
         />
       )}
     </View>

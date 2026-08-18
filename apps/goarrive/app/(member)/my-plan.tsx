@@ -16,7 +16,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch, DocumentData } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { MemberPlanData, createDefaultPlan } from '../../lib/planTypes';
 
@@ -122,6 +122,21 @@ export default function MyPlan() {
       }
 
       if (planData) {
+        // If a scenario is presented, overlay its snapshot on top of the base plan
+        if (planData.presentedScenarioId) {
+          try {
+            const scenDoc = await getDoc(doc(db, 'member_plans', resolvedDocId, 'scenarios', planData.presentedScenarioId));
+            if (scenDoc.exists()) {
+              const scenData = scenDoc.data() as DocumentData;
+              // Merge scenario data onto planData (scenario wins for all content fields)
+              planData = { ...planData, ...scenData, id: planData.id, memberId: planData.memberId, presentedScenarioId: planData.presentedScenarioId } as MemberPlanData;
+              console.log('[MyPlan] Overlaid presented scenario:', planData.presentedScenarioId);
+            }
+          } catch (err) {
+            console.warn('[MyPlan] Could not load presented scenario, falling back to base plan:', err);
+          }
+        }
+
         // Merge with defaults to fill any missing fields (same as coach's page)
         const defaults = createDefaultPlan(
           planData.memberName || 'Member',
