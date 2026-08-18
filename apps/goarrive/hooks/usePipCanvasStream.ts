@@ -3,12 +3,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getPipAudioStream } from './useWorkoutTTS';
 import { pushHandoffLog, pushHandoffLogAlways } from '../utils/handoffLog';
 import {
+  TILE_W,
+  TILE_H,
+  fsPx,
+  computeTileLayout,
   drawVideoFrame,
   drawFallbackGradient,
-  drawTimer,
-  drawMovementName,
-  drawRepCount,
-  drawProgressBar,
+  drawTimerBox,
+  drawTimerDigit,
+  drawWrappedTitle,
+  drawRestLabel,
+  drawNextUpCard,
+  drawProgressTrack,
+  drawProgressFill,
+  drawLogoContain,
+  FONT_HEADLINE,
 } from './usePipCanvasStream.helpers';
 
 // Pass-10 fingerprint fix. Pass-9 device log showed the tile RENDERED but
@@ -26,8 +35,8 @@ import {
 // the pointers and the loop keeps tracking the live workout.
 type PipFeed = {
   phase: string;
-  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[] } | null;
-  next: { name?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[] } | null;
+  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[]; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; originalBlockType?: string } | null;
+  next: { name?: string; videoUrl?: string; stepType?: string; grabEquipmentImageUrl?: string; grabEquipmentText?: string; demoMovements?: any[]; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; reps?: string; originalBlockType?: string } | null;
   timeLeft: number;
   isPaused: boolean;
   isRepBased: boolean;
@@ -134,8 +143,8 @@ function isIOSSafariUA(): boolean {
 interface PipCanvasStreamOptions {
   enabled: boolean;
   phase: string;
-  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string } | null;
-  next: { name?: string } | null;
+  current: { name?: string; isRepBased?: boolean; target?: number; reps?: string; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; originalBlockType?: string; stepType?: string } | null;
+  next: { name?: string; blockName?: string; duration?: number; thumbnailUrl?: string; posterUrl?: string; weight?: string; reps?: string; originalBlockType?: string; stepType?: string } | null;
   timeLeft: number;
   isPaused: boolean;
   isRepBased: boolean;
@@ -220,10 +229,17 @@ export function usePipCanvasStream({
   videoElRef,
   pipSourceResolverRef,
   canvasVideoElRef,
-  canvasW = 540,
-  canvasH = 675,
+  canvasW = TILE_W,
+  canvasH = TILE_H,
   probeMode,
 }: PipCanvasStreamOptions): PipCanvasStreamResult {
+  // Pass-22 cosmetics: font readiness state. document.fonts.load fires at arm
+  // time; the log surface records `fontsLoaded=<full|partial|none>` so a
+  // regression to system-font weights is visible on the device log without
+  // needing a screenshot. Draw helpers accept it and downgrade weights
+  // gracefully (800→700, 700→600) so a partial load never blocks arm.
+  const fontsLoadedRef = useRef<'full' | 'partial' | 'none'>('none');
+  const logoImgRef = useRef<HTMLImageElement | null>(null);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [isReady, setIsReady] = useState(false);
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
@@ -366,10 +382,66 @@ export function usePipCanvasStream({
     ctx.fillStyle = '#0E1117';
     ctx.fillRect(0, 0, cw, ch);
     ctx.fillStyle = '#F5A623';
-    ctx.font = `600 ${Math.round(cw * 0.045)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${Math.round(cw * 0.045)}px ${FONT_HEADLINE}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('LOADING…', cw / 2, ch / 2);
+
+    // Pass-22 cosmetics: font readiness. document.fonts.load kicks the browser
+    // to fetch + parse each face we intend to draw. Not awaited — we log the
+    // outcome, flip fontsLoadedRef, and let the next frame's drawFrame pick
+    // up the ready glyphs. Missing 800 falls back to 700; missing everything
+    // falls back to system-ui. NEVER blocks arm. pipCosmetic=1 fontsLoaded
+    if (typeof document !== 'undefined' && (document as any).fonts?.load) {
+      const faces = [
+        `800 20px 'Space Grotesk'`,
+        `700 20px 'Space Grotesk'`,
+        `600 20px 'Space Grotesk'`,
+        `500 20px 'DM Sans'`,
+        `400 20px 'DM Sans'`,
+      ];
+      Promise.allSettled(faces.map((f) => (document as any).fonts.load(f)))
+        .then((results) => {
+          const check = (fam: string, w: string): boolean => {
+            try { return (document as any).fonts.check(`${w} 20px '${fam}'`); } catch { return false; }
+          };
+          const sg800 = check('Space Grotesk', '800');
+          const sg700 = check('Space Grotesk', '700');
+          const dm400 = check('DM Sans', '400');
+          const state: 'full' | 'partial' | 'none' =
+            sg800 && sg700 && dm400 ? 'full'
+              : (sg700 || dm400) ? 'partial'
+              : 'none';
+          fontsLoadedRef.current = state;
+          const settledOk = results.filter(r => r.status === 'fulfilled').length;
+          pushHandoffLogAlways(`[PiP] pipCosmetic=1 canvas=${cw}x${ch} fontsLoaded=${state} sg800=${sg800} sg700=${sg700} dm400=${dm400} settled=${settledOk}/${faces.length}`);
+        })
+        .catch(() => {
+          pushHandoffLogAlways(`[PiP] pipCosmetic=1 canvas=${cw}x${ch} fontsLoaded=none reason=allSettledReject`);
+        });
+    } else {
+      pushHandoffLogAlways(`[PiP] pipCosmetic=1 canvas=${cw}x${ch} fontsLoaded=none reason=noFontsAPI`);
+    }
+
+    // Pass-22 cosmetics: logo image. Load once from the public folder — the
+    // asset ships at /goarrive-logo.png in every Hosting build, so no bundle
+    // require() needed. Cross-origin anonymous so the canvas never taints on
+    // draw. Never blocks arm; the chrome layer redraws when it's ready.
+    if (!logoImgRef.current && typeof Image !== 'undefined') {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.src = '/goarrive-logo.png';
+        img.onload = () => {
+          pushHandoffLog(`[PiP] pipCosmetic=1 logoReady w=${img.naturalWidth} h=${img.naturalHeight}`);
+        };
+        img.onerror = () => {
+          pushHandoffLog('[PiP] pipCosmetic=1 logoError src=/goarrive-logo.png');
+        };
+        logoImgRef.current = img;
+      } catch {}
+    }
 
     const canvasStream: MediaStream = (canvas as any).captureStream(30);
     const videoTrack = canvasStream.getVideoTracks()[0];
@@ -615,6 +687,150 @@ export function usePipCanvasStream({
       tileMode = next;
     }
 
+    // Pass-22 cosmetics: static-chrome offscreen canvas. Contains everything
+    // that doesn't change per frame — background wash, logo, title text,
+    // timer BOX (not digits), next-up card + label/name/meta/thumb, and the
+    // progress bar TRACK (not the fill). The main canvas per-frame draw
+    // composites this via drawImage, then paints the video, timer digits,
+    // and progress fill on top. Redraw is triggered only when the identity
+    // signature changes (phase, drawTarget identity, next identity, thumb
+    // readiness, fonts readiness). Perf goal: 24-30fps target on iOS Safari.
+    // pipCosmetic=1 pipStaticChrome=1
+    const layout = computeTileLayout();
+    const chromeCanvas = document.createElement('canvas');
+    chromeCanvas.width = layout.W;
+    chromeCanvas.height = layout.H;
+    const chromeCtxRaw = chromeCanvas.getContext('2d');
+    if (!chromeCtxRaw) {
+      pushHandoffLog('[PiP] chromeCtx null — will paint direct without offscreen composite');
+    }
+    const chromeCtx: CanvasRenderingContext2D | null = chromeCtxRaw;
+    let lastChromeSig = '';
+    let chromeRedrawTotal = 0;
+    let lastLoggedFontsLoaded: 'full' | 'partial' | 'none' | 'never' = 'never';
+    // Thumb cache for the next-up card. Keyed by URL; single-slot LRU is
+    // fine — we only ever need `next`'s thumb. `crossOrigin='anonymous'` so
+    // the canvas never taints when the image draws.
+    let nextThumbImg: HTMLImageElement | null = null;
+    let nextThumbUrl = '';
+    function ensureNextThumb(url: string | undefined): HTMLImageElement | null {
+      if (!url) { nextThumbImg = null; nextThumbUrl = ''; return null; }
+      if (url === nextThumbUrl && nextThumbImg) return nextThumbImg;
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.src = url;
+        nextThumbImg = img;
+        nextThumbUrl = url;
+      } catch { nextThumbImg = null; nextThumbUrl = ''; }
+      return nextThumbImg;
+    }
+
+    function redrawChrome(
+      isRest: boolean,
+      titleText: string,
+      nx: PipFeed['next'],
+      thumbImg: HTMLImageElement | null,
+      fontsLoaded: 'full' | 'partial' | 'none',
+    ): void {
+      if (!chromeCtx) return;
+      const cc = chromeCtx;
+      // Full clear — this canvas is only touched by redrawChrome so a plain
+      // fill of the tile bg is enough.
+      cc.fillStyle = '#0E1117';
+      cc.fillRect(0, 0, layout.W, layout.H);
+
+      // Logo slot (contain-fit).
+      drawLogoContain(cc, logoImgRef.current, layout.logoX, layout.logoY, layout.logoW, layout.logoH);
+
+      // Title band. REST composition: small "REST" label above the wrapped
+      // next name so the tile matches the main player's rest treatment.
+      // Non-rest: title = drawTarget name (or grabEquipmentText for grab).
+      const titleX = layout.titleColX + layout.titleColPadX;
+      const titleW = layout.titleColW - layout.titleColPadX * 2;
+      const titleY = layout.titleRowY;
+      const titleH = layout.titleRowH;
+      if (isRest) {
+        const labelH = fsPx(18);
+        const labelGap = fsPx(4);
+        drawRestLabel(cc, 'REST', titleX, titleY + fsPx(6), titleW, fontsLoaded);
+        const nameY = titleY + fsPx(6) + labelH + labelGap;
+        const nameH = titleH - (nameY - titleY) - fsPx(4);
+        drawWrappedTitle(cc, titleText, titleX, nameY, titleW, nameH, fsPx(28), fsPx(32), 2, '#F0F4F8', fontsLoaded);
+      } else {
+        drawWrappedTitle(cc, titleText, titleX, titleY, titleW, titleH, fsPx(28), fsPx(32), 2, '#F0F4F8', fontsLoaded);
+      }
+
+      // Timer box (background only — digits per frame). During REST the
+      // timer visually pauses on 0:00; the box carries the rest tone
+      // instead of the work-tone gold so the change is legible at a glance.
+      drawTimerBox(cc, layout.timerX, layout.timerY, layout.timerW, layout.timerH, isRest);
+
+      // Next-up card. REST composition per spec: the SLOT height stays
+      // reserved but the card contents are empty (the next name has been
+      // hoisted into the title band). Non-rest: card carries name + meta +
+      // thumb.
+      if (isRest || !nx) {
+        // Reserved-slot: draw a translucent card frame with no contents,
+        // so the tile height + rhythm doesn't shift between rest and work.
+        drawNextUpCard(
+          cc,
+          layout.nextUpX,
+          layout.nextUpY,
+          layout.nextUpW,
+          layout.nextUpH,
+          layout.nextUpRadius,
+          layout.nextUpPadX,
+          layout.nextUpPadY,
+          layout.nextUpThumbSize,
+          layout.nextUpThumbRadius,
+          '',
+          '',
+          null,
+          fontsLoaded,
+        );
+      } else {
+        const nxName = nx.stepType === 'exercise'
+          ? composeNextLabel(nx.name, nx.weight, nx.reps)
+          : (nx.originalBlockType || nx.name || '');
+        const metaBits: string[] = [];
+        if (nx.blockName) metaBits.push(nx.blockName);
+        if (nx.duration != null && nx.duration > 0) metaBits.push(`${nx.duration}s`);
+        const nxMeta = metaBits.join(' · ');
+        drawNextUpCard(
+          cc,
+          layout.nextUpX,
+          layout.nextUpY,
+          layout.nextUpW,
+          layout.nextUpH,
+          layout.nextUpRadius,
+          layout.nextUpPadX,
+          layout.nextUpPadY,
+          layout.nextUpThumbSize,
+          layout.nextUpThumbRadius,
+          nxName || '',
+          nxMeta,
+          thumbImg,
+          fontsLoaded,
+        );
+      }
+
+      // Progress bar track (fill per-frame).
+      const progW = layout.W - layout.progressPadX * 2;
+      drawProgressTrack(cc, layout.progressPadX, layout.progressY, progW, layout.progressH, layout.progressRadius);
+    }
+
+    function composeNextLabel(name: string | undefined, weight?: string, reps?: string): string {
+      const n = name || '';
+      const w = (weight || '').trim();
+      const r = (reps || '').trim();
+      const parts: string[] = [];
+      if (w) parts.push(/^\d+(\.\d+)?$/.test(w) ? `${w} lbs` : w);
+      if (r) parts.push(/^\d+$/.test(r) ? `${r} reps` : r);
+      return parts.length === 0 ? n : `${n}, ${parts.join(', ')}`;
+    }
+
     function drawFrame(now: number) {
       rafId = requestAnimationFrame(drawFrame);
       totalFrameCount++;
@@ -738,32 +954,17 @@ export function usePipCanvasStream({
         }
       }
 
-      const pad = Math.round(cw * 0.04);
-      const timerFontPx = Math.round(cw * 0.09);
-      const barH = Math.round(ch * 0.012);
-      const barY = ch - barH - Math.round(ch * 0.03);
-      // Pass-10: movement region is 4:5 (house media ratio). Fit inside a
-      // middle band with room above for header/name and below for rep
-      // count / next label / progress bar. Center horizontally.
-      const topBand = Math.round(ch * 0.13);
-      const bottomBand = Math.round(ch * 0.25);
-      const availH = ch - topBand - bottomBand;
-      const availW = cw - 2 * pad;
-      const RATIO_W_H = 4 / 5;
-      let videoW = availH * RATIO_W_H;
-      let videoH = availH;
-      if (videoW > availW) {
-        videoW = availW;
-        videoH = videoW / RATIO_W_H;
-      }
-      videoW = Math.round(videoW);
-      videoH = Math.round(videoH);
-      const videoX = Math.round((cw - videoW) / 2);
-      const videoY = topBand + Math.round((availH - videoH) / 2);
-      const overlayY = videoY + videoH + Math.round(ch * 0.025);
-
-      ctx.fillStyle = '#0E1117';
-      ctx.fillRect(0, 0, cw, ch);
+      // Pass-22 cosmetics: layout comes from computeTileLayout (BASE-unit
+      // grid mirrored from WorkoutPlayer at TILE_SCALE=1.5). Decision-code
+      // aliases (videoX/Y/W/H, pad, barY, barH) preserved so the ~400-line
+      // paint-decision block below stays byte-identical. pipCosmetic=1
+      const videoX = layout.mediaX;
+      const videoY = layout.mediaY;
+      const videoW = layout.mediaW;
+      const videoH = layout.mediaH;
+      const pad = layout.progressPadX;
+      const barY = layout.progressY;
+      const barH = layout.progressH;
 
       // Pass-19 R4 + Pass-20 R4 prep-cut: per-frame draw gate for no-video
       // prep steps. Runs BEFORE the taint-guarded video path so the previous
@@ -838,6 +1039,38 @@ export function usePipCanvasStream({
       const movName = isRest && nx?.name
         ? `Next: ${nx.name}`
         : (drawTarget?.name ?? '');
+
+      // Pass-22 cosmetics chrome paint. Identity-keyed redraw of the static
+      // offscreen canvas (bg + logo + title/REST + timer box + next-up +
+      // progress track). Per-frame overhead is one drawImage composite.
+      // Chrome REST uses nx name directly (drawRestLabel already shows
+      // "REST"). Non-rest uses movName (drawTarget name / grabEquipmentText
+      // handling happens later against movName's downstream nameText). The
+      // chrome then acts as the tile's canvas wash: no `fillRect(0,0,cw,ch)`
+      // wash needed since chrome fully covers the background.
+      const chromeTitle = isRest ? (nx?.name ?? '') : movName;
+      const thumbUrl = nx?.thumbnailUrl || nx?.posterUrl;
+      const thumbImg = ensureNextThumb(thumbUrl);
+      const thumbReady = !!(thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0);
+      const chromeSig = `${ph}|${drawTarget?.name ?? ''}|${targetStepType}|${nx?.name ?? ''}|${nx?.stepType ?? ''}|${nx?.blockName ?? ''}|${nx?.duration ?? 0}|${nx?.weight ?? ''}|${nx?.reps ?? ''}|${nx?.originalBlockType ?? ''}|${thumbReady ? '1' : '0'}|${fontsLoadedRef.current}`;
+      if (chromeSig !== lastChromeSig) {
+        lastChromeSig = chromeSig;
+        chromeRedrawTotal++;
+        redrawChrome(isRest, chromeTitle, nx, thumbImg, fontsLoadedRef.current);
+        if (chromeRedrawTotal === 1 || chromeRedrawTotal % 50 === 0) {
+          pushHandoffLog(`[PiP] pipCosmeticRedraw=1 total=${chromeRedrawTotal} phase=${ph} target=${drawTarget?.name ?? ''} thumbReady=${thumbReady} fontsLoaded=${fontsLoadedRef.current} frame=${totalFrameCount}`);
+        }
+        if (fontsLoadedRef.current !== lastLoggedFontsLoaded) {
+          lastLoggedFontsLoaded = fontsLoadedRef.current;
+          pushHandoffLog(`[PiP] pipCosmeticFonts=1 fontsLoaded=${fontsLoadedRef.current} frame=${totalFrameCount}`);
+        }
+      }
+      if (chromeCtx) {
+        ctx.drawImage(chromeCanvas, 0, 0);
+      } else {
+        ctx.fillStyle = '#0E1117';
+        ctx.fillRect(0, 0, cw, ch);
+      }
 
       // pipR7Reveal boundary tracker: fire once per entry into a distinct
       // reveal-swap (non-rest, so we don't conflate with the existing
@@ -1164,25 +1397,20 @@ export function usePipCanvasStream({
         }
       }
 
-      ctx.fillStyle = 'rgba(14,17,23,0.65)';
-      ctx.fillRect(0, 0, cw, videoY);
-
-      ctx.save();
-      ctx.fillStyle = '#8A95A3';
-      ctx.font = `500 ${Math.round(cw * 0.035)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(ph.toUpperCase(), pad, Math.round(ch * 0.06));
-      ctx.restore();
-
-      const nameMaxW = cw * 0.6;
-      // Pass-19 R4 follow-up + Pass-20 R4: for grabEquipment, mirror the
-      // main player's title (grabEquipmentText || name — see WorkoutPlayer
-      // L2425) so the tile shows the instruction ("Grab 35 pound Dumbbells
-      // & a Swiss Ball") above the image instead of just the block name.
-      // Use targetStepType so this also fires during REST heading INTO a
-      // grabEquipment step — same frame the prep-cut renders the image.
-      // Marker pipPass19R4Text=1 stays for served-JS verification.
+      // Pass-22 cosmetics per-frame paint. Chrome (bg + logo + title/REST +
+      // timer box + next-up + progress track) is already composited from
+      // the offscreen canvas above. Media region has already been painted
+      // by the decision-code branches. This block layers only the two
+      // per-frame elements: timer digit (or rep count text in the same box
+      // for repBased steps) + progress fill. Legacy WORK label + top-band
+      // wash + separate NEXT pill + fps meter are gone — the chrome
+      // handles all of that with the new BASE-unit layout.
+      //
+      // Marker pipPass19R4Text=1 fires here so served-JS verification of
+      // the grabEquipment text handoff still lights up even though the
+      // text itself is drawn inside chrome (redrawChrome uses chromeTitle
+      // which follows movName; the below just logs the FIRST time we hit
+      // a grabEquipment step so the log trail matches prior passes).
       const nameText = targetStepType === 'grabEquipment'
         ? (drawTarget?.grabEquipmentText || movName)
         : movName;
@@ -1190,41 +1418,58 @@ export function usePipCanvasStream({
         prepTextFirstDrawLogged = true;
         pushHandoffLog(`[PiP] pipPass19R4Text=1 target=grabEquipment textLen=${nameText.length} frame=${totalFrameCount}`);
       }
-      drawMovementName(ctx, nameText, pad, Math.round(ch * 0.075), nameMaxW);
 
-      if (!repBased) {
-        const timerStr = formatTime(tl);
-        drawTimer(ctx, timerStr, cw - pad, Math.round(ch * 0.02), timerFontPx);
-      }
-
+      // Timer digit or rep count text — both share the timer box slot so
+      // the box height stays stable across timed/rep steps. During REST
+      // the timer visually pauses at 0:00 with the rest-tone box.
       if (repBased) {
         const target = Number(cur?.reps ?? 0);
-        drawRepCount(ctx, done, target, cw / 2, overlayY, Math.round(cw * 0.12));
+        drawTimerDigit(
+          ctx,
+          target > 0 ? `${done}/${target}` : `${done}`,
+          layout.timerX,
+          layout.timerY,
+          layout.timerW,
+          layout.timerH,
+          isRest,
+          fontsLoadedRef.current,
+        );
+      } else {
+        drawTimerDigit(
+          ctx,
+          formatTime(tl),
+          layout.timerX,
+          layout.timerY,
+          layout.timerW,
+          layout.timerH,
+          isRest,
+          fontsLoadedRef.current,
+        );
       }
 
-      // Bottom "NEXT:" pill hidden during REST — the primary label already
-      // shows "Next: <name>" per the player's convention. During WORK/other
-      // phases it stays as the up-next hint.
-      const nextName = nx?.name;
-      if (nextName && !isRest) {
+      // Progress fill — track is in chrome, fill is per-frame gold.
+      const progW = layout.W - layout.progressPadX * 2;
+      drawProgressFill(
+        ctx,
+        pct,
+        layout.progressPadX,
+        layout.progressY,
+        progW,
+        layout.progressH,
+        layout.progressRadius,
+      );
+
+      // DIAG-only fps meter. Off in production tiles; a `?pipDiag=1` query
+      // string or `window.__pipDiag = true` flips it on for perf probes.
+      if (typeof window !== 'undefined' && ((window as any).__pipDiag || (typeof location !== 'undefined' && location.search && location.search.indexOf('pipDiag=1') >= 0))) {
         ctx.save();
-        ctx.fillStyle = '#8A95A3';
-        ctx.font = `500 ${Math.round(cw * 0.032)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(240,244,248,0.55)';
+        ctx.font = `500 ${fsPx(12)}px ${FONT_HEADLINE}`;
+        ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(`NEXT: ${nextName}`, pad, barY - Math.round(ch * 0.02));
+        ctx.fillText(`${currentFps}fps`, layout.W - pad, layout.progressY - fsPx(4));
         ctx.restore();
       }
-
-      ctx.save();
-      ctx.fillStyle = 'rgba(240,244,248,0.55)';
-      ctx.font = `500 ${Math.round(cw * 0.028)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(`${currentFps}fps`, cw - pad, barY - Math.round(ch * 0.005));
-      ctx.restore();
-
-      drawProgressBar(ctx, pct, 0, barY, cw, barH);
     }
 
     rafId = requestAnimationFrame(drawFrame);
