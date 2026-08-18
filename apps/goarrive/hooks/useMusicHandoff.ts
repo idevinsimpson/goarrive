@@ -229,6 +229,101 @@ function attemptBgPlay(shadow: HTMLAudioElement): void {
   }, BGPLAY_LOADEDDATA_TIMEOUT_MS);
 }
 
+// Pass-21 R9 warm-shadow ceiling. Devin's 2026-08-17 multi-leave device log
+// (11 leaves, 4 silent, 6 working, all discriminative on `warm:false vs true`)
+// proved the cold-shadow failure: WebKit demotes audio `preload='auto'` to
+// metadata-only (readyState reaches exactly 1) until an element has actually
+// played, so the first background leave per track fires shadow.play() against
+// a buffer of ZERO bytes. play() pends forever because a backgrounded page
+// can't fetch, and eventually rejects with AbortError on foreground return —
+// leaving the member in silence for the entire background window. 15s is a
+// slack ceiling above the ~5s the shadow variant needs on Devin's home wifi;
+// timeout logs `timeout:true` so a genuinely bad network shows itself instead
+// of hanging the leave. pass21r9=1
+const WARM_TIMEOUT_MS = 15000;
+
+/**
+ * Muted-play warm-buffer for the v3 shadow. Fires immediately after `swapTrack`
+ * points the shadow at a fresh track URL while the page is FOREGROUND, so the
+ * next backgrounded leave sees a fully-buffered element instead of a metadata-
+ * only cold stub.
+ *
+ * Mechanism: muted play() is legal on any blessed element without a fresh
+ * gesture and — more importantly — starts a real byte-fetch, which is the only
+ * thing that gets WebKit past its `preload='auto'` → metadata-only demotion.
+ * After `canplaythrough` (or timeout), pause and restore the previous muted
+ * state so the shadow sits ready. This is exactly what variant v1 runs full-
+ * time (muted-shadow-alongside-audible), so the co-audio scenario is proven
+ * harmless.
+ *
+ * Staleness: if a newer swapTrack lands mid-warm (isStale becomes true) OR the
+ * page has backgrounded, the pause() is skipped — the newer swapTrack owns the
+ * element now, and pausing it would undo whatever bgplay just started.
+ */
+async function warmShadowV3(
+  shadow: HTMLAudioElement,
+  isStale: () => boolean,
+): Promise<{ ms: number; bufferedEnd: number; timeout?: boolean; err?: string }> {
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const t0 = now();
+  const wasMuted = shadow.muted;
+  try { shadow.muted = true; } catch {}
+
+  try {
+    const p = shadow.play();
+    if (p && typeof p.then === 'function') await p;
+  } catch (err: any) {
+    if (!isStale()) { try { shadow.muted = wasMuted; } catch {} }
+    return {
+      ms: Math.round(now() - t0),
+      bufferedEnd: 0,
+      err: err?.name || String(err).slice(0, 40),
+    };
+  }
+
+  const timedOut = await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (timeout: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { shadow.removeEventListener('canplaythrough', onCPT); } catch {}
+      resolve(timeout);
+    };
+    const onCPT = () => finish(false);
+    try {
+      shadow.addEventListener('canplaythrough', onCPT, { once: true } as AddEventListenerOptions);
+    } catch {
+      shadow.addEventListener('canplaythrough', onCPT);
+    }
+    const timer = setTimeout(() => finish(true), WARM_TIMEOUT_MS);
+  });
+
+  const bufferedEnd = (() => {
+    try {
+      const b = shadow.buffered;
+      return b && b.length > 0 ? Number(b.end(b.length - 1).toFixed(2)) : 0;
+    } catch { return 0; }
+  })();
+
+  // Staleness gate covers BOTH the pause and the muted restore. If a newer
+  // swapTrack replaced the src OR the tab backgrounded during our warm, the
+  // hide seam already set `shadow.muted = isMutedRef.current` and is now
+  // driving playback — restoring our captured wasMuted would flip the mute
+  // state under the seam's feet (e.g. unmuting a session the member had
+  // silenced) and re-pausing would drop the very playback that just started.
+  if (!isStale()) {
+    try { shadow.pause(); } catch {}
+    try { shadow.muted = wasMuted; } catch {}
+  }
+
+  return {
+    ms: Math.round(now() - t0),
+    bufferedEnd,
+    ...(timedOut ? { timeout: true } : {}),
+  };
+}
+
 export interface UseMusicHandoffOptions {
   /** Same as useWorkoutMusic.enabled — hook stays inert if false. */
   enabled: boolean;
@@ -454,6 +549,24 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // fires on genuine track changes (force=true) — no conflict with #285.
       if (variant === 'v3' && force && inBackgroundRef.current) {
         attemptBgPlay(shadow);
+      }
+      // Pass-21 R9 warm-shadow. Foreground track handover only — background
+      // pointing goes through attemptBgPlay above. This is the fix for the
+      // 2026-08-17 diagnosis: the shadow's fresh src loads as metadata-only
+      // (readyState=1, bufferedEnd=0) until something forces a real byte-fetch,
+      // and iOS refuses to fetch after the tab is background. Playing muted
+      // now — while the page is foreground and audible is producing sound —
+      // primes the buffer so the next leave's runHideSeam plays into warm
+      // bytes instead of a stub. Fire-and-forget: never blocks swapTrack; if
+      // the warm times out or is staled by a newer swapTrack, we still log it.
+      // pass21r9=1 warmShadow=1
+      if (variant === 'v3' && force && !inBackgroundRef.current) {
+        const guardedUrl = url;
+        void warmShadowV3(shadow, () => (
+          currentUrlRef.current !== guardedUrl || inBackgroundRef.current
+        )).then((result) => {
+          logAlways('[HANDOFF/warm]', JSON.stringify({ ...result, pass21r9: 1 }));
+        });
       }
     };
 
