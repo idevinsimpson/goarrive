@@ -18,7 +18,7 @@ import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { MemberPlanData, createDefaultPlan } from '../../lib/planTypes';
+import { MemberPlanData, Scenario, createDefaultPlan } from '../../lib/planTypes';
 
 // Import the SAME PlanView the coach uses
 import { PlanView } from '../(app)/member-plan/[memberId]';
@@ -122,6 +122,21 @@ export default function MyPlan() {
       }
 
       if (planData) {
+        // If coach has presented a specific scenario, load and overlay it
+        if (planData.presentedScenarioId && resolvedDocId) {
+          try {
+            const scenDoc = await getDoc(doc(db, 'member_plans', resolvedDocId, 'scenarios', planData.presentedScenarioId));
+            if (scenDoc.exists()) {
+              const scenData = scenDoc.data() as Scenario;
+              // Overlay scenario fields onto base plan (base plan provides billing/lifecycle fields)
+              planData = { ...planData, ...scenData, id: planData.id } as MemberPlanData;
+            }
+          } catch (err) {
+            // Silently fall back to base plan (e.g. permission denied or missing doc)
+            console.warn('[MyPlan] Could not load presented scenario, falling back to base plan:', err);
+          }
+        }
+
         // Merge with defaults to fill any missing fields (same as coach's page)
         const defaults = createDefaultPlan(
           planData.memberName || 'Member',
