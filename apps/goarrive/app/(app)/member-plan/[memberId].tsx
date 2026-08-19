@@ -3310,6 +3310,8 @@ export default function MemberPlanScreen() {
   // Auto-save with debounce
   const handlePlanChange = useCallback((updates: Partial<MemberPlanData>) => {
     setSaveStatus('saving');
+    // Capture the active tab at EDIT TIME so a mid-debounce tab switch can't reroute the write
+    const scenIdAtEdit = selectedScenarioIdRef.current;
     setPlan(prev => {
       if (!prev) return prev;
       const updated = { ...prev, ...updates };
@@ -3317,7 +3319,6 @@ export default function MemberPlanScreen() {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(async () => {
         const key = planKeyRef.current || memberId!;
-        const scenId = selectedScenarioIdRef.current;
         try {
           // Also persist computed pricingResult so the member's page always has correct pricing
           let pricingResult: PricingResult | undefined;
@@ -3325,9 +3326,9 @@ export default function MemberPlanScreen() {
           const toSave = sanitizeForFirestore(pricingResult
             ? { ...updated, pricingResult, updatedAt: serverTimestamp() }
             : { ...updated, updatedAt: serverTimestamp() });
-          if (scenId) {
+          if (scenIdAtEdit) {
             // Write to the selected scenario doc; base plan stays unchanged
-            await setDoc(doc(db, 'member_plans', key, 'scenarios', scenId), toSave, { merge: true });
+            await setDoc(doc(db, 'member_plans', key, 'scenarios', scenIdAtEdit), toSave, { merge: true });
           } else {
             await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
           }
@@ -3351,16 +3352,29 @@ export default function MemberPlanScreen() {
               console.warn('[pricing defaults] Could not save to coach_brands:', e);
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error('Error saving plan:', err);
           setSaveStatus('idle');
+          const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+          if (isPermDenied && typeof alert !== 'undefined') {
+            alert(scenIdAtEdit
+              ? 'Scenario edits could not be saved — Firestore rules denied the write. Reload the page and try again after the rules deploy propagates.'
+              : 'Plan edits could not be saved — Firestore rules denied the write.');
+          }
         }
       }, 800);
-      // Keep basePlanRef up-to-date when editing the base plan
-      if (!selectedScenarioIdRef.current) basePlanRef.current = updated;
+      // Keep local caches fresh so tab switches don't show stale pre-edit values
+      if (!scenIdAtEdit) {
+        basePlanRef.current = updated;
+      } else {
+        setScenarios(sPrev => sPrev.map(s => s.id === scenIdAtEdit ? ({ ...s, ...updates } as Scenario) : s));
+      }
       return updated;
     });
   }, [memberId, user]);
+
+  // NOTE: intentionally no cleanup that clears saveTimer on unmount —
+  // if the timer fires after unmount the setDoc still resolves; clearing it would drop the last edit.
 
   // Switch the active scenario tab — updates plan state to scenario or base plan data
   const selectScenarioTab = useCallback((scenId: string | null) => {
