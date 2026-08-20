@@ -252,3 +252,60 @@ describe('createDefaultPlan', () => {
     expect(plan.whatsIncluded[1]).toContain(String(plan.contractMonths));
   });
 });
+
+// Bug guard: pricing must honor an explicit 0-week phase, not silently reinflate
+// to the 25/50/25 default split. JV's plan (P1=0, P2=0, P3=13) was billed $421/mo
+// instead of ~$176 because `(phases[0]?.weeks) ?` treated 0 as falsy.
+describe('calculatePricing — explicit-zero phase weeks (JV bug guard)', () => {
+  const jvPhases = [
+    { id: 1, name: 'Phase 1', weeks: 0, intensity: 'Fully Guided' as const, description: '' },
+    { id: 2, name: 'Phase 2', weeks: 0, intensity: 'Shared Guidance' as const, description: '' },
+    { id: 3, name: 'Phase 3', weeks: 13, intensity: 'Self-Reliant' as const, description: '' },
+  ];
+  const jvInputs = { hourlyRate: 100, sessionLengthMinutes: 30, checkInCallLengthMinutes: 15, programBuildTimeHours: 3 };
+
+  it("JV's exact shape (phases [0,0,13]) prices at ~$176/mo, not $421", () => {
+    const schedule = createDefaultSchedule(2); // Strength ×2/wk
+    const result = calculatePricing(schedule, 2, 3, jvPhases, jvInputs, [], false);
+
+    // totalCoachingHours: only P3 contributes → 2 sessions × 13 weeks × 3.5/60 = 1.5167
+    // checkInHours: 3 mo × 15/60 = 0.75; buildHours: 3 → totalHours ≈ 5.27
+    expect(result.totalCoachingHours).toBeCloseTo(1.5167, 2);
+    expect(result.totalHours).toBeCloseTo(5.2667, 2);
+    expect(Math.round(result.baseMonthlyPrice)).toBe(176);
+    expect(Math.round(result.calculatedMonthlyPrice)).toBe(176);
+  });
+
+  it('phaseBreakdown line hours sum to totalCoachingHours (invariant)', () => {
+    // Multi-type plan makes the invariant meaningful (>1 row in phaseBreakdown)
+    const schedule = createDefaultSchedule(4); // Strength ×2, Cardio + Mobility ×2
+    const phases = [
+      { id: 1, name: 'P1', weeks: 3, intensity: 'Fully Guided' as const, description: '' },
+      { id: 2, name: 'P2', weeks: 7, intensity: 'Shared Guidance' as const, description: '' },
+      { id: 3, name: 'P3', weeks: 3, intensity: 'Self-Reliant' as const, description: '' },
+    ];
+    const result = calculatePricing(schedule, 4, 3, phases, jvInputs, [], false);
+
+    expect(result.phaseBreakdown.length).toBeGreaterThan(1);
+    const summedLineHours = result.phaseBreakdown.reduce((sum, row) => sum + row.totalHours, 0);
+    expect(summedLineHours).toBeCloseTo(result.totalCoachingHours, 6);
+
+    // Per-row invariant too: each row's totalHours === phase1+phase2+phase3
+    for (const row of result.phaseBreakdown) {
+      expect(row.totalHours).toBeCloseTo(row.phase1Hours + row.phase2Hours + row.phase3Hours, 6);
+    }
+  });
+
+  it('legacy plan with no phases falls back to 25/50/25 (behavior unchanged)', () => {
+    const schedule = createDefaultSchedule(2);
+    const result = calculatePricing(schedule, 2, 3, [], jvInputs, [], false);
+
+    // 13 weeks → 25/50/25 = 3/7/3 (JS Math.round(6.5)=7, then 13-3-7=3)
+    // Strength ×2: P1=2×3×.5×1.0=3, P2=2×7×.5×.625=4.375, P3=2×3×3.5/60=0.35
+    // totalCoachingHours = 7.725
+    expect(result.totalCoachingHours).toBeCloseTo(7.725, 2);
+    expect(result.phaseBreakdown[0].phase1Hours).toBeCloseTo(3, 4);
+    expect(result.phaseBreakdown[0].phase2Hours).toBeCloseTo(4.375, 4);
+    expect(result.phaseBreakdown[0].phase3Hours).toBeCloseTo(0.35, 4);
+  });
+});

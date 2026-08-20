@@ -129,7 +129,7 @@ export default function MusicSettingsSheet(props: MusicSettingsSheetProps) {
   else statusLine = 'Now playing';
 
   return (
-    <View style={st.root} pointerEvents="box-none">
+    <View style={st.root} pointerEvents="box-none" nativeID="pipPass20MusicSheetFix">
       <Pressable style={st.backdrop} onPress={onClose} />
       <View style={st.card}>
         {/* Header */}
@@ -231,7 +231,15 @@ export default function MusicSettingsSheet(props: MusicSettingsSheetProps) {
 
         {/* Style */}
         <Text style={st.sectionLabel}>MUSIC STYLE</Text>
-        <ScrollView style={{ maxHeight: fs(180) }} showsVerticalScrollIndicator={false}>
+        {/* flexGrow:0 overrides RN Web ScrollView's default flexGrow:1, which
+            otherwise stretches the ScrollView (and the card) to consume all
+            spare space in the sheet root — pushing the footer to the bottom
+            of the screen and hiding the top sections above the container.
+            pipPass20MusicSheetFix=1 */}
+        <ScrollView
+          style={{ maxHeight: fs(180), flexGrow: 0, flexShrink: 0 }}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={st.chipRow}>
             {MUSIC_STYLE_OPTIONS.map((opt) => {
               const active = currentStyle === opt.value;
@@ -290,6 +298,11 @@ const makeStyles = (fs: (n: number) => number) =>
       paddingHorizontal: fs(18),
       paddingTop: fs(14),
       paddingBottom: fs(18),
+      // Cap so the card can never overflow the player canvas even if a nested
+      // ScrollView (or a future added section) tries to grow. Belt-and-suspenders
+      // with flexGrow:0 on the chip ScrollView above.
+      maxHeight: '90%',
+      overflow: 'hidden',
     },
     headerRow: {
       flexDirection: 'row',

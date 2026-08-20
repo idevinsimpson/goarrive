@@ -474,6 +474,9 @@ export interface MemberPlanData {
   // Shareable link
   shareToken?: string;
 
+  // Scenario presentation (set by coach when presenting a specific scenario to member)
+  presentedScenarioId?: string | null;
+
   // ── Legacy / backward-compat aliases ──
   contractLengthMonths?: number;
   pricingInputs?: PricingInputs;
@@ -502,6 +505,26 @@ export interface MemberPlanData {
   weekPlan3?: DayPlan[];
   weekPlan2?: DayPlan[];
   weeklyPlan?: DayPlan[];
+}
+
+// ─── Scenario (coach-private plan alternate) ──────────────────────────────────
+
+type ScenarioExcludedKeys =
+  | 'acceptedSnapshotId'
+  | 'stripeCustomerId'
+  | 'checkoutStatus'
+  | 'acceptedAt'
+  | 'contractStartAt'
+  | 'contractEndAt'
+  | 'shareToken'
+  | 'presentedScenarioId'
+  | 'createdAt';
+
+export interface Scenario extends Omit<MemberPlanData, ScenarioExcludedKeys> {
+  id: string;
+  name: string;
+  createdAt: FirestoreTimestamp | string;
+  coachId: string;
 }
 
 // ─── Pricing engine ───────────────────────────────────────────────────────────
@@ -629,10 +652,12 @@ function _calculatePricing(
   const { hourlyRate, sessionLengthMinutes, checkInCallLengthMinutes, programBuildTimeHours } = safeInputs;
 
   const totalWeeks = monthsToWeeks(contractLengthMonths);
-  // Use actual phase weeks from the plan if available; fall back to 25/50/25 split
-  const phase1Weeks = (phases && phases[0]?.weeks) ? phases[0].weeks : Math.round(totalWeeks * 0.25);
-  const phase2Weeks = (phases && phases[1]?.weeks) ? phases[1].weeks : Math.round(totalWeeks * 0.50);
-  const phase3Weeks = (phases && phases[2]?.weeks) ? phases[2].weeks : (totalWeeks - Math.round(totalWeeks * 0.25) - Math.round(totalWeeks * 0.50));
+  // Only fall back to the 25/50/25 default when the plan carries no phases at all.
+  // An explicit 0 is the coach's truth (e.g., all weeks in P3) and must not silently reinflate.
+  const hasExplicitPhases = Array.isArray(phases) && phases.length > 0;
+  const phase1Weeks = hasExplicitPhases ? (phases[0]?.weeks ?? 0) : Math.round(totalWeeks * 0.25);
+  const phase2Weeks = hasExplicitPhases ? (phases[1]?.weeks ?? 0) : Math.round(totalWeeks * 0.50);
+  const phase3Weeks = hasExplicitPhases ? (phases[2]?.weeks ?? 0) : (totalWeeks - Math.round(totalWeeks * 0.25) - Math.round(totalWeeks * 0.50));
 
   const sessionCounts = countSessionsByType(schedule);
   const totalSessionsPerWeek = Object.values(sessionCounts).reduce((sum, count) => sum + count, 0);

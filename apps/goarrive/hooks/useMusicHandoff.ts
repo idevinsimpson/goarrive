@@ -47,17 +47,31 @@
  */
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { Platform } from 'react-native';
-import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer } from './useWorkoutTTS';
+import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer, subscribeMainCtxStatechange } from './useWorkoutTTS';
+import { getLivenessCtxState } from './usePipCanvasStream';
 import {
   getMusicHandoffVariant,
+  getMusicHandoffVariantSource,
   type MusicHandoffVariant,
 } from '../utils/musicHandoffVariant';
-import { pushHandoffLog } from '../utils/handoffLog';
+import { pushHandoffLog, pushHandoffLogAlways } from '../utils/handoffLog';
 
 function log(...args: any[]) {
   const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
   console.info(line);
   pushHandoffLog(line);
+}
+
+// Pass-21 R8c hardening: seam telemetry is P0 — a leave failure with a
+// silent COPY LOG is uninterpretable (see the pass-13 trap the pass-14
+// instrumentation existed to prevent). Every line on the leave path
+// (init, mainCtx trigger, hide/skip reasons, hide v3, autopsy, visible)
+// routes through logAlways so DIAG-off doesn't strand us in darkness
+// again. Event-driven, ~10 lines per leave, no perf cost.
+function logAlways(...args: any[]) {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  console.info(line);
+  pushHandoffLogAlways(line);
 }
 
 // ── Volume-bucket picker ──────────────────────────────────────────────────────
@@ -215,6 +229,180 @@ function attemptBgPlay(shadow: HTMLAudioElement): void {
   }, BGPLAY_LOADEDDATA_TIMEOUT_MS);
 }
 
+// Pass-21 R9 warm-shadow ceiling. Devin's 2026-08-17 multi-leave device log
+// (11 leaves, 4 silent, 6 working, all discriminative on `warm:false vs true`)
+// proved the cold-shadow failure: WebKit demotes audio `preload='auto'` to
+// metadata-only (readyState reaches exactly 1) until an element has actually
+// played, so the first background leave per track fires shadow.play() against
+// a buffer of ZERO bytes. play() pends forever because a backgrounded page
+// can't fetch, and eventually rejects with AbortError on foreground return —
+// leaving the member in silence for the entire background window. 15s is a
+// slack ceiling above the ~5s the shadow variant needs on Devin's home wifi;
+// timeout logs `timeout:true` so a genuinely bad network shows itself instead
+// of hanging the leave. pass21r9=1
+const WARM_TIMEOUT_MS = 15000;
+// Metadata wait ceiling for warmShadowV3. point() calls shadow.load()
+// synchronously and returns; if warm's play() races that in-flight load, the
+// browser rejects the play promise with AbortError ("play() request was
+// interrupted by a call to load()"). Devin's 2026-08-18 R9a log surfaced
+// exactly this: the very first warm returned err=AbortError after 12ms and
+// never re-armed, leaving leaves #1 and #2 cold. Waiting for the
+// `loadedmetadata` event (readyState reaches HAVE_METADATA=1) sequences the
+// play() after load has produced metadata — the same readiness gate WebKit
+// uses to allow a fresh-source play(). 2s covers Firebase Storage TTFB on
+// slow cell hookup; fail-open past that so warm still attempts play() rather
+// than never running at all. pass21r10=1
+const WARM_META_TIMEOUT_MS = 2000;
+
+/**
+ * Muted-play warm-buffer for the v3 shadow. Fires immediately after `swapTrack`
+ * points the shadow at a fresh track URL while the page is FOREGROUND, so the
+ * next backgrounded leave sees a fully-buffered element instead of a metadata-
+ * only cold stub.
+ *
+ * Mechanism: muted play() is legal on any blessed element without a fresh
+ * gesture and — more importantly — starts a real byte-fetch, which is the only
+ * thing that gets WebKit past its `preload='auto'` → metadata-only demotion.
+ * After `canplaythrough` (or timeout), pause and restore the previous muted
+ * state so the shadow sits ready. This is exactly what variant v1 runs full-
+ * time (muted-shadow-alongside-audible), so the co-audio scenario is proven
+ * harmless.
+ *
+ * Staleness: if a newer swapTrack lands mid-warm (isStale becomes true) OR the
+ * page has backgrounded, the pause() is skipped — the newer swapTrack owns the
+ * element now, and pausing it would undo whatever bgplay just started.
+ */
+async function warmShadowV3(
+  shadow: HTMLAudioElement,
+  isStale: () => boolean,
+): Promise<{ ms: number; bufferedEnd: number; timeout?: boolean; err?: string; retried?: boolean; metaWaitMs?: number }> {
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const t0 = now();
+  const wasMuted = shadow.muted;
+  try { shadow.muted = true; } catch {}
+
+  // R10 gate: sequence play() after the shadow has HAVE_METADATA. See
+  // WARM_META_TIMEOUT_MS comment for the race this avoids.
+  let metaWaitMs = 0;
+  if (shadow.readyState < 1) {
+    const tm0 = now();
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(t);
+        try { shadow.removeEventListener('loadedmetadata', onMeta); } catch {}
+        resolve();
+      };
+      const onMeta = () => finish();
+      try {
+        shadow.addEventListener('loadedmetadata', onMeta, { once: true } as AddEventListenerOptions);
+      } catch {
+        shadow.addEventListener('loadedmetadata', onMeta);
+      }
+      const t = setTimeout(finish, WARM_META_TIMEOUT_MS);
+    });
+    metaWaitMs = Math.round(now() - tm0);
+    if (isStale()) {
+      try { shadow.muted = wasMuted; } catch {}
+      return { ms: Math.round(now() - t0), bufferedEnd: 0, metaWaitMs, err: 'staleAfterMeta' };
+    }
+  }
+
+  // R10 retry: AbortError on the first play() usually means load() was still
+  // in flight past the metadata gate (rare but observed once in Devin's R9
+  // log). A single retry after re-awaiting metadata clears it without a full
+  // re-swap. Any non-AbortError bails immediately.
+  let retried = false;
+  let playErr: any;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const p = shadow.play();
+      if (p && typeof p.then === 'function') await p;
+      playErr = undefined;
+      break;
+    } catch (err: any) {
+      playErr = err;
+      if (isStale() || err?.name !== 'AbortError' || attempt >= 1) break;
+      retried = true;
+      if (shadow.readyState < 1) {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(t);
+            try { shadow.removeEventListener('loadedmetadata', onMeta); } catch {}
+            resolve();
+          };
+          const onMeta = () => finish();
+          try {
+            shadow.addEventListener('loadedmetadata', onMeta, { once: true } as AddEventListenerOptions);
+          } catch {
+            shadow.addEventListener('loadedmetadata', onMeta);
+          }
+          const t = setTimeout(finish, WARM_META_TIMEOUT_MS);
+        });
+      }
+    }
+  }
+  if (playErr) {
+    if (!isStale()) { try { shadow.muted = wasMuted; } catch {} }
+    return {
+      ms: Math.round(now() - t0),
+      bufferedEnd: 0,
+      metaWaitMs,
+      ...(retried ? { retried: true } : {}),
+      err: playErr?.name || String(playErr).slice(0, 40),
+    };
+  }
+
+  const timedOut = await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (timeout: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { shadow.removeEventListener('canplaythrough', onCPT); } catch {}
+      resolve(timeout);
+    };
+    const onCPT = () => finish(false);
+    try {
+      shadow.addEventListener('canplaythrough', onCPT, { once: true } as AddEventListenerOptions);
+    } catch {
+      shadow.addEventListener('canplaythrough', onCPT);
+    }
+    const timer = setTimeout(() => finish(true), WARM_TIMEOUT_MS);
+  });
+
+  const bufferedEnd = (() => {
+    try {
+      const b = shadow.buffered;
+      return b && b.length > 0 ? Number(b.end(b.length - 1).toFixed(2)) : 0;
+    } catch { return 0; }
+  })();
+
+  // Staleness gate covers BOTH the pause and the muted restore. If a newer
+  // swapTrack replaced the src OR the tab backgrounded during our warm, the
+  // hide seam already set `shadow.muted = isMutedRef.current` and is now
+  // driving playback — restoring our captured wasMuted would flip the mute
+  // state under the seam's feet (e.g. unmuting a session the member had
+  // silenced) and re-pausing would drop the very playback that just started.
+  if (!isStale()) {
+    try { shadow.pause(); } catch {}
+    try { shadow.muted = wasMuted; } catch {}
+  }
+
+  return {
+    ms: Math.round(now() - t0),
+    bufferedEnd,
+    metaWaitMs,
+    ...(retried ? { retried: true } : {}),
+    ...(timedOut ? { timeout: true } : {}),
+  };
+}
+
 export interface UseMusicHandoffOptions {
   /** Same as useWorkoutMusic.enabled — hook stays inert if false. */
   enabled: boolean;
@@ -238,6 +426,18 @@ export interface UseMusicHandoffOptions {
    * Optional so tests without an advance path can omit it.
    */
   advanceRef?: MutableRefObject<() => void>;
+  /**
+   * True while a PiP session is active. When PiP is on, the canvas hook's
+   * merged MediaStream is already carrying music (via getPipAudioStream's
+   * MediaStreamAudioDestinationNode) and Safari keeps that stream audible
+   * across backgrounding on its own. If the hide seam ALSO starts the
+   * shadow, the member hears two sources offset by stream latency — a
+   * beat-echo. Skipping the hide seam when this ref is true keeps the PiP
+   * stream as the sole background source. The return seam is a no-op in
+   * this case because inBackgroundRef stays false. Optional; omit for
+   * non-PiP callers.
+   */
+  isPiPRef?: MutableRefObject<boolean>;
 }
 
 export interface UseMusicHandoffReturn {
@@ -257,7 +457,7 @@ export interface UseMusicHandoffReturn {
 }
 
 export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffReturn {
-  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef, advanceRef } = opts;
+  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef, advanceRef, isPiPRef } = opts;
 
   const variantRef = useRef<MusicHandoffVariant>('off');
   const audibleElRef = useRef<HTMLAudioElement | null>(null);
@@ -289,7 +489,13 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     variantRef.current = getMusicHandoffVariant();
-    log('[HANDOFF/init]', JSON.stringify({ variant: variantRef.current }));
+    // handoffHardening=1 beacon; source discriminates a session with a
+    // deliberate query/pill override from a fresh boot on the v3 default.
+    logAlways('[HANDOFF/init]', JSON.stringify({
+      variant: variantRef.current,
+      source: getMusicHandoffVariantSource(),
+      handoffHardening: 1,
+    }));
   }, []);
 
   // ── Shadow lifecycle ──────────────────────────────────────────────────────
@@ -422,6 +628,24 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // fires on genuine track changes (force=true) — no conflict with #285.
       if (variant === 'v3' && force && inBackgroundRef.current) {
         attemptBgPlay(shadow);
+      }
+      // Pass-21 R9 warm-shadow. Foreground track handover only — background
+      // pointing goes through attemptBgPlay above. This is the fix for the
+      // 2026-08-17 diagnosis: the shadow's fresh src loads as metadata-only
+      // (readyState=1, bufferedEnd=0) until something forces a real byte-fetch,
+      // and iOS refuses to fetch after the tab is background. Playing muted
+      // now — while the page is foreground and audible is producing sound —
+      // primes the buffer so the next leave's runHideSeam plays into warm
+      // bytes instead of a stub. Fire-and-forget: never blocks swapTrack; if
+      // the warm times out or is staled by a newer swapTrack, we still log it.
+      // pass21r9=1 warmShadow=1
+      if (variant === 'v3' && force && !inBackgroundRef.current) {
+        const guardedUrl = url;
+        void warmShadowV3(shadow, () => (
+          currentUrlRef.current !== guardedUrl || inBackgroundRef.current
+        )).then((result) => {
+          logAlways('[HANDOFF/warm]', JSON.stringify({ ...result, pass21r9: 1, pass21r10: 1 }));
+        });
       }
     };
 
@@ -679,7 +903,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       }
 
       resumeAudioGraph();
-      log('[HANDOFF/visible v3]', JSON.stringify({ state: getAudioContextState() }));
+      logAlways('[HANDOFF/visible v3]', JSON.stringify({ state: getAudioContextState() }));
 
       // Log ctx state at t+0, +500ms, +2s so the device spike (test case C)
       // has evidence of whether resume() succeeds without a user gesture.
@@ -696,7 +920,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         if (getAudioContextState() === 'running') {
           window.clearTimeout(t500);
           window.clearTimeout(t2000);
-          log('[HANDOFF/visible]', JSON.stringify({
+          logAlways('[HANDOFF/visible]', JSON.stringify({
             variant,
             state: 'running',
             timeline: marks.join(' '),
@@ -705,7 +929,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
           return;
         }
         if (Date.now() > deadline) {
-          log('[HANDOFF/timeout]', JSON.stringify({
+          logAlways('[HANDOFF/timeout]', JSON.stringify({
             variant,
             timeline: marks.join(' '),
             note: 'ctx still suspended after 3s — waiting for user tap',
@@ -736,20 +960,53 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // Fires synchronously from the visibilitychange event — no awaits
       // before the mute-flip / play() call. iOS gives us ~1s of grace after
       // backgrounding; anything asynchronous risks running after freeze.
+      //
+      // Pass-14 instrumentation: every early-return names its skip reason
+      // to the COPY LOG so a fired-but-declined seam is distinguishable
+      // from a visibilitychange that never fired at all. Without this the
+      // pass-13 log's silence on the "no music after leaving with PiP"
+      // path (zero HANDOFF/hide lines) is uninterpretable.
       const audible = audibleElRef.current;
       const variant = variantRef.current;
-      if (variant === 'off') return;
-      if (!audible) return;
-      if (!enabledRef.current) return;
-      if (musicOffRef.current) return;
+      if (variant === 'off') { pushHandoffLogAlways('[HANDOFF/hide skip variant-off]'); return; }
+      if (!audible) { pushHandoffLogAlways('[HANDOFF/hide skip no-audible]'); return; }
+      if (!enabledRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip disabled]'); return; }
+      if (musicOffRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip music-off]'); return; }
       // Music-hold means the intro is playing; we should NOT start music yet
       // just because the page hid. Same for user-paused / muted.
-      if (musicHoldRef.current || musicPausedRef.current) return;
+      if (musicHoldRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip hold]'); return; }
+      if (musicPausedRef.current) { pushHandoffLogAlways('[HANDOFF/hide skip paused]'); return; }
+      // PiP standdown (non-iOS only): the canvas PiP stream on desktop
+      // Safari and Chrome carries our music via a MediaStreamAudioDestination
+      // Node, and running the shadow flip here would layer a second
+      // latency-offset source under the PiP audio — the beat-echo Devin
+      // heard on pass-5. On iOS (pass-10 fork-insensitive fix) the PiP
+      // stream is video-only: the hide seam MUST run the shadow so the
+      // proven v3 shadow keeps carrying backgrounded music. Skipping
+      // standdown on iOS kills both stutter branches without waiting for
+      // the A/B discriminator.
+      const iOS = typeof navigator !== 'undefined'
+        && /iP(hone|od|ad)/.test(navigator.userAgent)
+        && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+      if (isPiPRef?.current && !iOS) {
+        pushHandoffLogAlways('[HANDOFF/hide skipped isPiP]');
+        return;
+      }
+      if (isPiPRef?.current && iOS) {
+        pushHandoffLogAlways('[HANDOFF/hide iOS: PiP open but standdown skipped — stream is video-only, shadow carries music]');
+      }
       const pos = audible.currentTime;
 
       if (variant === 'v3') {
         const shadow = shadowMusicElRef.current;
-        if (!shadow) return;
+        if (!shadow) {
+          // Pass-21 R8c: every decline names itself. A silent return here
+          // masked the leave failure Devin caught — a shadow that never
+          // primed is indistinguishable in the log from a seam that ran
+          // cleanly.
+          pushHandoffLogAlways('[HANDOFF/hide v3 skip no-shadow]');
+          return;
+        }
         // bufferedEnd proves whether the shadow was warm at the seam. If it is
         // at or ahead of pos, play() resumes from memory and the member hears
         // no gap; if it is 0 or behind, the seek is cold and a silence follows.
@@ -757,7 +1014,8 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         try {
           bufferedEnd = shadow.buffered.length ? shadow.buffered.end(shadow.buffered.length - 1) : 0;
         } catch {}
-        log('[HANDOFF/hide v3]', JSON.stringify({
+        const seamWall = Date.now();
+        logAlways('[HANDOFF/hide v3]', JSON.stringify({
           pos: audible.currentTime,
           src: !!shadow.src,
           bufferedEnd,
@@ -768,9 +1026,39 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         shadow.muted = isMutedRef.current;
         shadow.volume = volumeRef.current;
         const p = shadow.play();
-        if (p) p.catch((err: unknown) => log('[HANDOFF/hide v3 err]', String(err)));
+        if (p) p.catch((err: unknown) => logAlways('[HANDOFF/hide v3 err]', String(err)));
         audible.pause();
         inBackgroundRef.current = true;
+        // Pass-14 instrumentation: post-seam autopsy at ~2s. A late-firing
+        // timer exposes a frozen page (wall-clock delta will be much more
+        // than 2000ms); a normal delta with shadow.paused=true means iOS
+        // paused our shadow after we told it to play (media-session
+        // competition with the PiP element — the pass-15 fork). Shadow
+        // advancing but silent means route/mute/volume; those fields ride
+        // the same line so no cross-referencing is needed.
+        setTimeout(() => {
+          try {
+            const wallDelta = Date.now() - seamWall;
+            const audibleNow = audibleElRef.current;
+            const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+            logAlways('[HANDOFF/autopsy]', JSON.stringify({
+              wallDeltaMs: wallDelta,
+              shadow: {
+                paused: shadow.paused,
+                currentTime: Number(shadow.currentTime.toFixed(3)),
+                readyState: shadow.readyState,
+                muted: shadow.muted,
+                volume: Number(shadow.volume.toFixed(3)),
+              },
+              audible: { paused: audibleNow?.paused ?? null },
+              mainCtx: getAudioContextState(),
+              livenessCtx: getLivenessCtxState(),
+              visState: vs,
+            }));
+          } catch (err: any) {
+            logAlways('[HANDOFF/autopsy err]', String(err?.name || err));
+          }
+        }, 2000);
         return;
       }
 
@@ -786,7 +1074,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         try { audible.pause(); } catch {}
       }
       inBackgroundRef.current = true;
-      log('[HANDOFF/hide]', JSON.stringify({
+      logAlways('[HANDOFF/hide]', JSON.stringify({
         variant,
         pos: Number(pos.toFixed(3)),
         shadowPlaying: !shadow.paused,
@@ -795,7 +1083,15 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     };
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      // Pass-18: log every visibilitychange unconditionally so a fired-but-
+      // guarded event is distinguishable from an event that never fired at
+      // all. Four consecutive pass-14→17 sessions captured zero PiP-leave
+      // events; the leading theory is WebKit keeps document 'visible' under
+      // active PiP presentation and this handler never runs. Log first, then
+      // dispatch.
+      const vs = document.visibilityState;
+      pushHandoffLog(`[PiP] trigger visibilitychange visState=${vs} bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+      if (vs === 'visible') {
         runReturnSeam();
       } else {
         runHideSeam();
@@ -804,16 +1100,53 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     // pageshow + focus mirror the pre-adapter handler so bfcache restores and
     // iOS overlay dismissals (call-in overlays, Face ID, etc.) still resume
     // playback. These paths NEVER hide, so they always dispatch to return.
-    const onPageShow = () => runReturnSeam();
-    const onFocus = () => runReturnSeam();
+    const onPageShow = () => {
+      pushHandoffLog(`[PiP] trigger pageshow bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+      runReturnSeam();
+    };
+    const onFocus = () => {
+      pushHandoffLog(`[PiP] trigger focus bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+      runReturnSeam();
+    };
+    // Pass-18: window.blur is LOG-ONLY. Blur fires spuriously in-foreground
+    // (dev tools focus, popover open) so it must never trigger the seam;
+    // but its presence in the log helps disambiguate "iOS never told the tab
+    // anything" from "iOS fired blur but not visibilitychange".
+    const onBlur = () => {
+      pushHandoffLog(`[PiP] trigger blur logOnly bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current}`);
+    };
+
+    // Pass-18: mainCtx statechange is the actual leave signal when WebKit
+    // withholds visibilitychange under PiP. iOS suspends the AudioContext
+    // when Safari backgrounds; the ctx state transition to suspended/
+    // interrupted IS the backgrounding event. Guarded by inBackgroundRef
+    // so a duplicate trigger (if visibilitychange also fires) is a no-op —
+    // runHideSeam owns its own idempotence via inBackgroundRef.
+    const unsubMainCtx = subscribeMainCtxStatechange((state) => {
+      pushHandoffLogAlways(`[PiP] trigger mainCtx state=${state} bg=${inBackgroundRef.current} pip=${!!isPiPRef?.current} vs=${document.visibilityState}`);
+      if (state === 'suspended' || state === 'interrupted') {
+        if (!inBackgroundRef.current && isPiPRef?.current) {
+          runHideSeam();
+        }
+        return;
+      }
+      if (state === 'running') {
+        if (inBackgroundRef.current) {
+          runReturnSeam();
+        }
+      }
+    });
 
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+      unsubMainCtx();
       if (tapRetryCleanupRef.current) {
         tapRetryCleanupRef.current();
         tapRetryCleanupRef.current = null;

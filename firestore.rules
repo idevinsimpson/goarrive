@@ -248,6 +248,17 @@ service cloud.firestore {
       allow update: if isPlatformAdmin()
                    || (resource != null && isCoachOrBootstrap(resource.data.coachId));
       allow delete: if false;
+
+      // ─── Scenarios subcollection (coach-private plan alternates) ───────────
+      match /scenarios/{scenarioId} {
+        // Coach + admin: full CRUD, tenant-isolated
+        allow read, write, delete: if isPlatformAdmin()
+                                   || isCoachOrBootstrap(get(/databases/$(database)/documents/member_plans/$(planId)).data.coachId);
+        // Member: GET only if this is the presented scenario
+        allow get: if isOwnDoc(get(/databases/$(database)/documents/member_plans/$(planId)).data.memberId)
+                   && scenarioId == get(/databases/$(database)/documents/member_plans/$(planId)).data.presentedScenarioId;
+        // Member: no list access
+      }
     }
 
     // ─────────────────────────────────────────────

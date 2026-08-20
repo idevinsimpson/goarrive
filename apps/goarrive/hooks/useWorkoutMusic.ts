@@ -35,9 +35,11 @@ import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
 // graph in useWorkoutTTS — coach voice / cue audio live on a separate voice
 // bus that stays at full volume. Routing through Web Audio is required on
 // iOS Safari, which ignores JS-set HTMLAudioElement.volume entirely.
-import { setMusicVolume, wireToGain } from './useWorkoutTTS';
+import { rampMusicVolume, setMusicVolume, wireToGain } from './useWorkoutTTS';
 // iOS background-music handoff adapter — see hook file for full contract.
 import { useMusicHandoff } from './useMusicHandoff';
+// Pass-21 B: firstAudio timestamp for the cold-start waterfall summary.
+import { markFirstAudioPlaying } from '../utils/perfProbe';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -91,6 +93,14 @@ export interface UseWorkoutMusicOptions {
   uid: string | null;
   workoutId: string | null;
   coachId: string | null;
+  /**
+   * True while a PiP session is active. Threaded straight through to
+   * useMusicHandoff so its visibilitychange hide seam can skip starting
+   * the shadow — the canvas PiP stream is already carrying our music via
+   * MediaStreamAudioDestinationNode and layering a second source under it
+   * caused the beat-echo Devin heard on pass-5 device test.
+   */
+  isPiPRef?: MutableRefObject<boolean>;
 }
 
 export interface UseWorkoutMusicReturn {
@@ -120,7 +130,7 @@ export interface UseWorkoutMusicReturn {
 }
 
 export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicReturn {
-  const { enabled, visible, phase, isPaused, isMuted, initialStyle, initialVolume, uid, workoutId, coachId } = opts;
+  const { enabled, visible, phase, isPaused, isMuted, initialStyle, initialVolume, uid, workoutId, coachId, isPiPRef } = opts;
 
   const [musicMuted, setMusicMuted] = useState(false);
   const [musicOff, setMusicOff] = useState(false);
@@ -185,6 +195,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     // Backgrounded shadow's 'ended' drives advance — the audible's ended
     // listener at ~L499 cannot fire while paused by the hide seam.
     advanceRef,
+    isPiPRef,
   });
 
   const seedFor = useCallback(
@@ -324,9 +335,31 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
       el.src = url;
       el.load();
     } catch {}
-    // Mirror onto the handoff shadow so the swap is invisible on the
-    // background-audible side. No-op for variant=off / non-web.
-    swapTrack(url);
+    // Pass-21 B shadow-prime timing surgery: defer swapTrack (shadow src
+    // set + HEAD-check for gain variant) until the audible fires 'playing'.
+    // The pre-pass timing ran shadow src load in parallel with audible's
+    // first-track fetch — bandwidth contention during Devin's slow cold
+    // start. Waiting for audible 'playing' means:
+    //   1. Audible's first-track fetch owns the pipe until it lands.
+    //   2. Shadow's variant HEAD + load fires against a warm HTTP cache
+    //      (Firebase Storage variants are keyed off the audible track path).
+    //   3. Same guarded stale-attach check as attachTrack itself — if a
+    //      skip/advance replaced the track before 'playing' fired, the
+    //      deferred swap is dropped and the next attach's listener owns it.
+    // Also marks firstAudio for the coldStart waterfall — 'playing' is the
+    // "audible music is producing sound" moment, matching Devin's ear.
+    const onPlaying = () => {
+      markFirstAudioPlaying();
+      const c = currentTrackRef.current;
+      if (!c || c.style !== style || c.index !== index) return;
+      swapTrack(url);
+    };
+    try {
+      el.addEventListener('playing', onPlaying, { once: true } as AddEventListenerOptions);
+    } catch {
+      const wrapped = () => { el.removeEventListener('playing', wrapped); onPlaying(); };
+      el.addEventListener('playing', wrapped);
+    }
     currentTrackRef.current = { style, index };
     setCurrentTrack({ style, index });
     setTrackStatus('playing');
@@ -554,12 +587,69 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   }, []);
 
   // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
+  //
+  // Pass-13 debounce: on iOS the pause tap sometimes double-flips isPaused
+  // within a few ms (shadow-hide seam + foreground pause both touch the
+  // audible element), which caused a single-syllable stutter — the audible
+  // element toggled pause→play→pause faster than the decoder could settle.
+  // A 120ms trailing debounce collapses those bounces into one transition
+  // and is short enough that the user doesn't perceive it as latency.
+  //
+  // Pass-14 Fix 2: the debounce alone was refuted on device (pass-13
+  // review) — stutter persisted. Add a gain-ramp inside the timeout so
+  // the audible element is silenced before el.pause() (30ms fade-out,
+  // then el.pause() 40ms after ramp start; on resume, el.play() first
+  // then ramp musicGain back to the slider-squared value). This targets
+  // the underlying decoder-tail-replay pop rather than the isPaused
+  // double-flip.
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pauseFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     musicPausedRef.current = isPaused;
     const el = musicElRef.current;
     if (!el || !el.src) return;
-    if (isPaused) el.pause();
-    else if (!musicHoldRef.current && !musicOffRef.current) el.play().catch(() => {});
+    if (pauseTimerRef.current) {
+      clearTimeout(pauseTimerRef.current);
+      pauseTimerRef.current = null;
+    }
+    if (pauseFadeTimerRef.current) {
+      clearTimeout(pauseFadeTimerRef.current);
+      pauseFadeTimerRef.current = null;
+    }
+    pauseTimerRef.current = setTimeout(() => {
+      pauseTimerRef.current = null;
+      // Re-read musicPausedRef in case another flip landed while we waited.
+      const target = volumeRef.current * volumeRef.current;
+      if (musicPausedRef.current) {
+        // Ramp gain to 0 first, then pause the element after the fade
+        // window so the last audible sample decays cleanly instead of
+        // clipping and leaving a tail that the next play() replays.
+        rampMusicVolume(0, 30);
+        pauseFadeTimerRef.current = setTimeout(() => {
+          pauseFadeTimerRef.current = null;
+          if (musicPausedRef.current) el.pause();
+          else if (!musicHoldRef.current && !musicOffRef.current) {
+            el.play().catch(() => {});
+            rampMusicVolume(target, 30);
+          }
+        }, 40);
+      } else if (!musicHoldRef.current && !musicOffRef.current) {
+        // Resume path: start playback first so the decoder is producing
+        // samples, then ramp gain back up to slider-squared value.
+        el.play().catch(() => {});
+        rampMusicVolume(target, 30);
+      }
+    }, 120);
+    return () => {
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current);
+        pauseTimerRef.current = null;
+      }
+      if (pauseFadeTimerRef.current) {
+        clearTimeout(pauseFadeTimerRef.current);
+        pauseFadeTimerRef.current = null;
+      }
+    };
   }, [isPaused]);
   useEffect(() => {
     if (musicElRef.current) musicElRef.current.muted = isMuted || musicMuted;

@@ -45,8 +45,8 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
-import { usePipCanvasStream } from '../hooks/usePipCanvasStream';
+import { useWorkoutTTS, unlockAudioPlayback, getAudioContextState } from '../hooks/useWorkoutTTS';
+import { usePipCanvasStream, getLivenessCtxState, resumeLivenessCtx } from '../hooks/usePipCanvasStream';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -57,8 +57,15 @@ import MusicSettingsSheet from './MusicSettingsSheet';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
-import { getMusicHandoffVariant } from '../utils/musicHandoffVariant';
-import { readHandoffLog } from '../utils/handoffLog';
+import {
+  getMusicHandoffVariant,
+  setMusicHandoffVariant,
+  type MusicHandoffVariant,
+} from '../utils/musicHandoffVariant';
+import { getPipProbeMode, setPipProbeMode, nextPipProbeMode, pipProbeModeLabel, type PipProbeMode } from '../utils/pipProbeMode';
+import { pushHandoffLog, readHandoffLog } from '../utils/handoffLog';
+import { isDiagOn, toggleDiag } from '../utils/diagMode';
+import { markColdStartBegin, markFirstVideoRS4, markGrabEquipVisible, startPerfProbe } from '../utils/perfProbe';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -194,17 +201,180 @@ export default function WorkoutPlayer({
   // further down. The gate keeps the rAF loop + hidden video off the
   // foreground-workout hot path — they only spin up during PiP.
   const [isPiP, setIsPiP] = useState(false);
+  // Pass-6 handoff-standdown gate: PiP-active ref threaded into useWorkoutMusic
+  // → useMusicHandoff so the visibilitychange hide seam skips starting the
+  // shadow when PiP is presenting. Written synchronously in onEnter/onLeave
+  // below (before setIsPiP) so the ref is correct at the moment the browser's
+  // visibilitychange fires from a rapid PiP→home-screen gesture.
+  const pipActiveRef = useRef(false);
+  // Arming flag: onPressIn on the PiP button sets this true so the canvas
+  // hook + hidden video warm up during the ~100ms between touch-down and
+  // touch-up. requestPictureInPicture() must stay inside the gesture, and
+  // iOS won't accept the presentation without at least one canvas frame in
+  // the target video — arming buys that head start without leaving the tap.
+  // Cleared on PiP entry, PiP failure, or a 3s safety timeout.
+  const [pipArming, setPipArming] = useState(false);
+  // Pass-21 Cut #3: DIAG toggle state mirror. The module cache lives in
+  // diagMode.ts (survives across mounts); this state exists so the pill's
+  // label re-renders on tap without a page reload — DIAG is a runtime flag
+  // and the whole point is flipping it live while investigating.
+  const [diagOn, setDiagOn] = useState<boolean>(() => isDiagOn());
+  // Pass-2 mechanism probe: getPipProbeMode() = query > localStorage > default
+  // 'full'. Staging-only via pipEnabled gate below. The probe runs inline with
+  // a subset of the hook so a device tester can isolate which step starves the
+  // foreground music path (see pipProbeMode.ts).
+  const pipProbeMode = useMemo<PipProbeMode>(() => getPipProbeMode(), []);
   // Ref to the DOM video element for the currently-active workout video.
-  // Populated via effect when the expo-av Video mounts/changes.
+  // Populated via effect when the expo-av Video mounts/changes. Marked
+  // disablePictureInPicture so iOS Safari's own PiP affordance on this
+  // element does not compete with our canvas-composite tile — the movement
+  // video is a source for the canvas, not a presentation target.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
+  // NOTE: the populating effect lives further down (after displayedUrl,
+  // videoRef and videosRef are declared) so it can watch displayedUrl —
+  // without that dep the ref stays null after the first layer swap and
+  // PiP renders a frozen tile (pass-12 bug 4).
+  //
+  // Pass-14: the pass-13 one-shot effect regressed the tile (permanent
+  // videoRS=-1 after 23:05:07 in the device log). The effect ran once
+  // per (phase, currentIndex, displayedUrl) tuple and picked whatever
+  // element existed at that instant — often paused mid-transition.
+  // Self-healing resolver: the draw loop calls this every frame when
+  // its current binding is null or paused, so a bad pick self-corrects
+  // on the next rAF tick. Scanning all layer:* entries beats trusting
+  // videoRef.current, which the ref callback may not have refreshed
+  // yet after a layer swap. Every rebind is logged via pushHandoffLog
+  // (device tester copies COPY LOG; console.warn was invisible on iOS).
+  //
+  // Pass-15: resolver is now expected-URL-driven. Pass-14 selection
+  // quality landed (paused=false picks) but targeting broke — Class 1
+  // (empty registry, no retry, 30s+ text-only) and Class 2 (single
+  // stale layer held 90s+ across movements) proved the picker had no
+  // concept of what SHOULD play. Pass-15 uses activeVideoUrl as the
+  // expected URL, prefers expected+!paused, retries for up to 3s on
+  // no-match, and widens scan beyond `layer:*` (transition/
+  // grabEquipment videos register under phase-name keys).
+  const pipSourceResolverRef = useRef<(() => HTMLVideoElement | null) | null>(null);
+  // Pass-15: expected-URL pointer. activeVideoUrl already encodes the
+  // reveal walk-forward (during rest/reveal it's the next movement's
+  // video), so the resolver can prefer the intended layer over any
+  // stale in-registry candidate. Ref lets the resolver read the latest
+  // value without churning effect deps.
+  const expectedUrlRef = useRef<string | null>(null);
+  // Pass-15: first-miss timestamp per expected URL. When the resolver
+  // finds no candidate matching the expected URL, we retry (return null)
+  // rather than binding a stale/wrong element. The 3s cap bounds the
+  // black-tile window — after that, any playing candidate beats a
+  // frozen black tile. Reset whenever expected URL changes.
+  const expectedMissAtRef = useRef<{ url: string | null; ts: number }>({ url: null, ts: 0 });
+  // Pass-19 R1: retry count for canplay/loadeddata events fired on low-readyState
+  // candidates. Incremented each time a listener fires and re-invokes the resolver.
+  const r1RetryCountRef = useRef(0);
+  // Pass-19 R1: WeakSet of elements that already have a canplay listener attached.
+  // Prevents duplicate listeners when the resolver is called multiple rAF ticks
+  // before the element fires canplay.
+  const r1ListenersAttachedRef = useRef(typeof WeakSet !== 'undefined' ? new WeakSet<HTMLVideoElement>() : null);
+
+  // Pass 12: publish a window flag while this player is mounted. The SW
+  // auto-reload handler injected in inject_pwa_meta.py reads this flag
+  // on controllerchange — if truthy, it defers the reload rather than
+  // nuking the workout mid-session. The Aug 16 pass-10 log caught
+  // exactly that footprint (17:44:23 backgrounded → 17:44:37 fresh
+  // PAGE-INIT with workout restarted from ready). Gate on mount, not
+  // on "timer running," so pause and rest are covered too.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    (window as any).__goarrivePlayerMounted = true;
+    return () => {
+      (window as any).__goarrivePlayerMounted = false;
+    };
+  }, []);
+
+  // Pass-21 Cut #0: perfProbe tripwire on the MAIN thread. Cheap rAF gap
+  // sampler emitting one summary line per 30s (mean/p95/max gap + count of
+  // >100ms stalls). Rides every build regardless of DIAG so cuts #1-#5 get
+  // before/after numbers and future regressions trip loudly in the COPY
+  // LOG. Web-only; no-op on native (rAF is a DOM API).
+  //
+  // Pass-21 B: also start the cold-start waterfall clock — the summary
+  // line emits once grab-equipment image + first audible music playing +
+  // first movement Video readyState=4 have all landed (or the 15s partial
+  // timeout fires). One begin per WorkoutPlayer mount so navigating to a
+  // different workout resets the timeline.
+  // perfProbe=1 coldStart=1
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    const vid = videoRef.current?._nativeRef?.current?.getVideoElement?.() ?? null;
-    pipSourceVideoRef.current = vid;
-  }, [phase, currentIndex]);
+    markColdStartBegin();
+    return startPerfProbe();
+  }, []);
 
-  const { mediaStream } = usePipCanvasStream({
-    enabled: pipEnabled && Platform.OS === 'web' && isPiP,
+  // Pass-7: presentation-target ref declared before the hook call so it can
+  // be threaded into usePipCanvasStream for the .currentTime sample log.
+  // The element itself is created imperatively in the useEffect below.
+  const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Pass-20 R8 reveal-ahead for no-video next steps. Mirror of the big
+  // reveal memo further down (line ~1537) that produces `isInRevealWindow`
+  // for the main player's double-buffered video swap. Hoisted here so the
+  // PiP hook call can consume it — the two calculations MUST stay in sync
+  // (both apply REVEAL_LEAD_SECONDS to the last of any timed non-rest
+  // phase, both include REST as continuously in-window, both suppress
+  // during rep-based and swap-sides work-L). If you change the reveal
+  // rule, update both.
+  //
+  // Pass-21 R8c: the `timeLeft <= 0` false-out is DELIBERATELY dropped.
+  // useWorkoutTimer's 250ms interval sets timeLeft=0 on tick, and the
+  // step only advances in the hit-zero transition effect the next
+  // commit. Between those two commits, timeLeft<=0 while phase/current/
+  // next still describe the OLD step. If we false-out here on tl<=0,
+  // the reveal window collapses for that one commit and drawTarget
+  // steps backward from nx to old cur — the ¼s (~HYSTERESIS_FRAMES/24fps)
+  // boundary blip Devin caught. Holding through 0 keeps drawTarget on
+  // nx until the next commit publishes new cur = old nx, at which point
+  // isRevealSwap flips to false (no more nx) and drawTarget = new cur —
+  // same identity as previous frame. Seamless.
+  const isInPipRevealWindow = useMemo<boolean>(() => {
+    if (!current || !next) return false;
+    if (phase === 'rest') return true;
+    const isTimedRevealPhase =
+      phase === 'work' || phase === 'transition' || phase === 'waterBreak'
+      || phase === 'grabEquipment' || phase === 'demo';
+    if (!isTimedRevealPhase) return false;
+    if (isRepBased) return false;
+    const stayingOnSameMovement =
+      phase === 'work' && (current as any)?.swapSides === true && swapSide === 'L';
+    if (stayingOnSameMovement) return false;
+    if (typeof timeLeft !== 'number') return false;
+    return timeLeft <= REVEAL_LEAD_SECONDS;
+  }, [phase, timeLeft, current, next, isRepBased, swapSide]);
+
+  // Pass-21 R8c pipRevealHold=1 marker — fires once per boundary when
+  // the reveal window holds through the zero-crossing tick (tl<=0 but
+  // memo still returns true). Confirms the tl<=0 guard drop is doing
+  // its job at boundaries; a device log grep for `pipRevealHold` should
+  // show ONE entry per timed-phase → next-step transition.
+  const pipRevealHoldLastSigRef = useRef<string>('');
+  useEffect(() => {
+    if (!isInPipRevealWindow) return;
+    if (typeof timeLeft !== 'number' || timeLeft > 0) return;
+    if (!current || !next) return;
+    const curName = (current as any)?.name ?? '';
+    const nxName = (next as any)?.name ?? '';
+    const sig = `${phase}|${curName}|${nxName}`;
+    if (sig === pipRevealHoldLastSigRef.current) return;
+    pipRevealHoldLastSigRef.current = sig;
+    pushHandoffLog(`[PiP] pipRevealHold=1 phase=${phase} tl=${timeLeft.toFixed(2)} cur=${curName} nx=${nxName}`);
+  }, [isInPipRevealWindow, timeLeft, current, next, phase]);
+
+  const { mediaStream, startStream, attachAudioTracks, detachAudioTracks } = usePipCanvasStream({
+    // Pass-4 keep-warm: stream comes up on workout mount and stays up so
+    // readyState reaches 4 well before the user taps PiP. Pass-3 rebuilt on
+    // every arm and 24/26 taps landed on readyState=0 (InvalidStateError).
+    // 'audio' probeMode keeps the audio bus OFF the continuously-playing
+    // element (PR #289 mechanism) — armPip calls attachAudioTracks() inside
+    // the tap gesture. 'full' merges audio from mount (original path).
+    enabled: pipEnabled && Platform.OS === 'web',
+    probeMode: pipProbeMode,
     phase,
     current: current as any,
     next: next as any,
@@ -213,37 +383,153 @@ export default function WorkoutPlayer({
     isRepBased,
     repsDone: 0,
     progressPct,
+    // Pass-20 R8: hand the reveal-window flag to the PiP draw loop so it
+    // can early-cut to next's placeholder when next is a no-video exercise.
+    isInRevealWindow: isInPipRevealWindow,
     videoElRef: pipSourceVideoRef,
+    // Pass-7: expose the presentation-target video so the periodic
+    // drawFrame log can sample .currentTime + .readyState.
+    canvasVideoElRef: pipCanvasVideoRef,
+    // Pass-14 Fix 1: self-healing resolver. drawFrame calls this when
+    // its bound videoEl is null-or-paused during a work-like phase so
+    // a stale pick auto-corrects on the next rAF tick.
+    pipSourceResolverRef,
   });
 
-  // Hidden <video> that carries the canvas-stream MediaStream as srcObject.
-  // Created imperatively to avoid React Native JSX incompatibility with raw <video>.
-  const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Hidden <video> that carries the canvas-stream MediaStream as srcObject
+  // and is the PiP presentation target. Created imperatively so RN JSX doesn't
+  // choke on raw <video>. Exists eagerly whenever the feature is on (staging +
+  // full mode) so it's ready to receive srcObject the moment the hook arms.
+  //
+  // Event listeners live here so state transitions hook the same element that
+  // PiP presents (webkitpresentationmodechanged covers the iOS branch that
+  // never fires enter/leavepictureinpicture).
   useEffect(() => {
-    if (Platform.OS !== 'web' || !pipEnabled || !isPiP) return;
+    if (Platform.OS !== 'web' || !pipEnabled) return;
+    // Pass-4: hidden video exists for AUDIO + FULL modes. CANVAS mode is the
+    // no-audio control and has no presentation target.
+    if (pipProbeMode === 'canvas') return;
     const vid = document.createElement('video');
     vid.autoplay = true;
     vid.muted = true;
     vid.playsInline = true;
     vid.setAttribute('playsinline', '');
+    // Pass 9: give the hidden video the same visibility treatment pass 7 gave
+    // the capture canvas. Pass-8 log proved entry works (PiP resolved 2/2,
+    // held 53s) but the tile stayed black while cvCT advanced 52.80 → 105.05
+    // — frames flowed INTO this element, they did not reach the PiP window.
+    // The 08/13 spike (only full end-to-end success) had its video fully
+    // visible; the app's is 1px × 1px at left:-10000px. That's the ONE
+    // remaining property where the app diverges from the spike. Same iOS
+    // "doesn't render what it can't see" rule that bit the canvas, one
+    // element downstream. Blue border so Devin can tell the two thumbnails
+    // apart at a glance (canvas = orange, video = blue). Parked beside the
+    // canvas: canvas is at left:8 width:80 → video at left:96 (80+8+8 gap).
     Object.assign(vid.style, {
       position: 'fixed',
-      left: '-10000px',
-      top: '0',
-      opacity: '0',
+      top: '8px',
+      left: '96px',
+      width: '80px',
+      height: '100px',
+      zIndex: '1',
+      opacity: '1',
       pointerEvents: 'none',
-      width: '1px',
-      height: '1px',
+      border: '1px solid #3B82F6',
+      background: '#000',
     });
     document.body.appendChild(vid);
     pipCanvasVideoRef.current = vid;
+    // Identity marker: a re-init between arms would break the "first tap
+    // after load" pattern seen in 08/15 device test. If two mount logs land
+    // between a workout start and a tap, the element identity changed.
+    const idTag = Math.floor(Math.random() * 1e6).toString(36);
+    (vid as any).__pipIdTag = idTag;
+    pushHandoffLog(`[PiP] pipCanvasVideo mounted id=${idTag} probe=${pipProbeMode}`);
+
+    // Pass-14 instrumentation: enrich every presentation transition with
+    // visState + both AudioContext states (main via getAudioContextState,
+    // liveness via getLivenessCtxState). If iOS suspends the liveness ctx
+    // at PiP enter (or leave), that transition is visible in the log
+    // instead of an inferred silence.
+    const logPresentationChange = (tag: string, extra?: string) => {
+      const vs = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+      pushHandoffLog(`[PiP] ${tag} visState=${vs} mainCtx=${getAudioContextState()} livenessCtx=${getLivenessCtxState()}${extra ? ' ' + extra : ''}`);
+    };
+    const onEnter = () => {
+      pipActiveRef.current = true;
+      setIsPiP(true);
+      setPipArming(false);
+      logPresentationChange('enterpictureinpicture');
+      // Pass 9: log the video element's actual on-screen box at PiP entry.
+      // If pass 9 does NOT fill the tile, this rules the styling hypothesis
+      // in or out without another guess — 0×0 means the visibility change
+      // didn't apply; 80×100 (or spike-sized) means the visibility change
+      // applied but iOS still refused to composite frames into the window.
+      try {
+        pushHandoffLog(`[PiP] onEnter videoBox offsetWidth=${vid.offsetWidth} offsetHeight=${vid.offsetHeight} clientRect=${JSON.stringify({ w: Math.round(vid.getBoundingClientRect().width), h: Math.round(vid.getBoundingClientRect().height), x: Math.round(vid.getBoundingClientRect().x), y: Math.round(vid.getBoundingClientRect().y) })}`);
+      } catch (err: any) {
+        pushHandoffLog(`[PiP] onEnter videoBox read err: ${err?.name || err}`);
+      }
+    };
+    const onLeave = () => {
+      pipActiveRef.current = false;
+      setIsPiP(false);
+      setPipArming(false);
+      logPresentationChange('leavepictureinpicture');
+      try { vid.muted = true; } catch {}
+      // Pass-5 exit path: strip audio tracks so the warm hidden element does
+      // not keep carrying merged audio inline (P0 starves foreground music).
+      // Video track stays so the next arm is still fast.
+      detachAudioTracks();
+      // Pass 9: after external PiP close, iOS pauses the element and cvCT
+      // freezes until the next arm re-plays it. Pass-8 log confirmed:
+      // cvCT stuck at 105.05 after mode=inline. Re-play here so the warm
+      // stream keeps ticking and the next arm doesn't have to cold-start.
+      try {
+        const p = vid.play();
+        if (p && typeof (p as any).catch === 'function') {
+          (p as any).catch((e: any) => pushHandoffLog(`[PiP] onLeave replay rejected: ${e?.name || e}`));
+        }
+        pushHandoffLog('[PiP] onLeave replay issued');
+      } catch (err: any) {
+        pushHandoffLog(`[PiP] onLeave replay threw: ${err?.name || err}`);
+      }
+    };
+    const onWebkitModeChange = () => {
+      const mode = (vid as any).webkitPresentationMode;
+      // Pass-7: webkitSetPresentationMode is silent — the log needs the
+      // outcome, not just the call. This handler + the 500ms re-read in
+      // handlePiP together give us both the async event path (if it fires)
+      // and a direct snapshot.
+      logPresentationChange('webkitpresentationmodechanged', `mode=${mode}`);
+      // Pass-15 dedupe: on newer WebKit, `enterpictureinpicture` /
+      // `leavepictureinpicture` fire alongside webkitpresentationmodechanged.
+      // Pass-14 log showed duplicate onEnter/onLeave bodies per real
+      // transition (two `videoBox` and two `replay issued` lines).
+      // Trivially safe: guard on pipActiveRef so the enter/leave body
+      // runs at most once per state flip, while the webkit tag log
+      // above still records the raw event for observability.
+      if (mode === 'picture-in-picture') {
+        if (!pipActiveRef.current) onEnter();
+      } else {
+        if (pipActiveRef.current) onLeave();
+      }
+    };
+    vid.addEventListener('enterpictureinpicture', onEnter);
+    vid.addEventListener('leavepictureinpicture', onLeave);
+    vid.addEventListener('webkitpresentationmodechanged' as any, onWebkitModeChange);
+
     return () => {
+      pushHandoffLog(`[PiP] pipCanvasVideo unmounted id=${idTag}`);
+      vid.removeEventListener('enterpictureinpicture', onEnter);
+      vid.removeEventListener('leavepictureinpicture', onLeave);
+      vid.removeEventListener('webkitpresentationmodechanged' as any, onWebkitModeChange);
       vid.pause();
       (vid as any).srcObject = null;
       vid.parentNode?.removeChild(vid);
       pipCanvasVideoRef.current = null;
     };
-  }, [pipEnabled, isPiP]);
+  }, [pipEnabled, pipProbeMode, detachAudioTracks]);
 
   // Wire the canvas MediaStream into the hidden video when it's available.
   // volume=0 (not muted) so PiP still carries audio via the MediaStream track.
@@ -325,6 +611,10 @@ export default function WorkoutPlayer({
     uid: user?.uid ?? null,
     workoutId: typeof workout?.id === 'string' ? workout.id : null,
     coachId: typeof workout?.coachId === 'string' ? workout.coachId : null,
+    // Pass-6: PiP standdown for handoff. When PiP is active, the canvas
+    // stream is the sole background audio source; the shadow flip would
+    // double it (beat-echo on device 08/15).
+    isPiPRef: pipActiveRef,
   });
   // Local aliases keep the announcement/start call sites identical to the
   // pre-hook implementation.
@@ -571,10 +861,76 @@ export default function WorkoutPlayer({
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   const registerVideo = useCallback((key: string, el: any | null) => {
+    // Pass-20 R4v2 dedup: the ref callbacks at the JSX call sites are
+    // inline arrow functions, so React sees a "new" ref every render and
+    // fires the OLD callback with null then the NEW callback with the
+    // element on EVERY commit. WorkoutPlayer re-renders on every timeLeft
+    // tick (~1 Hz), so every mounted <Video> got a null→set churn per
+    // second — driving pushHandoffLog spam AND repeated playAsync() /
+    // pause() / crossOrigin-load() cycles that could stall decode.
+    //
+    // Guardrail: if the incoming element is the same DOM node we already
+    // hold under this key, no-op. If the incoming is null but the map
+    // already holds an element, defer the delete via queueMicrotask —
+    // React fires null THEN set within the same commit, so the same-el
+    // set will land first and cancel the delete. Genuine unmounts still
+    // work: the delayed check finds the entry unchanged (or already
+    // replaced by something new) and skips only when identity matches.
+    // pipRegDedup=1
+    //
+    // Pass-20 R6 (2026-08-17): the microtask-defer alone does not catch
+    // React's inline-arrow churn. On churn React fires oldRef(null) then
+    // newRef(same-el) synchronously in the same commit; the microtask
+    // sees `get(key) === currentEl` still true (identity unchanged) and
+    // proceeds to delete. Device log at 17:02–17:09 showed cands going
+    // 1→0→1 at ~1Hz for the whole session, producing a ~1s placeholder
+    // flash on every empty beat and a 55s straight stretch at 17:07–08.
+    //
+    // Verify death via isConnected in the microtask: on real unmount
+    // React removes the DOM node after commit so isConnected flips to
+    // false; on churn the DOM node stays in the tree so isConnected
+    // stays true. Skip the delete when connected — the null was churn.
+    // pipRegDedupR6=1
+    const readDomEl = (entry: any): HTMLVideoElement | null => {
+      try { return entry?._nativeRef?.current?.getVideoElement?.() ?? null; } catch { return null; }
+    };
     if (!el) {
-      videosRef.current.delete(key);
+      const currentEl = videosRef.current.get(key);
+      if (!currentEl) return;
+      if (typeof queueMicrotask === 'function') {
+        queueMicrotask(() => {
+          if (videosRef.current.get(key) !== currentEl) return;
+          const domEl = readDomEl(currentEl);
+          if (domEl && domEl.isConnected) {
+            if (!(currentEl as any).__pipRegDedupR6SkipLogged) {
+              (currentEl as any).__pipRegDedupR6SkipLogged = true;
+              pushHandoffLog(`[PiP] pipRegDedupR6=1 skipDelete key=${key} isConnected=true`);
+            }
+            return;
+          }
+          videosRef.current.delete(key);
+        });
+      } else {
+        videosRef.current.delete(key);
+      }
       return;
     }
+    const existing = videosRef.current.get(key);
+    if (existing === el) {
+      if (!(el as any).__pipRegDedupLogged) {
+        (el as any).__pipRegDedupLogged = true;
+        pushHandoffLog(`[PiP] pipRegDedup=1 firstHit key=${key}`);
+      }
+      return;
+    }
+    // Pass-18 Fix 1: event-driven rebind wake signal. Time-capped retry can't
+    // cover the 62-second hole pass-16 caught at 00:23:44 (rebind key=null
+    // layerKeys=0 → tile text-only across work→rest→work until a natural
+    // displayedUrl change rescued it). The registry itself is the wake:
+    // when a NEW layer entry lands and the current binding is null or its
+    // src doesn't match expectedUrlRef, invoke the resolver immediately.
+    // Only layer:* keys — phase-name entries already ride the widened scan.
+    const isNewEntry = !existing;
     videosRef.current.set(key, el);
     // iOS Safari needs the legacy webkit-playsinline attribute (expo-av only
     // sets the modern playsInline prop) or playback hijacks into fullscreen.
@@ -584,9 +940,68 @@ export default function WorkoutPlayer({
           ? el._nativeRef.current.getVideoElement()
           : null;
         if (node?.setAttribute) {
+          // Pass 12: crossOrigin=anonymous BEFORE src prevents canvas taint
+          // when the movement <video> is drawn into the PiP canvas.
+          // captureStream() from a tainted canvas silently stops delivering
+          // frames — the on-page canvas keeps painting but the PiP tile
+          // freezes. Same class as useWorkoutTTS.ts:176's audio-graph
+          // lesson. Firebase Storage already serves CORS headers (the audio
+          // path proves it). If expo-av set src before the ref callback
+          // fired, load() forces a CORS-enabled refetch.
+          if ((node as HTMLVideoElement).crossOrigin !== 'anonymous') {
+            const hadSrc = !!(node as HTMLVideoElement).currentSrc || !!(node as HTMLVideoElement).src;
+            (node as HTMLVideoElement).crossOrigin = 'anonymous';
+            node.setAttribute('crossorigin', 'anonymous');
+            if (hadSrc) { try { (node as HTMLVideoElement).load(); } catch { /* best-effort */ } }
+          }
           node.playsInline = true;
           node.setAttribute('playsinline', '');
           node.setAttribute('webkit-playsinline', '');
+          // Pass-17: auto-resume when iOS pauses the element under us. The
+          // pass-15 device log showed the bound PiP element with vpaused=
+          // true throughout every rest EXCEPT rest #1 (the only rest with
+          // no preceding work→rest transition). Rest #1 the element stayed
+          // vpaused=false and rolled seamlessly into work #1. Every later
+          // rest was frozen. The most parsimonious explanation is iOS
+          // pauses <video> elements when the audio session is interrupted
+          // by the end-of-work TTS cue — expo-av's shouldPlay prop is
+          // unchanged so it never re-issues play(). Mirror the visibility-
+          // change resume pattern at line 847 but per-element: whenever a
+          // layer pauses while the user hasn't paused, re-issue play(). No
+          // loop — the pause event only fires on actual pause transitions.
+          // Guarded by __pipAutoResumeAttached so re-registers don't
+          // stack listeners on the same element.
+          if (!(node as any).__pipAutoResumeAttached) {
+            (node as any).__pipAutoResumeAttached = true;
+            const domNode = node as HTMLVideoElement;
+            domNode.addEventListener('pause', () => {
+              if (isPausedRef.current) return;
+              pushHandoffLog(`[PiP] video auto-resume key=${key} rs=${domNode.readyState}`);
+              el.playAsync?.().catch(() => {});
+            });
+          }
+          // Pass-21 B: firstVideo mark for the coldStart waterfall.
+          // Only layer:* keys count as "movement video" — grabEquipment /
+          // transition / followAlong / waterBreak are ceremony frames and
+          // land under phase-name keys. markFirstVideoRS4 itself is
+          // idempotent (only the first call after markColdStartBegin
+          // records), so a later layer re-register can't overwrite. The
+          // __firstVideoRS4Attached guard just avoids stacking listeners
+          // on the same DOM node across re-registers.
+          if (key.startsWith('layer:') && !(node as any).__firstVideoRS4Attached) {
+            (node as any).__firstVideoRS4Attached = true;
+            const dn = node as HTMLVideoElement;
+            if (dn.readyState >= 4) {
+              markFirstVideoRS4();
+            } else {
+              try {
+                dn.addEventListener('canplaythrough', () => markFirstVideoRS4(), { once: true } as AddEventListenerOptions);
+              } catch {
+                const wrapped = () => { dn.removeEventListener('canplaythrough', wrapped); markFirstVideoRS4(); };
+                dn.addEventListener('canplaythrough', wrapped);
+              }
+            }
+          }
         }
       } catch { /* best-effort */ }
     }
@@ -606,6 +1021,24 @@ export default function WorkoutPlayer({
       // webkit-playsinline attribute older iOS Safari needs for inline play.
       const domVideo = el._nativeRef?.current?.getVideoElement?.();
       domVideo?.setAttribute?.('webkit-playsinline', '');
+    }
+    // Pass-18 Fix 1: fire the resolver on new layer registration if the
+    // current binding is null or mismatched. This is the wake signal —
+    // no polling, no cap, no waiting for the next rAF.
+    if (
+      Platform.OS === 'web'
+      && isNewEntry
+      && key.startsWith('layer:')
+      && pipSourceResolverRef.current
+    ) {
+      const bound = pipSourceVideoRef.current;
+      const expected = expectedUrlRef.current;
+      const boundSrc = bound?.currentSrc || bound?.src || '';
+      const mismatched = !bound || (!!expected && boundSrc !== expected);
+      if (mismatched) {
+        pushHandoffLog(`[PiP] registerVideo trigger key=${key} boundNull=${!bound} matchExpected=${!!expected && boundSrc === expected}`);
+        try { pipSourceResolverRef.current(); } catch {}
+      }
     }
   }, []);
 
@@ -696,53 +1129,174 @@ export default function WorkoutPlayer({
   // the movement guide in a floating tile while navigating other apps.
   // isPiP state is declared above the canvas-stream hook so it can gate it.
 
-  const getDomVideo = useCallback((): HTMLVideoElement | null => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
-    const expoEl = videoRef.current;
-    if (!expoEl) return null;
-    try {
-      const domVideo =
-        typeof expoEl._nativeRef?.current?.getVideoElement === 'function'
-          ? expoEl._nativeRef.current.getVideoElement()
-          : null;
-      return domVideo instanceof HTMLVideoElement ? domVideo : null;
-    } catch {
-      return null;
+  // Imperative arm: called from the PiP button's onPressIn (touch-down).
+  // React state + useEffect chain is too slow between onPressIn and onPress
+  // (~10ms) for iOS's gesture-scoped requestPictureInPicture() requirement,
+  // so we synchronously create the canvas MediaStream, assign srcObject on
+  // the hidden video, and start playback all inside the same call stack.
+  // pipArming is still set so the hook's enable path stays consistent and
+  // the 3s safety timeout clears state if iOS silently refuses.
+  //
+  // All diagnostic paths write to pushHandoffLog (COPY LOG buffer) so the
+  // tester can read what happened on an iPhone without DevTools.
+  const armPip = useCallback(() => {
+    if (Platform.OS !== 'web') return;
+    // Pass-16 Fix 2: gesture-blessed resume of the liveness ctx. Pass-15
+    // caught PiP entry with livenessCtx=suspended after a voice-cue
+    // suspend/interrupt storm; a resume() attempted from a non-gesture
+    // path can be rejected by iOS. armPip's onPressIn is the earliest
+    // point in the tap flow we hold a gesture, so we spend it here
+    // unconditionally — noop if already running.
+    resumeLivenessCtx('armPip');
+    pushHandoffLog(`[PiP] armPip fired livenessCtx=${getLivenessCtxState()}`);
+    setPipArming(true);
+    window.setTimeout(() => setPipArming(false), 3000);
+
+    // Pass-4: stream is warm from mount; startStream() is idempotent so this
+    // returns the existing MediaStream. attachAudioTracks() is the load-bearing
+    // call for probe=audio — adds audio tracks to the already-playing stream
+    // inside the tap gesture, just before requestPictureInPicture unmutes.
+    const stream = startStream();
+    if (!stream) {
+      pushHandoffLog('[PiP] armPip: startStream returned null');
+      return;
     }
-  }, []);
+    // Canvas mode is the no-audio control — never merge the music bus into it.
+    if (pipProbeMode !== 'canvas') {
+      const audioResult = attachAudioTracks();
+      pushHandoffLog(`[PiP] armPip: attachAudioTracks=${audioResult}`);
+    }
+    const vid = pipCanvasVideoRef.current;
+    if (!vid) {
+      pushHandoffLog('[PiP] armPip: pipCanvasVideoRef null (probe=canvas has no target)');
+      return;
+    }
+    // srcObject may already be assigned from the keep-warm effect below; only
+    // reassign if it's a different stream (identity check avoids Safari's
+    // "reset readyState on srcObject set" behavior).
+    if ((vid as any).srcObject !== stream) {
+      try {
+        (vid as any).srcObject = stream;
+        pushHandoffLog('[PiP] armPip: srcObject assigned');
+      } catch (err: any) {
+        pushHandoffLog(`[PiP] armPip: srcObject assign threw: ${err?.name || err}`);
+        return;
+      }
+    } else {
+      pushHandoffLog(`[PiP] armPip: srcObject already set readyState=${vid.readyState}`);
+    }
+    try {
+      const p = vid.play();
+      if (p && typeof (p as any).catch === 'function') {
+        (p as any).catch((e: any) => pushHandoffLog(`[PiP] armPip: play rejected: ${e?.name || e}`));
+      }
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] armPip: play threw: ${err?.name || err}`);
+    }
+  }, [startStream, attachAudioTracks, pipProbeMode]);
 
   const handlePiP = useCallback(async () => {
-    const domVideo = getDomVideo();
-    if (!domVideo) return;
-    try {
-      if ((document as any).pictureInPictureElement) {
-        await (document as any).exitPictureInPicture();
-      } else if ((domVideo as any).webkitPresentationMode === 'picture-in-picture') {
-        (domVideo as any).webkitSetPresentationMode('inline');
-      } else if ((document as any).pictureInPictureEnabled) {
-        await (domVideo as any).requestPictureInPicture();
-      } else if (typeof (domVideo as any).webkitSetPresentationMode === 'function') {
-        (domVideo as any).webkitSetPresentationMode('picture-in-picture');
+    pushHandoffLog('[PiP] handlePiP fired');
+    // Exit path — if we're already in PiP, tear it down. Works for both the
+    // standard PiP element registry and the iOS webkit presentation mode.
+    if ((document as any).pictureInPictureElement) {
+      pushHandoffLog('[PiP] handlePiP: exiting existing PiP');
+      try { await (document as any).exitPictureInPicture(); } catch (err: any) {
+        pushHandoffLog(`[PiP] exitPictureInPicture err: ${err?.name || err}`);
       }
-    } catch {
-      // PiP blocked (e.g. user gesture required on some browsers) — ignore.
+      return;
     }
-  }, [getDomVideo]);
-
-  // Track PiP state via events so the button icon stays accurate.
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const domVideo = getDomVideo();
-    if (!domVideo) return;
-    const onEnter = () => setIsPiP(true);
-    const onLeave = () => setIsPiP(false);
-    domVideo.addEventListener('enterpictureinpicture', onEnter);
-    domVideo.addEventListener('leavepictureinpicture', onLeave);
-    return () => {
-      domVideo.removeEventListener('enterpictureinpicture', onEnter);
-      domVideo.removeEventListener('leavepictureinpicture', onLeave);
+    const canvasVideo = pipCanvasVideoRef.current;
+    if (canvasVideo && (canvasVideo as any).webkitPresentationMode === 'picture-in-picture') {
+      pushHandoffLog('[PiP] handlePiP: exiting webkit PiP');
+      try { (canvasVideo as any).webkitSetPresentationMode('inline'); } catch (err: any) {
+        pushHandoffLog(`[PiP] webkitSetPresentationMode inline err: ${err?.name || err}`);
+      }
+      return;
+    }
+    if (!canvasVideo) {
+      pushHandoffLog('[PiP] handlePiP: canvas video ref null — probe mode may not be "full"');
+      console.warn('[PiP] canvas video ref is null — probe mode may not be "full"');
+      setPipArming(false);
+      return;
+    }
+    // Report the presentation-target readiness state so a silent failure
+    // (readyState=0, srcObject=null) is diagnosable from COPY LOG alone.
+    const hasSrc = !!(canvasVideo as any).srcObject;
+    const dpip = (canvasVideo as any).disablePictureInPicture;
+    const dpipAttr = canvasVideo.hasAttribute('disablePictureInPicture');
+    const idTag = (canvasVideo as any).__pipIdTag ?? '?';
+    pushHandoffLog(`[PiP] handlePiP: srcObject=${hasSrc} readyState=${canvasVideo.readyState} paused=${canvasVideo.paused} dpip=${dpip} dpipAttr=${dpipAttr} id=${idTag}`);
+    // Unmute inside the tap gesture — this is the seam iOS is strictest about.
+    try {
+      canvasVideo.muted = false;
+      canvasVideo.volume = 1;
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] unmute rejected: ${err?.name || err}`);
+      console.warn('[PiP] unmute rejected:', err);
+    }
+    // Pass-8: flip entry order — standard requestPictureInPicture() FIRST,
+    // webkit fallback second. Pass 7 showed webkitSetPresentationMode
+    // silently refused 15/15 attempts (modeAfter=inline, event never fired)
+    // even though frames were flowing at 1x realtime with a visible canvas.
+    // Two reasons for the flip:
+    //   1) Standard API rejects with a NAMED error (NotSupportedError,
+    //      NotAllowedError, InvalidStateError). Silent refusals become
+    //      diagnosis; even total failure names its cause.
+    //   2) The 08/13 spike — the one time end-to-end worked on this device
+    //      — entered via requestPictureInPicture, not the webkit call.
+    //      Visible canvas is the other half of the spike's recipe.
+    // Webkit fallback preserved because pass 5 showed the standard API can
+    // reject with NotSupportedError on MediaStream sources on some builds.
+    const hasWebkit = typeof (canvasVideo as any).webkitSetPresentationMode === 'function';
+    const hasStandard = !!(document as any).pictureInPictureEnabled
+      && typeof (canvasVideo as any).requestPictureInPicture === 'function';
+    const runWebkitProbe = () => {
+      window.setTimeout(() => {
+        try {
+          const modeAfter = (canvasVideo as any).webkitPresentationMode;
+          pushHandoffLog(`[PiP] webkitPresentationMode@500ms=${modeAfter}`);
+        } catch (err: any) {
+          pushHandoffLog(`[PiP] webkitPresentationMode@500ms read err: ${err?.name || err}`);
+        }
+      }, 500);
     };
-  }, [getDomVideo, phase]);
+    try {
+      let attempted = false;
+      if (hasStandard) {
+        try {
+          await (canvasVideo as any).requestPictureInPicture();
+          pushHandoffLog('[PiP] requestPictureInPicture resolved (preferred)');
+          attempted = true;
+        } catch (err: any) {
+          pushHandoffLog(`[PiP] requestPictureInPicture rejected: ${err?.name || 'unknown'} — ${err?.message || ''}`);
+          if (!hasWebkit) throw err;
+          // else fall through to webkit fallback
+        }
+      }
+      if (!attempted && hasWebkit) {
+        (canvasVideo as any).webkitSetPresentationMode('picture-in-picture');
+        pushHandoffLog(`[PiP] webkitSetPresentationMode picture-in-picture called (${hasStandard ? 'fallback after standard rejected' : 'no standard API'})`);
+        runWebkitProbe();
+        attempted = true;
+      }
+      if (!attempted) {
+        pushHandoffLog('[PiP] no PiP API available on this browser');
+        console.warn('[PiP] no PiP API available on this browser');
+        setPipArming(false);
+        try { canvasVideo.muted = true; } catch {}
+      }
+    } catch (err: any) {
+      pushHandoffLog(`[PiP] request rejected: ${err?.name || err} — ${err?.message || ''}`);
+      console.warn('[PiP] request rejected:', err);
+      setPipArming(false);
+      try { canvasVideo.muted = true; } catch {}
+      // Pass-5 exit path: a failed entry leaves the hidden video carrying
+      // merged audio inline for the rest of the session — the P0 config that
+      // starves foreground music. Strip audio tracks so inline music returns.
+      detachAudioTracks();
+    }
+  }, [detachAudioTracks]);
 
   const pipSupported = Platform.OS === 'web'
     && typeof document !== 'undefined'
@@ -1083,12 +1637,13 @@ export default function WorkoutPlayer({
   //
   // Exception: swap-sides movements stay on the current movement during the L-side
   // lookahead (the R side of the same movement is coming next, not a new item).
-  const { activeVideoUrl, activeThumbUrl, isInRevealWindow } = useMemo<{
+  const { activeVideoUrl, activeThumbUrl, isInRevealWindow, revealDisplayItem } = useMemo<{
     activeVideoUrl: string | null;
     activeThumbUrl: string | null;
     isInRevealWindow: boolean;
+    revealDisplayItem: any;
   }>(() => {
-    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isInRevealWindow: false };
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isInRevealWindow: false, revealDisplayItem: null };
 
     // Resolve a timeline item to a displayable {video, thumb} pair, falling back
     // to the next exercise's media if the item itself has none (e.g. waterBreak,
@@ -1147,17 +1702,27 @@ export default function WorkoutPlayer({
       isTimedRevealPhase
       && !isRepBased
       && !stayingOnSameMovement
-      && timeLeft > 0
       && timeLeft <= REVEAL_LEAD_SECONDS
       && next
     ) {
       // Last 3.5s of any timed phase: preview the next timeline item.
+      // Pass-21 R8c: kept in sync with isInPipRevealWindow at :335 —
+      // the `timeLeft > 0` guard is DELIBERATELY dropped so the reveal
+      // window holds through the zero-crossing tick (see full note at
+      // the hoisted memo). Prevents the main title from blipping back
+      // to `current` for the one commit where useWorkoutTimer has set
+      // timeLeft=0 but the transition effect hasn't yet advanced the
+      // step. Same fix that closes the ¼s tile flash Devin caught.
       displayItem = next;
       displayIndex = currentIndex + 1;
       inRevealWindow = true;
     }
 
-    return { ...pickAsset(displayItem, displayIndex), isInRevealWindow: inRevealWindow };
+    return {
+      ...pickAsset(displayItem, displayIndex),
+      isInRevealWindow: inRevealWindow,
+      revealDisplayItem: inRevealWindow ? displayItem : null,
+    };
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Double-buffered video layers, with eager preload ─────────────────
@@ -1181,6 +1746,215 @@ export default function WorkoutPlayer({
 
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
+
+  // Pass-15 Fix 1: expected-URL-driven resolver + bounded retry.
+  //
+  // Pass-14 selection quality worked (picker preferred !paused && rs>=3)
+  // but targeting failed. Two classes of miss showed up on device:
+  //   Class 1 — empty registry (layerKeys=0) at movement start: resolver
+  //     bound null once, drawFrame kept calling but the "no candidate"
+  //     branch only re-logs on state change so we saw ~30s of text-only
+  //     tile with no rebind entries.
+  //   Class 2 — single stale layer held for 90+ seconds across multiple
+  //     movements: picker had no concept of what SHOULD play, so any
+  //     playing candidate was "good enough" even when it was the wrong
+  //     movement's video.
+  //
+  // Pass-15 fixes both:
+  //   1. expected = activeVideoUrl (encodes reveal walk-forward — during
+  //      rest it's already the next movement's URL). Prefer expected
+  //      match && !paused && rs>=3 first, expected match paused second.
+  //      A non-matching stale layer is worse than a short retry window.
+  //   2. On no-match: track first-miss timestamp per expected URL.
+  //      Return null (retry) for up to 3s before falling back to any
+  //      playing candidate. drawFrame calls the resolver every rAF tick
+  //      when videoEl is null/paused, so retries are automatic.
+  //   3. Widen scan beyond `layer:*` — transition/grabEquipment/
+  //      waterBreak/followAlong/intro/outro register under phase-name
+  //      keys (WorkoutPlayer.tsx registerVideo call sites). Read
+  //      el.currentSrc to match the URL regardless of the map key
+  //      format. That closes the "layerKeys=0 while movement plays on
+  //      screen" gap: the visible element IS in videosRef, just under
+  //      a phase-name key.
+  //   4. Every rebind log carries expected=<shortUrl> + match=true/false
+  //      so wrong-binds are visible in the log immediately.
+  //
+  // Effect keeps deps on phase/currentIndex/displayedUrl so the log
+  // closure captures fresh values for the rebind context fields.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    // Pass-20 R6 keepPrev log throttle. R5 device log had the keepPrev
+    // path running per-frame from 17:04:09→17:06:15 (hundreds of lines
+    // at 20Hz) — visually fine but flooded the 5000-entry ring buffer.
+    // One line per second with count-since-last preserves signal
+    // without ring pressure. Vars live in the effect closure so a
+    // phase change (which re-runs the effect) resets the throttle.
+    let keepPrevLastLogAt = 0;
+    let keepPrevSinceLastLogCount = 0;
+
+    // Pass-16: log the full /videos/<file> segment (not just the coach
+    // prefix). Pass-15 truncated to 32 chars which cut off exactly at
+    // the shared coach-prefix `movements%2F<coachId>%2F...`, making
+    // every rebind's expected= look identical in the log even when the
+    // actual URLs differed. Grab the segment starting at `videos%2F`
+    // if present (Firebase Storage URL shape), else the last two path
+    // components — that always includes the discriminating filename.
+    const shortUrl = (u: string | null): string => {
+      if (!u) return 'null';
+      const vIdx = u.indexOf('videos%2F');
+      if (vIdx >= 0) {
+        const tail = u.slice(vIdx);
+        const qIdx = tail.indexOf('?');
+        return qIdx >= 0 ? tail.slice(0, qIdx) : tail;
+      }
+      const slashIdx = u.lastIndexOf('/', u.lastIndexOf('/') - 1);
+      return slashIdx >= 0 ? u.slice(slashIdx + 1) : u;
+    };
+
+    const resolve = (): HTMLVideoElement | null => {
+      const map = videosRef.current;
+      const expected = expectedUrlRef.current;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+      const readVideoEl = (el: any): HTMLVideoElement | null => {
+        try { return el?._nativeRef?.current?.getVideoElement?.() ?? null; } catch { return null; }
+      };
+
+      // Reset the miss window whenever expected URL changes so each
+      // new movement gets its own fresh 3s retry budget.
+      if (expectedMissAtRef.current.url !== expected) {
+        expectedMissAtRef.current = { url: expected, ts: 0 };
+      }
+
+      // Widened scan: read el.currentSrc to match the URL, ignoring
+      // whether the map key is `layer:` or a phase-name (transition,
+      // grabEquipment, etc.).
+      type Cand = { key: string; el: HTMLVideoElement; paused: boolean; rs: number; matches: boolean };
+      const cands: Cand[] = [];
+      for (const [key, entry] of map.entries()) {
+        const el = readVideoEl(entry);
+        if (!el) continue;
+        const src = el.currentSrc || el.src || '';
+        const matches = !!expected && src === expected;
+        cands.push({ key, el, paused: el.paused, rs: el.readyState, matches });
+      }
+
+      // Pass-19 R2: when multiple candidates match the expected URL
+      // (e.g. INCOMING and current share a movement URL during transition),
+      // prefer the element registered under the exact `layer:${expected}`
+      // key before falling to any-match. This prevents the INCOMING element
+      // from stealing the bind away from the already-decoded current layer.
+      // Preference order:
+      //   1a. layer:${expected} key + playing + decoded (exact-key first-class)
+      //   1b. any match + playing + decoded (first-class hit)
+      //   2a. layer:${expected} key at all (correct element even if paused)
+      //   2b. any match at all (correct URL even if paused)
+      //   3.  after 3s no-match cap: any playing decoded candidate
+      const exactLayerKey = expected ? `layer:${expected}` : null;
+      let pick: Cand | null = null;
+      pick = cands.find((c) => c.matches && !c.paused && c.rs >= 3 && c.key === exactLayerKey) ?? null;
+      if (!pick) pick = cands.find((c) => c.matches && !c.paused && c.rs >= 3) ?? null;
+      if (!pick) pick = cands.find((c) => c.matches && c.key === exactLayerKey) ?? null;
+      if (!pick) pick = cands.find((c) => c.matches) ?? null;
+
+      if (!pick) {
+        if (expectedMissAtRef.current.ts === 0) expectedMissAtRef.current.ts = now;
+        const missElapsedMs = now - expectedMissAtRef.current.ts;
+        if (missElapsedMs >= 3000) {
+          pick = cands.find((c) => !c.paused && c.rs >= 3) ?? null;
+          if (!pick) {
+            const el = readVideoEl(videoRef.current);
+            if (el) pick = { key: 'videoRef', el, paused: el.paused, rs: el.readyState, matches: false };
+          }
+        }
+      } else {
+        // Reset the miss clock; the URL slot stays associated so a
+        // fresh miss under the same expected restarts from zero.
+        expectedMissAtRef.current.ts = 0;
+      }
+
+      const prev = pipSourceVideoRef.current;
+      // Pass-20 R4v2 keep-bound: on no-match, keep the previous binding
+      // rather than nulling it. The prior code unbound on every mismatch,
+      // which combined with ref-callback identity churn caused the tile
+      // to blink black across reveals.
+      //
+      // Pass-20 R6: extend keepPrev to cover cands=0 too. R5 device log
+      // showed the registry itself oscillating (cands 1→0→1 at ~1Hz);
+      // every empty beat previously nulled the binding under the old
+      // `cands.length > 0` gate, driving the visible flicker. New rule:
+      // keep prev whenever the bound element is still alive
+      // (isConnected && !paused), regardless of cands count. The alive-
+      // check protects against holding a dead element after a real
+      // unmount. Log throttled to ≤1/s with count (see R6 flood note
+      // in the effect header). pipKeepBound=1 pipKeepBoundR6=1
+      const prevAlive = prev !== null && prev.isConnected && !prev.paused;
+      if (!pick && prevAlive) {
+        keepPrevSinceLastLogCount++;
+        if (now - keepPrevLastLogAt >= 1000) {
+          pushHandoffLog(`[PiP] pipKeepBound=1 pipKeepBoundR6=1 keepPrev expected=${shortUrl(expected)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length} countSinceLast=${keepPrevSinceLastLogCount}`);
+          keepPrevLastLogAt = now;
+          keepPrevSinceLastLogCount = 0;
+        }
+        return prev;
+      }
+      if (pick) {
+        // Pass-19 R1: if the picked element has readyState < 2, attach a
+        // one-shot canplay/loadeddata listener so we re-invoke the resolver
+        // as soon as the element becomes drawable — faster than waiting for
+        // the next rAF tick. Deduped by r1ListenersAttachedRef.
+        // pipPass19R1Retry=1
+        if (Platform.OS === 'web' && pick.rs < 2) {
+          const ws = r1ListenersAttachedRef.current;
+          if (ws && !ws.has(pick.el)) {
+            ws.add(pick.el);
+            const el = pick.el;
+            const onReady = () => {
+              el.removeEventListener('canplay', onReady);
+              el.removeEventListener('loadeddata', onReady);
+              r1RetryCountRef.current++;
+              pushHandoffLog(`[PiP] pipPass19R1Retry=1 retryCount=${r1RetryCountRef.current} rs=${el.readyState} resolving`);
+              try { pipSourceResolverRef.current?.(); } catch {}
+            };
+            el.addEventListener('canplay', onReady, { once: true });
+            el.addEventListener('loadeddata', onReady, { once: true });
+            pushHandoffLog(`[PiP] R1 listener attached rs=${pick.rs} key=${pick.key}`);
+          }
+        }
+        if (prev !== pick.el) {
+          pipSourceVideoRef.current = pick.el;
+          try {
+            (pick.el as any).disablePictureInPicture = true;
+            pick.el.setAttribute('disablePictureInPicture', '');
+          } catch {}
+          const pickedSrc = pick.el.currentSrc || pick.el.src || '';
+          // Pass-19 R2: log elementSwitch=1 when the bound element changes
+          // (not first bind). pipPass19R2Switch=1
+          const elementSwitch = prev !== null ? 1 : 0;
+          pushHandoffLog(`[PiP] pipSource rebind key=${pick.key} paused=${pick.paused} rs=${pick.rs} match=${pick.matches} elementSwitch=${elementSwitch} pipPass19R2Switch=1 expected=${shortUrl(expected)} picked=${shortUrl(pickedSrc)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length}`);
+        }
+        return pick.el;
+      }
+      if (prev !== null) {
+        pipSourceVideoRef.current = null;
+        const missMs = expectedMissAtRef.current.ts === 0 ? 0 : Math.round(now - expectedMissAtRef.current.ts);
+        pushHandoffLog(`[PiP] pipSource rebind key=null match=false expected=${shortUrl(expected)} phase=${phase} displayedUrl=${shortUrl(displayedUrl)} cands=${cands.length} missMs=${missMs}`);
+      }
+      return null;
+    };
+
+    pipSourceResolverRef.current = resolve;
+    resolve();
+    return () => { pipSourceResolverRef.current = null; };
+  }, [phase, currentIndex, displayedUrl]);
+
+  // Pass-15: keep expectedUrlRef in sync with activeVideoUrl. Ref
+  // update lets the resolver read the latest expected URL without
+  // triggering the resolver-install effect on every reveal flip.
+  useEffect(() => {
+    expectedUrlRef.current = activeVideoUrl;
+  }, [activeVideoUrl]);
 
   // URLs whose <Video> reported a load/decode error. Failed layers are
   // unmounted and never re-mounted, so the poster/thumbnail fallback renders
@@ -1867,6 +2641,49 @@ export default function WorkoutPlayer({
                       source={{ uri: current.grabEquipmentImageUrl }}
                       style={[st.videoPlayer, { borderRadius: fs(12) }]}
                       resizeMode="cover"
+                      onLoad={markGrabEquipVisible}
+                    />
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: fs(12) },
+                      ]}
+                    />
+                  </>
+                ) : activeVideoUrl ? (
+                  // Fall through to the upcoming exercise's video so the member
+                  // sees what they're about to do (pickAsset walks forward for
+                  // non-exercise items). Dark overlay keeps the "get ready"
+                  // framing so it doesn't feel like the workout has started.
+                  <>
+                    <Video
+                      ref={(el: any) => registerVideo('grabEquipment', el)}
+                      key={activeVideoUrl}
+                      source={getVideoSource(activeVideoUrl)}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      shouldPlay={!isPaused}
+                      isMuted
+                      style={[st.videoPlayer, { borderRadius: fs(12) }]}
+                      videoStyle={
+                        Platform.OS === 'web'
+                          ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                          : undefined
+                      }
+                    />
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: fs(12) },
+                      ]}
+                    />
+                  </>
+                ) : activeThumbUrl ? (
+                  <>
+                    <Image
+                      source={{ uri: activeThumbUrl }}
+                      style={[st.videoPlayer, { borderRadius: fs(12) }]}
+                      resizeMode="cover"
                     />
                     <View
                       style={[
@@ -2023,22 +2840,28 @@ export default function WorkoutPlayer({
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
-            {phase === 'work' && renderTitleTimerSlot(
+            {phase === 'work' && (() => {
+              // During the 3.5s reveal window the video swaps to `next`; keep
+              // the title in sync so both flip together instead of the title
+              // lagging by REVEAL_LEAD_SECONDS behind the video.
+              const titleItem = isInRevealWindow && revealDisplayItem ? revealDisplayItem : current;
+              const titleHasSwapBadge = titleItem === current && current.swapSides;
+              return renderTitleTimerSlot(
               <>
-                {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
+                {renderAutoFitTitle(composePrescriptionLabel(titleItem.name, titleItem.weight, titleItem.reps), {
                   hasTimer: !isRepBased,
                   // Swap-sides movements stack the FULL/SPLIT badge (~30 base
                   // units incl. margin) under the title inside the fixed
                   // 112-unit module — shrink the title budget so the pair
                   // never overflows into the logo above.
-                  maxLines: current.swapSides ? 2 : NAME_MAX_LINES,
-                  maxHeight: current.swapSides ? 82 : undefined,
+                  maxLines: titleHasSwapBadge ? 2 : NAME_MAX_LINES,
+                  maxHeight: titleHasSwapBadge ? 82 : undefined,
                 })}
                 {/* Swap-mode badge stacks naturally below the title — the */}
                 {/* title column is center-aligned, so it appears centered  */}
                 {/* directly under the movement name without overlapping    */}
                 {/* the media frame.                                        */}
-                {current.swapSides && (() => {
+                {titleHasSwapBadge && (() => {
                   const mode = (current as any).swapMode === 'duplicate' ? 'duplicate' : 'split';
                   const win = typeof (current as any).swapWindowSec === 'number'
                     ? (current as any).swapWindowSec : 5;
@@ -2053,7 +2876,8 @@ export default function WorkoutPlayer({
                 })()}
               </>,
               !isRepBased ? renderGoldTimer(formatTime(timeLeft)) : null,
-            )}
+            );
+            })()}
             {phase === 'rest' && renderTitleTimerSlot(
               <>
                 <Text style={st.restPhaseLabel}>REST</Text>
@@ -2266,11 +3090,18 @@ export default function WorkoutPlayer({
                   <Icon name="skip-forward" size={fs(18)} color="#F5A623" />
                   <Text style={st.sharedOverlaySkipText}>Skip</Text>
                 </TouchableOpacity>
-                {pipSupported && displayedUrl && (
-                  <TouchableOpacity style={st.pipBtn} onPress={handlePiP}>
-                    <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
-                    <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>
-                  </TouchableOpacity>
+                {pipSupported && pipEnabled && (
+                  pipProbeMode === 'full' ? (
+                    <TouchableOpacity style={st.pipBtn} onPressIn={armPip} onPress={handlePiP}>
+                      <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
+                      <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[st.pipBtn, { opacity: 0.35 }]}>
+                      <Icon name="alert-circle" size={fs(16)} color="#F0F4F8" />
+                      <Text style={st.pipBtnText}>PiP off ({pipProbeModeLabel(pipProbeMode)})</Text>
+                    </View>
+                  )
                 )}
               </View>
             </View>
@@ -2307,17 +3138,62 @@ export default function WorkoutPlayer({
       </View>
       </View>
 
-      {/* Music-handoff variant badge — staging only. Tiny pill in the bottom-
-          left showing the active ?handoff= variant so the on-device tester
-          can tell baseline (off) from fix (v1/v2/v3) at a glance. Never renders
-          in production because isStagingHost() is host-based. */}
+      {/* Staging-only debug pills. AUDIO cycles the ?handoff= variant, PROBE
+          cycles the pass-2 pipprobe mode. Both write localStorage + reload —
+          this is durable test infra, not scaffolding: four device sessions
+          today were lost to invisible query-param preconditions. Never
+          renders in production because isStagingHost() is host-based. */}
       {isStagingHost() && (
         <View style={st.audioVariantRow}>
-          <View pointerEvents="none" style={st.audioVariantBadge}>
-            <Text style={st.audioVariantBadgeText}>
+          {/* Pass-21 R8c hardening: pill goes LOUD (red/inverted) when the
+              variant is anything other than v3. A mis-tap during pill-heavy
+              testing that leaves the tab stuck on v1/v2/off is the exact
+              silent-fail Devin diagnosed for the music-on-leave regression;
+              the inverted style is impossible to miss glancing at the
+              screen mid-workout. Persistence moved to sessionStorage so a
+              fresh session self-heals; the pill still lets you cycle within
+              a session. */}
+          <Pressable
+            style={getMusicHandoffVariant() === 'v3' ? st.audioVariantBadge : st.audioVariantBadgeLoud}
+            onPress={() => {
+              const order: MusicHandoffVariant[] = ['v3', 'v1', 'v2', 'off'];
+              const cur = getMusicHandoffVariant();
+              const next = order[(order.indexOf(cur) + 1) % order.length];
+              setMusicHandoffVariant(next);
+              try { window.location.reload(); } catch {}
+            }}
+          >
+            <Text style={getMusicHandoffVariant() === 'v3' ? st.audioVariantBadgeText : st.audioVariantBadgeTextLoud}>
               AUDIO: {getMusicHandoffVariant().toUpperCase()}
             </Text>
-          </View>
+          </Pressable>
+          <Pressable
+            style={st.audioVariantBadge}
+            onPress={() => {
+              setPipProbeMode(nextPipProbeMode(getPipProbeMode()));
+              try { window.location.reload(); } catch {}
+            }}
+          >
+            <Text style={st.audioVariantBadgeText}>
+              PROBE: {pipProbeModeLabel(getPipProbeMode())}
+            </Text>
+          </Pressable>
+          {/* Pass-21 Cut #3: DIAG toggle. Flips the runtime gate on the
+              default pushHandoffLog path — off means the sessionStorage
+              ring writes stop entirely, on restores the pre-cut trace. No
+              reload: the diagMode cache is a module var updated on tap.
+              pipDiag=1 */}
+          <Pressable
+            style={st.audioVariantBadge}
+            onPress={() => {
+              const next = toggleDiag();
+              setDiagOn(next);
+            }}
+          >
+            <Text style={st.audioVariantBadgeText}>
+              DIAG: {diagOn ? 'ON' : 'OFF'}
+            </Text>
+          </Pressable>
           <Pressable
             style={st.copyLogBtn}
             onPress={() => {
@@ -3172,6 +4048,14 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 3,
   },
+  audioVariantBadgeLoud: {
+    backgroundColor: '#E53E3E',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
   copyLogBtn: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     borderWidth: 1,
@@ -3182,6 +4066,13 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
   },
   audioVariantBadgeText: {
     color: '#F5A623',
+    fontFamily: FB,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  audioVariantBadgeTextLoud: {
+    color: '#FFFFFF',
     fontFamily: FB,
     fontSize: 10,
     fontWeight: '700',

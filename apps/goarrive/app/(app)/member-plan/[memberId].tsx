@@ -38,14 +38,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
 import ContinuationCard from '../../../components/ContinuationCard';
 import {
-  MemberPlanData, DayPlan, SessionType, Phase,
+  MemberPlanData, Scenario, DayPlan, SessionType, Phase,
   SessionTypeGuidance, GuidanceLevel, PricingResult, PostContract, ContinuationPricing,
   calculatePricing, formatCurrency, monthsToWeeks,
   createDefaultPlan, createDefaultSchedule, createDefaultPhases,
@@ -2588,6 +2588,97 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               )}
             </View>
 
+            {/* ── Commit to Save (coach controls: apply discount + amounts) ── */}
+            <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
+              <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>COMMIT TO SAVE</Text>
+              {(() => {
+                const ctsActive = plan.commitToSave?.active ?? plan.commitToSaveAddOnActive ?? true;
+                const ctsSavings = plan.commitToSave?.monthlySavings ?? plan.commitToSaveMonthlySavings ?? 100;
+                const ctsMissedFee = plan.commitToSave?.missedSessionFee ?? plan.commitToSaveMissedSessionFee ?? 50;
+                const ctsDefaults = { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: false, active: true };
+                const base = Math.round(pricing.baseMonthlyPrice);
+                const postCts = Math.max(0, base - ctsSavings);
+                const displayed = Math.round(pricing.displayMonthlyPrice);
+                return (
+                  <>
+                    {/* Active toggle */}
+                    <Pressable
+                      onPress={() => onChange({
+                        commitToSave: {
+                          ...ctsDefaults,
+                          ...(plan.commitToSave || {}),
+                          active: !ctsActive,
+                        },
+                      })}
+                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={{ color: '#FFF', fontSize: 14 }}>Apply Commit to Save discount</Text>
+                        <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>Turns the discount on/off in pricing (different from member visibility below)</Text>
+                      </View>
+                      <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: ctsActive ? GOLD : BORDER, backgroundColor: ctsActive ? GOLD : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                        {ctsActive && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                      </View>
+                    </Pressable>
+
+                    {/* Amount fields (visible when active) */}
+                    {ctsActive && (
+                      <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BORDER, marginTop: 4 }}>
+                        <NumericField
+                          label="Discount per month"
+                          value={ctsSavings}
+                          onChange={(v) => onChange({
+                            commitToSave: {
+                              ...ctsDefaults,
+                              ...(plan.commitToSave || {}),
+                              active: true,
+                              monthlySavings: v,
+                            },
+                          })}
+                          prefix="$" suffix="/mo" icon="💸"
+                        />
+                        <NumericField
+                          label="Missed session fee"
+                          value={ctsMissedFee}
+                          onChange={(v) => onChange({
+                            commitToSave: {
+                              ...ctsDefaults,
+                              ...(plan.commitToSave || {}),
+                              missedSessionFee: v,
+                            },
+                          })}
+                          prefix="$" suffix="/mo" icon="⚠️"
+                        />
+                      </View>
+                    )}
+
+                    {/* Legibility chain — makes the "Monthly price" number make sense */}
+                    {ctsActive && !plan.isManualOverride && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: GOLD_BG, borderRadius: 8, borderWidth: 1, borderColor: GOLD_BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                          {formatCurrency(base)} base − {formatCurrency(ctsSavings)} CTS = <Text style={{ color: GOLD, fontWeight: '700' }}>{formatCurrency(postCts)}/mo member rate</Text>
+                        </Text>
+                      </View>
+                    )}
+                    {ctsActive && plan.isManualOverride && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: GOLD_BG, borderRadius: 8, borderWidth: 1, borderColor: GOLD_BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                          Manual override active: member rate is <Text style={{ color: '#FFF', fontWeight: '700' }}>{formatCurrency(displayed)}/mo</Text>. CTS is on but does not change this price while overridden.
+                        </Text>
+                      </View>
+                    )}
+                    {!ctsActive && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                          Discount is off. Member rate uses the base {formatCurrency(base)}/mo{plan.isManualOverride ? ` (currently overridden to ${formatCurrency(displayed)}/mo)` : ''}.
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
+            </View>
+
             {/* ── Member Visibility Controls ── */}
             <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
               <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>MEMBER VISIBILITY</Text>
@@ -2613,7 +2704,10 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                 })}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
               >
-                <Text style={{ color: '#FFF', fontSize: 14 }}>Show Commit to Save to member</Text>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={{ color: '#FFF', fontSize: 14 }}>Show Commit to Save card to member</Text>
+                  <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>Visibility only — the discount above is what actually applies</Text>
+                </View>
                 <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.commitToSave?.enabled ? ACCENT : BORDER, backgroundColor: plan.commitToSave?.enabled ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
                   {plan.commitToSave?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
                 </View>
@@ -2975,6 +3069,18 @@ export default function MemberPlanScreen() {
   const saveStatusTimer = useRef<any>(null);
   const planKeyRef = useRef<string>(memberId || '');
 
+  // Scenario state
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const selectedScenarioIdRef = useRef<string | null>(null);
+  const basePlanRef = useRef<MemberPlanData | null>(null);
+  const [tabStripCollapsed, setTabStripCollapsed] = useState(false);
+  const [renamingScenarioId, setRenamingScenarioId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
+
+  // Keep ref in sync with state so handlePlanChange can read it without stale closure
+  useEffect(() => { selectedScenarioIdRef.current = selectedScenarioId; }, [selectedScenarioId]);
+
   // Load data
   useEffect(() => {
     if (!memberId || !user) return;
@@ -3181,13 +3287,31 @@ export default function MemberPlanScreen() {
     console.log('[loadData] Setting plan for:', finalPlan.memberName, 'planKey:', planKey);
     // PR-K: Surface paymentStatus for lapse banner
     setMemberPaymentStatus((finalPlan as any).paymentStatus as string | undefined);
+    basePlanRef.current = finalPlan;
     setPlan(finalPlan);
+
+    // ── Step 6: Load scenarios subcollection ─────────────────────────────
+    try {
+      const scenSnap = await getDocs(collection(db, 'member_plans', planKey, 'scenarios'));
+      const loaded = scenSnap.docs.map(d => ({ id: d.id, ...d.data() } as Scenario));
+      loaded.sort((a, b) => {
+        const aTime = typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : (a.createdAt as any)?.seconds ?? 0;
+        const bTime = typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : (b.createdAt as any)?.seconds ?? 0;
+        return aTime - bTime;
+      });
+      setScenarios(loaded);
+    } catch (err) {
+      console.warn('[loadData] Could not load scenarios:', err);
+    }
+
     setLoading(false);
   };
 
   // Auto-save with debounce
   const handlePlanChange = useCallback((updates: Partial<MemberPlanData>) => {
     setSaveStatus('saving');
+    // Capture the active tab at EDIT TIME so a mid-debounce tab switch can't reroute the write
+    const scenIdAtEdit = selectedScenarioIdRef.current;
     setPlan(prev => {
       if (!prev) return prev;
       const updated = { ...prev, ...updates };
@@ -3202,7 +3326,12 @@ export default function MemberPlanScreen() {
           const toSave = sanitizeForFirestore(pricingResult
             ? { ...updated, pricingResult, updatedAt: serverTimestamp() }
             : { ...updated, updatedAt: serverTimestamp() });
-          await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
+          if (scenIdAtEdit) {
+            // Write to the selected scenario doc; base plan stays unchanged
+            await setDoc(doc(db, 'member_plans', key, 'scenarios', scenIdAtEdit), toSave, { merge: true });
+          } else {
+            await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
+          }
           setSaveStatus('saved');
           if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
           saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
@@ -3223,14 +3352,125 @@ export default function MemberPlanScreen() {
               console.warn('[pricing defaults] Could not save to coach_brands:', e);
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error('Error saving plan:', err);
           setSaveStatus('idle');
+          const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+          if (isPermDenied && typeof alert !== 'undefined') {
+            alert(scenIdAtEdit
+              ? 'Scenario edits could not be saved — Firestore rules denied the write. Reload the page and try again after the rules deploy propagates.'
+              : 'Plan edits could not be saved — Firestore rules denied the write.');
+          }
         }
       }, 800);
+      // Keep local caches fresh so tab switches don't show stale pre-edit values
+      if (!scenIdAtEdit) {
+        basePlanRef.current = updated;
+      } else {
+        setScenarios(sPrev => sPrev.map(s => s.id === scenIdAtEdit ? ({ ...s, ...updates } as Scenario) : s));
+      }
       return updated;
     });
   }, [memberId, user]);
+
+  // NOTE: intentionally no cleanup that clears saveTimer on unmount —
+  // if the timer fires after unmount the setDoc still resolves; clearing it would drop the last edit.
+
+  // Switch the active scenario tab — updates plan state to scenario or base plan data
+  const selectScenarioTab = useCallback((scenId: string | null) => {
+    setSelectedScenarioId(scenId);
+    selectedScenarioIdRef.current = scenId;
+    if (scenId === null) {
+      if (basePlanRef.current) setPlan(basePlanRef.current);
+    } else {
+      setScenarios(prev => {
+        const scen = prev.find(s => s.id === scenId);
+        if (scen) {
+          const asBase = scen as unknown as MemberPlanData;
+          setPlan(asBase);
+        }
+        return prev;
+      });
+    }
+  }, []);
+
+  // Scenario CRUD helpers
+  const handleCreateScenario = useCallback(async (name: string) => {
+    const key = planKeyRef.current || memberId!;
+    if (!key) return;
+    // Snapshot current plan data minus excluded fields
+    const source = plan || basePlanRef.current;
+    if (!source) return;
+    const {
+      acceptedSnapshotId: _a,
+      stripeCustomerId: _s,
+      checkoutStatus: _c,
+      acceptedAt: _aa,
+      contractStartAt: _cs,
+      contractEndAt: _ce,
+      shareToken: _st,
+      presentedScenarioId: _ps,
+      ...planSnapshot
+    } = source as any;
+    const newRef = doc(collection(db, 'member_plans', key, 'scenarios'));
+    const scenData = {
+      ...planSnapshot,
+      id: newRef.id,
+      name,
+      createdAt: serverTimestamp(),
+      coachId: coachUid,
+    };
+    try {
+      await setDoc(newRef, sanitizeForFirestore(scenData));
+      const newScen: Scenario = { ...scenData, id: newRef.id } as unknown as Scenario;
+      setScenarios(prev => [...prev, newScen]);
+      selectScenarioTab(newRef.id);
+    } catch (err: any) {
+      console.error('[createScenario] Error:', err);
+      const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+      const msg = isPermDenied
+        ? 'Cannot create scenario yet — Firestore rules for scenarios have not been deployed. Ask Devin to approve the rules deploy in the Pass A thread.'
+        : `Could not create scenario: ${err?.message || 'unknown error'}`;
+      if (typeof alert !== 'undefined') alert(msg);
+    }
+  }, [memberId, plan, coachUid, selectScenarioTab]);
+
+  const handleDeleteScenario = useCallback(async (scenId: string) => {
+    const key = planKeyRef.current || memberId!;
+    if (!key) return;
+    try {
+      await deleteDoc(doc(db, 'member_plans', key, 'scenarios', scenId));
+      setScenarios(prev => prev.filter(s => s.id !== scenId));
+      if (selectedScenarioIdRef.current === scenId) {
+        selectScenarioTab(null);
+      }
+    } catch (err: any) {
+      console.error('[deleteScenario] Error:', err);
+      const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+      if (typeof alert !== 'undefined') {
+        alert(isPermDenied
+          ? 'Cannot delete scenario yet — rules deploy pending.'
+          : `Could not delete scenario: ${err?.message || 'unknown error'}`);
+      }
+    }
+  }, [memberId, selectScenarioTab]);
+
+  const handleRenameScenario = useCallback(async (scenId: string, newName: string) => {
+    const key = planKeyRef.current || memberId!;
+    if (!key || !newName.trim()) return;
+    try {
+      await setDoc(doc(db, 'member_plans', key, 'scenarios', scenId), { name: newName.trim() }, { merge: true });
+      setScenarios(prev => prev.map(s => s.id === scenId ? { ...s, name: newName.trim() } : s));
+    } catch (err: any) {
+      console.error('[renameScenario] Error:', err);
+      const isPermDenied = err?.code === 'permission-denied' || /permission/i.test(err?.message || '');
+      if (typeof alert !== 'undefined') {
+        alert(isPermDenied
+          ? 'Cannot rename scenario yet — rules deploy pending.'
+          : `Could not rename scenario: ${err?.message || 'unknown error'}`);
+      }
+    }
+  }, [memberId]);
 
   // Pricing (memoized)
   const pricing = useMemo(() => {
@@ -3283,6 +3523,17 @@ export default function MemberPlanScreen() {
   const handleShare = async () => {
     const url = `https://goarrive.web.app/shared-plan/${memberId}`;
     try {
+      // Bind the presented scenario to the base plan doc before sharing
+      const key = planKeyRef.current || memberId!;
+      try {
+        await setDoc(
+          doc(db, 'member_plans', key),
+          { presentedScenarioId: selectedScenarioIdRef.current ?? null },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn('[handleShare] Could not set presentedScenarioId:', e);
+      }
       // Auto-set status to 'presented' when sharing if still draft
       if (plan && (!plan.status || plan.status === 'draft')) {
         handlePlanChange({ status: 'presented' } as any);
@@ -3371,6 +3622,100 @@ export default function MemberPlanScreen() {
             <Text style={{ color: saveStatus === 'saved' ? '#6EBB7A' : MUTED, fontSize: 11, textAlign: 'right', marginTop: 4 }}>
               {saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}
             </Text>
+          )}
+        </View>
+      )}
+
+      {/* ─── SCENARIO TAB STRIP (coach editor page — shown in both toggle modes; never on member's /my-plan) */}
+      {tab === 'plan' && (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+          {/* Header row: label + caret */}
+          <Pressable
+            onPress={() => setTabStripCollapsed(c => !c)}
+            hitSlop={8}
+            style={{ flexDirection: 'row', alignItems: 'center', marginBottom: tabStripCollapsed ? 0 : 6 }}>
+            <Text style={{ color: MUTED, fontSize: 11, fontWeight: '600', fontFamily: FH, flex: 1 }}>SCENARIOS</Text>
+            <Text style={{ color: MUTED, fontSize: 12, fontWeight: '700', paddingHorizontal: 4 }}>
+              {tabStripCollapsed ? '▼' : '▲'}
+            </Text>
+          </Pressable>
+          {!tabStripCollapsed && (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexWrap: 'wrap', rowGap: 6 }}>
+              {/* Base plan tab (Plan 1, undeletable) */}
+              <Pressable
+                onPress={() => selectScenarioTab(null)}
+                style={{
+                  paddingHorizontal: 12, paddingVertical: 6, marginRight: 6, borderRadius: 8,
+                  backgroundColor: selectedScenarioId === null ? ACCENT : '#1A2035',
+                  borderWidth: 1, borderColor: selectedScenarioId === null ? ACCENT : BORDER,
+                }}>
+                <Text style={{ color: selectedScenarioId === null ? '#000' : MUTED, fontSize: 12, fontWeight: '700' }}>Plan 1</Text>
+              </Pressable>
+              {/* Scenario tabs */}
+              {scenarios.map((scen) => (
+                <View key={scen.id} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 6 }}>
+                  {renamingScenarioId === scen.id ? (
+                    <TextInput
+                      value={renameText}
+                      onChangeText={setRenameText}
+                      autoFocus
+                      onBlur={() => {
+                        handleRenameScenario(scen.id, renameText);
+                        setRenamingScenarioId(null);
+                      }}
+                      onSubmitEditing={() => {
+                        handleRenameScenario(scen.id, renameText);
+                        setRenamingScenarioId(null);
+                      }}
+                      style={{
+                        color: '#FFF', fontSize: 12, fontWeight: '700',
+                        backgroundColor: '#1A2035', borderWidth: 1, borderColor: ACCENT,
+                        borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: 60,
+                      }}
+                    />
+                  ) : (
+                    <Pressable
+                      onPress={() => selectScenarioTab(scen.id)}
+                      onLongPress={() => {
+                        setRenamingScenarioId(scen.id);
+                        setRenameText(scen.name);
+                      }}
+                      style={{
+                        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+                        backgroundColor: selectedScenarioId === scen.id ? ACCENT : '#1A2035',
+                        borderWidth: 1, borderColor: selectedScenarioId === scen.id ? ACCENT : BORDER,
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                      }}>
+                      <Text style={{ color: selectedScenarioId === scen.id ? '#000' : MUTED, fontSize: 12, fontWeight: '700' }}>{scen.name}</Text>
+                      <Pressable
+                        hitSlop={6}
+                        onPress={() => {
+                          if (typeof window !== 'undefined' && window.confirm) {
+                            if (window.confirm(`Delete "${scen.name}"?`)) handleDeleteScenario(scen.id);
+                          } else {
+                            handleDeleteScenario(scen.id);
+                          }
+                        }}>
+                        <Icon name="x" size={12} color={selectedScenarioId === scen.id ? '#000' : MUTED} />
+                      </Pressable>
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+              {/* Add (+) button — duplicates currently selected tab */}
+              <Pressable
+                onPress={() => {
+                  const defaultName = `Plan ${scenarios.length + 2}`;
+                  handleCreateScenario(defaultName);
+                }}
+                style={{
+                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+                  backgroundColor: '#1A2035', borderWidth: 1, borderColor: BORDER,
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                <Text style={{ color: ACCENT, fontSize: 16, fontWeight: '700', lineHeight: 18 }}>+</Text>
+              </Pressable>
+            </View>
           )}
         </View>
       )}

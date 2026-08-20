@@ -14,10 +14,12 @@ vi.mock('../useWorkoutTTS', () => ({
 
 vi.mock('../../utils/musicHandoffVariant', () => ({
   getMusicHandoffVariant: vi.fn(() => 'v3'),
+  getMusicHandoffVariantSource: vi.fn(() => 'default'),
 }));
 
 vi.mock('../../utils/handoffLog', () => ({
   pushHandoffLog: vi.fn(),
+  pushHandoffLogAlways: vi.fn(),
 }));
 
 const originalOS = Platform.OS;
