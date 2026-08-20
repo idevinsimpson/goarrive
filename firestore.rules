@@ -1052,6 +1052,17 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // SHARED PLAN VIEWS (token-keyed projection mirror)
+    // Public GET by exact token — the token IS the access credential.
+    // No LIST (prevents enumeration). No client writes (triggers only).
+    // ─────────────────────────────────────────────
+    match /sharedPlanViews/{shareToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // MARKETING LEADS (email-gate captures from share links)
     // Public write: anyone (including unauthenticated guests after anon sign-in)
     // can create a lead document. Coaches and admins can read their own leads.

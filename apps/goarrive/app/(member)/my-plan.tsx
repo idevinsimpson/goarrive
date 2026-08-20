@@ -1,10 +1,9 @@
 /**
  * My Plan — Member's view of their fitness plan.
  *
- * ARCHITECTURE: This is a thin wrapper around the coach's PlanView component.
- * It loads the SAME Firestore document the coach edits (member_plans/{memberDocId})
- * and renders PlanView with isCoach=false. This guarantees the member sees the
- * EXACT same layout, pricing, and data as the coach's "Member View" preview.
+ * ARCHITECTURE: Thin wrapper around PlanView (same component coach uses).
+ * Uses live onSnapshot subscriptions so the member sees coach edits in real-time.
+ * When a scenario is presented, overlays it onto the base plan reactively.
  *
  * One source of truth. One component. Identical output.
  */
@@ -16,7 +15,10 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch } from 'firebase/firestore';
+import {
+  collection, query, where, getDocs, doc, updateDoc,
+  orderBy, limit, onSnapshot, serverTimestamp,
+} from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { MemberPlanData, Scenario, createDefaultPlan } from '../../lib/planTypes';
 
@@ -71,134 +73,134 @@ export default function MyPlan() {
     }
   }
 
+  // ─── Live subscription setup ───────────────────────────────────────────────
   useEffect(() => {
-    if (user) fetchPlan();
-  }, [user]);
-
-  // ─── Load the SAME plan document the coach edits ──────────────────────────
-  async function fetchPlan() {
     if (!user) return;
-    setLoading(true);
-    try {
-      let planData: MemberPlanData | null = null;
-      let resolvedDocId: string = '';
 
-      // ── PRIMARY: Look up member doc ID, then load plan by that key ──
-      // The coach saves to member_plans/{memberDocId}. We find our memberDocId
-      // from the members collection, then load that exact document.
-      const membersQuery = query(collection(db, 'members'), where('uid', '==', user.uid));
-      const membersSnap = await getDocs(membersQuery);
-      if (!membersSnap.empty) {
-        const memberDocId = membersSnap.docs[0].id;
-        console.log('[MyPlan] Found member doc:', memberDocId);
-        const planDoc = await getDoc(doc(db, 'member_plans', memberDocId));
-        if (planDoc.exists()) {
-          resolvedDocId = memberDocId;
-          planData = { id: planDoc.id, ...planDoc.data() } as MemberPlanData;
-          console.log('[MyPlan] Loaded plan from member doc key:', memberDocId);
-        }
-      }
+    let unsubPlan: (() => void) | null = null;
+    let unsubScenario: (() => void) | null = null;
+    let resolvedDocId = '';
+    let basePlan: MemberPlanData | null = null;
 
-      // ── FALLBACK 1: Direct doc by uid ──
-      if (!planData) {
-        const planByUid = await getDoc(doc(db, 'member_plans', user.uid));
-        if (planByUid.exists()) {
-          resolvedDocId = user.uid;
-          planData = { id: planByUid.id, ...planByUid.data() } as MemberPlanData;
-          console.log('[MyPlan] Loaded plan from uid key:', user.uid);
-        }
-      }
-
-      // ── FALLBACK 2: Query by memberId field ──
-      if (!planData) {
-        const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user.uid));
-        const snap = await getDocs(plansQuery);
-        if (!snap.empty) {
-          const best = snap.docs[0];
-          resolvedDocId = best.id;
-          planData = { id: best.id, ...best.data() } as MemberPlanData;
-          console.log('[MyPlan] Loaded plan from memberId query:', best.id);
-        }
-      }
-
-      if (planData) {
-        // If coach has presented a specific scenario, load and overlay it
-        if (planData.presentedScenarioId && resolvedDocId) {
-          try {
-            const scenDoc = await getDoc(doc(db, 'member_plans', resolvedDocId, 'scenarios', planData.presentedScenarioId));
-            if (scenDoc.exists()) {
-              const scenData = scenDoc.data() as Scenario;
-              // Overlay scenario fields onto base plan (base plan provides billing/lifecycle fields)
-              planData = { ...planData, ...scenData, id: planData.id } as MemberPlanData;
-            }
-          } catch (err) {
-            // Silently fall back to base plan (e.g. permission denied or missing doc)
-            console.warn('[MyPlan] Could not load presented scenario, falling back to base plan:', err);
-          }
-        }
-
-        // Merge with defaults to fill any missing fields (same as coach's page)
-        const defaults = createDefaultPlan(
-          planData.memberName || 'Member',
-          resolvedDocId || user.uid,
-          planData.coachId || ''
-        );
-        const merged: MemberPlanData = {
-          ...defaults,
-          ...planData,
-          nutrition: { ...defaults.nutrition, ...(planData.nutrition || {}) },
-          commitToSave: { ...defaults.commitToSave, ...(planData.commitToSave || {}) },
-          phases: (planData.phases?.length) ? planData.phases : defaults.phases,
-          weeklySchedule: (planData.weeklySchedule?.length) ? planData.weeklySchedule : defaults.weeklySchedule,
-          sessionGuidanceProfiles: (planData.sessionGuidanceProfiles?.length) ? planData.sessionGuidanceProfiles : defaults.sessionGuidanceProfiles,
-          memberName: planData.memberName || defaults.memberName,
-        };
-        planDocIdRef.current = resolvedDocId;
-        setPlan(merged);
-      } else {
-        console.log('[MyPlan] No plan found for uid:', user.uid);
-      }
-    } catch (err) {
-      console.error('[MyPlan] Error fetching plan:', err);
-    } finally {
-      setLoading(false);
+    function applyScenarioOverlay(base: MemberPlanData, scenData: Scenario | null): MemberPlanData {
+      if (!scenData) return base;
+      return { ...base, ...scenData, id: base.id } as MemberPlanData;
     }
-  }
+
+    function mergeWithDefaults(planData: MemberPlanData, docId: string): MemberPlanData {
+      const defaults = createDefaultPlan(
+        planData.memberName || 'Member',
+        docId || user!.uid,
+        planData.coachId || ''
+      );
+      return {
+        ...defaults,
+        ...planData,
+        nutrition: { ...defaults.nutrition, ...(planData.nutrition || {}) },
+        commitToSave: { ...defaults.commitToSave, ...(planData.commitToSave || {}) },
+        phases: (planData.phases?.length) ? planData.phases : defaults.phases,
+        weeklySchedule: (planData.weeklySchedule?.length) ? planData.weeklySchedule : defaults.weeklySchedule,
+        sessionGuidanceProfiles: (planData.sessionGuidanceProfiles?.length) ? planData.sessionGuidanceProfiles : defaults.sessionGuidanceProfiles,
+        memberName: planData.memberName || defaults.memberName,
+      };
+    }
+
+    function subscribePlan(docId: string) {
+      resolvedDocId = docId;
+      planDocIdRef.current = docId;
+
+      unsubPlan = onSnapshot(
+        doc(db, 'member_plans', docId),
+        (snap) => {
+          if (!snap.exists()) {
+            setLoading(false);
+            return;
+          }
+
+          const newBase = { id: snap.id, ...snap.data() } as MemberPlanData;
+          basePlan = newBase;
+
+          // Re-subscribe to scenario if presentedScenarioId changed
+          if (newBase.presentedScenarioId) {
+            if (unsubScenario) { unsubScenario(); unsubScenario = null; }
+            unsubScenario = onSnapshot(
+              doc(db, 'member_plans', docId, 'scenarios', newBase.presentedScenarioId),
+              (scenSnap) => {
+                const scenData = scenSnap.exists() ? (scenSnap.data() as Scenario) : null;
+                const overlaid = applyScenarioOverlay(basePlan!, scenData);
+                setPlan(mergeWithDefaults(overlaid, docId));
+                setLoading(false);
+              },
+              (err) => {
+                console.warn('[MyPlan] Scenario subscription error, falling back:', err);
+                setPlan(mergeWithDefaults(basePlan!, docId));
+                setLoading(false);
+              }
+            );
+          } else {
+            // No presented scenario — tear down any old scenario subscription
+            if (unsubScenario) { unsubScenario(); unsubScenario = null; }
+            setPlan(mergeWithDefaults(newBase, docId));
+            setLoading(false);
+          }
+        },
+        (err) => {
+          console.error('[MyPlan] Plan subscription error:', err);
+          setLoading(false);
+        }
+      );
+    }
+
+    // Find member's plan doc ID, then subscribe
+    async function setup() {
+      try {
+        // PRIMARY: Look up member doc ID
+        const membersSnap = await getDocs(query(collection(db, 'members'), where('uid', '==', user!.uid)));
+        if (!membersSnap.empty) {
+          subscribePlan(membersSnap.docs[0].id);
+          return;
+        }
+
+        // FALLBACK 1: Direct doc by uid
+        subscribePlan(user!.uid);
+      } catch (err) {
+        console.error('[MyPlan] Setup error:', err);
+        setLoading(false);
+      }
+    }
+
+    setup();
+
+    return () => {
+      if (unsubPlan) unsubPlan();
+      if (unsubScenario) unsubScenario();
+    };
+  }, [user]);
 
   // ─── Handle changes from PlanView (member toggling CTS/Nutrition) ─────────
   const handlePlanChange = useCallback((updates: Partial<MemberPlanData>) => {
     setPlan(prev => {
       if (!prev) return prev;
       const updated = { ...prev, ...updates };
-
-      // Persist to Firestore (same document the coach edits)
       const docId = planDocIdRef.current || prev.id;
       if (docId) {
-        try {
-          updateDoc(doc(db, 'member_plans', docId), {
-            ...updates,
-            updatedAt: new Date(),
-          }).catch(err => console.warn('[MyPlan] Save error:', err));
-        } catch (err) {
-          console.warn('[MyPlan] Save error:', err);
-        }
+        updateDoc(doc(db, 'member_plans', docId), {
+          ...updates,
+          updatedAt: new Date(),
+        }).catch(err => console.warn('[MyPlan] Save error:', err));
       }
-
       return updated;
     });
   }, []);
 
   // ─── Accept plan handler ──────────────────────────────────────────────────
-  // Navigates to payment selection page instead of writing status directly.
-  // The plan status is updated to 'active' by the stripeWebhook Cloud Function
-  // after checkout.session.completed fires.
-  //
-  // Guard: if the plan is already active or paid, skip the payment flow and
-  // show an informational alert instead of navigating to payment-select.
+  // Writes acceptedScenarioId to Firestore BEFORE routing to payment-select.
+  // This ensures createCheckoutSession reads the correct scenario deterministically.
   async function handleAcceptPlan() {
     if (!user || !plan) return;
     const docId = planDocIdRef.current || plan.id;
     if (!docId) return;
+
     // Guard: already enrolled
     if (
       plan.status === 'active' ||
@@ -212,7 +214,22 @@ export default function MyPlan() {
       );
       return;
     }
-    // Navigate to payment selection
+
+    try {
+      // Write acceptedScenarioId BEFORE navigating — createCheckoutSession reads this.
+      // presentedScenarioId may be null (base plan) or a scenario ID.
+      const acceptedScenarioId = (plan as any).presentedScenarioId ?? null;
+      await updateDoc(doc(db, 'member_plans', docId), {
+        acceptedScenarioId,
+        acceptedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error('[MyPlan] Could not write acceptedScenarioId:', err);
+      Alert.alert('Error', 'Could not save your acceptance. Please try again.');
+      return;
+    }
+
+    // Navigate to payment selection only after write resolves
     router.push(`/(member)/payment-select?planId=${docId}` as any);
   }
 
@@ -234,7 +251,7 @@ export default function MyPlan() {
       <View style={st.root}>
         <AppHeader />
         <View style={st.emptyContainer}>
-          <Text style={{ fontSize: 48, marginBottom: 16 }}>{'\uD83D\uDCCB'}</Text>
+          <Text style={{ fontSize: 48, marginBottom: 16 }}>📋</Text>
           <Text style={st.emptyTitle}>No Plan Yet</Text>
           <Text style={st.emptyText}>
             Your coach hasn't created your fitness plan yet.{'\n'}
@@ -245,7 +262,7 @@ export default function MyPlan() {
     );
   }
 
-  // ─── Render: PlanView (isCoach=false) + Plan Acceptance ───────────────────
+  // ─── Render: PlanView (isCoach=false) + live data ─────────────────────────
   return (
     <View style={st.root}>
       <AppHeader />
@@ -277,15 +294,12 @@ export default function MyPlan() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: Platform.OS === 'web' ? 100 : 24 }}
       >
-        {/* ── THE EXACT SAME PlanView the coach sees, with isCoach=false ── */}
         <PlanView
           plan={plan}
           isCoach={false}
           onChange={handlePlanChange}
           onAccept={handleAcceptPlan}
         />
-
-        {/* Accept Plan is now rendered inside PlanView */}
       </ScrollView>
     </View>
   );
@@ -303,28 +317,12 @@ const st = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 8,
     borderBottomWidth: 1, borderBottomColor: '#2A3347',
   },
-  sectionLabel: {
-    fontSize: 11, fontWeight: '700', color: '#5B9BD5',
-    letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8,
-  },
-  darkCard: {
-    backgroundColor: '#161B25', borderWidth: 1, borderColor: '#2A3347',
-    borderRadius: 12, padding: 14,
-  },
-  subtitleText: { color: '#C5CDD8', fontSize: 14, lineHeight: 22 },
   badge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 16,
     borderWidth: 1, alignSelf: 'flex-start',
   },
   badgeText: { fontSize: 12, fontWeight: '600', letterSpacing: 0.4 },
-  acceptBtn: {
-    backgroundColor: '#6EBB7A',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 20,
-  },
   notifBanner: {
     flexDirection: 'row', alignItems: 'flex-start',
     backgroundColor: 'rgba(110,187,122,0.12)',
@@ -335,9 +333,4 @@ const st = StyleSheet.create({
   notifTitle: { color: '#F0F4F8', fontSize: 13, fontWeight: '700', marginBottom: 2 },
   notifBody: { color: '#A0AEC0', fontSize: 12, lineHeight: 18 },
   notifDismiss: { padding: 4, marginTop: 2 },
-  acceptBtnText: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: '700',
-  },
 });

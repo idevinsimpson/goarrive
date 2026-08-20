@@ -3521,18 +3521,40 @@ export default function MemberPlanScreen() {
   };
 
   const handleShare = async () => {
-    const url = `https://goarrive.web.app/shared-plan/${memberId}`;
     try {
-      // Bind the presented scenario to the base plan doc before sharing
       const key = planKeyRef.current || memberId!;
+
+      // Ensure the plan has a strong shareToken (crypto.randomBytes 18 bytes = 24 chars base64url)
+      let shareToken = plan?.shareToken;
+      if (!shareToken) {
+        // Generate token client-side using Web Crypto API (works in browser + RN)
+        let tokenBytes: Uint8Array;
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+          tokenBytes = crypto.getRandomValues(new Uint8Array(18));
+        } else {
+          // Fallback (RN non-web): use Math.random — weak but rare fallback path
+          tokenBytes = new Uint8Array(18);
+          for (let i = 0; i < 18; i++) tokenBytes[i] = Math.floor(Math.random() * 256);
+        }
+        // base64url encode
+        shareToken = btoa(String.fromCharCode(...tokenBytes))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+      }
+
+      const url = `https://goarrive.web.app/shared-plan/${memberId}?token=${shareToken}`;
+
+      // Write presentedScenarioId + shareToken atomically before sharing
       try {
         await setDoc(
           doc(db, 'member_plans', key),
-          { presentedScenarioId: selectedScenarioIdRef.current ?? null },
+          {
+            presentedScenarioId: selectedScenarioIdRef.current ?? null,
+            shareToken,
+          },
           { merge: true }
         );
       } catch (e) {
-        console.warn('[handleShare] Could not set presentedScenarioId:', e);
+        console.warn('[handleShare] Could not set presentedScenarioId/shareToken:', e);
       }
       // Auto-set status to 'presented' when sharing if still draft
       if (plan && (!plan.status || plan.status === 'draft')) {

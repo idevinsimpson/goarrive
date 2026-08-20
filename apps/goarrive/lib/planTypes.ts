@@ -242,6 +242,7 @@ export interface ContinuationPricing {
 export interface AcceptedPlanSnapshot {
   snapshotId: string;          // Firestore doc ID in acceptedPlanSnapshots/{snapshotId}
   planId: string;              // member_plans/{planId}
+  scenarioId?: string | null;  // scenario overlaid at accept time (null = base plan)
   memberId: string;
   coachId: string;
   snapshotAt: FirestoreTimestamp;  // Firestore Timestamp
@@ -364,6 +365,74 @@ export interface LedgerEntry {
   createdAt: FirestoreTimestamp;
 }
 
+// ─── Shared plan view (projection mirror, token-keyed) ────────────────────────
+// Stored at sharedPlanViews/{shareToken}. Maintained by Firestore triggers.
+// Contains only the content PlanView renders at isCoach=false. No billing fields,
+// no scenarios list, no coach-private settings, no shareToken in body.
+export interface SharedPlanView {
+  // Identity
+  memberId: string;
+  coachId: string;
+  planId: string;
+  status: 'draft' | 'pending' | 'presented' | 'accepted' | 'active';
+
+  // Hero
+  memberName: string;
+  memberAge?: number;
+  subtitle?: string;
+  planSubtitle?: string;
+  identityTag?: string;
+  referredBy?: string;
+
+  // Goals & why
+  goals?: string[];
+  goalEmojis?: Record<string, string>;
+  goalSummary?: string;
+  whyStatement?: string;
+  whyTranslation?: string;
+  readiness?: number;
+  motivation?: number;
+  gymConfidence?: number;
+  currentWeight?: string;
+  goalWeight?: string;
+  goalWeightAutoSuggested?: boolean;
+
+  // Starting points
+  startingPoints?: string[];
+  startingPointIntro?: string;
+
+  // Schedule
+  weeklySchedule?: DayPlan[];
+  sessionsPerWeek?: SessionsPerWeek;
+
+  // Contract
+  contractMonths?: 3 | 6 | 9 | 12;
+  contractLengthMonths?: number;
+
+  // Content
+  phases?: Phase[];
+  whatsIncluded?: string[];
+  sessionGuidanceProfiles?: SessionTypeGuidance[];
+
+  // Pricing & add-ons (member-visible)
+  showInvestment?: boolean;
+  pricingResult?: PricingResult;
+  hourlyRate?: number;
+  sessionLengthMinutes?: number;
+  checkInCallMinutes?: number;
+  programBuildTimeHours?: number;
+  monthlyPriceOverride?: number;
+  overrideFrequency?: 'week' | 'month' | 'year';
+  payInFullDiscountPercent?: number;
+  commitToSave?: CommitToSave;
+  nutrition?: NutritionAddOn;
+  postContract?: PostContract;
+  continuationPricing?: ContinuationPricing;
+
+  // Trigger freshness — set by trigger using serverTimestamp()
+  updatedAt: FirestoreTimestamp;
+}
+
 // ─── Full plan data ───────────────────────────────────────────────────────────
 
 export interface MemberPlanData {
@@ -448,6 +517,7 @@ export interface MemberPlanData {
   contractStartAt?: FirestoreTimestamp;  // Timestamp when contract begins (= acceptedAt for monthly)
   contractEndAt?: FirestoreTimestamp;    // Timestamp = contractStartAt + contractLengthMonths
   acceptedSnapshotId?: string;    // references acceptedPlanSnapshots/{id}
+  acceptedScenarioId?: string | null; // scenario the member accepted (null = base plan)
   stripeCustomerId?: string;      // Stripe customer ID on coach connected account
   checkoutStatus?: 'pending_payment' | 'paid' | 'pay_in_full_paid' | 'free_active' | 'cancelled' | 'failed';
 

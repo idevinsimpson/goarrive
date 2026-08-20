@@ -57,7 +57,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as admin from 'firebase-admin';
-import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
@@ -735,6 +735,22 @@ export const createCheckoutSession = onCall(
     const applicationFeePercent = tierSplit;
 
     // ── Create acceptedPlanSnapshot ──
+    // Read acceptedScenarioId from plan to freeze which scenario the member accepted.
+    const acceptedScenarioId = (plan.acceptedScenarioId as string | null | undefined) ?? null;
+
+    // If a scenario was accepted, overlay its content onto the plan for the snapshot.
+    let snapshotPlan = plan;
+    if (acceptedScenarioId) {
+      try {
+        const scenSnap = await db.collection('member_plans').doc(planId).collection('scenarios').doc(acceptedScenarioId).get();
+        if (scenSnap.exists) {
+          snapshotPlan = { ...plan, ...scenSnap.data() };
+        }
+      } catch (err) {
+        console.warn('[createCheckoutSession] Could not load acceptedScenario for snapshot, using base plan:', err);
+      }
+    }
+
     const snapshotRef = db.collection('acceptedPlanSnapshots').doc();
     const snapshotId = snapshotRef.id;
     const now = Timestamp.now();
@@ -747,12 +763,13 @@ export const createCheckoutSession = onCall(
       planId,
       memberId,
       coachId,
+      scenarioId: acceptedScenarioId,
       snapshotAt: now,
       contractLengthMonths: contractMonths,
-      hourlyRate,
-      sessionLengthMinutes,
-      checkInCallMinutes,
-      programBuildTimeHours,
+      hourlyRate: (snapshotPlan.hourlyRate as number) ?? hourlyRate,
+      sessionLengthMinutes: (snapshotPlan.sessionLengthMinutes as number) ?? sessionLengthMinutes,
+      checkInCallMinutes: (snapshotPlan.checkInCallMinutes as number) ?? checkInCallMinutes,
+      programBuildTimeHours: (snapshotPlan.programBuildTimeHours as number) ?? programBuildTimeHours,
       sessionsPerWeek,
       calculatedMonthlyPrice: displayMonthlyPrice,
       displayMonthlyPrice,
@@ -13082,5 +13099,120 @@ export const generateMusicVolumeVariants = onCall(
     } finally {
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
+  }
+);
+
+// ─── Plan projection mirror — sharedPlanViews ───────────────────────────────
+// Maintains sharedPlanViews/{shareToken} as a token-keyed projection of the
+// presented plan content (base plan overlaid with presentedScenario if set).
+// Only content fields visible to members at isCoach=false are projected.
+// Billing/lifecycle fields and coach-private data are excluded.
+
+const PROJECTED_EXCLUDED_FIELDS = new Set([
+  'shareToken', 'presentedScenarioId', 'stripeCustomerId', 'checkoutStatus',
+  'acceptedSnapshotId', 'acceptedScenarioId', 'contractStartAt', 'contractEndAt',
+  'acceptedAt', 'checkoutSessionId',
+]);
+
+async function buildAndWriteSharedPlanProjection(planId: string): Promise<void> {
+  // Read fresh plan state (do not rely on before/after — handles out-of-order delivery)
+  const planRef = db.collection('member_plans').doc(planId);
+  const planSnap = await planRef.get();
+
+  if (!planSnap.exists) {
+    // Plan deleted — remove projection if it existed under any shareToken.
+    // We don't know the old shareToken here; the plan-level trigger fires before/after.
+    // The delete path is handled separately in onPlanWriteMirrorSharedView via before.data().
+    return;
+  }
+
+  const planData = planSnap.data()!;
+  const shareToken = planData.shareToken as string | undefined;
+
+  if (!shareToken) {
+    // Plan has never been shared — no projection to maintain
+    return;
+  }
+
+  // Overlay presented scenario if set
+  let content = { ...planData };
+  const presentedScenarioId = planData.presentedScenarioId as string | null | undefined;
+  if (presentedScenarioId) {
+    try {
+      const scenSnap = await planRef.collection('scenarios').doc(presentedScenarioId).get();
+      if (scenSnap.exists) {
+        content = { ...content, ...scenSnap.data() };
+      }
+    } catch (err) {
+      console.warn('[mirrorSharedView] Could not load presentedScenario, using base plan:', err);
+    }
+  }
+
+  // Strip excluded fields from projection
+  const projection: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(content)) {
+    if (!PROJECTED_EXCLUDED_FIELDS.has(key)) {
+      projection[key] = value;
+    }
+  }
+
+  // Add required metadata
+  projection.planId = planId;
+  projection.memberId = planData.memberId ?? planId;
+  projection.coachId = planData.coachId;
+  projection.status = planData.status;
+
+  // updatedAt guard: read current projection doc and skip if it's already fresher
+  // than the source. Guards against out-of-order trigger delivery.
+  const projRef = db.collection('sharedPlanViews').doc(shareToken);
+  const projSnap = await projRef.get();
+  if (projSnap.exists) {
+    const projUpdatedAt = projSnap.data()?.updatedAt as FirebaseFirestore.Timestamp | undefined;
+    const sourceUpdatedAt = planData.updatedAt as FirebaseFirestore.Timestamp | undefined;
+    if (projUpdatedAt && sourceUpdatedAt && projUpdatedAt.toMillis() > sourceUpdatedAt.toMillis()) {
+      // Projection is already more recent than this source event — skip to avoid overwriting newer data
+      return;
+    }
+  }
+
+  projection.updatedAt = FieldValue.serverTimestamp();
+  await projRef.set(projection);
+}
+
+export const onPlanWriteMirrorSharedView = onDocumentWritten(
+  { document: 'member_plans/{planId}', region: 'us-central1' },
+  async (event) => {
+    const planId = event.params.planId;
+    const beforeData = event.data?.before?.data();
+    const afterData = event.data?.after?.data();
+
+    // Plan was deleted or lost its shareToken — clean up projection
+    if (!afterData) {
+      const oldToken = beforeData?.shareToken as string | undefined;
+      if (oldToken) {
+        try { await db.collection('sharedPlanViews').doc(oldToken).delete(); } catch { /* best-effort */ }
+      }
+      return;
+    }
+
+    // shareToken changed — delete old projection doc
+    const oldToken = beforeData?.shareToken as string | undefined;
+    const newToken = afterData?.shareToken as string | undefined;
+    if (oldToken && oldToken !== newToken) {
+      try { await db.collection('sharedPlanViews').doc(oldToken).delete(); } catch { /* best-effort */ }
+    }
+
+    if (!newToken) return; // Not yet shared
+
+    await buildAndWriteSharedPlanProjection(planId);
+  }
+);
+
+export const onScenarioWriteMirrorSharedView = onDocumentWritten(
+  { document: 'member_plans/{planId}/scenarios/{scenarioId}', region: 'us-central1' },
+  async (event) => {
+    const { planId } = event.params;
+    // Rebuild projection — the plan doc has the authoritative presentedScenarioId
+    await buildAndWriteSharedPlanProjection(planId);
   }
 );
