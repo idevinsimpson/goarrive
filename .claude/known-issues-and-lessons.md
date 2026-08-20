@@ -297,3 +297,35 @@ The cost of skipping any of these is one round-trip to a human with a phone — 
 - **Corner case, covered, keep the cover:** the shadow's track can *end* seconds after handoff; the bgplay retry (`attempt` → `ok`) recovered it live.
 
 **Open follow-up (deliberate-policy item, not a bug):** swap-back position reconciliation — returns measured `drift` of 8.7s and 83.9s between audible and shadow; decide whose clock wins and why.
+
+### Explicit Zero Is Data, Not Absence — the Truthiness-Fallback Trap in Pricing Config
+**2026-08-18, found live on a coach call.** `_calculatePricing` chose phase weeks with `(phases[0]?.weeks) ? phases[0].weeks : <default>`. A coach who deliberately set phases to `[0, 0, 13]` (all weeks self-reliant) got the 25/50/25 default silently substituted for the zeros — the engine billed 3 phantom full-guidance weeks and ~7 phantom blend weeks, quoting $421/mo where the true math was $176/mo. The breakdown UI read the zeros correctly, so the itemized rows summed to 5.3h while the total claimed 12.6h — *the display and the engine disagreed about the same document, on screen, during a sales call.*
+
+**Rules that follow:**
+- **Fallbacks gate on absence, never on truthiness.** `hasExplicitPhases ? (phases[i]?.weeks ?? 0) : default` — an explicit 0 is the coach's decision and must survive. Audit any `(x?.field) ? x.field : default` over Firestore-backed config; 0, `''`, and `false` are all valid coach inputs.
+- **Any UI that shows a total next to its parts must carry an invariant test: parts sum to total.** That single assertion (`sum(phaseBreakdown[i].hours) === totalCoachingHours`) would have caught this class at build time; it is now in `payments.test.ts` permanently.
+- **When a display and an engine read the same doc through different code paths, the mismatch IS the bug report.** The fix ships with a test pinning the exact real-world doc shape that exposed it.
+
+### A PR's Diff Against Main Is the Fact; Its Diff Against Its Base Is a Hypothesis
+**2026-08-18, second occurrence of the class (first: #267).** PR #295 branched off main *before* sibling PR #294 merged; both touched `member-plan/[memberId].tsx`. #295's own diff looked perfect, but merging it as-is would have silently deleted #294's entire feature — 95 lines gone with no conflict, because git saw them as "not in this branch's history." Caught pre-merge by grepping the sibling feature's UI marker at the branch head: 0 hits on the branch, 1 on main.
+
+**Rules that follow:**
+- **Before merging any PR, grep the branch head for the marker strings of every feature that merged to main after the branch was cut.** Zero hits on a marker that main has = the merge is a revert in disguise.
+- **Rebase the PR branch onto current main and re-verify both markers coexist; force-push to a PR branch is routine, force-push to main never.**
+- **After rebase, the verification is mechanical and must be posted: sibling marker count, own marker count, tsc, new head hash** — evidence, not assurance.
+
+### Every Production Receipt Names Its Authorizer, With the Link
+**2026-08-18→19.** A production release went out fully authorized — but the authorization lived in a thread segment the PM had stopped reading, and verdict-button taps produce no message visible to API reads. The release later surfaced as an apparent unauthorized deploy; the question closed in ninety seconds *only because the ship receipt happened to record "merged by <account> at <timestamp>."* Without that line it would have been an investigation.
+
+**Rules that follow:**
+- **A ship receipt is not complete without: who authorized (account), when, and the message link to the authorization.** Who executed is not enough.
+- **Authorization-grade button taps get a text echo in-thread** ("✓ Picked: <option> · <time>") — a tap that leaves no message is invisible to every future audit.
+- **One lane, one thread, for anything authorization-grade.** The near-miss here was an authorization landing in lane A while the audit read lane B.
+
+### Agent Infrastructure Dies Silently — Quota and Auth Walls Need Visible States, Auto-Resume, and an Independent Watchdog
+**2026-08-19→20.** A usage-quota wall killed a feature-pass worker five minutes after spawn; the failure monitor and autopsy died on the same wall; meeting-recap summaries silently corrupted (the quota banner shipped as the "summary" text). Quota reset that evening; nothing resumed. The five-minute outage became a ~24-hour stall, discovered only by the next scheduled PM sweep. The restart attempt then died on a second wall — expired OAuth — which no in-band instruction can clear.
+
+**Rules that follow:**
+- **A quota or auth halt posts as a one-line visible state in the affected thread** — "HALT: <cause> — resumes <when> — in flight: <what>" — never as silence or a corrupted artifact.
+- **The first post-reset turn re-reads every active thread's recorded state and resumes without a human nudge.** Specs must therefore live in threads, complete enough that resumption needs zero human context — this is the same discipline that makes worker respawns cheap.
+- **The failure detector must not share the failure domain it watches.** A monitor that spends tokens dies with the agent; the watchdog belongs on the host (cron + heartbeat-file staleness + direct owner alert), independent of the agent's API access, and it should classify the last log lines (quota banner / 401 / crash) so the alert names the fix.
