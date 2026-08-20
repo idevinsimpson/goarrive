@@ -2,11 +2,13 @@
  * Shared Plan — Public-facing plan viewer
  * Accessible at /shared-plan/[memberId]?token=[shareToken]
  *
- * Uses a live onSnapshot subscription to sharedPlanViews/{shareToken} —
+ * With ?token=: live onSnapshot subscription to sharedPlanViews/{shareToken} —
  * the token-keyed projection mirror maintained by Cloud Functions triggers.
- * No authentication required. The unguessable shareToken is the access credential.
+ * No authentication required; the unguessable shareToken is the access credential.
  *
- * Deprecated path (getSharedPlan CF) remains live for legacy links during staging.
+ * Without ?token= (legacy links): one-shot fetch via the getSharedPlan HTTPS
+ * endpoint. Read-only, not live — this path stays around so already-shared
+ * links keep working through the token migration window.
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -19,6 +21,8 @@ import { db } from '../../lib/firebase';
 import { MemberPlanData } from '../../lib/planTypes';
 import { PlanView } from '../(app)/member-plan/[memberId]';
 
+const GET_SHARED_PLAN_URL = 'https://us-central1-goarrive.cloudfunctions.net/getSharedPlan';
+
 export default function SharedPlanScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -28,12 +32,45 @@ export default function SharedPlanScreen() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!token) {
-      setError('This link is missing a required access token. Please ask your coach to re-share your plan.');
+    if (!memberId) {
+      setError('Plan link is missing a member id.');
       setLoading(false);
       return;
     }
 
+    // ── Legacy path: no token → one-shot fetch via getSharedPlan HTTPS CF ──
+    if (!token) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const url = `${GET_SHARED_PLAN_URL}?memberId=${encodeURIComponent(memberId)}`;
+          const resp = await fetch(url);
+          if (cancelled) return;
+          if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            setError(body?.error || 'Plan not found.');
+            setLoading(false);
+            return;
+          }
+          const { plan: fetchedPlan } = await resp.json() as { plan: MemberPlanData };
+          if (!fetchedPlan) {
+            setError('Plan not found.');
+          } else {
+            setPlan(fetchedPlan);
+            setError('');
+          }
+        } catch (err) {
+          if (cancelled) return;
+          console.error('[SharedPlan] getSharedPlan fetch error:', err);
+          setError('Something went wrong loading this plan.');
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
+    // ── Token path: live subscription to sharedPlanViews/{shareToken} ──
     const projRef = doc(db, 'sharedPlanViews', token);
     const unsub = onSnapshot(
       projRef,
@@ -62,7 +99,7 @@ export default function SharedPlanScreen() {
     );
 
     return () => unsub();
-  }, [token]);
+  }, [memberId, token]);
 
   const handleAccept = () => {
     // Member must sign in / claim before accepting.

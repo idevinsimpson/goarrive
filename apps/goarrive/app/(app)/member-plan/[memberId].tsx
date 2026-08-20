@@ -3524,35 +3524,43 @@ export default function MemberPlanScreen() {
     try {
       const key = planKeyRef.current || memberId!;
 
-      // Ensure the plan has a strong shareToken (crypto.randomBytes 18 bytes = 24 chars base64url)
-      let shareToken = plan?.shareToken;
+      // F6: strong token requires Web Crypto. If unavailable, fall through to a
+      // legacy tokenless URL and warn — the getSharedPlan HTTPS fallback still
+      // renders that link. NEVER downgrade to Math.random for a security token.
+      let shareToken: string | undefined = plan?.shareToken;
       if (!shareToken) {
-        // Generate token client-side using Web Crypto API (works in browser + RN)
-        let tokenBytes: Uint8Array;
-        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-          tokenBytes = crypto.getRandomValues(new Uint8Array(18));
+        const webCrypto =
+          typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
+            ? crypto
+            : null;
+        if (webCrypto) {
+          const tokenBytes = webCrypto.getRandomValues(new Uint8Array(18));
+          shareToken = btoa(String.fromCharCode(...tokenBytes))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
         } else {
-          // Fallback (RN non-web): use Math.random — weak but rare fallback path
-          tokenBytes = new Uint8Array(18);
-          for (let i = 0; i < 18; i++) tokenBytes[i] = Math.floor(Math.random() * 256);
+          console.warn('[handleShare] crypto.getRandomValues unavailable — falling back to legacy tokenless URL');
+          shareToken = undefined;
         }
-        // base64url encode
-        shareToken = btoa(String.fromCharCode(...tokenBytes))
-          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
       }
 
-      const url = `https://goarrive.web.app/shared-plan/${memberId}?token=${shareToken}`;
+      // F7: use current origin on web so a coach on staging shares a staging
+      // link (not prod). Native has no window; prod domain is the only sane
+      // default there.
+      const shareBase =
+        Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'https://goarrive.web.app';
+      const url = shareToken
+        ? `${shareBase}/shared-plan/${memberId}?token=${shareToken}`
+        : `${shareBase}/shared-plan/${memberId}`;
 
-      // Write presentedScenarioId + shareToken atomically before sharing
+      // Write presentedScenarioId (and shareToken when we have one) before sharing
       try {
-        await setDoc(
-          doc(db, 'member_plans', key),
-          {
-            presentedScenarioId: selectedScenarioIdRef.current ?? null,
-            shareToken,
-          },
-          { merge: true }
-        );
+        const planUpdate: Record<string, unknown> = {
+          presentedScenarioId: selectedScenarioIdRef.current ?? null,
+        };
+        if (shareToken) planUpdate.shareToken = shareToken;
+        await setDoc(doc(db, 'member_plans', key), planUpdate, { merge: true });
       } catch (e) {
         console.warn('[handleShare] Could not set presentedScenarioId/shareToken:', e);
       }

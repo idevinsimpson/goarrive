@@ -197,6 +197,78 @@ describe('accept-freeze: createCheckoutSession scenario snapshot', () => {
     expect(snapshot.hourlyRate).toBe(100);
   });
 
+  // ─── F1 (money bug) regression: price sanity check must derive from
+  // effective plan (base + scenario overlay), NOT base plan alone. Otherwise
+  // any scenario that moves monthly price by more than $10 gets falsely
+  // rejected by the createCheckoutSession price-mismatch guard. This suite
+  // exercises the same guard shape the CF uses (Math.abs(client - server) > 10)
+  // against a scenario that changes hourly rate by $50 — well past $10 monthly
+  // once multiplied by sessions/month.
+
+  function computeServerMonthly(planLike: {
+    sessionsPerWeek: number;
+    hourlyRate: number;
+    sessionLengthMinutes: number;
+  }): number {
+    const sessionsPerMonth = Math.round(planLike.sessionsPerWeek * (52 / 12));
+    return Math.round(planLike.hourlyRate * (planLike.sessionLengthMinutes / 60) * sessionsPerMonth);
+  }
+
+  function priceSanityCheck(displayed: number, server: number): 'ok' | 'reject' {
+    return Math.abs(displayed - server) > 10 ? 'reject' : 'ok';
+  }
+
+  it('F1 pre-fix: base-plan sanity check REJECTS a scenario with >$10 monthly delta', () => {
+    // Setup: scenario X changes hourlyRate from $100 → $150 (+$50/hr).
+    // 3 sessions/week × 52/12 ≈ 13/month × 1hr → base $1300/mo, scenario $1950/mo.
+    firestoreState.plans[planId].acceptedScenarioId = scenarioId;
+    firestoreState.scenarios[planId][scenarioId].hourlyRate = 150;
+
+    const basePlan = firestoreState.plans[planId];
+    const scenario = firestoreState.scenarios[planId][scenarioId];
+
+    // Client renders scenario-based price (what the member saw in the share view)
+    const clientDisplayedMonthly = computeServerMonthly({
+      sessionsPerWeek: basePlan.sessionsPerWeek,
+      hourlyRate: scenario.hourlyRate,
+      sessionLengthMinutes: scenario.sessionLengthMinutes,
+    });
+
+    // Pre-fix CF: server computes from BASE plan only (F1 bug)
+    const serverMonthlyPreFix = computeServerMonthly({
+      sessionsPerWeek: basePlan.sessionsPerWeek,
+      hourlyRate: basePlan.hourlyRate,
+      sessionLengthMinutes: basePlan.sessionLengthMinutes,
+    });
+
+    expect(Math.abs(clientDisplayedMonthly - serverMonthlyPreFix)).toBeGreaterThan(10);
+    expect(priceSanityCheck(clientDisplayedMonthly, serverMonthlyPreFix)).toBe('reject');
+  });
+
+  it('F1 post-fix: effective-plan sanity check ACCEPTS the same scenario', () => {
+    firestoreState.plans[planId].acceptedScenarioId = scenarioId;
+    firestoreState.scenarios[planId][scenarioId].hourlyRate = 150;
+
+    const basePlan = firestoreState.plans[planId];
+    const scenario = firestoreState.scenarios[planId][scenarioId];
+    const effectivePlan = { ...basePlan, ...scenario };
+
+    const clientDisplayedMonthly = computeServerMonthly({
+      sessionsPerWeek: effectivePlan.sessionsPerWeek,
+      hourlyRate: effectivePlan.hourlyRate,
+      sessionLengthMinutes: effectivePlan.sessionLengthMinutes,
+    });
+
+    // Post-fix CF: server computes from EFFECTIVE plan (base + scenario overlay)
+    const serverMonthlyPostFix = computeServerMonthly({
+      sessionsPerWeek: effectivePlan.sessionsPerWeek,
+      hourlyRate: effectivePlan.hourlyRate,
+      sessionLengthMinutes: effectivePlan.sessionLengthMinutes,
+    });
+
+    expect(priceSanityCheck(clientDisplayedMonthly, serverMonthlyPostFix)).toBe('ok');
+  });
+
   it('handleAcceptPlan writes acceptedScenarioId BEFORE routing', async () => {
     // Verify the client-side contract: the write must complete before navigation.
     // Simulated by checking write order using resolved promises.
