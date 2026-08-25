@@ -233,6 +233,8 @@ service cloud.firestore {
                  || (resource != null && (
                       isOwnDoc(resource.data.memberId)
                       || isCoachOrBootstrap(resource.data.coachId)
+                      // Unauth: allow read of publicly-presented plans (shared-plan page)
+                      || resource.data.status in ['presented', 'accepted', 'active']
                     ));
       // list: Firestore enforces that the query must filter by coachId or memberId
       // matching the caller, preventing unscoped cross-tenant queries.
@@ -257,9 +259,12 @@ service cloud.firestore {
       // Coach full CRUD
       allow create: if isCoachOrBootstrap(request.resource.data.coachId);
       allow update, delete: if resource != null && isCoachOrBootstrap(resource.data.coachId);
-      // Coach read (all scenarios) OR member read (only the presented one)
+      // Coach read (all scenarios), member read (only the presented one), or
+      // unauth read when this is the presented scenario of a publicly-visible plan.
+      // get() in rules uses admin access so this covers unauthenticated callers too.
       allow read: if (resource != null && isCoachOrBootstrap(resource.data.coachId))
-                  || get(/databases/$(database)/documents/member_plans/$(planId)).data.presentedScenarioId == scenarioId;
+                  || (get(/databases/$(database)/documents/member_plans/$(planId)).data.status in ['presented', 'accepted', 'active']
+                      && get(/databases/$(database)/documents/member_plans/$(planId)).data.presentedScenarioId == scenarioId);
     }
 
     // ─────────────────────────────────────────────

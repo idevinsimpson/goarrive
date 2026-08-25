@@ -1,27 +1,31 @@
 /**
  * Shared Plan — Public-facing read-only plan viewer
  * Accessible at /shared-plan/[memberId]
- * Bypasses member dashboard and shows the plan directly.
- * Uses the getSharedPlan Cloud Function to fetch plan data
- * so unauthenticated visitors can view shared plans.
- * Only shows plans with status 'presented', 'accepted', or 'active'.
+ * Live Firestore onSnapshot subscription (no auth required) replaces the
+ * one-shot getSharedPlan CF fetch. Doc key: member_plans/{memberId} (primary)
+ * with plan_{memberId} and memberId-field-query fallbacks matching CF logic.
+ * When presentedScenarioId is set, a nested snapshot overlays the scenario.
+ * Firestore rules allow unauth read when plan.status in [presented/accepted/active].
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
   Platform, Pressable, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
+import {
+  doc, getDoc, onSnapshot, DocumentData,
+} from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { db } from '../../lib/firebase';
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
   formatCurrency, calculatePricing, monthsToWeeks, PricingResult,
   getGoalEmoji, getGoalColor, PostContract,
 } from '../../lib/planTypes';
 
-// Cloud Function URL for fetching shared plan data (no auth required)
-const GET_SHARED_PLAN_URL = 'https://us-central1-goarrive.cloudfunctions.net/getSharedPlan';
+const ALLOWED_STATUSES = ['presented', 'accepted', 'active'];
 
 // ─── Helpers to normalize old/new field names ───────────────────────────────
 
@@ -83,35 +87,114 @@ export default function SharedPlanScreen() {
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [localPlan, setLocalPlan] = useState<MemberPlanData | null>(null);
 
+  // Track the resolved Firestore doc ID and the current presented scenario subscription
+  const resolvedPlanIdRef = useRef<string>('');
+  const scenarioUnsubRef = useRef<(() => void) | null>(null);
+  // Track last basePlan separately so scenario overlay can re-merge on base changes
+  const basePlanRef = useRef<MemberPlanData | null>(null);
+
   useEffect(() => {
     if (!memberId) return;
-    fetchPlanViaCloudFunction();
+    let planUnsub: (() => void) | null = null;
+
+    async function startSubscription() {
+      const id = memberId as string;
+
+      // Resolve the actual Firestore doc ID (mirrors getSharedPlan CF logic).
+      // member_plans/{memberId} is the primary key; fall back to plan_{memberId}.
+      // The collection-query fallback requires authentication so it is skipped here —
+      // unauthenticated viewers always reach the plan via the primary or legacy key.
+      let resolvedId = id;
+      const primarySnap = await getDoc(doc(db, 'member_plans', id));
+      if (!primarySnap.exists()) {
+        const legacySnap = await getDoc(doc(db, 'member_plans', `plan_${id}`));
+        if (legacySnap.exists()) {
+          resolvedId = `plan_${id}`;
+        }
+        // If neither exists, onSnapshot below will surface "not found" gracefully.
+      }
+      resolvedPlanIdRef.current = resolvedId;
+
+      // Subscribe to the base plan doc
+      planUnsub = onSnapshot(
+        doc(db, 'member_plans', resolvedId),
+        (snap) => {
+          if (!snap.exists()) {
+            setError('No plan found for this member.');
+            setLoading(false);
+            return;
+          }
+          const data = { id: snap.id, ...snap.data() } as MemberPlanData;
+
+          if (!ALLOWED_STATUSES.includes(data.status || '')) {
+            // Plan was reverted out of a visible status
+            setError('This plan is no longer available.');
+            setPlan(null);
+            setLoading(false);
+            // Tear down any active scenario sub
+            if (scenarioUnsubRef.current) { scenarioUnsubRef.current(); scenarioUnsubRef.current = null; }
+            return;
+          }
+
+          basePlanRef.current = data;
+          setError('');
+
+          const newPresentedId = data.presentedScenarioId ?? null;
+
+          // Set up (or replace) scenario subscription when presentedScenarioId is set
+          if (newPresentedId) {
+            if (scenarioUnsubRef.current) { scenarioUnsubRef.current(); scenarioUnsubRef.current = null; }
+            scenarioUnsubRef.current = onSnapshot(
+              doc(db, 'member_plans', resolvedId, 'scenarios', newPresentedId),
+              (scenSnap) => {
+                const base = basePlanRef.current;
+                if (!base) return;
+                if (scenSnap.exists()) {
+                  // Scenario wins for all content fields; preserve identity fields from base
+                  const scenData = scenSnap.data() as DocumentData;
+                  setPlan({ ...base, ...scenData, id: base.id, memberId: base.memberId, presentedScenarioId: base.presentedScenarioId } as MemberPlanData);
+                } else {
+                  setPlan(base);
+                }
+                setLoading(false);
+              },
+              (err) => {
+                console.warn('[SharedPlan] Scenario snapshot error, falling back to base plan:', err);
+                if (basePlanRef.current) setPlan(basePlanRef.current);
+                setLoading(false);
+              }
+            );
+          } else {
+            // No scenario presented — tear down old scenario sub, show base plan
+            if (scenarioUnsubRef.current) { scenarioUnsubRef.current(); scenarioUnsubRef.current = null; }
+            setPlan(data);
+            setLoading(false);
+          }
+        },
+        (err) => {
+          console.error('[SharedPlan] Plan snapshot error:', err);
+          setError('Something went wrong loading this plan.');
+          setLoading(false);
+        }
+      );
+    }
+
+    startSubscription().catch((err) => {
+      console.error('[SharedPlan] Error resolving plan doc:', err);
+      setError('Something went wrong loading this plan.');
+      setLoading(false);
+    });
+
+    return () => {
+      if (planUnsub) planUnsub();
+      if (scenarioUnsubRef.current) { scenarioUnsubRef.current(); scenarioUnsubRef.current = null; }
+    };
   }, [memberId]);
 
-  async function fetchPlanViaCloudFunction() {
-    try {
-      const url = `${GET_SHARED_PLAN_URL}?memberId=${encodeURIComponent(memberId as string)}`;
-      const resp = await fetch(url);
-      const json = await resp.json();
-
-      if (!resp.ok) {
-        setError(json.error || 'Something went wrong loading this plan.');
-        return;
-      }
-
-      const planData = json.plan as MemberPlanData;
-      if (planData) {
-        setPlan(planData);
-      } else {
-        setError('No plan found for this member.');
-      }
-    } catch (err) {
-      console.error('[SharedPlan] Error fetching plan via CF:', err);
-      setError('Something went wrong loading this plan.');
-    } finally {
-      setLoading(false);
-    }
-  }
+  // Clear local interactive toggles when the coach swaps to a different scenario
+  useEffect(() => {
+    setLocalPlan(null);
+  }, [plan?.presentedScenarioId]);
 
   if (loading) {
     return (
@@ -157,7 +240,7 @@ export default function SharedPlanScreen() {
   };
 
   return (
-    <View style={st.root}>
+    <View style={[st.root, Platform.OS === 'web' && ({ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' } as any)]}>
       {/* Header bar */}
       <View style={[st.planBar, { paddingTop: Math.max(8, insets.top) }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -172,7 +255,7 @@ export default function SharedPlanScreen() {
         </View>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60, minHeight: '100%' as any }}>
         {/* Hero */}
         <View style={{ marginTop: 20, marginBottom: 16 }}>
           {plan.identityTag ? (

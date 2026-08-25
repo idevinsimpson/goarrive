@@ -3532,7 +3532,14 @@ export default function MemberPlanScreen() {
                   />
                 ) : (
                   <Pressable
-                    onPress={() => setSelectedScenarioId(null)}
+                    onPress={() => {
+                      setSelectedScenarioId(null);
+                      // When plan is presented/active, write presentedScenarioId=null so
+                      // the prospect's live view instantly mirrors the base plan (Option A).
+                      if (plan && ['presented', 'accepted', 'active'].includes(plan.status || '')) {
+                        handlePlanChange({ presentedScenarioId: null });
+                      }
+                    }}
                     onLongPress={() => { setRenamingScenarioId('base'); setRenameText('Plan 1'); }}
                     style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: selectedScenarioId === null ? ACCENT : '#1A2035', borderWidth: 1, borderColor: selectedScenarioId === null ? ACCENT : BORDER }}
                   >
@@ -3556,7 +3563,14 @@ export default function MemberPlanScreen() {
                       />
                     ) : (
                       <Pressable
-                        onPress={() => setSelectedScenarioId(scenario.id)}
+                        onPress={() => {
+                          setSelectedScenarioId(scenario.id);
+                          // When plan is presented/active, write presentedScenarioId so
+                          // the prospect's live view instantly mirrors the selected tab (Option A).
+                          if (plan && ['presented', 'accepted', 'active'].includes(plan.status || '')) {
+                            handlePlanChange({ presentedScenarioId: scenario.id });
+                          }
+                        }}
                         onLongPress={() => { setRenamingScenarioId(scenario.id); setRenameText(scenario.name); }}
                         style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: selectedScenarioId === scenario.id ? PRIMARY : '#1A2035', borderWidth: 1, borderColor: selectedScenarioId === scenario.id ? PRIMARY : BORDER }}
                       >
