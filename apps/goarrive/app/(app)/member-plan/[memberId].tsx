@@ -3376,7 +3376,10 @@ export default function MemberPlanScreen() {
   // NOTE: intentionally no cleanup that clears saveTimer on unmount —
   // if the timer fires after unmount the setDoc still resolves; clearing it would drop the last edit.
 
-  // Switch the active scenario tab — updates plan state to scenario or base plan data
+  // Switch the active scenario tab — updates plan state to scenario or base plan data.
+  // When the plan is already presented/accepted/active, also write presentedScenarioId
+  // to the base plan doc so the sharedPlanViews mirror projects the new selection to
+  // the prospect within ~1s — instant tab-swap during a live call, no re-hitting Present.
   const selectScenarioTab = useCallback((scenId: string | null) => {
     setSelectedScenarioId(scenId);
     selectedScenarioIdRef.current = scenId;
@@ -3391,6 +3394,12 @@ export default function MemberPlanScreen() {
         }
         return prev;
       });
+    }
+    const currentStatus = basePlanRef.current?.status;
+    const key = planKeyRef.current;
+    if (key && (currentStatus === 'presented' || currentStatus === 'accepted' || currentStatus === 'active')) {
+      setDoc(doc(db, 'member_plans', key), { presentedScenarioId: scenId }, { merge: true })
+        .catch((e) => console.warn('[selectScenarioTab] presentedScenarioId write failed:', e));
     }
   }, []);
 

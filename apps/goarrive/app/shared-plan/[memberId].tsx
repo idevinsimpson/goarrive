@@ -12,7 +12,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, Platform,
+  View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -133,12 +133,14 @@ export default function SharedPlanScreen() {
 
   return (
     <View style={st.root}>
-      <PlanView
-        plan={plan}
-        isCoach={false}
-        onChange={() => {}}
-        onAccept={handleAccept}
-      />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
+        <PlanView
+          plan={plan}
+          isCoach={false}
+          onChange={() => {}}
+          onAccept={handleAccept}
+        />
+      </ScrollView>
     </View>
   );
 }
