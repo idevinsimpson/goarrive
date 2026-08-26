@@ -3046,6 +3046,17 @@ function QRowEdit({ label, value, onEdit }: { label: string; value?: string | nu
 // MAIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Personal fields describe the member, not the plan variant — they must stay identical
+// across the base plan and every scenario. Edits to any of these keys fan out to base +
+// all sibling scenarios so a coach who tweaks the member's name/goals/why in scenario B
+// sees the same values in scenario A and the base plan.
+const PERSONAL_FIELDS = new Set<string>([
+  'memberName', 'memberAge', 'identityTag', 'planSubtitle', 'referredBy',
+  'startingPoints', 'startingPointIntro',
+  'goals', 'goalEmojis', 'currentWeight', 'goalWeight', 'goalWeightAutoSuggested', 'goalSummary',
+  'whyStatement', 'whyTranslation', 'readiness', 'motivation', 'gymConfidence',
+]);
+
 export default function MemberPlanScreen() {
   const insets = useSafeAreaInsets();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
@@ -3071,6 +3082,7 @@ export default function MemberPlanScreen() {
 
   // Scenario state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const scenariosRef = useRef<Scenario[]>([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const selectedScenarioIdRef = useRef<string | null>(null);
   const basePlanRef = useRef<MemberPlanData | null>(null);
@@ -3078,8 +3090,9 @@ export default function MemberPlanScreen() {
   const [renamingScenarioId, setRenamingScenarioId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
 
-  // Keep ref in sync with state so handlePlanChange can read it without stale closure
+  // Keep refs in sync with state so handlePlanChange can read them without stale closure
   useEffect(() => { selectedScenarioIdRef.current = selectedScenarioId; }, [selectedScenarioId]);
+  useEffect(() => { scenariosRef.current = scenarios; }, [scenarios]);
 
   // Load data
   useEffect(() => {
@@ -3332,6 +3345,30 @@ export default function MemberPlanScreen() {
           } else {
             await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
           }
+
+          // Fan out personal-field edits to every OTHER target (base + sibling scenarios).
+          // Only sends the whitelisted keys so we never overwrite a sibling's weekly plan/pricing.
+          const personalUpdates: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(updates)) {
+            if (PERSONAL_FIELDS.has(k)) personalUpdates[k] = v;
+          }
+          if (Object.keys(personalUpdates).length > 0) {
+            const personalPayload = sanitizeForFirestore({ ...personalUpdates, updatedAt: serverTimestamp() });
+            const fanTargets: Promise<void>[] = [];
+            if (scenIdAtEdit) {
+              // Editing a scenario → also update the base plan doc
+              fanTargets.push(setDoc(doc(db, 'member_plans', key), personalPayload, { merge: true }));
+            }
+            for (const sib of scenariosRef.current) {
+              if (sib.id === scenIdAtEdit) continue; // active target already written above
+              fanTargets.push(setDoc(doc(db, 'member_plans', key, 'scenarios', sib.id), personalPayload, { merge: true }));
+            }
+            try {
+              await Promise.all(fanTargets);
+            } catch (fanErr) {
+              console.warn('[personal-fields sync] fan-out write failed:', fanErr);
+            }
+          }
           setSaveStatus('saved');
           if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
           saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
@@ -3363,11 +3400,26 @@ export default function MemberPlanScreen() {
           }
         }
       }, 800);
-      // Keep local caches fresh so tab switches don't show stale pre-edit values
+      // Keep local caches fresh so tab switches don't show stale pre-edit values.
+      // Personal-field edits fan out to base + every sibling scenario so tab-swap is instant.
+      const personalOnly: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(updates)) {
+        if (PERSONAL_FIELDS.has(k)) personalOnly[k] = v;
+      }
+      const hasPersonal = Object.keys(personalOnly).length > 0;
       if (!scenIdAtEdit) {
         basePlanRef.current = updated;
+        if (hasPersonal) {
+          setScenarios(sPrev => sPrev.map(s => ({ ...s, ...personalOnly } as Scenario)));
+        }
       } else {
-        setScenarios(sPrev => sPrev.map(s => s.id === scenIdAtEdit ? ({ ...s, ...updates } as Scenario) : s));
+        if (hasPersonal && basePlanRef.current) {
+          basePlanRef.current = { ...basePlanRef.current, ...personalOnly } as MemberPlanData;
+        }
+        setScenarios(sPrev => sPrev.map(s => {
+          if (s.id === scenIdAtEdit) return { ...s, ...updates } as Scenario;
+          return hasPersonal ? ({ ...s, ...personalOnly } as Scenario) : s;
+        }));
       }
       return updated;
     });
