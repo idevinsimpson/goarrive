@@ -3046,6 +3046,17 @@ function QRowEdit({ label, value, onEdit }: { label: string; value?: string | nu
 // MAIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Personal fields describe the member, not the plan variant — they must stay identical
+// across the base plan and every scenario. Edits to any of these keys fan out to base +
+// all sibling scenarios so a coach who tweaks the member's name/goals/why in scenario B
+// sees the same values in scenario A and the base plan.
+const PERSONAL_FIELDS = new Set<string>([
+  'memberName', 'memberAge', 'identityTag', 'planSubtitle', 'referredBy',
+  'startingPoints', 'startingPointIntro',
+  'goals', 'goalEmojis', 'currentWeight', 'goalWeight', 'goalWeightAutoSuggested', 'goalSummary',
+  'whyStatement', 'whyTranslation', 'readiness', 'motivation', 'gymConfidence',
+]);
+
 export default function MemberPlanScreen() {
   const insets = useSafeAreaInsets();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
@@ -3071,6 +3082,7 @@ export default function MemberPlanScreen() {
 
   // Scenario state
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const scenariosRef = useRef<Scenario[]>([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const selectedScenarioIdRef = useRef<string | null>(null);
   const basePlanRef = useRef<MemberPlanData | null>(null);
@@ -3078,8 +3090,9 @@ export default function MemberPlanScreen() {
   const [renamingScenarioId, setRenamingScenarioId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
 
-  // Keep ref in sync with state so handlePlanChange can read it without stale closure
+  // Keep refs in sync with state so handlePlanChange can read them without stale closure
   useEffect(() => { selectedScenarioIdRef.current = selectedScenarioId; }, [selectedScenarioId]);
+  useEffect(() => { scenariosRef.current = scenarios; }, [scenarios]);
 
   // Load data
   useEffect(() => {
@@ -3332,6 +3345,30 @@ export default function MemberPlanScreen() {
           } else {
             await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
           }
+
+          // Fan out personal-field edits to every OTHER target (base + sibling scenarios).
+          // Only sends the whitelisted keys so we never overwrite a sibling's weekly plan/pricing.
+          const personalUpdates: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(updates)) {
+            if (PERSONAL_FIELDS.has(k)) personalUpdates[k] = v;
+          }
+          if (Object.keys(personalUpdates).length > 0) {
+            const personalPayload = sanitizeForFirestore({ ...personalUpdates, updatedAt: serverTimestamp() });
+            const fanTargets: Promise<void>[] = [];
+            if (scenIdAtEdit) {
+              // Editing a scenario → also update the base plan doc
+              fanTargets.push(setDoc(doc(db, 'member_plans', key), personalPayload, { merge: true }));
+            }
+            for (const sib of scenariosRef.current) {
+              if (sib.id === scenIdAtEdit) continue; // active target already written above
+              fanTargets.push(setDoc(doc(db, 'member_plans', key, 'scenarios', sib.id), personalPayload, { merge: true }));
+            }
+            try {
+              await Promise.all(fanTargets);
+            } catch (fanErr) {
+              console.warn('[personal-fields sync] fan-out write failed:', fanErr);
+            }
+          }
           setSaveStatus('saved');
           if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
           saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
@@ -3363,11 +3400,26 @@ export default function MemberPlanScreen() {
           }
         }
       }, 800);
-      // Keep local caches fresh so tab switches don't show stale pre-edit values
+      // Keep local caches fresh so tab switches don't show stale pre-edit values.
+      // Personal-field edits fan out to base + every sibling scenario so tab-swap is instant.
+      const personalOnly: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(updates)) {
+        if (PERSONAL_FIELDS.has(k)) personalOnly[k] = v;
+      }
+      const hasPersonal = Object.keys(personalOnly).length > 0;
       if (!scenIdAtEdit) {
         basePlanRef.current = updated;
+        if (hasPersonal) {
+          setScenarios(sPrev => sPrev.map(s => ({ ...s, ...personalOnly } as Scenario)));
+        }
       } else {
-        setScenarios(sPrev => sPrev.map(s => s.id === scenIdAtEdit ? ({ ...s, ...updates } as Scenario) : s));
+        if (hasPersonal && basePlanRef.current) {
+          basePlanRef.current = { ...basePlanRef.current, ...personalOnly } as MemberPlanData;
+        }
+        setScenarios(sPrev => sPrev.map(s => {
+          if (s.id === scenIdAtEdit) return { ...s, ...updates } as Scenario;
+          return hasPersonal ? ({ ...s, ...personalOnly } as Scenario) : s;
+        }));
       }
       return updated;
     });
@@ -3376,7 +3428,10 @@ export default function MemberPlanScreen() {
   // NOTE: intentionally no cleanup that clears saveTimer on unmount —
   // if the timer fires after unmount the setDoc still resolves; clearing it would drop the last edit.
 
-  // Switch the active scenario tab — updates plan state to scenario or base plan data
+  // Switch the active scenario tab — updates plan state to scenario or base plan data.
+  // When the plan is already presented/accepted/active, also write presentedScenarioId
+  // to the base plan doc so the sharedPlanViews mirror projects the new selection to
+  // the prospect within ~1s — instant tab-swap during a live call, no re-hitting Present.
   const selectScenarioTab = useCallback((scenId: string | null) => {
     setSelectedScenarioId(scenId);
     selectedScenarioIdRef.current = scenId;
@@ -3391,6 +3446,12 @@ export default function MemberPlanScreen() {
         }
         return prev;
       });
+    }
+    const currentStatus = basePlanRef.current?.status;
+    const key = planKeyRef.current;
+    if (key && (currentStatus === 'presented' || currentStatus === 'accepted' || currentStatus === 'active')) {
+      setDoc(doc(db, 'member_plans', key), { presentedScenarioId: scenId }, { merge: true })
+        .catch((e) => console.warn('[selectScenarioTab] presentedScenarioId write failed:', e));
     }
   }, []);
 
@@ -3521,18 +3582,48 @@ export default function MemberPlanScreen() {
   };
 
   const handleShare = async () => {
-    const url = `https://goarrive.web.app/shared-plan/${memberId}`;
     try {
-      // Bind the presented scenario to the base plan doc before sharing
       const key = planKeyRef.current || memberId!;
+
+      // F6: strong token requires Web Crypto. If unavailable, fall through to a
+      // legacy tokenless URL and warn — the getSharedPlan HTTPS fallback still
+      // renders that link. NEVER downgrade to Math.random for a security token.
+      let shareToken: string | undefined = plan?.shareToken;
+      if (!shareToken) {
+        const webCrypto =
+          typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
+            ? crypto
+            : null;
+        if (webCrypto) {
+          const tokenBytes = webCrypto.getRandomValues(new Uint8Array(18));
+          shareToken = btoa(String.fromCharCode(...tokenBytes))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        } else {
+          console.warn('[handleShare] crypto.getRandomValues unavailable — falling back to legacy tokenless URL');
+          shareToken = undefined;
+        }
+      }
+
+      // F7: use current origin on web so a coach on staging shares a staging
+      // link (not prod). Native has no window; prod domain is the only sane
+      // default there.
+      const shareBase =
+        Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'https://goarrive.web.app';
+      const url = shareToken
+        ? `${shareBase}/shared-plan/${memberId}?token=${shareToken}`
+        : `${shareBase}/shared-plan/${memberId}`;
+
+      // Write presentedScenarioId (and shareToken when we have one) before sharing
       try {
-        await setDoc(
-          doc(db, 'member_plans', key),
-          { presentedScenarioId: selectedScenarioIdRef.current ?? null },
-          { merge: true }
-        );
+        const planUpdate: Record<string, unknown> = {
+          presentedScenarioId: selectedScenarioIdRef.current ?? null,
+        };
+        if (shareToken) planUpdate.shareToken = shareToken;
+        await setDoc(doc(db, 'member_plans', key), planUpdate, { merge: true });
       } catch (e) {
-        console.warn('[handleShare] Could not set presentedScenarioId:', e);
+        console.warn('[handleShare] Could not set presentedScenarioId/shareToken:', e);
       }
       // Auto-set status to 'presented' when sharing if still draft
       if (plan && (!plan.status || plan.status === 'draft')) {

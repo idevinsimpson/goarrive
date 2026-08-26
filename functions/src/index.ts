@@ -57,7 +57,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as admin from 'firebase-admin';
-import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
@@ -647,16 +647,35 @@ export const createCheckoutSession = onCall(
       throw new HttpsError('failed-precondition', 'Your coach is still setting up payments. Please contact them directly.');
     }
 
-    // ── Compute pricing ──
-    const sessionsPerWeek = (plan.sessionsPerWeek as number) || 3;
+    // ── Resolve effective plan (base + acceptedScenario overlay) ──
+    // The member sees the presented/accepted scenario in the share view; they
+    // accept the SCENARIO, not the base plan. Pricing, contract, and any
+    // scenario-overridable field must derive from the effective (overlaid)
+    // content — otherwise the client-vs-server sanity check below wrongly
+    // rejects any scenario that moves the number by more than $10 (F1: money bug).
+    const acceptedScenarioId = (plan.acceptedScenarioId as string | null | undefined) ?? null;
+    let effectivePlan: FirebaseFirestore.DocumentData = plan;
+    if (acceptedScenarioId) {
+      try {
+        const scenSnap = await db.collection('member_plans').doc(planId).collection('scenarios').doc(acceptedScenarioId).get();
+        if (scenSnap.exists) {
+          effectivePlan = { ...plan, ...scenSnap.data() };
+        }
+      } catch (err) {
+        console.warn('[createCheckoutSession] Could not load acceptedScenario for effective pricing, using base plan:', err);
+      }
+    }
+
+    // ── Compute pricing (all reads via effectivePlan) ──
+    const sessionsPerWeek = (effectivePlan.sessionsPerWeek as number) || 3;
     const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
-    const contractMonths = (plan.contractMonths as number) || 12;
+    const contractMonths = (effectivePlan.contractMonths as number) || 12;
 
     // Initial monthly — ?? (not ||) so an explicitly zeroed rate survives ($0/free plans)
-    const hourlyRate = (plan.hourlyRate as number) ?? 100;
-    const sessionLengthMinutes = (plan.sessionLengthMinutes as number) ?? 60;
-    const checkInCallMinutes = (plan.checkInCallMinutes as number) ?? 30;
-    const programBuildTimeHours = (plan.programBuildTimeHours as number) ?? 5;
+    const hourlyRate = (effectivePlan.hourlyRate as number) ?? 100;
+    const sessionLengthMinutes = (effectivePlan.sessionLengthMinutes as number) ?? 60;
+    const checkInCallMinutes = (effectivePlan.checkInCallMinutes as number) ?? 30;
+    const programBuildTimeHours = (effectivePlan.programBuildTimeHours as number) ?? 5;
 
     // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
     // The frontend's calculatePricing() already applies CTS, nutrition, manual
@@ -668,20 +687,20 @@ export const createCheckoutSession = onCall(
 
     // Server-side fallback calculation (used for validation & snapshot)
     const serverBaseMonthly = Math.round(
-      plan.pricingResult?.displayMonthlyPrice ??
-      plan.monthlyPriceOverride ??
-      plan.pricingResult?.calculatedMonthlyPrice ??
+      effectivePlan.pricingResult?.displayMonthlyPrice ??
+      effectivePlan.monthlyPriceOverride ??
+      effectivePlan.pricingResult?.calculatedMonthlyPrice ??
       (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth)
     );
     const ctsMonthlySavings = ctsActive
-      ? ((plan.commitToSave?.monthlySavings as number) ?? (plan.commitToSaveMonthlySavings as number) ?? 100)
+      ? ((effectivePlan.commitToSave?.monthlySavings as number) ?? (effectivePlan.commitToSaveMonthlySavings as number) ?? 100)
       : 0;
     const nutritionMonthlyCost = nutActive
-      ? ((plan.nutrition?.monthlyCost as number) ?? (plan.nutritionMonthlyCost as number) ?? 100)
+      ? ((effectivePlan.nutrition?.monthlyCost as number) ?? (effectivePlan.nutritionMonthlyCost as number) ?? 100)
       : 0;
     // Clamp at 0: CTS savings on a $0/free plan must never produce a negative price
     const serverMonthly = Math.max(0, serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost);
-    const payInFullDiscountPct = (plan.payInFullDiscountPercent as number) ?? 10;
+    const payInFullDiscountPct = (effectivePlan.payInFullDiscountPercent as number) ?? 10;
     const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
 
     // Use client-sent prices when available; fall back to server calculation.
@@ -716,8 +735,8 @@ export const createCheckoutSession = onCall(
 
     const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
 
-    // Continuation monthly
-    const cp = plan.continuationPricing as any;
+    // Continuation monthly (also from effectivePlan — scenario may override)
+    const cp = effectivePlan.continuationPricing as any;
     const contHr = cp?.continuationHourlyRate ?? hourlyRate;
     const contMin = cp?.continuationMinutesPerSession ?? 3.5;
     const contCheckIn = cp?.continuationCheckInMinutesPerMonth ?? 30;
@@ -735,6 +754,9 @@ export const createCheckoutSession = onCall(
     const applicationFeePercent = tierSplit;
 
     // ── Create acceptedPlanSnapshot ──
+    // acceptedScenarioId + effectivePlan were already resolved above (F1 fix).
+    // Reuse them here; the snapshot must reflect the same effective content used
+    // for pricing, or the snapshot and Stripe charges diverge.
     const snapshotRef = db.collection('acceptedPlanSnapshots').doc();
     const snapshotId = snapshotRef.id;
     const now = Timestamp.now();
@@ -747,6 +769,7 @@ export const createCheckoutSession = onCall(
       planId,
       memberId,
       coachId,
+      scenarioId: acceptedScenarioId,
       snapshotAt: now,
       contractLengthMonths: contractMonths,
       hourlyRate,
@@ -767,9 +790,9 @@ export const createCheckoutSession = onCall(
       baseMonthlyPrice: serverBaseMonthly,
       billingInterval,
       ctsActive,
-      ctsMonthlySavings: ctsActive ? ctsMonthlySavings : (plan.postContract?.ctsMonthlySavings ?? null),
+      ctsMonthlySavings: ctsActive ? ctsMonthlySavings : (effectivePlan.postContract?.ctsMonthlySavings ?? null),
       ctsMissedSessionFee: ctsActive
-        ? ((plan.commitToSave?.missedSessionFee as number) ?? (plan.commitToSaveMissedSessionFee as number) ?? 50)
+        ? ((effectivePlan.commitToSave?.missedSessionFee as number) ?? (effectivePlan.commitToSaveMissedSessionFee as number) ?? 50)
         : null,
       nutActive,
       nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
@@ -13082,5 +13105,137 @@ export const generateMusicVolumeVariants = onCall(
     } finally {
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
+  }
+);
+
+// ─── Plan projection mirror — sharedPlanViews ───────────────────────────────
+// Maintains sharedPlanViews/{shareToken} as a token-keyed projection of the
+// presented plan content (base plan overlaid with presentedScenario if set).
+// Only content fields visible to members at isCoach=false are projected.
+// Billing/lifecycle fields and coach-private data are excluded.
+//
+// F3 (privacy by construction): explicit ALLOWLIST derived from the
+// SharedPlanView interface in apps/goarrive/lib/planTypes.ts. New plan fields
+// default to hidden — coach-private / billing state cannot leak unless someone
+// explicitly adds the key here AND updates SharedPlanView.
+const PROJECTED_ALLOWED_FIELDS: readonly string[] = [
+  // Identity
+  'memberId', 'coachId', 'planId', 'status',
+  // Hero
+  'memberName', 'memberAge', 'subtitle', 'planSubtitle', 'identityTag', 'referredBy',
+  // Goals & why
+  'goals', 'goalEmojis', 'goalSummary', 'whyStatement', 'whyTranslation',
+  'readiness', 'motivation', 'gymConfidence',
+  'currentWeight', 'goalWeight', 'goalWeightAutoSuggested',
+  // Starting points
+  'startingPoints', 'startingPointIntro',
+  // Schedule
+  'weeklySchedule', 'sessionsPerWeek',
+  // Contract
+  'contractMonths', 'contractLengthMonths',
+  // Content
+  'phases', 'whatsIncluded', 'sessionGuidanceProfiles',
+  // Pricing & add-ons (member-visible)
+  'showInvestment', 'pricingResult',
+  'hourlyRate', 'sessionLengthMinutes', 'checkInCallMinutes', 'programBuildTimeHours',
+  'monthlyPriceOverride', 'overrideFrequency', 'payInFullDiscountPercent',
+  'commitToSave', 'nutrition', 'postContract', 'continuationPricing',
+];
+
+async function buildAndWriteSharedPlanProjection(planId: string): Promise<void> {
+  // F2 (live-update killer fix): read + write in one Firestore transaction so
+  // plan+scenario reads are consistent and the projection write is atomic. The
+  // old updatedAt guard compared serverTimestamp-set projection.updatedAt vs
+  // client-set plan.updatedAt — which never moves on scenario-only writes, so
+  // every scenario edit past the first was skipped. Transactions + deterministic
+  // projection = idempotent by construction, no guard needed.
+  const planRef = db.collection('member_plans').doc(planId);
+
+  await db.runTransaction(async (tx) => {
+    const planSnap = await tx.get(planRef);
+    if (!planSnap.exists) {
+      // Plan deleted — the plan-level trigger handles projection cleanup via
+      // before.data().shareToken, so nothing to do here.
+      return;
+    }
+
+    const planData = planSnap.data()!;
+    const shareToken = planData.shareToken as string | undefined;
+    if (!shareToken) {
+      // Plan has never been shared — no projection to maintain.
+      return;
+    }
+
+    // Overlay presented scenario if set (read inside the same tx for consistency)
+    let content: Record<string, unknown> = { ...planData };
+    const presentedScenarioId = planData.presentedScenarioId as string | null | undefined;
+    if (presentedScenarioId) {
+      try {
+        const scenRef = planRef.collection('scenarios').doc(presentedScenarioId);
+        const scenSnap = await tx.get(scenRef);
+        if (scenSnap.exists) {
+          content = { ...content, ...scenSnap.data() };
+        }
+      } catch (err) {
+        console.warn('[mirrorSharedView] Could not load presentedScenario, using base plan:', err);
+      }
+    }
+
+    // F3 (allowlist): copy ONLY explicitly permitted fields into projection.
+    const projection: Record<string, unknown> = {};
+    for (const key of PROJECTED_ALLOWED_FIELDS) {
+      if (key in content) {
+        projection[key] = content[key];
+      }
+    }
+
+    // Required metadata — always set from base plan (not scenario) so identity
+    // fields can't be spoofed by a scenario override.
+    projection.planId = planId;
+    projection.memberId = planData.memberId ?? planId;
+    projection.coachId = planData.coachId;
+    projection.status = planData.status;
+    projection.updatedAt = FieldValue.serverTimestamp();
+
+    const projRef = db.collection('sharedPlanViews').doc(shareToken);
+    tx.set(projRef, projection);
+  });
+}
+
+export const onPlanWriteMirrorSharedView = onDocumentWritten(
+  { document: 'member_plans/{planId}', region: 'us-central1' },
+  async (event) => {
+    const planId = event.params.planId;
+    const beforeData = event.data?.before?.data();
+    const afterData = event.data?.after?.data();
+
+    // Plan was deleted or lost its shareToken — clean up projection
+    if (!afterData) {
+      const oldToken = beforeData?.shareToken as string | undefined;
+      if (oldToken) {
+        try { await db.collection('sharedPlanViews').doc(oldToken).delete(); } catch { /* best-effort */ }
+      }
+      return;
+    }
+
+    // shareToken changed — delete old projection doc
+    const oldToken = beforeData?.shareToken as string | undefined;
+    const newToken = afterData?.shareToken as string | undefined;
+    if (oldToken && oldToken !== newToken) {
+      try { await db.collection('sharedPlanViews').doc(oldToken).delete(); } catch { /* best-effort */ }
+    }
+
+    if (!newToken) return; // Not yet shared
+
+    await buildAndWriteSharedPlanProjection(planId);
+  }
+);
+
+export const onScenarioWriteMirrorSharedView = onDocumentWritten(
+  { document: 'member_plans/{planId}/scenarios/{scenarioId}', region: 'us-central1' },
+  async (event) => {
+    const { planId } = event.params;
+    // Rebuild projection — the plan doc has the authoritative presentedScenarioId
+    await buildAndWriteSharedPlanProjection(planId);
   }
 );

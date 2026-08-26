@@ -16,7 +16,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { MemberPlanData, Scenario, createDefaultPlan } from '../../lib/planTypes';
 
@@ -39,6 +39,12 @@ export default function MyPlan() {
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
   const planDocIdRef = useRef<string>('');
+  // Pass B live-view refs: raw base plan doc, the presented scenario doc, and
+  // the scenario listener's teardown + the id it is currently pointed at.
+  const basePlanRef = useRef<MemberPlanData | null>(null);
+  const scenarioRef = useRef<Scenario | null>(null);
+  const scenarioUnsubRef = useRef<(() => void) | null>(null);
+  const currentScenarioIdRef = useRef<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
@@ -71,98 +77,149 @@ export default function MyPlan() {
     }
   }
 
+  // ─── LIVE subscription to the SAME plan document the coach edits ──────────
+  // Pass B: the member's plan view is live. The coach's edits and any switch of
+  // the presented scenario land on this screen in real time, with no refresh —
+  // this is the "screen-share illusion" half that runs for authenticated
+  // members. The document resolution below is the one-shot part (it answers
+  // "which plan doc is mine?"); everything after it is a snapshot listener.
   useEffect(() => {
-    if (user) fetchPlan();
+    if (!user) return;
+    let cancelled = false;
+    let planUnsub: (() => void) | null = null;
+
+    (async () => {
+      setLoading(true);
+      const resolvedDocId = await resolvePlanDocId();
+      if (cancelled) return;
+      if (!resolvedDocId) {
+        console.log('[MyPlan] No plan found for uid:', user.uid);
+        setLoading(false);
+        return;
+      }
+      planDocIdRef.current = resolvedDocId;
+
+      planUnsub = onSnapshot(
+        doc(db, 'member_plans', resolvedDocId),
+        (snap) => {
+          if (cancelled) return;
+          if (!snap.exists()) {
+            setLoading(false);
+            return;
+          }
+          const base = { id: snap.id, ...snap.data() } as MemberPlanData;
+          basePlanRef.current = base;
+          // Re-point the scenario listener only when the presented scenario
+          // actually changes — an unchanged id keeps the existing listener so
+          // rapid coach-side edits don't churn subscriptions.
+          syncScenarioSubscription(resolvedDocId, base.presentedScenarioId ?? null);
+          composePlan();
+          setLoading(false);
+        },
+        (err) => {
+          console.warn('[MyPlan] Plan subscription error:', err);
+          setLoading(false);
+        }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      if (planUnsub) planUnsub();
+      if (scenarioUnsubRef.current) {
+        scenarioUnsubRef.current();
+        scenarioUnsubRef.current = null;
+      }
+      currentScenarioIdRef.current = null;
+    };
   }, [user]);
 
-  // ─── Load the SAME plan document the coach edits ──────────────────────────
-  async function fetchPlan() {
-    if (!user) return;
-    setLoading(true);
+  // ─── Resolve which member_plans document belongs to this member ───────────
+  // Unchanged resolution order from the pre-Pass-B one-shot loader: member doc
+  // key first (what the coach writes to), then uid key, then a memberId query.
+  async function resolvePlanDocId(): Promise<string> {
+    if (!user) return '';
     try {
-      let planData: MemberPlanData | null = null;
-      let resolvedDocId: string = '';
-
-      // ── PRIMARY: Look up member doc ID, then load plan by that key ──
-      // The coach saves to member_plans/{memberDocId}. We find our memberDocId
-      // from the members collection, then load that exact document.
       const membersQuery = query(collection(db, 'members'), where('uid', '==', user.uid));
       const membersSnap = await getDocs(membersQuery);
       if (!membersSnap.empty) {
         const memberDocId = membersSnap.docs[0].id;
-        console.log('[MyPlan] Found member doc:', memberDocId);
         const planDoc = await getDoc(doc(db, 'member_plans', memberDocId));
-        if (planDoc.exists()) {
-          resolvedDocId = memberDocId;
-          planData = { id: planDoc.id, ...planDoc.data() } as MemberPlanData;
-          console.log('[MyPlan] Loaded plan from member doc key:', memberDocId);
-        }
+        if (planDoc.exists()) return memberDocId;
       }
 
-      // ── FALLBACK 1: Direct doc by uid ──
-      if (!planData) {
-        const planByUid = await getDoc(doc(db, 'member_plans', user.uid));
-        if (planByUid.exists()) {
-          resolvedDocId = user.uid;
-          planData = { id: planByUid.id, ...planByUid.data() } as MemberPlanData;
-          console.log('[MyPlan] Loaded plan from uid key:', user.uid);
-        }
-      }
+      const planByUid = await getDoc(doc(db, 'member_plans', user.uid));
+      if (planByUid.exists()) return user.uid;
 
-      // ── FALLBACK 2: Query by memberId field ──
-      if (!planData) {
-        const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user.uid));
-        const snap = await getDocs(plansQuery);
-        if (!snap.empty) {
-          const best = snap.docs[0];
-          resolvedDocId = best.id;
-          planData = { id: best.id, ...best.data() } as MemberPlanData;
-          console.log('[MyPlan] Loaded plan from memberId query:', best.id);
-        }
-      }
-
-      if (planData) {
-        // If coach has presented a specific scenario, load and overlay it
-        if (planData.presentedScenarioId && resolvedDocId) {
-          try {
-            const scenDoc = await getDoc(doc(db, 'member_plans', resolvedDocId, 'scenarios', planData.presentedScenarioId));
-            if (scenDoc.exists()) {
-              const scenData = scenDoc.data() as Scenario;
-              // Overlay scenario fields onto base plan (base plan provides billing/lifecycle fields)
-              planData = { ...planData, ...scenData, id: planData.id } as MemberPlanData;
-            }
-          } catch (err) {
-            // Silently fall back to base plan (e.g. permission denied or missing doc)
-            console.warn('[MyPlan] Could not load presented scenario, falling back to base plan:', err);
-          }
-        }
-
-        // Merge with defaults to fill any missing fields (same as coach's page)
-        const defaults = createDefaultPlan(
-          planData.memberName || 'Member',
-          resolvedDocId || user.uid,
-          planData.coachId || ''
-        );
-        const merged: MemberPlanData = {
-          ...defaults,
-          ...planData,
-          nutrition: { ...defaults.nutrition, ...(planData.nutrition || {}) },
-          commitToSave: { ...defaults.commitToSave, ...(planData.commitToSave || {}) },
-          phases: (planData.phases?.length) ? planData.phases : defaults.phases,
-          weeklySchedule: (planData.weeklySchedule?.length) ? planData.weeklySchedule : defaults.weeklySchedule,
-          sessionGuidanceProfiles: (planData.sessionGuidanceProfiles?.length) ? planData.sessionGuidanceProfiles : defaults.sessionGuidanceProfiles,
-          memberName: planData.memberName || defaults.memberName,
-        };
-        planDocIdRef.current = resolvedDocId;
-        setPlan(merged);
-      } else {
-        console.log('[MyPlan] No plan found for uid:', user.uid);
-      }
+      const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user.uid));
+      const snap = await getDocs(plansQuery);
+      if (!snap.empty) return snap.docs[0].id;
     } catch (err) {
-      console.error('[MyPlan] Error fetching plan:', err);
-    } finally {
-      setLoading(false);
+      console.error('[MyPlan] Error resolving plan doc:', err);
     }
+    return '';
+  }
+
+  // ─── Presented-scenario listener, re-pointed only on a real id change ─────
+  // Members may read ONLY the presented scenario (Firestore rules enforce it);
+  // any error here falls back to the base plan rather than blanking the screen.
+  function syncScenarioSubscription(docId: string, scenarioId: string | null) {
+    if (scenarioId === currentScenarioIdRef.current) return;
+    if (scenarioUnsubRef.current) {
+      scenarioUnsubRef.current();
+      scenarioUnsubRef.current = null;
+    }
+    currentScenarioIdRef.current = scenarioId;
+    scenarioRef.current = null;
+
+    if (!scenarioId) {
+      composePlan();
+      return;
+    }
+
+    scenarioUnsubRef.current = onSnapshot(
+      doc(db, 'member_plans', docId, 'scenarios', scenarioId),
+      (snap) => {
+        scenarioRef.current = snap.exists() ? (snap.data() as Scenario) : null;
+        composePlan();
+      },
+      (err) => {
+        console.warn('[MyPlan] Could not load presented scenario, falling back to base plan:', err);
+        scenarioRef.current = null;
+        composePlan();
+      }
+    );
+  }
+
+  // ─── Compose what the member sees: base plan + presented scenario overlay ──
+  // The base plan always supplies billing/lifecycle fields; the scenario
+  // supplies presentation content. Defaults fill anything absent, exactly as
+  // the coach's page does, so both surfaces render from the same shape.
+  function composePlan() {
+    const base = basePlanRef.current;
+    if (!base || !user) return;
+
+    let planData: MemberPlanData = base;
+    if (base.presentedScenarioId && scenarioRef.current) {
+      planData = { ...base, ...scenarioRef.current, id: base.id } as MemberPlanData;
+    }
+
+    const defaults = createDefaultPlan(
+      planData.memberName || 'Member',
+      planDocIdRef.current || user.uid,
+      planData.coachId || ''
+    );
+    const merged: MemberPlanData = {
+      ...defaults,
+      ...planData,
+      nutrition: { ...defaults.nutrition, ...(planData.nutrition || {}) },
+      commitToSave: { ...defaults.commitToSave, ...(planData.commitToSave || {}) },
+      phases: (planData.phases?.length) ? planData.phases : defaults.phases,
+      weeklySchedule: (planData.weeklySchedule?.length) ? planData.weeklySchedule : defaults.weeklySchedule,
+      sessionGuidanceProfiles: (planData.sessionGuidanceProfiles?.length) ? planData.sessionGuidanceProfiles : defaults.sessionGuidanceProfiles,
+      memberName: planData.memberName || defaults.memberName,
+    };
+    setPlan(merged);
   }
 
   // ─── Handle changes from PlanView (member toggling CTS/Nutrition) ─────────
@@ -212,7 +269,21 @@ export default function MyPlan() {
       );
       return;
     }
-    // Navigate to payment selection
+    // Accept-freeze: write acceptedScenarioId + acceptedAt BEFORE navigating.
+    // createCheckoutSession reads acceptedScenarioId to deterministically know
+    // which scenario the member is enrolling in. Await the write; only navigate
+    // once it's committed, so payment-select can't race the freeze.
+    try {
+      const acceptedScenarioId = (plan as any).presentedScenarioId ?? null;
+      await updateDoc(doc(db, 'member_plans', docId), {
+        acceptedScenarioId,
+        acceptedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error('[MyPlan] Could not write acceptedScenarioId:', err);
+      Alert.alert('Error', 'Could not save your acceptance. Please try again.');
+      return;
+    }
     router.push(`/(member)/payment-select?planId=${docId}` as any);
   }
 
