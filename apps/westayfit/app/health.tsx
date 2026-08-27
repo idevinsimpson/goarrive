@@ -1,7 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { WSF_BUILD_STAMP } from '../src/buildStamp';
-import { wsfFirebaseProjectId } from '../src/firebase';
 import { wsfTheme } from '../src/theme';
 
 export default function Health() {
@@ -13,7 +12,6 @@ export default function Health() {
         <Row label="Version" value={WSF_BUILD_STAMP.version} />
         <Row label="Commit" value={WSF_BUILD_STAMP.commitSha} testID="wsf-health-commit" />
         <Row label="Built at" value={WSF_BUILD_STAMP.builtAt} testID="wsf-health-builtAt" />
-        <Row label="Firebase project" value={wsfFirebaseProjectId} testID="wsf-health-project" />
       </View>
     </View>
   );

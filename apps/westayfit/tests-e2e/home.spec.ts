@@ -16,7 +16,7 @@ test('renders the brand shell at /', async ({ page }) => {
   expect(robots, 'brand shell must be noindex,nofollow').toContain('noindex');
   expect(robots).toContain('nofollow');
 
-  await expect(page.getByText('Universal communities that move together.')).toBeVisible();
+  await expect(page.getByText('Wherever your people gather, We Stay Fit.')).toBeVisible();
 });
 
 test('brand shell has no serious or critical axe violations', async ({ page }) => {

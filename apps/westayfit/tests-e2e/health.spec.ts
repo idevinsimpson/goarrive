@@ -11,13 +11,17 @@ test('renders the build stamp at /health', async ({ page }) => {
 
   await expect(page.getByText('Health', { exact: true })).toBeVisible();
 
-  const commit = await page.getByTestId('wsf-health-commit').textContent();
-  const builtAt = await page.getByTestId('wsf-health-builtAt').textContent();
-  const project = await page.getByTestId('wsf-health-project').textContent();
+  const commit = (await page.getByTestId('wsf-health-commit').textContent())?.trim();
+  const builtAt = (await page.getByTestId('wsf-health-builtAt').textContent())?.trim();
 
-  expect(commit?.trim(), 'commit stamp must be non-empty').toBeTruthy();
-  expect(builtAt?.trim(), 'build time stamp must be non-empty').toBeTruthy();
-  expect(project?.trim(), 'firebase project stamp must be "goarrive"').toBe('goarrive');
+  expect(commit, 'commit stamp must be non-empty').toBeTruthy();
+  expect(builtAt, 'build time stamp must be non-empty').toBeTruthy();
+
+  expect(
+    commit,
+    'commit stamp must be a real short SHA injected at build time, not the local-dev "dev" fallback'
+  ).not.toBe('dev');
+  expect(commit, 'commit stamp must look like a 7-40 char lowercase hex short SHA').toMatch(/^[0-9a-f]{7,40}$/);
 
   const robots = await page.locator('meta[name="robots"]').getAttribute('content');
   expect(robots, '/health must be noindex,nofollow').toContain('noindex');

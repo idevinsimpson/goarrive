@@ -47,6 +47,25 @@ Reason: WSF has two real routes (`/`, `/health`) plus the auto-generated `+not-f
 
 Called out on PM review of PR #299 as an accepted deviation from the dispatch spec (which implied a rewrite would be present).
 
+## 2026-08-26 — M-U1.1 correction: `/health` shows real commit; home tagline is chartered sentence; specs enforce spec, not implementation
+
+Chose (after PM visual smoke of the first M-U1 deploy):
+
+1. `/health` reads a build-time-injected commit SHA (`EXPO_PUBLIC_BUILD_COMMIT`, set inline in the `build:web` script via `git rev-parse --short HEAD`). The `dev` string is kept as a fallback for local dev only (when the app is served via `expo start` without the build wrapper). Playwright spec `health.spec.ts` now asserts the deployed value is not `dev` and matches the short-SHA regex `^[0-9a-f]{7,40}$`.
+2. `/health` no longer shows the Firebase project row. `wsfFirebaseProjectId` is not verification data — publishable, but non-diagnostic — so the stamp is now App, Version, Commit, Built at (as per the PM's stated intent).
+3. Home tagline is the chartered sentence: *"Wherever your people gather, We Stay Fit."* (from `UNIVERSAL_COMMUNITIES_CHARTER.md`). Playwright spec `home.spec.ts` now asserts that literal string, not the implementation copy.
+
+Alternatives considered:
+- Injecting the commit at runtime via a Firebase Function or a `/health.json` endpoint (rejected: adds infra weight for a static-truth artifact; env at build time is the smaller mechanism and stays inside the WSF app boundary).
+- Keeping the `Firebase project` row for informational purposes (rejected on PM's read: the project ID is fixed to `goarrive` for the life of the app; it teaches nothing at diagnosis time).
+- Asserting only that the commit stamp is non-empty (rejected: that was the original spec and it silently passed against the `dev` fallback string — the whole point of `/health` is defeated).
+
+Reason: `/health` is the deploy-truth artifact. If it can lie, it is worse than not existing. The spec now enforces the invariant.
+
+Process lesson (recorded here so future WSF work does not repeat it):
+- Specs must assert the *specified* copy, not the *rendered* copy. When the two diverge, the spec should fail — that is the whole reason the spec exists.
+- Visual smoke by a human is authoritative for defects that only show up on-screen (wrong copy, placeholder values, contrast, layout). Automated tests catch what they were written to catch; they cannot catch what they were not.
+
 ## 2026-08-26 — Record `ls-remote` check permanently in truth gate
 
 Recorded in Maia's session memory: before any `git worktree add -b <branch>`, run both `git branch --list <branch>` AND `git ls-remote origin refs/heads/<branch>`. Stop on any output.
