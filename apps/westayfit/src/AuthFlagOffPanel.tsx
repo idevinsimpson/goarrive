@@ -1,21 +1,19 @@
 import { Link } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { wsfTheme } from '../src/theme';
+import { wsfTheme } from './theme';
 
-export default function BrandShell() {
+export function AuthFlagOffPanel({ title, testID }: { title: string; testID: string }) {
   return (
-    <View style={styles.container} testID="wsf-brand-shell">
+    <View style={styles.container} testID={testID}>
       <View style={styles.inner}>
         <Text style={styles.eyebrow}>We Stay Fit</Text>
-        <Text style={styles.heading}>Your place. Your people. Your move.</Text>
-        <Text style={styles.subline}>Turn the community you already have into a community that moves.</Text>
+        <Text style={styles.heading}>{title}</Text>
         <Text style={styles.body}>
-          We Stay Fit is coming soon. This shell exists so the app can ship, deploy, and be verified.
-          It intentionally has no content, no signup, and no reads or writes.
+          Accounts are opening soon. Check back once we invite the first champions.
         </Text>
-        <Link href="/health" style={styles.link}>
-          Build details
+        <Link href="/" style={styles.link}>
+          Back to home
         </Link>
       </View>
     </View>
@@ -31,7 +29,7 @@ const styles = StyleSheet.create({
     padding: wsfTheme.spacing.xl,
   },
   inner: {
-    maxWidth: 640,
+    maxWidth: 480,
     width: '100%',
   },
   eyebrow: {
@@ -49,18 +47,11 @@ const styles = StyleSheet.create({
     lineHeight: wsfTheme.typography.heading.lineHeight,
     marginBottom: wsfTheme.spacing.md,
   },
-  subline: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize,
-    fontWeight: wsfTheme.typography.subheading.fontWeight,
-    lineHeight: wsfTheme.typography.subheading.lineHeight,
-    marginBottom: wsfTheme.spacing.lg,
-  },
   body: {
     color: wsfTheme.colors.textMuted,
     fontSize: wsfTheme.typography.body.fontSize,
     lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.xl,
+    marginBottom: wsfTheme.spacing.lg,
   },
   link: {
     color: wsfTheme.colors.primary,

@@ -23,6 +23,21 @@ WSF communities do not consume GoArrive coaches, workouts, movements, or program
 - M-U3 (Interest → App Bridge) will lean on principle 2 (low-friction join).
 - M-U4 (Champion Campaigns Landing Surface) will lean on principle 3 (champion-led).
 
+## Brand Language
+
+Canonical verbal hierarchy for We Stay Fit (Devin-approved 2026-08-27; recorded in `DECISIONS.md`):
+
+- **Brand:** We Stay Fit
+- **Primary slogan:** "Your place. Your people. Your move." — exact punctuation; no variants such as "Your movement", "Your next move", or "Your community".
+- **Primary explainer:** "Turn the community you already have into a community that moves."
+- **Supporting/campaign line:** "Fitness is better together." — supporting use only, not a substitute for the slogan or explainer.
+
+The slogan is a product-design filter: as WSF grows, "place / people / move" become visible in the product surface (community pages, invites, activity feeds). It is not required copy for every screen; sparing contextual variants are acceptable when they serve the slogan.
+
+Scope: WSF-only. GoArrive brand language is unchanged. No outcome claims (health, ROI, retention, leasing, productivity, growth) derive from the phrase "community that moves" — it means people participating in movement experiences, nothing more.
+
+Supersedes: the M-U1-era chartered tagline "Wherever your people gather, We Stay Fit." is no longer the canonical explainer. Historical M-U1 uses, releases, and evidence artifacts are not rewritten.
+
 ## Ratification
 
 The charter itself is subject to change; every ratified change gets an entry in `DECISIONS.md`. This document tracks the currently-proposed principles until formally ratified.

@@ -72,3 +72,17 @@ Process lesson (recorded here so future WSF work does not repeat it):
 Recorded in Maia's session memory: before any `git worktree add -b <branch>`, run both `git branch --list <branch>` AND `git ls-remote origin refs/heads/<branch>`. Stop on any output.
 
 Reason: catches stale remote branches from prior workers/attempts that the local checkout has never heard of; `branch --list` alone misses that entirely.
+
+## 2026-08-27 — Brand language hierarchy (Devin-approved)
+
+Chose: canonical verbal hierarchy, applied prospectively:
+- Brand: We Stay Fit
+- Primary slogan: "Your place. Your people. Your move." (exact punctuation; no variants such as "Your movement", "Your next move", "Your community")
+- Primary explainer: "Turn the community you already have into a community that moves."
+- Supporting/campaign line: "Fitness is better together." (supporting use only)
+
+Supersedes: "Wherever your people gather, We Stay Fit." — the M-U1-era chartered tagline is no longer the canonical explainer. Historical uses (M-U1 releases, receipts, evidence) are not rewritten.
+
+Rules: slogan is a product-design filter (place/people/move become visible as the product grows), not copy for every screen; sparing contextual variants allowed; WSF-only — GoArrive brand language unchanged; no outcome claims derive from "community that moves" (no health, ROI, retention, leasing, productivity, or growth claims) — it means people participating in movement experiences.
+
+Reason: the slogan creates identity, the explainer creates understanding; the community already exists — We Stay Fit activates it around movement. Recorded from Devin's written approval during the 2026-08-27 delegated-autonomy window.

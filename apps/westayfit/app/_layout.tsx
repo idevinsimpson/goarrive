@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { wsfTheme } from '../src/theme';
 
@@ -11,7 +12,7 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
+    <WsfAuthProvider>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -19,6 +20,6 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: wsfTheme.colors.background },
         }}
       />
-    </>
+    </WsfAuthProvider>
   );
 }
