@@ -25,3 +25,16 @@ functions/check-zoom-*.js
 functions/create-zoom-test-session.js
 functions/zoom-disable-ai-companion.js
 functions/zoom-inspect-account-settings.js
+
+# We Stay Fit (M-U1)
+apps/westayfit/dist/
+apps/westayfit/.expo/
+apps/westayfit/test-results/
+apps/westayfit/playwright-report/
+apps/westayfit/blob-report/
+apps/westayfit/playwright/.cache/
+functions-westayfit/lib/
+
+# WSF detached run receipts (per feedback_detached_marker_for_long_steps.md)
+.*-exit
+.functions-list-*.txt

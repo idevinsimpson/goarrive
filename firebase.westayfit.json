@@ -1,0 +1,38 @@
+{
+  "hosting": {
+    "site": "westayfit-app",
+    "public": "apps/westayfit/dist",
+    "ignore": [
+      "firebase.json",
+      "firebase.westayfit.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+        ]
+      },
+      {
+        "source": "/index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "Content-Type", "value": "text/html; charset=utf-8" }
+        ]
+      },
+      {
+        "source": "/_expo/static/js/**/*.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "Content-Type", "value": "application/javascript; charset=utf-8" }
+        ]
+      }
+    ]
+  }
+}
