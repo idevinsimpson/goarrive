@@ -65,6 +65,7 @@ Reason: `/health` is the deploy-truth artifact. If it can lie, it is worse than 
 Process lesson (recorded here so future WSF work does not repeat it):
 - Specs must assert the *specified* copy, not the *rendered* copy. When the two diverge, the spec should fail — that is the whole reason the spec exists.
 - Visual smoke by a human is authoritative for defects that only show up on-screen (wrong copy, placeholder values, contrast, layout). Automated tests catch what they were written to catch; they cannot catch what they were not.
+- `expo export` must run with `--clear` when the bundle depends on a build-time env var whose value can change between builds (e.g. `EXPO_PUBLIC_BUILD_COMMIT`). Metro's transform cache does not include env var values in its cache key, so a rebuild after `git commit` will silently reuse the previous value's bundle. `build:web` uses `--clear` for this reason. The `dist/health.html` SSG output does re-render with the fresh env var, so mismatch is only visible in the hydrated JS bundle — and the Playwright health spec only regex-checks the SHA shape, not the value, so this failure mode is silent unless caught by human smoke.
 
 ## 2026-08-26 — Record `ls-remote` check permanently in truth gate
 
