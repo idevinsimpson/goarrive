@@ -36,6 +36,17 @@ Alternative considered:
 
 Reason: WSF's meta needs are a strict subset of GoArrive's; a smaller own-script is more auditable and cannot regress GoArrive.
 
+## 2026-08-26 — No SPA catch-all rewrite in `firebase.westayfit.json`
+
+Chose: omit the `"rewrites": [{ "source": "**", "destination": "/index.html" }]` block that a typical SPA hosting config includes. Unknown routes are served by the Expo static export's own `+not-found.html` page (which returns a real HTTP 404 with correct semantics).
+
+Alternative considered:
+- Add the standard SPA catch-all so any URL renders the app shell and lets client-side routing decide (rejected: `/definitely-not-a-real-wsf-route` would then return HTTP 200 with the brand shell, not 404 — worse SEO and worse user signaling for a `noindex` site whose whole point is not to accumulate garbage indexed URLs).
+
+Reason: WSF has two real routes (`/`, `/health`) plus the auto-generated `+not-found` and `_sitemap` — the static export covers them by construction, so the SPA rewrite is unnecessary and actively harmful for 404 semantics. Verified by the live-channel Playwright spec `unknown-route.spec.ts`: `GET /definitely-not-a-real-wsf-route` returns 404 with no GoArrive leakage.
+
+Called out on PM review of PR #299 as an accepted deviation from the dispatch spec (which implied a rewrite would be present).
+
 ## 2026-08-26 — Record `ls-remote` check permanently in truth gate
 
 Recorded in Maia's session memory: before any `git worktree add -b <branch>`, run both `git branch --list <branch>` AND `git ls-remote origin refs/heads/<branch>`. Stop on any output.
