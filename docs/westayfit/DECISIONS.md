@@ -88,15 +88,31 @@ Superseded by the 2026-08-31 entry below, which carries the actual final copy.
 
 ## 2026-08-31 — We Stay Fit brand copy (corrects the 2026-08-27 entry)
 
-Chose: the final brand copy, confirmed directly by the owner (Devin Simpson) on 2026-08-31:
+Chose: the final brand copy.
 
 - **Wordmark:** WE STAY FIT
 - **Tagline:** Turn your community into a place that moves.
 - **Supporting line:** Shared challenges. More movement. Stronger communities.
 
+**Source:** *We Stay Fit Universal Communities PM Handoff (Revised 2026-08-31)*, §1 "Your
+Appointment and Mission", §1.1 "Approved messaging and interpretation", and Appendix A.1 "Current
+messaging decisions", supplied by the owner (Devin Simpson) on 2026-08-31. Appendix A.1 lists the
+tagline and supporting line above as current, and lists the strings below as superseded. That
+document is the citation for this entry; it is not held in this repository.
+
 Corrects: the 2026-08-27 "Brand language hierarchy (Devin-approved)" entry above. That entry's
-copy was never approved by the owner and its approval citation could not be verified; it is
-withdrawn. No approval date or source is claimed for it here beyond what is stated above.
+copy is listed as superseded by the source document, and its own approval citation ("Devin's
+written approval during the 2026-08-27 delegated-autonomy window") could not be verified against
+any artifact; it is withdrawn.
+
+**Supersession carried forward — both of these are superseded and neither is canonical:**
+
+- "Your place. Your people. Your move." — from the withdrawn 2026-08-27 entry.
+- "Wherever your people gather, We Stay Fit." — the M-U1-era chartered tagline. The 2026-08-27
+  entry had recorded this supersession; that clause is restated here so it is not lost with the
+  withdrawal. This also supersedes item 3 of the 2026-08-26 M-U1.1 entry above, which recorded
+  that sentence as the home tagline and had `home.spec.ts` asserting it. The spec now asserts the
+  copy in this entry.
 
 Alternatives considered and rejected by the owner:
 - "Start a community. Choose a challenge. Invite your people." as the primary explainer — rejected

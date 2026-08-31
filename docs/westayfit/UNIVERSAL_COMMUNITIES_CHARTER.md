@@ -25,7 +25,7 @@ WSF communities do not consume GoArrive coaches, workouts, movements, or program
 
 ## Brand Language
 
-Canonical brand copy for We Stay Fit, confirmed directly by the owner (Devin Simpson) on 2026-08-31; recorded in `DECISIONS.md`:
+Canonical brand copy for We Stay Fit. Source: *We Stay Fit Universal Communities PM Handoff (Revised 2026-08-31)*, §1.1 and Appendix A.1, supplied by the owner (Devin Simpson) on 2026-08-31; recorded in `DECISIONS.md`:
 
 - **Wordmark:** WE STAY FIT
 - **Tagline:** "Turn your community into a place that moves." — exact punctuation.
