@@ -51,6 +51,9 @@ importers:
       ffprobe-static:
         specifier: ^3.1.0
         version: 3.1.0
+      firebase:
+        specifier: ^12.11.0
+        version: 12.12.1
       jest:
         specifier: ^30.3.0
         version: 30.3.0(@types/node@20.19.39)
