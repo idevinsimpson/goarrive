@@ -2818,24 +2818,18 @@ export default function WorkoutPlayer({
             && !!current.swapSides
             && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
-          // RN does not merge `transform` arrays across style objects — last wins.
-          // Crop goes in `style` (applied to the outer wrapper) on all platforms.
-          // Mirror goes in `style` on native and in `videoStyle` on web so that
-          // the CSS transform is applied directly to the <video> element — this
-          // avoids a one-frame delay if expo-av's wrapper doesn't re-apply the
-          // outer style transform synchronously on prop change.
+          // Mirror lives on a persistent per-URL wrapper View so it survives
+          // stall-recovery remounts of the inner <Video> (which bump the video
+          // element's key). Crop stays on the Video's own style; the web
+          // <video> element uses fixed sizing via videoStyle. Poster fallback
+          // Image applies mirrorStyle directly since it isn't inside the wrapper.
           const buildLayerStyle = (url: string): any => {
             const crop = cropByUrl.get(url);
-            const t = [
-              ...getCropTransform(crop ?? null, mediaInnerSize.width, mediaInnerSize.height),
-              ...(isMirrored && Platform.OS !== 'web' ? [{ scaleX: -1 }] : []),
-            ];
+            const t = getCropTransform(crop ?? null, mediaInnerSize.width, mediaInnerSize.height);
             return t.length ? { transform: t } : null;
           };
           const layerVideoStyle: any = Platform.OS === 'web'
-            ? (isMirrored
-              ? { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }
-              : { width: '100%', height: '100%', objectFit: 'cover' })
+            ? { width: '100%', height: '100%', objectFit: 'cover' }
             : undefined;
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
@@ -2919,6 +2913,11 @@ export default function WorkoutPlayer({
                       const isDisplayed = layer.url === displayedUrl;
                       const opacity = isDisplayed ? 1 : 0;
                       return (
+                        <View
+                          key={`wrap:${layer.url}`}
+                          style={[st.videoLayer, { opacity } as any, mirrorStyle]}
+                          pointerEvents="none"
+                        >
                         <Video
                           key={`${layer.url}#${layerEpochs[layer.url] ?? 0}`}
                           ref={(el: any) => {
@@ -2930,7 +2929,7 @@ export default function WorkoutPlayer({
                           isLooping
                           shouldPlay={!isPaused}
                           isMuted
-                          style={[st.videoPlayer, st.videoLayer, { opacity } as any, buildLayerStyle(layer.url)]}
+                          style={[st.videoPlayer, buildLayerStyle(layer.url)]}
                           videoStyle={layerVideoStyle}
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
                           onError={() => {
@@ -2965,6 +2964,7 @@ export default function WorkoutPlayer({
                             }
                           }}
                         />
+                        </View>
                       );
                     })}
                     {!displayedUrl && activeThumbUrl && (
