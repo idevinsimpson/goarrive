@@ -131,3 +131,58 @@ language is unchanged; sparing contextual variants are acceptable where they ser
 no outcome claims (health, ROI, retention, leasing, productivity, growth) derive from this copy.
 
 Historical M-U1-era uses, releases, and evidence artifacts are not rewritten.
+
+## 2026-08-31 — One targeted hosting rewrite for the dynamic community route (amends the 2026-08-26 "no SPA catch-all" entry)
+
+Chose: add exactly one rewrite to `firebase.westayfit.json` —
+`/community/**` → `/community/__dynamic.html` — and have `inject_meta.py` emit that
+alias file plus fail the build if any exported dynamic route lacks a rewrite.
+
+Why the earlier decision needed amending: it was made when WSF had two static routes
+(`/`, `/health`), and it reasoned correctly for that shape. M-U2 introduced the first
+*dynamic* route, `app/community/[groupId].tsx`, which Expo exports to the literal file
+`dist/community/[groupId].html`. Firebase Hosting has no way to serve that for
+`/community/<id>`, so a direct load, refresh, bookmark, or shared community link
+returned **HTTP 404**. In-session `router.replace()` worked, which is exactly why it
+went unnoticed: the happy path never touches the URL.
+
+Alternatives considered:
+- The standard SPA catch-all `**` → `/index.html` (rejected, same reason as
+  2026-08-26: it would make every unknown URL return 200 with the brand shell. The
+  targeted rewrite fixes the one broken route and leaves 404 semantics intact
+  everywhere else — `/definitely-not-a-real-wsf-route` still 404s).
+- A rewrite whose destination is the bracketed path itself (rejected: relies on
+  unverified handling of `[` and `]` in a Hosting `destination`; the alias file is
+  deterministic and needs no such assumption).
+
+**Correction to the 2026-08-26 entry:** it stated that unknown routes are "served by
+the Expo static export's own `+not-found.html` page (which returns a real HTTP 404
+with correct semantics)". The 404 status is real, but the page is not: Firebase
+Hosting only auto-serves a custom 404 from a file named exactly `404.html`, and the
+export produces `+not-found.html`, which Hosting never reaches for. Unknown routes get
+Firebase's default 404 page. The existing `unknown-route.spec.ts` still passes because
+it asserts a 404 status with no GoArrive leakage — both still true. Serving the
+Expo not-found page would require emitting it as `404.html`; not done here, and not a
+blocker.
+
+Reason: a community link that breaks when someone refreshes or shares it defeats the
+point of a community app. The build-time guard exists because this defect was created
+by a decision that was correct when written and silently expired when the route shape
+changed — the next dynamic route should not be able to repeat that.
+
+## 2026-08-31 — Force an ID-token refresh after email verification
+
+Chose: `await user.getIdToken(true)` in `verify-email.tsx` immediately after `reload(user)`
+reports `emailVerified`, before routing onward.
+
+`reload()` updates the local `User` object but does **not** refresh the cached ID token.
+The client gate (`user.emailVerified`) therefore passed while the token still carried
+`email_verified: false` — and both `firestore.rules` (`wsfEmailVerified()`) and
+`wsfCreateCommunity` gate on the **token** claim. Every newly verified member hit
+`PERMISSION_DENIED` on the very next write and was dead-ended one step after verifying,
+unless they happened to sign out and back in. Reproduced deterministically on the
+emulator harness.
+
+Reason: the token is the security boundary, so the token is what has to be current.
+Client-side `emailVerified` is a display value; treating it as the gate makes the UI and
+the rules disagree.

@@ -29,6 +29,12 @@ export default function VerifyEmail() {
     try {
       await reload(user);
       if (user.emailVerified) {
+        // reload() refreshes the local User object but NOT the cached ID token,
+        // which still carries email_verified: false. Both firestore.rules and
+        // wsfCreateCommunity gate on the TOKEN claim, so without a forced
+        // refresh the very next write fails with PERMISSION_DENIED and the new
+        // member is dead-ended one step after verifying. Mint a fresh token.
+        await user.getIdToken(true);
         router.replace('/profile-setup');
       } else {
         setStatus('Still unverified. Check your inbox and try again.');

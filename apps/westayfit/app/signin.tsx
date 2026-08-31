@@ -28,8 +28,15 @@ export default function SignIn() {
     setError(null);
     setSubmitting(true);
     try {
-      await signInWithEmailAndPassword(getFirebaseAuth(), email.trim(), password);
-      router.replace('/verify-email');
+      const credential = await signInWithEmailAndPassword(
+        getFirebaseAuth(),
+        email.trim(),
+        password
+      );
+      // Route on actual state. Sending an already-verified returning member to
+      // "Verify your email" tells them to check an inbox for nothing and makes
+      // them tap through a step they finished long ago.
+      router.replace(credential.user.emailVerified ? '/profile-setup' : '/verify-email');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in failed.');
     } finally {
