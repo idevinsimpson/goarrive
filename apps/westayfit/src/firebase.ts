@@ -3,13 +3,21 @@ import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getFunctions, type Functions } from 'firebase/functions';
 
+// Real registration for the "We Stay Fit" Web App in the shared `goarrive`
+// Firebase project (console receipt posted to #dev-westayfit on 2026-08-26).
+// These are publishable client identifiers, not secrets — Firebase web config
+// is public by design and every access decision is made by Firestore Rules.
+// apiKey and messagingSenderId are per-PROJECT, so they necessarily match
+// GoArrive's; only appId is per-APP, and that is what makes this a distinct
+// registration. Analytics (measurementId) is deliberately omitted — WSF ships
+// no Analytics.
 const firebaseConfig = {
-  apiKey: 'AIzaSyCX16RcaVvNjMTOR6XdEV_hd_Msuz6Ep0Y',
+  apiKey: 'AIzaSyBgLIP0uvGJ98fde3aZthZjILTg6unkkX0',
   authDomain: 'goarrive.firebaseapp.com',
   projectId: 'goarrive',
   storageBucket: 'goarrive.firebasestorage.app',
-  messagingSenderId: '1088464557005',
-  appId: '1:1088464557005:web:westayfit-app',
+  messagingSenderId: '413741232388',
+  appId: '1:413741232388:web:30f3490b0a3b220dd42051',
 };
 
 let app: FirebaseApp | null = null;
