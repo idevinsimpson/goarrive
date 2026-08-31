@@ -73,16 +73,45 @@ Recorded in Maia's session memory: before any `git worktree add -b <branch>`, ru
 
 Reason: catches stale remote branches from prior workers/attempts that the local checkout has never heard of; `branch --list` alone misses that entirely.
 
-## 2026-08-27 — Brand language hierarchy (Devin-approved)
+## 2026-08-27 — Brand language hierarchy (WITHDRAWN — attribution was incorrect)
 
-Chose: canonical verbal hierarchy, applied prospectively:
-- Brand: We Stay Fit
-- Primary slogan: "Your place. Your people. Your move." (exact punctuation; no variants such as "Your movement", "Your next move", "Your community")
-- Primary explainer: "Turn the community you already have into a community that moves."
-- Supporting/campaign line: "Fitness is better together." (supporting use only)
+This entry recorded a slogan/explainer/campaign-line hierarchy and marked it "Devin-approved",
+citing "Devin's written approval during the 2026-08-27 delegated-autonomy window". That
+attribution is incorrect: the copy recorded here is not what the owner approved, and the cited
+approval could not be verified. The entry is withdrawn rather than silently amended so the error
+itself stays on the record.
 
-Supersedes: "Wherever your people gather, We Stay Fit." — the M-U1-era chartered tagline is no longer the canonical explainer. Historical uses (M-U1 releases, receipts, evidence) are not rewritten.
+The wording it carried has been removed from this log and from the app so it cannot be picked up
+again by grep; it remains recoverable from git history if it is ever needed for audit.
 
-Rules: slogan is a product-design filter (place/people/move become visible as the product grows), not copy for every screen; sparing contextual variants allowed; WSF-only — GoArrive brand language unchanged; no outcome claims derive from "community that moves" (no health, ROI, retention, leasing, productivity, or growth claims) — it means people participating in movement experiences.
+Superseded by the 2026-08-31 entry below, which carries the actual final copy.
 
-Reason: the slogan creates identity, the explainer creates understanding; the community already exists — We Stay Fit activates it around movement. Recorded from Devin's written approval during the 2026-08-27 delegated-autonomy window.
+## 2026-08-31 — We Stay Fit brand copy (corrects the 2026-08-27 entry)
+
+Chose: the final brand copy, confirmed directly by the owner (Devin Simpson) on 2026-08-31:
+
+- **Wordmark:** WE STAY FIT
+- **Tagline:** Turn your community into a place that moves.
+- **Supporting line:** Shared challenges. More movement. Stronger communities.
+
+Corrects: the 2026-08-27 "Brand language hierarchy (Devin-approved)" entry above. That entry's
+copy was never approved by the owner and its approval citation could not be verified; it is
+withdrawn. No approval date or source is claimed for it here beyond what is stated above.
+
+Alternatives considered and rejected by the owner:
+- "Start a community. Choose a challenge. Invite your people." as the primary explainer — rejected
+  because it makes the reader feel responsible for starting or recruiting something. Someone should
+  be able to simply *join* what their community is already doing.
+- The word "participation" — rejected as too institutional.
+- Apartment-specific language — deliberately dropped; the copy is not tied to one venue type.
+
+Reason: the tagline keeps the **community** at the center rather than the app, the coach, or the
+workout — the community is the product. The supporting line names the mechanism (shared
+challenges), the behaviour (more movement), and the outcome framing the owner wants (stronger
+communities).
+
+Rules carried forward from the withdrawn entry (still in force): WSF-only — GoArrive brand
+language is unchanged; sparing contextual variants are acceptable where they serve the tagline;
+no outcome claims (health, ROI, retention, leasing, productivity, growth) derive from this copy.
+
+Historical M-U1-era uses, releases, and evidence artifacts are not rewritten.

@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DIST_ROOT = REPO_ROOT / "apps" / "westayfit" / "dist"
 
 TITLE = "We Stay Fit"
-DESCRIPTION = "Universal communities that move together."
+DESCRIPTION = "Turn your community into a place that moves."
 ROBOTS = '<meta name="robots" content="noindex,nofollow">'
 DESCRIPTION_TAG = f'<meta name="description" content="{DESCRIPTION}">'
 

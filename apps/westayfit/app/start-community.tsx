@@ -90,7 +90,7 @@ export default function StartCommunity() {
     <FormShell
       eyebrow="We Stay Fit"
       heading="Start your community"
-      intro="Turn the community you already have into a community that moves."
+      intro="Turn your community into a place that moves."
       testID="wsf-start"
     >
       <FieldLabel>Community name</FieldLabel>

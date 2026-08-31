@@ -25,18 +25,19 @@ WSF communities do not consume GoArrive coaches, workouts, movements, or program
 
 ## Brand Language
 
-Canonical verbal hierarchy for We Stay Fit (Devin-approved 2026-08-27; recorded in `DECISIONS.md`):
+Canonical brand copy for We Stay Fit, confirmed directly by the owner (Devin Simpson) on 2026-08-31; recorded in `DECISIONS.md`:
 
-- **Brand:** We Stay Fit
-- **Primary slogan:** "Your place. Your people. Your move." — exact punctuation; no variants such as "Your movement", "Your next move", or "Your community".
-- **Primary explainer:** "Turn the community you already have into a community that moves."
-- **Supporting/campaign line:** "Fitness is better together." — supporting use only, not a substitute for the slogan or explainer.
+- **Wordmark:** WE STAY FIT
+- **Tagline:** "Turn your community into a place that moves." — exact punctuation.
+- **Supporting line:** "Shared challenges. More movement. Stronger communities." — supporting use only, not a substitute for the tagline.
 
-The slogan is a product-design filter: as WSF grows, "place / people / move" become visible in the product surface (community pages, invites, activity feeds). It is not required copy for every screen; sparing contextual variants are acceptable when they serve the slogan.
+The tagline keeps the community at the center rather than the app, the coach, or the workout — the community is the product. It is not required copy for every screen; sparing contextual variants are acceptable when they serve the tagline.
 
-Scope: WSF-only. GoArrive brand language is unchanged. No outcome claims (health, ROI, retention, leasing, productivity, growth) derive from the phrase "community that moves" — it means people participating in movement experiences, nothing more.
+Rejected by the owner, and not to be reintroduced: "Start a community. Choose a challenge. Invite your people." as the primary explainer (it makes the reader feel responsible for starting or recruiting, when someone should be able to simply *join* what their community is already doing); the word "participation" (too institutional); and apartment-specific language.
 
-Supersedes: the M-U1-era chartered tagline "Wherever your people gather, We Stay Fit." is no longer the canonical explainer. Historical M-U1 uses, releases, and evidence artifacts are not rewritten.
+Scope: WSF-only. GoArrive brand language is unchanged. No outcome claims (health, ROI, retention, leasing, productivity, growth) derive from this copy.
+
+Corrects: the hierarchy previously recorded here as "Devin-approved 2026-08-27" was not the copy the owner approved, and that approval citation could not be verified; it is withdrawn (see `DECISIONS.md`). The M-U1-era chartered tagline "Wherever your people gather, We Stay Fit." also remains superseded. Historical M-U1 uses, releases, and evidence artifacts are not rewritten.
 
 ## Ratification
 

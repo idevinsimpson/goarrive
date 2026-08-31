@@ -8,8 +8,8 @@ export default function BrandShell() {
     <View style={styles.container} testID="wsf-brand-shell">
       <View style={styles.inner}>
         <Text style={styles.eyebrow}>We Stay Fit</Text>
-        <Text style={styles.heading}>Your place. Your people. Your move.</Text>
-        <Text style={styles.subline}>Turn the community you already have into a community that moves.</Text>
+        <Text style={styles.heading}>Turn your community into a place that moves.</Text>
+        <Text style={styles.subline}>Shared challenges. More movement. Stronger communities.</Text>
         <Text style={styles.body}>
           We Stay Fit is coming soon. This shell exists so the app can ship, deploy, and be verified.
           It intentionally has no content, no signup, and no reads or writes.

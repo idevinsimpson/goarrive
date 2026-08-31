@@ -16,9 +16,9 @@ test('renders the brand shell at /', async ({ page }) => {
   expect(robots, 'brand shell must be noindex,nofollow').toContain('noindex');
   expect(robots).toContain('nofollow');
 
-  await expect(page.getByText('Your place. Your people. Your move.')).toBeVisible();
+  await expect(page.getByText('Turn your community into a place that moves.')).toBeVisible();
   await expect(
-    page.getByText('Turn the community you already have into a community that moves.')
+    page.getByText('Shared challenges. More movement. Stronger communities.')
   ).toBeVisible();
 });
 
