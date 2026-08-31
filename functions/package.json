@@ -4,7 +4,7 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
-    "test:rules": "jest --config jest.rules.config.cjs",
+    "test:rules": "NODE_OPTIONS=--max-old-space-size=2048 jest --config jest.rules.config.cjs",
     "test:rules:emulator": "firebase emulators:exec --only firestore --project demo-goarrive \"npm run test:rules\"",
     "test:contract": "jest --config jest.contract.config.cjs"
   },
