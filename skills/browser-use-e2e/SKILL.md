@@ -8,8 +8,22 @@ GoArrive uses [Browser Use](https://browser-use.com/) for automated, LLM-driven 
 
 ## Authentication
 
-The API key for Browser Use Cloud is required to initialize the SDK.
-- **API Key:** `bu_blfMah0ZzLlNSqFoUlcHOOQKJ2xxMB0h4J7qvgOh5NA`
+The API key for Browser Use Cloud is required to initialize the SDK. It is read from the
+environment and **must never be committed to this repository**.
+
+- **Environment variable:** `BROWSER_USE_API_KEY`
+- **Where to set it:** export it in your local shell / `.env` (both are gitignored), or supply it
+  as a CI secret. Never paste the literal value into a file, a prompt, or a commit.
+
+```bash
+export BROWSER_USE_API_KEY="<your Browser Use Cloud key>"
+```
+
+> **Security notice — rotate the old key.** A live Browser Use Cloud API key was previously
+> hardcoded in this file and committed to a **public** repository. Removing it from the current
+> file does **not** remove it from git history, so it must be treated as **compromised**. Revoke
+> and reissue that key in the Browser Use Cloud dashboard; do not reuse it. The replacement key
+> belongs only in the environment variable above.
 
 ## Usage Instructions
 
@@ -20,12 +34,15 @@ When asked to perform browser-based E2E testing or verify UI/UX flows, follow th
    pip install browser-use-sdk
    ```
 
-2. **Initialize the Client:** Use the provided API key to authenticate the `AsyncBrowserUse` client.
+2. **Initialize the Client:** Authenticate the `AsyncBrowserUse` client with the key from the
+   environment. Never inline the literal key.
    ```python
+   import os
+
    from browser_use_sdk.v3 import AsyncBrowserUse
 
-   # Initialize with the GoArrive API Key
-   client = AsyncBrowserUse(api_key="bu_blfMah0ZzLlNSqFoUlcHOOQKJ2xxMB0h4J7qvgOh5NA")
+   api_key = os.environ["BROWSER_USE_API_KEY"]  # raises if the env var is not set
+   client = AsyncBrowserUse(api_key=api_key)
    ```
 
 3. **Execute Test Tasks:** Pass natural language instructions to the `run()` method to execute the test.
