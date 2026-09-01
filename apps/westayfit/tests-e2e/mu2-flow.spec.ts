@@ -187,6 +187,23 @@ test('known gap: the site still ships no favicon', async ({ request }) => {
   ).toBe(404);
 });
 
+test('the home page gets a new visitor to signup', async ({ page }) => {
+  // The deploy that passed every other gate shipped a home page with no route
+  // into the app: /signup worked, nothing linked to it, and the copy said
+  // there was no signup. Reaching the product required already knowing the
+  // URL. Assert the front door from the front door.
+  await page.goto('/');
+  await expect(page.getByTestId('wsf-brand-shell')).toBeVisible();
+
+  const signup = page.getByTestId('wsf-home-signup');
+  await expect(signup, 'home page must offer a way in').toBeVisible();
+  await expect(page.getByTestId('wsf-home-signin')).toBeVisible();
+  await expect(page.getByText('no signup')).toHaveCount(0);
+
+  await signup.click();
+  await expect(page.getByTestId('wsf-signup')).toBeVisible({ timeout: 15_000 });
+});
+
 test('a signed-out visitor cannot read a community page', async ({ page }) => {
   // Cheap negative case in the same harness: proves the community route is
   // gated by auth state rather than merely un-linked.

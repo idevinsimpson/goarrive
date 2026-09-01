@@ -6,7 +6,7 @@
   "scripts": {
     "start": "expo start",
     "web": "expo start --web",
-    "build:web": "EXPO_PUBLIC_BUILD_COMMIT=\"$(git rev-parse --short HEAD)\" expo export --platform web --clear && python3 ../../scripts/westayfit/inject_meta.py",
+    "build:web": "EXPO_PUBLIC_BUILD_COMMIT=\"$(git rev-parse --short HEAD)\" EXPO_PUBLIC_WSF_BUILT_AT=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" expo export --platform web --clear && python3 ../../scripts/westayfit/inject_meta.py",
     "deploy:staging": "firebase hosting:channel:deploy staging --config ../../firebase.westayfit.json --expires 7d",
     "ts:check": "tsc --noEmit",
     "test:vitest": "vitest run",
