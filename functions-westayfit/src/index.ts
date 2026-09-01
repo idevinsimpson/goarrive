@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { defineSecret } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 initializeApp();
@@ -161,6 +162,22 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 const SEND_COOLDOWN_MS = 60_000;
 const SEND_DAILY_CAP = 10;
 
+/**
+ * The Resend key is bound through Secret Manager, not plain function config.
+ *
+ * A bare `process.env.WSF_EMAIL_API_KEY` would have worked at runtime, and that
+ * is precisely the trap: the only ways to populate one are a committed `.env`,
+ * a `.env` on whichever laptop happens to deploy, or plaintext function config
+ * that the Cloud console renders in full to anyone with project access. This
+ * repo has already had one live credential reach a public branch, so the
+ * default has to be the safe one rather than the convenient one.
+ *
+ * `.value()` still resolves through process.env at runtime — Cloud Run mounts
+ * the secret there — so the callable tests set the variable exactly as before,
+ * and an unbound secret reads as '' and trips the missing-config check below.
+ */
+const wsfEmailApiKey = defineSecret('WSF_EMAIL_API_KEY');
+
 type SendConfig = {
   apiKey: string;
   from: string;
@@ -169,7 +186,7 @@ type SendConfig = {
 };
 
 function readSendConfig(): SendConfig {
-  const apiKey = process.env.WSF_EMAIL_API_KEY;
+  const apiKey = wsfEmailApiKey.value();
   const from = process.env.WSF_EMAIL_FROM;
   const appUrl = process.env.WSF_APP_URL;
   const missing = [
@@ -236,7 +253,10 @@ async function checkSendQuota(uid: string, now: number): Promise<number> {
 }
 
 export const wsfSendVerificationEmail = onCall(
-  { region: 'us-central1' },
+  // Without `secrets`, the value is never mounted and the function refuses to
+  // run — the safe failure, but a confusing one. Binding it here is what makes
+  // the deployed function able to read the key at all.
+  { region: 'us-central1', secrets: [wsfEmailApiKey] },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');

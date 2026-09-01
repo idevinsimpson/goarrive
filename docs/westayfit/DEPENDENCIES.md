@@ -65,14 +65,15 @@ unconfirmed stays under Unverified until someone looks.
 | Storage bucket | `goarrive.firebasestorage.app` | In WSF config; WSF never imports Storage |
 | Functions region | `us-central1` | `functions-westayfit/src/index.ts` |
 | Hosting sites | `goarrive` (default), `westayfit-app` | `firebase.json`, `firebase.westayfit.json` |
+| Resend sender domains | **`goarrive.fit` only** — verified, sending enabled, us-east-1. `westay.fit` is **not in the account at all** | Resend `list-domains`, 2026-09-01. Also: three API keys exist, all GoArrive-named; none scoped to WSF |
 
 ### Unverified — assumptions in use, not yet checked
 
 | Setting | Why it matters | Status |
 |---|---|---|
 | Auth email sender | Verification mail did not arrive at a real Gmail address on 2026-09-01. Presumed to be Firebase's default `noreply@goarrive.firebaseapp.com`, which is routinely spam-filtered — **presumed, not observed**, since no message was received to inspect | Open (R-9) |
-| Custom SMTP | Whether one is configured at all. GoArrive sends its own mail through Resend in `functions/src/notifications.ts`, which is a separate path and says nothing about the Auth setting | Open |
-| Authorized domains | The staging channel works today, so it is either listed or irrelevant for email/password. The mechanism has not been confirmed, and a new custom domain would need it | Open |
+| Custom SMTP | Whether one is configured on **Auth** at all. Now largely moot for WSF: `wsfSendVerificationEmail` sends through Resend directly rather than through Auth's mailer, so this only still matters for GoArrive's own password resets | Open, deprioritised |
+| Authorized domains | **Now has a named consumer.** `WSF_APP_URL` is passed as the `continueUrl` to `generateEmailVerificationLink`, and Firebase rejects a `continueUrl` whose domain is not on the authorised list. Set it to a domain that is not listed and every send fails — after the member has already created an account | Open, blocking the email path |
 | Email enumeration protection | When enabled, Firebase masks `auth/email-already-in-use`. It is surfacing, so it is probably off — probably is not verified, and turning it on would change the copy in `src/authErrors.ts` | Open |
 | Password policy | WSF enforces 8 characters client-side only. Whether a project-level policy exists is unknown; a stricter one would reject signups the UI accepted | Open |
 | **Live** Firestore index set | 48 indexes and zero `wsf*` is what the **repo file** says. The live set has never been fetched and could differ — which is the whole hazard in R-10 | Open |
