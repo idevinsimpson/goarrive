@@ -79,7 +79,7 @@ beforeEach(async () => {
 
   // Seed test data using the admin context (bypasses rules)
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    const db = ctx.firestore();
+    const db = modularDb(ctx.firestore());
 
     // Seed member_plans
     await setDoc(doc(db, 'member_plans', PLAN_A_ID), {
@@ -138,32 +138,50 @@ beforeEach(async () => {
   });
 });
 
+// ─── Helper: unwrap RUT's compat Firestore for the modular API ────────────────
+
+// @firebase/rules-unit-testing v5 returns a COMPAT Firestore -- its public types
+// declare `firestore(): firebase.firestore.Firestore`. Every call below uses the
+// MODULAR API (collection/doc/setDoc/...), which accepts a compat instance only
+// by unwrapping `._delegate` internally. Whether that unwrap yields the same
+// Firestore class the modular API expects depends on how the `firebase/compat/*`
+// and `firebase/firestore` entry points resolve in a given process -- so the
+// suite passes in one environment and fails in another with:
+//   "Expected first argument to collection() to be a CollectionReference,
+//    a DocumentReference or FirebaseFirestore"
+// Unwrapping explicitly removes the accident.
+function modularDb(compat: unknown): any {
+  return (compat as any)?._delegate ?? compat;
+}
+
 // ─── Helper: create authenticated Firestore context ───────────────────────────
 
 function asCoachA() {
   // Bootstrap coach: UID matches coachId (no custom claims needed)
-  return testEnv.authenticatedContext(COACH_A_UID).firestore();
+  return modularDb(testEnv.authenticatedContext(COACH_A_UID).firestore());
 }
 
 function asCoachB() {
-  return testEnv.authenticatedContext(COACH_B_UID).firestore();
+  return modularDb(testEnv.authenticatedContext(COACH_B_UID).firestore());
 }
 
 function asMemberA() {
-  return testEnv.authenticatedContext(MEMBER_A_UID).firestore();
+  return modularDb(testEnv.authenticatedContext(MEMBER_A_UID).firestore());
 }
 
 function asMemberB() {
-  return testEnv.authenticatedContext(MEMBER_B_UID).firestore();
+  return modularDb(testEnv.authenticatedContext(MEMBER_B_UID).firestore());
 }
 
 function asUnauthenticated() {
-  return testEnv.unauthenticatedContext().firestore();
+  return modularDb(testEnv.unauthenticatedContext().firestore());
 }
 
 function asPlatformAdmin() {
   // Custom-claim platformAdmin: token.admin == true triggers isPlatformAdmin()
-  return testEnv.authenticatedContext(ADMIN_UID, { admin: true }).firestore();
+  return modularDb(
+    testEnv.authenticatedContext(ADMIN_UID, { admin: true }).firestore()
+  );
 }
 
 // ─── member_plans ─────────────────────────────────────────────────────────────
@@ -470,15 +488,19 @@ describe('musicPrefs', () => {
 // bootstrap contexts above, because the rule uses isMemberOfCoach().
 
 function asClaimedMemberA() {
-  return testEnv
-    .authenticatedContext(MEMBER_A_UID, { role: 'member', coachId: COACH_A_UID })
-    .firestore();
+  return modularDb(
+    testEnv
+      .authenticatedContext(MEMBER_A_UID, { role: 'member', coachId: COACH_A_UID })
+      .firestore()
+  );
 }
 
 function asClaimedMemberB() {
-  return testEnv
-    .authenticatedContext(MEMBER_B_UID, { role: 'member', coachId: COACH_B_UID })
-    .firestore();
+  return modularDb(
+    testEnv
+      .authenticatedContext(MEMBER_B_UID, { role: 'member', coachId: COACH_B_UID })
+      .firestore()
+  );
 }
 
 describe('workoutMusicFeedback', () => {
