@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { WSF_BUILD_STAMP } from '../src/buildStamp';
-import { getFirebaseApp, wsfFirebaseProjectId } from '../src/firebase';
+import { getFirebaseApp, wsfFirebaseProjectId, wsfUsingEmulators } from '../src/firebase';
 import { wsfTheme } from '../src/theme';
 
 describe('WSF smoke', () => {
@@ -41,6 +41,15 @@ describe('WSF smoke', () => {
 
     // ...and it must be WSF's own registration, not GoArrive's app.
     expect(appId).toBe('1:413741232388:web:30f3490b0a3b220dd42051');
+  });
+
+  // The emulator wiring is double-guarded: a build-time flag AND a loopback
+  // hostname. This asserts the first guard defaults closed, so a build that
+  // simply forgets to set the flag can never be emulated. The second guard
+  // (hostname) is what protects a hosted build that sets it by accident.
+  it('does not use emulators unless the build flag is set', () => {
+    expect(process.env.EXPO_PUBLIC_WSF_USE_EMULATORS).toBeUndefined();
+    expect(wsfUsingEmulators).toBe(false);
   });
 
   it('reusing getFirebaseApp returns the same instance', () => {

@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Optional escape hatch for environments that already ship a Chromium and
+// cannot run `playwright install` — set WSF_PLAYWRIGHT_CHROMIUM to that
+// binary. Left unset, Playwright uses its own managed download, so CI and a
+// normal dev machine are unaffected.
+const chromiumPath = process.env.WSF_PLAYWRIGHT_CHROMIUM;
+
 export default defineConfig({
   testDir: './tests-e2e',
   fullyParallel: true,
@@ -14,7 +20,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(chromiumPath ? { launchOptions: { executablePath: chromiumPath } } : {}),
+      },
     },
   ],
 });

@@ -1,0 +1,63 @@
+{
+  "_comment": [
+    "Local verification harness for the We Stay Fit app. NOT a deploy config —",
+    "`firebase deploy` is never run against this file; firebase.westayfit.json",
+    "is the deploy config and this one only ever backs `emulators:start`.",
+    "",
+    "It exists because the WSF gate battery has to drive the real signup →",
+    "verify → profile-setup → start-community flow against the candidate's own",
+    "firestore.rules and the real functions-westayfit code. Neither firebase.json",
+    "(GoArrive's, no auth/functions emulator, wrong hosting site) nor",
+    "firebase.westayfit.json (hosting only) can do that alone.",
+    "",
+    "hosting mirrors firebase.westayfit.json exactly — including the",
+    "/community/** rewrite, which is the thing GATE 1 has to prove. Keep the two",
+    "in sync: if a rewrite or header changes there, change it here, or the",
+    "harness stops testing what actually ships."
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions-westayfit",
+      "codebase": "westayfit",
+      "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"]
+    }
+  ],
+  "hosting": {
+    "site": "westayfit-app",
+    "public": "apps/westayfit/dist",
+    "ignore": [
+      "firebase.json",
+      "firebase.westayfit.json",
+      "firebase.westayfit.emulators.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "rewrites": [
+      { "source": "/community/**", "destination": "/community/__dynamic.html" }
+    ],
+    "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+        ]
+      }
+    ]
+  },
+  "emulators": {
+    "auth": { "host": "127.0.0.1", "port": 9099 },
+    "firestore": { "host": "127.0.0.1", "port": 8080 },
+    "functions": { "host": "127.0.0.1", "port": 5001 },
+    "hosting": { "host": "127.0.0.1", "port": 5010 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
+}
