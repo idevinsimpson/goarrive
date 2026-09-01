@@ -17,6 +17,7 @@ import {
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
+import { authErrorMessage, isEmailAlreadyInUse } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth } from '../src/firebase';
 
@@ -27,6 +28,7 @@ export default function SignUp() {
   const [confirmAdult, setConfirmAdult] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offerSignIn, setOfferSignIn] = useState(false);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Create your account" testID="wsf-signup-disabled" />;
@@ -36,6 +38,7 @@ export default function SignUp() {
 
   async function onSubmit() {
     setError(null);
+    setOfferSignIn(false);
     setSubmitting(true);
     try {
       const auth = getFirebaseAuth();
@@ -44,7 +47,8 @@ export default function SignUp() {
       await sendEmailVerification(cred.user);
       router.replace('/verify-email');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-up failed.');
+      setError(authErrorMessage(e, 'Sign-up failed.'));
+      setOfferSignIn(isEmailAlreadyInUse(e));
     } finally {
       setSubmitting(false);
     }
@@ -96,6 +100,12 @@ export default function SignUp() {
       </Pressable>
 
       {error ? <ErrorText testID="wsf-signup-error">{error}</ErrorText> : null}
+
+      {/* The address is taken, so "Create account" cannot succeed no matter how
+          many times it is pressed. Lead with the action that works. */}
+      {offerSignIn ? (
+        <SecondaryLink href="/signin" label="Sign in to your existing account" />
+      ) : null}
 
       <SubmitButton
         label="Create account"

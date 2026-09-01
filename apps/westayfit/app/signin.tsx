@@ -11,6 +11,7 @@ import {
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
+import { authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth } from '../src/firebase';
 
@@ -38,7 +39,7 @@ export default function SignIn() {
       // them tap through a step they finished long ago.
       router.replace(credential.user.emailVerified ? '/profile-setup' : '/verify-email');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-in failed.');
+      setError(authErrorMessage(e, 'Sign-in failed.'));
     } finally {
       setSubmitting(false);
     }

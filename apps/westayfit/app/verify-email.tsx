@@ -11,6 +11,7 @@ import {
   StatusText,
   SubmitButton,
 } from '../src/AuthFormPrimitives';
+import { authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth } from '../src/firebase';
 
@@ -40,7 +41,7 @@ export default function VerifyEmail() {
         setStatus('Still unverified. Check your inbox and try again.');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Refresh failed.');
+      setError(authErrorMessage(e, 'Refresh failed.'));
     } finally {
       setChecking(false);
     }
@@ -55,7 +56,7 @@ export default function VerifyEmail() {
       await sendEmailVerification(user);
       setStatus('Verification email sent.');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Send failed.');
+      setError(authErrorMessage(e, 'Send failed.'));
     } finally {
       setResending(false);
     }
