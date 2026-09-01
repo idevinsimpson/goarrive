@@ -47,3 +47,34 @@ Someone attempts to create a Hosting site named `westayfit` (without `-app`) or 
 A functions redeploy that renames a function shows a delete-prompt. Aborting the deploy is safe; accepting it deletes a live GoArrive function. Auto-accepting via `--force` or piped `yes` is the failure mode.
 
 **Mitigation:** WSF deploy commands never pipe `yes` or pass `--force`. Prompt-aborts are treated as stop-conditions, not blockers to be bypassed.
+
+## R-9: WSF inherits project-level Firebase config it does not own and cannot see
+
+R-1 through R-8 are all about *files* two apps share. This is the harder version: settings that live in the **Firebase console**, belong to the project rather than to either app, were configured for GoArrive's needs, and are invisible in the repo. WSF picks them up silently and no test can see them.
+
+Four instances surfaced within one hour of the first real member walking the flow, after every automated gate had passed:
+
+- **Shared Auth pool.** Every existing GoArrive member and coach already owns their email address in this project, so `createUserWithEmailAndPassword` returns `auth/email-already-in-use` for exactly the people most likely to be handed a WSF invite. Not an edge case — the default case for anyone already in the ecosystem.
+- **Built-in email delivery.** WSF is the only thing in the project relying on Firebase Auth to send mail. GoArrive stopped: it has a Resend provider on a verified domain (`functions/src/notifications.ts`) and its `addCoach` / `sendMemberInvite` hand the generated link to an admin instead. WSF self-signup has no admin in the loop, so it inherited an abandoned path. Verification mail does not arrive.
+- **Custom action URL.** Auth action links point at `https://goarrive.web.app/reset-password`. **That route does not exist** — no match in any of the 45 routes under `apps/goarrive/app`, and no `oobCode` / `applyActionCode` / `verifyEmail` handling anywhere in the app source. GoArrive hosting ends in a catch-all `** → /index.html`, so the URL returns **200**, renders the app shell, and silently discards the code. Firebase's default handler at `https://goarrive.firebaseapp.com/__/auth/action` still works and is what the custom URL overrode.
+- **App Check** (clear today, listed because the coupling is live): enforced nowhere, so WSF callables pass with `app: "MISSING"`. Enabling it project-wide for GoArrive breaks every WSF callable the same day.
+
+**Unconfirmed and worth settling:** `generatePasswordResetLink` in `addCoach` and `sendMemberInvite` receives the same dead action URL. If it is dead for `verifyEmail` it is dead for password resets, which would make every coach and member invite link GoArrive has issued inert. Two things could make that false — `goarrive.web.app` may serve an older deployment that had the route, or the handler may live outside this repo.
+
+**Mitigation:** treat every project-level console setting as an undeclared dependency of WSF, not as ambient environment. Before a milestone ships anything that touches auth, email, storage or enforcement, enumerate the console settings that path depends on and record their current values in `DEPENDENCIES.md` — a value nobody wrote down is a value nobody can diff. No automated gate substitutes: these settings are outside the repo, so the only defence is that a human walks the real flow as a real member before the milestone is called done. Every one of these four passed emulator verification, live rules verification, and five PHASE 3 checks.
+
+## R-10: `firestore.indexes.json` is the same shared-file hazard as `firestore.rules`, with no drift gate
+
+R-1 covers the ruleset. The index file has identical replace-the-whole-file semantics on `firebase deploy --only firestore:indexes`, and one extra edge: a deploy from a stale file can propose **deleting** indexes it does not contain. A dropped composite index is a production outage on whatever query needed it, with a rebuild measured in minutes to hours.
+
+Currently latent — 48 indexes, zero for `wsf*`, because WSF runs no compound queries at all; every read is a direct `doc()` get. The first one (M-U3 invites, or listing a member's communities) walks straight into it.
+
+**Mitigation:** GATE 0 — the live-vs-`main` diff built for the rules deploy — has no equivalent for indexes. Build one against the indexes endpoint before the first WSF index ships, and never accept an index deploy that proposes a deletion.
+
+## R-11: Findings recorded only in Slack are findings that will be missed twice
+
+The `auth/email-already-in-use` collision above was found and written up on 2026-08-26, in a Slack message, as N-U8 — in the WSF → GoArrive direction only, and judged not a blocker. The mirror direction, which is the one that blocks the entire existing user base, was never written down anywhere. When it surfaced in a real smoke test five days later it was treated as new.
+
+The audit was right. The record of it was a chat message, so what survived was a label and a wrong summary.
+
+**Mitigation:** an audit whose conclusion matters to a later decision lands in this repo, in `RISKS.md` or `DECISIONS.md`, in the same work session — not in the channel where the work was discussed. When an audit clears a gate, write down the scenarios it *did not* clear as explicitly as the ones it did.
