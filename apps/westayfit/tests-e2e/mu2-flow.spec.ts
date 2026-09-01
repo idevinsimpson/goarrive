@@ -32,33 +32,61 @@ const PROJECT_ID = 'goarrive';
  * pinned gap with a test below that fails once it is closed — never a way to
  * quiet an error nobody has looked at.
  */
-const KNOWN_GAPS = ['/favicon.ico'];
+const KNOWN_GAPS = [
+  '/favicon.ico',
+  // wsfSendVerificationEmail refuses to run without WSF_EMAIL_API_KEY /
+  // WSF_EMAIL_FROM / WSF_APP_URL, and the emulator deliberately supplies none
+  // of them — configuring it would mean a real POST to Resend from a test run.
+  // So the call returns failed-precondition (HTTP 400), signup swallows it, and
+  // the member still reaches /verify-email. That resilience is the point: the
+  // account exists by then, and a send failure must not strand anyone on the
+  // signup screen. Matched on the function name rather than a bare 400 so this
+  // cannot quietly absorb some other bad request.
+  'wsfSendVerificationEmail',
+];
 
-type OobCode = {
-  email: string;
-  oobCode: string;
-  oobLink: string;
-  requestType: string;
-};
+/**
+ * Marks an address verified through the Auth emulator's admin API.
+ *
+ * Deliberately independent of how the app sends mail. The earlier version
+ * scraped the emulator's captured oobCodes, which silently tied this test to
+ * the client SDK's sendEmailVerification — so the moment WSF moved to its own
+ * delivery path (wsfSendVerificationEmail, because Firebase's built-in mail
+ * never arrives and its action links do not resolve) the harness broke for a
+ * reason that had nothing to do with the behaviour under test.
+ *
+ * What this test is actually for is what happens on the CLIENT once an address
+ * becomes verified: whether the ID token is refreshed so the next write is
+ * allowed. Getting to that state is setup, not the assertion.
+ */
+async function markEmailVerified(email: string): Promise<void> {
+  const headers = { authorization: 'Bearer owner', 'content-type': 'application/json' };
+  const base = `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1`;
 
-/** Pull the verification link the Auth emulator captured instead of sending. */
-async function fetchVerificationLink(email: string): Promise<string> {
-  const res = await fetch(`${AUTH_EMULATOR}/emulator/v1/projects/${PROJECT_ID}/oobCodes`);
-  if (!res.ok) {
-    throw new Error(`oobCodes fetch failed: ${res.status} ${await res.text()}`);
+  const lookup = await fetch(`${base}/projects/${PROJECT_ID}/accounts:query`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ expression: [] }),
+  });
+  if (!lookup.ok) {
+    throw new Error(`emulator account query failed: ${lookup.status} ${await lookup.text()}`);
   }
-  const body = (await res.json()) as { oobCodes?: OobCode[] };
-  const codes = (body.oobCodes ?? []).filter(
-    (c) => c.email === email && c.requestType === 'VERIFY_EMAIL'
-  );
-  const latest = codes[codes.length - 1];
-  if (!latest) {
-    throw new Error(
-      `no VERIFY_EMAIL oobCode for ${email}. The app never called ` +
-        `sendEmailVerification, or it reached the real project instead of the emulator.`
-    );
+  const { userInfo = [] } = (await lookup.json()) as {
+    userInfo?: { localId: string; email?: string }[];
+  };
+  const user = userInfo.find((u) => u.email === email);
+  if (!user) {
+    throw new Error(`no emulator account for ${email} — signup did not create one`);
   }
-  return latest.oobLink;
+
+  const update = await fetch(`${base}/accounts:update`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ localId: user.localId, emailVerified: true }),
+  });
+  if (!update.ok) {
+    throw new Error(`emulator verify failed: ${update.status} ${await update.text()}`);
+  }
 }
 
 /**
@@ -87,10 +115,7 @@ function captureConsoleErrors(page: Page): string[] {
   return errors;
 }
 
-test('a new adult can sign up, verify, build a profile and start a community', async ({
-  page,
-  request,
-}) => {
+test('a new adult can sign up, verify, build a profile and start a community', async ({ page }) => {
   const errors = captureConsoleErrors(page);
   // Unique per run so repeated runs against a warm emulator don't collide on
   // an existing account.
@@ -109,12 +134,15 @@ test('a new adult can sign up, verify, build a profile and start a community', a
   await page.getByTestId('wsf-signup-submit').click();
 
   // ---- verify email -------------------------------------------------------
+  // Reaching this screen at all is an assertion, not a step. The verification
+  // send fails here (the emulator supplies no mail config, by design), and the
+  // account already exists by this point — so a failed send must carry the
+  // member forward rather than strand them on signup with an error and no
+  // route out.
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('wsf-signup-error')).toHaveCount(0);
 
-  const link = await fetchVerificationLink(email);
-  const applied = await request.get(link);
-  expect(applied.status(), 'applying the emulator verification link').toBeLessThan(400);
+  await markEmailVerified(email);
 
   // The regression this guards: before the fix, `reload()` alone left the
   // cached ID token saying email_verified:false, so this click routed forward

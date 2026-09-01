@@ -1,9 +1,5 @@
 import { router } from 'expo-router';
-import {
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-  updateProfile,
-} from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
@@ -20,6 +16,7 @@ import {
 import { authErrorMessage, isEmailAlreadyInUse } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth } from '../src/firebase';
+import { requestVerificationEmail } from '../src/verificationEmail';
 
 export default function SignUp() {
   const [displayName, setDisplayName] = useState('');
@@ -44,7 +41,16 @@ export default function SignUp() {
       const auth = getFirebaseAuth();
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
       await updateProfile(cred.user, { displayName: displayName.trim() });
-      await sendEmailVerification(cred.user);
+
+      // Best-effort. The account already exists by this point, so a send
+      // failure must not strand the member on the signup screen with no way
+      // forward — /verify-email has a Resend button that surfaces the real
+      // error when they actively ask for one.
+      try {
+        await requestVerificationEmail();
+      } catch (sendError) {
+        console.warn('[signup] verification email not sent', sendError);
+      }
       router.replace('/verify-email');
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-up failed.'));

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { reload, sendEmailVerification, signOut } from 'firebase/auth';
+import { reload, signOut } from 'firebase/auth';
 import { useCallback, useState } from 'react';
 
 import { useWsfAuth } from '../src/auth';
@@ -14,6 +14,7 @@ import {
 import { authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth } from '../src/firebase';
+import { requestVerificationEmail } from '../src/verificationEmail';
 
 export default function VerifyEmail() {
   const { ready, user } = useWsfAuth();
@@ -53,8 +54,15 @@ export default function VerifyEmail() {
     setError(null);
     setStatus(null);
     try {
-      await sendEmailVerification(user);
-      setStatus('Verification email sent.');
+      // WSF's own delivery path — the client SDK's sendEmailVerification routes
+      // through mail that does not arrive and mints a link that does not
+      // resolve. See wsfSendVerificationEmail.
+      const result = await requestVerificationEmail();
+      setStatus(
+        result.sent
+          ? 'Verification email sent.'
+          : 'This address is already verified — tap "I have verified".'
+      );
     } catch (e) {
       setError(authErrorMessage(e, 'Send failed.'));
     } finally {
