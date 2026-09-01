@@ -45,11 +45,19 @@ module.exports = {
     '^.+\\.tsx?$': [
       require.resolve('ts-jest'),
       {
+        // Transpile only. Without isolatedModules, ts-jest builds a full
+        // TypeScript program; with rootDir at the repo root and an inline
+        // tsconfig that names no `include`, that program reaches for every
+        // .ts file in the monorepo and exhausts the heap during suite load,
+        // before a single test runs. Diagnostics are already off, so the
+        // type graph was never being used for anything.
+        isolatedModules: true,
         diagnostics: false,
         tsconfig: {
           module: 'commonjs',
           esModuleInterop: true,
           skipLibCheck: true,
+          isolatedModules: true,
         },
       },
     ],
