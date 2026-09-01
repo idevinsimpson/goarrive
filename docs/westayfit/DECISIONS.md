@@ -186,3 +186,65 @@ emulator harness.
 Reason: the token is the security boundary, so the token is what has to be current.
 Client-side `emailVerified` is a display value; treating it as the gate makes the UI and
 the rules disagree.
+
+## 2026-09-01 — Emulator wiring in the WSF app, guarded twice
+
+Chose: `apps/westayfit/src/firebase.ts` connects to the Auth, Firestore and Functions
+emulators when `EXPO_PUBLIC_WSF_USE_EMULATORS` is set **and** the page is served from a
+loopback hostname. Both conditions, always.
+
+Why it was needed: the app had no emulator wiring of any kind, so there was no way to
+point a build at a local Firebase. That made the M-U2 verification gate unanswerable as
+written — the signup → verify → profile-setup → start-community flow could only be
+asserted in pieces, and the ID-token refresh above (the fix that decides whether a new
+member dead-ends) is invisible to every in-process test. The gate had been asked for
+twice before anyone noticed the code could not satisfy it.
+
+Why two guards and not one: an env var can leak into a hosted build by accident, and a
+production bundle silently pointing real members at a nonexistent emulator would fail
+every auth call with a network error and read as an outage. The build-time flag alone is
+a promise; the hostname check is structural, and makes the bad state unreachable rather
+than merely unlikely. A unit test asserts the flag defaults closed.
+
+Consequence for deploys: `scripts/westayfit/gate1.sh` leaves `dist/` as an emulator
+build. Any deploy must rebuild with `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` and that flag
+**unset**. The hostname guard means a stale `dist` would not actually reach a real
+member's browser in a broken state, but it would still be the wrong artifact.
+
+## 2026-09-01 — Exact version pins for `firebase` and `@firebase/rules-unit-testing`
+
+Chose: pin both exactly in `functions/package.json` rather than carry caret ranges.
+
+`^12.11.0` is not a hypothetical risk. An `npm install` resolved it forward mid-repair,
+the tree ended up with two copies of `@firebase/firestore`, and the modular
+`collection()` began receiving an instance from the other copy. Hours went into chasing
+that as a code fault, because the resulting error names the test file, not the
+dependency. Measured against the live registry at the time of writing: `^12.11.0` →
+`12.18.0`; pinned → `12.11.0`.
+
+`@firebase/rules-unit-testing` is pinned for a stronger reason. The `modularDb()` helper
+in `firestore.rules.test.ts` reaches for `._delegate` on the compat Firestore that RUT
+returns. That is an internal implementation detail, not public API, so a minor release
+is free to change it and silently re-break the suite with nothing in the changelog to
+warn anyone.
+
+`npm ci` honours the lockfile and would have been safe. The pin exists because nothing
+forces anyone to use it, and the failure mode does not look like a dependency problem.
+
+Reason: a range is a promise that upstream will not break you. For a suite whose whole
+job is to prove the security rules still hold, that promise is not worth the debugging
+cost when it fails.
+
+## 2026-09-01 — The WSF site ships no favicon (open gap, deliberately not patched)
+
+Recorded, not decided: there is no icon asset anywhere in `apps/westayfit`, and no
+`web.favicon` in `app.json`. Every page load 404s on `/favicon.ico` and every browser
+tab shows a generic icon.
+
+Not fixed here because the mark is a brand decision and inventing one would put an
+unapproved asset in front of every member. Pinned instead by a test in
+`tests-e2e/mu2-flow.spec.ts` that **fails when a favicon appears**, alongside a named
+allowance in that spec's `KNOWN_GAPS`. The pairing is the point: the allowance cannot
+outlive the gap silently, because closing the gap breaks the test that documents it.
+
+Cosmetic, not a deploy blocker. Owner: Devin.
