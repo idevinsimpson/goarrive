@@ -65,6 +65,7 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/firebase-deploy-setup.md` | **Mandatory.** How to deploy to staging/production using the service account key in non-interactive environments. |
 | `.claude/interaction-rules.md` | **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol. |
 | `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split based on authentication state. |
+| `docs/westayfit/WE_STAY_FIT_MASTER.md` | **Mandatory for any We Stay Fit work.** Master source of truth for WSF — brand and messaging (including which lines are superseded), the three-surface architecture, system-of-record boundaries, agent routing, the milestone roadmap, the FitLife Expo 2026 activation, and the decisions only Devin may make. Read before acting on WSF; it governs over older WSF handoff documents. |
 
 ## Recent Context
 Recent development has focused heavily on enhancing the coach and admin experience. Key updates include fixing admin impersonation for lazy-loaded components and implementing prorated earnings caps with yearly admin configuration. The team also built a bulk movement upload feature utilizing AI auto-analysis and enhanced the workout thumbnail grid with dynamic scaling (4:5 aspect ratio). Additionally, sorting logic across all libraries was updated to prioritize the most recently edited items.
