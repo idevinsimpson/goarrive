@@ -70,6 +70,10 @@ it finishes. No second turn required, no human required.
 scripts/westayfit/run-detached.sh <unit> <channel-id> <thread-ts> -- <command ...>
 ```
 
+**Proven 2026-09-05 13:22:46Z.** `wsf-selftest` launched at 13:19:26Z, slept 200 s — longer
+than any inline command survives — and posted `SELFTEST-OK` into thread `1788613482.722789`
+as text on its own, with no human and no second turn. (`/home/ben/.local/state/wsf-run/wsf-selftest.20260905T131926Z.log`)
+
 One-time setup and the acceptance self-test are in the script header. **Standing rule:**
 any build, deploy, gate run, emulator suite, or `npm ci` goes through it. Inline
 long-running work inside a chat turn is no longer acceptable.
@@ -92,6 +96,17 @@ long-running work inside a chat turn is no longer acceptable.
 | Claude OAuth token | `~/.config/systemd/user/agent-slack.service.d/override.conf` — never edited |
 | Running bot | `/home/ben/agent-platform-live/shared/slack-bot/bot.js`, node v22 |
 | Jarvis switches | `JARVIS_VOICE_REPLY=on` in `/home/ben/agent-platform-live/shared/slack-bot/.env` (documented kill switch); `JARVIS_SPOKEN_REPLY_SCRIPT_PATH` / `TTS_DRAFT_SCRIPT_PATH` env vars read at `bot.js:95-96`; `[JARVIS: /path.mp3]` markers parsed at `bot.js:1691-1694`. **No per-channel setting** — off means off in every channel. |
+
+**Fix 1 applied 2026-09-05.** Drop-in verified merged (`systemctl --user cat agent-slack`
+lines 37–38); deferred restart scheduled `13:21:43Z +240s`. Verification of the running
+process follows the restart.
+
+**How the switch would be applied, if Devin says off.** `bot.js:36` loads `.env` with
+`require('dotenv').config({ path: __dirname + '/.env' })` — default mode, which does **not**
+overwrite variables already in the environment. So `Environment=JARVIS_VOICE_REPLY=off` in
+the systemd drop-in wins over the `.env`'s `on`, with no edit to the running tree and a
+one-line revert. Caveat: that switch is documented as governing replies to *voice memos*;
+whether it also stops the every-turn `audio-bundle` is unproven until tried.
 
 ## Still open
 
