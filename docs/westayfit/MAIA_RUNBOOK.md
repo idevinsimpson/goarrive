@@ -87,7 +87,11 @@ long-running work inside a chat turn is no longer acceptable.
 
 ## Dispatch rules that follow
 
-1. Every turn ends with work **pushed**. A dispatch that expects >15 minutes of inline work is a defect in the dispatch.
+1. Every turn ends with work **pushed** — *even mid-feature.* WIP commits are fine; lost work
+   is not. A dispatch that expects >15 minutes of inline work is a defect in the dispatch.
+   (E3, 2026-09-05: "build E3" as one dispatch put her 17 minutes in with nothing on origin,
+   tailing a log inline. The caps kept the turn alive; the code was still unsafe until a
+   checkpoint nudge. Split feature dispatches so each turn has a natural push point.)
 2. Long steps go through `run-detached.sh`. The dispatch names the thread-ts to report into.
 3. Mention her as `<@U0AQAGGMTE3|Maia>`. Plain `@Maia` pings nobody.
 4. Read her **threads**, not the channel — and in **detailed** mode, or an audio-bundle reply looks like an empty message.
