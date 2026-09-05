@@ -68,3 +68,25 @@ Append-only release log. Each entry: date, milestone, staging channel URL, funct
 **Post-commit redeploy**
 
 After committing and pushing the fixes above, one more rebuild + channel redeploy is performed so `/health` displays the SHA of the actual PR HEAD (not the SHA that was HEAD at the time of the first post-fix rebuild).
+
+## 2026-09-05 — E3 staging preview for Devin's phone test (commit `324cad6`)
+
+**Scope:** WSF functions codebase + WSF Hosting preview channel `staging`. Live channel untouched.
+GoArrive functions untouched (`firebase functions:list` before/after: only `wsf*` lines differ).
+Approved by Devin 20:10Z ("Ready for you to deploy to staging for testing"). Executed by Maia
+20:30–20:40Z, thread #dev-westayfit 1788640186.853239.
+
+| Item | Value |
+|---|---|
+| Channel URL | `https://westayfit-app--staging-x4m0iwln.web.app` (expires 2026-09-12 20:35:52Z) |
+| Join URL | `https://westayfit-app--staging-x4m0iwln.web.app/join/P9RACO2GyZJWUOMHbXZW-w` |
+| Build | `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 npm --prefix apps/westayfit run build:web` at `324cad6`; three dynamic-route aliases routed; SHA in `/health` |
+| Functions created | `wsfChallengePulse`, `wsfCheckIn` (minInstances 1 — billing prompt answered with `--force`, cost accepted by Devin), `wsfJoinCommunity`, `wsfListChallenge`, `wsfPreviewCommunity` |
+| Functions updated | `wsfHealth`, `wsfCreateCommunity`, `wsfSendVerificationEmail` |
+| Secret | `WSF_EMAIL_API_KEY` did not exist; placeholder set (version 1). **Verification emails will not send until Manus installs the real Resend key** (`docs/westayfit/MANUS_HANDOFF_EMAIL.md`). |
+| Seed | `scripts/westayfit/seed/staging-test.json` (`b815415`): community `wsf-staging-test` (custom, public, `isSample: false`), challenge `wsf-staging-test-challenge` "Staging moves" (active, `goalTarget: null`), moves: Walk the main hall · Stretch at the wall for one minute · Scan the code at the desk (`requiresCode`, code `1234`) |
+| Smoke | `/health` 200 · `/join/<code>` 200 · `/community/wsf-staging-test/challenge` 200 |
+| Housekeeping | `firebase-admin@12` installed `--no-save` at the worktree root for the seed script (untracked `node_modules/`, no manifest change) |
+
+**Not LIVE VERIFIED yet:** the member flow on this channel is Devin's phone test. EMULATOR
+VERIFIED at `324cad6` (gate green 20:05Z, 7 browser specs + callable suite).
