@@ -47,11 +47,29 @@ doors open. Attendees join it; they do not search, choose a type, or resolve dup
 | Slice | Substance | M-U parent | Owner |
 |---|---|---|---|
 | **E1** | Verification email actually delivers | M-U2 completion | Manus (config) + Maia (deploy) |
-| **E2** | Join an existing community by link / QR | M-U3, reduced | Maia |
+| **E2** | Join an existing community by link / QR — **ACCEPTED 2026-09-05, 7/7 EMULATOR VERIFIED** @ `feat/wsf-e2-join-by-qr` `5cbdb8e` (gate log `wsf-e2-gate.20260905T144155Z`, exit 0; `firestore.rules` delta vs base `7fc4b28`: empty) | M-U3, reduced | Maia |
 | **E3** | Challenge templates, community challenges, check-ins | M-U4 — **the product at FitLife** | Maia |
 | **E4** | Aggregate counters, honest and live | M-U5, reduced | Maia |
 | **E5** | Community Pulse display view (kiosk two) | M-U5, reduced | Maia |
 | **E6** | Expo hardening — attract, auto-reset, large targets | M-U7, reduced | Maia |
+
+### E2 acceptance record
+
+Criterion → proof, all on `5cbdb8e`: (1) second adult with only a join URL reaches
+`/community/<id>` — `e2-join-flow.spec.ts:142`; (2) joining twice writes exactly one
+membership — `wsf-join-community.test.ts` §3.2 asserts `memberships.size === 1`;
+(3) unknown code and private group return byte-identical not-found — `wsf-preview-community.test.ts`
+§3.3 compares code, message and details; (4) cold load of `/join/<code>` is 200, unknown
+code renders the not-valid state — `e2-join-flow.spec.ts:148, :210`; (5) signed-out →
+signup → back to the join URL → community — `e2-join-flow.spec.ts:151–198`; (6) no
+`firestore.rules` or `firestore.indexes.json` change — verified against the merge-base;
+(7) M-U2 flows unchanged — `mu2-flow.spec.ts` ×4. Callables run inside `gate1.sh` under
+`set -euo pipefail` before the e2e block, so exit 0 proves them. Two harness defects the
+gate caught on the way: a seed against the emulator's DELETE-only `/emulator/v1` path, and
+a double-mounted join screen from a `push` where a `replace` belonged — the second was a
+real product defect. Non-blocking follow-up: add a non-`active` lifecycle case to the
+oracle test (the callable already handles it). `apps/westayfit/dist` is an emulator build
+after any gate run — rebuild before deploying.
 
 ### Dependency correction
 
