@@ -219,35 +219,19 @@ way.
 
 ## Still open
 
-- **A wedged turn cannot be un-wedged from Slack.** A kill instruction is itself a turn,
-  and it queues behind the wedge it is meant to clear. The real fix is a control path the
-  bot's event consumer handles *outside* the turn loop — e.g. a message that is exactly
-  `maia: restart` schedules the deferred restart directly, no model call. Dispatch this as
-  the next bot.js task after the live-progress patch (`dispatch/BOT-LIVE-PROGRESS.md`).
-- **Live-progress patch: written, self-tested, dispatched 17:00Z.** Branch
-  `Trifecta-United/agent-platform` `maia/live-progress-heartbeat` @ `50495e9`, BASE
-  `5fa8626` (2026-08-12; `main` has not touched `bot.js` since). Findings at
-  `bot.js` L893–912 (executor output capture), L1149–1290 (`createLiveProgress`),
-  L2905–2941 (fallback heartbeat, now 20 s and edit-in-place), L1663–1682 (monitor
-  heartbeat absorbed, progress-tick audio removed). Harness `scripts/live-progress-selftest.js`
-  passes 5 scenarios; `npm test` 828 pass, 3 pre-existing `dotenv` failures identical to
-  `main`. Known limit: with Claude Code 2.1.x as the executor, a running command's output is
-  not visible to `bot.js` until the call returns, so a hung command shows the command and
-  the elapsed time with `last output: (none yet)` — and is sealed as ❌ when the turn ends.
-  Report thread: #dev-westayfit 1788626986.167859. Apply thread: 1788627643.833759.
-  **Apply STOPPED at the guard (17:01Z, correctly):** `git apply --check` failed at line
-  2647 and the running file matched neither BASE nor its parent — the live tree is
-  `fix/text-as-button-answer` @ `4f53fd0` plus uncommitted Sep 4 edits (`optionMeta` /
-  `matchTextToProposal`, inline `audioChain`, `envelopeGuard.inspectEnvelope` changes).
-  Option B would have erased them. **Captured 17:06Z:** `live/agent-slack-2026-09-05` @
-  `92eae98` (pushed; `bot.js` sha256 `2fa097b8…437387`; the commit also carries
-  `proposals.js` + `proposals.test.js`, which were already staged on the box and which the
-  live `bot.js` imports). The rebuild runs in a fresh session against that exact commit
-  with the same harness → branch `maia/live-progress-heartbeat-v2`, plus a separate commit
-  for the audio-only/empty-text reply defect (seen again at 17:04:48Z in thread
-  1788627812.717299 — the capture result arrived as audio with an empty text slot; the
-  text had to be requested a second time). Lesson recorded as rule 12.
-  LIVE VERIFIED only after the 3-minute acceptance run in its own thread.
+- **Live progress — LIVE VERIFIED 2026-09-05 17:40Z** (thread 1788629761.176299, on the
+  service restarted 17:34:33Z). Long tool calls now show one edited-in-place line
+  (`⏳ 1m40s · running: <cmd>` → `✅ 3m00s · <cmd>`); no "Still working" posts; no
+  progress-tick audio; the written reply posts as its own message before any audio
+  (commit B). Branch `maia/live-progress-heartbeat-v2` (A `ce0b061`, B `36c720a`) applied
+  by patch on the box; backup `bot.js.bak-20260905T173052Z`. Full record in
+  `dispatch/BOT-LIVE-PROGRESS.md`.
+- **Un-wedge (defects 0–2 in `dispatch/BOT-UNWEDGE.md`) — in progress in a third session**
+  on branch `maia/unwedge-v1`: absorb the last heartbeat phrase on the narration-stream
+  path; a real absolute-cap timer that kills the CLI process group plus a stall detector;
+  and the `maia: status` / `maia: restart` / `maia: cancel` control path served before
+  any model call, allowlisted via a new `control.conf` drop-in. Apply only when no turn is
+  in flight (a restart kills every concurrent turn).
 - **Jarvis off?** It is all-or-nothing. Turning it off silences Devin's assistant channels too. Devin's decision; until then the text-is-the-record rule (§5) is the control, and Maia has saved it to memory.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
   tree is `agent-setup/…` (Aug 31, +28 KB). Her button-tap fix cannot reach the running
