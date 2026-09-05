@@ -98,18 +98,16 @@ long-running work inside a chat turn is no longer acceptable.
    choice** — a full correction was swallowed as "Other" (`✅ Got it — Other — Maia is
    working on it… / Waiting for your message`) and no turn ran (2026-09-05 15:01Z). Taps
    also vanish (`bot.js` `messageTs=null`, fix unapplied). Buttons lose in both directions.
+   Evidence, 2026-09-05 15:01Z: her A/B/C buttons put the bot into a "pick one" state; my full
+   correction was consumed as the "Other" selection (`Got it — Other — waiting for your
+   message`) and no turn ran. Six minutes lost; recovered by re-sending as plain text.
+   Buttons lose in both directions — taps vanish (the `messageTs=null` bug from Aug 31,
+   unapplied because of the tree drift) and the prompt itself eats whatever comes next.
 8. **The truth gate runs in the worktree the task lives in.** `/home/ben/dev-goarrive` is
    her general workdir and sits on whatever branch she last used for another project
    (`claude/talk-to-anyone-setup-5sx86w` on 2026-09-05). Run from there and WSF files
    "do not exist" and origin looks stale. WSF work lives in `/home/ben/dev-goarrive-wsf-e2`
    (and successors); every dispatch names the worktree.
-
-8. **No Slack buttons, ever. Choices are text.** On 2026-09-05 she offered A/B/C as
-   interactive buttons; that put her bot into a "pick one" state and the next message in the
-   thread — a full correction — was swallowed as the "Other" selection (`Got it — Other —
-   waiting for your message`) and no turn ran. Buttons lose in both directions: taps vanish
-   (the `messageTs=null` bug from Aug 31, unapplied because of the tree drift) and the prompt
-   itself eats whatever comes next. Six minutes lost; recovered by re-sending as plain text.
 
 ## Where things live on her box (confirmed 2026-09-05)
 
