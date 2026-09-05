@@ -77,3 +77,26 @@ could hold.
    (`systemctl --user show agent-slack -p ActiveEnterTimestamp`), and the same message from
    a non-allowlisted test user does nothing.
 5. LIVE VERIFIED means all four ran on the running service, with the pasted outputs.
+
+## Applied and verified (2026-09-05)
+
+- **Built** in a third session on `maia/unwedge-v1` @ `50dd8bf` (C `508ff48`, D `ec8a5da`,
+  E `5d6059f`; harness 96 checks; `npm test` 813/816 = baseline; each patch `git apply
+  --check` clean). Root cause of the dead 45-minute deadline: `TURN_DEADLINE_MS` was the
+  watchdog's *idle lease*, renewed by every CLI stdout chunk, so a loop of short tool calls
+  kept it alive forever; the absolute cap only SIGTERMed the CLI pid, never its process
+  group, and never escalated to SIGKILL.
+- **Applied on the box 18:17Z** (thread 1788632135.937019): patch route C→D→E, counts
+  3 / 4 / 4 / 0 as expected; backup `bot.js.bak-20260905T181619Z`; new drop-in
+  `agent-slack.service.d/control.conf` = `MAIA_CONTROL_USERS=U0AQPK35TAS`,
+  `TOOL_CALL_TIMEOUT_MS=600000`, `TOOL_STALL_MS=60000` (raised to 900000 after the
+  acceptance run); restart fired ~18:20Z.
+- **Step 1 — stall detector: LIVE VERIFIED 18:24:47Z** (thread 1788632626.697259): the
+  progress line sealed `❌ no output for 1m0s · bash -c 'sleep 1800'` exactly 60 s in, then
+  the bot posted `Turn stopped: no output for 1m0s from bash -c 'sleep 1800'. Resend your
+  message to retry.` (the stop line arrived 60 s after the seal — the SIGTERM→SIGKILL
+  grace plus the reply path; acceptable). Process-group cleanup evidence requested.
+- **Residual after C:** the heartbeat phrase still appears once inside the narration
+  stream message when a turn has *no* long tool call (only short reads) — seen in the E3
+  turn A thread at 18:24Z. C only suppresses it while a live-progress message exists. Next
+  patch: never emit the fixed phrase; when the monitor has nothing new, stay silent.
