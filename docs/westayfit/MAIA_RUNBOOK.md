@@ -133,7 +133,8 @@ long-running work inside a chat turn is no longer acceptable.
     the deadline (the deadline is checked between steps, and a blocked step never
     returns), and a "kill it" message can only start one more turn that queues behind the
     same wedge. On 2026-09-05 16:24Z the E3 thread showed four "Still working" posts in
-    one second — four turns, all hung, none able to run the kill they were sent. From
+    one second — four messages queued behind one wedged turn, none able to run the kill
+    they were sent. From
     that moment only the box can recover her (see below). Do not send anything else
     until the heartbeats stop; each message adds a hung turn and a longer backlog.
 
@@ -175,6 +176,23 @@ pkill -f 'firebase emulators'; pkill -f jest; pkill -f 'jdk-21/bin/java'
 systemctl --user restart agent-slack                            # drops every hung turn
 systemctl --user show agent-slack -p ActiveEnterTimestamp       # proof of the restart
 ```
+
+**LIVE 2026-09-05 16:44:11Z.** Devin had Manus run exactly this from the Hetzner console
+(`goarrive-maia`, as `ben`). Status before the restart: active since 13:25:47Z, MainPID
+2078804 (`node bot.js`) with **one** child `claude` (PID 2101666), Tasks 159,
+**Memory 2.2G against `high: 2.0G`** (max 4.0G), CPU 10m49s; box `free -m`: 7751 total /
+657 free / 4387 available; the three `pkill`s found nothing;
+`ActiveEnterTimestamp=16:44:11 UTC` after. Two conclusions:
+
+1. Turns are serialized through one `claude` child. The four-per-second heartbeats were
+   four *queued* messages, not four executing turns — so a "kill it" message can never run
+   before the wedged turn ahead of it finishes. Rule 11 stands; the fix is
+   `dispatch/BOT-UNWEDGE.md` (a hard tool-call timeout, and a control path served before
+   the queue).
+2. The service was over its cgroup memory high-water mark. Above `MemoryHigh` the kernel
+   throttles everything in the cgroup, which is what the hour-late audio uploads and the
+   crawl were — not the task. Raising `MemoryHigh` in a new drop-in (never `override.conf`)
+   is Fix 4, pending the post-restart numbers from the health check.
 
 After the restart the backlog is **not** replayed: re-send the last dispatch as a fresh
 thread (rule 6). If `free -m` shows under ~500 MB available, say so in the thread before
