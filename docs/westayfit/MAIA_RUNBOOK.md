@@ -93,7 +93,12 @@ long-running work inside a chat turn is no longer acceptable.
 4. Read her **threads**, not the channel — and in **detailed** mode, or an audio-bundle reply looks like an empty message.
 5. **The written reply is the record.** Audio may only repeat what the text says, never add to it. Devin has transcribed audio replies and found content that was not in the thread; the 1a receipt was delivered audio-only with an empty text slot. Until the toggle is found and turned off for dev channels: "Text reply only — no Jarvis audio", and anything spoken must also be typed.
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
-7. **The truth gate runs in the worktree the task lives in.** `/home/ben/dev-goarrive` is
+7. **No buttons. Choices are text.** When she posts an A/B/C as Slack buttons, her bot
+   enters a modal "pick one" state and the **next message in the thread is consumed as the
+   choice** — a full correction was swallowed as "Other" (`✅ Got it — Other — Maia is
+   working on it… / Waiting for your message`) and no turn ran (2026-09-05 15:01Z). Taps
+   also vanish (`bot.js` `messageTs=null`, fix unapplied). Buttons lose in both directions.
+8. **The truth gate runs in the worktree the task lives in.** `/home/ben/dev-goarrive` is
    her general workdir and sits on whatever branch she last used for another project
    (`claude/talk-to-anyone-setup-5sx86w` on 2026-09-05). Run from there and WSF files
    "do not exist" and origin looks stale. WSF work lives in `/home/ben/dev-goarrive-wsf-e2`
