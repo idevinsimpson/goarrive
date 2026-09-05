@@ -90,6 +90,18 @@ export function pickNearestBucket(sliderPct: number): number {
 }
 
 /**
+ * Fallback order for a target gain bucket: the loudest rendered bucket that does
+ * NOT exceed the member's chosen gain first, then the quietest that does, so a
+ * missing variant can only ever make playback quieter than intended — never louder.
+ */
+export function orderBucketsForFallback(target: number): number[] {
+  return [
+    ...PICKER_BUCKETS.filter(b => b <= target).sort((a, b) => b - a),
+    ...PICKER_BUCKETS.filter(b => b > target).sort((a, b) => a - b),
+  ];
+}
+
+/**
  * Transforms a full-volume Firebase Storage URL into the variant URL for the
  * given gain bucket. Returns null if the URL is not a recognised music_cache
  * Firebase Storage URL (e.g. test/dev URLs).
@@ -656,22 +668,38 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       return;
     }
 
-    // Async: HEAD-check variant, fall back to full-volume on 404 (first-play case).
-    void headCheck(variantUri).then((exists) => {
-      // Staleness guards: a newer swapTrack updates currentUrlRef synchronously,
-      // and the member may have moved the slider again while this was in flight.
+    // Async: cascade through the fallback order and pick the first rendered
+    // bucket whose HEAD 200s. orderBucketsForFallback puts the loudest bucket
+    // at-or-below the target first, then the quietest above — so a missing
+    // exact variant can only make playback quieter than intended, never louder.
+    // If nothing is rendered at any bucket, fall through to the full-volume URL.
+    void (async () => {
+      const order = orderBucketsForFallback(bucketPicked);
+      let chosenBucket: number | null = null;
+      let chosenUri: string | null = null;
+      for (const b of order) {
+        const uri = b === bucketPicked ? variantUri : buildVariantGcsUri(url, b);
+        if (!uri) continue;
+        if (await headCheck(uri)) {
+          chosenBucket = b;
+          chosenUri = uri;
+          break;
+        }
+      }
+      // Re-check staleness AFTER the cascade resolves — awaits widen the window
+      // for a newer swapTrack, slider move, or backgrounding to land mid-flight.
+      // All three existing guards must still hold at the moment we call point().
       if (currentUrlRef.current !== url) return;
       if (pickNearestBucket(Math.sqrt(volumeRef.current) * 100) !== bucketPicked) return;
-      // Re-check: the page may have backgrounded while this HEAD was in flight,
-      // making the shadow audible. Same reasoning as the synchronous guard.
       if (!force && inBackgroundRef.current) return;
-      const finalUri = exists ? variantUri : url;
+      const finalUri = chosenUri ?? url;
       point(finalUri);
       log('[VOLUME_BUCKET]', {
         sliderDisplay: sliderPct, gainEffective, bucketPicked,
-        sourceUri: finalUri, fallbackUsed: !exists,
+        bucketUsed: chosenBucket, sourceUri: finalUri,
+        fallbackUsed: chosenBucket !== bucketPicked,
       });
-    });
+    })();
   }, []);
 
   const swapTrack = useCallback((url: string) => {
