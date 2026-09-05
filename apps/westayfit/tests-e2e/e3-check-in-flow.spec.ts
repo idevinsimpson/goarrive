@@ -173,8 +173,18 @@ test('E3: member taps a move, the shared number moves, a reload keeps it, a re-t
     'I did this'
   );
 
-  // Tap move one. The number moves and the button flips to "Already counted".
+  // Tap move one. The button carries data-state="fresh"|"pending"|"counted"
+  // — fresh before the tap, pending while wsfCheckIn is in flight, counted
+  // only after the server confirms. The shared number bumps optimistically
+  // on tap, then reconciles to the server value on confirm. We MUST wait
+  // for "counted" before reloading: page.reload() aborts an in-flight
+  // fetch, so a reload during "pending" tears down the wsfCheckIn call and
+  // the server never sees the write — the reloaded list then still shows
+  // "I did this" (the exact failure this spec is here to catch).
   await page.getByTestId(`wsf-challenge-move-${moveOneId}-submit`).click();
+  await expect(
+    page.getByTestId(`wsf-challenge-move-${moveOneId}-submit`)
+  ).toHaveAttribute('data-state', 'counted');
   await expect(page.getByTestId(`wsf-challenge-move-${moveOneId}-submit`)).toHaveText(
     'Already counted'
   );

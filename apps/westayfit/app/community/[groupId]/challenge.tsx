@@ -4,6 +4,17 @@ import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+// react-native-web accepts a `dataSet` prop on Pressable / View that maps
+// to `data-*` attributes on the DOM element, but react-native's TypeScript
+// types omit it. We augment PressableProps locally so the e3 spec can key
+// on the button's data-state="fresh|pending|counted" attribute without
+// resorting to `as any` at the call site.
+declare module 'react-native' {
+  interface PressableProps {
+    dataSet?: Record<string, string>;
+  }
+}
+
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
 import { FormShell, SecondaryLink, TextField } from '../../../src/AuthFormPrimitives';
@@ -70,6 +81,11 @@ export default function ChallengePage() {
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [moveErrors, setMoveErrors] = useState<Record<string, string>>({});
+  // Moves currently mid-flight against wsfCheckIn. Kept out of `state` so
+  // the "did the list return me as counted?" question stays separable from
+  // "is the tap still in flight?". A reload during pending aborts the
+  // fetch, so the spec must wait for `data-state="counted"` before reload.
+  const [pendingMoveIds, setPendingMoveIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -129,25 +145,31 @@ export default function ChallengePage() {
   const onCheckIn = useCallback(
     async (moveId: string, code?: string) => {
       if (state.kind !== 'ready') return;
+      if (state.checkedInMoveIds.has(moveId)) return;
+      if (pendingMoveIds.has(moveId)) return;
 
-      // Snapshot pre-tap state for revert on error. The checked-in set is a
-      // fresh Set per transition so the revert can hand back the exact
-      // pre-tap reference and totals is a plain object.
-      const snapshotCheckedInMoveIds = state.checkedInMoveIds;
-      const snapshotTotals = state.totals;
-
-      const optimisticCheckedInMoveIds = new Set(snapshotCheckedInMoveIds);
-      optimisticCheckedInMoveIds.add(moveId);
-      const optimisticTotals: PulseTotals = {
-        ...snapshotTotals,
-        completedCount: snapshotTotals.completedCount + 1,
-      };
-      setState({
-        kind: 'ready',
-        challenge: state.challenge,
-        moves: state.moves,
-        checkedInMoveIds: optimisticCheckedInMoveIds,
-        totals: optimisticTotals,
+      // Three states per move: fresh -> pending -> counted. The shared
+      // number still bumps optimistically so the tap feels instant, but
+      // `checkedInMoveIds` (which drives the "Already counted" label + the
+      // data-state="counted" attribute) is NOT set until the server
+      // confirms. If a reload lands during pending, the fetch aborts and
+      // the reloaded list is the source of truth — no stale "counted"
+      // label against a server that never wrote.
+      setState((prev) =>
+        prev.kind === 'ready'
+          ? {
+              ...prev,
+              totals: {
+                ...prev.totals,
+                completedCount: prev.totals.completedCount + 1,
+              },
+            }
+          : prev
+      );
+      setPendingMoveIds((prev) => {
+        const next = new Set(prev);
+        next.add(moveId);
+        return next;
       });
       setMoveErrors((errs) => {
         if (!errs[moveId]) return errs;
@@ -162,26 +184,38 @@ export default function ChallengePage() {
           'wsfCheckIn'
         );
         const result = await fn({ moveId, code });
-        // Reconcile with the server-computed totals. `alreadyCheckedIn: true`
-        // takes the same success path: the move stays marked done, and the
-        // server-reported completedCount replaces the optimistic +1 (which was
-        // wrong for that case — it never mattered because a member can only
-        // increment their own move once, per spec §5.3).
+        // Server confirmed. Flip to counted and reconcile the shared count
+        // with the server-computed value. `alreadyCheckedIn: true` takes
+        // the same success path — the button stays counted, and totals
+        // reflect what the server saw at commit time.
+        setState((prev) => {
+          if (prev.kind !== 'ready') return prev;
+          const nextCheckedIn = new Set(prev.checkedInMoveIds);
+          nextCheckedIn.add(moveId);
+          return {
+            ...prev,
+            checkedInMoveIds: nextCheckedIn,
+            totals: result.data.totals,
+          };
+        });
+      } catch (e) {
+        // Revert the optimistic bump and surface one plain sentence. The
+        // button drops back to "I did this" (fresh) via the pending
+        // release in the finally block.
         setState((prev) =>
           prev.kind === 'ready'
-            ? { ...prev, totals: result.data.totals }
+            ? {
+                ...prev,
+                totals: {
+                  ...prev.totals,
+                  completedCount: Math.max(
+                    0,
+                    prev.totals.completedCount - 1
+                  ),
+                },
+              }
             : prev
         );
-      } catch (e) {
-        // Revert. Keep the button enabled so the tap can be retried; spec:
-        // "on error: revert, show one plain sentence, keep the button enabled."
-        setState({
-          kind: 'ready',
-          challenge: state.challenge,
-          moves: state.moves,
-          checkedInMoveIds: snapshotCheckedInMoveIds,
-          totals: snapshotTotals,
-        });
         const message =
           e instanceof FirebaseError && e.code === 'functions/failed-precondition'
             ? 'Cannot check in right now.'
@@ -189,9 +223,16 @@ export default function ChallengePage() {
               ? e.message
               : 'Check-in failed.';
         setMoveErrors((errs) => ({ ...errs, [moveId]: message }));
+      } finally {
+        setPendingMoveIds((prev) => {
+          if (!prev.has(moveId)) return prev;
+          const next = new Set(prev);
+          next.delete(moveId);
+          return next;
+        });
       }
     },
-    [state]
+    [state, pendingMoveIds]
   );
 
   if (!wsfAuthEnabled) {
@@ -273,6 +314,7 @@ export default function ChallengePage() {
               key={move.id}
               move={move}
               checkedIn={checkedInMoveIds.has(move.id)}
+              pending={pendingMoveIds.has(move.id)}
               error={moveErrors[move.id]}
               onCheckIn={onCheckIn}
             />
@@ -286,20 +328,32 @@ export default function ChallengePage() {
 function MoveRow({
   move,
   checkedIn,
+  pending,
   error,
   onCheckIn,
 }: {
   move: ListedMove;
   checkedIn: boolean;
+  pending: boolean;
   error?: string;
   onCheckIn: (moveId: string, code?: string) => void;
 }) {
   const [code, setCode] = useState('');
   const codeMissing = move.requiresCode && code.trim().length === 0;
-  const label = checkedIn ? 'Already counted' : 'I did this';
+  const dataState: 'fresh' | 'pending' | 'counted' = checkedIn
+    ? 'counted'
+    : pending
+      ? 'pending'
+      : 'fresh';
+  const label = checkedIn
+    ? 'Already counted'
+    : pending
+      ? 'Counting\u2026'
+      : 'I did this';
+  const disabled = codeMissing || pending;
 
   const onPress = () => {
-    if (checkedIn) return;
+    if (checkedIn || pending) return;
     onCheckIn(move.id, move.requiresCode ? code.trim() : undefined);
   };
 
@@ -323,11 +377,12 @@ function MoveRow({
       ) : null}
       <Pressable
         onPress={onPress}
-        disabled={codeMissing}
+        disabled={disabled}
+        dataSet={{ state: dataState }}
         style={[
           styles.moveButton,
           checkedIn ? styles.moveButtonDone : null,
-          codeMissing ? styles.moveButtonDisabled : null,
+          disabled ? styles.moveButtonDisabled : null,
         ]}
         testID={`wsf-challenge-move-${move.id}-submit`}
         accessibilityRole="button"
