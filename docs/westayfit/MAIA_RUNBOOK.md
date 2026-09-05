@@ -95,6 +95,7 @@ long-running work inside a chat turn is no longer acceptable.
 | Turn caps | `~/.config/systemd/user/agent-slack.service.d/turn-lease.conf` |
 | Claude OAuth token | `~/.config/systemd/user/agent-slack.service.d/override.conf` — never edited |
 | Running bot | `/home/ben/agent-platform-live/shared/slack-bot/bot.js`, node v22 |
+| JDK for the emulators | `~/jdk-21` (portable Temurin 21). Not on PATH by default; `scripts/westayfit/gate1.sh` auto-detects it as of `0f019c4`, and the ensure-JDK step in the E2 gate job installs it if absent. |
 | Jarvis switches | `JARVIS_VOICE_REPLY=on` in `/home/ben/agent-platform-live/shared/slack-bot/.env` (documented kill switch); `JARVIS_SPOKEN_REPLY_SCRIPT_PATH` / `TTS_DRAFT_SCRIPT_PATH` env vars read at `bot.js:95-96`; `[JARVIS: /path.mp3]` markers parsed at `bot.js:1691-1694`. **No per-channel setting** — off means off in every channel. |
 
 **Fix 1 LIVE VERIFIED 2026-09-05 13:30Z.** Drop-in merged; deferred restart scheduled
