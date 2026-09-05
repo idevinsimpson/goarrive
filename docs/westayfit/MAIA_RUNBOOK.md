@@ -235,9 +235,14 @@ way.
   2647 and the running file matched neither BASE nor its parent — the live tree is
   `fix/text-as-button-answer` @ `4f53fd0` plus uncommitted Sep 4 edits (`optionMeta` /
   `matchTextToProposal`, inline `audioChain`, `envelopeGuard.inspectEnvelope` changes).
-  Option B would have erased them. Next: capture the running file on branch
-  `live/agent-slack-2026-09-05` (thread 1788627773.*), rebuild the patch against that exact
-  commit in a fresh session with the same harness, then apply. Lesson recorded as rule 12.
+  Option B would have erased them. **Captured 17:06Z:** `live/agent-slack-2026-09-05` @
+  `92eae98` (pushed; `bot.js` sha256 `2fa097b8…437387`; the commit also carries
+  `proposals.js` + `proposals.test.js`, which were already staged on the box and which the
+  live `bot.js` imports). The rebuild runs in a fresh session against that exact commit
+  with the same harness → branch `maia/live-progress-heartbeat-v2`, plus a separate commit
+  for the audio-only/empty-text reply defect (seen again at 17:04:48Z in thread
+  1788627812.717299 — the capture result arrived as audio with an empty text slot; the
+  text had to be requested a second time). Lesson recorded as rule 12.
   LIVE VERIFIED only after the 3-minute acceptance run in its own thread.
 - **Jarvis off?** It is all-or-nothing. Turning it off silences Devin's assistant channels too. Devin's decision; until then the text-is-the-record rule (§5) is the control, and Maia has saved it to memory.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
