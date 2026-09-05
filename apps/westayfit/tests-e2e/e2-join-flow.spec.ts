@@ -44,11 +44,17 @@ function mintJoinCode(): string {
 /**
  * Seed a public, active `wsfCommunityGroups` document straight against the
  * Firestore emulator. The rule for that collection is `allow create: if false`
- * — server-only writes — so we hit the emulator's admin path
- * `/emulator/v1/projects/{p}/databases/(default)/documents/...`, which bypasses
- * `firestore.rules` entirely. This is a stand-in for what will happen on Expo
- * morning: a coach on the platform creates the FitLife group by hand (via a
- * callable path we do not have yet) and the code is printed on QR.
+ * — server-only writes — so we go around the rules layer via the emulator's
+ * documented bypass: the standard Firestore REST path
+ * `/v1/projects/{p}/databases/(default)/documents/...` with an
+ * `Authorization: Bearer owner` header. That header is what
+ * `rules-unit-testing`'s `withSecurityRulesDisabled` sends under the hood; the
+ * emulator treats it as admin and skips `firestore.rules` entirely. The
+ * lookalike `/emulator/v1/...` prefix is a different endpoint — DELETE-only,
+ * for clearing collections — so a PATCH there 404s before rules ever run.
+ * This seed is a stand-in for what will happen on Expo morning: a coach on the
+ * platform creates the FitLife group by hand (via a callable path we do not
+ * have yet) and the code is printed on QR.
  */
 async function seedPublicGroup(opts: {
   joinCode: string;
@@ -56,11 +62,14 @@ async function seedPublicGroup(opts: {
 }): Promise<string> {
   const docId = `e2gate1-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
   const url =
-    `${FIRESTORE_EMULATOR}/emulator/v1/projects/${PROJECT_ID}` +
+    `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}` +
     `/databases/(default)/documents/wsfCommunityGroups/${docId}`;
   const res = await fetch(url, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      authorization: 'Bearer owner',
+    },
     body: JSON.stringify({
       fields: {
         displayName: { stringValue: opts.displayName },
