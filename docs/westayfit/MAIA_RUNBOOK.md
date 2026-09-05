@@ -128,6 +128,15 @@ long-running work inside a chat turn is no longer acceptable.
     `run-detached.sh` and end the turn; if it is in the way, `kill` it. A turn that is
     waiting is a turn that is hung.
 
+11. **Two heartbeats in the same second means two hung turns — stop sending.** Every
+    message to Maia starts a new turn. A turn wedged inside a tool call is not ended by
+    the deadline (the deadline is checked between steps, and a blocked step never
+    returns), and a "kill it" message can only start one more turn that queues behind the
+    same wedge. On 2026-09-05 16:24Z the E3 thread showed four "Still working" posts in
+    one second — four turns, all hung, none able to run the kill they were sent. From
+    that moment only the box can recover her (see below). Do not send anything else
+    until the heartbeats stop; each message adds a hung turn and a longer backlog.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |
@@ -152,8 +161,40 @@ the systemd drop-in wins over the `.env`'s `on`, with no edit to the running tre
 one-line revert. Caveat: that switch is documented as governing replies to *voice memos*;
 whether it also stops the every-turn `audio-bundle` is unproven until tried.
 
+## Recovering her from the box (for Devin or Manus — nothing here needs Maia)
+
+Use when the thread is heartbeats only, the branch has not moved, and the last per-tool
+summary is a wait ("monitoring PID N…", "tailing the log…"). Run as the `ben` user:
+
+```bash
+systemctl --user status agent-slack --no-pager | head -12      # alive? since when?
+free -m                                                         # memory pressure?
+ps -eo pid,etimes,rss,cmd --sort=-etimes | grep -E 'jest|java|firebase|emulator' | grep -v grep | head
+# stray test/emulator processes only — never the bot itself:
+pkill -f 'firebase emulators'; pkill -f jest; pkill -f 'jdk-21/bin/java'
+systemctl --user restart agent-slack                            # drops every hung turn
+systemctl --user show agent-slack -p ActiveEnterTimestamp       # proof of the restart
+```
+
+After the restart the backlog is **not** replayed: re-send the last dispatch as a fresh
+thread (rule 6). If `free -m` shows under ~500 MB available, say so in the thread before
+re-dispatching — the wedge was memory, not the task, and the next gate will hang the same
+way.
+
 ## Still open
 
+- **A wedged turn cannot be un-wedged from Slack.** A kill instruction is itself a turn,
+  and it queues behind the wedge it is meant to clear. The real fix is a control path the
+  bot's event consumer handles *outside* the turn loop — e.g. a message that is exactly
+  `maia: restart` schedules the deferred restart directly, no model call. Dispatch this as
+  the next bot.js task after the live-progress patch (`dispatch/BOT-LIVE-PROGRESS.md`).
+- **Live-progress patch in preparation.** Because her running tree could not be read
+  while she was wedged, the patch is being written from the `agent-platform` source in a
+  separate session and pushed to `Trifecta-United/agent-platform` branch
+  `maia/live-progress-heartbeat`, with `shared/slack-bot/LIVE-PROGRESS-REPORT.md` and a
+  `live-progress.patch` that applies to the 2026-08-13 tree. Apply on the box with a
+  backup + `git apply --check`, then the deferred restart; then the 3-minute acceptance
+  command in the spec.
 - **Jarvis off?** It is all-or-nothing. Turning it off silences Devin's assistant channels too. Devin's decision; until then the text-is-the-record rule (§5) is the control, and Maia has saved it to memory.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
   tree is `agent-setup/…` (Aug 31, +28 KB). Her button-tap fix cannot reach the running
