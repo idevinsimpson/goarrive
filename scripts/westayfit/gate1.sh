@@ -63,6 +63,14 @@ EXPO_PUBLIC_WSF_AUTH_ENABLED=1 \
 EXPO_PUBLIC_WSF_USE_EMULATORS=1 \
   npm --prefix apps/westayfit run build:web
 
+# GATE 1 also has to prove §3.2 (idempotent join) and §3.3 (oracle byte-identical
+# not-found) — those properties live in the callable jest suite, not the e2e
+# browser flow. The e2e block below already owns the full emulator set; run
+# callables under `--only firestore` so we don't pay the full-suite boot twice.
+echo "--- callable suite (firestore only, fast) ---"
+firebase emulators:exec --only firestore --project goarrive \
+  "npm --prefix functions-westayfit run test:callable"
+
 echo "--- drive the flow ---"
 # Run every spec under tests-e2e/. Named specs get compounded here rather than
 # hidden inside a package script so a new spec (E2's e2-join-flow, and future
