@@ -75,3 +75,35 @@ Pass when:
 5. A screenshot-equivalent: paste the final edited message text.
 
 Then the same on a real E3 gate run — the heartbeat must show `gate1.sh` and its live tail.
+
+## Apply on the box (Maia, or a person at the box)
+
+The patch is prepared from the `agent-platform` source (branch `maia/live-progress-heartbeat`,
+report in `shared/slack-bot/LIVE-PROGRESS-REPORT.md`) because the running tree could not be
+read while the bot was wedged. Every step below is copy-paste; every output is pasted back
+as text.
+
+```bash
+cd /home/ben/agent-platform-live
+git status -sb | head -3 && git log -1 --format='%h %ci' -- shared/slack-bot/bot.js   # what the box runs
+git fetch origin maia/live-progress-heartbeat
+git show origin/maia/live-progress-heartbeat:shared/slack-bot/live-progress.patch > /tmp/live-progress.patch
+cp shared/slack-bot/bot.js shared/slack-bot/bot.js.bak-$(date -u +%Y%m%dT%H%M%SZ)  # backup first
+git apply --check /tmp/live-progress.patch && git apply /tmp/live-progress.patch     # or: patch -p1 --dry-run < …
+node --check shared/slack-bot/bot.js
+grep -c 'Still working on this' shared/slack-bot/bot.js                              # expect 0
+grep -c 'progress-tick' shared/slack-bot/bot.js                                      # expect 0
+systemd-run --user --on-active=120 --unit=agent-slack-deferred-restart --collect systemctl --user restart agent-slack
+```
+
+If `git apply --check` rejects a hunk: post the rejection verbatim and stop — do not hand-edit.
+If the directory is not a git checkout: `patch -p1 --dry-run < /tmp/live-progress.patch`
+then without `--dry-run`, after fetching the patch file some other way (e.g. `curl` from the
+GitHub raw URL with a token, or paste).
+
+**Rollback:** `cp shared/slack-bot/bot.js.bak-<stamp> shared/slack-bot/bot.js` and the same
+deferred restart.
+
+After the restart, in a **new thread**, run the acceptance command from §Acceptance and
+paste the final edited message text. LIVE VERIFIED only when the thread shows one updating
+message, no "Still working on this…", no `progress-tick-*.mp3`.
