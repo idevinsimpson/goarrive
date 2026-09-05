@@ -103,8 +103,8 @@ export default function SharedPlanScreen() {
 
   const handleAccept = () => {
     // Member must sign in / claim before accepting.
-    // Route to sign-in with a redirect back to /(member)/my-plan.
-    router.push('/(auth)/sign-in' as any);
+    // TODO(ux-batch-1-a): redirect back to /(member)/my-plan after login
+    router.push('/(auth)/login');
   };
 
   if (loading) {
