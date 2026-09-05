@@ -6,6 +6,16 @@ deferred-restart pattern in `MAIA_RUNBOOK.md`. Follows `BOT-LIVE-PROGRESS.md`; s
 region of `bot.js`. Requested because of 2026-09-05: four hung turns in one thread, none
 recoverable from Slack, a person needed at the box.
 
+## Defect 0 — the heartbeat phrase still reaches the narration stream (small, do first)
+
+After the live-progress patch (LIVE VERIFIED 17:40Z), narration channels still get
+`_Still working on this..._` appended as a line inside the in-place narration stream
+message: the monitor's `appendNarration` wrapper streams every tick into an open stream,
+and only the no-stream path absorbs heartbeat ticks. **Required:** absorb heartbeat ticks
+(fewer than `progressMonitorMinEvents` new events, the monitor's own test) on the stream
+path too. Real narration lines ("I'm editing index.ts…") are unchanged. The phrase must
+not be emitted anywhere while a live-progress message exists.
+
 ## Defect 1 — a blocked tool call never returns
 
 `bot.js` has turn deadlines (`TURN_DEADLINE_MS`, `TURN_ABSOLUTE_CAP_MS`), but they are checked
