@@ -138,6 +138,13 @@ long-running work inside a chat turn is no longer acceptable.
     that moment only the box can recover her (see below). Do not send anything else
     until the heartbeats stop; each message adds a hung turn and a longer backlog.
 
+12. **A patch for her bot is built against the captured running file, never `main`.** The
+    live tree drifts (a branch plus uncommitted edits, as of 2026-09-05). Before any
+    `bot.js` change: commit the running file to a `live/<date>` branch and push; build and
+    self-test the change against that commit; apply with `git apply --check` first; the
+    guard in the apply dispatch (stop if the file matches neither expected base) is what
+    saved the Sep 4 edits on 2026-09-05.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |
@@ -145,7 +152,7 @@ long-running work inside a chat turn is no longer acceptable.
 | Slack bot token | `SLACK_BOT_TOKEN` in `~/.agent/.env` (siblings: `SLACK_APP_TOKEN`, `SLACK_NOTIFICATION_CHANNEL`, `SLACK_CHANNEL_TALK_TO_MAIA`) |
 | Turn caps | `~/.config/systemd/user/agent-slack.service.d/turn-lease.conf` |
 | Claude OAuth token | `~/.config/systemd/user/agent-slack.service.d/override.conf` — never edited |
-| Running bot | `/home/ben/agent-platform-live/shared/slack-bot/bot.js`, node v22 |
+| Running bot | `/home/ben/agent-platform-live/shared/slack-bot/bot.js`, node v22. **A git checkout of `Trifecta-United/agent-platform` on branch `fix/text-as-button-answer` @ `4f53fd0` (2026-08-20) with uncommitted edits to `bot.js` dated Sep 4 22:56** — not `main`, not the Aug-13 file assumed earlier. Any patch must be built against the file as captured on branch `live/agent-slack-2026-09-05`, never against `main`. |
 | JDK for the emulators | `~/jdk-21` (portable Temurin 21). Not on PATH by default; `scripts/westayfit/gate1.sh` auto-detects it as of `0f019c4`, and the ensure-JDK step in the E2 gate job installs it if absent. |
 | Jarvis switches | `JARVIS_VOICE_REPLY=on` in `/home/ben/agent-platform-live/shared/slack-bot/.env` (documented kill switch); `JARVIS_SPOKEN_REPLY_SCRIPT_PATH` / `TTS_DRAFT_SCRIPT_PATH` env vars read at `bot.js:95-96`; `[JARVIS: /path.mp3]` markers parsed at `bot.js:1691-1694`. **No per-channel setting** — off means off in every channel. |
 
@@ -224,6 +231,13 @@ way.
   not visible to `bot.js` until the call returns, so a hung command shows the command and
   the elapsed time with `last output: (none yet)` — and is sealed as ❌ when the turn ends.
   Report thread: #dev-westayfit 1788626986.167859. Apply thread: 1788627643.833759.
+  **Apply STOPPED at the guard (17:01Z, correctly):** `git apply --check` failed at line
+  2647 and the running file matched neither BASE nor its parent — the live tree is
+  `fix/text-as-button-answer` @ `4f53fd0` plus uncommitted Sep 4 edits (`optionMeta` /
+  `matchTextToProposal`, inline `audioChain`, `envelopeGuard.inspectEnvelope` changes).
+  Option B would have erased them. Next: capture the running file on branch
+  `live/agent-slack-2026-09-05` (thread 1788627773.*), rebuild the patch against that exact
+  commit in a fresh session with the same harness, then apply. Lesson recorded as rule 12.
   LIVE VERIFIED only after the 3-minute acceptance run in its own thread.
 - **Jarvis off?** It is all-or-nothing. Turning it off silences Devin's assistant channels too. Devin's decision; until then the text-is-the-record rule (§5) is the control, and Maia has saved it to memory.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
