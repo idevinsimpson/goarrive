@@ -131,12 +131,16 @@ long-running work inside a chat turn is no longer acceptable.
 11. **Two heartbeats in the same second means two hung turns — stop sending.** Every
     message to Maia starts a new turn. A turn wedged inside a tool call is not ended by
     the deadline (the deadline is checked between steps, and a blocked step never
-    returns), and a "kill it" message can only start one more turn that queues behind the
-    same wedge. On 2026-09-05 16:24Z the E3 thread showed four "Still working" posts in
-    one second — four messages queued behind one wedged turn, none able to run the kill
-    they were sent. From
-    that moment only the box can recover her (see below). Do not send anything else
-    until the heartbeats stop; each message adds a hung turn and a longer backlog.
+    returns), and a "kill it" message only starts one more turn under the same
+    conditions. On 2026-09-05 16:24Z the E3 thread showed four "Still working" posts in
+    one second — four turns all crawling under one memory throttle, none able to run the
+    kill they were sent. From that moment only the box can recover her (see below). Do
+    not send anything else until the heartbeats stop; each message adds a hung turn.
+    *Turns in different threads run concurrently* (seen 17:30Z: the v2 apply turn ran
+    while the E3 turn was still inside a tool call). So a deferred restart scheduled in
+    one thread kills whatever is in flight in every other thread — never dispatch a
+    restart while another turn is running, or accept losing that turn's unpushed work
+    (its files on disk survive).
 
 12. **A patch for her bot is built against the captured running file, never `main`.** The
     live tree drifts (a branch plus uncommitted edits, as of 2026-09-05). Before any
@@ -198,11 +202,11 @@ this; it was committed and pushed as `858feb2` in a 19-second turn.
 657 free / 4387 available; the three `pkill`s found nothing;
 `ActiveEnterTimestamp=16:44:11 UTC` after. Two conclusions:
 
-1. Turns are serialized through one `claude` child. The four-per-second heartbeats were
-   four *queued* messages, not four executing turns — so a "kill it" message can never run
-   before the wedged turn ahead of it finishes. Rule 11 stands; the fix is
-   `dispatch/BOT-UNWEDGE.md` (a hard tool-call timeout, and a control path served before
-   the queue).
+1. Turns run concurrently across threads (corrected 17:31Z — only one `claude` child was
+   visible at 16:44Z, but the v2 apply turn later ran alongside the E3 turn). The
+   four-per-second heartbeats were four turns crawling under the same throttle, so the
+   "kill it" turn crawled with them. Rule 11 stands; the fix is `dispatch/BOT-UNWEDGE.md`
+   (a hard tool-call timeout, and a control path served before any model call).
 2. The service was over its cgroup memory high-water mark. Above `MemoryHigh` the kernel
    throttles everything in the cgroup, which is what the hour-late audio uploads and the
    crawl were — not the task. Raising `MemoryHigh` in a new drop-in (never `override.conf`)
