@@ -141,3 +141,22 @@ rebuilt against it in a second session: branch **`maia/live-progress-heartbeat-v
   `agent-slack-deferred-restart.timer` armed for ~17:34Z. The turn's own final reply
   still came out audio-first with the text appended into the stream message — the last
   time that code path runs. Acceptance test scheduled for 17:36Z in its own thread.
+
+## LIVE VERIFIED — 2026-09-05 17:40Z
+
+Acceptance thread #dev-westayfit 1788629761.176299, run through a normal turn on the
+restarted service (`ActiveEnterTimestamp=Sat 2026-09-05 17:34:33 UTC`):
+
+1. **One** progress message from the bot, posted ~20 s into the loop and edited in place;
+   final text, verbatim: `✅ 3m00s · bash -c 'for i in $(seq 1 18); do echo "step $i of 18"; sleep 10; done'`
+2. No standalone "Still working on this…" message.
+3. No `progress-tick-*.mp3` upload.
+4. Her written reply posted as its own text message (17:40:15Z) **before** the audio bundle
+   (17:40:20Z) and the Jarvis clip (17:40:24Z) — commit B works.
+5. Loop output `step 16/17/18 of 18` pasted; `ActiveEnterTimestamp` pasted.
+
+**Residual (small, follow-up C):** on narration channels the monitor still appends the
+heartbeat phrase `_Still working on this..._` as a line *inside* the in-place narration
+stream message. One line in one edited message, not a wall — but the phrase should not be
+emitted anywhere while a live-progress message exists. Folded into `BOT-UNWEDGE.md`.
+
