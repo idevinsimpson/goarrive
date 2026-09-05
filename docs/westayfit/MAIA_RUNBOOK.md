@@ -104,6 +104,13 @@ long-running work inside a chat turn is no longer acceptable.
    "do not exist" and origin looks stale. WSF work lives in `/home/ben/dev-goarrive-wsf-e2`
    (and successors); every dispatch names the worktree.
 
+8. **No Slack buttons, ever. Choices are text.** On 2026-09-05 she offered A/B/C as
+   interactive buttons; that put her bot into a "pick one" state and the next message in the
+   thread — a full correction — was swallowed as the "Other" selection (`Got it — Other —
+   waiting for your message`) and no turn ran. Buttons lose in both directions: taps vanish
+   (the `messageTs=null` bug from Aug 31, unapplied because of the tree drift) and the prompt
+   itself eats whatever comes next. Six minutes lost; recovered by re-sending as plain text.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |
