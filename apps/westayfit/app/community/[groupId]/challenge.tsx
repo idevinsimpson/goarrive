@@ -30,7 +30,6 @@ type ListedMove = {
   dayNumber: number | null;
   locationLabel: string | null;
   requiresCode: boolean;
-  checkedIn: boolean;
 };
 
 type PulseTotals = {
@@ -42,6 +41,7 @@ type PulseTotals = {
 type ListChallengeResponse = {
   challenge: ChallengeSummary | null;
   moves: ListedMove[];
+  myCheckedInMoveIds: string[];
   totals: PulseTotals;
 };
 
@@ -55,7 +55,13 @@ type LoadState =
   | { kind: 'notSignedIn' }
   | { kind: 'notMember' }
   | { kind: 'noActiveChallenge' }
-  | { kind: 'ready'; challenge: ChallengeSummary; moves: ListedMove[]; totals: PulseTotals }
+  | {
+      kind: 'ready';
+      challenge: ChallengeSummary;
+      moves: ListedMove[];
+      checkedInMoveIds: Set<string>;
+      totals: PulseTotals;
+    }
   | { kind: 'error'; message: string };
 
 export default function ChallengePage() {
@@ -87,12 +93,18 @@ export default function ChallengePage() {
         );
         const result = await fn({ groupId });
         if (cancelled) return;
-        const { challenge, moves, totals } = result.data;
+        const { challenge, moves, myCheckedInMoveIds, totals } = result.data;
         if (!challenge) {
           setState({ kind: 'noActiveChallenge' });
           return;
         }
-        setState({ kind: 'ready', challenge, moves, totals });
+        setState({
+          kind: 'ready',
+          challenge,
+          moves,
+          checkedInMoveIds: new Set(myCheckedInMoveIds),
+          totals,
+        });
       } catch (e) {
         if (cancelled) return;
         // permission-denied is what wsfListChallenge throws for a caller whose
@@ -118,15 +130,14 @@ export default function ChallengePage() {
     async (moveId: string, code?: string) => {
       if (state.kind !== 'ready') return;
 
-      // Snapshot pre-tap state for revert on error. `moves` is a fresh array
-      // per state transition, so a shallow copy plus one field flip is enough
-      // — no other move needs to change and totals is a plain object.
-      const snapshotMoves = state.moves;
+      // Snapshot pre-tap state for revert on error. The checked-in set is a
+      // fresh Set per transition so the revert can hand back the exact
+      // pre-tap reference and totals is a plain object.
+      const snapshotCheckedInMoveIds = state.checkedInMoveIds;
       const snapshotTotals = state.totals;
 
-      const optimisticMoves = snapshotMoves.map((m) =>
-        m.id === moveId ? { ...m, checkedIn: true } : m
-      );
+      const optimisticCheckedInMoveIds = new Set(snapshotCheckedInMoveIds);
+      optimisticCheckedInMoveIds.add(moveId);
       const optimisticTotals: PulseTotals = {
         ...snapshotTotals,
         completedCount: snapshotTotals.completedCount + 1,
@@ -134,7 +145,8 @@ export default function ChallengePage() {
       setState({
         kind: 'ready',
         challenge: state.challenge,
-        moves: optimisticMoves,
+        moves: state.moves,
+        checkedInMoveIds: optimisticCheckedInMoveIds,
         totals: optimisticTotals,
       });
       setMoveErrors((errs) => {
@@ -166,7 +178,8 @@ export default function ChallengePage() {
         setState({
           kind: 'ready',
           challenge: state.challenge,
-          moves: snapshotMoves,
+          moves: state.moves,
+          checkedInMoveIds: snapshotCheckedInMoveIds,
           totals: snapshotTotals,
         });
         const message =
@@ -238,7 +251,7 @@ export default function ChallengePage() {
     );
   }
 
-  const { challenge, moves, totals } = state;
+  const { challenge, moves, checkedInMoveIds, totals } = state;
   const goalSuffix = totals.goalTarget !== null ? ` of ${totals.goalTarget}` : '';
   const participantLabel = `${totals.participantCount} members moving`;
 
@@ -259,6 +272,7 @@ export default function ChallengePage() {
             <MoveRow
               key={move.id}
               move={move}
+              checkedIn={checkedInMoveIds.has(move.id)}
               error={moveErrors[move.id]}
               onCheckIn={onCheckIn}
             />
@@ -271,19 +285,21 @@ export default function ChallengePage() {
 
 function MoveRow({
   move,
+  checkedIn,
   error,
   onCheckIn,
 }: {
   move: ListedMove;
+  checkedIn: boolean;
   error?: string;
   onCheckIn: (moveId: string, code?: string) => void;
 }) {
   const [code, setCode] = useState('');
   const codeMissing = move.requiresCode && code.trim().length === 0;
-  const label = move.checkedIn ? 'Already counted' : 'I did this';
+  const label = checkedIn ? 'Already counted' : 'I did this';
 
   const onPress = () => {
-    if (move.checkedIn) return;
+    if (checkedIn) return;
     onCheckIn(move.id, move.requiresCode ? code.trim() : undefined);
   };
 
@@ -296,7 +312,7 @@ function MoveRow({
       {move.locationLabel ? (
         <Text style={styles.moveLocation}>{move.locationLabel}</Text>
       ) : null}
-      {move.requiresCode && !move.checkedIn ? (
+      {move.requiresCode && !checkedIn ? (
         <TextField
           value={code}
           onChangeText={setCode}
@@ -310,7 +326,7 @@ function MoveRow({
         disabled={codeMissing}
         style={[
           styles.moveButton,
-          move.checkedIn ? styles.moveButtonDone : null,
+          checkedIn ? styles.moveButtonDone : null,
           codeMissing ? styles.moveButtonDisabled : null,
         ]}
         testID={`wsf-challenge-move-${move.id}-submit`}
@@ -319,7 +335,7 @@ function MoveRow({
         <Text
           style={[
             styles.moveButtonText,
-            move.checkedIn ? styles.moveButtonTextDone : null,
+            checkedIn ? styles.moveButtonTextDone : null,
           ]}
         >
           {label}

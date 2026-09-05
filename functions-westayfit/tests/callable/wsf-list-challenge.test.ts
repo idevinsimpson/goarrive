@@ -3,13 +3,17 @@
  * page's challenge panel. Pins:
  *
  *   1. §5.1 A joined member sees the active challenge and its moves,
- *      sorted by sequence, with a `checkedIn` flag per move reflecting
- *      that member's own history.
+ *      sorted by sequence, with a top-level `myCheckedInMoveIds` array
+ *      naming the caller's own check-ins. A different member's list must
+ *      never leak into the caller's response — the check-in doc paths
+ *      embed the caller's membershipId, so `db.getAll` on those known
+ *      paths can never return anyone else's row.
  *
  *   2. §5.6 non-member refused with permission-denied.
  *
  *   3. No active challenge in the group → challenge: null, moves: [],
- *      totals zeroed. This is the pre-event state and must not throw.
+ *      myCheckedInMoveIds: [], totals zeroed. This is the pre-event state
+ *      and must not throw.
  *
  * Runs against Firestore emulator via `.run(request)`.
  */
@@ -116,34 +120,52 @@ describe('wsfListChallenge', () => {
     expect(result.error.code).toBe('permission-denied');
   });
 
-  test('§5.1 member sees active challenge, moves ordered by sequence, and their own checkedIn flags', async () => {
+  test('§5.1 member sees active challenge, moves ordered by sequence, and only their own check-ins in myCheckedInMoveIds', async () => {
     const groupId = await seedGroup();
     const challengeId = await seedChallenge(groupId, 'active', 1000);
     const moveB = await seedMove(challengeId, 2, 'B move');
     const moveA = await seedMove(challengeId, 1, 'A move');
     const moveC = await seedMove(challengeId, 3, 'C move');
-    const uid = `wsfList_happy_${Date.now()}`;
-    await seedActiveMember(groupId, uid);
+    const callerUid = `wsfList_happy_caller_${Date.now()}`;
+    const otherUid = `wsfList_happy_other_${Date.now()}`;
+    await seedActiveMember(groupId, callerUid);
+    await seedActiveMember(groupId, otherUid);
 
-    // Check in on A only.
+    // Caller checks in on A. A different member checks in on B — the caller's
+    // list must include A and only A, never B; the other member's list must
+    // include B and only B, never A. This is the isolation guarantee the doc
+    // path `wsfCheckIns/{moveId}_{membershipId}` earns us.
     await wsfCheckIn.run({
-      auth: { uid, token: { email_verified: true } as any } as any,
+      auth: { uid: callerUid, token: { email_verified: true } as any } as any,
       data: { moveId: moveA } as any,
       rawRequest: {} as any,
       acceptsStreaming: false,
     } as any);
+    await wsfCheckIn.run({
+      auth: { uid: otherUid, token: { email_verified: true } as any } as any,
+      data: { moveId: moveB } as any,
+      rawRequest: {} as any,
+      acceptsStreaming: false,
+    } as any);
 
-    const result = await wsfListChallenge.run(makeRequest(uid, { groupId }));
+    const callerResult = await wsfListChallenge.run(
+      makeRequest(callerUid, { groupId })
+    );
+    const otherResult = await wsfListChallenge.run(
+      makeRequest(otherUid, { groupId })
+    );
 
-    expect(result.challenge?.id).toBe(challengeId);
-    expect(result.challenge?.goalTarget).toBe(1000);
-    expect(result.moves.map((m) => m.id)).toEqual([moveA, moveB, moveC]);
-    expect(result.moves.map((m) => m.checkedIn)).toEqual([true, false, false]);
-    expect(result.totals.completedCount).toBeGreaterThanOrEqual(1);
-    expect(result.totals.goalTarget).toBe(1000);
+    expect(callerResult.challenge?.id).toBe(challengeId);
+    expect(callerResult.challenge?.goalTarget).toBe(1000);
+    expect(callerResult.moves.map((m) => m.id)).toEqual([moveA, moveB, moveC]);
+    expect(callerResult.myCheckedInMoveIds).toEqual([moveA]);
+    expect(callerResult.totals.completedCount).toBeGreaterThanOrEqual(2);
+    expect(callerResult.totals.goalTarget).toBe(1000);
+
+    expect(otherResult.myCheckedInMoveIds).toEqual([moveB]);
   });
 
-  test('no active challenge: challenge=null, moves=[], zeroed totals — no throw', async () => {
+  test('no active challenge: challenge=null, moves=[], myCheckedInMoveIds=[], zeroed totals — no throw', async () => {
     const groupId = await seedGroup();
     // Only a draft challenge exists.
     await seedChallenge(groupId, 'draft');
@@ -153,6 +175,7 @@ describe('wsfListChallenge', () => {
     const result = await wsfListChallenge.run(makeRequest(uid, { groupId }));
     expect(result.challenge).toBeNull();
     expect(result.moves).toEqual([]);
+    expect(result.myCheckedInMoveIds).toEqual([]);
     expect(result.totals).toEqual({
       participantCount: 0,
       completedCount: 0,
@@ -201,9 +224,10 @@ describe('wsfListChallenge', () => {
     expect(move.requiresCode).toBe(true);
     // Whitelist check — a future field that accidentally leaked the secret
     // (or any other server-side move field) would fail this even if a "does
-    // not contain checkInCode" assertion missed it.
+    // not contain checkInCode" assertion missed it. `checkedIn` is off the
+    // per-move shape now that the caller's own history rides at the top
+    // level as `myCheckedInMoveIds`.
     expect(Object.keys(move).sort()).toEqual([
-      'checkedIn',
       'dayNumber',
       'id',
       'instructions',
@@ -213,5 +237,15 @@ describe('wsfListChallenge', () => {
       'title',
     ]);
     expect('checkInCode' in move).toBe(false);
+    expect('checkedIn' in move).toBe(false);
+    // Top-level shape gains `myCheckedInMoveIds` — anything else added later
+    // must be intentional; a stray field would fail this whitelist and force
+    // the surface change to be reviewed here.
+    expect(Object.keys(result).sort()).toEqual([
+      'challenge',
+      'moves',
+      'myCheckedInMoveIds',
+      'totals',
+    ]);
   });
 });

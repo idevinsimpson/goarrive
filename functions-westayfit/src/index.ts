@@ -807,7 +807,6 @@ type ListedMove = {
   dayNumber: number | null;
   locationLabel: string | null;
   requiresCode: boolean;
-  checkedIn: boolean;
 };
 type ListChallengeResponse = {
   challenge:
@@ -819,6 +818,7 @@ type ListChallengeResponse = {
       }
     | null;
   moves: ListedMove[];
+  myCheckedInMoveIds: string[];
   totals: PulseTotals;
 };
 
@@ -835,7 +835,8 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
     }
 
     const db = getFirestore();
-    const membershipRef = db.doc(`wsfMemberships/${groupId}_${uid}`);
+    const membershipId = `${groupId}_${uid}`;
+    const membershipRef = db.doc(`wsfMemberships/${membershipId}`);
     const membershipSnap = await membershipRef.get();
     // Non-members are refused with permission-denied, not not-found. This is
     // an authenticated endpoint scoped to a groupId the caller supplied — the
@@ -858,30 +859,20 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
       return {
         challenge: null,
         moves: [],
+        myCheckedInMoveIds: [],
         totals: { participantCount: 0, completedCount: 0, goalTarget: null },
       };
     }
     const challengeDoc = challengesSnap.docs[0]!;
     const challenge = challengeDoc.data() as ChallengeDoc;
 
-    const [movesSnap, myCheckInsSnap, totals] = await Promise.all([
+    const [movesSnap, totals] = await Promise.all([
       db
         .collection('wsfChallengeMoves')
         .where('challengeId', '==', challengeDoc.id)
         .get(),
-      db
-        .collection('wsfCheckIns')
-        .where('challengeId', '==', challengeDoc.id)
-        .where('membershipId', '==', `${groupId}_${uid}`)
-        .get(),
       readChallengeTotals(challengeDoc.id, challenge.goalTarget ?? null),
     ]);
-
-    const checkedMoveIds = new Set<string>();
-    for (const doc of myCheckInsSnap.docs) {
-      const data = doc.data() as { moveId?: string };
-      if (data.moveId) checkedMoveIds.add(data.moveId);
-    }
 
     const moves: ListedMove[] = movesSnap.docs
       .map((doc) => {
@@ -894,10 +885,27 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
           dayNumber: data.dayNumber ?? null,
           locationLabel: data.locationLabel ?? null,
           requiresCode: data.requiresCode === true,
-          checkedIn: checkedMoveIds.has(doc.id),
         };
       })
       .sort((a, b) => a.sequence - b.sequence);
+
+    // One batched read against the caller's own check-in docs, keyed on the
+    // canonical id `wsfCheckIns/{moveId}_{membershipId}`. `db.getAll` on
+    // known paths sidesteps the composite index a `where` query would need,
+    // and — because the paths embed the caller's membershipId — it can never
+    // return anyone else's check-in.
+    const myCheckedInMoveIds: string[] = [];
+    if (moves.length > 0) {
+      const checkInRefs = moves.map((m) =>
+        db.doc(`wsfCheckIns/${m.id}_${membershipId}`)
+      );
+      const checkInSnaps = await db.getAll(...checkInRefs);
+      for (let i = 0; i < checkInSnaps.length; i++) {
+        if (checkInSnaps[i]!.exists) {
+          myCheckedInMoveIds.push(moves[i]!.id);
+        }
+      }
+    }
 
     return {
       challenge: {
@@ -907,6 +915,7 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
         goalTarget: challenge.goalTarget ?? null,
       },
       moves,
+      myCheckedInMoveIds,
       totals,
     };
   }
