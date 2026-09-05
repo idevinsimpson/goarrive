@@ -39,7 +39,8 @@
     "cleanUrls": true,
     "trailingSlash": false,
     "rewrites": [
-      { "source": "/community/**", "destination": "/community/__dynamic.html" },
+      { "source": "/community/*/challenge", "destination": "/community/__dynamic/challenge.html" },
+      { "source": "/community/**", "destination": "/community/__dynamic/index.html" },
       { "source": "/join/**", "destination": "/join/__dynamic.html" }
     ],
     "headers": [
