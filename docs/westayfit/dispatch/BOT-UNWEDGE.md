@@ -130,4 +130,29 @@ could hold.
 - **If A:** v5 stays rolled back until the child session reproduces the failure from the
   journal trace and ships v5.1; the standing rule is still enforced by her memory and the
   manifest. Runbook rule 13 (probe after every restart) comes out of this.
-
+- **Analysis 21:45Z** (child session on `Trifecta-United/agent-platform`, branch
+  `maia/unwedge-v5-1` @ `c32c0fc`, docs only; repo + sandbox evidence, nothing verified on
+  the box). Verdict **`MANIFEST` (conditional)**: (1) the patch hunks are byte-identical
+  to `git diff 89e02ad 044985b`, and a clean apply on the v4 file (`58ae878c…`) yields
+  HEAD's `bot.js`; (2) a stub-token load test of v4 and v5 gives identical startup lines,
+  Bolt starts, first error is Slack's 403 on the stub token — no JS error on either;
+  harness pass, `npm test` 816/816; (3) on the ack path patch I only adds the `audioSink`
+  closure argument before `quickAck.post`, and quick-ack posts its text before the sink
+  runs, inside try/catch — it cannot suppress the ack; (4) `spoken_script` is in
+  `SPOKEN_SCRIPT_FIELDS`, so the Jarvis clip is not withheld; (5) a hand-added top-level
+  `rules` key fails the strict manifest schema (`UNKNOWN_FIELD`) → `[composition]
+  refusing to boot reason=admission-deny-all`, exit 1 before Bolt exists → under
+  `Restart=always`/`RestartSec=5` a crash loop with no Socket Mode connection, exactly the
+  observed silence — **iff** `registry.allowed_roots` is declared in the box's config
+  (otherwise the manifest is never read and the cause is outside the repo); (6) neither
+  the `rules` array nor `prompts.inline` is read by `bot.js`: the turn prompt is
+  `slack.base_system_prompt` (+ channel `system_prompt`) in `config.json` /
+  `config.local.json`, which is where the standing rule must go.
+- **Procedure refined 21:58Z** (reply in thread 1788643312.060589): discriminator
+  `journalctl --user -u agent-slack -n 40 --no-pager | grep -E "composition|admission|
+  UNKNOWN_FIELD|bot started|refusing|Error"`; step 3 now removes the key with
+  `node -e '… delete j.rules … JSON.stringify(j,null,2)'` (any formatting), re-validates
+  with `loadManifest` from `shared/assistant-registry/manifest-loader.js`, and never
+  `git checkout -- assistants/maia.manifest.json` (the file also carries the westayfit
+  channel edit). The v5 code stays in place; markers unchanged. Pass = `Maia bot started
+  in Socket Mode` and no `refusing to boot`, then Devin's native `@Maia status`.
