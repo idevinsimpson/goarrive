@@ -133,7 +133,7 @@ Plus one screen that is not part of the member loop:
 | Slice | Substance | Depends on |
 |---|---|---|
 | **E1** | Land the email path so a member can actually finish signing up | Resend config — **blocked on Devin** |
-| **E2** | Join an existing community by link/QR | E1 |
+| **E2** | Join an existing community by link/QR | M-U2 (built) |
 | **E3** | Challenge templates + community challenges + check-ins | E2 |
 | **E4** | Aggregate counters, honest and live | E3 |
 | **E5** | Community Pulse display view | E4 |
@@ -141,6 +141,19 @@ Plus one screen that is not part of the member loop:
 
 Six slices, 23 days. Roughly 4 days each with no slack — **still tight, but arithmetically
 possible**, which the current roadmap is not.
+
+### Correcting my own dependency chain
+
+An earlier draft of this table had E2 depending on E1. **That was wrong, and it matters.**
+
+E1 blocks *live member validation* — nobody can walk the real flow until verification mail
+delivers. It does not block *engineering*: E2–E6 are built and verified against the
+emulator, where the harness sets verification state directly (`markEmailVerified` in the
+GATE 1 spec already does exactly this). Treating E1 as a serial gate would have idled the
+whole build behind a dashboard task neither Maia nor I can perform.
+
+E1 stays urgent — real people walking the loop is the entire point of the Expo, and every
+day it slips is a day of unvalidated work stacking up. But **E2 starts now.**
 
 ---
 
