@@ -12,6 +12,8 @@
 
 ---
 
+**E3 checkpoint 2026-09-05 17:00Z:** `feat/wsf-e3-challenges` @ `858feb2` — `wsfListChallenge`, `wsfCheckIn`, `wsfChallengePulse` callables + three callable test files (1,053 lines), committed after the bot recovery; NOT gated, not reviewed yet. Review against `dispatch/E3-CHALLENGES-AND-CHECKINS.md` in progress.
+
 ## 1. Closed
 
 | ID | Name | State |

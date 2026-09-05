@@ -177,6 +177,13 @@ systemctl --user restart agent-slack                            # drops every hu
 systemctl --user show agent-slack -p ActiveEnterTimestamp       # proof of the restart
 ```
 
+**Recovery confirmed 16:49Z.** Five-command read-only health check answered in text in
+25 seconds (thread 1788626965.235519). After the restart: MainPID 2119862,
+MemoryCurrent 232 MB, peak 346 MB, `MemoryHigh=2G` / `MemoryMax=4G` are lines 3–4 of the
+unit's own files; box 1.5 GB used / 6.2 GB available. The E3 work from the 14:46Z turn was
+sitting uncommitted on disk (`index.ts` + three callable tests) — rule 1 exists for exactly
+this; it was committed and pushed as `858feb2` in a 19-second turn.
+
 **LIVE 2026-09-05 16:44:11Z.** Devin had Manus run exactly this from the Hetzner console
 (`goarrive-maia`, as `ben`). Status before the restart: active since 13:25:47Z, MainPID
 2078804 (`node bot.js`) with **one** child `claude` (PID 2101666), Tasks 159,
@@ -206,13 +213,18 @@ way.
   bot's event consumer handles *outside* the turn loop — e.g. a message that is exactly
   `maia: restart` schedules the deferred restart directly, no model call. Dispatch this as
   the next bot.js task after the live-progress patch (`dispatch/BOT-LIVE-PROGRESS.md`).
-- **Live-progress patch in preparation.** Because her running tree could not be read
-  while she was wedged, the patch is being written from the `agent-platform` source in a
-  separate session and pushed to `Trifecta-United/agent-platform` branch
-  `maia/live-progress-heartbeat`, with `shared/slack-bot/LIVE-PROGRESS-REPORT.md` and a
-  `live-progress.patch` that applies to the 2026-08-13 tree. Apply on the box with a
-  backup + `git apply --check`, then the deferred restart; then the 3-minute acceptance
-  command in the spec.
+- **Live-progress patch: written, self-tested, dispatched 17:00Z.** Branch
+  `Trifecta-United/agent-platform` `maia/live-progress-heartbeat` @ `50495e9`, BASE
+  `5fa8626` (2026-08-12; `main` has not touched `bot.js` since). Findings at
+  `bot.js` L893–912 (executor output capture), L1149–1290 (`createLiveProgress`),
+  L2905–2941 (fallback heartbeat, now 20 s and edit-in-place), L1663–1682 (monitor
+  heartbeat absorbed, progress-tick audio removed). Harness `scripts/live-progress-selftest.js`
+  passes 5 scenarios; `npm test` 828 pass, 3 pre-existing `dotenv` failures identical to
+  `main`. Known limit: with Claude Code 2.1.x as the executor, a running command's output is
+  not visible to `bot.js` until the call returns, so a hung command shows the command and
+  the elapsed time with `last output: (none yet)` — and is sealed as ❌ when the turn ends.
+  Report thread: #dev-westayfit 1788626986.167859. Apply thread: 1788627643.833759.
+  LIVE VERIFIED only after the 3-minute acceptance run in its own thread.
 - **Jarvis off?** It is all-or-nothing. Turning it off silences Devin's assistant channels too. Devin's decision; until then the text-is-the-record rule (§5) is the control, and Maia has saved it to memory.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
   tree is `agent-setup/…` (Aug 31, +28 KB). Her button-tap fix cannot reach the running
