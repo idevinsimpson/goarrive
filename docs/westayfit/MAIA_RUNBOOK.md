@@ -25,10 +25,15 @@ Maia's own readout on Sep 5 shows the identical state she reported on Aug 31.
 
 Two compounding faults:
 
-- **Jarvis audio.** A voice-reply feature live since 2026-06-07 in the assistant channels
-  is active in the dev channels too. Her final summary each turn is voiced, and the text
-  slot posts **empty**. The 1a hosting receipt was delivered this way and asked for three
-  times as "missing".
+- **Jarvis audio — the mechanism, confirmed 2026-09-05 13:13Z.** Her turn-end reply is
+  posted as **two audio files, not text**: first `audio-bundle-<ts>.mp3` attached to an
+  otherwise-empty message (this is the reply content, voiced — a concise thread read shows
+  it as a blank message), then `jarvis-reply-<ts>.mp3` under "Jarvis audio reply — tap to
+  play". The written record is empty because the writing was converted to audio. It fires
+  even on a turn explicitly instructed "text only", so it is not something she controls
+  in-turn — it is platform behaviour in `bot.js`. A voice-reply feature has been live since
+  2026-06-07 in the assistant channels and is active in the dev channels too. The 1a
+  hosting receipt was delivered this way and asked for three times as "missing".
 - **Thread replies.** She replies in-thread; a channel read shows nothing. Read threads.
 
 ## Fix 1 — raise both caps, without a human at the box
@@ -74,7 +79,7 @@ long-running work inside a chat turn is no longer acceptable.
 1. Every turn ends with work **pushed**. A dispatch that expects >15 minutes of inline work is a defect in the dispatch.
 2. Long steps go through `run-detached.sh`. The dispatch names the thread-ts to report into.
 3. Mention her as `<@U0AQAGGMTE3|Maia>`. Plain `@Maia` pings nobody.
-4. Read her **threads**, not the channel.
+4. Read her **threads**, not the channel — and in **detailed** mode, or an audio-bundle reply looks like an empty message.
 5. **The written reply is the record.** Audio may only repeat what the text says, never add to it. Devin has transcribed audio replies and found content that was not in the thread; the 1a receipt was delivered audio-only with an empty text slot. Until the toggle is found and turned off for dev channels: "Text reply only — no Jarvis audio", and anything spoken must also be typed.
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
 
