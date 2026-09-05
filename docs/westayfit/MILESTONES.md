@@ -12,8 +12,6 @@
 
 ---
 
-**E3 checkpoint 2026-09-05 17:00Z:** `feat/wsf-e3-challenges` @ `858feb2` — `wsfListChallenge`, `wsfCheckIn`, `wsfChallengePulse` callables + three callable test files (1,053 lines), committed after the bot recovery; NOT gated, not reviewed yet. Review against `dispatch/E3-CHALLENGES-AND-CHECKINS.md` in progress.
-
 ## 1. Closed
 
 | ID | Name | State |
@@ -50,7 +48,7 @@ doors open. Attendees join it; they do not search, choose a type, or resolve dup
 |---|---|---|---|
 | **E1** | Verification email actually delivers | M-U2 completion | Manus (config) + Maia (deploy) |
 | **E2** | Join an existing community by link / QR — **ACCEPTED 2026-09-05, 7/7 EMULATOR VERIFIED** @ `feat/wsf-e2-join-by-qr` `5cbdb8e` (gate log `wsf-e2-gate.20260905T144155Z`, exit 0; `firestore.rules` delta vs base `7fc4b28`: empty) | M-U3, reduced | Maia |
-| **E3** | Challenge templates, community challenges, check-ins | M-U4 — **the product at FitLife** | Maia |
+| **E3** | Challenge templates, community challenges, check-ins | M-U4 — **the product at FitLife** | Maia — **WIP** `feat/wsf-e3-challenges` @ `858feb2` (2026-09-05 17:00Z checkpoint: three callables + three callable tests, 1,053 lines; not gated, review in progress) |
 | **E4** | Aggregate counters, honest and live | M-U5, reduced | Maia |
 | **E5** | Community Pulse display view (kiosk two) | M-U5, reduced | Maia |
 | **E6** | Expo hardening — attract, auto-reset, large targets | M-U7, reduced | Maia |
