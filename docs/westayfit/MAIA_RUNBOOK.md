@@ -74,6 +74,13 @@ scripts/westayfit/run-detached.sh <unit> <channel-id> <thread-ts> -- <command ..
 than any inline command survives — and posted `SELFTEST-OK` into thread `1788613482.722789`
 as text on its own, with no human and no second turn. (`/home/ben/.local/state/wsf-run/wsf-selftest.20260905T131926Z.log`)
 
+**The runner forwards PATH; it does not find Java.** `~/jdk-21` is not on PATH, so a raw
+`firebase emulators:exec …` inside the runner dies in three seconds with *Could not spawn
+java -version* (2026-09-05 14:35Z). Anything touching the emulators goes through
+`scripts/westayfit/gate1.sh`, which locates the JDK, or exports `JAVA_HOME=$HOME/jdk-21`
+and prepends `$JAVA_HOME/bin` to PATH inline. As of `5cbdb8e` on the E2 branch, `gate1.sh`
+also runs the callable jest suite, so one gate run is the complete proof.
+
 One-time setup and the acceptance self-test are in the script header. **Standing rule:**
 any build, deploy, gate run, emulator suite, or `npm ci` goes through it. Inline
 long-running work inside a chat turn is no longer acceptable.
