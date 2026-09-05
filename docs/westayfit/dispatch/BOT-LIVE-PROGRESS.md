@@ -134,4 +134,10 @@ rebuilt against it in a second session: branch **`maia/live-progress-heartbeat-v
   `grep -c '_Still working'` = 0, `grep -c 'postReplyText'` = 4.
 - Apply: `git cherry-pick ce0b061` then `36c720a` on a clean worktree (with the frozen-tree
   guard override), else the two patch files; backup + `node --check` + deferred restart
-  (`--on-active=180`). Dispatched 17:30Z in its own thread; queued behind the E3 turn.
+  (`--on-active=180`). Dispatched 17:30Z in its own thread.
+- **APPLIED 17:31Z** (thread 1788629421.976339): patch route (worktree had an unrelated
+  modified `assistants/maia.manifest.json`); backup `bot.js.bak-20260905T173052Z`;
+  `APPLIED-A`, `APPLIED-B`, `SYNTAX-OK`, greps 3 / 0 / 4 as expected; restart timer
+  `agent-slack-deferred-restart.timer` armed for ~17:34Z. The turn's own final reply
+  still came out audio-first with the text appended into the stream message — the last
+  time that code path runs. Acceptance test scheduled for 17:36Z in its own thread.
