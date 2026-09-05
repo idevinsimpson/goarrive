@@ -101,10 +101,13 @@ long-running work inside a chat turn is no longer acceptable.
    Enforced two ways from today: (a) the rule above is written into Maia's persistent
    rules/memory in her own words (dispatch 20:30Z, thread 1788640255.280279 — she pastes
    the stored entry and its path back as proof); (b) `bot.js` v5 (branch
-   `maia/unwedge-v5`, in preparation) posts every spoken script — Jarvis reply, quick-ack,
+   `maia/unwedge-v5`, applied on the box 20:57Z) posts every spoken script — Jarvis reply, quick-ack,
    bundle — as the text of the same Slack message that carries the audio (`🎙️ *Spoken:* …`),
-   so audio can never carry a fact the thread does not. Until v5 is applied, transcripts
-   Devin pastes are the check; the 20:24Z receipt matched its audio.
+   so audio can never carry a fact the thread does not. Transcripts Devin pastes remain the check (the 20:24Z and 20:59Z receipts matched
+   their audio). **Where the rule lives in her prompt:** neither a manifest `rules` array
+   nor `prompts.inline` is read by `bot.js`; every turn's prompt is
+   `slack.base_system_prompt` (+ the channel `system_prompt`) in `config.local.json` —
+   that is where the sentence goes (repo analysis 21:45Z, `maia/unwedge-v5-1` @ `c32c0fc`).
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
 7. **No buttons. Choices are text.** When she posts an A/B/C as Slack buttons, her bot
    enters a modal "pick one" state and the **next message in the thread is consumed as the
@@ -241,8 +244,15 @@ way.
   (20:59Z): the v5 patch (`bot.js` + `audio-bundle.js`, backups
   `*.bak-20260905T205707Z`) and a new top-level `rules` array in
   `assistants/maia.manifest.json`, then `agent-slack-deferred-restart-1788641936`.
-  Diagnose-then-rollback procedure for Manus is in `dispatch/BOT-UNWEDGE.md` ("v5 restart
-  incident"). Until she answers, E3 acceptance and the `prompts.inline` follow-up wait.
+  **Most likely cause (repo + sandbox analysis 21:45Z, not yet confirmed on the box): the
+  manifest `rules` key.** Unknown top-level keys fail the strict manifest schema
+  (`UNKNOWN_FIELD`) and the bot refuses to boot before Bolt starts — a silent crash loop
+  under `Restart=always`; patch I's two files load and ack cleanly on both revisions.
+  Procedure for Manus in `dispatch/BOT-UNWEDGE.md` ("v5 restart incident"): step 1
+  journal, expect case B, remove the key with the node one-liner (never `git checkout`
+  the manifest — it also carries the westayfit channel edit), restart, look for
+  `Maia bot started in Socket Mode`. Until she answers, E3 acceptance and the
+  rule-placement follow-up (`slack.base_system_prompt`, not `prompts.inline`) wait.
 - **Live progress — LIVE VERIFIED 2026-09-05 17:40Z** (thread 1788629761.176299, on the
   service restarted 17:34:33Z). Long tool calls now show one edited-in-place line
   (`⏳ 1m40s · running: <cmd>` → `✅ 3m00s · <cmd>`); no "Still working" posts; no
