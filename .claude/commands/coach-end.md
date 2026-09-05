@@ -4,7 +4,7 @@ description: Drop the active persona and return to normal
 
 # /coach-end
 
-1. `rm -f .claude/personas/.active`
+1. `rm -f personas/.active`
 2. Confirm in one line which persona you dropped.
 3. Return to your normal voice for the rest of the session.
 

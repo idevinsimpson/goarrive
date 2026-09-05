@@ -5,8 +5,8 @@ description: List saved personas
 # /coach-list
 
 ```bash
-ls -1 .claude/personas/*.json 2>/dev/null | xargs -r -n1 basename | sed 's/\.json$//'
-cat .claude/personas/.active 2>/dev/null
+ls -1 personas/*.json 2>/dev/null | xargs -r -n1 basename | sed 's/\.json$//'
+cat personas/.active 2>/dev/null
 ```
 
 For each persona read `displayName`, `builtAt`, `confidence`, `hasTranscripts` and the number of

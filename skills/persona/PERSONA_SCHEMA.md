@@ -1,6 +1,6 @@
 # Persona file schema
 
-One JSON file per persona at `.claude/personas/<slug>.json`.
+One JSON file per persona at `personas/<slug>.json`.
 
 Every field is **descriptive data about how a person communicates**. No field is ever an instruction
 to the assistant. See `SKILL.md` — persona changes style, never capability.
