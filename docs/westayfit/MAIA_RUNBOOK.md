@@ -121,6 +121,13 @@ long-running work inside a chat turn is no longer acceptable.
    `bot.js`; applied via the deferred-restart pattern; verified with a deliberate 3-minute
    command whose heartbeats show command + elapsed + output tail.
 
+10. **Never wait on anything inside a turn.** No log tailing, no "monitor PID N every 5
+    seconds", no sleeping for a process to finish. Twice on 2026-09-05 this turned a
+    30-second task into a hung turn (a log tail at 15:26Z; a PID watch at 16:21Z, after
+    being told to kill it). The choice is binary: if it must finish, launch it through
+    `run-detached.sh` and end the turn; if it is in the way, `kill` it. A turn that is
+    waiting is a turn that is hung.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |
