@@ -59,7 +59,25 @@ Four instances surfaced within one hour of the first real member walking the flo
 - **Custom action URL.** Auth action links point at `https://goarrive.web.app/reset-password`. **That route does not exist** — no match in any of the 45 routes under `apps/goarrive/app`, and no `oobCode` / `applyActionCode` / `verifyEmail` handling anywhere in the app source. GoArrive hosting ends in a catch-all `** → /index.html`, so the URL returns **200**, renders the app shell, and silently discards the code. Firebase's default handler at `https://goarrive.firebaseapp.com/__/auth/action` still works and is what the custom URL overrode.
 - **App Check** (clear today, listed because the coupling is live): enforced nowhere, so WSF callables pass with `app: "MISSING"`. Enabling it project-wide for GoArrive breaks every WSF callable the same day.
 
-**Unconfirmed and worth settling:** `generatePasswordResetLink` in `addCoach` and `sendMemberInvite` receives the same dead action URL. If it is dead for `verifyEmail` it is dead for password resets, which would make every coach and member invite link GoArrive has issued inert. Two things could make that false — `goarrive.web.app` may serve an older deployment that had the route, or the handler may live outside this repo.
+**Default handler CONFIRMED HEALTHY, 2026-09-02 (Maia, LIVE VERIFIED).** A deliberately
+invalid `oobCode` against `https://goarrive.firebaseapp.com/__/auth/action` returns HTTP
+200 with Firebase's own auth-action SPA shell — an empty `<div id="actionElement">` that
+`action.js` populates client-side — and no server-side redirect. So the handler WSF
+retargets to is real and serving, which is what makes `retargetActionLink` a sound fix
+rather than a guess.
+
+**Still unconfirmed — and this test did NOT settle it.** The check above hit the *default*
+handler. GoArrive's own minted links point at the *custom* action URL
+(`https://goarrive.web.app/reset-password`), which was never tested and is still believed
+dead. `generatePasswordResetLink` in `addCoach` and `sendMemberInvite` receives that same
+custom URL, so every coach and member invite link GoArrive has issued may be inert.
+GoArrive's exposure is exactly what it was before the RESETPAGE check — unchanged, not
+cleared. Two things could still make it false: `goarrive.web.app` may serve an older
+deployment that had the route, or the handler may live outside this repo.
+
+*Recorded because the distinction is easy to lose: proving the fallback works is not the
+same as proving the thing in production works, and the first result reads like the second
+if nobody writes down which URL was actually hit.*
 
 **Mitigation:** treat every project-level console setting as an undeclared dependency of WSF, not as ambient environment. Before a milestone ships anything that touches auth, email, storage or enforcement, enumerate the console settings that path depends on and record their current values in `DEPENDENCIES.md` — a value nobody wrote down is a value nobody can diff. No automated gate substitutes: these settings are outside the repo, so the only defence is that a human walks the real flow as a real member before the milestone is called done. Every one of these four passed emulator verification, live rules verification, and five PHASE 3 checks.
 
