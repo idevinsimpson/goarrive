@@ -1,6 +1,6 @@
 # WE STAY FIT — MASTER SOURCE OF TRUTH
 
-**Version 1.0 · 2026-09-02 · Owner: Devin Simpson (devin.simpson@goa.fit)**
+**Version 1.1 · 2026-09-05 · Owner: Devin Simpson (devin.simpson@goa.fit)**
 
 This is the governing document for We Stay Fit (WSF). It is written to be read by
 **Claude Code, ChatGPT, Maia, and Manus** as well as by people. When any of them
@@ -627,8 +627,16 @@ that does not exist. Resend has exactly one verified sending domain (`goarrive.f
 Claude Code, ChatGPT, Maia and Manus **may not decide these**. Surface them; do not
 improvise.
 
+### Time-boxed — these have lead times and get worse if they wait
+
+| # | Decision | Needed by | Why the date |
+|---|---|---|---|
+| **A** | **Email path.** Finish `westay.fit` in Resend, or ship on the already-verified `goarrive.fit` sender as an interim? | **Now** | Every day this sits, E2–E6 accumulate as code no real person has walked. It is the only thing standing between us and a validated member journey. |
+| **B** | **Check-in verification** — honour system, per-location QR, or mixed? | **~Sep 14** | QR means codes printed and placed, and vendor coordination. It is the strongest part of the FitLife concept and the one with a physical lead time. |
+| **C** | **Verified email before joining?** | **Before E2 lands** | At the booth, "scan → sign up → go find your email → come back" costs most of the funnel. Built as a one-line guard either way; defaulting to requiring it. |
+
 **Blocking now**
-1. **Milestone numbering** — adopt the Firebase roadmap in §5 and update `MILESTONES.md`, or keep the repo's current M-U3/M-U4 names?
+1. ~~**Milestone numbering**~~ — **RESOLVED 2026-09-05.** Firebase roadmap adopted; `MILESTONES.md` rewritten with the Lovable-lineage names recorded as superseded and that work moved to Post-Expo.
 2. **Email configuration** — Resend sender address on `westay.fit` once verified; `WSF_APP_URL`; whether to ship on the already-verified `goarrive.fit` sender in the interim.
 3. **Auth action URL** — the project-level setting is shared with GoArrive and may mean GoArrive password resets are also broken.
 4. **PR #300** review.
