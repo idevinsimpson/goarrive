@@ -27,6 +27,7 @@ import {
   getDocs,
   doc,
   getDoc,
+  limit,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useRouter } from 'expo-router';
@@ -65,11 +66,40 @@ export default function MemberHome() {
   const [loading, setLoading] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [isPending, setIsPending] = useState(true);
+  const [todayWorkoutName, setTodayWorkoutName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     fetchMemberData();
+    fetchTodayWorkout();
   }, [user]);
+
+  function todayDateString(): string {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  async function fetchTodayWorkout() {
+    if (!user) return;
+    try {
+      const q = query(
+        collection(db, 'workout_assignments'),
+        where('memberId', '==', user.uid),
+        where('scheduledFor', '==', todayDateString()),
+        where('status', '==', 'scheduled'),
+        limit(1)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        setTodayWorkoutName(snap.docs[0].data().workoutName ?? 'Today\'s Workout');
+      }
+    } catch (err) {
+      console.error('[MemberHome] Error fetching today workout:', err);
+    }
+  }
 
   async function fetchMemberData() {
     try {
@@ -204,6 +234,21 @@ export default function MemberHome() {
           </View>
         ) : (
           <>
+            {/* Start Today's Workout — shown only when a scheduled workout exists for today */}
+            {todayWorkoutName !== null && (
+              <Pressable style={s.todayCard} onPress={() => router.push('/(member)/workouts')}>
+                <View style={s.todayCardHeader}>
+                  <View style={s.todayIconWrap}>
+                    <Text style={s.todayIconText}>▶</Text>
+                  </View>
+                  <View style={s.todayCardInfo}>
+                    <Text style={s.todayCardLabel}>Start Today's Workout</Text>
+                    <Text style={s.todayCardName} numberOfLines={2}>{todayWorkoutName}</Text>
+                  </View>
+                </View>
+              </Pressable>
+            )}
+
             {/* Plan Status Card */}
             <View style={s.card}>
               <View style={s.cardHeader}>
@@ -374,6 +419,45 @@ const s = StyleSheet.create({
   },
   welcomeLeft: {
     flex: 1,
+  },
+  todayCard: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  todayCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  todayIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayIconText: {
+    fontSize: 20,
+    color: '#F5A623',
+  },
+  todayCardInfo: {
+    flex: 1,
+  },
+  todayCardLabel: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  todayCardName: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#F0F4F8',
   },
   greeting: {
     fontSize: 24,
