@@ -25,3 +25,6 @@ functions/check-zoom-*.js
 functions/create-zoom-test-session.js
 functions/zoom-disable-ai-companion.js
 functions/zoom-inspect-account-settings.js
+
+# Claude Code local permission overrides (per-machine, not shared)
+.claude/settings.local.json
