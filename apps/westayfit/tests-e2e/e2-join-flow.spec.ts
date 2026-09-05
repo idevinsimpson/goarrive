@@ -44,11 +44,11 @@ function mintJoinCode(): string {
 /**
  * Seed a public, active `wsfCommunityGroups` document straight against the
  * Firestore emulator. The rule for that collection is `allow create: if false`
- * — server-only writes — so we hit the emulator via the admin bypass
- * (`Authorization: Bearer owner`), the same way `markEmailVerified` drives
- * the Auth emulator's admin API. This is a stand-in for what will happen on
- * Expo morning: a coach on the platform creates the FitLife group by hand
- * (via a callable path we do not have yet) and the code is printed on QR.
+ * — server-only writes — so we hit the emulator's admin path
+ * `/emulator/v1/projects/{p}/databases/(default)/documents/...`, which bypasses
+ * `firestore.rules` entirely. This is a stand-in for what will happen on Expo
+ * morning: a coach on the platform creates the FitLife group by hand (via a
+ * callable path we do not have yet) and the code is printed on QR.
  */
 async function seedPublicGroup(opts: {
   joinCode: string;
@@ -56,14 +56,11 @@ async function seedPublicGroup(opts: {
 }): Promise<string> {
   const docId = `e2gate1-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
   const url =
-    `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}` +
-    `/databases/(default)/documents/wsfCommunityGroups?documentId=${docId}`;
+    `${FIRESTORE_EMULATOR}/emulator/v1/projects/${PROJECT_ID}` +
+    `/databases/(default)/documents/wsfCommunityGroups/${docId}`;
   const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      authorization: 'Bearer owner',
-      'content-type': 'application/json',
-    },
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       fields: {
         displayName: { stringValue: opts.displayName },
