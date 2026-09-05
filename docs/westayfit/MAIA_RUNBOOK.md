@@ -157,6 +157,12 @@ long-running work inside a chat turn is no longer acceptable.
     self-test the change against that commit; apply with `git apply --check` first; the
     guard in the apply dispatch (stop if the file matches neither expected base) is what
     saved the Sep 4 edits on 2026-09-05.
+13. **After every restart, probe before dispatching work.** Post a two-line mention
+    (`reply with the word alive and the output of systemctl --user show agent-slack -p
+    ActiveEnterTimestamp`). Every healthy turn acks within ~3 s. Two silent mentions in a
+    row means the service is down or its Slack socket is dead — stop dispatching and go to
+    the console (below). Socket Mode does not replay the backlog: re-send the lost dispatch
+    as a fresh thread afterwards. Added 2026-09-05 after the v5 restart went silent.
 
 ## Where things live on her box (confirmed 2026-09-05)
 
@@ -228,6 +234,15 @@ way.
 
 ## Still open
 
+- **Bot silent after the v5 restart (21:02Z, 2026-09-05) — OPEN, console recovery
+  dispatched 21:2xZ.** The E3 acceptance dispatch (21:05:27Z, thread 1788642327.877409)
+  and a liveness probe (21:19:59Z, thread 1788643199.385959) got no reply, not even the
+  instant ack every earlier turn posted within 3 s. Only changes since the last good turn
+  (20:59Z): the v5 patch (`bot.js` + `audio-bundle.js`, backups
+  `*.bak-20260905T205707Z`) and a new top-level `rules` array in
+  `assistants/maia.manifest.json`, then `agent-slack-deferred-restart-1788641936`.
+  Diagnose-then-rollback procedure for Manus is in `dispatch/BOT-UNWEDGE.md` ("v5 restart
+  incident"). Until she answers, E3 acceptance and the `prompts.inline` follow-up wait.
 - **Live progress — LIVE VERIFIED 2026-09-05 17:40Z** (thread 1788629761.176299, on the
   service restarted 17:34:33Z). Long tool calls now show one edited-in-place line
   (`⏳ 1m40s · running: <cmd>` → `✅ 3m00s · <cmd>`); no "Still working" posts; no

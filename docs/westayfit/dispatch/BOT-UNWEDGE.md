@@ -100,3 +100,34 @@ could hold.
   stream message when a turn has *no* long tool call (only short reads) — seen in the E3
   turn A thread at 18:24Z. C only suppresses it while a live-progress message exists. Next
   patch: never emit the fixed phrase; when the monitor has nothing new, stay silent.
+
+## v5 restart incident (2026-09-05 21:02Z) — OPEN
+
+- **Applied 20:57Z–20:59Z** (thread 1788641770.375139): patch I (`044985b`, branch
+  `maia/unwedge-v5` @ `a73d476`) on `bot.js` + `audio-bundle.js`, `APPLIED-I`, `SYNTAX-OK`,
+  all nine marker counts as expected; backups `bot.js.bak-20260905T205707Z` and
+  `audio-bundle.js.bak-20260905T205707Z`; pre-patch `bot.js` sha256 prefix
+  `58ae878c6aff8544` (= `origin/maia/unwedge-v4`). The generator already emits
+  `spoken_script`, so no edit there. She also added a top-level `rules` array to
+  `assistants/maia.manifest.json` (no rules block existed; `prompts.inline` is the loaded
+  paragraph). Restart timer `agent-slack-deferred-restart-1788641936` → ~21:02Z.
+- **Symptom:** two mentions after the restart (21:05:27Z acceptance dispatch, 21:19:59Z
+  liveness probe) produced nothing — no instant ack, no progress line, no reply. Every
+  turn before the restart acked within 3 s. Not a hung turn (rule 11 heartbeats absent);
+  the process is down, crash-looping, throwing in the mention handler, or its socket is
+  dead. `node --check` cannot catch a load-time or handler-time error, and the 232-check
+  harness runs the code outside the real Bolt entry path.
+- **Recovery (Manus, console, as `ben`)** — posted 21:2xZ in #dev-westayfit: (1) status +
+  `journalctl --user -u agent-slack --since '2026-09-05 21:00:00'`; (2) case A, a trace in
+  bot.js/audio-bundle.js → restore both `*.bak-20260905T205707Z` files (keep the broken
+  copies as `*.v5-broken-<stamp>`), `node --check`, sha256 prefix must read
+  `58ae878c6aff8544`; (3) case B, a manifest/schema error → delete the three-line
+  `"rules": [ … ],` block (`sed -i '/^  "rules": \[$/,/^  \],$/d'`), re-validate JSON,
+  keep the westayfit channel hunk; (4) `systemctl --user restart agent-slack`, then
+  `SubState=running` and a clean Bolt start line in the journal; Devin's native
+  `@Maia status` is the proof. Backlog is not replayed: the E3 acceptance dispatch is
+  re-sent as a fresh thread afterwards.
+- **If A:** v5 stays rolled back until the child session reproduces the failure from the
+  journal trace and ships v5.1; the standing rule is still enforced by her memory and the
+  manifest. Runbook rule 13 (probe after every restart) comes out of this.
+
