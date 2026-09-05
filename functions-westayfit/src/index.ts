@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from 'crypto';
+
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
@@ -7,10 +9,38 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 initializeApp();
 
 const GROUP_TYPES = ['familyFriends', 'custom'] as const;
-const JOIN_POLICIES = ['private', 'inviteOnly'] as const;
+// 'public' added for E2: only 'public' groups are joinable by code. Private and
+// inviteOnly groups still have a joinCode (minted on create; back-filled for
+// legacy rows) but wsfPreviewCommunity and wsfJoinCommunity treat them as
+// not-found so an attacker cannot use those endpoints as an existence oracle.
+const JOIN_POLICIES = ['private', 'inviteOnly', 'public'] as const;
 
 type GroupType = (typeof GROUP_TYPES)[number];
 type JoinPolicy = (typeof JOIN_POLICIES)[number];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Join code — printed on a QR, so PUBLIC by construction, but must not be
+// enumerable or derivable from anything else on the group. randomBytes(16)
+// yields 128 bits of entropy; base64url is URL-safe and needs no percent
+// encoding on either the QR or in a copy-paste. 22 chars. Well above the spec
+// minimum of 16.
+//
+// NOT hashed at rest. It is unguessable, not secret; a hashed store would make
+// the lookup path impossible. Do not conflate the two properties.
+// ─────────────────────────────────────────────────────────────────────────────
+export function mintJoinCode(): string {
+  return randomBytes(16).toString('base64url');
+}
+
+function normalizeJoinCode(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  // 16–128 chars, base64url alphabet. Anything else can't be one we minted; a
+  // strict shape check keeps garbage out of the query without leaking whether
+  // a real code with that shape exists.
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(trimmed)) return null;
+  return trimmed;
+}
 
 export const wsfHealth = onCall(
   { region: 'us-central1' },
@@ -96,6 +126,11 @@ export const wsfCreateCommunity = onCall<CreateCommunityRequest>(
         displayName,
         groupType,
         joinPolicy,
+        // Every new group ships with a joinCode from day one so the E2 path
+        // never has to distinguish "old group without a code" from "new group
+        // with one" — the backfill script only has to catch groups minted
+        // before this change landed.
+        joinCode: mintJoinCode(),
         createdByUserId: uid,
         lifecycleStatus: 'active',
         isSample: false,
@@ -311,5 +346,244 @@ export const wsfSendVerificationEmail = onCall(
     }
 
     return { sent: true } as const;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E2 — Join an existing community by link / QR.
+//
+// Two callables, one route (client-side): wsfPreviewCommunity (unauthenticated)
+// serves the "which community am I about to join?" preview, and
+// wsfJoinCommunity (authenticated) creates the membership. Both bypass
+// firestore.rules by construction (Admin SDK), which is deliberate: a rules
+// change replaces GoArrive's live ruleset too (see docs/westayfit/dispatch/
+// E2-JOIN-BY-QR.md §1), so E2 is designed to need ZERO rules changes.
+//
+// The reads that had to happen: a visitor cannot read wsfCommunityGroups
+// directly (rule requires membership), and we do not weaken that rule. Instead
+// the callables read on the visitor's behalf and return a strictly-shaped
+// projection — never the raw doc, never the groupId on the preview path.
+//
+// The two properties this design must preserve:
+//   * Not an existence oracle. Unknown code and non-public group must return
+//     byte-identical not-found. See PREVIEW_NOT_FOUND / JOIN_NOT_FOUND.
+//   * Idempotent join. The membership doc ID is deterministic
+//     (`${groupId}_${uid}`) so a double-tap, a back-button re-submit, or a
+//     network retry produces exactly one row and no error.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * §5 open decision: does joining require a verified email?
+ *
+ * Default TRUE (safe, consistent with wsfCreateCommunity, protects the aggregate
+ * counter from throwaway signups). Flipping to false trades the booth funnel
+ * for that safety — the decision is Devin's. The guard is exactly one line so
+ * that answer is one line, per §5.
+ */
+const JOIN_REQUIRES_EMAIL_VERIFIED = true;
+
+function assertJoinEmailVerified(token: { email_verified?: boolean }): void {
+  if (JOIN_REQUIRES_EMAIL_VERIFIED && token.email_verified !== true) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Verify your email before joining a community.'
+    );
+  }
+}
+
+/**
+ * A single generic not-found shape shared by preview and join. Same code, same
+ * message. Asserted byte-identical by the callable suite because it is the
+ * property most likely to erode silently under a helpful-error refactor.
+ */
+const NOT_FOUND_MESSAGE = 'This link is not valid.';
+function notFound(): never {
+  throw new HttpsError('not-found', NOT_FOUND_MESSAGE);
+}
+
+// Coarse per-IP bucket for wsfPreviewCommunity. It is unauthenticated by design
+// (visitors have not signed up yet), so the callable is enumerable-by-attempt.
+// The join code space is 128-bit CSPRNG so brute force is not the concern; the
+// rate limit exists to keep the endpoint from being a cheap DoS or Firestore
+// cost pump.
+//
+// 100 requests / rolling minute per IP hash. The IP hash is salted with the
+// current UTC day so buckets rotate daily and no long-lived per-visitor
+// identifier lives in Firestore.
+const PREVIEW_RATE_LIMIT_WINDOW_MS = 60_000;
+const PREVIEW_RATE_LIMIT_MAX = 100;
+
+function hashIpForBucket(ip: string, now: number): string {
+  const daySalt = Math.floor(now / (24 * 60 * 60 * 1000)).toString();
+  return createHash('sha256').update(`${ip}:${daySalt}`).digest('hex').slice(0, 16);
+}
+
+function extractIp(rawRequest: { ip?: string; headers?: Record<string, unknown> }): string {
+  const header = rawRequest?.headers?.['x-forwarded-for'];
+  if (typeof header === 'string' && header.length > 0) {
+    // First entry is the origin client per XFF convention. Trim whitespace.
+    return header.split(',')[0]!.trim();
+  }
+  if (Array.isArray(header) && header.length > 0 && typeof header[0] === 'string') {
+    return header[0].split(',')[0]!.trim();
+  }
+  return rawRequest?.ip ?? 'unknown';
+}
+
+async function enforcePreviewRateLimit(ip: string, now: number): Promise<void> {
+  const hash = hashIpForBucket(ip, now);
+  const ref = getFirestore().doc(`wsfPreviewRateLimits/${hash}`);
+  const snap = await ref.get();
+  const data = snap.data() as { windowStart?: number; count?: number } | undefined;
+  const windowStart = data?.windowStart ?? 0;
+  const inWindow = now - windowStart < PREVIEW_RATE_LIMIT_WINDOW_MS;
+  const nextCount = (inWindow ? (data?.count ?? 0) : 0) + 1;
+  if (nextCount > PREVIEW_RATE_LIMIT_MAX) {
+    // Distinct code from not-found so hitting the limit does not signal
+    // "the code was valid" — it signals nothing about codes at all.
+    throw new HttpsError('resource-exhausted', 'Too many requests. Try again shortly.');
+  }
+  await ref.set(
+    { windowStart: inWindow ? windowStart : now, count: nextCount },
+    { merge: true }
+  );
+}
+
+type PreviewRequest = { joinCode?: unknown };
+type PreviewResponse = {
+  displayName: string;
+  groupType: GroupType;
+  memberCount: number;
+};
+
+export const wsfPreviewCommunity = onCall<PreviewRequest>(
+  // invoker: 'public' grants run.invoker to allUsers at deploy so the client
+  // can call this while signed out. No-op in the emulator — the setting is
+  // enforced by Cloud Run's IAM, not by the callable framework itself.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<PreviewResponse> => {
+    const ip = extractIp(request.rawRequest as any);
+    // Rate-limit fires FIRST, before any code lookup, so a limited caller
+    // cannot learn anything about the code space by comparing responses.
+    await enforcePreviewRateLimit(ip, Date.now());
+
+    const joinCode = normalizeJoinCode(request.data?.joinCode);
+    if (!joinCode) notFound();
+
+    const db = getFirestore();
+    const groupsSnap = await db
+      .collection('wsfCommunityGroups')
+      .where('joinCode', '==', joinCode)
+      .limit(1)
+      .get();
+    if (groupsSnap.empty) notFound();
+
+    const groupDoc = groupsSnap.docs[0]!;
+    const group = groupDoc.data() as {
+      displayName: string;
+      groupType: GroupType;
+      joinPolicy: JoinPolicy;
+      lifecycleStatus: string;
+    };
+    // Only 'public' groups on 'active' lifecycle preview. Anything else must
+    // return the same not-found as an unknown code — this is the oracle test.
+    if (group.joinPolicy !== 'public' || group.lifecycleStatus !== 'active') {
+      notFound();
+    }
+
+    // Aggregate count: cheaper than reading every membership doc and does not
+    // require a composite index for a single equality filter. Only counts
+    // active memberships so soft-removed rows (a future concern) never inflate
+    // the "how big is this community?" preview.
+    const countSnap = await db
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupDoc.id)
+      .where('membershipStatus', '==', 'active')
+      .count()
+      .get();
+
+    return {
+      displayName: group.displayName,
+      groupType: group.groupType,
+      memberCount: countSnap.data().count,
+    };
+  }
+);
+
+type JoinRequest = { joinCode?: unknown };
+type JoinResponse = { groupId: string; alreadyMember: boolean };
+
+export const wsfJoinCommunity = onCall<JoinRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<JoinResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    assertJoinEmailVerified(request.auth.token as { email_verified?: boolean });
+
+    const uid = request.auth.uid;
+    const joinCode = normalizeJoinCode(request.data?.joinCode);
+    if (!joinCode) notFound();
+
+    const db = getFirestore();
+    const profileRef = db.doc(`wsfMemberProfiles/${uid}`);
+    const groupsQuery = db
+      .collection('wsfCommunityGroups')
+      .where('joinCode', '==', joinCode)
+      .limit(1);
+
+    return await db.runTransaction(async (tx) => {
+      // All reads first (Firestore txn rule).
+      const [profileSnap, groupsSnap] = await Promise.all([
+        tx.get(profileRef),
+        tx.get(groupsQuery),
+      ]);
+
+      if (!profileSnap.exists) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Complete your profile before joining a community.'
+        );
+      }
+      const profile = profileSnap.data() as { adultConfirmation?: unknown };
+      if (profile.adultConfirmation !== true) {
+        throw new HttpsError(
+          'failed-precondition',
+          'You must confirm you are 18 or older before joining a community.'
+        );
+      }
+
+      if (groupsSnap.empty) notFound();
+      const groupDoc = groupsSnap.docs[0]!;
+      const group = groupDoc.data() as { joinPolicy: JoinPolicy; lifecycleStatus: string };
+
+      const membershipRef = db.doc(`wsfMemberships/${groupDoc.id}_${uid}`);
+      const membershipSnap = await tx.get(membershipRef);
+
+      // Existing members are grandfathered: a returning tap resolves even if
+      // the group has since flipped away from 'public' or gone inactive. The
+      // rule is "new joins require public+active", not "existing members lose
+      // access when the champion flips a setting."
+      if (membershipSnap.exists) {
+        return { groupId: groupDoc.id, alreadyMember: true };
+      }
+
+      if (group.joinPolicy !== 'public' || group.lifecycleStatus !== 'active') {
+        notFound();
+      }
+
+      // Membership shape matches wsfCreateCommunity's exactly (see §2). Role
+      // is 'member' rather than 'foundingChampion' — a joiner is not the
+      // creator.
+      tx.set(membershipRef, {
+        groupId: groupDoc.id,
+        userId: uid,
+        role: 'member',
+        membershipStatus: 'active',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { groupId: groupDoc.id, alreadyMember: false };
+    });
   }
 );

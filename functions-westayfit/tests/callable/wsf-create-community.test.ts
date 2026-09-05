@@ -78,6 +78,12 @@ describe('wsfCreateCommunity', () => {
       lifecycleStatus: 'active',
       isSample: false,
     });
+    // E2: every new group ships with a mint-fresh joinCode from day one so the
+    // backfill only has to catch legacy rows.
+    const groupData = groupSnap.data() as { joinCode?: unknown };
+    expect(typeof groupData.joinCode).toBe('string');
+    expect((groupData.joinCode as string).length).toBeGreaterThanOrEqual(16);
+    expect(groupData.joinCode).toMatch(/^[A-Za-z0-9_-]+$/);
 
     const membershipSnap = await db.doc(`wsfMemberships/${groupId}_${ALICE_UID}`).get();
     expect(membershipSnap.exists).toBe(true);
