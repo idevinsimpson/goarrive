@@ -178,8 +178,21 @@ export default function JoinPage() {
             {typeLabel} · {memberLabel}
           </Text>
           <View style={styles.actions}>
+            {/*
+              `replace`, not push. If these Links pushed, the join screen would
+              stay at the bottom of the stack while signup -> verify-email ->
+              profile-setup ran on top. profile-setup then router.replace's
+              back to /join/<code> via nextRouteAfterAuth, which mounts a
+              SECOND join instance — the strict-mode Playwright locator caught
+              exactly this ("resolved to 2 elements"). `replace` swaps the join
+              screen out for the auth flow instead; sessionStorage carries the
+              pending code across, and the return trip lands on a single join
+              instance. Back-button behaviour also stays sane — no one lands
+              on a stale signed-out join page after signing up.
+            */}
             <Link
               href="/signup"
+              replace
               style={styles.primaryAction}
               testID="wsf-join-signup"
             >
@@ -187,6 +200,7 @@ export default function JoinPage() {
             </Link>
             <Link
               href="/signin"
+              replace
               style={styles.secondaryAction}
               testID="wsf-join-signin"
             >
