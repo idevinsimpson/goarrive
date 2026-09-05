@@ -107,3 +107,31 @@ deferred restart.
 After the restart, in a **new thread**, run the acceptance command from §Acceptance and
 paste the final edited message text. LIVE VERIFIED only when the thread shows one updating
 message, no "Still working on this…", no `progress-tick-*.mp3`.
+
+## v2 — rebuilt against the captured running file (2026-09-05 17:22Z)
+
+The v1 branch was built against `main`'s `bot.js` and did not apply: the running tree is
+`fix/text-as-button-answer` @ `4f53fd0` plus uncommitted Sep 4 edits. The running file was
+captured as `live/agent-slack-2026-09-05` @ `92eae98` (sha256 `2fa097b8…7387`) and the change
+rebuilt against it in a second session: branch **`maia/live-progress-heartbeat-v2` @ `0eaf6a3`**.
+
+- **A = `ce0b061`** — the live-progress port. Four of five regions applied on identical
+  context; the fallback-timer block in `trackedProcessMessage` (the live tree predates
+  `5fa8626` and still posted the literal `_Still working..._` every 65 s) was resolved in
+  favour of the tracker-driven timer. Live-only behaviour untouched (proposals imports,
+  inline `audioChain`, envelope-guard call shape, frozen options).
+- **B = `36c720a`** — the written reply is posted as its own message, with one retry per
+  chunk, *before* any audio. Root cause of the "audio-only, empty text" replies: on
+  narration channels the final reply was `streamer.append()`ed into the in-place narration
+  stream message (so it sorted above the mid-turn posts and looked absent), while
+  `finalizeBundle()` uploaded the merged audio with no comment — a file-only message with
+  an empty text slot — then the Jarvis clip. A second, real drop path existed on
+  non-stream channels when `chat.postMessage` threw.
+- Verification: sha256 match before any edit; harness pass; `npm test` 813/816 vs baseline
+  813/816 (same three pre-existing failures); `git apply --check` ok for both
+  `live-progress-v2.patch` and `reply-text-first.patch` in clean worktrees.
+- Expected on the box after A+B: `grep -c 'Still working' bot.js` = 3 (comments only),
+  `grep -c '_Still working'` = 0, `grep -c 'postReplyText'` = 4.
+- Apply: `git cherry-pick ce0b061` then `36c720a` on a clean worktree (with the frozen-tree
+  guard override), else the two patch files; backup + `node --check` + deferred restart
+  (`--on-active=180`). Dispatched 17:30Z in its own thread; queued behind the E3 turn.
