@@ -1,0 +1,33 @@
+{
+  "community": {
+    "id": "fitlife-sample",
+    "displayName": "FitLife (sample)",
+    "groupType": "custom",
+    "joinPolicy": "public",
+    "isSample": true
+  },
+  "challenge": {
+    "id": "fitlife-sample-challenge",
+    "title": "FitLife Move",
+    "status": "active",
+    "goalTarget": null
+  },
+  "moves": [
+    {
+      "id": "fitlife-sample-move-1",
+      "title": "First move title (replace)",
+      "instructions": "One-sentence instruction for the first move.",
+      "sequence": 1,
+      "locationLabel": "Main hall",
+      "requiresCode": false
+    },
+    {
+      "id": "fitlife-sample-move-2",
+      "title": "Second move title (replace)",
+      "instructions": "One-sentence instruction for the second move.",
+      "sequence": 2,
+      "locationLabel": "Side room",
+      "requiresCode": false
+    }
+  ]
+}
