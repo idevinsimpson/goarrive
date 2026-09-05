@@ -587,3 +587,396 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
     });
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E3 — Challenges, moves, and check-ins.
+//
+// The failure mode this file has to survive is one moment, not the average
+// day: the emcee at FitLife says "everyone do this now," and roughly a hundred
+// people tap within thirty seconds. A single `wsfChallenges/{id}.completedCount`
+// increment is one Firestore document — sustainable at ~1 write/second, which
+// is precisely below the burst floor. Writes contend, retry, fail, and the
+// counter — the most-watched object in the room — stalls.
+//
+// So the counter is a 10-way sharded aggregate under
+// `wsfChallengeCounters/{challengeId}/shards/{0..9}`. Each check-in picks a
+// shard uniformly at random and increments it with FieldValue.increment(1);
+// any read sums the ten. Ten shards buys ~10 writes/second headroom,
+// comfortably past what a five-hour event can produce.
+//
+// Two invariants the acceptance criteria assert directly (§5.3, §5.5):
+//
+//   * Idempotency is free from the deterministic doc ID
+//     `wsfCheckIns/{moveId}_{membershipId}`. The transaction reads that doc
+//     first; if it exists, we return `alreadyCheckedIn: true` and touch
+//     nothing — never an error. A double-tap, a network retry, or a
+//     back-button re-submit produces exactly one row and exactly one increment.
+//
+//   * Concurrency is real: the burst test drives 50 members hitting the same
+//     move via Promise.all. Distinct check-in doc IDs (no write contention)
+//     plus random shard selection (average contention ~5 per shard, resolved
+//     by FieldValue.increment's CRDT-like commit) produces a total of exactly
+//     50 with no lost updates.
+//
+// Everything else follows E2's ground rules: callables only (Admin SDK
+// bypasses rules, so `git diff -- firestore.rules` is empty — §5.9), no
+// hardcoded goal (`goalTarget` is nullable and admin-set), no member identity
+// under any pulse input (§5.7), sample groups excluded from real totals
+// (§5.8), no leaderboard, no body data.
+//
+// `minInstances: 1` on wsfCheckIn is intentional. A cold start between
+// someone's tap and their number moving is the one latency that matters at
+// the event.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHALLENGE_SHARD_COUNT = 10;
+
+type ChallengeStatus = 'draft' | 'active' | 'completed';
+
+type ChallengeDoc = {
+  groupId: string;
+  title: string;
+  status: ChallengeStatus;
+  goalTarget: number | null;
+  startsAt?: FirebaseFirestore.Timestamp;
+  endsAt?: FirebaseFirestore.Timestamp;
+};
+
+type MoveDoc = {
+  challengeId: string;
+  title: string;
+  instructions?: string;
+  sequence: number;
+  dayNumber: number | null;
+  locationLabel?: string;
+  requiresCode?: boolean;
+};
+
+type PulseTotals = {
+  participantCount: number;
+  completedCount: number;
+  goalTarget: number | null;
+};
+
+function randomShardIndex(): number {
+  return Math.floor(Math.random() * CHALLENGE_SHARD_COUNT);
+}
+
+function shardRef(challengeId: string, index: number) {
+  return getFirestore().doc(
+    `wsfChallengeCounters/${challengeId}/shards/${index}`
+  );
+}
+
+/**
+ * Sums the ten completed-count shards for a challenge. Missing shard docs
+ * count as zero — the seed script does not need to pre-write empty shards,
+ * and a challenge with zero check-ins reads as zero without special-casing.
+ */
+async function sumCompletedShards(challengeId: string): Promise<number> {
+  const db = getFirestore();
+  const reads = [] as Promise<FirebaseFirestore.DocumentSnapshot>[];
+  for (let i = 0; i < CHALLENGE_SHARD_COUNT; i++) {
+    reads.push(db.doc(`wsfChallengeCounters/${challengeId}/shards/${i}`).get());
+  }
+  const snaps = await Promise.all(reads);
+  let total = 0;
+  for (const snap of snaps) {
+    const data = snap.data() as { count?: number } | undefined;
+    if (typeof data?.count === 'number') total += data.count;
+  }
+  return total;
+}
+
+/**
+ * Counts distinct members who have ever checked in on this challenge, via
+ * `wsfChallengeParticipants/{challengeId}_{membershipId}` marker docs. First
+ * check-in for a member atomically writes the marker inside the same txn as
+ * the check-in itself, so the count converges without a distinct query.
+ */
+async function countParticipants(challengeId: string): Promise<number> {
+  const snap = await getFirestore()
+    .collection('wsfChallengeParticipants')
+    .where('challengeId', '==', challengeId)
+    .count()
+    .get();
+  return snap.data().count;
+}
+
+async function readChallengeTotals(
+  challengeId: string,
+  goalTarget: number | null
+): Promise<PulseTotals> {
+  const [completedCount, participantCount] = await Promise.all([
+    sumCompletedShards(challengeId),
+    countParticipants(challengeId),
+  ]);
+  return { participantCount, completedCount, goalTarget };
+}
+
+function normalizeStringId(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length === 0 || trimmed.length > 1500) return null;
+  return trimmed;
+}
+
+type ListChallengeRequest = { groupId?: unknown };
+type ListedMove = {
+  id: string;
+  title: string;
+  instructions: string;
+  sequence: number;
+  dayNumber: number | null;
+  locationLabel: string | null;
+  requiresCode: boolean;
+  checkedIn: boolean;
+};
+type ListChallengeResponse = {
+  challenge:
+    | {
+        id: string;
+        title: string;
+        status: ChallengeStatus;
+        goalTarget: number | null;
+      }
+    | null;
+  moves: ListedMove[];
+  totals: PulseTotals;
+};
+
+export const wsfListChallenge = onCall<ListChallengeRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<ListChallengeResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) {
+      throw new HttpsError('invalid-argument', 'groupId is required.');
+    }
+
+    const db = getFirestore();
+    const membershipRef = db.doc(`wsfMemberships/${groupId}_${uid}`);
+    const membershipSnap = await membershipRef.get();
+    // Non-members are refused with permission-denied, not not-found. This is
+    // an authenticated endpoint scoped to a groupId the caller supplied — the
+    // fact that a group with that id exists is not what we are guarding here.
+    if (!membershipSnap.exists) {
+      throw new HttpsError('permission-denied', 'Members only.');
+    }
+    const membership = membershipSnap.data() as { membershipStatus?: string };
+    if (membership.membershipStatus !== 'active') {
+      throw new HttpsError('permission-denied', 'Members only.');
+    }
+
+    const challengesSnap = await db
+      .collection('wsfChallenges')
+      .where('groupId', '==', groupId)
+      .where('status', '==', 'active')
+      .limit(1)
+      .get();
+    if (challengesSnap.empty) {
+      return {
+        challenge: null,
+        moves: [],
+        totals: { participantCount: 0, completedCount: 0, goalTarget: null },
+      };
+    }
+    const challengeDoc = challengesSnap.docs[0]!;
+    const challenge = challengeDoc.data() as ChallengeDoc;
+
+    const [movesSnap, myCheckInsSnap, totals] = await Promise.all([
+      db
+        .collection('wsfChallengeMoves')
+        .where('challengeId', '==', challengeDoc.id)
+        .get(),
+      db
+        .collection('wsfCheckIns')
+        .where('challengeId', '==', challengeDoc.id)
+        .where('membershipId', '==', `${groupId}_${uid}`)
+        .get(),
+      readChallengeTotals(challengeDoc.id, challenge.goalTarget ?? null),
+    ]);
+
+    const checkedMoveIds = new Set<string>();
+    for (const doc of myCheckInsSnap.docs) {
+      const data = doc.data() as { moveId?: string };
+      if (data.moveId) checkedMoveIds.add(data.moveId);
+    }
+
+    const moves: ListedMove[] = movesSnap.docs
+      .map((doc) => {
+        const data = doc.data() as MoveDoc;
+        return {
+          id: doc.id,
+          title: data.title,
+          instructions: data.instructions ?? '',
+          sequence: data.sequence,
+          dayNumber: data.dayNumber ?? null,
+          locationLabel: data.locationLabel ?? null,
+          requiresCode: data.requiresCode === true,
+          checkedIn: checkedMoveIds.has(doc.id),
+        };
+      })
+      .sort((a, b) => a.sequence - b.sequence);
+
+    return {
+      challenge: {
+        id: challengeDoc.id,
+        title: challenge.title,
+        status: challenge.status,
+        goalTarget: challenge.goalTarget ?? null,
+      },
+      moves,
+      totals,
+    };
+  }
+);
+
+type CheckInRequest = { moveId?: unknown };
+type CheckInResponse = {
+  alreadyCheckedIn: boolean;
+  totals: PulseTotals;
+};
+
+export const wsfCheckIn = onCall<CheckInRequest>(
+  // minInstances:1 — see the E3 header. A cold start on this callable is the
+  // one visible latency at the event. Everything else can pay a cold start.
+  { region: 'us-central1', minInstances: 1 },
+  async (request): Promise<CheckInResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const moveId = normalizeStringId(request.data?.moveId);
+    if (!moveId) {
+      throw new HttpsError('invalid-argument', 'moveId is required.');
+    }
+
+    const db = getFirestore();
+    const moveRef = db.doc(`wsfChallengeMoves/${moveId}`);
+    const moveSnap = await moveRef.get();
+    if (!moveSnap.exists) {
+      throw new HttpsError('not-found', 'Move not found.');
+    }
+    const move = moveSnap.data() as MoveDoc;
+
+    const challengeSnap = await db
+      .doc(`wsfChallenges/${move.challengeId}`)
+      .get();
+    if (!challengeSnap.exists) {
+      throw new HttpsError('not-found', 'Challenge not found.');
+    }
+    const challenge = challengeSnap.data() as ChallengeDoc;
+    if (challenge.status !== 'active') {
+      throw new HttpsError(
+        'failed-precondition',
+        'This challenge is not active.'
+      );
+    }
+
+    const membershipId = `${challenge.groupId}_${uid}`;
+    const membershipRef = db.doc(`wsfMemberships/${membershipId}`);
+    const membershipSnap = await membershipRef.get();
+    if (!membershipSnap.exists) {
+      throw new HttpsError('permission-denied', 'Members only.');
+    }
+    const membership = membershipSnap.data() as { membershipStatus?: string };
+    if (membership.membershipStatus !== 'active') {
+      throw new HttpsError('permission-denied', 'Members only.');
+    }
+
+    const checkInRef = db.doc(`wsfCheckIns/${moveId}_${membershipId}`);
+    const participantRef = db.doc(
+      `wsfChallengeParticipants/${move.challengeId}_${membershipId}`
+    );
+
+    const alreadyCheckedIn = await db.runTransaction(async (tx) => {
+      // All reads before any writes (Firestore txn rule).
+      const [existingCheckIn, existingParticipant] = await Promise.all([
+        tx.get(checkInRef),
+        tx.get(participantRef),
+      ]);
+
+      if (existingCheckIn.exists) {
+        // Idempotent path — spec §5.3. Touch nothing, never throw.
+        return true;
+      }
+
+      const shardIndex = randomShardIndex();
+      const shard = shardRef(move.challengeId, shardIndex);
+
+      tx.set(checkInRef, {
+        challengeId: move.challengeId,
+        moveId,
+        membershipId,
+        userId: uid,
+        groupId: challenge.groupId,
+        shardIndex,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(
+        shard,
+        { count: FieldValue.increment(1) },
+        { merge: true }
+      );
+      if (!existingParticipant.exists) {
+        tx.set(participantRef, {
+          challengeId: move.challengeId,
+          membershipId,
+          userId: uid,
+          groupId: challenge.groupId,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+      return false;
+    });
+
+    const totals = await readChallengeTotals(
+      move.challengeId,
+      challenge.goalTarget ?? null
+    );
+    return { alreadyCheckedIn, totals };
+  }
+);
+
+type PulseRequest = { challengeId?: unknown };
+type PulseResponse = PulseTotals;
+
+export const wsfChallengePulse = onCall<PulseRequest>(
+  // Public: the kiosk display is unauthenticated. Spec §5.7 forbids member
+  // identity in the response under any input, and readChallengeTotals returns
+  // only aggregates — no docs, no ids, no names. Sample-flagged groups are
+  // hidden entirely (§5.8) so a curator-facing seed cannot leak into a real
+  // display via a copied challengeId.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<PulseResponse> => {
+    const challengeId = normalizeStringId(request.data?.challengeId);
+    if (!challengeId) {
+      throw new HttpsError('not-found', 'Challenge not found.');
+    }
+
+    const db = getFirestore();
+    const challengeSnap = await db.doc(`wsfChallenges/${challengeId}`).get();
+    if (!challengeSnap.exists) {
+      throw new HttpsError('not-found', 'Challenge not found.');
+    }
+    const challenge = challengeSnap.data() as ChallengeDoc;
+
+    const groupSnap = await db
+      .doc(`wsfCommunityGroups/${challenge.groupId}`)
+      .get();
+    if (!groupSnap.exists) {
+      throw new HttpsError('not-found', 'Challenge not found.');
+    }
+    const group = groupSnap.data() as { isSample?: boolean };
+    if (group.isSample === true) {
+      // §5.8 — sample data must never surface in a total presented as real.
+      throw new HttpsError('not-found', 'Challenge not found.');
+    }
+
+    return readChallengeTotals(challengeId, challenge.goalTarget ?? null);
+  }
+);
