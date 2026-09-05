@@ -104,25 +104,18 @@ async function seedMembership(groupId: string, uid: string): Promise<void> {
 async function createVerifiedAccount(email: string, password: string): Promise<string> {
   const base = `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1`;
 
-  const signUp = await fetch(`${base}/accounts:signUp`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password, returnSecureToken: true }),
-  });
-  if (!signUp.ok) {
-    throw new Error(`emulator signUp failed: ${signUp.status} ${await signUp.text()}`);
-  }
-  const { localId } = (await signUp.json()) as { localId: string };
-  if (!localId) throw new Error('emulator signUp did not return a localId');
-
-  const verify = await fetch(`${base}/accounts:update`, {
+  const create = await fetch(`${base}/projects/${PROJECT_ID}/accounts`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
-    body: JSON.stringify({ localId, emailVerified: true }),
+    body: JSON.stringify({ email, password, emailVerified: true }),
   });
-  if (!verify.ok) {
-    throw new Error(`emulator verify failed: ${verify.status} ${await verify.text()}`);
+  if (!create.ok) {
+    throw new Error(
+      `emulator account create failed: ${create.status} ${await create.text()}`
+    );
   }
+  const { localId } = (await create.json()) as { localId: string };
+  if (!localId) throw new Error('emulator account create did not return a localId');
 
   return localId;
 }
