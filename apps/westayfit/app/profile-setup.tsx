@@ -16,6 +16,7 @@ import {
 } from '../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseFirestore } from '../src/firebase';
+import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 import {
   WSF_ACCEPTED_PRIVACY_VERSION,
   WSF_ACCEPTED_TERMS_VERSION,
@@ -82,7 +83,12 @@ export default function ProfileSetup() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      router.replace('/start-community');
+      // Round-trip: a visitor who arrived via /join/<code> is stashed a pending
+      // code on that page. Profile-setup is the LAST step whose completion makes
+      // wsfJoinCommunity's guards pass — verified, profile exists, adult — so
+      // this is the correct hop to hand the flow back to /join/<code>. Anyone
+      // without a pending code falls through to the ordinary /start-community.
+      router.replace(nextRouteAfterAuth('/start-community'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed.');
     } finally {

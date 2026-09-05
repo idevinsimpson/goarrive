@@ -59,11 +59,15 @@ EXPO_PUBLIC_WSF_USE_EMULATORS=1 \
   npm --prefix apps/westayfit run build:web
 
 echo "--- drive the flow ---"
+# Run every spec under tests-e2e/. Named specs get compounded here rather than
+# hidden inside a package script so a new spec (E2's e2-join-flow, and future
+# ones) shows up in this file's diff — a spec that never runs is worse than no
+# spec at all.
 WSF_PLAYWRIGHT_BASE_URL="http://127.0.0.1:${HOSTING_PORT}" \
   firebase emulators:exec \
     --project goarrive \
     --config "$EMULATOR_CONFIG" \
-    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts"
+    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts"
 
 echo
 echo "GATE 1 CLEAR — profile-setup succeeded and /community/<id> served 200 on a cold load."

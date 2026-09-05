@@ -11,7 +11,8 @@
     "cleanUrls": true,
     "trailingSlash": false,
     "rewrites": [
-      { "source": "/community/**", "destination": "/community/__dynamic.html" }
+      { "source": "/community/**", "destination": "/community/__dynamic.html" },
+      { "source": "/join/**", "destination": "/join/__dynamic.html" }
     ],
     "headers": [
       {

@@ -14,6 +14,7 @@ import {
 import { authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth } from '../src/firebase';
+import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 
 export default function SignIn() {
   const [email, setEmail] = useState('');
@@ -37,7 +38,13 @@ export default function SignIn() {
       // Route on actual state. Sending an already-verified returning member to
       // "Verify your email" tells them to check an inbox for nothing and makes
       // them tap through a step they finished long ago.
-      router.replace(credential.user.emailVerified ? '/profile-setup' : '/verify-email');
+      //
+      // A returning member who scanned a QR before signing in has a pending
+      // join code stashed by the /join/<code> route; nextRouteAfterAuth hands
+      // that visitor straight back to the join page. Callers without a pending
+      // code fall through to the ordinary fallback.
+      const fallback = credential.user.emailVerified ? '/profile-setup' : '/verify-email';
+      router.replace(nextRouteAfterAuth(fallback));
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-in failed.'));
     } finally {
