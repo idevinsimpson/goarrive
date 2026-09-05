@@ -17,9 +17,18 @@
  * Runs against Firestore emulator via `.run(request)`.
  */
 
+// First-touch hardening (§E3 review fix 6). METADATA_SERVER_DETECTION off
+// skips firebase-admin's cold GCP-metadata probe (irrelevant against the
+// emulator, ~1s wasted otherwise). The _warmup write in beforeAll below
+// forces the emulator RPC channel open before the timed tests fire, taking
+// the check-in happy-path from ~4s to ~0.5s on this suite.
+process.env.METADATA_SERVER_DETECTION =
+  process.env.METADATA_SERVER_DETECTION || 'none';
 process.env.GCLOUD_PROJECT = 'goarrive-test';
 process.env.FIRESTORE_EMULATOR_HOST =
   process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+
+import { createHash } from 'crypto';
 
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
@@ -95,6 +104,14 @@ async function tryRun(uid: string | null, data: Record<string, unknown>) {
 }
 
 describe('wsfChallengePulse', () => {
+  beforeAll(async () => {
+    // First-touch warm-up: open the Firestore emulator RPC channel before
+    // the timed tests fire. Same shape as check-in and join-community.
+    await getFirestore()
+      .doc('_warmup/wsf-challenge-pulse')
+      .set({ at: Date.now() });
+  }, 30_000);
+
   test('unauthenticated caller: OK — public kiosk endpoint', async () => {
     const groupId = await seedGroup();
     const challengeId = await seedChallenge(groupId, 2000);
@@ -190,5 +207,98 @@ describe('wsfChallengePulse', () => {
     const challengeId = await seedChallenge(groupId, null);
     const result = await wsfChallengePulse.run(makeRequest(null, { challengeId }));
     expect(result.goalTarget).toBeNull();
+  });
+
+  test('§E3-review rate-limit: over-cap request from one ip throws resource-exhausted (rightmost XFF wins)', async () => {
+    // Pre-seed the limiter doc at the cap, keyed by the RIGHTMOST XFF entry.
+    // A leftmost-XFF implementation would hash the spoofable prefix
+    // (1.2.3.4) and miss the pre-seeded bucket entirely — the call would
+    // succeed, and this test would fail. That is what pins rightmost
+    // extraction: the shape of the failure, not the presence of a limit.
+    const realClient = '203.0.113.42';
+    const spoof = '1.2.3.4';
+    const now = Date.now();
+    const daySalt = Math.floor(now / (24 * 60 * 60 * 1000)).toString();
+    const hash = createHash('sha256')
+      .update(`${realClient}:${daySalt}`)
+      .digest('hex')
+      .slice(0, 16);
+    // 100 = PREVIEW_RATE_LIMIT_MAX. The 101st call in the window fails.
+    await getFirestore().doc(`wsfPreviewRateLimits/${hash}`).set({
+      windowStart: now,
+      count: 100,
+    });
+
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId);
+
+    const req = {
+      auth: undefined,
+      data: { challengeId } as any,
+      rawRequest: {
+        headers: { 'x-forwarded-for': `${spoof}, ${realClient}` },
+      } as any,
+      acceptsStreaming: false,
+    } as any;
+
+    let caught: HttpsError | null = null;
+    try {
+      await wsfChallengePulse.run(req);
+    } catch (e) {
+      caught = e as HttpsError;
+    }
+    expect(caught).not.toBeNull();
+    expect(caught!.code).toBe('resource-exhausted');
+  });
+
+  test('§E3-review cache staleness: within TTL returns cached; past TTL returns fresh', async () => {
+    // Cache TTL is 2000ms. Verify:
+    //   1) First pulse: cache miss, Firestore total=0, cache set at T0.
+    //   2) A real check-in advances Firestore state to 1. Cache is stale.
+    //   3) Second pulse at T0+500 (inside TTL) MUST return cached 0 —
+    //      that is the whole point of the cache and what a "kiosk polls at
+    //      2s" spec is buying: collapse to one real read per 2s.
+    //   4) Third pulse at T0+2500 (past TTL) MUST return fresh 1.
+    // Date.now is mocked only inside the pulse call; check-in runs with
+    // real time so its Firestore RPCs are not affected by a frozen clock.
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId, 500);
+    const moveId = await seedMove(challengeId);
+    const uid = `wsfPulse_cache_${Date.now()}`;
+    await seedActiveMember(groupId, uid);
+
+    const T0 = Date.now();
+
+    async function pulseAt(mockedNow: number) {
+      const spy = jest.spyOn(Date, 'now').mockReturnValue(mockedNow);
+      try {
+        return await wsfChallengePulse.run(makeRequest(null, { challengeId }));
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    const first = await pulseAt(T0);
+    expect(first.completedCount).toBe(0);
+
+    // Real-time check-in — advances Firestore state, does not touch the
+    // in-process pulse cache.
+    await wsfCheckIn.run({
+      auth: { uid, token: { email_verified: true } as any } as any,
+      data: { moveId } as any,
+      rawRequest: {} as any,
+      acceptsStreaming: false,
+    } as any);
+
+    const cachedWithinTtl = await pulseAt(T0 + 500);
+    // The cached value from T0 must still be served — participantCount and
+    // completedCount both frozen at 0 despite Firestore now saying 1.
+    expect(cachedWithinTtl.completedCount).toBe(0);
+    expect(cachedWithinTtl.participantCount).toBe(0);
+
+    const freshPastTtl = await pulseAt(T0 + 2_500);
+    // Cache expired at T0+2000, so this pulse re-reads Firestore.
+    expect(freshPastTtl.completedCount).toBe(1);
+    expect(freshPastTtl.participantCount).toBe(1);
   });
 });

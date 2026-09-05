@@ -19,6 +19,12 @@
  * pattern established by wsf-create-community.test.ts.
  */
 
+// First-touch hardening (§E3 review fix 6). METADATA_SERVER_DETECTION off
+// skips firebase-admin's cold GCP-metadata probe (irrelevant against the
+// emulator, ~1s wasted otherwise). The _warmup write in beforeAll below
+// forces the emulator RPC channel open before the timed tests fire.
+process.env.METADATA_SERVER_DETECTION =
+  process.env.METADATA_SERVER_DETECTION || 'none';
 process.env.GCLOUD_PROJECT = 'goarrive-test';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
@@ -85,6 +91,14 @@ async function tryRun(data: Record<string, unknown>) {
 }
 
 describe('wsfPreviewCommunity', () => {
+  beforeAll(async () => {
+    // First-touch warm-up: open the Firestore emulator RPC channel before
+    // the timed tests fire. Same shape as check-in and pulse.
+    await getFirestore()
+      .doc('_warmup/wsf-preview-community')
+      .set({ at: Date.now() });
+  }, 30_000);
+
   test('public + active group returns strictly {displayName, groupType, memberCount}', async () => {
     const joinCode = mintJoinCode();
     await seedGroup({

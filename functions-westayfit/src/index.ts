@@ -419,34 +419,60 @@ function hashIpForBucket(ip: string, now: number): string {
 }
 
 function extractIp(rawRequest: { ip?: string; headers?: Record<string, unknown> }): string {
+  // Rightmost XFF entry, not leftmost: Cloud Run's front-end appends the
+  // real client last, and every hop before it is caller-supplied and
+  // spoofable. Reading the left entry gives the attacker a knob to rotate
+  // buckets by lying about the header — the exact bypass this exists to
+  // prevent.
+  //
+  // If these callables are ever routed through Hosting rewrites, the
+  // rightmost entry becomes the Firebase CDN and this must change: at that
+  // point the real client is second-from-right and the CDN entry must be
+  // stripped first.
   const header = rawRequest?.headers?.['x-forwarded-for'];
-  if (typeof header === 'string' && header.length > 0) {
-    // First entry is the origin client per XFF convention. Trim whitespace.
-    return header.split(',')[0]!.trim();
+  let raw: string | null = null;
+  if (typeof header === 'string') {
+    raw = header;
+  } else if (Array.isArray(header)) {
+    raw = header.filter((v) => typeof v === 'string').join(',');
   }
-  if (Array.isArray(header) && header.length > 0 && typeof header[0] === 'string') {
-    return header[0].split(',')[0]!.trim();
+  if (raw && raw.length > 0) {
+    const parts = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    if (parts.length > 0) return parts[parts.length - 1]!;
   }
   return rawRequest?.ip ?? 'unknown';
 }
 
 async function enforcePreviewRateLimit(ip: string, now: number): Promise<void> {
   const hash = hashIpForBucket(ip, now);
-  const ref = getFirestore().doc(`wsfPreviewRateLimits/${hash}`);
-  const snap = await ref.get();
-  const data = snap.data() as { windowStart?: number; count?: number } | undefined;
-  const windowStart = data?.windowStart ?? 0;
-  const inWindow = now - windowStart < PREVIEW_RATE_LIMIT_WINDOW_MS;
-  const nextCount = (inWindow ? (data?.count ?? 0) : 0) + 1;
-  if (nextCount > PREVIEW_RATE_LIMIT_MAX) {
-    // Distinct code from not-found so hitting the limit does not signal
-    // "the code was valid" — it signals nothing about codes at all.
-    throw new HttpsError('resource-exhausted', 'Too many requests. Try again shortly.');
-  }
-  await ref.set(
-    { windowStart: inWindow ? windowStart : now, count: nextCount },
-    { merge: true }
-  );
+  const db = getFirestore();
+  const ref = db.doc(`wsfPreviewRateLimits/${hash}`);
+  // Transaction + FieldValue.increment gives an atomic read-modify-write.
+  // The old shape read the doc, computed nextCount, and wrote — under a
+  // parallel burst two callers would both read the same count and both
+  // write the same nextCount, under-counting the bucket by up to the
+  // concurrency factor. That is precisely the case the limiter is here to
+  // catch, so the limiter itself must not race. A transaction retries on
+  // contention; increment resolves as a CRDT commit.
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data() as { windowStart?: number; count?: number } | undefined;
+    const windowStart = data?.windowStart ?? 0;
+    const inWindow = snap.exists && now - windowStart < PREVIEW_RATE_LIMIT_WINDOW_MS;
+    if (inWindow) {
+      const nextCount = (data?.count ?? 0) + 1;
+      if (nextCount > PREVIEW_RATE_LIMIT_MAX) {
+        // Distinct code from not-found so hitting the limit does not signal
+        // "the code was valid" — it signals nothing about codes at all.
+        throw new HttpsError('resource-exhausted', 'Too many requests. Try again shortly.');
+      }
+      tx.update(ref, { count: FieldValue.increment(1) });
+    } else {
+      // Window rolled (or first hit): reset windowStart and count in a
+      // single write so the next reader sees a coherent window.
+      tx.set(ref, { windowStart: now, count: 1 });
+    }
+  });
 }
 
 type PreviewRequest = { joinCode?: unknown };
@@ -761,14 +787,14 @@ async function readChallengeTotals(
 // Doc-id shape check. Firestore accepts almost anything in a document ID, and
 // that permissiveness reached the public endpoints as `internal` — a raw
 // `/` in the value made `db.doc(...)` throw a TypeError under the callable
-// wrapper, and the wrapper had nothing to translate it to. Same shape as E2's
-// normalizeJoinCode (line 41): base64url alphabet, 16–128 chars, so real
-// Firestore auto-IDs (20 chars, alphanumeric) pass and everything else is
-// rejected as `invalid-argument` at the boundary.
+// wrapper, and the wrapper had nothing to translate it to. The goal is only
+// "no `/`, bounded length", not a length floor: hand-made FitLife ids like
+// `fitlife-2026` need to pass on event day, and a well-formed unknown id is
+// `not-found` at the doc read, not `invalid-argument` at the boundary.
 function normalizeStringId(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
-  if (!/^[A-Za-z0-9_-]{16,128}$/.test(trimmed)) return null;
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(trimmed)) return null;
   return trimmed;
 }
 
@@ -921,26 +947,6 @@ export const wsfCheckIn = onCall<CheckInRequest>(
     }
     const move = moveSnap.data() as MoveDoc;
 
-    // §E3 review fix 2 — requiresCode was decorative until this block. The
-    // switch is real: honour system is still the default (requiresCode
-    // undefined/false), but the moment an admin flips a move to
-    // requiresCode:true, the callable enforces the paired secret before the
-    // transaction opens. Missing or wrong `code` → failed-precondition, same
-    // vocabulary as "this challenge is not active" so the client can render a
-    // single "can't check in" state without leaking whether the code was
-    // absent or wrong.
-    if (move.requiresCode === true) {
-      const providedCode = normalizeCheckInCode(request.data?.code);
-      const expectedCode =
-        typeof move.checkInCode === 'string' ? move.checkInCode.trim() : '';
-      if (expectedCode.length === 0 || providedCode !== expectedCode) {
-        throw new HttpsError(
-          'failed-precondition',
-          'This move requires a check-in code.'
-        );
-      }
-    }
-
     const challengeRef = db.doc(`wsfChallenges/${move.challengeId}`);
 
     // §E3 review fix 3 — challenge.status and membership are read inside the
@@ -958,7 +964,13 @@ export const wsfCheckIn = onCall<CheckInRequest>(
     //      of the challenge's current status — spec §5.3 idempotency wins
     //      even against a completed challenge, so a retry from a member who
     //      already succeeded never surfaces as an error.
-    //   4. Otherwise validate status active + membership active, then write.
+    //   4. NOW enforce requiresCode. Ordered AFTER the idempotent return so a
+    //      member who already succeeded can never be told `failed-precondition`
+    //      on a retry, whatever they send as `code` (spec §5.3 "never an
+    //      error"). Under the old order the code gate lived before the txn
+    //      and rejected an existing-member retry that sent a wrong or absent
+    //      code — the same tap that succeeded once would fail on the retry.
+    //   5. Otherwise validate status active + membership active, then write.
     const { alreadyCheckedIn, goalTarget } = await db.runTransaction(
       async (tx) => {
         const challengeSnap = await tx.get(challengeRef);
@@ -984,10 +996,28 @@ export const wsfCheckIn = onCall<CheckInRequest>(
 
         if (existingCheckIn.exists) {
           // Idempotent path — spec §5.3. Touch nothing, never throw, and
-          // never re-gate on challenge.status or membership state. A member
-          // who already succeeded is grandfathered against any change that
-          // happened after their first tap.
+          // never re-gate on challenge.status, membership state, or the
+          // paired code. A member who already succeeded is grandfathered
+          // against any change that happened after their first tap.
           return { alreadyCheckedIn: true as const, goalTarget: gt };
+        }
+
+        // §E3 review fix 2 — requiresCode is real. Honour system is still
+        // the default (requiresCode undefined/false), but the moment an
+        // admin flips a move to requiresCode:true the callable enforces the
+        // paired secret. Same vocabulary as "this challenge is not active"
+        // so the client can render a single "can't check in" state without
+        // leaking whether the code was absent or wrong.
+        if (move.requiresCode === true) {
+          const providedCode = normalizeCheckInCode(request.data?.code);
+          const expectedCode =
+            typeof move.checkInCode === 'string' ? move.checkInCode.trim() : '';
+          if (expectedCode.length === 0 || providedCode !== expectedCode) {
+            throw new HttpsError(
+              'failed-precondition',
+              'This move requires a check-in code.'
+            );
+          }
         }
 
         if (challenge.status !== 'active') {
@@ -1050,24 +1080,29 @@ export const wsfChallengePulse = onCall<PulseRequest>(
   // hidden entirely (§5.8) so a curator-facing seed cannot leak into a real
   // display via a copied challengeId.
   //
-  // Two throttles guard the endpoint (§ E3 review, worst-first): the same
-  // per-IP bucket wsfPreviewCommunity uses (100 req / rolling minute per IP
-  // hash) fires first, so an unauthenticated flood cannot pump reads; the
-  // per-challengeId in-process cache collapses legitimate polling to one
-  // real read per 2 s.
+  // Two throttles guard the endpoint (§ E3 review, cache-first): the
+  // per-challengeId in-process cache is checked BEFORE the IP limiter — a
+  // cache hit is already-public aggregate data, costs zero Firestore reads,
+  // and must not count against anyone's bucket or the same emcee-facing
+  // kiosk poll would burn its own quota. Only genuine cache misses fall
+  // through to the per-IP bucket wsfPreviewCommunity uses (100 req / rolling
+  // minute per IP hash), which then guards the Firestore read path.
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<PulseResponse> => {
     const now = Date.now();
-    const ip = extractIp(request.rawRequest as any);
-    await enforcePreviewRateLimit(ip, now);
 
     const challengeId = normalizeStringId(request.data?.challengeId);
     if (!challengeId) {
       throw new HttpsError('invalid-argument', 'challengeId is required.');
     }
 
+    // Cache first — hits return public-safe totals with no Firestore reads
+    // and no limiter bump. Misses fall through to the limiter and reads.
     const cached = pulseCacheGet(challengeId, now);
     if (cached) return cached;
+
+    const ip = extractIp(request.rawRequest as any);
+    await enforcePreviewRateLimit(ip, now);
 
     const db = getFirestore();
     const challengeSnap = await db.doc(`wsfChallenges/${challengeId}`).get();

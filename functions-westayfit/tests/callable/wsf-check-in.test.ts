@@ -24,6 +24,13 @@
  * Runs against Firestore emulator via `.run(request)`.
  */
 
+// First-touch hardening (§E3 review fix 6). METADATA_SERVER_DETECTION off
+// skips firebase-admin's cold GCP-metadata probe (irrelevant against the
+// emulator, ~1s wasted otherwise). The _warmup write in beforeAll below
+// forces the emulator RPC channel open before the timed tests fire, taking
+// the happy-path from ~4.1s to ~0.5s under the gate.
+process.env.METADATA_SERVER_DETECTION =
+  process.env.METADATA_SERVER_DETECTION || 'none';
 process.env.GCLOUD_PROJECT = 'goarrive-test';
 process.env.FIRESTORE_EMULATOR_HOST =
   process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
@@ -145,6 +152,14 @@ async function directCheckInCount(
 }
 
 describe('wsfCheckIn', () => {
+  beforeAll(async () => {
+    // First-touch warm-up: open the Firestore emulator RPC channel before
+    // the timed tests fire. Same shape as pulse and join-community.
+    await getFirestore()
+      .doc('_warmup/wsf-check-in')
+      .set({ at: Date.now() });
+  }, 30_000);
+
   test('unauthenticated caller: unauthenticated code', async () => {
     const result = await tryRun(null, { moveId: 'anything' });
     expect(result.ok).toBe(false);
@@ -308,12 +323,17 @@ describe('wsfCheckIn', () => {
     expect(result.error.code).toBe('invalid-argument');
   });
 
-  test('§E3-review too-short moveId: invalid-argument', async () => {
+  test('§E3-review short well-formed moveId (unknown): not-found — no length floor', async () => {
+    // The id shape check is "no `/`, bounded length", not a length floor.
+    // A hand-made FitLife id like `fitlife-2026` has to pass on event day, so
+    // a 5-char well-formed id is treated the same as any other unknown id: it
+    // reaches the doc read and returns not-found. Length-floor regressions
+    // that reject it as invalid-argument would fail this test.
     const uid = `wsfCheckIn_bad_short_${Date.now()}`;
     const result = await tryRun(uid, { moveId: 'short' });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe('invalid-argument');
+    expect(result.error.code).toBe('not-found');
   });
 
   test('§E3-review requiresCode:true refuses missing code: failed-precondition', async () => {
