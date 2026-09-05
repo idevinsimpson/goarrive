@@ -9,7 +9,7 @@ Her Slack bot (`agent-slack.service`, `bot.js`) enforces **two** independent tur
 
 | Knob | Set to | Effect |
 |---|---|---|
-| `TURN_DEADLINE_MS` | 1,500,000 (25 min) — raised from 4 min on Aug 20 | turn killed at 25 min |
+| `TURN_DEADLINE_MS` | 1,500,000 (25 min) — raised from 4 min on Aug 20 | turn killed at 25 min. **Both knobs exist and both kill** — Maia reads this one and reports "25, not 30"; the 30-min kills are the unset knob below. |
 | `TURN_ABSOLUTE_CAP_MS` | **unset** → 30-min platform default | turn killed at 30 min |
 
 Neither resets on activity. When a turn dies the platform posts *"This turn hit the
@@ -75,7 +75,7 @@ long-running work inside a chat turn is no longer acceptable.
 2. Long steps go through `run-detached.sh`. The dispatch names the thread-ts to report into.
 3. Mention her as `<@U0AQAGGMTE3|Maia>`. Plain `@Maia` pings nobody.
 4. Read her **threads**, not the channel.
-5. "Text reply only — no Jarvis audio" until the toggle is found and turned off for dev channels.
+5. **The written reply is the record.** Audio may only repeat what the text says, never add to it. Devin has transcribed audio replies and found content that was not in the thread; the 1a receipt was delivered audio-only with an empty text slot. Until the toggle is found and turned off for dev channels: "Text reply only — no Jarvis audio", and anything spoken must also be typed.
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
 
 ## Still open
