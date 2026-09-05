@@ -96,6 +96,15 @@ long-running work inside a chat turn is no longer acceptable.
 3. Mention her as `<@U0AQAGGMTE3|Maia>`. Plain `@Maia` pings nobody.
 4. Read her **threads**, not the channel — and in **detailed** mode, or an audio-bundle reply looks like an empty message.
 5. **The written reply is the record.** Audio may only repeat what the text says, never add to it. Devin has transcribed audio replies and found content that was not in the thread; the 1a receipt was delivered audio-only with an empty text slot. Until the toggle is found and turned off for dev channels: "Text reply only — no Jarvis audio", and anything spoken must also be typed.
+   **Devin's standing instruction, 2026-09-05 20:29Z (thread 1788639792.962019):** "never
+   finish anything without giving both an explanation in writing and in the audio."
+   Enforced two ways from today: (a) the rule above is written into Maia's persistent
+   rules/memory in her own words (dispatch 20:30Z, thread 1788640255.280279 — she pastes
+   the stored entry and its path back as proof); (b) `bot.js` v5 (branch
+   `maia/unwedge-v5`, in preparation) posts every spoken script — Jarvis reply, quick-ack,
+   bundle — as the text of the same Slack message that carries the audio (`🎙️ *Spoken:* …`),
+   so audio can never carry a fact the thread does not. Until v5 is applied, transcripts
+   Devin pastes are the check; the 20:24Z receipt matched its audio.
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
 7. **No buttons. Choices are text.** When she posts an A/B/C as Slack buttons, her bot
    enters a modal "pick one" state and the **next message in the thread is consumed as the
