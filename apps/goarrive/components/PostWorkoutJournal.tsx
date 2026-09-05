@@ -185,9 +185,7 @@ export default function PostWorkoutJournal({
 
           {/* Actions */}
           <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
-            <Text style={styles.submitButtonText}>
-              {glow || grow || energyRating || moodRating ? 'Save Reflection' : 'Save Without Reflection'}
-            </Text>
+            <Text style={styles.submitButtonText}>Save</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
