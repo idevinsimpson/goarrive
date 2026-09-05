@@ -93,6 +93,11 @@ long-running work inside a chat turn is no longer acceptable.
 4. Read her **threads**, not the channel — and in **detailed** mode, or an audio-bundle reply looks like an empty message.
 5. **The written reply is the record.** Audio may only repeat what the text says, never add to it. Devin has transcribed audio replies and found content that was not in the thread; the 1a receipt was delivered audio-only with an empty text slot. Until the toggle is found and turned off for dev channels: "Text reply only — no Jarvis audio", and anything spoken must also be typed.
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
+7. **The truth gate runs in the worktree the task lives in.** `/home/ben/dev-goarrive` is
+   her general workdir and sits on whatever branch she last used for another project
+   (`claude/talk-to-anyone-setup-5sx86w` on 2026-09-05). Run from there and WSF files
+   "do not exist" and origin looks stale. WSF work lives in `/home/ben/dev-goarrive-wsf-e2`
+   (and successors); every dispatch names the worktree.
 
 ## Where things live on her box (confirmed 2026-09-05)
 

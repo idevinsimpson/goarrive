@@ -64,7 +64,9 @@ code renders the not-valid state — `e2-join-flow.spec.ts:148, :210`; (5) signe
 signup → back to the join URL → community — `e2-join-flow.spec.ts:151–198`; (6) no
 `firestore.rules` or `firestore.indexes.json` change — verified against the merge-base;
 (7) M-U2 flows unchanged — `mu2-flow.spec.ts` ×4. Callables run inside `gate1.sh` under
-`set -euo pipefail` before the e2e block, so exit 0 proves them. Two harness defects the
+`set -euo pipefail` before the e2e block, so exit 0 proves them — and the log carries
+`Test Suites: 4 passed, 4 total · Tests: 25 passed, 25 total`. Follow-up landed as `4bc594a`:
+the oracle now also compares a non-`active` lifecycle against an unknown-code control. Two harness defects the
 gate caught on the way: a seed against the emulator's DELETE-only `/emulator/v1` path, and
 a double-mounted join screen from a `push` where a `replace` belonged — the second was a
 real product defect. Non-blocking follow-up: add a non-`active` lifecycle case to the
