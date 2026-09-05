@@ -162,7 +162,17 @@ describe('wsfPreviewCommunity', () => {
     expect(inviteResult.error.message).toBe(unknownResult.error.message);
   });
 
-  test('non-active lifecycle returns the same not-found as an unknown code', async () => {
+  test('§3.3 ORACLE: non-active lifecycle returns byte-identical not-found', async () => {
+    // The §3.3 oracle test covers unknown / private / inviteOnly. Non-active
+    // lifecycle is the fourth path the callable maps to the same not-found —
+    // and until now no test pinned that it stays byte-identical to unknown.
+    // A future change that added `details: { lifecycle: 'archived' }` to a
+    // "helpful" error message would satisfy the shape check that used to live
+    // here without failing it; this one refuses that drift.
+    //
+    // The group is joinPolicy=public specifically so the ONLY thing gating
+    // the not-found is lifecycleStatus. A private+archived group would leak
+    // through the private path first.
     const archivedCode = mintJoinCode();
     await seedGroup({
       displayName: 'Archived Public Group',
@@ -172,10 +182,15 @@ describe('wsfPreviewCommunity', () => {
     });
 
     const archivedResult = await tryRun({ joinCode: archivedCode });
+    const unknownResult = await tryRun({ joinCode: mintJoinCode() });
+
     expect(archivedResult.ok).toBe(false);
-    if (archivedResult.ok) return;
-    expect(archivedResult.error.code).toBe('not-found');
-    expect(archivedResult.error.message).toBe('This link is not valid.');
+    expect(unknownResult.ok).toBe(false);
+    if (archivedResult.ok || unknownResult.ok) return;
+
+    expect(archivedResult.error.code).toBe(unknownResult.error.code);
+    expect(archivedResult.error.message).toBe(unknownResult.error.message);
+    expect(archivedResult.error.details).toEqual(unknownResult.error.details);
   });
 
   test('malformed joinCode returns the same not-found (does not leak a distinct error)', async () => {
