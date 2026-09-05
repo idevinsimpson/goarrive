@@ -35,6 +35,11 @@ command -v firebase >/dev/null 2>&1 || {
   echo "GATE 1 BLOCKED: firebase CLI not on PATH." >&2
   exit 2
 }
+# Portable Temurin JDK 21 lives at ~/jdk-21 on the sandbox where Devin runs the
+# gate. If it's there and nothing else brought a JDK to PATH, pick it up so no
+# caller has to remember to export JAVA_HOME.
+if [ -z "${JAVA_HOME:-}" ] && [ -x "$HOME/jdk-21/bin/java" ]; then export JAVA_HOME="$HOME/jdk-21"; fi
+[ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
 command -v java >/dev/null 2>&1 || {
   echo "GATE 1 BLOCKED: no java. The Firestore and Auth emulators need a JDK." >&2
   exit 2
