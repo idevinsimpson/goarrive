@@ -113,6 +113,14 @@ long-running work inside a chat turn is no longer acceptable.
    "do not exist" and origin looks stale. WSF work lives in `/home/ben/dev-goarrive-wsf-e2`
    (and successors); every dispatch names the worktree.
 
+9. **Progress must be live and specific — never "Still working on this…".** Devin's
+   standing requirement (2026-09-05 16:20Z): while a command runs, the thread shows *what*
+   is running, for *how long*, and the *last lines it printed* — not a fixed string on a
+   timer, and not that string voiced as `progress-tick-*.mp3`. Per-tool summaries
+   ("I'm reviewing…") are fine; the timer heartbeat is the defect. Fix lives in the running
+   `bot.js`; applied via the deferred-restart pattern; verified with a deliberate 3-minute
+   command whose heartbeats show command + elapsed + output tail.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |
