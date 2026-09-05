@@ -21,8 +21,10 @@
 # One-time setup on the box. The token never leaves the box and never appears
 # in chat — it is read from a file only this user can open:
 #   mkdir -p ~/.config/wsf-run && chmod 700 ~/.config/wsf-run
-#   grep -ohE 'xox[bp]-[A-Za-z0-9-]+' ~/.config/systemd/user/agent-slack.service.d/*.conf \
+#   grep -ohE 'xox[bp]-[A-Za-z0-9-]+' ~/.agent/.env \
 #     | head -1 > ~/.config/wsf-run/slack-token && chmod 600 ~/.config/wsf-run/slack-token
+#   (SLACK_BOT_TOKEN lives in ~/.agent/.env on Maia's box — not in the systemd drop-ins,
+#    which carry only the Claude OAuth token and the turn caps.)
 #
 # Output: stdout+stderr of the job go to ~/.local/state/wsf-run/<unit>.<utc>.log.
 # The Slack report is the exit status plus the last 40 lines, one text message,

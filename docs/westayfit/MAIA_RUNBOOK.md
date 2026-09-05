@@ -83,9 +83,19 @@ long-running work inside a chat turn is no longer acceptable.
 5. **The written reply is the record.** Audio may only repeat what the text says, never add to it. Devin has transcribed audio replies and found content that was not in the thread; the 1a receipt was delivered audio-only with an empty text slot. Until the toggle is found and turned off for dev channels: "Text reply only — no Jarvis audio", and anything spoken must also be typed.
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
 
+## Where things live on her box (confirmed 2026-09-05)
+
+| What | Where |
+|---|---|
+| Slack bot token | `SLACK_BOT_TOKEN` in `~/.agent/.env` (siblings: `SLACK_APP_TOKEN`, `SLACK_NOTIFICATION_CHANNEL`, `SLACK_CHANNEL_TALK_TO_MAIA`) |
+| Turn caps | `~/.config/systemd/user/agent-slack.service.d/turn-lease.conf` |
+| Claude OAuth token | `~/.config/systemd/user/agent-slack.service.d/override.conf` — never edited |
+| Running bot | `/home/ben/agent-platform-live/shared/slack-bot/bot.js`, node v22 |
+| Jarvis switches | `JARVIS_VOICE_REPLY=on` in `/home/ben/agent-platform-live/shared/slack-bot/.env` (documented kill switch); `JARVIS_SPOKEN_REPLY_SCRIPT_PATH` / `TTS_DRAFT_SCRIPT_PATH` env vars read at `bot.js:95-96`; `[JARVIS: /path.mp3]` markers parsed at `bot.js:1691-1694`. **No per-channel setting** — off means off in every channel. |
+
 ## Still open
 
-- Which config controls Jarvis audio, and turning it off for `#dev-westayfit` / `#dev-goarrive`.
+- **Jarvis off?** It is all-or-nothing. Turning it off silences Devin's assistant channels too. Devin's decision; until then the text-is-the-record rule (§5) is the control, and Maia has saved it to memory.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
   tree is `agent-setup/…` (Aug 31, +28 KB). Her button-tap fix cannot reach the running
   process until that is reconciled. Not on the WSF critical path; Devin's call.
