@@ -167,4 +167,51 @@ describe('wsfListChallenge', () => {
     if (result.ok) return;
     expect(result.error.code).toBe('invalid-argument');
   });
+
+  test('§E3-review malformed groupId (contains /): invalid-argument — never internal', async () => {
+    const uid = `wsfList_bad_slash_${Date.now()}`;
+    const result = await tryRun(uid, { groupId: 'wsfMemberships/pwn' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('invalid-argument');
+  });
+
+  test('§E3-review wsfListChallenge NEVER returns checkInCode, even when set on the move', async () => {
+    // Seed a move with requiresCode + checkInCode. The response must expose
+    // requiresCode:true (so the client renders the "enter code" input) but
+    // must never carry the secret it enforces.
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId);
+    const codedRef = getFirestore().collection('wsfChallengeMoves').doc();
+    await codedRef.set({
+      challengeId,
+      title: 'Coded move',
+      instructions: 'Ask the host for the code.',
+      sequence: 1,
+      dayNumber: null,
+      requiresCode: true,
+      checkInCode: 'FITLIFE-SECRET-42',
+    });
+    const uid = `wsfList_no_leak_${Date.now()}`;
+    await seedActiveMember(groupId, uid);
+
+    const result = await wsfListChallenge.run(makeRequest(uid, { groupId }));
+    expect(result.moves).toHaveLength(1);
+    const move = result.moves[0]!;
+    expect(move.requiresCode).toBe(true);
+    // Whitelist check — a future field that accidentally leaked the secret
+    // (or any other server-side move field) would fail this even if a "does
+    // not contain checkInCode" assertion missed it.
+    expect(Object.keys(move).sort()).toEqual([
+      'checkedIn',
+      'dayNumber',
+      'id',
+      'instructions',
+      'locationLabel',
+      'requiresCode',
+      'sequence',
+      'title',
+    ]);
+    expect('checkInCode' in move).toBe(false);
+  });
 });

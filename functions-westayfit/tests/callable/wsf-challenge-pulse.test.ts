@@ -160,18 +160,29 @@ describe('wsfChallengePulse', () => {
     expect(result.error.code).toBe('not-found');
   });
 
-  test('unknown challengeId: not-found', async () => {
-    const result = await tryRun(null, { challengeId: 'does-not-exist' });
+  test('unknown challengeId (well-formed but absent): not-found', async () => {
+    // 20-char Firestore-auto-ID shape passes the id check and reaches the doc
+    // read; that branch is what this test pins.
+    const result = await tryRun(null, { challengeId: 'ZYXWVUTSRQPONMLKJIHG' });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('not-found');
   });
 
-  test('missing challengeId: not-found (no oracle for a missing arg vs an unknown id)', async () => {
+  test('§E3-review missing challengeId: invalid-argument', async () => {
     const result = await tryRun(null, {});
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe('not-found');
+    expect(result.error.code).toBe('invalid-argument');
+  });
+
+  test('§E3-review malformed challengeId (contains /): invalid-argument — never internal', async () => {
+    // Old shape check let `foo/bar` through and db.doc(...) threw TypeError,
+    // surfaced as `internal` on a public endpoint. Pin the new contract.
+    const result = await tryRun(null, { challengeId: 'wsfChallenges/pwn' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('invalid-argument');
   });
 
   test('goalTarget null flows through as null', async () => {

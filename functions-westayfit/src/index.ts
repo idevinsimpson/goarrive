@@ -631,6 +631,41 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
 
 const CHALLENGE_SHARD_COUNT = 10;
 
+// wsfChallengePulse in-process cache. The kiosk polls at ~2 s and each miss
+// pays 13 doc reads (challenge + group + 10 shards + 1 participant aggregate)
+// on a public callable. Devin's own spec: "the kiosk polling 2 s stale is
+// fine." Cache TTL matches — the freshest a poll can be is the poll cadence,
+// so nothing legitimate loses precision, and a burst of bot traffic collapses
+// to one real read per challengeId per 2 s per instance.
+//
+// Per-instance, not global. Cloud Run may scale to N instances, so worst
+// case is N reads / 2 s / challenge, still enough compression to matter.
+// Cache stores only successful totals; not-found and rate-limited paths bypass
+// it so an attacker cannot use a cache hit as an existence oracle.
+const PULSE_CACHE_TTL_MS = 2_000;
+const PULSE_CACHE_MAX = 1_000;
+const pulseCache = new Map<string, { ts: number; value: PulseTotals }>();
+
+function pulseCacheGet(challengeId: string, now: number): PulseTotals | null {
+  const hit = pulseCache.get(challengeId);
+  if (!hit) return null;
+  if (now - hit.ts >= PULSE_CACHE_TTL_MS) {
+    pulseCache.delete(challengeId);
+    return null;
+  }
+  return hit.value;
+}
+
+function pulseCacheSet(challengeId: string, now: number, value: PulseTotals): void {
+  if (pulseCache.size >= PULSE_CACHE_MAX && !pulseCache.has(challengeId)) {
+    // Drop the oldest insertion. Map iteration is insertion-ordered, so the
+    // first key is the LRU-in-effect for a strict TTL cache.
+    const oldest = pulseCache.keys().next().value;
+    if (oldest !== undefined) pulseCache.delete(oldest);
+  }
+  pulseCache.set(challengeId, { ts: now, value });
+}
+
 type ChallengeStatus = 'draft' | 'active' | 'completed';
 
 type ChallengeDoc = {
@@ -650,6 +685,10 @@ type MoveDoc = {
   dayNumber: number | null;
   locationLabel?: string;
   requiresCode?: boolean;
+  // Present only on moves whose admin set requiresCode:true. Never returned
+  // by wsfListChallenge (see the response whitelist), only read server-side
+  // by wsfCheckIn to compare against the caller's `code`.
+  checkInCode?: string;
 };
 
 type PulseTotals = {
@@ -672,14 +711,19 @@ function shardRef(challengeId: string, index: number) {
  * Sums the ten completed-count shards for a challenge. Missing shard docs
  * count as zero — the seed script does not need to pre-write empty shards,
  * and a challenge with zero check-ins reads as zero without special-casing.
+ *
+ * `db.getAll(...refs)` batches all ten reads into one RPC. The prior shape
+ * (ten `.get()`s in Promise.all) still paid ten roundtrips, and after a
+ * successful check-in the response was blocked on the slowest of those ten —
+ * the tap-to-total latency that matters at the event.
  */
 async function sumCompletedShards(challengeId: string): Promise<number> {
   const db = getFirestore();
-  const reads = [] as Promise<FirebaseFirestore.DocumentSnapshot>[];
+  const refs: FirebaseFirestore.DocumentReference[] = [];
   for (let i = 0; i < CHALLENGE_SHARD_COUNT; i++) {
-    reads.push(db.doc(`wsfChallengeCounters/${challengeId}/shards/${i}`).get());
+    refs.push(db.doc(`wsfChallengeCounters/${challengeId}/shards/${i}`));
   }
-  const snaps = await Promise.all(reads);
+  const snaps = await db.getAll(...refs);
   let total = 0;
   for (const snap of snaps) {
     const data = snap.data() as { count?: number } | undefined;
@@ -714,10 +758,17 @@ async function readChallengeTotals(
   return { participantCount, completedCount, goalTarget };
 }
 
+// Doc-id shape check. Firestore accepts almost anything in a document ID, and
+// that permissiveness reached the public endpoints as `internal` — a raw
+// `/` in the value made `db.doc(...)` throw a TypeError under the callable
+// wrapper, and the wrapper had nothing to translate it to. Same shape as E2's
+// normalizeJoinCode (line 41): base64url alphabet, 16–128 chars, so real
+// Firestore auto-IDs (20 chars, alphanumeric) pass and everything else is
+// rejected as `invalid-argument` at the boundary.
 function normalizeStringId(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
-  if (trimmed.length === 0 || trimmed.length > 1500) return null;
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(trimmed)) return null;
   return trimmed;
 }
 
@@ -835,11 +886,18 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
   }
 );
 
-type CheckInRequest = { moveId?: unknown };
+type CheckInRequest = { moveId?: unknown; code?: unknown };
 type CheckInResponse = {
   alreadyCheckedIn: boolean;
   totals: PulseTotals;
 };
+
+function normalizeCheckInCode(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length === 0 || trimmed.length > 128) return null;
+  return trimmed;
+}
 
 export const wsfCheckIn = onCall<CheckInRequest>(
   // minInstances:1 — see the E3 header. A cold start on this callable is the
@@ -863,81 +921,121 @@ export const wsfCheckIn = onCall<CheckInRequest>(
     }
     const move = moveSnap.data() as MoveDoc;
 
-    const challengeSnap = await db
-      .doc(`wsfChallenges/${move.challengeId}`)
-      .get();
-    if (!challengeSnap.exists) {
-      throw new HttpsError('not-found', 'Challenge not found.');
-    }
-    const challenge = challengeSnap.data() as ChallengeDoc;
-    if (challenge.status !== 'active') {
-      throw new HttpsError(
-        'failed-precondition',
-        'This challenge is not active.'
-      );
-    }
-
-    const membershipId = `${challenge.groupId}_${uid}`;
-    const membershipRef = db.doc(`wsfMemberships/${membershipId}`);
-    const membershipSnap = await membershipRef.get();
-    if (!membershipSnap.exists) {
-      throw new HttpsError('permission-denied', 'Members only.');
-    }
-    const membership = membershipSnap.data() as { membershipStatus?: string };
-    if (membership.membershipStatus !== 'active') {
-      throw new HttpsError('permission-denied', 'Members only.');
-    }
-
-    const checkInRef = db.doc(`wsfCheckIns/${moveId}_${membershipId}`);
-    const participantRef = db.doc(
-      `wsfChallengeParticipants/${move.challengeId}_${membershipId}`
-    );
-
-    const alreadyCheckedIn = await db.runTransaction(async (tx) => {
-      // All reads before any writes (Firestore txn rule).
-      const [existingCheckIn, existingParticipant] = await Promise.all([
-        tx.get(checkInRef),
-        tx.get(participantRef),
-      ]);
-
-      if (existingCheckIn.exists) {
-        // Idempotent path — spec §5.3. Touch nothing, never throw.
-        return true;
+    // §E3 review fix 2 — requiresCode was decorative until this block. The
+    // switch is real: honour system is still the default (requiresCode
+    // undefined/false), but the moment an admin flips a move to
+    // requiresCode:true, the callable enforces the paired secret before the
+    // transaction opens. Missing or wrong `code` → failed-precondition, same
+    // vocabulary as "this challenge is not active" so the client can render a
+    // single "can't check in" state without leaking whether the code was
+    // absent or wrong.
+    if (move.requiresCode === true) {
+      const providedCode = normalizeCheckInCode(request.data?.code);
+      const expectedCode =
+        typeof move.checkInCode === 'string' ? move.checkInCode.trim() : '';
+      if (expectedCode.length === 0 || providedCode !== expectedCode) {
+        throw new HttpsError(
+          'failed-precondition',
+          'This move requires a check-in code.'
+        );
       }
+    }
 
-      const shardIndex = randomShardIndex();
-      const shard = shardRef(move.challengeId, shardIndex);
+    const challengeRef = db.doc(`wsfChallenges/${move.challengeId}`);
 
-      tx.set(checkInRef, {
-        challengeId: move.challengeId,
-        moveId,
-        membershipId,
-        userId: uid,
-        groupId: challenge.groupId,
-        shardIndex,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-      tx.set(
-        shard,
-        { count: FieldValue.increment(1) },
-        { merge: true }
-      );
-      if (!existingParticipant.exists) {
-        tx.set(participantRef, {
+    // §E3 review fix 3 — challenge.status and membership are read inside the
+    // transaction so a status flip from `active` to `completed` between an
+    // emcee's "we're done" and a straggler's tap is caught atomically. The
+    // txn does a two-phase read because membership + check-in doc paths both
+    // key on the challenge's groupId (a challenge can, in principle, be
+    // reassigned; membership follows the current group). Sequential tx.get()s
+    // are legal — the "all reads before writes" rule stops at the first write.
+    // Order inside the callback matters:
+    //   1. Read challenge to learn groupId. Not-found fails fast.
+    //   2. Read [existingCheckIn, existingParticipant, membership] with the
+    //      derived paths.
+    //   3. If check-in already exists, return alreadyCheckedIn:true regardless
+    //      of the challenge's current status — spec §5.3 idempotency wins
+    //      even against a completed challenge, so a retry from a member who
+    //      already succeeded never surfaces as an error.
+    //   4. Otherwise validate status active + membership active, then write.
+    const { alreadyCheckedIn, goalTarget } = await db.runTransaction(
+      async (tx) => {
+        const challengeSnap = await tx.get(challengeRef);
+        if (!challengeSnap.exists) {
+          throw new HttpsError('not-found', 'Challenge not found.');
+        }
+        const challenge = challengeSnap.data() as ChallengeDoc;
+        const gt = challenge.goalTarget ?? null;
+
+        const membershipId = `${challenge.groupId}_${uid}`;
+        const membershipRef = db.doc(`wsfMemberships/${membershipId}`);
+        const checkInRef = db.doc(`wsfCheckIns/${moveId}_${membershipId}`);
+        const participantRef = db.doc(
+          `wsfChallengeParticipants/${move.challengeId}_${membershipId}`
+        );
+
+        const [existingCheckIn, existingParticipant, membershipSnap] =
+          await Promise.all([
+            tx.get(checkInRef),
+            tx.get(participantRef),
+            tx.get(membershipRef),
+          ]);
+
+        if (existingCheckIn.exists) {
+          // Idempotent path — spec §5.3. Touch nothing, never throw, and
+          // never re-gate on challenge.status or membership state. A member
+          // who already succeeded is grandfathered against any change that
+          // happened after their first tap.
+          return { alreadyCheckedIn: true as const, goalTarget: gt };
+        }
+
+        if (challenge.status !== 'active') {
+          throw new HttpsError(
+            'failed-precondition',
+            'This challenge is not active.'
+          );
+        }
+
+        if (!membershipSnap.exists) {
+          throw new HttpsError('permission-denied', 'Members only.');
+        }
+        const membership = membershipSnap.data() as { membershipStatus?: string };
+        if (membership.membershipStatus !== 'active') {
+          throw new HttpsError('permission-denied', 'Members only.');
+        }
+
+        const shardIndex = randomShardIndex();
+        const shard = shardRef(move.challengeId, shardIndex);
+
+        tx.set(checkInRef, {
           challengeId: move.challengeId,
+          moveId,
           membershipId,
           userId: uid,
           groupId: challenge.groupId,
+          shardIndex,
           createdAt: FieldValue.serverTimestamp(),
         });
+        tx.set(
+          shard,
+          { count: FieldValue.increment(1) },
+          { merge: true }
+        );
+        if (!existingParticipant.exists) {
+          tx.set(participantRef, {
+            challengeId: move.challengeId,
+            membershipId,
+            userId: uid,
+            groupId: challenge.groupId,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        }
+        return { alreadyCheckedIn: false as const, goalTarget: gt };
       }
-      return false;
-    });
-
-    const totals = await readChallengeTotals(
-      move.challengeId,
-      challenge.goalTarget ?? null
     );
+
+    const totals = await readChallengeTotals(move.challengeId, goalTarget);
     return { alreadyCheckedIn, totals };
   }
 );
@@ -951,12 +1049,25 @@ export const wsfChallengePulse = onCall<PulseRequest>(
   // only aggregates — no docs, no ids, no names. Sample-flagged groups are
   // hidden entirely (§5.8) so a curator-facing seed cannot leak into a real
   // display via a copied challengeId.
+  //
+  // Two throttles guard the endpoint (§ E3 review, worst-first): the same
+  // per-IP bucket wsfPreviewCommunity uses (100 req / rolling minute per IP
+  // hash) fires first, so an unauthenticated flood cannot pump reads; the
+  // per-challengeId in-process cache collapses legitimate polling to one
+  // real read per 2 s.
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<PulseResponse> => {
+    const now = Date.now();
+    const ip = extractIp(request.rawRequest as any);
+    await enforcePreviewRateLimit(ip, now);
+
     const challengeId = normalizeStringId(request.data?.challengeId);
     if (!challengeId) {
-      throw new HttpsError('not-found', 'Challenge not found.');
+      throw new HttpsError('invalid-argument', 'challengeId is required.');
     }
+
+    const cached = pulseCacheGet(challengeId, now);
+    if (cached) return cached;
 
     const db = getFirestore();
     const challengeSnap = await db.doc(`wsfChallenges/${challengeId}`).get();
@@ -977,6 +1088,8 @@ export const wsfChallengePulse = onCall<PulseRequest>(
       throw new HttpsError('not-found', 'Challenge not found.');
     }
 
-    return readChallengeTotals(challengeId, challenge.goalTarget ?? null);
+    const totals = await readChallengeTotals(challengeId, challenge.goalTarget ?? null);
+    pulseCacheSet(challengeId, now, totals);
+    return totals;
   }
 );

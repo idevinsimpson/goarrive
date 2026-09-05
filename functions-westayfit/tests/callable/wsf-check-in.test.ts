@@ -71,16 +71,24 @@ async function seedChallenge(
 
 async function seedMove(
   challengeId: string,
-  opts?: { sequence?: number; title?: string }
+  opts?: {
+    sequence?: number;
+    title?: string;
+    requiresCode?: boolean;
+    checkInCode?: string;
+  }
 ): Promise<string> {
   const ref = getFirestore().collection('wsfChallengeMoves').doc();
-  await ref.set({
+  const doc: Record<string, unknown> = {
     challengeId,
     title: opts?.title ?? 'Do the walk',
     instructions: 'Walk from the entrance to the vendor row.',
     sequence: opts?.sequence ?? 0,
     dayNumber: null,
-  });
+  };
+  if (opts?.requiresCode === true) doc.requiresCode = true;
+  if (typeof opts?.checkInCode === 'string') doc.checkInCode = opts.checkInCode;
+  await ref.set(doc);
   return ref.id;
 }
 
@@ -274,16 +282,125 @@ describe('wsfCheckIn', () => {
     expect(await directShardSum(challengeId)).toBe(before);
   });
 
-  test('unknown moveId: not-found', async () => {
+  test('unknown moveId (well-formed but absent): not-found', async () => {
     const groupId = await seedGroup();
     await seedChallenge(groupId);
     const uid = `wsfCheckIn_unknown_${Date.now()}`;
     await seedActiveMember(groupId, uid);
 
-    const result = await tryRun(uid, { moveId: 'does-not-exist' });
+    // 20 chars, matches the Firestore auto-ID shape, so it passes the shape
+    // check and reaches the doc read — the branch this test is pinning.
+    const result = await tryRun(uid, { moveId: 'ABCDEFGHIJKLMNOPQRST' });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('not-found');
+  });
+
+  test('§E3-review invalid moveId (contains /): invalid-argument — never internal', async () => {
+    // Under the old shape check `foo/bar` reached db.doc(...) and threw a
+    // TypeError under the callable wrapper, which surfaced as `internal` on a
+    // public-facing endpoint. Pin the new contract: shape-invalid input never
+    // reaches Firestore.
+    const uid = `wsfCheckIn_bad_slash_${Date.now()}`;
+    const result = await tryRun(uid, { moveId: 'wsfChallengeMoves/injected' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('invalid-argument');
+  });
+
+  test('§E3-review too-short moveId: invalid-argument', async () => {
+    const uid = `wsfCheckIn_bad_short_${Date.now()}`;
+    const result = await tryRun(uid, { moveId: 'short' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('invalid-argument');
+  });
+
+  test('§E3-review requiresCode:true refuses missing code: failed-precondition', async () => {
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId);
+    const moveId = await seedMove(challengeId, {
+      requiresCode: true,
+      checkInCode: 'FITLIFE-42',
+    });
+    const uid = `wsfCheckIn_reqcode_missing_${Date.now()}`;
+    await seedActiveMember(groupId, uid);
+
+    const before = await directShardSum(challengeId);
+    const result = await tryRun(uid, { moveId });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('failed-precondition');
+    // The counter must not have moved — a refused check-in changes nothing.
+    expect(await directShardSum(challengeId)).toBe(before);
+  });
+
+  test('§E3-review requiresCode:true refuses wrong code: failed-precondition', async () => {
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId);
+    const moveId = await seedMove(challengeId, {
+      requiresCode: true,
+      checkInCode: 'FITLIFE-42',
+    });
+    const uid = `wsfCheckIn_reqcode_wrong_${Date.now()}`;
+    await seedActiveMember(groupId, uid);
+
+    const result = await tryRun(uid, { moveId, code: 'nope' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('failed-precondition');
+    expect(await directCheckInCount(challengeId, moveId)).toBe(0);
+  });
+
+  test('§E3-review requiresCode:true accepts the right code and writes one row', async () => {
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId);
+    const moveId = await seedMove(challengeId, {
+      requiresCode: true,
+      checkInCode: 'FITLIFE-42',
+    });
+    const uid = `wsfCheckIn_reqcode_ok_${Date.now()}`;
+    await seedActiveMember(groupId, uid);
+
+    const before = await directShardSum(challengeId);
+    const result = await wsfCheckIn.run(makeRequest(uid, { moveId, code: 'FITLIFE-42' }));
+
+    expect(result.alreadyCheckedIn).toBe(false);
+    expect(await directShardSum(challengeId)).toBe(before + 1);
+    expect(await directCheckInCount(challengeId, moveId)).toBe(1);
+  });
+
+  test('§E3-review completed challenge: idempotent hit still returns alreadyCheckedIn:true; new tap refused', async () => {
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId, { status: 'active' });
+    const moveId = await seedMove(challengeId);
+    const uidExisting = `wsfCheckIn_completed_existing_${Date.now()}`;
+    const uidStraggler = `wsfCheckIn_completed_new_${Date.now()}`;
+    await seedActiveMember(groupId, uidExisting);
+    await seedActiveMember(groupId, uidStraggler);
+
+    // Existing member checks in while the challenge is still active.
+    const first = await wsfCheckIn.run(makeRequest(uidExisting, { moveId }));
+    expect(first.alreadyCheckedIn).toBe(false);
+    const afterFirst = await directShardSum(challengeId);
+
+    // Emcee marks the challenge completed.
+    await getFirestore()
+      .doc(`wsfChallenges/${challengeId}`)
+      .set({ status: 'completed' }, { merge: true });
+
+    // Straggler taps for the first time — must be refused, counter unchanged.
+    const stragglerAttempt = await tryRun(uidStraggler, { moveId });
+    expect(stragglerAttempt.ok).toBe(false);
+    if (stragglerAttempt.ok) return;
+    expect(stragglerAttempt.error.code).toBe('failed-precondition');
+    expect(await directShardSum(challengeId)).toBe(afterFirst);
+
+    // Existing member retries — must succeed with alreadyCheckedIn:true.
+    const retry = await wsfCheckIn.run(makeRequest(uidExisting, { moveId }));
+    expect(retry.alreadyCheckedIn).toBe(true);
+    expect(await directShardSum(challengeId)).toBe(afterFirst);
+    expect(await directCheckInCount(challengeId, moveId)).toBe(1);
   });
 
   test('goalTarget flows through nullable — null stays null on the response', async () => {
