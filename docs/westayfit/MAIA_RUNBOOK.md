@@ -97,9 +97,11 @@ long-running work inside a chat turn is no longer acceptable.
 | Running bot | `/home/ben/agent-platform-live/shared/slack-bot/bot.js`, node v22 |
 | Jarvis switches | `JARVIS_VOICE_REPLY=on` in `/home/ben/agent-platform-live/shared/slack-bot/.env` (documented kill switch); `JARVIS_SPOKEN_REPLY_SCRIPT_PATH` / `TTS_DRAFT_SCRIPT_PATH` env vars read at `bot.js:95-96`; `[JARVIS: /path.mp3]` markers parsed at `bot.js:1691-1694`. **No per-channel setting** — off means off in every channel. |
 
-**Fix 1 applied 2026-09-05.** Drop-in verified merged (`systemctl --user cat agent-slack`
-lines 37–38); deferred restart scheduled `13:21:43Z +240s`. Verification of the running
-process follows the restart.
+**Fix 1 LIVE VERIFIED 2026-09-05 13:30Z.** Drop-in merged; deferred restart scheduled
+`13:21:43Z +240s`, fired `ActiveEnterTimestamp=13:25:47 UTC`; read from the running
+process's environment: `TURN_DEADLINE_MS=2700000`, `TURN_ABSOLUTE_CAP_MS=5400000`;
+`agent-slack-deferred-restart` collected. The deferred-restart pattern is now the standard
+way she applies her own service config — no human at the box required.
 
 **How the switch would be applied, if Devin says off.** `bot.js:36` loads `.env` with
 `require('dotenv').config({ path: __dirname + '/.env' })` — default mode, which does **not**
