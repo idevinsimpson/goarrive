@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TextInput } from 'react-native';
 
+import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
   ErrorText,
@@ -11,6 +12,7 @@ import {
   FormShell,
   PasswordField,
   SecondaryLink,
+  StatusText,
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
@@ -20,6 +22,7 @@ import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 
 export default function SignIn() {
+  const { ready, user } = useWsfAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -27,8 +30,47 @@ export default function SignIn() {
   const [mismatch, setMismatch] = useState(false);
   const passwordRef = useRef<TextInput>(null);
 
+  // Already-signed-in short-circuit. E3.5 §3C C5: a member who taps the app
+  // icon after their session survived (verified, profile written) must not
+  // see a signin form asking them for the credentials they already used —
+  // that path leads straight back to "wrong password" when they mistype and
+  // then to reset-password, all to end up on the home they should have been
+  // shown on mount. Route to the gate that actually applies.
+  useEffect(() => {
+    if (!ready || !user) return;
+    let cancelled = false;
+    (async () => {
+      if (!user.emailVerified) {
+        if (!cancelled) router.replace('/verify-email');
+        return;
+      }
+      const db = getFirebaseFirestore();
+      const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
+      if (cancelled) return;
+      if (!profileSnap.exists()) {
+        router.replace('/profile-setup');
+        return;
+      }
+      router.replace(nextRouteAfterAuth('/') as never);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user]);
+
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Sign in" testID="wsf-signin-disabled" />;
+  }
+
+  // Suppress the form while auth resolves or while the redirect is in
+  // flight — otherwise a signed-in member sees a flash of "Sign in" with
+  // their own creds prompted, which is exactly the confusion C5 fixes.
+  if (!ready || user) {
+    return (
+      <FormShell heading="Sign in" testID="wsf-signin-loading">
+        <StatusText>Loading…</StatusText>
+      </FormShell>
+    );
   }
 
   async function onSubmit() {
