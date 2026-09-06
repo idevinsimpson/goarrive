@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { TextInput } from 'react-native';
 
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
@@ -23,6 +24,7 @@ export default function SignIn() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Sign in" testID="wsf-signin-disabled" />;
@@ -32,9 +34,13 @@ export default function SignIn() {
     setError(null);
     setSubmitting(true);
     try {
+      // Trim AND lowercase — Firebase Auth stores addresses lowercase, so a
+      // caller who typed 'Foo@Example.com' would otherwise fail sign-in
+      // against the account they created with 'foo@example.com'. The phone
+      // keyboard's leading auto-capital was one of the shapes E3.5 §3C found.
       const credential = await signInWithEmailAndPassword(
         getFirebaseAuth(),
-        email.trim(),
+        email.trim().toLowerCase(),
         password
       );
       // Route on actual state. Sending an already-verified returning member to
@@ -78,13 +84,25 @@ export default function SignIn() {
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        autoCorrect={false}
+        spellCheck={false}
+        autoComplete="email"
+        textContentType="emailAddress"
+        inputMode="email"
         keyboardType="email-address"
+        returnKeyType="next"
+        onSubmitEditing={() => passwordRef.current?.focus()}
         testID="wsf-signin-email"
       />
       <FieldLabel>Password</FieldLabel>
       <PasswordField
+        ref={passwordRef}
         value={password}
         onChangeText={setPassword}
+        autoComplete="current-password"
+        textContentType="password"
+        returnKeyType="go"
+        onSubmitEditing={onSubmit}
         testID="wsf-signin-password"
       />
       {error ? <ErrorText testID="wsf-signin-error">{error}</ErrorText> : null}

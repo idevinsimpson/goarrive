@@ -1,5 +1,5 @@
 import { Link } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { forwardRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -41,15 +41,23 @@ export function FieldLabel({ children }: { children: ReactNode }) {
   return <Text style={styles.label}>{children}</Text>;
 }
 
-export function TextField(props: TextInputProps) {
+// forwardRef so the parent can hold a ref to the underlying TextInput and
+// call .focus() on it — email `returnKeyType="next"` needs to focus the
+// password field, and the password field needs to submit on `returnKeyType="go"`
+// via onSubmitEditing (which react-native-web forwards from Enter).
+export const TextField = forwardRef<TextInput, TextInputProps>(function TextField(
+  props,
+  ref
+) {
   return (
     <TextInput
+      ref={ref}
       {...props}
       placeholderTextColor={wsfTheme.colors.textMuted}
       style={[styles.input, props.style]}
     />
   );
-}
+});
 
 /**
  * Password input with an inline Show/Hide toggle. The toggle is text, not an
@@ -62,11 +70,15 @@ export function TextField(props: TextInputProps) {
  * wsf-signup-password); the toggle carries wsf-password-toggle so the e2e
  * spec can flip it without a per-screen selector.
  */
-export function PasswordField(props: Omit<TextInputProps, 'secureTextEntry'>) {
+export const PasswordField = forwardRef<
+  TextInput,
+  Omit<TextInputProps, 'secureTextEntry'>
+>(function PasswordField(props, ref) {
   const [hidden, setHidden] = useState(true);
   return (
     <View style={styles.passwordRow}>
       <TextInput
+        ref={ref}
         {...props}
         secureTextEntry={hidden}
         placeholderTextColor={wsfTheme.colors.textMuted}
@@ -83,7 +95,7 @@ export function PasswordField(props: Omit<TextInputProps, 'secureTextEntry'>) {
       </Pressable>
     </View>
   );
-}
+});
 
 export function SubmitButton({
   label,

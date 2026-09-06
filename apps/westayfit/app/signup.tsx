@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { TextInput } from 'react-native';
 
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
@@ -24,6 +25,8 @@ export default function SignUp() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offerSignIn, setOfferSignIn] = useState(false);
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Create your account" testID="wsf-signup-disabled" />;
@@ -37,7 +40,14 @@ export default function SignUp() {
     setSubmitting(true);
     try {
       const auth = getFirebaseAuth();
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      // Trim AND lowercase — Firebase Auth stores the address lowercase, so
+      // creating an account with a mixed-case address here means signin has
+      // to lowercase to match. Normalizing on both sides removes the fork.
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        email.trim().toLowerCase(),
+        password
+      );
       await updateProfile(cred.user, { displayName: displayName.trim() });
 
       // Best-effort. The account already exists by this point, so a send
@@ -70,20 +80,37 @@ export default function SignUp() {
         value={displayName}
         onChangeText={setDisplayName}
         autoCapitalize="words"
+        autoComplete="name"
+        textContentType="name"
+        returnKeyType="next"
+        onSubmitEditing={() => emailRef.current?.focus()}
         testID="wsf-signup-displayName"
       />
       <FieldLabel>Email</FieldLabel>
       <TextField
+        ref={emailRef}
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        autoCorrect={false}
+        spellCheck={false}
+        autoComplete="email"
+        textContentType="emailAddress"
+        inputMode="email"
         keyboardType="email-address"
+        returnKeyType="next"
+        onSubmitEditing={() => passwordRef.current?.focus()}
         testID="wsf-signup-email"
       />
       <FieldLabel>Password (min 8 characters)</FieldLabel>
       <PasswordField
+        ref={passwordRef}
         value={password}
         onChangeText={setPassword}
+        autoComplete="new-password"
+        textContentType="newPassword"
+        returnKeyType="go"
+        onSubmitEditing={onSubmit}
         testID="wsf-signup-password"
       />
 
