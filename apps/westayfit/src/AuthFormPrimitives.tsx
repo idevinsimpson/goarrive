@@ -81,6 +81,12 @@ export const PasswordField = forwardRef<
         ref={ref}
         {...props}
         secureTextEntry={hidden}
+        // When the toggle reveals the password, iOS will otherwise autocorrect,
+        // spell-check, and title-case the plaintext — silently corrupting what
+        // was typed. Lock these off at the primitive so no caller can forget.
+        autoCorrect={false}
+        spellCheck={false}
+        autoCapitalize="none"
         placeholderTextColor={wsfTheme.colors.textMuted}
         style={[styles.input, styles.passwordInput, props.style]}
       />

@@ -85,14 +85,16 @@ test('C1: the password toggle flips input type on /signin', async ({ page }) => 
   await expect(page.getByTestId('wsf-signin')).toBeVisible();
 
   const passwordInput = page.getByTestId('wsf-signin-password');
-  // react-native-web renders a <input type="password"> when secureTextEntry
-  // is true. Reading the DOM attribute directly is what proves the toggle is
-  // wired to the actual native prop, not just visually.
+  await passwordInput.fill('polish-secret');
+  // react-native-web renders <input type="password"> when secureTextEntry is
+  // true, and OMITS the type attribute entirely (defaulting to text) when it
+  // is false. So the honest post-click assertion is "not type=password" — not
+  // "type=text" — paired with a value check that proves the toggle preserved
+  // what was typed.
   await expect(passwordInput).toHaveAttribute('type', 'password');
   await page.getByTestId('wsf-password-toggle').click();
-  await expect(passwordInput).toHaveAttribute('type', 'text');
-  await page.getByTestId('wsf-password-toggle').click();
-  await expect(passwordInput).toHaveAttribute('type', 'password');
+  await expect(passwordInput).not.toHaveAttribute('type', 'password');
+  await expect(passwordInput).toHaveValue('polish-secret');
 });
 
 test('C1: the password toggle flips input type on /signup', async ({ page }) => {
@@ -100,9 +102,11 @@ test('C1: the password toggle flips input type on /signup', async ({ page }) => 
   await expect(page.getByTestId('wsf-signup')).toBeVisible();
 
   const passwordInput = page.getByTestId('wsf-signup-password');
+  await passwordInput.fill('polish-secret');
   await expect(passwordInput).toHaveAttribute('type', 'password');
   await page.getByTestId('wsf-password-toggle').click();
-  await expect(passwordInput).toHaveAttribute('type', 'text');
+  await expect(passwordInput).not.toHaveAttribute('type', 'password');
+  await expect(passwordInput).toHaveValue('polish-secret');
 });
 
 test('C2: pressing Enter in the password field submits /signin', async ({ page }) => {
