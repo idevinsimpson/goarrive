@@ -193,6 +193,34 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await expect(page.getByTestId('wsf-home-my-list')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(communityName)).toBeVisible();
 
+  // ---- §6.1: sign out, sign back in via /signin, verify still lands on -----
+  // ---- home (not profile-setup), then that visiting /profile-setup
+  // ---- while a profile already exists redirects back to /.
+  //
+  // The redirect is the fix for the F1 corollary in the phone-test findings:
+  // a returning member who navigates to /profile-setup on their own (deep link,
+  // browser history, share sheet) must not be trapped there — profile-setup.tsx
+  // detects the existing profile and hands them back to the home.
+  await page.getByTestId('wsf-home-signout').click();
+  await expect(page.getByTestId('wsf-home-signed-out')).toBeVisible({ timeout: 15_000 });
+
+  await page.goto('/signin');
+  await page.getByTestId('wsf-signin-email').fill(email);
+  await page.getByTestId('wsf-signin-password').fill(password);
+  await page.getByTestId('wsf-signin-submit').click();
+
+  // A returning verified member with a profile lands on `/` — not verify-email,
+  // not profile-setup.
+  await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('wsf-home-my-list')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(communityName)).toBeVisible();
+
+  // Now the redirect assertion. Navigate to /profile-setup — the mount-time
+  // existence read should detect the profile and router.replace back to `/`.
+  await page.goto('/profile-setup');
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible();
+
   expect(
     errors.filter((e) => !KNOWN_GAPS.some((gap) => e.includes(gap))),
     'browser console errors during the flow'
