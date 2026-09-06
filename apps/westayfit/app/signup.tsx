@@ -7,6 +7,7 @@ import {
   ErrorText,
   FieldLabel,
   FormShell,
+  PasswordField,
   SecondaryLink,
   SubmitButton,
   TextField,
@@ -80,10 +81,9 @@ export default function SignUp() {
         testID="wsf-signup-email"
       />
       <FieldLabel>Password (min 8 characters)</FieldLabel>
-      <TextField
+      <PasswordField
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
         testID="wsf-signup-password"
       />
 

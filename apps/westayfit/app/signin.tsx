@@ -8,6 +8,7 @@ import {
   ErrorText,
   FieldLabel,
   FormShell,
+  PasswordField,
   SecondaryLink,
   SubmitButton,
   TextField,
@@ -81,10 +82,9 @@ export default function SignIn() {
         testID="wsf-signin-email"
       />
       <FieldLabel>Password</FieldLabel>
-      <TextField
+      <PasswordField
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
         testID="wsf-signin-password"
       />
       {error ? <ErrorText testID="wsf-signin-error">{error}</ErrorText> : null}

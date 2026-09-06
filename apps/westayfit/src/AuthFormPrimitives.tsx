@@ -1,5 +1,5 @@
 import { Link } from 'expo-router';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -48,6 +48,40 @@ export function TextField(props: TextInputProps) {
       placeholderTextColor={wsfTheme.colors.textMuted}
       style={[styles.input, props.style]}
     />
+  );
+}
+
+/**
+ * Password input with an inline Show/Hide toggle. The toggle is text, not an
+ * eye icon, so it renders in a form with no icon font and reads correctly to
+ * a screen reader without an aria-label workaround. State is component-local
+ * — never persisted — so the field defaults to obscured on every mount, and
+ * a returning session cannot leak a previous reveal.
+ *
+ * The caller supplies the input's testID (wsf-signin-password /
+ * wsf-signup-password); the toggle carries wsf-password-toggle so the e2e
+ * spec can flip it without a per-screen selector.
+ */
+export function PasswordField(props: Omit<TextInputProps, 'secureTextEntry'>) {
+  const [hidden, setHidden] = useState(true);
+  return (
+    <View style={styles.passwordRow}>
+      <TextInput
+        {...props}
+        secureTextEntry={hidden}
+        placeholderTextColor={wsfTheme.colors.textMuted}
+        style={[styles.input, styles.passwordInput, props.style]}
+      />
+      <Pressable
+        onPress={() => setHidden((h) => !h)}
+        style={styles.passwordToggle}
+        testID="wsf-password-toggle"
+        accessibilityRole="button"
+        accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
+      >
+        <Text style={styles.passwordToggleText}>{hidden ? 'Show' : 'Hide'}</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -189,6 +223,27 @@ const styles = StyleSheet.create({
     fontSize: wsfTheme.typography.body.fontSize,
     color: wsfTheme.colors.text,
     marginBottom: wsfTheme.spacing.sm,
+  },
+  passwordRow: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  passwordInput: {
+    // Room for the Show/Hide toggle so a long password does not tuck under it.
+    paddingRight: wsfTheme.spacing.xl * 2.4,
+  },
+  passwordToggle: {
+    position: 'absolute',
+    right: wsfTheme.spacing.sm,
+    top: 0,
+    bottom: wsfTheme.spacing.sm,
+    justifyContent: 'center',
+    paddingHorizontal: wsfTheme.spacing.sm,
+  },
+  passwordToggleText: {
+    color: wsfTheme.colors.primary,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '600',
   },
   button: {
     backgroundColor: wsfTheme.colors.primary,
