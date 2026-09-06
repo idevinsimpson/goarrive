@@ -114,3 +114,26 @@ sign-in lands on the home when a profile exists; the 18+ checkbox is gone from s
 (placeholder text until approved); community page shows human labels, a members count, and a
 copyable invite link for public communities; a third join policy *Public*; an in-app-browser
 hint. **Not LIVE VERIFIED yet:** Devin's retest in Safari, and the E3 check-in flow.
+
+## 2026-09-06 — E3.5 turn C staging redeploy: sign-in and password polish (commit `2f0a9dc`)
+
+**Scope:** WSF functions codebase + WSF Hosting preview channel `staging`. Live channel untouched.
+GoArrive functions untouched (`firebase functions:list` before/after: one new `wsf*` line). Gate green
+at `2f0a9dc` 17:47:23Z (25 browser specs incl. `e35-auth-polish`, callable suite incl.
+`wsf-send-password-reset-email`). Executed by Maia 18:00–18:05Z, thread #dev-westayfit 1788717599.623009.
+
+| Item | Value |
+|---|---|
+| Channel URL | `https://westayfit-app--staging-x4m0iwln.web.app` (expires 2026-09-13 18:03:58) |
+| Build | `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 npm --prefix apps/westayfit run build:web` at `2f0a9dc`; SHA in `/health`; `reset-password` route present |
+| Functions created | `wsfSendPasswordResetEmail` (callable, unauthenticated, enumeration-safe, same email config as verification) |
+| Functions updated | the whole `westayfit` codebase redeployed in place (10 existing) |
+| Rules / indexes | untouched |
+| Smoke | `/health` · `/` · `/signin` · `/signup` · `/reset-password` · `/join/P9RACO2GyZJWUOMHbXZW-w` · `/community/wsf-staging-test/challenge` — all 200 |
+
+**What changed for the tester:** Show/Hide on password fields; "Forgot your password?" → `/reset-password`;
+the mismatch error offers reset or create; email/password autofill and keyboard attributes; Enter submits;
+email trimmed and lower-cased; `/signin` and `/signup` send a signed-in member home; signup shows the
+8-character rule up front; the verify screen says plainly that email is not set up on this build.
+**Email itself still does not send** until decision A (sender domain) and the Manus steps in task #30:
+the reset and verification screens show the honest "not set up yet" message. **Not LIVE VERIFIED yet.**
