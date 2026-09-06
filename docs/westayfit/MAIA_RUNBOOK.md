@@ -180,6 +180,13 @@ long-running work inside a chat turn is no longer acceptable.
     the fence as ```` ```bash ````, a newline, then a comment line such as `# step 1`, then the
     commands. Re-read the posted message and check the first line of every block before
     ending the turn; if a line is missing, post it again as a plain reply that names the step.
+15. **A read-only report turn names its two sources and nothing else.** The E3.5-A acceptance
+    turn (2026-09-06 02:33Z) drifted into a 20-minute filesystem and journal search "to diagnose
+    the issue" because the dispatch did not say there was no issue; its first draft then
+    claimed the staging deploy had not happened, which was false. Every report dispatch
+    states: the spec section, the log file, and "there is nothing to diagnose in this turn".
+    Drift sign: `find` / `journalctl` lines in a report turn. Response: one correction reply
+    naming the sources (she picks up thread replies mid-turn), never a second dispatch.
 
 ## Where things live on her box (confirmed 2026-09-05)
 
