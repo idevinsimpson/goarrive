@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import { reload, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { useCallback, useState } from 'react';
 
 import { useWsfAuth } from '../src/auth';
@@ -13,7 +14,8 @@ import {
 } from '../src/AuthFormPrimitives';
 import { authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
-import { getFirebaseAuth } from '../src/firebase';
+import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
+import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 import { requestVerificationEmail } from '../src/verificationEmail';
 
 export default function VerifyEmail() {
@@ -37,7 +39,13 @@ export default function VerifyEmail() {
         // refresh the very next write fails with PERMISSION_DENIED and the new
         // member is dead-ended one step after verifying. Mint a fresh token.
         await user.getIdToken(true);
-        router.replace('/profile-setup');
+        // Same profile-vs-signed-in-home fork as signin.tsx — an already-set-up
+        // member who is just clearing verify limbo lands on the home, not on a
+        // profile screen they already finished.
+        const db = getFirebaseFirestore();
+        const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
+        const fallback = profileSnap.exists() ? '/' : '/profile-setup';
+        router.replace(nextRouteAfterAuth(fallback) as never);
       } else {
         setStatus('Still unverified. Check your inbox and try again.');
       }
