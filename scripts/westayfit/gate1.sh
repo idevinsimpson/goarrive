@@ -81,7 +81,7 @@ WSF_PLAYWRIGHT_BASE_URL="http://127.0.0.1:${HOSTING_PORT}" \
   firebase emulators:exec \
     --project goarrive \
     --config "$EMULATOR_CONFIG" \
-    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts"
+    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts tests-e2e/e35-home.spec.ts"
 
 echo
 echo "GATE 1 CLEAR — profile-setup succeeded and /community/<id> served 200 on a cold load."
