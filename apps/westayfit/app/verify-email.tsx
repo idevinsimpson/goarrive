@@ -12,7 +12,7 @@ import {
   StatusText,
   SubmitButton,
 } from '../src/AuthFormPrimitives';
-import { authErrorMessage } from '../src/authErrors';
+import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
@@ -24,6 +24,7 @@ export default function VerifyEmail() {
   const [resending, setResending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unconfigured, setUnconfigured] = useState(false);
 
   const onCheck = useCallback(async () => {
     if (!user) return;
@@ -67,6 +68,7 @@ export default function VerifyEmail() {
     setResending(true);
     setError(null);
     setStatus(null);
+    setUnconfigured(false);
     try {
       // WSF's own delivery path — the client SDK's sendEmailVerification routes
       // through mail that does not arrive and mints a link that does not
@@ -78,7 +80,17 @@ export default function VerifyEmail() {
           : 'This address is already verified — tap "I have verified".'
       );
     } catch (e) {
-      setError(authErrorMessage(e, 'Send failed.'));
+      // wsfSendVerificationEmail throws failed-precondition when the
+      // WSF_EMAIL_* env vars are missing (F13). The old fallback rendered
+      // "Send failed. (functions/failed-precondition)" — a string that names
+      // an internal code and tells the caller nothing they can act on. Show
+      // the honest state instead, so the person on the screen knows the
+      // build itself is not wired to send and who to ping.
+      if (authErrorCode(e) === 'functions/failed-precondition') {
+        setUnconfigured(true);
+      } else {
+        setError(authErrorMessage(e, 'Send failed.'));
+      }
     } finally {
       setResending(false);
     }
@@ -121,6 +133,11 @@ export default function VerifyEmail() {
       testID="wsf-verify"
     >
       {status ? <StatusText testID="wsf-verify-status">{status}</StatusText> : null}
+      {unconfigured ? (
+        <ErrorText testID="wsf-verify-unconfigured">
+          Email sending is not set up yet on this build. Ask Devin.
+        </ErrorText>
+      ) : null}
       {error ? <ErrorText testID="wsf-verify-error">{error}</ErrorText> : null}
       <SubmitButton
         label="I have verified"
