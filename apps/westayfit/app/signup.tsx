@@ -8,6 +8,7 @@ import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
   ErrorText,
+  FieldHint,
   FieldLabel,
   FormShell,
   PasswordField,
@@ -143,7 +144,7 @@ export default function SignUp() {
         onSubmitEditing={() => passwordRef.current?.focus()}
         testID="wsf-signup-email"
       />
-      <FieldLabel>Password (min 8 characters)</FieldLabel>
+      <FieldLabel>Password</FieldLabel>
       <PasswordField
         ref={passwordRef}
         value={password}
@@ -154,6 +155,11 @@ export default function SignUp() {
         onSubmitEditing={onSubmit}
         testID="wsf-signup-password"
       />
+      {/* Stated as a standing rule, not an after-submit error — the caller
+          should know the constraint before they type, and the field is
+          already disabled from submitting until it is satisfied (canSubmit
+          checks password.length >= 8). */}
+      <FieldHint testID="wsf-signup-password-hint">At least 8 characters</FieldHint>
 
       {error ? <ErrorText testID="wsf-signup-error">{error}</ErrorText> : null}
 

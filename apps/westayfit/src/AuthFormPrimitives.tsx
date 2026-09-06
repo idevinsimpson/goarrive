@@ -144,6 +144,21 @@ export function StatusText({ children, testID }: { children: ReactNode; testID?:
   );
 }
 
+/**
+ * Muted hint that sits next to a field to state a rule the caller must satisfy
+ * BEFORE they submit — e.g. the signup password length requirement. Separate
+ * from StatusText (which reports what happened) because the semantic is a
+ * standing precondition, not an event, and it should not shift the caller's
+ * focus the way an error/status message does.
+ */
+export function FieldHint({ children, testID }: { children: ReactNode; testID?: string }) {
+  return (
+    <Text style={styles.hint} testID={testID}>
+      {children}
+    </Text>
+  );
+}
+
 export function SecondaryLink({
   href,
   label,
@@ -291,6 +306,12 @@ const styles = StyleSheet.create({
     color: wsfTheme.colors.textMuted,
     fontSize: wsfTheme.typography.body.fontSize,
     marginTop: wsfTheme.spacing.sm,
+    marginBottom: wsfTheme.spacing.sm,
+  },
+  hint: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    marginTop: -wsfTheme.spacing.xs,
     marginBottom: wsfTheme.spacing.sm,
   },
   link: {
