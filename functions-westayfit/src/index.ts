@@ -1079,6 +1079,127 @@ export const wsfCheckIn = onCall<CheckInRequest>(
   }
 );
 
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfMyCommunities — the signed-in home reads this to render "Your communities".
+//
+// Authenticated, no rules change: reads wsfMemberships where userId == caller
+// with the Admin SDK, then loads each group and (if any) its active challenge.
+// firestore.rules already permits the caller to read their own memberships and
+// the groups they belong to, but a single callable is faster (one round trip
+// from the client's perspective) and keeps the aggregate totals off the
+// client — the response carries no member identity, only per-group and
+// per-challenge aggregates.
+//
+// isSample groups are NOT filtered out — a member of a sample group still sees
+// it in their list, but the item is marked `isSample: true` so the UI can badge
+// it "Sample" and never count it into any pooled aggregate.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type MyCommunityItem = {
+  groupId: string;
+  displayName: string;
+  groupType: GroupType;
+  joinPolicy: JoinPolicy;
+  role: string;
+  memberCount: number;
+  isSample: boolean;
+  activeChallenge: {
+    id: string;
+    title: string;
+    participantCount: number;
+    completedCount: number;
+    goalTarget: number | null;
+  } | null;
+};
+
+type MyCommunitiesResponse = { items: MyCommunityItem[] };
+
+export const wsfMyCommunities = onCall(
+  { region: 'us-central1' },
+  async (request): Promise<MyCommunitiesResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const db = getFirestore();
+
+    const membershipsSnap = await db
+      .collection('wsfMemberships')
+      .where('userId', '==', uid)
+      .where('membershipStatus', '==', 'active')
+      .get();
+
+    if (membershipsSnap.empty) return { items: [] };
+
+    const items = await Promise.all(
+      membershipsSnap.docs.map(async (membershipDoc) => {
+        const membership = membershipDoc.data() as {
+          groupId: string;
+          role: string;
+        };
+        const groupSnap = await db
+          .doc(`wsfCommunityGroups/${membership.groupId}`)
+          .get();
+        if (!groupSnap.exists) return null;
+        const group = groupSnap.data() as {
+          displayName: string;
+          groupType: GroupType;
+          joinPolicy: JoinPolicy;
+          isSample?: boolean;
+        };
+
+        const [memberCountSnap, activeChallengeSnap] = await Promise.all([
+          db
+            .collection('wsfMemberships')
+            .where('groupId', '==', membership.groupId)
+            .where('membershipStatus', '==', 'active')
+            .count()
+            .get(),
+          db
+            .collection('wsfChallenges')
+            .where('groupId', '==', membership.groupId)
+            .where('status', '==', 'active')
+            .limit(1)
+            .get(),
+        ]);
+
+        let activeChallenge: MyCommunityItem['activeChallenge'] = null;
+        if (!activeChallengeSnap.empty) {
+          const challengeDoc = activeChallengeSnap.docs[0]!;
+          const challenge = challengeDoc.data() as ChallengeDoc;
+          const totals = await readChallengeTotals(
+            challengeDoc.id,
+            challenge.goalTarget ?? null
+          );
+          activeChallenge = {
+            id: challengeDoc.id,
+            title: challenge.title,
+            participantCount: totals.participantCount,
+            completedCount: totals.completedCount,
+            goalTarget: totals.goalTarget,
+          };
+        }
+
+        const item: MyCommunityItem = {
+          groupId: membership.groupId,
+          displayName: group.displayName,
+          groupType: group.groupType,
+          joinPolicy: group.joinPolicy,
+          role: membership.role,
+          memberCount: memberCountSnap.data().count,
+          isSample: group.isSample === true,
+          activeChallenge,
+        };
+        return item;
+      })
+    );
+
+    const filtered = items.filter((i): i is MyCommunityItem => i !== null);
+    filtered.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return { items: filtered };
+  }
+);
+
 type PulseRequest = { challengeId?: unknown };
 type PulseResponse = PulseTotals;
 
