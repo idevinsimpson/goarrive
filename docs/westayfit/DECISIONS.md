@@ -248,3 +248,34 @@ allowance in that spec's `KNOWN_GAPS`. The pairing is the point: the allowance c
 outlive the gap silently, because closing the gap breaks the test that documents it.
 
 Cosmetic, not a deploy blocker. Owner: Devin.
+
+## 2026-09-06 — Age gate removed from profile creation (Devin)
+
+Devin, after the first LIVE phone test of the E3 staging channel: "Let's allow anyone to
+create a profile regardless of older than 18." The 18+ checkbox on profile-setup and the
+two server guards (`wsfCreateCommunity`, `wsfJoinCommunity`) are removed in E3.5 turn A.
+
+Supersedes, in part, master §6 "Adults only, first release": members under 18 may hold
+accounts. Not decided by this entry: the age floor. The PM recommendation is the sentence
+"By saving I confirm I am 13 or older" (the COPPA floor for collecting an email and a display
+name from US users), with no separate checkbox; Devin may change the number or remove the
+sentence. Under-13 data collection stays excluded either way, as do child location, child
+health information and public child names. Master doc bumped to 1.2 with the note.
+
+## 2026-09-06 — Phone-test findings become E3.5; join-policy and type semantics proposed
+
+Recorded from Devin's LIVE test (2026-09-06 01:06–01:08Z): every sign-in lands on the setup
+screens because there is no signed-in home; profile-setup overwrites the profile; terms are
+not readable; the community page shows raw enums; a community created in the UI cannot be
+joined by anyone because only `public` groups are link-joinable and the UI never offers
+`public`; types are the M-U2 stub. Spec: `dispatch/E3.5-PHONE-TEST-FIXES.md`.
+
+Proposed, pending Devin's one-word confirmation before turn B changes E2 behaviour:
+`public` = listed in search and joinable by link/QR; `inviteOnly` (label "Anyone with the
+link") = joinable by link/QR, not listed; `private` = members added by the Champion (M-U3).
+Types follow master §2 (`neighborhood · apartment · workplace · church · family · friends ·
+custom`, places first) with an optional free-text place label and no address or GPS.
+
+Discovery/search, the landing redesign and Champion "start a challenge" are the M-U5/M-U6
+surface the FitLife reduction cut ("M-U6 cut entirely"); they are written up as an E4
+proposal in the same spec for Devin to sequence against E4–E6.

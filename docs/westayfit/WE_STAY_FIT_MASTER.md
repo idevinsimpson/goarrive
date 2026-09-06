@@ -1,6 +1,6 @@
 # WE STAY FIT — MASTER SOURCE OF TRUTH
 
-**Version 1.1 · 2026-09-05 · Owner: Devin Simpson (devin.simpson@goa.fit)**
+**Version 1.2 · 2026-09-06 · Owner: Devin Simpson (devin.simpson@goa.fit)**
 
 This is the governing document for We Stay Fit (WSF). It is written to be read by
 **Claude Code, ChatGPT, Maia, and Manus** as well as by people. When any of them
@@ -404,6 +404,12 @@ aggregate information unless a member separately consents.
 No child accounts, minor profiles, school accounts, youth-leader access, parent-managed
 child profiles, child location tracking, child health information, or public child names.
 A family challenge may involve children offline; no child identity is stored.
+
+**Superseded in part, 2026-09-06 (Devin; `DECISIONS.md` 2026-09-06 "Age gate removed"):** the
+18+ confirmation is removed from profile creation and from the create/join guards, so
+members under 18 may hold accounts. Still excluded: under-13 data (COPPA floor; the PM
+recommends a "13 or older" sentence, pending Devin), child location, child health
+information, public child names, parent-managed profiles.
 
 ### Authorization
 

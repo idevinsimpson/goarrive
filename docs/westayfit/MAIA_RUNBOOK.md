@@ -111,6 +111,10 @@ long-running work inside a chat turn is no longer acceptable.
    nor `prompts.inline` is read by `bot.js`; every turn's prompt is
    `slack.base_system_prompt` (+ the channel `system_prompt`) in `config.local.json` —
    that is where the sentence goes (repo analysis 21:45Z, `maia/unwedge-v5-1` @ `c32c0fc`).
+   **Done (c):** appended to `slack.base_system_prompt` in `config/config.local.json` at 01:15Z
+   2026-09-06 (backup `config.local.json.bak-20260906T011502Z`, 6316 → 6780 chars), restart
+   01:18:23Z, **LIVE VERIFIED 01:21Z** — she confirmed the sentence is in her running prompt
+   (thread 1788657643.723519).
 6. Fresh thread per dispatch. A 350-reply thread kills even zero-tool turns.
 7. **No buttons. Choices are text.** When she posts an A/B/C as Slack buttons, her bot
    enters a modal "pick one" state and the **next message in the thread is consumed as the
