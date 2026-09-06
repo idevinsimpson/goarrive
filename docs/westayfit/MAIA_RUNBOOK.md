@@ -271,7 +271,9 @@ way.
   (commit B). Branch `maia/live-progress-heartbeat-v2` (A `ce0b061`, B `36c720a`) applied
   by patch on the box; backup `bot.js.bak-20260905T173052Z`. Full record in
   `dispatch/BOT-LIVE-PROGRESS.md`.
-- **Un-wedge (defects 0–2 in `dispatch/BOT-UNWEDGE.md`) — in progress in a third session**
+- **Un-wedge (defects 0–2 in `dispatch/BOT-UNWEDGE.md`) — applied through v5; stall detector,
+  silent tick and spoken-as-text LIVE VERIFIED; the control verbs (`status`/`cancel`/`restart`)
+  are built and allowlisted but not yet exercised from Devin's own Slack client.** Built
   on branch `maia/unwedge-v1`: absorb the last heartbeat phrase on the narration-stream
   path; a real absolute-cap timer that kills the CLI process group plus a stall detector;
   and the `maia: status` / `maia: restart` / `maia: cancel` control path served before

@@ -181,3 +181,8 @@ could hold.
   the service is alive and healthy. Main process ID is 2247899, zero restarts, …` with the
   `🎙️ *Jarvis audio reply* — tap to play` line last and `jarvis-reply-2026-09-06-005825.mp3`
   attached. No audio-only message; the spoken script carried nothing the text did not.
+- **v5 on a full-length turn (E3 acceptance, thread 1788656340.358089, 2026-09-06):** the
+  quick-ack posted its script as text at 00:59:08Z, the written report landed 01:02:28Z in
+  three parts, the audio bundle at 01:02:32Z carried its script, and the Jarvis reply at
+  01:02:47Z carried a four-paragraph script that summarised the written report without
+  adding to it. Rule 5 is enforced in code on the running service.
