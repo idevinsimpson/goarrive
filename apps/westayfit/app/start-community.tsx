@@ -36,7 +36,7 @@ const JOIN_POLICY_OPTIONS: { value: JoinPolicy; label: string; description: stri
   {
     value: 'private',
     label: 'Private',
-    description: 'I add each member myself.',
+    description: 'I add each member.',
   },
 ];
 
