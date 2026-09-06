@@ -73,6 +73,7 @@ EXPO_PUBLIC_WSF_USE_EMULATORS=1 \
 # lets the "unknown email" assertion be honest instead of a mock.
 echo "--- callable suite (firestore + auth, fast) ---"
 firebase emulators:exec --only firestore,auth --project goarrive \
+  --config "$EMULATOR_CONFIG" \
   "npm --prefix functions-westayfit run test:callable"
 
 echo "--- drive the flow ---"
