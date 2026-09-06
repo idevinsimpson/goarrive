@@ -41,11 +41,17 @@ export default function VerifyEmail() {
         await user.getIdToken(true);
         // Same profile-vs-signed-in-home fork as signin.tsx — an already-set-up
         // member who is just clearing verify limbo lands on the home, not on a
-        // profile screen they already finished.
+        // profile screen they already finished. A brand-new signup with a
+        // pending join code MUST still hit profile-setup first so the profile
+        // exists before wsfJoinCommunity is called; nextRouteAfterAuth is only
+        // safe on the terminal (profile-exists) branch.
         const db = getFirebaseFirestore();
         const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
-        const fallback = profileSnap.exists() ? '/' : '/profile-setup';
-        router.replace(nextRouteAfterAuth(fallback) as never);
+        if (!profileSnap.exists()) {
+          router.replace('/profile-setup' as never);
+          return;
+        }
+        router.replace(nextRouteAfterAuth('/') as never);
       } else {
         setStatus('Still unverified. Check your inbox and try again.');
       }

@@ -62,10 +62,15 @@ export function clearPendingJoinCode(): void {
 }
 
 /**
- * Where a caller should route after a successful auth step. If a pending join
- * code is in play it wins — that is the whole point of the round-trip.
- * Otherwise falls back to the caller's default (e.g. '/profile-setup' after
- * verify-email, '/start-community' after profile-setup).
+ * Where a caller should route on the terminal auth hop. If a pending join code
+ * is in play it wins — that is the whole point of the round-trip. Otherwise
+ * falls back to the caller's default (which for every current caller is `/`).
+ *
+ * Only invoke on the terminal hop — after the member is verified AND has a
+ * profile. Interim gates (verify-email, profile-setup) MUST route directly to
+ * the next gate; otherwise `wsfJoinCommunity` fires before the profile exists
+ * and the visitor dead-ends. The pending code survives sessionStorage across
+ * the gate hops and is consumed here on the last step.
  */
 export function nextRouteAfterAuth(fallback: string): string {
   const pending = readPendingJoinCode();

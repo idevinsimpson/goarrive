@@ -40,21 +40,24 @@ export default function SignIn() {
       // "Verify your email" tells them to check an inbox for nothing and makes
       // them tap through a step they finished long ago.
       //
-      // A returning member who scanned a QR before signing in has a pending
-      // join code stashed by the /join/<code> route; nextRouteAfterAuth hands
-      // that visitor straight back to the join page. Callers without a pending
-      // code fall through to the ordinary fallback.
+      // Pending-join-code precedence is terminal-only: signin -> verify ->
+      // profile-setup -> /join/<code> -> /community/<id>. An unverified or
+      // profileless member must complete their gate BEFORE the join round-trip
+      // resumes, otherwise the wsfJoinCommunity guards fail and the visitor
+      // dead-ends. Only a member who is verified AND has a profile is allowed
+      // to consult nextRouteAfterAuth — the pending code survives sessionStorage
+      // across the gate hops and is consumed on the final terminal hop.
       if (!credential.user.emailVerified) {
-        router.replace(nextRouteAfterAuth('/verify-email'));
+        router.replace('/verify-email');
         return;
       }
-      // Verified: check for an existing profile. A returning member with a
-      // profile lands on the signed-in home; a member who never finished
-      // profile-setup lands on it.
       const db = getFirebaseFirestore();
       const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', credential.user.uid));
-      const fallback = profileSnap.exists() ? '/' : '/profile-setup';
-      router.replace(nextRouteAfterAuth(fallback));
+      if (!profileSnap.exists()) {
+        router.replace('/profile-setup');
+        return;
+      }
+      router.replace(nextRouteAfterAuth('/'));
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-in failed.'));
     } finally {

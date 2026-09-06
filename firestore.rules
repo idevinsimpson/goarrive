@@ -1214,14 +1214,14 @@ service cloud.firestore {
     }
 
     // wsfMemberProfiles/{uid} — owner-only; platform admin read-only.
-    // Adult-confirmation invariant is enforced at create AND kept true on update.
+    // Age gate removed 2026-09-06 (DECISIONS.md): adultConfirmation is no longer
+    // required. Terms + privacy version pins remain as the consent record.
     match /wsfMemberProfiles/{uid} {
       allow read: if (isAuthenticated() && request.auth.uid == uid) || isPlatformAdmin();
 
       allow create: if isAuthenticated()
         && request.auth.uid == uid
         && wsfEmailVerified()
-        && request.resource.data.adultConfirmation == true
         && request.resource.data.displayName is string
         && request.resource.data.acceptedTermsVersion is string
         && request.resource.data.acceptedPrivacyVersion is string;
@@ -1229,7 +1229,6 @@ service cloud.firestore {
       allow update: if isAuthenticated()
         && request.auth.uid == uid
         && wsfEmailVerified()
-        && request.resource.data.adultConfirmation == true
         && request.resource.data.acceptedTermsVersion is string
         && request.resource.data.acceptedPrivacyVersion is string;
 
