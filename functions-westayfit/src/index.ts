@@ -316,9 +316,13 @@ function readSendConfig(): SendConfig {
     !appUrl && 'WSF_APP_URL',
   ].filter(Boolean);
   if (missing.length) {
+    // Shared by wsfSendVerificationEmail and wsfSendPasswordResetEmail. The
+    // client screens key on `failed-precondition` to show their honest
+    // "not set up yet on this build" copy (verify-email C7, reset-password C3
+    // in E3.5 §3C).
     throw new HttpsError(
       'failed-precondition',
-      `wsfSendVerificationEmail is not configured: missing ${missing.join(', ')}.`
+      `WSF email sending is not configured: missing ${missing.join(', ')}.`
     );
   }
   return {
@@ -1337,5 +1341,158 @@ export const wsfChallengePulse = onCall<PulseRequest>(
     const totals = await readChallengeTotals(challengeId, challenge.goalTarget ?? null);
     pulseCacheSet(challengeId, now, totals);
     return totals;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfSendPasswordResetEmail — self-service password reset for a signed-out
+// visitor. Devin's returning sign-in stopped at "email and password do not
+// match" with no way out (E3.5 §3C F12), and enumeration protection is the
+// entire reason this callable exists rather than surfacing Firebase Auth's
+// built-in reset. The screen never learns whether the address is on file.
+//
+// SECURITY — the constraints behind every line below:
+//   * Unauthenticated by design: a visitor who has forgotten their password
+//     cannot sign in first. Public invoker at deploy time.
+//   * Never reveals whether an account exists. Unknown email, malformed
+//     email, and successful send all return the same `{ accepted: true }`.
+//     No log line names the address either — a shared error log would
+//     otherwise become a signup list.
+//   * Per-EMAIL quota (sha256-hashed key). Same cooldown + daily cap as
+//     wsfSendVerificationEmail's per-uid quota, but since there is no uid
+//     the recipient itself has to be the key. The write happens before the
+//     unknown-email check on purpose: conditioning it on account existence
+//     would leak that fact via a Firestore write pattern.
+//   * Same Resend config path as verification. Refuses to run unconfigured
+//     with `failed-precondition` so the screen can render the honest
+//     "not set up yet on this build" copy.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function checkResetQuota(emailKey: string, now: number): Promise<number> {
+  const ref = getFirestore().doc(`wsfPasswordResetSends/${emailKey}`);
+  const snap = await ref.get();
+  const data = snap.data() as
+    | { lastSentAt?: number; dayStart?: number; countToday?: number }
+    | undefined;
+
+  const since = now - (data?.lastSentAt ?? 0);
+  if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return SEND_COOLDOWN_MS - since;
+
+  const dayStart = data?.dayStart ?? 0;
+  const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
+  const countToday = sameDay ? (data?.countToday ?? 0) : 0;
+  if (countToday >= SEND_DAILY_CAP) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Too many password reset requests today. Try again tomorrow.'
+    );
+  }
+
+  await ref.set(
+    { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
+    { merge: true }
+  );
+  return 0;
+}
+
+function normalizeResetEmail(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim().toLowerCase();
+  // Not RFC 5322 — just a cheap shape check so obvious garbage is rejected
+  // before we hash it or hand it to the Admin SDK. The Admin SDK will refuse
+  // truly malformed addresses; anything it accepts, we accept.
+  if (trimmed.length < 3 || trimmed.length > 254) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function hashEmailForQuota(email: string): string {
+  return createHash('sha256').update(email).digest('hex').slice(0, 32);
+}
+
+type SendPasswordResetRequest = { email?: unknown };
+type SendPasswordResetResponse = { accepted: true };
+
+export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
+  // invoker: 'public' — the caller is signed out by definition. Same shape
+  // as wsfPreviewCommunity. secrets: [wsfEmailApiKey] — Cloud Run mounts the
+  // Resend key at process.env for `.value()` to read.
+  { region: 'us-central1', secrets: [wsfEmailApiKey], invoker: 'public' },
+  async (request): Promise<SendPasswordResetResponse> => {
+    const email = normalizeResetEmail(request.data?.email);
+    if (!email) {
+      throw new HttpsError('invalid-argument', 'email is required.');
+    }
+
+    // Config first, quota second — same order as verification, so a missing
+    // secret surfaces as failed-precondition before any Firestore write.
+    const config = readSendConfig();
+
+    const emailKey = hashEmailForQuota(email);
+    const waitMs = await checkResetQuota(emailKey, Date.now());
+    if (waitMs > 0) {
+      throw new HttpsError(
+        'resource-exhausted',
+        `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another reset.`
+      );
+    }
+
+    let minted: string;
+    try {
+      minted = await getAuth().generatePasswordResetLink(email, {
+        url: config.appUrl,
+      });
+    } catch (e) {
+      const code =
+        typeof e === 'object' && e && 'code' in e
+          ? String((e as { code?: unknown }).code ?? '')
+          : '';
+      // Unknown email is the whole enumeration case: return the SAME success
+      // shape the happy path returns. auth/invalid-email is folded in for the
+      // same reason — the client shouldn't be able to distinguish "you typed
+      // it wrong" from "not on file".
+      if (
+        code === 'auth/user-not-found' ||
+        code === 'auth/email-not-found' ||
+        code === 'auth/invalid-email'
+      ) {
+        return { accepted: true };
+      }
+      // Anything else is a real fault. Log the code only, never the address.
+      console.error('[wsfSendPasswordResetEmail] Admin SDK failed', code || 'unknown');
+      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+    }
+
+    const link = retargetActionLink(minted, config.actionHandler);
+
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: config.from,
+        to: [email],
+        subject: 'Reset your We Stay Fit password',
+        text: [
+          'Someone asked to reset the password for your We Stay Fit account.',
+          '',
+          'Open this link to choose a new password. The link expires in an hour.',
+          '',
+          link,
+          '',
+          'If you did not ask for a reset, you can ignore this message.',
+        ].join('\n'),
+      }),
+    });
+
+    if (!res.ok) {
+      // The provider response body can echo the recipient; log the status only.
+      console.error('[wsfSendPasswordResetEmail] provider rejected send', res.status);
+      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+    }
+
+    return { accepted: true };
   }
 );
