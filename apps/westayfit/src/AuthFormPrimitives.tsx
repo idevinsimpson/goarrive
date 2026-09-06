@@ -144,9 +144,17 @@ export function StatusText({ children, testID }: { children: ReactNode; testID?:
   );
 }
 
-export function SecondaryLink({ href, label }: { href: string; label: string }) {
+export function SecondaryLink({
+  href,
+  label,
+  testID,
+}: {
+  href: string;
+  label: string;
+  testID?: string;
+}) {
   return (
-    <Link href={href as never} style={styles.link}>
+    <Link href={href as never} style={styles.link} testID={testID}>
       {label}
     </Link>
   );

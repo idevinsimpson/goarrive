@@ -14,7 +14,7 @@ import {
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
-import { authErrorMessage } from '../src/authErrors';
+import { authErrorMessage, isCredentialMismatch } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
@@ -24,6 +24,7 @@ export default function SignIn() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mismatch, setMismatch] = useState(false);
   const passwordRef = useRef<TextInput>(null);
 
   if (!wsfAuthEnabled) {
@@ -32,6 +33,7 @@ export default function SignIn() {
 
   async function onSubmit() {
     setError(null);
+    setMismatch(false);
     setSubmitting(true);
     try {
       // Trim AND lowercase — Firebase Auth stores addresses lowercase, so a
@@ -67,6 +69,7 @@ export default function SignIn() {
       router.replace(nextRouteAfterAuth('/'));
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-in failed.'));
+      setMismatch(isCredentialMismatch(e));
     } finally {
       setSubmitting(false);
     }
@@ -106,12 +109,37 @@ export default function SignIn() {
         testID="wsf-signin-password"
       />
       {error ? <ErrorText testID="wsf-signin-error">{error}</ErrorText> : null}
+      {/* Firebase Auth's enumeration protection collapses "no such user" and
+          "wrong password" into one code — so the only honest next steps are
+          the two forks that cover both cases. Reset the password you have, or
+          create the account you don't. Buried in the paragraph, either is
+          invisible; as tappable links they resolve the dead end E3.5 §3C
+          caught. */}
+      {mismatch ? (
+        <>
+          <SecondaryLink
+            href="/reset-password"
+            label="Forgot your password?"
+            testID="wsf-signin-error-forgot"
+          />
+          <SecondaryLink
+            href="/signup"
+            label="New here? Create an account"
+            testID="wsf-signin-error-create"
+          />
+        </>
+      ) : null}
       <SubmitButton
         label="Sign in"
         onPress={onSubmit}
         submitting={submitting}
         disabled={!email || !password}
         testID="wsf-signin-submit"
+      />
+      <SecondaryLink
+        href="/reset-password"
+        label="Forgot your password?"
+        testID="wsf-signin-forgot"
       />
       <SecondaryLink href="/signup" label="New here? Create an account" />
     </FormShell>

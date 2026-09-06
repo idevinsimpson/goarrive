@@ -40,6 +40,23 @@ export function isEmailAlreadyInUse(err: unknown): boolean {
   return authErrorCode(err) === 'auth/email-already-in-use';
 }
 
+/**
+ * True when the caller failed the email/password check in a way Firebase's own
+ * enumeration protection collapses into "the two values don't match" — the
+ * signin screen keys on this to render the two next-step links after the
+ * error (E3.5 §3C C4). Includes `auth/user-not-found` because Firebase Auth
+ * now returns `auth/invalid-credential` for unknown-user OR wrong-password by
+ * default anyway; the older codes are kept for older SDK builds.
+ */
+export function isCredentialMismatch(err: unknown): boolean {
+  const code = authErrorCode(err);
+  return (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/wrong-password' ||
+    code === 'auth/user-not-found'
+  );
+}
+
 export function authErrorCode(err: unknown): string | null {
   if (err && typeof err === 'object' && 'code' in err) {
     const code = (err as { code?: unknown }).code;
