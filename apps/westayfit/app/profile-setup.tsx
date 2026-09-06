@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
@@ -16,14 +17,10 @@ import {
   TextField,
 } from '../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../src/featureFlags';
-import { getFirebaseFirestore } from '../src/firebase';
+import { getFirebaseFirestore, getFirebaseFunctions } from '../src/firebase';
 import { LegalAccordion } from '../src/LegalAccordion';
 import { WSF_PRIVACY_MARKDOWN, WSF_TERMS_MARKDOWN } from '../src/legalContent';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
-import {
-  WSF_ACCEPTED_PRIVACY_VERSION,
-  WSF_ACCEPTED_TERMS_VERSION,
-} from '../src/profileConstants';
 
 type ExistingProfile = {
   displayName?: string;
@@ -41,6 +38,11 @@ export default function ProfileSetup() {
   const [error, setError] = useState<string | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [existing, setExisting] = useState<ExistingProfile | null>(null);
+  // If the mount-time existence read fails we cannot know whether a profile
+  // already exists. Submitting anyway would fall through to the create branch
+  // of wsfSaveProfile and clobber createdAt on a returning member. Block the
+  // submit until the read succeeds — the member can retry the page.
+  const [existenceReadFailed, setExistenceReadFailed] = useState(false);
 
   useEffect(() => {
     // Bail out until auth is settled and we have a verified user; the other
@@ -66,6 +68,7 @@ export default function ProfileSetup() {
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : 'Could not load profile.');
+        setExistenceReadFailed(true);
         setProfileLoaded(true);
       }
     })();
@@ -119,27 +122,24 @@ export default function ProfileSetup() {
   }
 
   const initialName = displayName || user.displayName || '';
-  const canSubmit = acceptedTerms && !!initialName.trim();
+  const canSubmit = acceptedTerms && !!initialName.trim() && !existenceReadFailed;
 
   async function onSubmit() {
     if (!user) return;
     setError(null);
     setSubmitting(true);
     try {
-      const db = getFirebaseFirestore();
-      // Create-or-update: never touch `createdAt` on update; version fields
-      // are always re-stamped to the current constant so a bump ripples through
-      // to the stored consent record when a member next opens the app.
-      const payload: Record<string, unknown> = {
-        displayName: initialName.trim(),
-        acceptedTermsVersion: WSF_ACCEPTED_TERMS_VERSION,
-        acceptedPrivacyVersion: WSF_ACCEPTED_PRIVACY_VERSION,
-        updatedAt: serverTimestamp(),
-      };
-      if (!existing) {
-        payload.createdAt = serverTimestamp();
-      }
-      await setDoc(doc(db, 'wsfMemberProfiles', user.uid), payload, { merge: true });
+      // wsfSaveProfile owns the create-vs-update fork and the accepted-version
+      // stamping; the client only supplies displayName. firestore.rules still
+      // require adultConfirmation on this collection (DECISIONS.md 2026-09-06
+      // removed the age gate on the client but the rules edit is a separate
+      // deploy) so a client setDoc would fail with PERMISSION_DENIED. The
+      // Admin-SDK write inside the callable bypasses rules.
+      const fn = httpsCallable<{ displayName: string }, { created: boolean }>(
+        getFirebaseFunctions(),
+        'wsfSaveProfile'
+      );
+      await fn({ displayName: initialName.trim() });
       // Round-trip: a visitor who arrived via /join/<code> is stashed a pending
       // code on that page. Profile-setup is the LAST step whose completion makes
       // wsfJoinCommunity's guards pass — verified + profile exists — so this is

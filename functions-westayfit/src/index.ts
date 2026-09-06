@@ -52,6 +52,97 @@ export const wsfHealth = onCall(
   }
 );
 
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfSaveProfile — create-or-update wsfMemberProfiles/{uid} via the Admin SDK.
+//
+// A callable, not a client setDoc, for two reasons:
+//   1. firestore.rules require adultConfirmation on wsfMemberProfiles create,
+//      DECISIONS.md 2026-09-06 removed the age gate, and a rules edit is a
+//      separate deploy on Devin's say-so. The Admin SDK write bypasses rules
+//      the same way every other WSF write already does.
+//   2. The server owns which terms/privacy version is being accepted and when.
+//      A client-written version is trivially spoofable; a callable stamps it
+//      from server-side constants that mirror profileConstants.ts.
+//
+// Input:  { displayName: string }  — 2..80 chars after trim.
+// Output: { created: boolean }     — true when the document did not exist.
+//
+// Create writes displayName, both accepted versions, createdAt and updatedAt.
+// Update writes displayName and updatedAt; accepted versions are re-stamped
+// ONLY if they differ from the stored values, so re-saving through ?edit=1
+// leaves createdAt and the consent record untouched when nothing changed.
+//
+// WSF_ACCEPTED_TERMS_VERSION / WSF_ACCEPTED_PRIVACY_VERSION MUST equal
+// apps/westayfit/src/profileConstants.ts. Bump both files in the same PR.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WSF_ACCEPTED_TERMS_VERSION = 'pending-approval-2026-08-25';
+const WSF_ACCEPTED_PRIVACY_VERSION = 'pending-approval-2026-08-25';
+
+type SaveProfileRequest = {
+  displayName?: unknown;
+};
+
+type SaveProfileResponse = { created: boolean };
+
+export const wsfSaveProfile = onCall<SaveProfileRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<SaveProfileResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'wsfSaveProfile requires an authenticated caller.');
+    }
+    const token = request.auth.token as { email_verified?: boolean };
+    if (token.email_verified !== true) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Verify your email before saving your profile.'
+      );
+    }
+    const uid = request.auth.uid;
+
+    const rawDisplayName = request.data?.displayName;
+    if (typeof rawDisplayName !== 'string') {
+      throw new HttpsError('invalid-argument', 'displayName must be a string.');
+    }
+    const displayName = rawDisplayName.trim();
+    if (displayName.length < 2 || displayName.length > 80) {
+      throw new HttpsError('invalid-argument', 'displayName must be 2-80 characters.');
+    }
+
+    const db = getFirestore();
+    const ref = db.doc(`wsfMemberProfiles/${uid}`);
+    const snap = await ref.get();
+
+    if (!snap.exists) {
+      await ref.set({
+        displayName,
+        acceptedTermsVersion: WSF_ACCEPTED_TERMS_VERSION,
+        acceptedPrivacyVersion: WSF_ACCEPTED_PRIVACY_VERSION,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { created: true };
+    }
+
+    const existing = snap.data() as {
+      acceptedTermsVersion?: string;
+      acceptedPrivacyVersion?: string;
+    };
+    const update: Record<string, unknown> = {
+      displayName,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (existing.acceptedTermsVersion !== WSF_ACCEPTED_TERMS_VERSION) {
+      update.acceptedTermsVersion = WSF_ACCEPTED_TERMS_VERSION;
+    }
+    if (existing.acceptedPrivacyVersion !== WSF_ACCEPTED_PRIVACY_VERSION) {
+      update.acceptedPrivacyVersion = WSF_ACCEPTED_PRIVACY_VERSION;
+    }
+    await ref.update(update);
+    return { created: false };
+  }
+);
+
 type CreateCommunityRequest = {
   displayName?: unknown;
   groupType?: unknown;
