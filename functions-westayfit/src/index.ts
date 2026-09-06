@@ -114,13 +114,8 @@ export const wsfCreateCommunity = onCall<CreateCommunityRequest>(
           'Complete your profile before creating a community.'
         );
       }
-      const profile = profileSnap.data() as { adultConfirmation?: unknown };
-      if (profile.adultConfirmation !== true) {
-        throw new HttpsError(
-          'failed-precondition',
-          'You must confirm you are 18 or older before creating a community.'
-        );
-      }
+      // Age gate removed 2026-09-06 (Devin, DECISIONS.md). Profile existence is
+      // still gated; adultConfirmation is no longer read here.
 
       tx.set(groupRef, {
         displayName,
@@ -571,13 +566,8 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
           'Complete your profile before joining a community.'
         );
       }
-      const profile = profileSnap.data() as { adultConfirmation?: unknown };
-      if (profile.adultConfirmation !== true) {
-        throw new HttpsError(
-          'failed-precondition',
-          'You must confirm you are 18 or older before joining a community.'
-        );
-      }
+      // Age gate removed 2026-09-06 (Devin, DECISIONS.md). Profile existence is
+      // still gated; adultConfirmation is no longer read here.
 
       if (groupsSnap.empty) notFound();
       const groupDoc = groupsSnap.docs[0]!;

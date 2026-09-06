@@ -32,25 +32,14 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { mintJoinCode, wsfJoinCommunity } from '../../src/index';
 
-async function seedAdultProfile(uid: string) {
+async function seedProfile(uid: string, extra: Record<string, unknown> = {}) {
   await getFirestore()
     .doc(`wsfMemberProfiles/${uid}`)
     .set({
       displayName: 'Test User',
-      adultConfirmation: true,
       acceptedTermsVersion: 'pending-approval-2026-08-25',
       acceptedPrivacyVersion: 'pending-approval-2026-08-25',
-    });
-}
-
-async function seedNonAdultProfile(uid: string) {
-  await getFirestore()
-    .doc(`wsfMemberProfiles/${uid}`)
-    .set({
-      displayName: 'Kid',
-      adultConfirmation: false,
-      acceptedTermsVersion: 'pending-approval-2026-08-25',
-      acceptedPrivacyVersion: 'pending-approval-2026-08-25',
+      ...extra,
     });
 }
 
@@ -130,7 +119,7 @@ describe('wsfJoinCommunity', () => {
   });
 
   test('happy path: verified adult joins a public+active group', async () => {
-    await seedAdultProfile('wsfJoin_alice');
+    await seedProfile('wsfJoin_alice');
     const code = mintJoinCode();
     const groupId = await seedGroup({ joinCode: code, joinPolicy: 'public' });
 
@@ -153,7 +142,7 @@ describe('wsfJoinCommunity', () => {
   });
 
   test('§3.2 idempotency: joining twice writes ONE membership doc and returns alreadyMember=true', async () => {
-    await seedAdultProfile('wsfJoin_bob');
+    await seedProfile('wsfJoin_bob');
     const code = mintJoinCode();
     const groupId = await seedGroup({ joinCode: code, joinPolicy: 'public' });
 
@@ -185,7 +174,7 @@ describe('wsfJoinCommunity', () => {
   });
 
   test('unverified email: failed-precondition (default JOIN_REQUIRES_EMAIL_VERIFIED=true)', async () => {
-    await seedAdultProfile('wsfJoin_carol');
+    await seedProfile('wsfJoin_carol');
     const code = mintJoinCode();
     await seedGroup({ joinCode: code, joinPolicy: 'public' });
 
@@ -207,20 +196,22 @@ describe('wsfJoinCommunity', () => {
     expect(result.error.message).toMatch(/Complete your profile/i);
   });
 
-  test('adultConfirmation false: failed-precondition', async () => {
-    await seedNonAdultProfile('wsfJoin_erin');
+  test('§3 A5 age gate removed: a profile with no adultConfirmation joins successfully', async () => {
+    // Pre-2026-09-06 this failed with "18 or older". Devin removed the guard;
+    // the callable is now expected to accept a profile that never wrote an
+    // adultConfirmation field at all.
+    await seedProfile('wsfJoin_erin');
     const code = mintJoinCode();
-    await seedGroup({ joinCode: code, joinPolicy: 'public' });
+    const groupId = await seedGroup({ joinCode: code, joinPolicy: 'public' });
 
     const result = await tryRun('wsfJoin_erin', true, { joinCode: code });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('failed-precondition');
-    expect(result.error.message).toMatch(/18 or older/i);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual({ groupId, alreadyMember: false });
   });
 
   test('non-public group: same not-found as unknown code (no oracle)', async () => {
-    await seedAdultProfile('wsfJoin_frank');
+    await seedProfile('wsfJoin_frank');
     const privateCode = mintJoinCode();
     await seedGroup({ joinCode: privateCode, joinPolicy: 'private' });
 
@@ -237,7 +228,7 @@ describe('wsfJoinCommunity', () => {
   });
 
   test('non-active lifecycle: same not-found as unknown code', async () => {
-    await seedAdultProfile('wsfJoin_grace');
+    await seedProfile('wsfJoin_grace');
     const archivedCode = mintJoinCode();
     await seedGroup({
       joinCode: archivedCode,
@@ -256,7 +247,7 @@ describe('wsfJoinCommunity', () => {
     // The rule is "new joins require public+active", not "old members lose
     // access when a champion flips a setting." Guard the second, quieter half
     // of that rule here.
-    await seedAdultProfile('wsfJoin_alice');
+    await seedProfile('wsfJoin_alice');
     const code = mintJoinCode();
     const groupId = await seedGroup({ joinCode: code, joinPolicy: 'public' });
 

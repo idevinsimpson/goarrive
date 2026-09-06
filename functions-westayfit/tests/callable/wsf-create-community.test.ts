@@ -17,14 +17,14 @@ import { wsfCreateCommunity } from '../../src/index';
 const ALICE_UID = 'wsfCreateCommunityAlice';
 const BOB_UID = 'wsfCreateCommunityBob';
 
-async function seedAdultProfile(uid: string) {
+async function seedProfile(uid: string, extra: Record<string, unknown> = {}) {
   await getFirestore()
     .doc(`wsfMemberProfiles/${uid}`)
     .set({
       displayName: 'Test User',
-      adultConfirmation: true,
       acceptedTermsVersion: 'pending-approval-2026-08-25',
       acceptedPrivacyVersion: 'pending-approval-2026-08-25',
+      ...extra,
     });
 }
 
@@ -53,8 +53,9 @@ describe('wsfCreateCommunity', () => {
     await Promise.all([clearMemberProfile(ALICE_UID), clearMemberProfile(BOB_UID)]);
   });
 
-  test('happy path: verified adult creates community + membership', async () => {
-    await seedAdultProfile(ALICE_UID);
+  test('happy path: verified member creates community + membership (age gate removed)', async () => {
+    // §3 A5 — profile has NO adultConfirmation field; create must succeed.
+    await seedProfile(ALICE_UID);
 
     const result = await wsfCreateCommunity.run(
       makeRequest(ALICE_UID, true, {
@@ -96,7 +97,7 @@ describe('wsfCreateCommunity', () => {
   });
 
   test('unverified email is rejected with failed-precondition', async () => {
-    await seedAdultProfile(BOB_UID);
+    await seedProfile(BOB_UID);
 
     let caught: unknown;
     try {
