@@ -103,7 +103,6 @@ test('A4: the terms accordion opens inline and shows the pending-approval versio
   await page.getByTestId('wsf-signup-displayName').fill('Terms Reader');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
-  await page.getByTestId('wsf-signup-adultCheckbox').click();
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
@@ -133,7 +132,6 @@ test('A4: the privacy accordion carries the same version marker', async ({ page 
   await page.getByTestId('wsf-signup-displayName').fill('Privacy Reader');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
-  await page.getByTestId('wsf-signup-adultCheckbox').click();
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });

@@ -177,7 +177,8 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await page.getByTestId('wsf-signup-displayName').fill('Second Adult');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
-  await page.getByTestId('wsf-signup-adultCheckbox').click();
+  // E3.5 A4 (extended to signup): the 18+ checkbox is gone from signup too.
+  await expect(page.getByTestId('wsf-signup-adultCheckbox')).toHaveCount(0);
   await page.getByTestId('wsf-signup-submit').click();
 
   // Signup ships forward to verify-email even when the emulator's mail send
@@ -188,7 +189,8 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await page.getByTestId('wsf-verify-check').click();
 
   await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('wsf-profile-adultCheckbox').click();
+  // E3.5 A4: the 18+ checkbox is gone from profile-setup.
+  await expect(page.getByTestId('wsf-profile-adultCheckbox')).toHaveCount(0);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 

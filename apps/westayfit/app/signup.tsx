@@ -1,11 +1,9 @@
 import { router } from 'expo-router';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
 
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
-  authFormStyles,
   ErrorText,
   FieldLabel,
   FormShell,
@@ -22,7 +20,6 @@ export default function SignUp() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmAdult, setConfirmAdult] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offerSignIn, setOfferSignIn] = useState(false);
@@ -31,7 +28,7 @@ export default function SignUp() {
     return <AuthFlagOffPanel title="Create your account" testID="wsf-signup-disabled" />;
   }
 
-  const canSubmit = confirmAdult && !!displayName.trim() && !!email.trim() && password.length >= 8;
+  const canSubmit = !!displayName.trim() && !!email.trim() && password.length >= 8;
 
   async function onSubmit() {
     setError(null);
@@ -64,7 +61,7 @@ export default function SignUp() {
     <FormShell
       eyebrow="We Stay Fit"
       heading="Create your account"
-      intro="Adults only. We will send a verification email before you can join a community."
+      intro="We will send a verification email before you can join a community."
       testID="wsf-signup"
     >
       <FieldLabel>Display name</FieldLabel>
@@ -89,21 +86,6 @@ export default function SignUp() {
         secureTextEntry
         testID="wsf-signup-password"
       />
-
-      <Pressable
-        onPress={() => setConfirmAdult((v) => !v)}
-        style={authFormStyles.checkboxRow}
-        testID="wsf-signup-adultCheckbox"
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: confirmAdult }}
-      >
-        <View style={[authFormStyles.checkbox, confirmAdult ? authFormStyles.checkboxChecked : null]}>
-          {confirmAdult ? <Text style={authFormStyles.checkboxCheck}>{'\u2713'}</Text> : null}
-        </View>
-        <Text style={authFormStyles.checkboxLabel}>
-          I confirm I am 18 or older, and I accept the Terms of Service and Privacy Policy.
-        </Text>
-      </Pressable>
 
       {error ? <ErrorText testID="wsf-signup-error">{error}</ErrorText> : null}
 

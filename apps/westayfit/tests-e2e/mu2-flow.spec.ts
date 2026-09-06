@@ -110,7 +110,11 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await page.getByTestId('wsf-signup-displayName').fill('Gate One');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
-  await page.getByTestId('wsf-signup-adultCheckbox').click();
+  // E3.5 A4 (extended to signup): the 18+ checkbox is gone from signup too;
+  // the decision now covers account creation, and profile-setup owns the
+  // terms/privacy accept. The old wsf-signup-adultCheckbox testID must not
+  // exist any more — assert its absence so a re-add regresses this test.
+  await expect(page.getByTestId('wsf-signup-adultCheckbox')).toHaveCount(0);
   await page.getByTestId('wsf-signup-submit').click();
 
   // ---- verify email -------------------------------------------------------
