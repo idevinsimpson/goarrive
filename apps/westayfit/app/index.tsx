@@ -8,6 +8,12 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useWsfAuth } from '../src/auth';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFunctions } from '../src/firebase';
+import {
+  challengeParticipationLabel,
+  groupTypeLabel,
+  memberCountLabel,
+  roleLabel,
+} from '../src/labels';
 import { wsfTheme } from '../src/theme';
 
 type MyCommunityItem = {
@@ -35,33 +41,6 @@ type MyCommunitiesState =
 
 // Same validator shape as pendingJoinCode.ts / wsfPreviewCommunity.
 const JOIN_CODE_SHAPE = /^[A-Za-z0-9_-]{16,128}$/;
-
-function inlineTypeLabel(groupType: string): string {
-  // Minimal type label for the home card; the shared src/labels.ts arrives in
-  // A6 and both this file and the community page will migrate onto it. Kept
-  // narrow deliberately — the M-U2 stub only defines two values today.
-  if (groupType === 'familyFriends') return 'Family and friends';
-  return 'Something else';
-}
-
-function inlineRoleLabel(role: string): string {
-  if (role === 'foundingChampion') return 'Founding Champion';
-  if (role === 'coChampion') return 'Co-Champion';
-  return 'Member';
-}
-
-function challengeSummary(item: MyCommunityItem): string {
-  if (!item.activeChallenge) return 'No active challenge yet';
-  const p = item.activeChallenge.participantCount;
-  const c = item.activeChallenge.completedCount;
-  const moving = p === 1 ? '1 moving' : `${p} moving`;
-  const checkins = c === 1 ? '1 check-in' : `${c} check-ins`;
-  return `${moving} · ${checkins}`;
-}
-
-function memberCountLabel(n: number): string {
-  return n === 1 ? '1 member' : `${n} members`;
-}
 
 export default function BrandShell() {
   const { ready, user } = useWsfAuth();
@@ -304,12 +283,12 @@ function MyCommunitiesList({ state }: { state: MyCommunitiesState }) {
               ) : null}
             </Text>
             <Text style={styles.communityMeta}>
-              {inlineTypeLabel(item.groupType)} · {inlineRoleLabel(item.role)} ·{' '}
+              {groupTypeLabel(item.groupType)} · {roleLabel(item.role)} ·{' '}
               {memberCountLabel(item.memberCount)}
             </Text>
             <Text style={styles.communityChallenge}>
               {item.activeChallenge
-                ? `${item.activeChallenge.title} — ${challengeSummary(item)}`
+                ? `${item.activeChallenge.title} — ${challengeParticipationLabel(item.activeChallenge.participantCount, item.activeChallenge.completedCount)}`
                 : 'No active challenge yet'}
             </Text>
           </View>
