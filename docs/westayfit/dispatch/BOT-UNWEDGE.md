@@ -173,3 +173,11 @@ could hold.
   The v5 code (`bot.js` + `audio-bundle.js`) stays in place. Lessons: manifest `rules` and
   `prompts.inline` are not read by `bot.js`; unknown manifest keys are a boot failure, not
   a no-op; runbook rule 13 (probe after every restart).
+- **v5 (spoken scripts as text) — LIVE VERIFIED 00:58:27Z 2026-09-06** (thread
+  1788656280.078399, the rule-13 probe after the recovery): reply 1 at 00:58:19Z (an empty
+  text message — the narration-stream placeholder on a turn with no long tool call; see
+  the residual under C), reply 2 at 00:58:20Z the written reply (`alive` + the `systemctl`
+  output), reply 3 at 00:58:27Z the audio message whose text begins `🎙️ *Spoken:* Devin,
+  the service is alive and healthy. Main process ID is 2247899, zero restarts, …` with the
+  `🎙️ *Jarvis audio reply* — tap to play` line last and `jarvis-reply-2026-09-06-005825.mp3`
+  attached. No audio-only message; the spoken script carried nothing the text did not.

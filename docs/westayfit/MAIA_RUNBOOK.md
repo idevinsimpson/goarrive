@@ -101,7 +101,10 @@ long-running work inside a chat turn is no longer acceptable.
    Enforced two ways from today: (a) the rule above is written into Maia's persistent
    rules/memory in her own words (dispatch 20:30Z, thread 1788640255.280279 — she pastes
    the stored entry and its path back as proof); (b) `bot.js` v5 (branch
-   `maia/unwedge-v5`, applied on the box 20:57Z) posts every spoken script — Jarvis reply, quick-ack,
+   `maia/unwedge-v5`, applied on the box 20:57Z; **LIVE VERIFIED 00:58:27Z 2026-09-06**,
+   thread 1788656280.078399: written reply first, then the audio message whose text is
+   `🎙️ *Spoken:* …` with the clip attached, and the spoken script contained nothing the
+   written reply did not) posts every spoken script — Jarvis reply, quick-ack,
    bundle — as the text of the same Slack message that carries the audio (`🎙️ *Spoken:* …`),
    so audio can never carry a fact the thread does not. Transcripts Devin pastes remain the check (the 20:24Z and 20:59Z receipts matched
    their audio). **Where the rule lives in her prompt:** neither a manifest `rules` array
@@ -258,8 +261,9 @@ way.
   (backup `assistants/maia.manifest.json.bak-rules-20260906T003706Z`), `manifest schema
   OK`, the channel hunk kept (4 insertions), `systemctl --user restart` →
   `MainPID=2247899 NRestarts=0 SubState=running ActiveEnterTimestamp=00:42:18Z`.
-  Next in order: rule-13 probe, E3 acceptance re-dispatch, then the rule-placement turn
-  (`slack.base_system_prompt`, not `prompts.inline`).
+  Rule-13 probe answered in 19 s (00:58:19Z, thread 1788656280.078399): `alive`,
+  `MainPID=2247899 NRestarts=0`. E3 acceptance re-dispatched 00:59Z; the rule-placement
+  turn (`slack.base_system_prompt`, not `prompts.inline`) follows once that lands.
 - **Live progress — LIVE VERIFIED 2026-09-05 17:40Z** (thread 1788629761.176299, on the
   service restarted 17:34:33Z). Long tool calls now show one edited-in-place line
   (`⏳ 1m40s · running: <cmd>` → `✅ 3m00s · <cmd>`); no "Still working" posts; no
