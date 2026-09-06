@@ -18,17 +18,47 @@ import { getFirebaseFunctions } from '../src/firebase';
 import { wsfTheme } from '../src/theme';
 
 type GroupType = 'familyFriends' | 'custom';
-type JoinPolicy = 'private' | 'inviteOnly';
+type JoinPolicy = 'public' | 'inviteOnly' | 'private';
 
 type CreateCommunityResponse = { groupId: string };
+
+const JOIN_POLICY_OPTIONS: { value: JoinPolicy; label: string; description: string }[] = [
+  {
+    value: 'public',
+    label: 'Public',
+    description: 'Anyone can find and join.',
+  },
+  {
+    value: 'inviteOnly',
+    label: 'Anyone with the link',
+    description: 'People with the join link can come in; not listed anywhere.',
+  },
+  {
+    value: 'private',
+    label: 'Private',
+    description: 'I add each member myself.',
+  },
+];
+
+// Per DECISIONS.md — Family and friends stays private by default; Something
+// else opens to Anyone-with-the-link by default. Public is opt-in either way.
+function defaultJoinPolicyFor(groupType: GroupType): JoinPolicy {
+  return groupType === 'familyFriends' ? 'private' : 'inviteOnly';
+}
 
 export default function StartCommunity() {
   const { ready, user } = useWsfAuth();
   const [name, setName] = useState('');
   const [groupType, setGroupType] = useState<GroupType>('familyFriends');
-  const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>('private');
+  const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>(defaultJoinPolicyFor('familyFriends'));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectGroupType = (v: string) => {
+    const next = v as GroupType;
+    setGroupType(next);
+    setJoinPolicy(defaultJoinPolicyFor(next));
+  };
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Start your community" testID="wsf-start-disabled" />;
@@ -108,20 +138,20 @@ export default function StartCommunity() {
           { value: 'custom', label: 'Something else' },
         ]}
         selected={groupType}
-        onSelect={(v) => setGroupType(v as GroupType)}
+        onSelect={selectGroupType}
         testIDPrefix="wsf-start-groupType"
       />
 
       <FieldLabel>Who can join?</FieldLabel>
       <ChoiceRow
-        options={[
-          { value: 'private', label: 'Private (I invite each member)' },
-          { value: 'inviteOnly', label: 'Invite-only link' },
-        ]}
+        options={JOIN_POLICY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
         selected={joinPolicy}
         onSelect={(v) => setJoinPolicy(v as JoinPolicy)}
         testIDPrefix="wsf-start-joinPolicy"
       />
+      <Text style={choiceStyles.policyDescription} testID="wsf-start-joinPolicy-description">
+        {JOIN_POLICY_OPTIONS.find((o) => o.value === joinPolicy)?.description ?? ''}
+      </Text>
 
       {error ? <ErrorText testID="wsf-start-error">{error}</ErrorText> : null}
 
@@ -196,5 +226,11 @@ const choiceStyles = StyleSheet.create({
   },
   pillTextSelected: {
     color: wsfTheme.colors.surface,
+  },
+  policyDescription: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.body.fontSize,
+    lineHeight: wsfTheme.typography.body.lineHeight,
+    marginBottom: wsfTheme.spacing.md,
   },
 });
