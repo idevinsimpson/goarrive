@@ -173,6 +173,13 @@ long-running work inside a chat turn is no longer acceptable.
     row means the service is down or its Slack socket is dead — stop dispatching and go to
     the console (below). Socket Mode does not replay the backlog: re-send the lost dispatch
     as a fresh thread afterwards. Added 2026-09-05 after the v5 restart went silent.
+14. **Never put a command on the same line as the opening code fence in a Slack dispatch.**
+    The Slack tool sometimes drops the first line of the first multi-line code block when it
+    follows the fence directly (seen 2026-09-05 21:22Z, 21:58Z, 2026-09-06 01:14Z and 01:26Z:
+    the dropped lines were the `cd`/branch-creation or the first diagnostic command). Write
+    the fence as ```` ```bash ````, a newline, then a comment line such as `# step 1`, then the
+    commands. Re-read the posted message and check the first line of every block before
+    ending the turn; if a line is missing, post it again as a plain reply that names the step.
 
 ## Where things live on her box (confirmed 2026-09-05)
 
