@@ -67,9 +67,12 @@ EXPO_PUBLIC_WSF_USE_EMULATORS=1 \
 # GATE 1 also has to prove §3.2 (idempotent join) and §3.3 (oracle byte-identical
 # not-found) — those properties live in the callable jest suite, not the e2e
 # browser flow. The e2e block below already owns the full emulator set; run
-# callables under `--only firestore` so we don't pay the full-suite boot twice.
-echo "--- callable suite (firestore only, fast) ---"
-firebase emulators:exec --only firestore --project goarrive \
+# callables under `--only firestore,auth` so we don't pay the full-suite boot
+# twice. `auth` is here because E3.5 §3C C3's wsfSendPasswordResetEmail test
+# needs a real Admin SDK generatePasswordResetLink call — the emulator is what
+# lets the "unknown email" assertion be honest instead of a mock.
+echo "--- callable suite (firestore + auth, fast) ---"
+firebase emulators:exec --only firestore,auth --project goarrive \
   "npm --prefix functions-westayfit run test:callable"
 
 echo "--- drive the flow ---"
@@ -81,7 +84,7 @@ WSF_PLAYWRIGHT_BASE_URL="http://127.0.0.1:${HOSTING_PORT}" \
   firebase emulators:exec \
     --project goarrive \
     --config "$EMULATOR_CONFIG" \
-    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts tests-e2e/e35-home.spec.ts"
+    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts tests-e2e/e35-home.spec.ts tests-e2e/e35-auth-polish.spec.ts"
 
 echo
 echo "GATE 1 CLEAR — profile-setup succeeded and /community/<id> served 200 on a cold load."
