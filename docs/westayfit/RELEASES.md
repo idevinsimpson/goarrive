@@ -90,3 +90,27 @@ Approved by Devin 20:10Z ("Ready for you to deploy to staging for testing"). Exe
 
 **Not LIVE VERIFIED yet:** the member flow on this channel is Devin's phone test. EMULATOR
 VERIFIED at `324cad6` (gate green 20:05Z, 7 browser specs + callable suite).
+
+## 2026-09-06 — E3.5 staging redeploy for Devin's retest (commit `642f335`)
+
+**Scope:** WSF functions codebase + WSF Hosting preview channel `staging`. Live channel untouched.
+GoArrive functions untouched (`firebase functions:list` before/after: only two new `wsf*` lines).
+Gate green at `642f335` 02:20:27Z (18 browser specs incl. the new `e35-home` spec, callable suite
+incl. `wsf-my-communities` and `wsf-save-profile`). Executed by Maia 02:21–02:30Z, thread
+#dev-westayfit 1788661278.137109.
+
+| Item | Value |
+|---|---|
+| Channel URL | `https://westayfit-app--staging-x4m0iwln.web.app` (expires 2026-09-13 02:25:12) |
+| Build | `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 npm --prefix apps/westayfit run build:web` at `642f335`; SHA in `/health`; dynamic routes present |
+| Functions created | `wsfMyCommunities`, `wsfSaveProfile` (both callable, us-central1, nodejs20) |
+| Functions updated | the whole `westayfit` codebase redeployed: `wsfCreateCommunity` and `wsfJoinCommunity` no longer require `adultConfirmation` |
+| Rules / indexes | untouched (the deployed rules still carry the dead `adultConfirmation` clauses on `wsfMemberProfiles`; harmless because the client now writes profiles through `wsfSaveProfile`) |
+| Smoke | `/health` 200 · `/` 200 · `/signin` 200 · `/join/P9RACO2GyZJWUOMHbXZW-w` 200 · `/community/wsf-staging-test/challenge` 200 |
+
+**What changed for the tester:** signed-in home with your communities, Start and Join-with-a-code;
+sign-in lands on the home when a profile exists; the 18+ checkbox is gone from signup and profile
+(replaced by the "13 or older" sentence, pending Devin's floor); Terms and Privacy expand inline
+(placeholder text until approved); community page shows human labels, a members count, and a
+copyable invite link for public communities; a third join policy *Public*; an in-app-browser
+hint. **Not LIVE VERIFIED yet:** Devin's retest in Safari, and the E3 check-in flow.
