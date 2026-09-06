@@ -237,22 +237,29 @@ way.
 
 ## Still open
 
-- **Bot silent after the v5 restart (21:02Z, 2026-09-05) — OPEN, console recovery
-  dispatched 21:2xZ.** The E3 acceptance dispatch (21:05:27Z, thread 1788642327.877409)
+- **Bot silent after the v5 restart (21:02Z, 2026-09-05) — RECOVERED 00:42:18Z
+  2026-09-06 by Manus at the console; case B confirmed.** The E3 acceptance dispatch (21:05:27Z, thread 1788642327.877409)
   and a liveness probe (21:19:59Z, thread 1788643199.385959) got no reply, not even the
   instant ack every earlier turn posted within 3 s. Only changes since the last good turn
   (20:59Z): the v5 patch (`bot.js` + `audio-bundle.js`, backups
   `*.bak-20260905T205707Z`) and a new top-level `rules` array in
   `assistants/maia.manifest.json`, then `agent-slack-deferred-restart-1788641936`.
-  **Most likely cause (repo + sandbox analysis 21:45Z, not yet confirmed on the box): the
-  manifest `rules` key.** Unknown top-level keys fail the strict manifest schema
+  **Cause, LIVE CONFIRMED from the journal (Manus, 00:32Z 2026-09-06): the manifest
+  `rules` key.** `[admission] slack.admission.identity {"mode":"deny-all","reason":
+  "registry-unavailable"}` → `[composition] refusing to boot reason=admission-deny-all`,
+  exit 1, restart counter 2281→2307 within one minute (a 5-second crash loop since
+  21:02Z). Unknown top-level keys fail the strict manifest schema
   (`UNKNOWN_FIELD`) and the bot refuses to boot before Bolt starts — a silent crash loop
   under `Restart=always`; patch I's two files load and ack cleanly on both revisions.
   Procedure for Manus in `dispatch/BOT-UNWEDGE.md` ("v5 restart incident"): step 1
   journal, expect case B, remove the key with the node one-liner (never `git checkout`
   the manifest — it also carries the westayfit channel edit), restart, look for
-  `Maia bot started in Socket Mode`. Until she answers, E3 acceptance and the
-  rule-placement follow-up (`slack.base_system_prompt`, not `prompts.inline`) wait.
+  `Maia bot started in Socket Mode`. Fix applied 00:37Z–00:42Z: key removed
+  (backup `assistants/maia.manifest.json.bak-rules-20260906T003706Z`), `manifest schema
+  OK`, the channel hunk kept (4 insertions), `systemctl --user restart` →
+  `MainPID=2247899 NRestarts=0 SubState=running ActiveEnterTimestamp=00:42:18Z`.
+  Next in order: rule-13 probe, E3 acceptance re-dispatch, then the rule-placement turn
+  (`slack.base_system_prompt`, not `prompts.inline`).
 - **Live progress — LIVE VERIFIED 2026-09-05 17:40Z** (thread 1788629761.176299, on the
   service restarted 17:34:33Z). Long tool calls now show one edited-in-place line
   (`⏳ 1m40s · running: <cmd>` → `✅ 3m00s · <cmd>`); no "Still working" posts; no

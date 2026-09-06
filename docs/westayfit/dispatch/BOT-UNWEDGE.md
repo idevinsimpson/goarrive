@@ -101,7 +101,7 @@ could hold.
   turn A thread at 18:24Z. C only suppresses it while a live-progress message exists. Next
   patch: never emit the fixed phrase; when the monitor has nothing new, stay silent.
 
-## v5 restart incident (2026-09-05 21:02Z) — OPEN
+## v5 restart incident (2026-09-05 21:02Z) — RESOLVED 2026-09-06 00:42Z
 
 - **Applied 20:57Z–20:59Z** (thread 1788641770.375139): patch I (`044985b`, branch
   `maia/unwedge-v5` @ `a73d476`) on `bot.js` + `audio-bundle.js`, `APPLIED-I`, `SYNTAX-OK`,
@@ -156,3 +156,20 @@ could hold.
   `git checkout -- assistants/maia.manifest.json` (the file also carries the westayfit
   channel edit). The v5 code stays in place; markers unchanged. Pass = `Maia bot started
   in Socket Mode` and no `refusing to boot`, then Devin's native `@Maia status`.
+- **LIVE CONFIRMED and RECOVERED (Manus, console, 00:31Z–00:42Z 2026-09-06).** Case B.
+  Step 1: `MainPID=0 Result=exit-code NRestarts=2281 SubState=auto-restart`; every 5 s the
+  journal repeated `[agent-slack] Loaded config overlay: …/config/config.local.json` →
+  `[admission] slack.admission.identity {"mode":"deny-all","reason":"registry-unavailable"}`
+  → `[admission] slack.composition.wiring {"mode":"refuse","reason":"admission-deny-all"}`
+  → `[composition] refusing to boot reason=admission-deny-all` → `status=1/FAILURE`
+  (restart counter 2303→2307 in 25 s); box memory fine (6.5 GB available). Step 2B:
+  backup `assistants/maia.manifest.json.bak-rules-20260906T003706Z`, `rules removed`,
+  `grep -c '"rules"'` = 0, `manifest schema OK` (the real loader), `git diff --stat` still
+  4 insertions (the channel edit, kept). Step 3: `systemctl --user restart agent-slack` →
+  `MainPID=2247899 NRestarts=0 SubState=running ActiveEnterTimestamp=00:42:18Z`; the
+  `--since '-1 min'` journal tail printed `-- No entries --` (run more than a minute after
+  the restart on the console; use `-n 30` next time), so the start line is unquoted — a
+  process that survives more than 5 s with `NRestarts=0` has passed the admission check.
+  The v5 code (`bot.js` + `audio-bundle.js`) stays in place. Lessons: manifest `rules` and
+  `prompts.inline` are not read by `bot.js`; unknown manifest keys are a boot failure, not
+  a no-op; runbook rule 13 (probe after every restart).
