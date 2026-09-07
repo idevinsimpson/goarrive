@@ -2814,7 +2814,16 @@ export default function WorkoutPlayer({
           // unmirrored regardless of the current side — the next movement starts at
           // work-L. This fixes the Tabata bug where work-R's reveal window showed
           // the round-2 video still mirrored despite previewing round-2's work-L.
-          const isMirrored = !isInRevealWindow
+          //
+          // The reveal gate must follow what is PAINTED, not what the timer says.
+          // isInRevealWindow flips on timer state, but the visible layer is
+          // displayedUrl, which only advances once the incoming layer reports
+          // ready (see the promote effect). In the gap between those two the
+          // outgoing — still mirrored — video is what the member is looking at,
+          // and dropping the mirror there is the split-second un-mirror flash.
+          // So only honour the reveal once the display has genuinely switched.
+          const revealDisplaySwitched = isInRevealWindow && displayedUrl === activeVideoUrl;
+          const isMirrored = !revealDisplaySwitched
             && !!current.swapSides
             && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
