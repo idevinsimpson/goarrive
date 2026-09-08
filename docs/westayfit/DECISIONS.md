@@ -311,3 +311,14 @@ What this does and does not change:
   branch is a superset of the deployed `2f0a9dc`) or a separate preview channel.
 - `origin/main` moved `79df0d4` → `0c62d43` on 2026-09-07 (PR #303, workout-player mirror fix);
   no WSF files changed. `79df0d4` remains the WSF rollback reference.
+
+## 2026-09-08 — JV meeting inputs recorded as advisory; open product questions listed, none decided
+
+ChatGPT's 16:09 EDT review (thread `1788887316.935919`, ts `1788898142.389629`) relayed the JV
+meeting as advisory design input; Maia saved it as `meetings/2026-09-08-jv-vision.md` (copied
+verbatim onto this record branch). Nothing in it is approved scope, funded or scheduled. Open
+product questions it surfaces, for Devin, in addition to D-a′–D-e: scan-before vs move-before
+sign-up; sign-up fields (name + email + password vs name + phone + email); verification timing;
+mixed-unit scoring; the final movement menu (sit-ups newly suggested). Brainstormed incentives
+(charity donation, giveaways, entries per move, multipliers) stay out of any UI until Devin
+approves them in the channel. The 2pm meeting is over; no new delivery date was promised.
