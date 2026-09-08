@@ -4,60 +4,19 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { resetDemo, useDemoState } from '../../src/demoState';
 import { wsfTheme } from '../../src/theme';
 
-type Activity = {
-  id: string;
-  title: string;
-  helper: string;
-  requires: string | null;
-  href: `/demo/${string}` | null;
-  status: 'live' | 'coming-soon';
-};
-
-const ACTIVITIES: Activity[] = [
-  {
-    id: 'squats',
-    title: 'Squats',
-    helper: 'Stand up, sit back, stand tall. Count your reps as you go.',
-    requires: null,
-    href: '/demo/squats',
-    status: 'live',
-  },
-  {
-    id: 'jumping-jacks',
-    title: 'Jumping jacks',
-    helper: 'Jump wide, jump back. Steady rhythm for a full minute.',
-    requires: null,
-    href: null,
-    status: 'coming-soon',
-  },
-  {
-    id: 'push-ups',
-    title: 'Push-ups',
-    helper: 'From the floor or a wall — however you push.',
-    requires: null,
-    href: null,
-    status: 'coming-soon',
-  },
-  {
-    id: 'planks',
-    title: 'Planks',
-    helper: 'Hold strong. Log your seconds.',
-    requires: 'Mat suggested',
-    href: null,
-    status: 'coming-soon',
-  },
-  {
-    id: 'sit-to-stands',
-    title: 'Sit-to-stands',
-    helper: 'Chair to standing, controlled and steady.',
-    requires: 'Chair required',
-    href: null,
-    status: 'coming-soon',
-  },
+// Concepts we've discussed but haven't built into this demo. Listed here as
+// design inputs only — not release promises, not "coming soon" commitments.
+const CONCEPT_IDEAS = [
+  'Jumping jacks',
+  'Push-ups',
+  'Planks',
+  'Sit-to-stands',
+  'Sit-ups',
 ];
 
 export default function DemoPicker() {
   const { squats } = useDemoState();
+  const percent = Math.min(100, Math.round((squats.current / squats.goal) * 100));
 
   return (
     <ScrollView
@@ -69,7 +28,8 @@ export default function DemoPicker() {
         <Text style={styles.eyebrow}>We Stay Fit</Text>
         <Text style={styles.heading}>Add your movement to the WE total.</Text>
         <Text style={styles.subline}>
-          Pick a movement, take a turn, and watch the community count climb together.
+          Take a turn and watch the community count climb together. Every rep from every person
+          adds up.
         </Text>
 
         <View style={styles.weCard} testID="demo-picker-we-total">
@@ -80,19 +40,44 @@ export default function DemoPicker() {
             <Text style={styles.weGoal}>{squats.goal.toLocaleString()} squats</Text>
           </Text>
           <View style={styles.weBarTrack} accessibilityRole="progressbar">
-            <View
-              style={[
-                styles.weBarFill,
-                { width: `${Math.min(100, Math.round((squats.current / squats.goal) * 100))}%` },
-              ]}
-            />
+            <View style={[styles.weBarFill, { width: `${percent}%` }]} />
           </View>
         </View>
 
-        <View style={styles.cardGrid}>
-          {ACTIVITIES.map((activity) => (
-            <ActivityCard key={activity.id} activity={activity} />
-          ))}
+        <Text style={styles.sectionEyebrow}>Take your turn</Text>
+        <Link
+          href="/demo/squats"
+          style={styles.heroLink}
+          testID="demo-activity-link-squats"
+        >
+          <View style={styles.heroCard} testID="demo-activity-squats">
+            <View style={styles.heroHeaderRow}>
+              <Text style={styles.heroTitle}>Squats</Text>
+              <View style={styles.pillLive}>
+                <Text style={styles.pillTextLive}>Ready</Text>
+              </View>
+            </View>
+            <Text style={styles.heroHelper}>
+              Stand up, sit back, stand tall. Do a set at your own pace, then log how many you did.
+            </Text>
+            <View style={styles.heroCta}>
+              <Text style={styles.heroCtaText}>Log a squat set →</Text>
+            </View>
+          </View>
+        </Link>
+
+        <View style={styles.conceptsBlock} testID="demo-picker-concepts">
+          <Text style={styles.sectionEyebrow}>Not in this demo</Text>
+          <Text style={styles.conceptsIntro}>
+            Ideas we've discussed but haven't built yet. Listed for the conversation, not scheduled.
+          </Text>
+          <View style={styles.conceptsRow}>
+            {CONCEPT_IDEAS.map((idea) => (
+              <View key={idea} style={styles.conceptChip} testID={`demo-concept-${idea.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
+                <Text style={styles.conceptText}>{idea}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={styles.footerRow}>
@@ -113,40 +98,12 @@ export default function DemoPicker() {
         </View>
 
         <Text style={styles.disclaimer}>
-          This is a preview experience. Numbers reset when you tap Reset demo. No live community
-          data is written.
+          This is a preview experience. Sample data only — nothing here is written to a real
+          community.
         </Text>
       </View>
     </ScrollView>
   );
-}
-
-function ActivityCard({ activity }: { activity: Activity }) {
-  const isLive = activity.status === 'live';
-  const card = (
-    <View style={[styles.card, !isLive && styles.cardDisabled]} testID={`demo-activity-${activity.id}`}>
-      <View style={styles.cardHeaderRow}>
-        <Text style={[styles.cardTitle, !isLive && styles.cardTitleDisabled]}>{activity.title}</Text>
-        <View style={[styles.pill, isLive ? styles.pillLive : styles.pillSoon]}>
-          <Text style={[styles.pillText, isLive ? styles.pillTextLive : styles.pillTextSoon]}>
-            {isLive ? 'Ready' : 'Coming soon'}
-          </Text>
-        </View>
-      </View>
-      <Text style={[styles.cardHelper, !isLive && styles.cardHelperDisabled]}>
-        {activity.helper}
-      </Text>
-      {activity.requires ? <Text style={styles.cardRequires}>{activity.requires}</Text> : null}
-    </View>
-  );
-  if (isLive && activity.href) {
-    return (
-      <Link href={activity.href} style={styles.cardLink} testID={`demo-activity-link-${activity.id}`}>
-        {card}
-      </Link>
-    );
-  }
-  return card;
 }
 
 const styles = StyleSheet.create({
@@ -227,86 +184,102 @@ const styles = StyleSheet.create({
     height: 10,
     backgroundColor: wsfTheme.colors.accent,
   },
-  cardGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: wsfTheme.spacing.md,
-    marginBottom: wsfTheme.spacing.lg,
+  sectionEyebrow: {
+    color: wsfTheme.colors.primary,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: wsfTheme.spacing.sm,
+    marginTop: wsfTheme.spacing.sm,
   },
-  cardLink: {
-    flexBasis: 320,
-    flexGrow: 1,
+  heroLink: {
     textDecorationLine: 'none' as const,
     color: wsfTheme.colors.text,
+    marginBottom: wsfTheme.spacing.lg,
   },
-  card: {
-    flexBasis: 320,
-    flexGrow: 1,
+  heroCard: {
     backgroundColor: wsfTheme.colors.surface,
     borderRadius: wsfTheme.radius.lg,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
+    borderWidth: 2,
+    borderColor: wsfTheme.colors.primary,
     padding: wsfTheme.spacing.lg,
-    minHeight: 156,
   },
-  cardDisabled: {
-    opacity: 0.55,
-  },
-  cardHeaderRow: {
+  heroHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: wsfTheme.spacing.sm,
     gap: wsfTheme.spacing.sm,
   },
-  cardTitle: {
+  heroTitle: {
     color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize + 2,
-    fontWeight: '700',
+    fontSize: 26,
+    fontWeight: '800',
     flexShrink: 1,
   },
-  cardTitleDisabled: {
-    color: wsfTheme.colors.textMuted,
-  },
-  cardHelper: {
+  heroHelper: {
     color: wsfTheme.colors.text,
+    fontSize: wsfTheme.typography.body.fontSize,
+    lineHeight: wsfTheme.typography.body.lineHeight,
+    marginBottom: wsfTheme.spacing.md,
+  },
+  heroCta: {
+    alignSelf: 'flex-start',
+    backgroundColor: wsfTheme.colors.primary,
+    paddingVertical: wsfTheme.spacing.sm,
+    paddingHorizontal: wsfTheme.spacing.md,
+    borderRadius: wsfTheme.radius.pill,
+  },
+  heroCtaText: {
+    color: wsfTheme.colors.surface,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '700',
+  },
+  pillLive: {
+    backgroundColor: wsfTheme.colors.accent,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: wsfTheme.radius.pill,
+  },
+  pillTextLive: {
+    color: wsfTheme.colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  conceptsBlock: {
+    backgroundColor: wsfTheme.colors.background,
+    borderRadius: wsfTheme.radius.md,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    padding: wsfTheme.spacing.md,
+    marginBottom: wsfTheme.spacing.lg,
+  },
+  conceptsIntro: {
+    color: wsfTheme.colors.textMuted,
     fontSize: wsfTheme.typography.body.fontSize,
     lineHeight: wsfTheme.typography.body.lineHeight,
     marginBottom: wsfTheme.spacing.sm,
   },
-  cardHelperDisabled: {
-    color: wsfTheme.colors.textMuted,
+  conceptsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: wsfTheme.spacing.sm,
   },
-  cardRequires: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontStyle: 'italic',
-  },
-  pill: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+  conceptChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: wsfTheme.radius.pill,
     borderWidth: 1,
-  },
-  pillLive: {
-    backgroundColor: wsfTheme.colors.accent,
-    borderColor: wsfTheme.colors.accent,
-  },
-  pillSoon: {
-    backgroundColor: wsfTheme.colors.background,
     borderColor: wsfTheme.colors.border,
+    backgroundColor: wsfTheme.colors.surface,
   },
-  pillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  pillTextLive: {
-    color: wsfTheme.colors.primary,
-  },
-  pillTextSoon: {
+  conceptText: {
     color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '600',
   },
   footerRow: {
     flexDirection: 'row',

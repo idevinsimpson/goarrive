@@ -7,6 +7,12 @@
 // The initial state is intentionally fixed to 980 / 1,000 squats so a single
 // +20 simulation reaches the milestone once per reset. Reset returns to 980 /
 // 1,000 so the demo is replayable in front of an audience.
+//
+// Overshoot policy: addSquats preserves ALL valid reps. 980 + 35 records 1,015,
+// not 1,000. The milestone latch fires exactly once on the crossing add and
+// never again until reset. Reaching the goal does not end the experience —
+// subsequent contributions still count toward the same running total. Visual
+// progress bars clamp at 100% in the UI; the raw number does not.
 
 import { useSyncExternalStore } from 'react';
 
@@ -115,13 +121,35 @@ export type AddSquatsResult = {
   newTotal: number;
   addedCount: number;
   crossedMilestone: boolean;
+  rejected: boolean;
 };
 
+function isValidCount(count: number): boolean {
+  return Number.isFinite(count) && count >= 0 && Number.isInteger(count);
+}
+
 export function addSquats(count: number): AddSquatsResult {
-  const safeCount = Math.max(0, Math.floor(count));
   const prev = state.squats.current;
   const goal = state.squats.goal;
-  const next = Math.min(goal, prev + safeCount);
+  if (!isValidCount(count)) {
+    return {
+      previousTotal: prev,
+      newTotal: prev,
+      addedCount: 0,
+      crossedMilestone: false,
+      rejected: true,
+    };
+  }
+  if (count === 0) {
+    return {
+      previousTotal: prev,
+      newTotal: prev,
+      addedCount: 0,
+      crossedMilestone: false,
+      rejected: false,
+    };
+  }
+  const next = prev + count;
   const crossedMilestone = prev < goal && next >= goal && !state.milestoneCelebrated;
   commit({
     squats: { ...state.squats, current: next },
@@ -131,8 +159,9 @@ export function addSquats(count: number): AddSquatsResult {
   return {
     previousTotal: prev,
     newTotal: next,
-    addedCount: next - prev,
+    addedCount: count,
     crossedMilestone,
+    rejected: false,
   };
 }
 

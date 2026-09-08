@@ -1,49 +1,80 @@
 import { Link, router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { addSquats, resetDemo, useDemoState, type AddSquatsResult } from '../../src/demoState';
 import { wsfTheme } from '../../src/theme';
 
-type Screen = 'ready' | 'counting' | 'recorded';
+type Screen = 'ready' | 'timing' | 'entering' | 'recorded';
 
-const COUNT_DURATION_MS = 30_000;
+const TIMER_DURATION_MS = 30_000;
 const TICK_MS = 250;
 const SIMULATE_COUNT = 20;
+const ANIM_STEP_MS = 40;
+const ANIM_MAX_STEPS = 40;
+
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduced(mq.matches);
+    const listener = (e: MediaQueryListEvent) => setReduced(e.matches);
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', listener);
+      return () => mq.removeEventListener('change', listener);
+    }
+    // Older Safari fallback
+    mq.addListener(listener);
+    return () => mq.removeListener(listener);
+  }, []);
+  return reduced;
+}
 
 export default function DemoSquats() {
   const { squats } = useDemoState();
   const [screen, setScreen] = useState<Screen>('ready');
-  const [reps, setReps] = useState(0);
-  const [remainingMs, setRemainingMs] = useState(COUNT_DURATION_MS);
+  const [coachCount, setCoachCount] = useState(0);
+  const [entryText, setEntryText] = useState('');
+  const [entryError, setEntryError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [remainingMs, setRemainingMs] = useState(TIMER_DURATION_MS);
   const [lastResult, setLastResult] = useState<AddSquatsResult | null>(null);
   const [animatedTotal, setAnimatedTotal] = useState(squats.current);
   const startTsRef = useRef<number | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const animRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reducedMotion = usePrefersReducedMotion();
 
   const stopTimer = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const stopAnim = useCallback(() => {
+    if (animRef.current) {
+      clearInterval(animRef.current);
+      animRef.current = null;
     }
   }, []);
 
   useEffect(() => {
     return () => {
       stopTimer();
-      if (animRef.current) clearInterval(animRef.current);
+      stopAnim();
     };
-  }, [stopTimer]);
+  }, [stopTimer, stopAnim]);
 
   useEffect(() => {
-    if (screen !== 'counting') return;
+    if (screen !== 'timing') return;
     startTsRef.current = Date.now();
-    setRemainingMs(COUNT_DURATION_MS);
-    intervalRef.current = setInterval(() => {
+    setRemainingMs(TIMER_DURATION_MS);
+    timerRef.current = setInterval(() => {
       const started = startTsRef.current ?? Date.now();
       const elapsed = Date.now() - started;
-      const remaining = Math.max(0, COUNT_DURATION_MS - elapsed);
+      const remaining = Math.max(0, TIMER_DURATION_MS - elapsed);
       setRemainingMs(remaining);
       if (remaining <= 0) {
         stopTimer();
@@ -52,68 +83,124 @@ export default function DemoSquats() {
     return stopTimer;
   }, [screen, stopTimer]);
 
-  const beginCount = useCallback(() => {
-    setReps(0);
-    setScreen('counting');
+  const goStartTimer = useCallback(() => {
+    setCoachCount(0);
+    setEntryError(null);
+    setScreen('timing');
   }, []);
 
-  const bumpRep = useCallback(() => {
-    setReps((prev) => prev + 1);
+  const goSkipTimer = useCallback(() => {
+    setCoachCount(0);
+    setEntryText('');
+    setEntryError(null);
+    setScreen('entering');
   }, []);
 
-  const undoRep = useCallback(() => {
-    setReps((prev) => Math.max(0, prev - 1));
-  }, []);
+  const bumpCoach = useCallback(() => setCoachCount((n) => n + 1), []);
+  const undoCoach = useCallback(() => setCoachCount((n) => Math.max(0, n - 1)), []);
 
-  const finishManual = useCallback(() => {
+  const finishTimer = useCallback(() => {
     stopTimer();
-    if (reps <= 0) {
-      setScreen('ready');
-      return;
-    }
-    animateResult(addSquats(reps));
-  }, [reps, stopTimer]);
+    setEntryText(coachCount > 0 ? String(coachCount) : '');
+    setEntryError(null);
+    setScreen('entering');
+  }, [coachCount, stopTimer]);
 
-  const simulate = useCallback(() => {
-    animateResult(addSquats(SIMULATE_COUNT));
-  }, []);
+  const cancelToReady = useCallback(() => {
+    stopTimer();
+    setCoachCount(0);
+    setEntryText('');
+    setEntryError(null);
+    setScreen('ready');
+  }, [stopTimer]);
 
-  function animateResult(result: AddSquatsResult) {
-    setLastResult(result);
-    setScreen('recorded');
+  function playAnimation(result: AddSquatsResult) {
     setAnimatedTotal(result.previousTotal);
-    if (animRef.current) clearInterval(animRef.current);
+    stopAnim();
     const delta = result.newTotal - result.previousTotal;
-    if (delta <= 0) {
+    if (delta <= 0 || reducedMotion) {
       setAnimatedTotal(result.newTotal);
       return;
     }
-    const steps = Math.min(delta, 40);
+    const steps = Math.min(delta, ANIM_MAX_STEPS);
     const stepValue = delta / steps;
     let cursor = 0;
     animRef.current = setInterval(() => {
       cursor += 1;
       if (cursor >= steps) {
         setAnimatedTotal(result.newTotal);
-        if (animRef.current) clearInterval(animRef.current);
+        stopAnim();
         return;
       }
       setAnimatedTotal(Math.round(result.previousTotal + stepValue * cursor));
-    }, 40);
+    }, ANIM_STEP_MS);
   }
+
+  const submitEntry = useCallback(() => {
+    if (submitting) return;
+    const trimmed = entryText.trim();
+    if (trimmed === '') {
+      setEntryError('Enter how many squats you did.');
+      return;
+    }
+    if (!/^\d+$/.test(trimmed)) {
+      setEntryError('Enter a whole number of squats.');
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setEntryError('Enter a whole number of squats.');
+      return;
+    }
+    if (parsed === 0) {
+      setEntryError('Add at least 1 squat to log a set.');
+      return;
+    }
+    setSubmitting(true);
+    const result = addSquats(parsed);
+    if (result.rejected) {
+      setEntryError('That count could not be logged. Try a whole number like 12.');
+      setSubmitting(false);
+      return;
+    }
+    setLastResult(result);
+    setScreen('recorded');
+    playAnimation(result);
+    setSubmitting(false);
+  }, [entryText, submitting, reducedMotion]);
+
+  const simulate = useCallback(() => {
+    if (submitting) return;
+    setSubmitting(true);
+    const result = addSquats(SIMULATE_COUNT);
+    setLastResult(result);
+    setScreen('recorded');
+    playAnimation(result);
+    setSubmitting(false);
+  }, [submitting, reducedMotion]);
 
   const backToPicker = useCallback(() => {
     router.push('/demo');
   }, []);
 
-  const resetAndStay = useCallback(() => {
+  const resetAndReplay = useCallback(() => {
+    stopAnim();
     resetDemo();
-    setReps(0);
+    setCoachCount(0);
+    setEntryText('');
+    setEntryError(null);
     setLastResult(null);
-    setAnimatedTotal(0);
+    setSubmitting(false);
+    setAnimatedTotal(INITIAL_BASELINE);
     setScreen('ready');
-    // reflect after reset
-    setTimeout(() => setAnimatedTotal(980), 0);
+  }, [stopAnim]);
+
+  const addAnotherSet = useCallback(() => {
+    setCoachCount(0);
+    setEntryText('');
+    setEntryError(null);
+    setLastResult(null);
+    setScreen('ready');
   }, []);
 
   return (
@@ -137,14 +224,14 @@ export default function DemoSquats() {
         <Text style={styles.eyebrow}>Squats</Text>
         <Text style={styles.heading}>Add your reps to the WE total.</Text>
         <Text style={styles.subline}>
-          Do a set now, then log what you actually did. Honest counts only — this demo does not
-          detect reps for you.
+          Do a set at your own pace, then come back to log it. Honest counts only — this demo does
+          not detect reps for you.
         </Text>
 
         <View style={styles.totalCard} testID="demo-squats-total">
           <Text style={styles.totalLabel}>Community squat count</Text>
           <Text style={styles.totalNumber}>{squats.current.toLocaleString()}</Text>
-          <Text style={styles.totalGoal}>of {squats.goal.toLocaleString()} squats</Text>
+          <Text style={styles.totalGoal}>Goal {squats.goal.toLocaleString()} squats</Text>
           <View style={styles.progressTrack}>
             <View
               style={[
@@ -156,19 +243,44 @@ export default function DemoSquats() {
         </View>
 
         {screen === 'ready' ? (
-          <ReadyPanel onBegin={beginCount} onSimulate={simulate} />
-        ) : screen === 'counting' ? (
-          <CountingPanel
-            reps={reps}
+          <ReadyPanel
+            onStartTimer={goStartTimer}
+            onSkipTimer={goSkipTimer}
+            onSimulate={simulate}
+            simulateDisabled={submitting}
+          />
+        ) : screen === 'timing' ? (
+          <TimingPanel
             remainingMs={remainingMs}
-            onBump={bumpRep}
-            onUndo={undoRep}
-            onDone={finishManual}
-            onCancel={() => {
-              stopTimer();
-              setScreen('ready');
-              setReps(0);
+            coachCount={coachCount}
+            onBumpCoach={bumpCoach}
+            onUndoCoach={undoCoach}
+            onFinish={finishTimer}
+            onCancel={cancelToReady}
+          />
+        ) : screen === 'entering' ? (
+          <EnteringPanel
+            value={entryText}
+            onChange={(next: string) => {
+              setEntryText(next);
+              if (entryError) setEntryError(null);
             }}
+            onBumpEntry={() => {
+              const parsed = Number(entryText.trim());
+              const base = Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+              setEntryText(String(base + 1));
+              if (entryError) setEntryError(null);
+            }}
+            onUndoEntry={() => {
+              const parsed = Number(entryText.trim());
+              const base = Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+              setEntryText(String(Math.max(0, base - 1)));
+              if (entryError) setEntryError(null);
+            }}
+            error={entryError}
+            submitting={submitting}
+            onSubmit={submitEntry}
+            onCancel={cancelToReady}
           />
         ) : (
           <RecordedPanel
@@ -176,11 +288,8 @@ export default function DemoSquats() {
             animatedTotal={animatedTotal}
             committedTotal={squats.current}
             goal={squats.goal}
-            onAddMore={() => {
-              setReps(0);
-              setScreen('ready');
-            }}
-            onReset={resetAndStay}
+            onAddMore={addAnotherSet}
+            onReset={resetAndReplay}
             onBackToPicker={backToPicker}
           />
         )}
@@ -189,108 +298,231 @@ export default function DemoSquats() {
   );
 }
 
-function ReadyPanel({ onBegin, onSimulate }: { onBegin: () => void; onSimulate: () => void }) {
+const INITIAL_BASELINE = 980;
+
+function ReadyPanel({
+  onStartTimer,
+  onSkipTimer,
+  onSimulate,
+  simulateDisabled,
+}: {
+  onStartTimer: () => void;
+  onSkipTimer: () => void;
+  onSimulate: () => void;
+  simulateDisabled: boolean;
+}) {
   return (
     <View style={styles.panel} testID="demo-squats-ready">
-      <Text style={styles.panelTitle}>Ready when you are</Text>
+      <Text style={styles.panelTitle}>Two ways to log your set</Text>
       <Text style={styles.panelBody}>
-        Tap Begin, do your squats, and tap the big button each time you complete a rep. When you're
-        done, tap Done and we'll add your reps to the community total.
+        Start the 30-second timer, do your squats wherever feels good, and come back to enter how
+        many you did. Or skip the timer and enter your count directly.
       </Text>
       <View style={styles.actionsCol}>
         <Pressable
-          onPress={onBegin}
+          onPress={onStartTimer}
           style={styles.primaryButton}
-          testID="demo-squats-begin"
+          testID="demo-squats-start-timer"
           accessibilityRole="button"
         >
-          <Text style={styles.primaryButtonText}>Begin — 30 second window</Text>
+          <Text style={styles.primaryButtonText}>Start 30-second timer</Text>
+        </Pressable>
+        <Pressable
+          onPress={onSkipTimer}
+          style={styles.secondaryButton}
+          testID="demo-squats-skip-timer"
+          accessibilityRole="button"
+        >
+          <Text style={styles.secondaryButtonText}>Skip timer — log reps now</Text>
         </Pressable>
         <Pressable
           onPress={onSimulate}
-          style={styles.secondaryButton}
+          disabled={simulateDisabled}
+          style={[styles.tertiaryPill, simulateDisabled && styles.tertiaryButtonDisabled]}
           testID="demo-squats-simulate"
           accessibilityRole="button"
         >
-          <Text style={styles.secondaryButtonText}>Simulate 20 squats for the demo</Text>
+          <Text style={styles.tertiaryPillText}>Simulate 20 squats for the demo</Text>
         </Pressable>
       </View>
       <Text style={styles.helper}>
-        Simulate is a demo shortcut so the audience can see the total climb without waiting 30
-        seconds. Real logging happens through Begin.
+        Simulate is a demo shortcut so the audience can see the total climb without waiting. Real
+        logging happens through the timer or manual entry.
       </Text>
     </View>
   );
 }
 
-function CountingPanel({
-  reps,
+function TimingPanel({
   remainingMs,
-  onBump,
-  onUndo,
-  onDone,
+  coachCount,
+  onBumpCoach,
+  onUndoCoach,
+  onFinish,
   onCancel,
 }: {
-  reps: number;
   remainingMs: number;
-  onBump: () => void;
-  onUndo: () => void;
-  onDone: () => void;
+  coachCount: number;
+  onBumpCoach: () => void;
+  onUndoCoach: () => void;
+  onFinish: () => void;
   onCancel: () => void;
 }) {
   const seconds = Math.ceil(remainingMs / 1000);
   const done = remainingMs <= 0;
   return (
-    <View style={styles.panel} testID="demo-squats-counting">
-      <View style={styles.countingHeader}>
-        <View>
-          <Text style={styles.panelTitle}>{done ? 'Time' : `${seconds}s left`}</Text>
-          <Text style={styles.helper}>
-            {done ? 'Tap Done to log your reps.' : 'Tap for each squat you complete.'}
+    <View style={styles.panel} testID="demo-squats-timing">
+      <Text style={styles.panelTitle}>{done ? 'Time' : `${seconds} seconds left`}</Text>
+      <Text style={styles.panelBody}>
+        Do your squats at your own pace. You don't have to stay at the screen. When you're ready,
+        tap the button and enter your count.
+      </Text>
+
+      <View style={styles.timerBig}>
+        <Text style={styles.timerBigNumber}>{seconds}</Text>
+        <Text style={styles.timerBigLabel}>{done ? 'time is up' : 'seconds'}</Text>
+      </View>
+
+      <View style={styles.coachRow}>
+        <View style={styles.coachTextCol}>
+          <Text style={styles.coachTitle}>Optional coach counter</Text>
+          <Text style={styles.coachHelper}>
+            Have someone tap along as you squat. You can also skip this and just enter the total
+            after.
           </Text>
         </View>
-        <View style={styles.repsPill}>
-          <Text style={styles.repsPillLabel}>Reps</Text>
-          <Text style={styles.repsPillCount}>{reps}</Text>
+        <View style={styles.coachControls}>
+          <Pressable
+            onPress={onUndoCoach}
+            disabled={coachCount <= 0}
+            style={[styles.stepButton, coachCount <= 0 && styles.stepButtonDisabled]}
+            testID="demo-squats-coach-minus"
+            accessibilityRole="button"
+          >
+            <Text style={styles.stepButtonText}>−</Text>
+          </Pressable>
+          <View style={styles.stepValue}>
+            <Text style={styles.stepValueNumber}>{coachCount}</Text>
+          </View>
+          <Pressable
+            onPress={onBumpCoach}
+            style={styles.stepButton}
+            testID="demo-squats-coach-plus"
+            accessibilityRole="button"
+          >
+            <Text style={styles.stepButtonText}>+</Text>
+          </Pressable>
         </View>
       </View>
 
-      <Pressable
-        onPress={onBump}
-        style={[styles.repButton, done && styles.repButtonDone]}
-        disabled={done}
-        testID="demo-squats-bump"
-        accessibilityRole="button"
-      >
-        <Text style={styles.repButtonText}>{done ? 'Time is up' : 'Count one squat'}</Text>
-        <Text style={styles.repButtonHint}>{done ? 'Tap Done below' : 'Big tap target'}</Text>
-      </Pressable>
-
-      <View style={styles.actionsRow}>
+      <View style={styles.actionsCol}>
         <Pressable
-          onPress={onUndo}
-          disabled={reps <= 0}
-          style={[styles.tertiaryButton, reps <= 0 && styles.tertiaryButtonDisabled]}
-          testID="demo-squats-undo"
+          onPress={onFinish}
+          style={styles.primaryButton}
+          testID="demo-squats-finish-timer"
           accessibilityRole="button"
         >
-          <Text style={styles.tertiaryButtonText}>Undo last rep</Text>
+          <Text style={styles.primaryButtonText}>I'm done — enter my reps</Text>
         </Pressable>
         <Pressable
           onPress={onCancel}
           style={styles.tertiaryButton}
-          testID="demo-squats-cancel"
+          testID="demo-squats-cancel-timer"
           accessibilityRole="button"
         >
           <Text style={styles.tertiaryButtonText}>Cancel</Text>
         </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function EnteringPanel({
+  value,
+  onChange,
+  onBumpEntry,
+  onUndoEntry,
+  error,
+  submitting,
+  onSubmit,
+  onCancel,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onBumpEntry: () => void;
+  onUndoEntry: () => void;
+  error: string | null;
+  submitting: boolean;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const parsed = Number(value.trim());
+  const validForSubmit = /^\d+$/.test(value.trim()) && Number.isFinite(parsed) && parsed > 0;
+  return (
+    <View style={styles.panel} testID="demo-squats-entering">
+      <Text style={styles.panelTitle}>How many squats did you do?</Text>
+      <Text style={styles.panelBody}>
+        Enter your honest count. This adds to the community WE total.
+      </Text>
+
+      <View style={styles.entryRow}>
         <Pressable
-          onPress={onDone}
-          style={styles.primaryButton}
-          testID="demo-squats-done"
+          onPress={onUndoEntry}
+          style={styles.stepButton}
+          testID="demo-squats-entry-minus"
           accessibilityRole="button"
         >
-          <Text style={styles.primaryButtonText}>Done — add {reps} to WE total</Text>
+          <Text style={styles.stepButtonText}>−</Text>
+        </Pressable>
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          placeholder="0"
+          style={styles.entryInput}
+          testID="demo-squats-entry-input"
+          accessibilityLabel="Number of squats"
+          maxLength={4}
+        />
+        <Pressable
+          onPress={onBumpEntry}
+          style={styles.stepButton}
+          testID="demo-squats-entry-plus"
+          accessibilityRole="button"
+        >
+          <Text style={styles.stepButtonText}>+</Text>
+        </Pressable>
+      </View>
+
+      {error ? (
+        <Text style={styles.errorText} testID="demo-squats-entry-error">
+          {error}
+        </Text>
+      ) : null}
+
+      <View style={styles.actionsCol}>
+        <Pressable
+          onPress={onSubmit}
+          disabled={!validForSubmit || submitting}
+          style={[
+            styles.primaryButton,
+            (!validForSubmit || submitting) && styles.primaryButtonDisabled,
+          ]}
+          testID="demo-squats-log"
+          accessibilityRole="button"
+        >
+          <Text style={styles.primaryButtonText}>
+            {submitting ? 'Logging…' : validForSubmit ? `Log ${parsed} to WE total` : 'Log to WE total'}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onCancel}
+          style={styles.tertiaryButton}
+          testID="demo-squats-cancel-entry"
+          accessibilityRole="button"
+        >
+          <Text style={styles.tertiaryButtonText}>Cancel</Text>
         </Pressable>
       </View>
     </View>
@@ -314,37 +546,39 @@ function RecordedPanel({
   onReset: () => void;
   onBackToPicker: () => void;
 }) {
-  // goalReached reflects committed state, not the mid-count-up animation
-  // value, so the "Add another set" button and the helper copy stay honest
-  // during the ~1.6s count-up animation right after a milestone add.
-  const goalReached = committedTotal >= goal;
-  const displayTotal = goalReached ? goal : animatedTotal;
+  // YOU → WE transition stays visible even when the goal is crossed. The
+  // animation plays through overshoot; we never snap the display to `goal`.
+  const showMilestone = !!result && result.crossedMilestone;
+  const overGoal = committedTotal > goal;
+  const displayTotal = animatedTotal;
   return (
     <View style={styles.panel} testID="demo-squats-recorded">
-      {result?.crossedMilestone || (result && result.newTotal >= goal && result.addedCount > 0) ? (
-        <MilestoneCard result={result} goal={goal} />
-      ) : (
-        <Text style={styles.panelTitle}>
-          Nice — added {result?.addedCount ?? 0} to the WE total.
+      {showMilestone ? <MilestoneCard result={result!} goal={goal} /> : null}
+
+      <View style={styles.youBlock} testID="demo-squats-you-block">
+        <Text style={styles.youLabel}>YOU added</Text>
+        <Text style={styles.youNumber}>{result?.addedCount ?? 0}</Text>
+        <Text style={styles.youUnit}>squats</Text>
+      </View>
+
+      <View style={styles.weBlock} testID="demo-squats-we-block">
+        <Text style={styles.weLabel}>WE total is now</Text>
+        <Text style={styles.weNumber}>{displayTotal.toLocaleString()}</Text>
+        <Text style={styles.weFrom}>
+          from {result?.previousTotal.toLocaleString() ?? '—'} · goal {goal.toLocaleString()}
+          {overGoal ? ` · +${(committedTotal - goal).toLocaleString()} past goal` : ''}
         </Text>
-      )}
-      <Text style={styles.helper}>
-        {goalReached
-          ? 'The community hit the goal. Reset the demo to run it again.'
-          : `Community squat count is now ${displayTotal.toLocaleString()} of ${goal.toLocaleString()}.`}
-      </Text>
+      </View>
 
       <View style={styles.actionsCol}>
-        {goalReached ? null : (
-          <Pressable
-            onPress={onAddMore}
-            style={styles.primaryButton}
-            testID="demo-squats-add-more"
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryButtonText}>Add another set</Text>
-          </Pressable>
-        )}
+        <Pressable
+          onPress={onAddMore}
+          style={styles.primaryButton}
+          testID="demo-squats-add-more"
+          accessibilityRole="button"
+        >
+          <Text style={styles.primaryButtonText}>Log another set</Text>
+        </Pressable>
         <Link
           href="/demo/display"
           style={styles.secondaryLink}
@@ -377,10 +611,13 @@ function MilestoneCard({ result, goal }: { result: AddSquatsResult; goal: number
   return (
     <View style={styles.milestoneCard} testID="demo-squats-milestone">
       <Text style={styles.milestoneEyebrow}>Milestone reached</Text>
-      <Text style={styles.milestoneHeadline}>The community just hit {goal.toLocaleString()}.</Text>
+      <Text style={styles.milestoneHeadline}>
+        The community just crossed {goal.toLocaleString()}.
+      </Text>
       <Text style={styles.milestoneBody}>
-        Your set of {result.addedCount} squats pushed the WE total from {result.previousTotal.toLocaleString()}{' '}
-        to {result.newTotal.toLocaleString()}. That's the goal — together.
+        Your set of {result.addedCount} squats moved the WE total from{' '}
+        {result.previousTotal.toLocaleString()} to {result.newTotal.toLocaleString()}. Together —
+        that's the point.
       </Text>
     </View>
   );
@@ -498,12 +735,6 @@ const styles = StyleSheet.create({
     gap: wsfTheme.spacing.sm,
     marginTop: wsfTheme.spacing.sm,
   },
-  actionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: wsfTheme.spacing.sm,
-    marginTop: wsfTheme.spacing.md,
-  },
   primaryButton: {
     backgroundColor: wsfTheme.colors.primary,
     paddingVertical: wsfTheme.spacing.md,
@@ -512,6 +743,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 52,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.5,
   },
   primaryButtonText: {
     color: wsfTheme.colors.surface,
@@ -549,6 +783,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: wsfTheme.spacing.md,
     borderRadius: wsfTheme.radius.sm,
   },
+  tertiaryPill: {
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    paddingVertical: wsfTheme.spacing.sm,
+    paddingHorizontal: wsfTheme.spacing.lg,
+    borderRadius: wsfTheme.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tertiaryPillText: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '600',
+  },
   tertiaryButtonDisabled: {
     opacity: 0.4,
   },
@@ -558,58 +806,171 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textDecorationLine: 'underline',
   },
-  countingHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: wsfTheme.spacing.md,
-    gap: wsfTheme.spacing.md,
-  },
-  repsPill: {
+  timerBig: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: wsfTheme.spacing.lg,
+    marginVertical: wsfTheme.spacing.sm,
     backgroundColor: wsfTheme.colors.background,
+    borderRadius: wsfTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+  },
+  timerBigNumber: {
+    color: wsfTheme.colors.primary,
+    fontSize: 72,
+    fontWeight: '800',
+    lineHeight: 76,
+  },
+  timerBigLabel: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.body.fontSize,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+    marginTop: wsfTheme.spacing.xs,
+  },
+  coachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wsfTheme.spacing.md,
+    marginTop: wsfTheme.spacing.md,
+    marginBottom: wsfTheme.spacing.md,
+    paddingVertical: wsfTheme.spacing.sm,
+    paddingHorizontal: wsfTheme.spacing.md,
+    backgroundColor: wsfTheme.colors.background,
+    borderRadius: wsfTheme.radius.md,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    flexWrap: 'wrap',
+  },
+  coachTextCol: {
+    flexBasis: 240,
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  coachTitle: {
+    color: wsfTheme.colors.text,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '700',
+  },
+  coachHelper: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  coachControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wsfTheme.spacing.sm,
+  },
+  stepButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: wsfTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepButtonDisabled: {
+    opacity: 0.4,
+  },
+  stepButtonText: {
+    color: wsfTheme.colors.surface,
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 32,
+  },
+  stepValue: {
+    minWidth: 64,
+    alignItems: 'center',
+  },
+  stepValueNumber: {
+    color: wsfTheme.colors.text,
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  entryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: wsfTheme.spacing.md,
+    marginVertical: wsfTheme.spacing.md,
+  },
+  entryInput: {
+    flexGrow: 0,
+    minWidth: 120,
     borderWidth: 2,
     borderColor: wsfTheme.colors.accent,
     borderRadius: wsfTheme.radius.md,
     paddingVertical: wsfTheme.spacing.sm,
     paddingHorizontal: wsfTheme.spacing.md,
-    alignItems: 'center',
-    minWidth: 96,
+    fontSize: 40,
+    fontWeight: '800',
+    textAlign: 'center',
+    color: wsfTheme.colors.text,
+    backgroundColor: wsfTheme.colors.surface,
   },
-  repsPillLabel: {
+  errorText: {
+    color: '#B00020',
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '600',
+    marginTop: wsfTheme.spacing.xs,
+  },
+  youBlock: {
+    borderRadius: wsfTheme.radius.lg,
+    backgroundColor: wsfTheme.colors.background,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    padding: wsfTheme.spacing.md,
+    marginBottom: wsfTheme.spacing.sm,
+    alignItems: 'flex-start',
+  },
+  youLabel: {
     color: wsfTheme.colors.textMuted,
-    fontSize: 11,
+    fontSize: wsfTheme.typography.caption.fontSize,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
-  repsPillCount: {
-    color: wsfTheme.colors.text,
-    fontSize: 32,
-    fontWeight: '800',
-    lineHeight: 36,
-  },
-  repButton: {
-    backgroundColor: wsfTheme.colors.accent,
-    borderRadius: wsfTheme.radius.lg,
-    paddingVertical: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: wsfTheme.spacing.md,
-  },
-  repButtonDone: {
-    backgroundColor: wsfTheme.colors.border,
-  },
-  repButtonText: {
+  youNumber: {
     color: wsfTheme.colors.primary,
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 44,
+    fontWeight: '900',
+    lineHeight: 48,
+    marginVertical: 4,
   },
-  repButtonHint: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    marginTop: 4,
+  youUnit: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.body.fontSize,
     fontWeight: '600',
-    opacity: 0.7,
+  },
+  weBlock: {
+    borderRadius: wsfTheme.radius.lg,
+    backgroundColor: wsfTheme.colors.primary,
+    padding: wsfTheme.spacing.md,
+    marginBottom: wsfTheme.spacing.md,
+  },
+  weLabel: {
+    color: wsfTheme.colors.accent,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: wsfTheme.spacing.xs,
+  },
+  weNumber: {
+    color: wsfTheme.colors.surface,
+    fontSize: 56,
+    fontWeight: '900',
+    lineHeight: 60,
+    marginBottom: 4,
+  },
+  weFrom: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '600',
   },
   milestoneCard: {
     backgroundColor: wsfTheme.colors.accent,

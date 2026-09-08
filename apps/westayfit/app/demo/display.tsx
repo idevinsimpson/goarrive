@@ -10,8 +10,13 @@ import { wsfTheme } from '../../src/theme';
 // (other tabs of the same browser).
 export default function DemoDisplay() {
   const { squats } = useDemoState();
-  const percent = Math.min(100, Math.round((squats.current / squats.goal) * 100));
+  // Multiply first, divide second — avoids a float-rounding artifact where
+  // 1015/1000*100 == 101.4999… and Math.round returns 101 instead of 102.
+  const rawPercent = squats.goal > 0 ? Math.round((squats.current * 100) / squats.goal) : 0;
+  const barPercent = Math.min(100, rawPercent);
   const goalReached = squats.current >= squats.goal;
+  const overGoal = squats.current > squats.goal;
+  const past = overGoal ? squats.current - squats.goal : 0;
 
   return (
     <View style={styles.root} testID="demo-display">
@@ -34,11 +39,13 @@ export default function DemoDisplay() {
         <View style={styles.goalRow}>
           <Text style={styles.goalLabel}>Goal</Text>
           <Text style={styles.goalNumber}>{squats.goal.toLocaleString()}</Text>
-          <Text style={styles.goalPercent}>{percent}%</Text>
+          <Text style={styles.goalPercent} testID="demo-display-percent">
+            {rawPercent}%
+          </Text>
         </View>
 
         <View style={styles.barTrack}>
-          <View style={[styles.barFill, { width: `${percent}%` }]} />
+          <View style={[styles.barFill, { width: `${barPercent}%` }]} />
         </View>
 
         {goalReached ? (
@@ -49,6 +56,7 @@ export default function DemoDisplay() {
             </Text>
             <Text style={styles.celebrationBody}>
               Every rep from every person added up. That's what We Stay Fit means.
+              {overGoal ? ` And we kept going — ${past.toLocaleString()} past the goal.` : ''}
             </Text>
           </View>
         ) : (
