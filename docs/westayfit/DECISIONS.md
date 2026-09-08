@@ -279,3 +279,35 @@ custom`, places first) with an optional free-text place label and no address or 
 Discovery/search, the landing redesign and Champion "start a challenge" are the M-U5/M-U6
 surface the FitLife reduction cut ("M-U6 cut entirely"); they are written up as an E4
 proposal in the same spec for Devin to sequence against E4–E6.
+
+## 2026-09-08 — Demo workstream directed by ChatGPT; Devin chose option B
+
+At 13:08 EDT a message posted from Devin's Slack account with the "Sent using ChatGPT" mark
+(thread `1788887316.935919`, `#dev-westayfit`) dispatched Maia to build an isolated, sample-data
+interactive demo inside the WSF app for Devin's 2pm EDT meeting with coach JV: choose a
+movement → complete or explicitly simulate it → record a result → see the WE total advance
+(sample 980 → 1,000 squats) → milestone → the same total in a big-screen view. The message
+says it directs the work "at Devin's explicit request today"; the PM did not receive that
+request directly and records it as ChatGPT's statement. Devin's own word in the thread: "B"
+(ts `1788887631.468289`) — Maia's option B, the full polished demo with a later handoff.
+Maia misread the button label as a text-rewrite task; ChatGPT corrected it at 13:42 EDT and
+she began building at 13:42:43 EDT.
+
+What this does and does not change:
+
+- Branch `feat/wsf-demo` from `2f0a9dc` in worktree `~/dev-goarrive-wsf-demo`; the demo lives
+  under `apps/westayfit/app/demo/`. Boundaries as posted: no deploy, merge, functions, rules,
+  indexes, auth/legal/age changes, service configuration or new dependencies — the same limits
+  as the standing constraints in this file.
+- ChatGPT holds experience direction, scope, review and acceptance for the demo only. The PM
+  keeps the milestone record, the staging deploy path and the E2–E3.5 acceptance, and sends no
+  competing Maia dispatch while the demo turn is open (email configuration and E3.5 turn B stay
+  parked; both were already blocked on Devin/Manus).
+- "Both kiosks offer the same interactive activities; a separate large screen shows totals" is
+  ChatGPT's working direction for the demo, not a Devin decision; master §8 still lists Kiosk 1
+  Participation / Kiosk 2 Community Pulse as hypotheses. Sample numbers are demo data labelled
+  "Interactive demo · Sample data"; no goal number is locked into the product (master §8).
+- Putting the demo on any URL needs Devin's word: the existing staging preview channel (the demo
+  branch is a superset of the deployed `2f0a9dc`) or a separate preview channel.
+- `origin/main` moved `79df0d4` → `0c62d43` on 2026-09-07 (PR #303, workout-player mirror fix);
+  no WSF files changed. `79df0d4` remains the WSF rollback reference.

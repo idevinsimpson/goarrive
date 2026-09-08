@@ -187,6 +187,15 @@ long-running work inside a chat turn is no longer acceptable.
     states: the spec section, the log file, and "there is nothing to diagnose in this turn".
     Drift sign: `find` / `journalctl` lines in a report turn. Response: one correction reply
     naming the sources (she picks up thread replies mid-turn), never a second dispatch.
+16. **Button labels name the work; a second director in the channel is not a second dispatcher.**
+    On 2026-09-08 Maia offered options as buttons; Devin pressed "B - Reframe post-meeting" and
+    she read the label as a task ("reframing the post-meeting text") instead of the option it
+    stood for (build the full polished demo, hand off after the meeting). Label buttons with the
+    deliverable ("B - Build the full demo, hand off after 2pm"), never with a summary word. When
+    a ChatGPT-directed turn (posted from Devin's account with the "Sent using ChatGPT" mark) is
+    open, the PM posts nothing into that thread and dispatches no competing turn until Maia's
+    handoff; parked turns wait. Two "Devin" voices with different "Sent using" marks in one
+    thread confuse the bot.
 
 ## Where things live on her box (confirmed 2026-09-05)
 
