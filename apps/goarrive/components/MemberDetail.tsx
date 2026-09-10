@@ -403,14 +403,14 @@ export default function MemberDetail({
 
           {/* Subscription pause/resume (only shown when a Stripe sub exists) */}
           {memberSubscription && (
-            <View style={s.subRow}>
-              <View>
-                <Text style={s.subLabel}>Subscription</Text>
-                <Text style={s.subStatus}>
-                  {memberSubscription.pausedAt ? 'Paused — billing voided' : 'Active — billing on'}
-                </Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
+            <View style={s.subSection}>
+              <View style={s.subRow}>
+                <View>
+                  <Text style={s.subLabel}>Subscription</Text>
+                  <Text style={s.subStatus}>
+                    {memberSubscription.pausedAt ? 'Paused — billing voided' : 'Active — billing on'}
+                  </Text>
+                </View>
                 <TouchableOpacity
                   style={[s.subBtn, memberSubscription.pausedAt ? s.subBtnResume : s.subBtnPause]}
                   onPress={handleToggleSubscriptionPause}
@@ -420,10 +420,12 @@ export default function MemberDetail({
                     ? <ActivityIndicator size="small" color={FG} />
                     : <Text style={s.subBtnText}>{memberSubscription.pausedAt ? 'Resume' : 'Pause'}</Text>}
                 </TouchableOpacity>
-                {memberSubscription.pausedAt && (
-                  <Text style={s.subResumeHint}>Contract end extends by paused days on resume.</Text>
-                )}
               </View>
+              <Text style={s.subResumeHint}>
+                {memberSubscription.pausedAt
+                  ? 'Billing is off while paused. When you resume, the paused days will be added to their contract end date so they don\u2019t lose any time they already paid for.'
+                  : 'Pausing stops billing. When you resume, the paused days will be added to their contract end date so they don\u2019t lose any time they already paid for.'}
+              </Text>
             </View>
           )}
 
@@ -830,14 +832,17 @@ const s = StyleSheet.create({
     color: GOLD,
     fontFamily: FB,
   },
+  subSection: {
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+    paddingBottom: 12,
+  },
   subRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
   },
   subLabel: {
     fontSize: 13,
@@ -874,11 +879,11 @@ const s = StyleSheet.create({
     fontFamily: FB,
   },
   subResumeHint: {
-    fontSize: 10,
+    fontSize: 12,
     color: '#8899AA',
-    marginTop: 4,
-    maxWidth: 160,
-    textAlign: 'right',
+    lineHeight: 16,
+    paddingHorizontal: 20,
+    marginTop: -4,
     fontFamily: FB,
   },
   body: {
