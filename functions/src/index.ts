@@ -12678,11 +12678,20 @@ export const pauseStripeSubscription = onCall(
     const subData = subSnap.data()!;
     if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
+    const stripeAccountId = subData.stripeAccountId as string | undefined;
+    if (!stripeAccountId) throw new HttpsError('failed-precondition', 'Subscription is missing stripeAccountId — cannot pause. Contact support.');
 
     const stripe = getStripe(stripeSecretKey.value());
-    await stripe.subscriptions.update(stripeSubscriptionId, {
-      pause_collection: { behavior: 'void' },
-    });
+    try {
+      await stripe.subscriptions.update(
+        stripeSubscriptionId,
+        { pause_collection: { behavior: 'void' } },
+        { stripeAccount: stripeAccountId },
+      );
+    } catch (err: any) {
+      console.error(`[pauseStripeSubscription] Stripe update failed for sub ${stripeSubscriptionId} on account ${stripeAccountId}:`, err?.message, err?.raw?.code);
+      throw new HttpsError('internal', `Stripe pause failed: ${err?.message ?? 'unknown error'}`);
+    }
 
     await subRef.update({ pausedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     return { success: true };
@@ -12714,6 +12723,8 @@ export const resumeStripeSubscription = onCall(
     const subData = subSnap.data()!;
     if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
+    const stripeAccountId = subData.stripeAccountId as string | undefined;
+    if (!stripeAccountId) throw new HttpsError('failed-precondition', 'Subscription is missing stripeAccountId — cannot resume. Contact support.');
 
     // Capture pause duration before clearing pausedAt.
     const pausedAtTs = subData.pausedAt as FirebaseFirestore.Timestamp | undefined;
@@ -12726,9 +12737,16 @@ export const resumeStripeSubscription = onCall(
 
     const stripe = getStripe(stripeSecretKey.value());
     // Empty string clears pause_collection and resumes billing.
-    await stripe.subscriptions.update(stripeSubscriptionId, {
-      pause_collection: '' as any,
-    });
+    try {
+      await stripe.subscriptions.update(
+        stripeSubscriptionId,
+        { pause_collection: '' as any },
+        { stripeAccount: stripeAccountId },
+      );
+    } catch (err: any) {
+      console.error(`[resumeStripeSubscription] Stripe update failed for sub ${stripeSubscriptionId} on account ${stripeAccountId}:`, err?.message, err?.raw?.code);
+      throw new HttpsError('internal', `Stripe resume failed: ${err?.message ?? 'unknown error'}`);
+    }
 
     // Extend contractEndAt on the member_plans doc if it exists.
     if (extendedDays > 0) {
