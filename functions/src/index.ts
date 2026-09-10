@@ -12665,27 +12665,31 @@ export const pauseStripeSubscription = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
     const callerToken = request.auth?.token as Record<string, any> | undefined;
-    const callerCoachId: string | undefined = callerToken?.coachId ?? (callerToken?.role === 'platformAdmin' ? callerUid : undefined);
-    if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach');
+    const isPlatformAdmin = callerToken?.role === 'platformAdmin';
+    const callerCoachId: string | undefined = callerToken?.coachId ?? (isPlatformAdmin ? callerUid : undefined);
+    if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach or admin');
 
     const { memberId, stripeSubscriptionId } = request.data as { memberId?: string; stripeSubscriptionId?: string };
     if (!memberId || !stripeSubscriptionId) throw new HttpsError('invalid-argument', 'memberId and stripeSubscriptionId are required');
 
-    // Verify this subscription belongs to the calling coach.
     const subRef = db.collection('memberSubscriptions').doc(stripeSubscriptionId);
     const subSnap = await subRef.get();
     if (!subSnap.exists) throw new HttpsError('not-found', 'Subscription not found');
     const subData = subSnap.data()!;
-    if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    const owningCoachId = subData.coachId as string | undefined;
+    if (!owningCoachId) throw new HttpsError('failed-precondition', 'Subscription is missing coachId');
+    if (!isPlatformAdmin && owningCoachId !== callerCoachId) {
+      throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    }
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
     let stripeAccountId = subData.stripeAccountId as string | undefined;
     if (!stripeAccountId) {
-      const acctSnap = await db.collection('coachStripeAccounts').doc(callerCoachId).get();
+      const acctSnap = await db.collection('coachStripeAccounts').doc(owningCoachId).get();
       stripeAccountId = acctSnap.exists ? (acctSnap.data()?.stripeAccountId as string | undefined) : undefined;
       if (!stripeAccountId) {
         throw new HttpsError('failed-precondition', 'Coach has no Stripe Connect account on file — cannot pause. Please reconnect Stripe.');
       }
-      console.log(`[pauseStripeSubscription] Auto-healing sub ${stripeSubscriptionId} with coach account ${stripeAccountId}`);
+      console.log(`[pauseStripeSubscription] Auto-healing sub ${stripeSubscriptionId} with coach ${owningCoachId} account ${stripeAccountId}`);
     }
 
     const stripe = getStripe(stripeSecretKey.value());
@@ -12721,27 +12725,31 @@ export const resumeStripeSubscription = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
     const callerToken = request.auth?.token as Record<string, any> | undefined;
-    const callerCoachId: string | undefined = callerToken?.coachId ?? (callerToken?.role === 'platformAdmin' ? callerUid : undefined);
-    if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach');
+    const isPlatformAdmin = callerToken?.role === 'platformAdmin';
+    const callerCoachId: string | undefined = callerToken?.coachId ?? (isPlatformAdmin ? callerUid : undefined);
+    if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach or admin');
 
     const { memberId, stripeSubscriptionId } = request.data as { memberId?: string; stripeSubscriptionId?: string };
     if (!memberId || !stripeSubscriptionId) throw new HttpsError('invalid-argument', 'memberId and stripeSubscriptionId are required');
 
-    // Verify this subscription belongs to the calling coach.
     const subRef = db.collection('memberSubscriptions').doc(stripeSubscriptionId);
     const subSnap = await subRef.get();
     if (!subSnap.exists) throw new HttpsError('not-found', 'Subscription not found');
     const subData = subSnap.data()!;
-    if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    const owningCoachId = subData.coachId as string | undefined;
+    if (!owningCoachId) throw new HttpsError('failed-precondition', 'Subscription is missing coachId');
+    if (!isPlatformAdmin && owningCoachId !== callerCoachId) {
+      throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    }
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
     let stripeAccountId = subData.stripeAccountId as string | undefined;
     if (!stripeAccountId) {
-      const acctSnap = await db.collection('coachStripeAccounts').doc(callerCoachId).get();
+      const acctSnap = await db.collection('coachStripeAccounts').doc(owningCoachId).get();
       stripeAccountId = acctSnap.exists ? (acctSnap.data()?.stripeAccountId as string | undefined) : undefined;
       if (!stripeAccountId) {
         throw new HttpsError('failed-precondition', 'Coach has no Stripe Connect account on file — cannot resume. Please reconnect Stripe.');
       }
-      console.log(`[resumeStripeSubscription] Auto-healing sub ${stripeSubscriptionId} with coach account ${stripeAccountId}`);
+      console.log(`[resumeStripeSubscription] Auto-healing sub ${stripeSubscriptionId} with coach ${owningCoachId} account ${stripeAccountId}`);
     }
 
     // Capture pause duration before clearing pausedAt.
