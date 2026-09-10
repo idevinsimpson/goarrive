@@ -12678,8 +12678,15 @@ export const pauseStripeSubscription = onCall(
     const subData = subSnap.data()!;
     if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
-    const stripeAccountId = subData.stripeAccountId as string | undefined;
-    if (!stripeAccountId) throw new HttpsError('failed-precondition', 'Subscription is missing stripeAccountId — cannot pause. Contact support.');
+    let stripeAccountId = subData.stripeAccountId as string | undefined;
+    if (!stripeAccountId) {
+      const acctSnap = await db.collection('coachStripeAccounts').doc(callerCoachId).get();
+      stripeAccountId = acctSnap.exists ? (acctSnap.data()?.stripeAccountId as string | undefined) : undefined;
+      if (!stripeAccountId) {
+        throw new HttpsError('failed-precondition', 'Coach has no Stripe Connect account on file — cannot pause. Please reconnect Stripe.');
+      }
+      console.log(`[pauseStripeSubscription] Auto-healing sub ${stripeSubscriptionId} with coach account ${stripeAccountId}`);
+    }
 
     const stripe = getStripe(stripeSecretKey.value());
     try {
@@ -12693,7 +12700,11 @@ export const pauseStripeSubscription = onCall(
       throw new HttpsError('internal', `Stripe pause failed: ${err?.message ?? 'unknown error'}`);
     }
 
-    await subRef.update({ pausedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    await subRef.update({
+      pausedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      stripeAccountId,
+    });
     return { success: true };
   }
 );
@@ -12723,8 +12734,15 @@ export const resumeStripeSubscription = onCall(
     const subData = subSnap.data()!;
     if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
-    const stripeAccountId = subData.stripeAccountId as string | undefined;
-    if (!stripeAccountId) throw new HttpsError('failed-precondition', 'Subscription is missing stripeAccountId — cannot resume. Contact support.');
+    let stripeAccountId = subData.stripeAccountId as string | undefined;
+    if (!stripeAccountId) {
+      const acctSnap = await db.collection('coachStripeAccounts').doc(callerCoachId).get();
+      stripeAccountId = acctSnap.exists ? (acctSnap.data()?.stripeAccountId as string | undefined) : undefined;
+      if (!stripeAccountId) {
+        throw new HttpsError('failed-precondition', 'Coach has no Stripe Connect account on file — cannot resume. Please reconnect Stripe.');
+      }
+      console.log(`[resumeStripeSubscription] Auto-healing sub ${stripeSubscriptionId} with coach account ${stripeAccountId}`);
+    }
 
     // Capture pause duration before clearing pausedAt.
     const pausedAtTs = subData.pausedAt as FirebaseFirestore.Timestamp | undefined;
@@ -12769,7 +12787,7 @@ export const resumeStripeSubscription = onCall(
       if (subData.stripeScheduleId) {
         const schedule = await stripe.subscriptionSchedules.retrieve(
           subData.stripeScheduleId,
-          { stripeAccount: subData.stripeAccountId }
+          { stripeAccount: stripeAccountId }
         );
         if (schedule.phases && schedule.phases.length > 0) {
           const nowSec = Math.floor(resumedAtMs / 1000);
@@ -12805,7 +12823,7 @@ export const resumeStripeSubscription = onCall(
           await stripe.subscriptionSchedules.update(
             subData.stripeScheduleId,
             { phases: updatedPhases as any },
-            { stripeAccount: subData.stripeAccountId }
+            { stripeAccount: stripeAccountId }
           );
         }
       }
@@ -12819,6 +12837,7 @@ export const resumeStripeSubscription = onCall(
     await subRef.update({
       pausedAt: FieldValue.delete(),
       updatedAt: FieldValue.serverTimestamp(),
+      stripeAccountId,
       ...(historyEntry && { pauseHistory: FieldValue.arrayUnion(historyEntry) }),
     });
     return { success: true };
