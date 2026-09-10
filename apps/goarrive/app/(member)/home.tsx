@@ -88,10 +88,15 @@ export default function MemberHome() {
   //   - Single-assign flows write `Timestamp.fromDate(...)` (correct per backend contract).
   //   - BatchAssignModal historically wrote `YYYY-MM-DD` strings (fixed in #316 for new docs,
   //     but existing string docs are still live — no backfill).
-  // So: try a day-range Timestamp query first, then fall back to the string-equality query
-  // for the legacy batch-assigned docs.
+  // So: run both a day-range Timestamp query and a string-equality fallback query.
+  // Each is guarded independently — if one throws (e.g. Timestamp query needs an index
+  // that hasn't finished building yet) the other still populates the card.
   async function fetchTodayWorkout() {
     if (!user) return;
+    const collected = new Map<string, { id: string; name: string }>();
+
+    // Primary: day-range on the Timestamp field. Requires composite index
+    // (memberId ASC, status ASC, scheduledFor ASC, createdAt ASC).
     try {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
@@ -109,15 +114,20 @@ export default function MemberHome() {
         limit(5)
       );
       const tsSnap = await getDocs(tsQuery);
-      const collected = new Map<string, { id: string; name: string }>();
       tsSnap.docs.forEach((d) => {
         collected.set(d.id, {
           id: d.id,
           name: d.data().workoutName ?? "Today's Workout",
         });
       });
+    } catch (err) {
+      console.error('[MemberHome] Timestamp today-workout query failed:', err);
+    }
 
-      // Legacy fallback: string-equality docs (pre-#316 BatchAssignModal writes).
+    // Fallback: legacy string-equality docs (pre-#316 BatchAssignModal writes).
+    // Independent guard so a Timestamp-query failure doesn't blank the card
+    // for members whose assignments still live as strings.
+    try {
       const strQuery = query(
         collection(db, 'workout_assignments'),
         where('memberId', '==', user.uid),
@@ -134,11 +144,11 @@ export default function MemberHome() {
           });
         }
       });
-
-      setTodayWorkouts(Array.from(collected.values()).slice(0, 5));
     } catch (err) {
-      console.error('[MemberHome] Error fetching today workout:', err);
+      console.error('[MemberHome] String-equality today-workout query failed:', err);
     }
+
+    setTodayWorkouts(Array.from(collected.values()).slice(0, 5));
   }
 
   async function fetchMemberData() {
