@@ -53,7 +53,7 @@ import {
   deleteDoc,
   limit,
 } from 'firebase/firestore';
-import { useNavigation, router } from 'expo-router';
+import { useNavigation, router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
 import { db, functions } from '../../lib/firebase';
@@ -567,6 +567,7 @@ function BuildScreenInner() {
   const { user, claims, effectiveUid } = useAuth();
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';
   const { cols, cardWidth, cardHeight } = useGridLayout();
+  const { type: typeParam } = useLocalSearchParams<{ type?: string }>();
 
   // ── Preview Engine (scroll-aware animation scheduling) ─────────────────
   const previewEngine = usePreviewEngine();
@@ -580,7 +581,9 @@ function BuildScreenInner() {
   const [variationBadges, setVariationBadges] = useState<Record<string, 'running' | 'ready'>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [activeType, setActiveType] = useState<BuildType | 'All'>('All');
+  const VALID_TYPES: Array<BuildType | 'All'> = ['All', 'Workouts', 'Movements', 'Plans', 'Follow-Alongs', 'Playbooks'];
+  const initialType: BuildType | 'All' = (VALID_TYPES.includes(typeParam as any) ? typeParam : 'All') as BuildType | 'All';
+  const [activeType, setActiveType] = useState<BuildType | 'All'>(initialType);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
