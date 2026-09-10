@@ -28,6 +28,8 @@ import {
   doc,
   getDoc,
   limit,
+  orderBy,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useRouter } from 'expo-router';
@@ -66,8 +68,7 @@ export default function MemberHome() {
   const [loading, setLoading] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [isPending, setIsPending] = useState(true);
-  const [todayWorkoutName, setTodayWorkoutName] = useState<string | null>(null);
-  const [todayAssignmentId, setTodayAssignmentId] = useState<string | null>(null);
+  const [todayWorkouts, setTodayWorkouts] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -83,22 +84,58 @@ export default function MemberHome() {
     return `${y}-${m}-${day}`;
   }
 
+  // Two write paths exist for `scheduledFor`:
+  //   - Single-assign flows write `Timestamp.fromDate(...)` (correct per backend contract).
+  //   - BatchAssignModal historically wrote `YYYY-MM-DD` strings (fixed in #316 for new docs,
+  //     but existing string docs are still live — no backfill).
+  // So: try a day-range Timestamp query first, then fall back to the string-equality query
+  // for the legacy batch-assigned docs.
   async function fetchTodayWorkout() {
     if (!user) return;
     try {
-      const q = query(
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const startOfTomorrow = new Date(startOfDay);
+      startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+      const tsQuery = query(
+        collection(db, 'workout_assignments'),
+        where('memberId', '==', user.uid),
+        where('status', '==', 'scheduled'),
+        where('scheduledFor', '>=', Timestamp.fromDate(startOfDay)),
+        where('scheduledFor', '<', Timestamp.fromDate(startOfTomorrow)),
+        orderBy('scheduledFor', 'asc'),
+        orderBy('createdAt', 'asc'),
+        limit(5)
+      );
+      const tsSnap = await getDocs(tsQuery);
+      const collected = new Map<string, { id: string; name: string }>();
+      tsSnap.docs.forEach((d) => {
+        collected.set(d.id, {
+          id: d.id,
+          name: d.data().workoutName ?? "Today's Workout",
+        });
+      });
+
+      // Legacy fallback: string-equality docs (pre-#316 BatchAssignModal writes).
+      const strQuery = query(
         collection(db, 'workout_assignments'),
         where('memberId', '==', user.uid),
         where('scheduledFor', '==', todayDateString()),
         where('status', '==', 'scheduled'),
-        limit(1)
+        limit(5)
       );
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const first = snap.docs[0];
-        setTodayWorkoutName(first.data().workoutName ?? 'Today\'s Workout');
-        setTodayAssignmentId(first.id);
-      }
+      const strSnap = await getDocs(strQuery);
+      strSnap.docs.forEach((d) => {
+        if (!collected.has(d.id)) {
+          collected.set(d.id, {
+            id: d.id,
+            name: d.data().workoutName ?? "Today's Workout",
+          });
+        }
+      });
+
+      setTodayWorkouts(Array.from(collected.values()).slice(0, 5));
     } catch (err) {
       console.error('[MemberHome] Error fetching today workout:', err);
     }
@@ -237,13 +274,14 @@ export default function MemberHome() {
           </View>
         ) : (
           <>
-            {/* Start Today's Workout — shown only when a scheduled workout exists for today */}
-            {todayWorkoutName !== null && (
+            {/* Start Today's Workout — one card per scheduled assignment for today */}
+            {todayWorkouts.map((w) => (
               <Pressable
+                key={w.id}
                 style={s.todayCard}
                 onPress={() =>
                   router.push(
-                    `/(member)/workouts?assignmentId=${todayAssignmentId ?? ''}` as any
+                    `/(member)/workouts?assignmentId=${w.id}` as any
                   )
                 }
               >
@@ -253,11 +291,11 @@ export default function MemberHome() {
                   </View>
                   <View style={s.todayCardInfo}>
                     <Text style={s.todayCardLabel}>Start Today's Workout</Text>
-                    <Text style={s.todayCardName} numberOfLines={2}>{todayWorkoutName}</Text>
+                    <Text style={s.todayCardName} numberOfLines={2}>{w.name}</Text>
                   </View>
                 </View>
               </Pressable>
-            )}
+            ))}
 
             {/* Plan Status Card */}
             <View style={s.card}>
