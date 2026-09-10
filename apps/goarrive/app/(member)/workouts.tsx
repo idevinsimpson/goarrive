@@ -36,6 +36,7 @@ import {
   addDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
 import { enqueueWrite, processQueue } from '../../lib/offlineQueue';
@@ -156,6 +157,10 @@ function buildHeartRateMetrics(stats: HeartRateSessionStats | null): {
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MemberWorkoutsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { assignmentId: deepLinkAssignmentId } = useLocalSearchParams<{
+    assignmentId?: string;
+  }>();
   const { user, claims } = useAuth();
   const memberId = user?.uid ?? '';
 
@@ -440,6 +445,22 @@ export default function MemberWorkoutsScreen() {
       }
     })();
   }, [loading, assignments, handleStartWorkout]);
+
+  // ── Deep-link from home: auto-start a specific assignment ────────────
+  // Home's Start Today's Workout card routes here with ?assignmentId=<id>.
+  // Wait until the assignments list has loaded, match the id, hand off to
+  // the same handleStartWorkout an in-tab tap would call, then clear the
+  // param so back-navigation or a fresh visit doesn't retrigger.
+  const deepLinkFiredRef = useRef(false);
+  useEffect(() => {
+    if (loading || deepLinkFiredRef.current) return;
+    if (!deepLinkAssignmentId) return;
+    const assignment = assignments.find((a) => a.id === deepLinkAssignmentId);
+    if (!assignment || assignment.status === 'completed') return;
+    deepLinkFiredRef.current = true;
+    handleStartWorkout(assignment);
+    router.setParams({ assignmentId: '' } as any);
+  }, [loading, assignments, deepLinkAssignmentId, handleStartWorkout, router]);
 
   // ── Listen for coach reactions on workout_logs ───────────────────────
   useEffect(() => {
