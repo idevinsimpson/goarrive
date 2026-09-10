@@ -67,6 +67,7 @@ export default function MemberHome() {
   const [firstName, setFirstName] = useState('');
   const [isPending, setIsPending] = useState(true);
   const [todayWorkoutName, setTodayWorkoutName] = useState<string | null>(null);
+  const [todayAssignmentId, setTodayAssignmentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -94,7 +95,9 @@ export default function MemberHome() {
       );
       const snap = await getDocs(q);
       if (!snap.empty) {
-        setTodayWorkoutName(snap.docs[0].data().workoutName ?? 'Today\'s Workout');
+        const first = snap.docs[0];
+        setTodayWorkoutName(first.data().workoutName ?? 'Today\'s Workout');
+        setTodayAssignmentId(first.id);
       }
     } catch (err) {
       console.error('[MemberHome] Error fetching today workout:', err);
@@ -236,7 +239,14 @@ export default function MemberHome() {
           <>
             {/* Start Today's Workout — shown only when a scheduled workout exists for today */}
             {todayWorkoutName !== null && (
-              <Pressable style={s.todayCard} onPress={() => router.push('/(member)/workouts')}>
+              <Pressable
+                style={s.todayCard}
+                onPress={() =>
+                  router.push(
+                    `/(member)/workouts?assignmentId=${todayAssignmentId ?? ''}` as any
+                  )
+                }
+              >
                 <View style={s.todayCardHeader}>
                   <View style={s.todayIconWrap}>
                     <Text style={s.todayIconText}>▶</Text>
