@@ -59,6 +59,8 @@ interface PlanData {
   };
 }
 
+type HomeState = 'no-intake' | 'building' | 'has-plan';
+
 export default function MemberHome() {
   const { user, claims } = useAuth();
   const router = useRouter();
@@ -67,7 +69,8 @@ export default function MemberHome() {
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [firstName, setFirstName] = useState('');
-  const [isPending, setIsPending] = useState(true);
+  const [homeState, setHomeState] = useState<HomeState>('building');
+  const isPending = homeState !== 'has-plan';
   const [todayWorkouts, setTodayWorkouts] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
@@ -202,6 +205,11 @@ export default function MemberHome() {
           if (!candidates.find(c => c.id === d.id)) candidates.push({ id: d.id, ...d.data() });
         });
 
+        // Three-state branch: plan wins over intake state.
+        // A plan implies an intake was submitted, so treat plan existence as
+        // the primary signal; only fall back to intakeSubmissionId when no
+        // plan doc exists. Draft plans stay in the 'building' bucket because
+        // the coach has not shared them with the member yet.
         if (candidates.length > 0) {
           const priority = ['accepted', 'presented', 'pending', 'draft'];
           const sorted = [...candidates].sort((a, b) => {
@@ -211,10 +219,11 @@ export default function MemberHome() {
           });
           const best = sorted[0] as PlanData;
           setPlan(best);
-          // Only hide plan if it's a draft (not yet shared with member)
-          setIsPending(best.status === 'draft');
+          setHomeState(best.status === 'draft' ? 'building' : 'has-plan');
+        } else if (data.intakeSubmissionId) {
+          setHomeState('building');
         } else {
-          setIsPending(true);
+          setHomeState('no-intake');
         }
       }
     } catch (err) {
@@ -234,6 +243,15 @@ export default function MemberHome() {
 
   const handleViewPlan = () => {
     router.push('/(member)/my-plan');
+  };
+
+  const handleStartIntake = () => {
+    const coachId = memberData?.coachId;
+    if (coachId && coachId !== 'unassigned') {
+      router.push(`/intake/${coachId}` as any);
+    } else {
+      router.push('/intake' as any);
+    }
   };
 
   const handleContactCoach = async () => {
@@ -311,11 +329,24 @@ export default function MemberHome() {
             <View style={s.card}>
               <View style={s.cardHeader}>
                 <Text style={s.cardTitle}>
-                  {isPending ? 'Your Plan is Being Built' : 'Your Plan'}
+                  {homeState === 'has-plan'
+                    ? 'Your Plan'
+                    : homeState === 'building'
+                      ? 'Your Plan is Being Built'
+                      : 'Complete Your Intake'}
                 </Text>
               </View>
               <View style={s.cardBody}>
-                {isPending ? (
+                {homeState === 'has-plan' && plan ? (
+                  <>
+                    <Text style={s.cardText}>
+                      {plan.hero?.planTitle || 'Your Tailored Plan'}
+                    </Text>
+                    <Text style={s.cardSubtext}>
+                      {plan.hero?.statusText || 'Your plan is ready'}
+                    </Text>
+                  </>
+                ) : homeState === 'building' ? (
                   <>
                     <Text style={s.cardText}>
                       Thank you for completing your intake form! Your coach is now
@@ -325,19 +356,22 @@ export default function MemberHome() {
                       You'll be notified when your plan is ready to review.
                     </Text>
                   </>
-                ) : plan ? (
+                ) : (
                   <>
                     <Text style={s.cardText}>
-                      {plan.hero?.planTitle || 'Your Tailored Plan'}
+                      Your coach needs a few details from you before they can build
+                      your plan.
                     </Text>
                     <Text style={s.cardSubtext}>
-                      {plan.hero?.statusText || 'Your plan is ready'}
+                      It takes just a few minutes.
                     </Text>
+                    <Pressable
+                      style={s.contactButton}
+                      onPress={handleStartIntake}
+                    >
+                      <Text style={s.contactButtonText}>Start Intake</Text>
+                    </Pressable>
                   </>
-                ) : (
-                  <Text style={s.cardText}>
-                    No plan has been created yet. Please check back soon.
-                  </Text>
                 )}
               </View>
             </View>
