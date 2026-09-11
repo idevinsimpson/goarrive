@@ -1,6 +1,6 @@
 # GoArrive Current State & Roadmap
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-09-07._
 
 ## What Is Built and Working
 The platform has a strong operational backbone. This section records capabilities that are built and working at the most recently verified level; an item may be merged to `main`, available on staging, or deployed to production. Deployment status is stated explicitly for recent items and must not be inferred from a merge alone.
@@ -85,13 +85,14 @@ When deciding what to build next, follow this priority order:
 | Priority | Area | Rationale |
 |---|---|---|
 | 1 | Marketing funnel conversion tracking | Enrollment funnel shipped; next is lead management dashboard and conversion analytics for coaches. |
-| 2 | Workout player quality and reliability | Ongoing hardening — iOS audio/video edge cases keep surfacing; keep the regression suite growing. Audio PiP Phase 2 (canvas-stream) is in QA on iOS Safari. |
-| 3 | Continuous-video player | Render pipeline scaffold (#262) and Phase 4 playback hook (#266) merged to main; #267 resolved-URL integration remains open. Renderer security/resource policies and production activation still require explicit human review. |
-| 4 | Coach-review speed and acknowledgment loops | Review queue exists in MemberDetail; make review-and-respond the fastest path in the coach's day. |
-| 5 | Notification reliability | Push is mock-only server-side; email and SMS are conditional. |
-| 6 | Coach command center refinement | Continue replacing "Coming Soon" tiles in MemberDetail. |
-| 7 | Deeper admin visibility | Analytics tab, recording dashboard. |
-| 8 | Secondary expansions | Messaging, progress photos, check-in calls, native apps. |
+| 2 | Workout player quality and reliability | Ongoing hardening — iOS audio/video edge cases keep surfacing; keep the regression suite growing. Audio PiP Phase 2 (canvas-stream) is in QA on iOS Safari. UX batch 1 (PRs #306/#307/#308) open for review. |
+| 3 | Plan scenarios and pricing visibility | Plan Scenarios (Pass A + B) and CTS controls shipped to staging; prod activation and final E2E remain. |
+| 4 | Continuous-video player | Render pipeline scaffold (#262) and Phase 4 playback hook (#266) merged to main; #267 resolved-URL integration remains open/stale. Renderer security/resource policies and production activation still require explicit human review. |
+| 5 | Coach-review speed and acknowledgment loops | Review queue exists in MemberDetail; make review-and-respond the fastest path in the coach's day. |
+| 6 | Notification reliability | Push is mock-only server-side; email and SMS are conditional. |
+| 7 | Coach command center refinement | Continue replacing "Coming Soon" tiles in MemberDetail. |
+| 8 | Deeper admin visibility | Analytics tab, recording dashboard. |
+| 9 | Secondary expansions | Messaging, progress photos, check-in calls, native apps. |
 
 ## Recent Changes (May–August 2026)
 **2026-08-14 latest main updates (deployment scoped separately):** PR #259 merged as `68441d7` after exact-head staging and physical-iPhone v3 Case D established background-music continuity; the observed volume jump at the handoff remains unresolved. Superseding PR #271 merged as `516ae212`, removing the visible green PiP debug thumbnail and rAF mirror while preserving the off-screen capture canvas, hidden video handoff, and PiP stream. These merge facts do not establish a production deploy; the attempted production hotfix ended at a cherry-pick conflict, was aborted, and deployed nothing.
