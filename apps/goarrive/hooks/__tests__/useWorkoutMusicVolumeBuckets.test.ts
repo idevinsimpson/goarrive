@@ -149,3 +149,58 @@ describe('fire-and-forget contract', () => {
     expect(guard.pending('edm', 15)).toEqual(VOLUME_BUCKETS);
   });
 });
+
+// ── orderBucketsForFallback (never-louder cascade) ───────────────────────────
+// The pre-fix HEAD-check fell back to the full-volume original URL when the
+// exact bucket wasn't rendered — iOS ignores element.volume, so a member with
+// the slider at 5% who caught an unrendered bucket got a 100%-gain leave.
+// orderBucketsForFallback returns the order applyBucket iterates: loudest
+// at-or-below target first (so a missing variant stays quieter than intended),
+// then quietest above (last-ditch fallback if nothing at-or-below is rendered).
+//
+// Mirrored here (matching the nearestBucket pattern above) because importing
+// useMusicHandoff pulls expo-modules-core transitively and the module needs
+// __DEV__ defined. Keep in sync with useMusicHandoff.ts::orderBucketsForFallback.
+
+function orderBucketsForFallback(target: number): number[] {
+  return [
+    ...VOLUME_BUCKETS.filter(b => b <= target).sort((a, b) => b - a),
+    ...VOLUME_BUCKETS.filter(b => b > target).sort((a, b) => a - b),
+  ];
+}
+
+describe('orderBucketsForFallback', () => {
+  test('target present: the target bucket sits first in the order', () => {
+    expect(orderBucketsForFallback(0.25)[0]).toBe(0.25);
+  });
+
+  test('target missing: iterating the order picks the next quieter rendered bucket', () => {
+    const rendered = new Set([0.12, 0.5]);
+    const chosen = orderBucketsForFallback(0.25).find(b => rendered.has(b));
+    expect(chosen).toBe(0.12);
+  });
+
+  test('only louder rendered: iterating picks the quietest of the louder buckets', () => {
+    const rendered = new Set([0.5, 1.0]);
+    const chosen = orderBucketsForFallback(0.25).find(b => rendered.has(b));
+    expect(chosen).toBe(0.5);
+  });
+
+  test('nothing rendered: the caller falls through to the full-volume URL', () => {
+    const rendered = new Set<number>();
+    const chosen = orderBucketsForFallback(0.25).find(b => rendered.has(b));
+    expect(chosen).toBeUndefined();
+  });
+
+  test('full order for mid-target: loud-to-quiet at-or-below, then quiet-to-loud above', () => {
+    expect(orderBucketsForFallback(0.25)).toEqual([0.25, 0.12, 0.05, 0.5, 1.0]);
+  });
+
+  test('target 1.0: nothing is louder, whole ladder is at-or-below', () => {
+    expect(orderBucketsForFallback(1.0)).toEqual([1.0, 0.5, 0.25, 0.12, 0.05]);
+  });
+
+  test('target 0.05: only self at-or-below, then quietest-above ordered low-to-high', () => {
+    expect(orderBucketsForFallback(0.05)).toEqual([0.05, 0.12, 0.25, 0.5, 1.0]);
+  });
+});
