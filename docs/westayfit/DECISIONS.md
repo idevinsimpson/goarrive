@@ -371,3 +371,10 @@ runbook, dispatch specs, meeting note) lives on `claude/westay-fit-takeover-cont
 `main`, so a main-based audit read stale copies (the Sep 3 expiry, "no dated release entry" for
 E2/E3/E3.5). Recommendation for Devin: authorize a docs-only PR of `docs/westayfit/**` from the PM
 branch to `main` so future audits see the current record. Not done: no PR without his word.
+
+## 2026-09-12 — Maia paused by Devin (owner decision)
+
+- **Devin's words (16:5x EDT, to the PM in the Claude Code chat):** "I'm so over this. Maia is paused."
+- **Effect:** no dispatch, probe or checkpoint to Maia by anyone until Devin lifts the pause. The E4-A1-R4 package (approved per ChatGPT's 13:41 EDT relay; Devin's approval words are not in Slack) is suspended mid-implementation: R1 patch (PM VERIFIED, SHA `6259369a…`) plus R4 edits reported to five files, all uncommitted in `~/dev-goarrive-wsf-e4a1` on the bot box.
+- **Why (record):** in 24 hours the ChatGPT→Maia loop produced four review rounds and no committed code; the bot lost directives to its options menu twice, drafted-and-waited once, died silently once, was cut by the 45-minute deadline three times, self-killed its shell with a broad `pkill -f`, and wedged after the approved run started (runbook rules 18–22, defect 3).
+- **Open for Devin:** (1) preserve the uncommitted worktree (a WIP commit + push of `feat/wsf-e4a1`, no PR) before any restart; (2) who finishes R4 and where; (3) whether the bot's turn deadline and process hygiene are fixed before Maia resumes code packages.
