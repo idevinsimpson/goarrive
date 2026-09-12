@@ -108,3 +108,32 @@ Also asserted, no screenshot: an anonymous POST to
    phone interval before the expo.
 
 ## GATE 1 under the lockstep commit
+
+Run at `4795091` from a fresh generated-types state (`apps/westayfit/.expo/types`
+removed first, the same condition a fresh checkout has):
+
+| Step | Result |
+|---|---|
+| unit + types (`test:vitest`, `ts:check`) | PASS — 7 files / 39 tests; `tsc --noEmit` exit 0 (a first attempt with Expo's generated `.expo/types/router.d.ts` present failed on the pre-existing `app/signin.tsx:111` typed-routes error described in follow-on 1; R4 code is not involved) |
+| build functions-westayfit | PASS |
+| build web (`expo export` + `inject_meta.py`) | **BLOCKED by design** — `ERROR: 2 dynamic route(s) have no rewrite in firebase.westayfit.json` for `contribute/[goalId]` and `display/[goalId]`. This is the lockstep guard between the exported routes and the Hosting config; the rewrites are follow-on 4 (a config change that needs its own approval). Until they land, GATE 1's static-export path cannot run on this branch. |
+| callable suite (`--only firestore,auth --project goarrive-test`) | not reached by the script; the identical command was run standalone above: 14 suites / 121 tests PASS |
+| browser step (five baseline specs) | not reached by the script; run instead through the dev-server path under `--project goarrive-test` with the lockstep `PROJECT_ID` — result below |
+
+### Five baseline browser specs under goarrive-test (dev-server path)
+
+Command: the same `emulators:exec --only firestore,auth,functions --project goarrive-test`
+runner as the E4-A1 spec, with `E2E_SPECS` set to the five baseline specs; Playwright
+under `CI=1` (1 worker, 2 retries). Wall time 2.9 minutes, 31 attempts for 25 tests.
+
+| Outcome | Count | Detail |
+|---|---|---|
+| passed | 21 | E3 check-in flow (tap → counted → reload keeps it → re-tap idempotent), all E3.5 home and auth-polish cases incl. C5 redirect and §6.2 `createdAt` preservation, F9 Private label, the E2 unknown-code negative, the mu2 signed-out cases — all with the client on `goarrive-test` and every callable served under `/goarrive-test/us-central1/` (functions-emulator verification lines show `auth: VALID`) |
+| flaky (failed once, passed on retry) | 2 | `e35-auth-polish` C3 ×2: the reset button was still disabled on the first attempt (dev-server first-render timing), passed on retry |
+| failed | 2 | `e2-join-flow.spec.ts:144` and `mu2-flow.spec.ts:102`: both time out at `locator('meta[name="robots"]')` — that tag is injected by `inject_meta.py` into the **static export** and does not exist on the Expo dev server. Both tests fail *before* their callable-dependent steps, so the E2 §3.5 signup round-trip and the full M-U2 flow are **NOT RUN on this path**, not failed on substance. |
+
+So the namespace lockstep holds for every flow the dev-server path can reach; the two
+static-export-dependent flows need the real GATE 1 path, which needs the rewrites
+(follow-on 4). The next section runs exactly that with the rewrites applied locally.
+
+### GATE 1 with the two proposed rewrites applied locally (not committed)
