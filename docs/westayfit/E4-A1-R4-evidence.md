@@ -137,3 +137,26 @@ static-export-dependent flows need the real GATE 1 path, which needs the rewrite
 (follow-on 4). The next section runs exactly that with the rewrites applied locally.
 
 ### GATE 1 with the two proposed rewrites applied locally (not committed)
+
+Run at `d44365a` (code identical to `4795091`) with
+`{ "source": "/contribute/**", "destination": "/contribute/__dynamic.html" }` and
+`{ "source": "/display/**", "destination": "/display/__dynamic.html" }` added to
+`firebase.westayfit.json` and `firebase.westayfit.emulators.json` for this run only;
+both files were restored byte-for-byte afterwards (`git status` clean). `.expo/types`
+removed first, as on a fresh checkout.
+
+| Step | Result |
+|---|---|
+| unit + types | PASS — 7 files / 39 tests; `tsc --noEmit` exit 0 |
+| build functions-westayfit | PASS |
+| build web + `inject_meta.py` | PASS — all five dynamic routes reported `[routed]` |
+| callable suite (`--only firestore,auth --project goarrive-test`) | PASS — 14 suites / 121 tests |
+| five baseline browser specs on the static export via the Hosting emulator (`--project goarrive-test`) | PASS — 25/25 in 39.0 s, no retries |
+| verdict printed by the script | `GATE 1 CLEAR — profile-setup succeeded and /community/<id> served 200 on a cold load.` — `GATE1_EXIT=0` |
+
+Conclusion: with follow-on 4 approved, this branch passes the full GATE 1 under the
+lockstep project id; without it, the static-export path stays blocked at the build
+guard by design. The emulator warnings in the log (IPv6 port probes, MOTD and
+web-app-config fetches, the missing `WSF_EMAIL_API_KEY` secret for
+`wsfSendVerificationEmail`) are the offline-sandbox conditions, not failures.
+`apps/westayfit/dist` in the PM container is an emulator build and was not deployed.
