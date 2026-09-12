@@ -1,0 +1,522 @@
+import { Link, router } from 'expo-router';
+import { FirebaseError } from 'firebase/app';
+import { httpsCallable } from 'firebase/functions';
+import { useCallback, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { useWsfAuth } from '../../src/auth';
+import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
+import { wsfAuthEnabled } from '../../src/featureFlags';
+import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
+import { wsfTheme } from '../../src/theme';
+
+// The minimum surface needed to make the E4-A1 slice self-testable end to
+// end on the local emulator: seed a synthetic community/goal, then deep-link
+// into /contribute/{goalId} on one browser and /display/{goalId} on another.
+//
+// This screen is HARD-GATED to the emulator + loopback host via
+// `wsfUsingEmulators` (double-gated inside firebase.ts). A production build
+// cannot reach the form even if someone navigates the URL directly; every
+// user-visible surface reads *LOCAL SYNTHETIC TEST* so a screenshot from any
+// step is unmistakable in a review.
+//
+// Reuses `wsfCreateCommunity` (E3.5) for the fixture setup rather than
+// inventing a synthetic seed collection — same primitive real signups run
+// through — and then `wsfCreateGoal` (E4-A1) for the goal itself.
+
+type CreatedGoal = {
+  goalId: string;
+  title: string;
+  target: number;
+  unit: string;
+  communityGroupId: string;
+};
+
+function isoLocalDefault(offsetMs: number): string {
+  // Emits a `datetime-local`-compatible string in the user's local time so
+  // the two <input type="text"> fields on this page can be typed by a human
+  // driving Playwright. The value is parsed back with `new Date(x)` and
+  // passed to wsfCreateGoal as an ISO 8601 string, and the server converts
+  // to Timestamp — so anything Date can parse is safe here.
+  const t = new Date(Date.now() + offsetMs);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return (
+    `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}` +
+    `T${pad(t.getHours())}:${pad(t.getMinutes())}`
+  );
+}
+
+export default function NewGoalPage() {
+  const { ready, user } = useWsfAuth();
+
+  const defaultStart = useMemo(() => isoLocalDefault(-60_000), []);
+  const defaultEnd = useMemo(() => isoLocalDefault(60 * 60_000), []);
+
+  const [communityGroupId, setCommunityGroupId] = useState('');
+  const [displayName, setDisplayName] = useState('E4-A1 synthetic community');
+  const [seedError, setSeedError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
+
+  const [title, setTitle] = useState('E4-A1 synthetic goal');
+  const [target, setTarget] = useState('5000');
+  const [unit, setUnit] = useState('squats');
+  const [startsAt, setStartsAt] = useState(defaultStart);
+  const [endsAt, setEndsAt] = useState(defaultEnd);
+  const [timezone, setTimezone] = useState('America/New_York');
+
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [created, setCreated] = useState<CreatedGoal | null>(null);
+
+  const onSeedCommunity = useCallback(async () => {
+    if (seeding) return;
+    setSeedError(null);
+    const trimmed = displayName.trim();
+    if (trimmed.length < 2 || trimmed.length > 80) {
+      setSeedError('displayName must be 2 to 80 characters.');
+      return;
+    }
+    setSeeding(true);
+    try {
+      const fn = httpsCallable<
+        { displayName: string; groupType: string; joinPolicy: string },
+        { groupId: string }
+      >(getFirebaseFunctions(), 'wsfCreateCommunity');
+      const result = await fn({
+        displayName: trimmed,
+        groupType: 'household',
+        joinPolicy: 'private',
+      });
+      setCommunityGroupId(result.data.groupId);
+    } catch (e) {
+      const message =
+        e instanceof FirebaseError
+          ? `${e.code}: ${e.message}`
+          : e instanceof Error
+            ? e.message
+            : 'Could not seed synthetic community.';
+      setSeedError(message);
+    } finally {
+      setSeeding(false);
+    }
+  }, [displayName, seeding]);
+
+  const onSubmit = useCallback(async () => {
+    if (submitting) return;
+    setError(null);
+
+    const trimmedGroupId = communityGroupId.trim();
+    if (!trimmedGroupId) {
+      setError('communityGroupId is required. Seed a synthetic community first.');
+      return;
+    }
+
+    const trimmedTitle = title.trim();
+    if (trimmedTitle.length < 2 || trimmedTitle.length > 120) {
+      setError('Title must be 2 to 120 characters.');
+      return;
+    }
+    if (!/^[0-9]+$/.test(target.trim())) {
+      setError('Target must be a whole number.');
+      return;
+    }
+    const targetNum = Number.parseInt(target.trim(), 10);
+    if (!Number.isInteger(targetNum) || targetNum < 1 || targetNum > 100_000_000) {
+      setError('Target must be a positive integer up to 100000000.');
+      return;
+    }
+    const trimmedUnit = unit.trim();
+    if (trimmedUnit.length < 1 || trimmedUnit.length > 40) {
+      setError('Unit must be 1 to 40 characters.');
+      return;
+    }
+
+    const startsDate = new Date(startsAt);
+    const endsDate = new Date(endsAt);
+    if (Number.isNaN(startsDate.getTime())) {
+      setError('startsAt is not a valid date/time.');
+      return;
+    }
+    if (Number.isNaN(endsDate.getTime())) {
+      setError('endsAt is not a valid date/time.');
+      return;
+    }
+    if (endsDate.getTime() <= startsDate.getTime()) {
+      setError('endsAt must be strictly after startsAt.');
+      return;
+    }
+    const trimmedTz = timezone.trim();
+    if (!trimmedTz) {
+      setError('timezone is required.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const fn = httpsCallable<
+        {
+          title: string;
+          target: number;
+          unit: string;
+          communityGroupId: string;
+          startsAt: string;
+          endsAt: string;
+          timezone: string;
+        },
+        { goalId: string }
+      >(getFirebaseFunctions(), 'wsfCreateGoal');
+      const result = await fn({
+        title: trimmedTitle,
+        target: targetNum,
+        unit: trimmedUnit,
+        communityGroupId: trimmedGroupId,
+        startsAt: startsDate.toISOString(),
+        endsAt: endsDate.toISOString(),
+        timezone: trimmedTz,
+      });
+      setCreated({
+        goalId: result.data.goalId,
+        title: trimmedTitle,
+        target: targetNum,
+        unit: trimmedUnit,
+        communityGroupId: trimmedGroupId,
+      });
+    } catch (e) {
+      const message =
+        e instanceof FirebaseError
+          ? `${e.code}: ${e.message}`
+          : e instanceof Error
+            ? e.message
+            : 'Could not create goal.';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    communityGroupId,
+    title,
+    target,
+    unit,
+    startsAt,
+    endsAt,
+    timezone,
+    submitting,
+  ]);
+
+  // Hard gate. Production bundles that somehow route here render a refusal
+  // panel and never call any callable — no accidental production writes.
+  if (!wsfUsingEmulators) {
+    return (
+      <View style={styles.screen}>
+        <View style={[styles.card, styles.testBanner]}>
+          <Text style={styles.testBannerText} testID="wsf-new-goal-gated-off">
+            LOCAL SYNTHETIC TEST — DISABLED
+          </Text>
+          <Text style={styles.body}>
+            /goals/new is only available when the WSF web app is running against
+            the local Firestore emulator on a loopback host.
+          </Text>
+          <Text style={styles.caption}>
+            Set EXPO_PUBLIC_WSF_USE_EMULATORS=1 and load this page over
+            localhost / 127.0.0.1. This screen writes SYNTHETIC data only.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!wsfAuthEnabled) {
+    return <AuthFlagOffPanel title="New goal" testID="wsf-new-goal-disabled" />;
+  }
+  if (!ready) {
+    return (
+      <View style={styles.screen}>
+        <Text style={styles.body}>Loading…</Text>
+      </View>
+    );
+  }
+  if (!user) {
+    return (
+      <View style={styles.screen}>
+        <TestBanner />
+        <Text style={styles.heading}>Sign in to start a goal</Text>
+        <Link href="/signin" style={styles.link}>
+          Sign in
+        </Link>
+      </View>
+    );
+  }
+
+  if (created) {
+    return (
+      <View style={styles.screen} testID="wsf-new-goal-created">
+        <TestBanner />
+        <Text style={styles.heading}>LOCAL SYNTHETIC TEST — goal is live</Text>
+        <View style={styles.card}>
+          <Text style={styles.subheading}>{created.title}</Text>
+          <Text style={styles.body}>
+            {created.target} {created.unit}
+          </Text>
+          <Text style={styles.caption} selectable testID="wsf-new-goal-id">
+            goalId: {created.goalId}
+          </Text>
+          <Text style={styles.caption} selectable testID="wsf-new-goal-group-id">
+            communityGroupId: {created.communityGroupId}
+          </Text>
+        </View>
+        <View style={styles.card}>
+          <Text style={styles.subheading}>Share these links</Text>
+          <Link
+            href={{ pathname: '/contribute/[goalId]', params: { goalId: created.goalId } }}
+            style={styles.link}
+            testID="wsf-new-goal-contribute-link"
+          >
+            Contribute (phone)
+          </Link>
+          <Link
+            href={{ pathname: '/display/[goalId]', params: { goalId: created.goalId } }}
+            style={styles.link}
+            testID="wsf-new-goal-display-link"
+          >
+            Big-screen display
+          </Link>
+        </View>
+        <Pressable
+          style={styles.primary}
+          onPress={() =>
+            router.push({
+              pathname: '/contribute/[goalId]',
+              params: { goalId: created.goalId },
+            })
+          }
+          testID="wsf-new-goal-goto-contribute"
+        >
+          <Text style={styles.primaryText}>Open contribute page</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.screen} testID="wsf-new-goal-form">
+      <TestBanner />
+      <Text style={styles.heading}>Start a new goal</Text>
+
+      <View style={styles.card}>
+        <Text style={styles.subheading}>Step 1 — synthetic community</Text>
+        <Text style={styles.caption}>
+          Every goal must be bound to a community. Seed one via
+          wsfCreateCommunity, or paste an existing groupId.
+        </Text>
+        <Text style={styles.label}>Community display name</Text>
+        <TextInput
+          style={styles.input}
+          value={displayName}
+          onChangeText={setDisplayName}
+          editable={!seeding}
+          testID="wsf-new-goal-community-name"
+        />
+        <Pressable
+          style={[styles.secondary, seeding && styles.primaryDisabled]}
+          onPress={onSeedCommunity}
+          disabled={seeding}
+          testID="wsf-new-goal-seed-community"
+        >
+          <Text style={styles.secondaryText}>
+            {seeding ? 'Seeding…' : 'Seed synthetic community'}
+          </Text>
+        </Pressable>
+        {seedError ? (
+          <Text style={styles.errorText} testID="wsf-new-goal-seed-error">
+            {seedError}
+          </Text>
+        ) : null}
+
+        <Text style={styles.label}>communityGroupId</Text>
+        <TextInput
+          style={styles.input}
+          value={communityGroupId}
+          onChangeText={setCommunityGroupId}
+          placeholder="Paste here after seeding, or type an existing id"
+          editable={!seeding && !submitting}
+          testID="wsf-new-goal-group-id-input"
+        />
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.subheading}>Step 2 — goal</Text>
+        <Text style={styles.label}>Title</Text>
+        <TextInput
+          style={styles.input}
+          value={title}
+          onChangeText={setTitle}
+          placeholder="e.g. Community squat challenge"
+          editable={!submitting}
+          testID="wsf-new-goal-title"
+        />
+        <Text style={styles.label}>Target</Text>
+        <TextInput
+          style={styles.input}
+          value={target}
+          onChangeText={setTarget}
+          placeholder="e.g. 5000"
+          keyboardType="number-pad"
+          inputMode="numeric"
+          editable={!submitting}
+          testID="wsf-new-goal-target"
+        />
+        <Text style={styles.label}>Unit</Text>
+        <TextInput
+          style={styles.input}
+          value={unit}
+          onChangeText={setUnit}
+          placeholder="e.g. squats"
+          editable={!submitting}
+          testID="wsf-new-goal-unit"
+        />
+        <Text style={styles.label}>startsAt (local ISO, e.g. 2026-09-12T12:00)</Text>
+        <TextInput
+          style={styles.input}
+          value={startsAt}
+          onChangeText={setStartsAt}
+          editable={!submitting}
+          testID="wsf-new-goal-starts-at"
+        />
+        <Text style={styles.label}>endsAt (local ISO)</Text>
+        <TextInput
+          style={styles.input}
+          value={endsAt}
+          onChangeText={setEndsAt}
+          editable={!submitting}
+          testID="wsf-new-goal-ends-at"
+        />
+        <Text style={styles.label}>timezone (IANA, e.g. America/New_York)</Text>
+        <TextInput
+          style={styles.input}
+          value={timezone}
+          onChangeText={setTimezone}
+          editable={!submitting}
+          testID="wsf-new-goal-timezone"
+        />
+        {error ? (
+          <Text style={styles.errorText} testID="wsf-new-goal-error">
+            {error}
+          </Text>
+        ) : null}
+        <Pressable
+          style={[styles.primary, submitting && styles.primaryDisabled]}
+          onPress={onSubmit}
+          disabled={submitting}
+          testID="wsf-new-goal-submit"
+        >
+          <Text style={styles.primaryText}>
+            {submitting ? 'Creating…' : 'Create synthetic goal'}
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function TestBanner() {
+  return (
+    <View style={styles.testBanner} testID="wsf-new-goal-test-banner">
+      <Text style={styles.testBannerText}>LOCAL SYNTHETIC TEST</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    padding: wsfTheme.spacing.lg,
+    gap: wsfTheme.spacing.md,
+    backgroundColor: wsfTheme.colors.background,
+  },
+  testBanner: {
+    backgroundColor: '#B0342A',
+    padding: wsfTheme.spacing.sm,
+    borderRadius: wsfTheme.radius.sm,
+    alignItems: 'center',
+  },
+  testBannerText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    letterSpacing: 1,
+    fontSize: 14,
+  },
+  card: {
+    backgroundColor: wsfTheme.colors.surface,
+    padding: wsfTheme.spacing.lg,
+    borderRadius: wsfTheme.radius.md,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    gap: wsfTheme.spacing.sm,
+  },
+  heading: {
+    ...wsfTheme.typography.heading,
+    color: wsfTheme.colors.text,
+  },
+  subheading: {
+    ...wsfTheme.typography.subheading,
+    color: wsfTheme.colors.text,
+  },
+  body: {
+    ...wsfTheme.typography.body,
+    color: wsfTheme.colors.text,
+  },
+  caption: {
+    ...wsfTheme.typography.caption,
+    color: wsfTheme.colors.textMuted,
+  },
+  label: {
+    ...wsfTheme.typography.caption,
+    color: wsfTheme.colors.textMuted,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    borderRadius: wsfTheme.radius.sm,
+    paddingVertical: wsfTheme.spacing.sm,
+    paddingHorizontal: wsfTheme.spacing.md,
+    fontSize: 16,
+    color: wsfTheme.colors.text,
+    backgroundColor: wsfTheme.colors.background,
+  },
+  primary: {
+    backgroundColor: wsfTheme.colors.primary,
+    paddingVertical: wsfTheme.spacing.md,
+    borderRadius: wsfTheme.radius.pill,
+    alignItems: 'center',
+  },
+  secondary: {
+    backgroundColor: wsfTheme.colors.background,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.primary,
+    paddingVertical: wsfTheme.spacing.sm,
+    borderRadius: wsfTheme.radius.pill,
+    alignItems: 'center',
+  },
+  primaryDisabled: {
+    opacity: 0.6,
+  },
+  primaryText: {
+    color: wsfTheme.colors.surface,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryText: {
+    color: wsfTheme.colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  errorText: {
+    ...wsfTheme.typography.caption,
+    color: '#B0342A',
+  },
+  link: {
+    ...wsfTheme.typography.body,
+    color: wsfTheme.colors.primary,
+    textDecorationLine: 'underline',
+  },
+});

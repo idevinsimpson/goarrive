@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
@@ -1494,5 +1494,812 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
     }
 
     return { accepted: true };
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// E4-A1 — Goals + Contributions (quantitative shared totals).
+//
+// Where E3 counted unique members × moves (binary check-in), E4 counts a
+// running quantity: "we did 3,720 squats together." A member contributes N
+// units per attempt; the same attemptId retried counts once; the aggregate
+// reflects the sum.
+//
+// Invariants pinned by acceptance:
+//   * 3700+20=3720. FieldValue.increment(count) on a random shard.
+//   * concurrent +30/+20 -> +50 shared, +30 own for the +30 contributor
+//     (concurrency-safe via 10-way sharded counter + per-member totals doc).
+//   * double-submit counts once — idempotency on
+//     wsfContributions/{goalId}_{attemptId} inside a transaction.
+//   * 4999/5000 != 100%. All math is integer; percent uses (n*100)/target
+//     floor semantics on the display, never a float round-trip.
+//   * 4980+35=5015. Overshoot preserved: aggregate is unclamped; the UI
+//     clamps a progress bar to 100% while the number keeps climbing.
+//   * closed / new-goal / unit isolation: closed goals reject contributions
+//     (failed-precondition), separate goalIds keep separate counters, and
+//     each contribution records the goal's `unit` at attempt time.
+//
+// New Admin-SDK-only collections (no firestore.rules change; default-deny
+// covers them — same pattern as E3 §5.9):
+//   * wsfGoals/{goalId}
+//   * wsfContributions/{goalId}_{attemptId}
+//   * wsfGoalCounters/{goalId}/shards/{0..9}
+//   * wsfGoalMemberTotals/{goalId}_{userId}
+// ═════════════════════════════════════════════════════════════════════════════
+
+const GOAL_SHARD_COUNT = 10;
+
+type GoalStatus = 'active' | 'closed';
+
+type GoalDoc = {
+  ownerUid: string;
+  communityGroupId: string;
+  title: string;
+  target: number;
+  unit: string;
+  status: GoalStatus;
+  startsAt: FirebaseFirestore.Timestamp;
+  endsAt: FirebaseFirestore.Timestamp;
+  timezone: string;
+  isSample?: boolean;
+  createdAt?: FirebaseFirestore.Timestamp;
+  closedAt?: FirebaseFirestore.Timestamp;
+};
+
+type GoalPulseTotals = {
+  sharedTotal: number;
+  target: number;
+  unit: string;
+  status: GoalStatus;
+  contributorCount: number;
+};
+
+function randomGoalShardIndex(): number {
+  return Math.floor(Math.random() * GOAL_SHARD_COUNT);
+}
+
+function goalShardRef(goalId: string, index: number) {
+  return getFirestore().doc(`wsfGoalCounters/${goalId}/shards/${index}`);
+}
+
+async function sumGoalShards(goalId: string): Promise<number> {
+  const db = getFirestore();
+  const refs: FirebaseFirestore.DocumentReference[] = [];
+  for (let i = 0; i < GOAL_SHARD_COUNT; i++) {
+    refs.push(db.doc(`wsfGoalCounters/${goalId}/shards/${i}`));
+  }
+  const snaps = await db.getAll(...refs);
+  let total = 0;
+  for (const snap of snaps) {
+    const data = snap.data() as { count?: number } | undefined;
+    if (typeof data?.count === 'number') total += data.count;
+  }
+  return total;
+}
+
+async function countGoalContributors(goalId: string): Promise<number> {
+  const snap = await getFirestore()
+    .collection('wsfGoalMemberTotals')
+    .where('goalId', '==', goalId)
+    .count()
+    .get();
+  return snap.data().count;
+}
+
+// Same 2-second TTL and per-instance LRU as wsfChallengePulse — a poller at
+// 2s cadence never loses precision, and burst traffic collapses to one real
+// read per goalId per 2s per instance.
+const GOAL_PULSE_CACHE_TTL_MS = 2_000;
+const GOAL_PULSE_CACHE_MAX = 1_000;
+const goalPulseCache = new Map<string, { ts: number; value: GoalPulseTotals }>();
+
+function goalPulseCacheGet(goalId: string, now: number): GoalPulseTotals | null {
+  const hit = goalPulseCache.get(goalId);
+  if (!hit) return null;
+  if (now - hit.ts >= GOAL_PULSE_CACHE_TTL_MS) {
+    goalPulseCache.delete(goalId);
+    return null;
+  }
+  return hit.value;
+}
+
+function goalPulseCacheSet(
+  goalId: string,
+  now: number,
+  value: GoalPulseTotals
+): void {
+  if (goalPulseCache.size >= GOAL_PULSE_CACHE_MAX && !goalPulseCache.has(goalId)) {
+    const oldest = goalPulseCache.keys().next().value;
+    if (oldest !== undefined) goalPulseCache.delete(oldest);
+  }
+  goalPulseCache.set(goalId, { ts: now, value });
+}
+
+function normalizeGoalTitle(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 2 || trimmed.length > 120) return null;
+  return trimmed;
+}
+
+function normalizeGoalTarget(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (!Number.isInteger(v)) return null;
+  if (v < 1 || v > 100_000_000) return null;
+  return v;
+}
+
+function normalizeGoalUnit(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 1 || trimmed.length > 40) return null;
+  // Reject ASCII control characters. No script/language whitelist — a unit
+  // like "sentadillas" or "поднятия" is valid; matches wsfCreateCommunity's
+  // trim + length free-text pattern for displayName.
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function normalizeAttemptId(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function normalizeContributionCount(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (!Number.isInteger(v)) return null;
+  if (v < 1 || v > 100_000) return null;
+  return v;
+}
+
+// Signed integer for wsfAdjustGoal.delta. Zero is not a legal adjustment
+// (nothing to record). Bounded so a fat-finger can't hide behind Number.MAX.
+function normalizeAdjustmentDelta(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (!Number.isInteger(v)) return null;
+  if (v === 0) return null;
+  if (v < -100_000_000 || v > 100_000_000) return null;
+  return v;
+}
+
+// 1..280 chars, no ASCII control chars. Recorded on the immutable adjustment
+// doc so future audits can read why the correction happened; the length cap
+// keeps the audit doc within a comfortable read size.
+function normalizeAdjustmentReason(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 1 || trimmed.length > 280) return null;
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+// ISO 8601 string -> Date. Rejects empty, malformed, and infinite dates. The
+// callable receives ISO strings because httpsCallable serializes over JSON;
+// Date instances on the client become strings on the wire. We convert to a
+// Firestore Timestamp at write time via Timestamp.fromDate().
+function normalizeIsoTimestamp(v: unknown): Date | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 1 || trimmed.length > 64) return null;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+// IANA zone name — validated by asking the runtime to build a formatter for
+// it. Any invalid identifier throws RangeError. This is the same check the
+// browser platform uses; we don't ship a hard-coded allowlist because the
+// canonical IANA database is what actually matters and it changes over time.
+function normalizeIanaTimezone(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 1 || trimmed.length > 64) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed });
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+// Read the caller's membership in `groupId`. Returns the membership data
+// only if the row exists AND membershipStatus === 'active'. Everything else
+// returns null so the caller can reject with a uniform "Members only." —
+// this mirrors wsfListChallenge / wsfCheckIn.
+async function readActiveMembership(
+  tx: FirebaseFirestore.Transaction,
+  groupId: string,
+  uid: string
+): Promise<{ role: string; membershipStatus: string } | null> {
+  const membershipRef = getFirestore().doc(`wsfMemberships/${groupId}_${uid}`);
+  const snap = await tx.get(membershipRef);
+  if (!snap.exists) return null;
+  const data = snap.data() as {
+    role?: string;
+    membershipStatus?: string;
+  };
+  if (data.membershipStatus !== 'active') return null;
+  return {
+    role: data.role ?? '',
+    membershipStatus: data.membershipStatus,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCreateGoal — bring a new goal into being.
+//
+// Authenticated + email-verified. Caller becomes ownerUid. Returns { goalId }
+// so the client can immediately deep-link into /contribute/{goalId} and
+// /display/{goalId}. status starts as 'active'; unit is recorded verbatim so
+// concurrent goals with different units stay isolated.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CreateGoalRequest = {
+  communityGroupId?: unknown;
+  title?: unknown;
+  target?: unknown;
+  unit?: unknown;
+  startsAt?: unknown; // ISO 8601
+  endsAt?: unknown; // ISO 8601
+  timezone?: unknown; // IANA
+};
+
+type CreateGoalResponse = { goalId: string };
+
+export const wsfCreateGoal = onCall<CreateGoalRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<CreateGoalResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const token = request.auth.token as { email_verified?: boolean };
+    if (token.email_verified !== true) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Verify your email before starting a goal.'
+      );
+    }
+    const uid = request.auth.uid;
+
+    const communityGroupId = normalizeStringId(request.data?.communityGroupId);
+    if (!communityGroupId) {
+      throw new HttpsError(
+        'invalid-argument',
+        'communityGroupId is required.'
+      );
+    }
+    const title = normalizeGoalTitle(request.data?.title);
+    if (!title) {
+      throw new HttpsError('invalid-argument', 'title must be 2..120 chars.');
+    }
+    const target = normalizeGoalTarget(request.data?.target);
+    if (target === null) {
+      throw new HttpsError(
+        'invalid-argument',
+        'target must be a positive integer up to 100000000.'
+      );
+    }
+    const unit = normalizeGoalUnit(request.data?.unit);
+    if (!unit) {
+      throw new HttpsError(
+        'invalid-argument',
+        'unit must be 1..40 chars; no ASCII control characters.'
+      );
+    }
+    const startsAtDate = normalizeIsoTimestamp(request.data?.startsAt);
+    if (!startsAtDate) {
+      throw new HttpsError(
+        'invalid-argument',
+        'startsAt must be a valid ISO 8601 timestamp.'
+      );
+    }
+    const endsAtDate = normalizeIsoTimestamp(request.data?.endsAt);
+    if (!endsAtDate) {
+      throw new HttpsError(
+        'invalid-argument',
+        'endsAt must be a valid ISO 8601 timestamp.'
+      );
+    }
+    if (endsAtDate.getTime() <= startsAtDate.getTime()) {
+      throw new HttpsError(
+        'invalid-argument',
+        'endsAt must be strictly after startsAt.'
+      );
+    }
+    const timezone = normalizeIanaTimezone(request.data?.timezone);
+    if (!timezone) {
+      throw new HttpsError(
+        'invalid-argument',
+        'timezone must be a valid IANA identifier.'
+      );
+    }
+
+    const db = getFirestore();
+    const goalRef = db.collection('wsfGoals').doc();
+
+    // Membership + role are checked inside the transaction so a caller who
+    // loses foundingChampion between read and write can never race a goal
+    // into existence. Reuses the E3.5 wsfMemberships shape verbatim —
+    // groupId_uid path, {role, membershipStatus}. No new role invented.
+    await db.runTransaction(async (tx) => {
+      const membership = await readActiveMembership(tx, communityGroupId, uid);
+      if (!membership) {
+        throw new HttpsError(
+          'permission-denied',
+          'Active membership required in the community.'
+        );
+      }
+      if (membership.role !== 'foundingChampion') {
+        throw new HttpsError(
+          'permission-denied',
+          'Only a foundingChampion can start a goal in this community.'
+        );
+      }
+
+      tx.set(goalRef, {
+        ownerUid: uid,
+        communityGroupId,
+        title,
+        target,
+        unit,
+        status: 'active',
+        startsAt: Timestamp.fromDate(startsAtDate),
+        endsAt: Timestamp.fromDate(endsAtDate),
+        timezone,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { goalId: goalRef.id };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfContribute — add `count` units to `goalId` under attempt `attemptId`.
+//
+// Idempotent by (goalId, attemptId). Concurrency-safe via random-shard
+// increment + a per-member totals doc for own-credit. Rejects contributions
+// to a non-active goal.
+//
+// The transaction reads goal + prior contribution + prior member total up
+// front, then either short-circuits on idempotent replay OR writes the
+// contribution + shard delta + updated member total atomically. Idempotent
+// replay returns the ORIGINAL count so the caller sees the same body they
+// would have seen on the first tap — matching E3's §5.3 discipline.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ContributeRequest = {
+  goalId?: unknown;
+  attemptId?: unknown;
+  count?: unknown;
+};
+
+type ContributeResponse = {
+  addedCount: number;
+  ownCredit: number;
+  sharedTotal: number;
+  target: number;
+  unit: string;
+  status: GoalStatus;
+  alreadyRecorded: boolean;
+};
+
+export const wsfContribute = onCall<ContributeRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<ContributeResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+    const attemptId = normalizeAttemptId(request.data?.attemptId);
+    if (!attemptId) {
+      throw new HttpsError(
+        'invalid-argument',
+        'attemptId must be 8..128 chars of A-Z, a-z, 0-9, _ or -.'
+      );
+    }
+    const count = normalizeContributionCount(request.data?.count);
+    if (count === null) {
+      throw new HttpsError(
+        'invalid-argument',
+        'count must be a positive integer up to 100000.'
+      );
+    }
+
+    const db = getFirestore();
+    const goalRef = db.doc(`wsfGoals/${goalId}`);
+    const contribRef = db.doc(`wsfContributions/${goalId}_${attemptId}`);
+    const memberTotalRef = db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`);
+
+    // Two-phase read inside the transaction: goal first (need communityGroupId
+    // to derive the membership path), then contribution + memberTotal +
+    // membership in parallel. Mirrors wsfCheckIn's §E3-fix-3 shape — the
+    // "all reads before writes" rule stops at the first write, so sequential
+    // tx.get() plus a Promise.all is legal.
+    const { addedCount, alreadyRecorded, goalTarget, goalUnit, goalStatus } =
+      await db.runTransaction(async (tx) => {
+        const goalSnap = await tx.get(goalRef);
+        if (!goalSnap.exists) {
+          throw new HttpsError('not-found', 'Goal not found.');
+        }
+        const goal = goalSnap.data() as GoalDoc;
+        const membershipRef = db.doc(
+          `wsfMemberships/${goal.communityGroupId}_${uid}`
+        );
+
+        const [contribSnap, memberTotalSnap, membershipSnap] =
+          await Promise.all([
+            tx.get(contribRef),
+            tx.get(memberTotalRef),
+            tx.get(membershipRef),
+          ]);
+
+        // Idempotency wins over closure, window end, AND membership drift.
+        // A member who already succeeded must never see "you did the reps,
+        // we say you didn't" — even if the goal has since closed, the window
+        // has ended, or their membership was revoked. Matches wsfCheckIn
+        // §5.3 discipline.
+        if (contribSnap.exists) {
+          const prev = contribSnap.data() as { count?: number };
+          return {
+            addedCount: typeof prev.count === 'number' ? prev.count : 0,
+            alreadyRecorded: true as const,
+            goalTarget: goal.target,
+            goalUnit: goal.unit,
+            goalStatus: goal.status,
+          };
+        }
+
+        // NEW contribution — enforce all gates in strict order.
+        //   1. Active membership in the goal's community. Non-member and
+        //      wrong-group callers both fall out here with the same message
+        //      (avoids leaking whether a given group id exists).
+        if (!membershipSnap.exists) {
+          throw new HttpsError('permission-denied', 'Members only.');
+        }
+        const membership = membershipSnap.data() as {
+          membershipStatus?: string;
+        };
+        if (membership.membershipStatus !== 'active') {
+          throw new HttpsError('permission-denied', 'Members only.');
+        }
+
+        //   2. Goal must be active.
+        if (goal.status !== 'active') {
+          throw new HttpsError('failed-precondition', 'This goal is closed.');
+        }
+
+        //   3. Server-time window enforcement. startsAt inclusive, endsAt
+        //      exclusive — a contribution landing exactly at endsAt is
+        //      rejected. Uses Timestamp.now() so a client clock skew can
+        //      never open or close the window early.
+        const now = Timestamp.now();
+        const startMs = goal.startsAt.toMillis();
+        const endMs = goal.endsAt.toMillis();
+        if (now.toMillis() < startMs) {
+          throw new HttpsError(
+            'failed-precondition',
+            'Goal has not started yet.'
+          );
+        }
+        if (now.toMillis() >= endMs) {
+          throw new HttpsError(
+            'failed-precondition',
+            'Goal window has ended.'
+          );
+        }
+
+        const shardIndex = randomGoalShardIndex();
+        const shard = goalShardRef(goalId, shardIndex);
+
+        tx.set(contribRef, {
+          goalId,
+          attemptId,
+          userId: uid,
+          count,
+          shardIndex,
+          unit: goal.unit,
+          communityGroupId: goal.communityGroupId,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        tx.set(
+          shard,
+          { count: FieldValue.increment(count) },
+          { merge: true }
+        );
+
+        const previousMemberTotal =
+          (memberTotalSnap.data() as { total?: number } | undefined)?.total ??
+          0;
+        tx.set(
+          memberTotalRef,
+          {
+            goalId,
+            userId: uid,
+            total: previousMemberTotal + count,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        return {
+          addedCount: count,
+          alreadyRecorded: false as const,
+          goalTarget: goal.target,
+          goalUnit: goal.unit,
+          goalStatus: goal.status,
+        };
+      });
+
+    const [sharedTotal, ownCreditSnap] = await Promise.all([
+      sumGoalShards(goalId),
+      memberTotalRef.get(),
+    ]);
+    const ownCredit =
+      (ownCreditSnap.data() as { total?: number } | undefined)?.total ?? 0;
+
+    return {
+      addedCount,
+      ownCredit,
+      sharedTotal,
+      target: goalTarget,
+      unit: goalUnit,
+      status: goalStatus,
+      alreadyRecorded,
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfGoalPulse — public read of the shared total for `goalId`.
+//
+// Public invoker: a kiosk / audience display uses this unauthenticated.
+// Cache-first (2s TTL, per-instance LRU) mirrors wsfChallengePulse so a
+// display polling every 2s does not pay a Firestore read on every tick.
+// No rate-limit / no isSample filter / no eligibility check — the E4-A1
+// slice reads the goal doc verbatim by id. Hardening beyond the cache TTL
+// is deferred to its own review per the scope correction 2026-09-11.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type GoalPulseRequest = { goalId?: unknown };
+
+export const wsfGoalPulse = onCall<GoalPulseRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<GoalPulseTotals> => {
+    const now = Date.now();
+
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const cached = goalPulseCacheGet(goalId, now);
+    if (cached) return cached;
+
+    const db = getFirestore();
+    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+    if (!goalSnap.exists) {
+      throw new HttpsError('not-found', 'Goal not found.');
+    }
+    const goal = goalSnap.data() as GoalDoc;
+
+    const [sharedTotal, contributorCount] = await Promise.all([
+      sumGoalShards(goalId),
+      countGoalContributors(goalId),
+    ]);
+    const totals: GoalPulseTotals = {
+      sharedTotal,
+      target: goal.target,
+      unit: goal.unit,
+      status: goal.status,
+      contributorCount,
+    };
+    goalPulseCacheSet(goalId, now, totals);
+    return totals;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfAdjustGoal — authorized downward (or upward) correction of a goal's
+// shared total and, optionally, a specific member's own credit.
+//
+// Contributions are immutable. When a mis-recording needs to be undone, we
+// don't rewrite the contribution — we WRITE an adjustment. The adjustment is
+// itself immutable; each one is a new row on wsfGoalAdjustments/{adjId}. The
+// running total is (sum of contribution counts) + (sum of adjustment deltas).
+//
+// Why: three properties matter simultaneously —
+//   • the ledger of what actually happened stays intact,
+//   • the visible shared total is *exact* (not monotonic-only),
+//   • any downward move is traced to a caller and a reason.
+//
+// Auth: caller must have an active foundingChampion membership in the goal's
+// community. No new role is invented — this reuses the same authority model
+// that lets a foundingChampion create the goal in the first place.
+//
+// Delta is a signed nonzero integer. targetUid is optional; when present the
+// caller-supplied uid's per-member total moves by delta as well, so both
+// "we counted this member for too much" and "we counted a member who never
+// showed" can be corrected symmetrically. When targetUid is absent, only the
+// shared total moves — used for e.g. "one of the tally counters was jammed
+// and the shared count is off by 40."
+//
+// Bounds: delta is nonzero, bounded to ±100M. The transaction rejects any
+// adjustment that would drive shared total or the addressed member total
+// below zero — "no monotonic-only total" does not mean "allow negative
+// totals," it means "downward corrections are permitted."
+// ─────────────────────────────────────────────────────────────────────────────
+
+type AdjustGoalRequest = {
+  goalId?: unknown;
+  delta?: unknown;
+  targetUid?: unknown;
+  reason?: unknown;
+};
+
+type AdjustGoalResponse = {
+  adjustmentId: string;
+  delta: number;
+  targetUid: string | null;
+  sharedTotal: number;
+  targetMemberTotal: number | null;
+};
+
+export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<AdjustGoalResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+    const delta = normalizeAdjustmentDelta(request.data?.delta);
+    if (delta === null) {
+      throw new HttpsError(
+        'invalid-argument',
+        'delta must be a nonzero integer within ±100000000.'
+      );
+    }
+    const reason = normalizeAdjustmentReason(request.data?.reason);
+    if (!reason) {
+      throw new HttpsError(
+        'invalid-argument',
+        'reason must be 1..280 chars; no ASCII control characters.'
+      );
+    }
+    let targetUid: string | null = null;
+    const rawTargetUid = request.data?.targetUid;
+    if (rawTargetUid !== undefined && rawTargetUid !== null) {
+      const normalized = normalizeStringId(rawTargetUid);
+      if (!normalized) {
+        throw new HttpsError(
+          'invalid-argument',
+          'targetUid, when provided, must be a valid user id.'
+        );
+      }
+      targetUid = normalized;
+    }
+
+    const db = getFirestore();
+    const goalRef = db.doc(`wsfGoals/${goalId}`);
+    const adjustmentRef = db.collection('wsfGoalAdjustments').doc();
+    const shardRefs: FirebaseFirestore.DocumentReference[] = [];
+    for (let i = 0; i < GOAL_SHARD_COUNT; i++) {
+      shardRefs.push(db.doc(`wsfGoalCounters/${goalId}/shards/${i}`));
+    }
+    const writeShardRef = shardRefs[0]!; // deterministic; corrections aren't hot
+
+    const { newTargetTotal } = await db.runTransaction(async (tx) => {
+      const goalSnap = await tx.get(goalRef);
+      if (!goalSnap.exists) {
+        throw new HttpsError('not-found', 'Goal not found.');
+      }
+      const goal = goalSnap.data() as GoalDoc;
+
+      // Caller must be an active foundingChampion in the goal's community.
+      const callerMembership = await readActiveMembership(
+        tx,
+        goal.communityGroupId,
+        uid
+      );
+      if (!callerMembership) {
+        throw new HttpsError('permission-denied', 'Members only.');
+      }
+      if (callerMembership.role !== 'foundingChampion') {
+        throw new HttpsError(
+          'permission-denied',
+          'Only a foundingChampion can adjust this goal.'
+        );
+      }
+
+      const targetMemberTotalRef = targetUid
+        ? db.doc(`wsfGoalMemberTotals/${goalId}_${targetUid}`)
+        : null;
+
+      const [shardSnaps, targetTotalSnap] = await Promise.all([
+        Promise.all(shardRefs.map((r) => tx.get(r))),
+        targetMemberTotalRef
+          ? tx.get(targetMemberTotalRef)
+          : Promise.resolve(null),
+      ]);
+
+      const currentSharedTotal = shardSnaps.reduce((sum, snap) => {
+        const data = snap.data() as { count?: number } | undefined;
+        return sum + (typeof data?.count === 'number' ? data.count : 0);
+      }, 0);
+      const projectedSharedTotal = currentSharedTotal + delta;
+      if (projectedSharedTotal < 0) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Adjustment would drive shared total below zero.'
+        );
+      }
+
+      let projectedTargetTotal: number | null = null;
+      if (targetMemberTotalRef && targetTotalSnap) {
+        const prevTargetTotal =
+          (targetTotalSnap.data() as { total?: number } | undefined)?.total ??
+          0;
+        projectedTargetTotal = prevTargetTotal + delta;
+        if (projectedTargetTotal < 0) {
+          throw new HttpsError(
+            'failed-precondition',
+            "Adjustment would drive the member's total below zero."
+          );
+        }
+      }
+
+      // Immutable audit doc. Written once; never updated.
+      tx.set(adjustmentRef, {
+        goalId,
+        communityGroupId: goal.communityGroupId,
+        delta,
+        targetUid,
+        reason,
+        byUid: uid,
+        byRole: 'foundingChampion',
+        shardIndex: 0,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(
+        writeShardRef,
+        { count: FieldValue.increment(delta) },
+        { merge: true }
+      );
+      if (targetMemberTotalRef) {
+        tx.set(
+          targetMemberTotalRef,
+          {
+            goalId,
+            userId: targetUid,
+            total: projectedTargetTotal,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      return { newTargetTotal: projectedTargetTotal };
+    });
+
+    const sharedTotal = await sumGoalShards(goalId);
+    return {
+      adjustmentId: adjustmentRef.id,
+      delta,
+      targetUid,
+      sharedTotal,
+      targetMemberTotal: newTargetTotal,
+    };
   }
 );
