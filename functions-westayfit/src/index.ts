@@ -1510,7 +1510,10 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
 //   * concurrent +30/+20 -> +50 shared, +30 own for the +30 contributor
 //     (concurrency-safe via 10-way sharded counter + per-member totals doc).
 //   * double-submit counts once — idempotency on
-//     wsfContributions/{goalId}_{attemptId} inside a transaction.
+//     wsfContributions/{goalId}_{userId}_{attemptId} inside a transaction.
+//     The key is scoped by the authenticated uid (E4-A1-R4), so two members
+//     who independently pick the same attemptId each count exactly once and
+//     a replay can never surface another member's count.
 //   * 4999/5000 != 100%. All math is integer; percent uses (n*100)/target
 //     floor semantics on the display, never a float round-trip.
 //   * 4980+35=5015. Overshoot preserved: aggregate is unclamped; the UI
@@ -1522,7 +1525,7 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
 // New Admin-SDK-only collections (no firestore.rules change; default-deny
 // covers them — same pattern as E3 §5.9):
 //   * wsfGoals/{goalId}
-//   * wsfContributions/{goalId}_{attemptId}
+//   * wsfContributions/{goalId}_{userId}_{attemptId}
 //   * wsfGoalCounters/{goalId}/shards/{0..9}
 //   * wsfGoalMemberTotals/{goalId}_{userId}
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1915,7 +1918,12 @@ export const wsfContribute = onCall<ContributeRequest>(
 
     const db = getFirestore();
     const goalRef = db.doc(`wsfGoals/${goalId}`);
-    const contribRef = db.doc(`wsfContributions/${goalId}_${attemptId}`);
+    // Attempt identity is goal + authenticated uid + attemptId. Same member,
+    // same attemptId -> one recorded contribution and the original receipt
+    // on replay; different members with the same attemptId -> distinct keys.
+    const contribRef = db.doc(
+      `wsfContributions/${goalId}_${uid}_${attemptId}`
+    );
     const memberTotalRef = db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`);
 
     // Two-phase read inside the transaction: goal first (need communityGroupId
@@ -1947,7 +1955,16 @@ export const wsfContribute = onCall<ContributeRequest>(
         // has ended, or their membership was revoked. Matches wsfCheckIn
         // §5.3 discipline.
         if (contribSnap.exists) {
-          const prev = contribSnap.data() as { count?: number };
+          const prev = contribSnap.data() as {
+            count?: number;
+            userId?: string;
+          };
+          // The key is scoped by uid, so an existing doc IS this caller's own
+          // earlier attempt. If storage ever disagreed that would be corruption,
+          // not a caller-observable state: refuse rather than leak a count.
+          if (prev.userId !== uid) {
+            throw new HttpsError('internal', 'Contribution record mismatch.');
+          }
           return {
             addedCount: typeof prev.count === 'number' ? prev.count : 0,
             alreadyRecorded: true as const,
@@ -2103,6 +2120,52 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     };
     goalPulseCacheSet(goalId, now, totals);
     return totals;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfMyContribution — authenticated own-credit read for a goal (E4-A1-R4).
+//
+// The auth boundary is the explicit `request.auth` check below: anonymous
+// callers get `unauthenticated`. The Firestore path is derived from
+// request.auth.uid, never from a client-supplied id, so a caller can only
+// read their own row. Deliberately NOT cached — a shared cache would be a
+// cross-member leak vector; wsfGoalPulse's cache holds public totals only.
+//
+// No membership check by design: a member who left still deserves to see
+// the credit they earned (matches wsfContribute's idempotency-over-membership-
+// drift discipline). Corrections applied through wsfAdjustGoal land on the
+// same wsfGoalMemberTotals doc, so this read is durable across reload,
+// closure and authorized correction with no extra mechanism.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type MyContributionRequest = { goalId?: unknown };
+
+type MyContributionResponse = { ownCredit: number; unit: string };
+
+export const wsfMyContribution = onCall<MyContributionRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MyContributionResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+    const db = getFirestore();
+    const [goalSnap, memberSnap] = await Promise.all([
+      db.doc(`wsfGoals/${goalId}`).get(),
+      db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`).get(),
+    ]);
+    if (!goalSnap.exists) {
+      throw new HttpsError('not-found', 'Goal not found.');
+    }
+    const goal = goalSnap.data() as GoalDoc;
+    const total =
+      (memberSnap.data() as { total?: number } | undefined)?.total ?? 0;
+    return { ownCredit: total, unit: goal.unit };
   }
 );
 

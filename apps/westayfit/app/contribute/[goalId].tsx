@@ -11,7 +11,8 @@ import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { barPercent, integerPercent } from '../../src/goalPercent';
 import { wsfTheme } from '../../src/theme';
 
-// Response shapes mirror wsfContribute / wsfGoalPulse in functions-westayfit.
+// Response shapes mirror wsfContribute / wsfGoalPulse / wsfMyContribution in
+// functions-westayfit.
 type GoalPulse = {
   sharedTotal: number;
   target: number;
@@ -30,11 +31,15 @@ type ContributeResult = {
   alreadyRecorded: boolean;
 };
 
+// Authenticated own credit for the signed-in member. Read from the server on
+// load; never derived client-side.
+type MyContribution = { ownCredit: number; unit: string };
+
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'notSignedIn' }
   | { kind: 'notFound' }
-  | { kind: 'closed'; pulse: GoalPulse }
+  | { kind: 'closed'; pulse: GoalPulse; ownCredit: number }
   | { kind: 'ready'; pulse: GoalPulse; ownCredit: number }
   | { kind: 'error'; message: string };
 
@@ -166,18 +171,29 @@ export default function ContributeToGoal() {
     let cancelled = false;
     (async () => {
       try {
-        const fn = httpsCallable<{ goalId: string }, GoalPulse>(
+        const pulseFn = httpsCallable<{ goalId: string }, GoalPulse>(
           getFirebaseFunctions(),
           'wsfGoalPulse'
         );
-        const result = await fn({ goalId });
+        const mineFn = httpsCallable<{ goalId: string }, MyContribution>(
+          getFirebaseFunctions(),
+          'wsfMyContribution'
+        );
+        // Own credit comes from the server on every load — authenticated,
+        // uncached, keyed by the caller's uid — so a reload, a closed goal or
+        // an authorized correction never shows a stale or invented number.
+        const [pulseRes, mineRes] = await Promise.all([
+          pulseFn({ goalId }),
+          mineFn({ goalId }),
+        ]);
         if (cancelled) return;
-        const pulse = result.data;
+        const pulse = pulseRes.data;
+        const ownCredit = mineRes.data.ownCredit;
         if (pulse.status !== 'active') {
-          setState({ kind: 'closed', pulse });
+          setState({ kind: 'closed', pulse, ownCredit });
           return;
         }
-        setState({ kind: 'ready', pulse, ownCredit: 0 });
+        setState({ kind: 'ready', pulse, ownCredit });
       } catch (e) {
         if (cancelled) return;
         if (e instanceof FirebaseError && e.code === 'functions/not-found') {
@@ -220,10 +236,10 @@ export default function ContributeToGoal() {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
               ? { kind: 'ready', pulse, ownCredit: prev.ownCredit }
-              : { kind: 'closed', pulse };
+              : { kind: 'closed', pulse, ownCredit: prev.ownCredit };
           }
           if (prev.kind === 'closed') {
-            return { kind: 'closed', pulse };
+            return { kind: 'closed', pulse, ownCredit: prev.ownCredit };
           }
           // Effect fired during a transition to error/notFound/notSignedIn —
           // drop the poll result rather than clobber the terminal state.
@@ -432,7 +448,8 @@ export default function ContributeToGoal() {
   const pulse = state.pulse;
   const pct = barPercent(pulse.sharedTotal, pulse.target);
   const truePct = integerPercent(pulse.sharedTotal, pulse.target);
-  const ownCredit = state.kind === 'ready' ? state.ownCredit : 0;
+  const ownCredit =
+    state.kind === 'ready' || state.kind === 'closed' ? state.ownCredit : 0;
   const remaining = Math.max(0, pulse.target - pulse.sharedTotal);
   const overshoot = pulse.sharedTotal > pulse.target;
 

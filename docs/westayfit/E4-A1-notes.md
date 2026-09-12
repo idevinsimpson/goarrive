@@ -39,7 +39,7 @@ All new collections are default-deny — the existing catch-all in
 §5.9):
 
 - `wsfGoals/{goalId}` — `{ownerUid, title, target, unit, status, createdAt}`
-- `wsfContributions/{goalId}_{attemptId}` — `{goalId, attemptId, userId, count, shardIndex, unit, createdAt}`
+- `wsfContributions/{goalId}_{userId}_{attemptId}` — `{goalId, attemptId, userId, count, shardIndex, unit, communityGroupId, createdAt}` (key scoped by the authenticated uid since E4-A1-R4: same member + same attemptId replays once; different members with the same attemptId each count once)
 - `wsfGoalCounters/{goalId}/shards/{0..9}` — `{count}`
 - `wsfGoalMemberTotals/{goalId}_{userId}` — `{goalId, userId, total, updatedAt}`
 

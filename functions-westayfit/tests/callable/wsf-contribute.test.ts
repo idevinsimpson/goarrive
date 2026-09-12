@@ -18,6 +18,11 @@
  *   after-window rejection (failed-precondition)
  *   exact replay after the window closes (idempotent-first discipline)
  *
+ * R4 additions (2026-09-12): attempt identity is goal + authenticated uid +
+ * attemptId — same member + same attemptId counts once and replays the
+ * original receipt; different members with the same attemptId each count
+ * once; own credit is durable across closure and authorized correction.
+ *
  * Runs against the local Firestore emulator via `func.run(request)`. No live
  * project, no rules edit, no client SDK — Admin SDK writes only.
  */
@@ -30,7 +35,7 @@ process.env.FIRESTORE_EMULATOR_HOST =
 
 import { Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { wsfContribute } from '../../src/index';
+import { wsfAdjustGoal, wsfContribute, wsfMyContribution } from '../../src/index';
 
 type Data = Record<string, unknown>;
 
@@ -569,12 +574,12 @@ describe('wsfContribute', () => {
     expect(mi.sharedTotal).toBe(7);
 
     const sqContribSnap = await getFirestore()
-      .doc(`wsfContributions/${squats.goalId}_attempt-unit-squats`)
+      .doc(`wsfContributions/${squats.goalId}_${uid}_attempt-unit-squats`)
       .get();
     expect(sqContribSnap.data()?.unit).toBe('squats');
 
     const miContribSnap = await getFirestore()
-      .doc(`wsfContributions/${minutes.goalId}_attempt-unit-minutes`)
+      .doc(`wsfContributions/${minutes.goalId}_${uid}_attempt-unit-minutes`)
       .get();
     expect(miContribSnap.data()?.unit).toBe('minutes');
   });
@@ -594,5 +599,100 @@ describe('wsfContribute', () => {
     expect(a.ownCredit).toBe(10);
     expect(b.ownCredit).toBe(25);
     expect(b.sharedTotal).toBe(25);
+  });
+
+  test('R4 exact-once scope: same member + same attemptId counts once; different members with the same attemptId each count once', async () => {
+    const { goalId, communityGroupId } = await seedGoal();
+    const uidA = uniq('scopeA');
+    const uidB = uniq('scopeB');
+    await Promise.all([
+      seedMembership(communityGroupId, uidA),
+      seedMembership(communityGroupId, uidB),
+    ]);
+
+    const a1 = await wsfContribute.run(
+      makeRequest(uidA, { goalId, attemptId: 'shared-attempt-x', count: 20 })
+    );
+    expect(a1.alreadyRecorded).toBe(false);
+    expect(a1.ownCredit).toBe(20);
+
+    // B independently supplies the very same attemptId: a distinct key, so
+    // this is a valid NEW contribution, not a replay of A's.
+    const b1 = await wsfContribute.run(
+      makeRequest(uidB, { goalId, attemptId: 'shared-attempt-x', count: 99 })
+    );
+    expect(b1.alreadyRecorded).toBe(false);
+    expect(b1.addedCount).toBe(99);
+    expect(b1.ownCredit).toBe(99);
+    expect(b1.sharedTotal).toBe(119);
+
+    // A replays: original receipt, counted once, B's count never surfaces.
+    const a2 = await wsfContribute.run(
+      makeRequest(uidA, { goalId, attemptId: 'shared-attempt-x', count: 555 })
+    );
+    expect(a2.alreadyRecorded).toBe(true);
+    expect(a2.addedCount).toBe(20);
+    expect(a2.ownCredit).toBe(20);
+
+    expect(await directShardSum(goalId)).toBe(119);
+    expect(await directContributionCount(goalId)).toBe(2);
+    const db = getFirestore();
+    const [docA, docB] = await Promise.all([
+      db.doc(`wsfContributions/${goalId}_${uidA}_shared-attempt-x`).get(),
+      db.doc(`wsfContributions/${goalId}_${uidB}_shared-attempt-x`).get(),
+    ]);
+    expect(docA.exists && docA.data()?.userId).toBe(uidA);
+    expect(docB.exists && docB.data()?.userId).toBe(uidB);
+    const [totA, totB] = await Promise.all([
+      db.doc(`wsfGoalMemberTotals/${goalId}_${uidA}`).get(),
+      db.doc(`wsfGoalMemberTotals/${goalId}_${uidB}`).get(),
+    ]);
+    expect(totA.data()?.total).toBe(20);
+    expect(totB.data()?.total).toBe(99);
+  });
+
+  test('R4 durability: own credit survives closure (wsfMyContribution reads the member total after status=closed)', async () => {
+    const { goalId, communityGroupId } = await seedGoal();
+    const uid = uniq('durable');
+    await seedMembership(communityGroupId, uid);
+    await wsfContribute.run(
+      makeRequest(uid, { goalId, attemptId: 'attempt-durable', count: 20 })
+    );
+    await getFirestore()
+      .doc(`wsfGoals/${goalId}`)
+      .set({ status: 'closed', closedAt: new Date() }, { merge: true });
+
+    const mine = await wsfMyContribution.run(makeRequest(uid, { goalId }) as any);
+    expect(mine).toEqual({ ownCredit: 20, unit: 'squats' });
+
+    // New attempts are refused after closure; the recorded one replays.
+    const late = await tryRun(uid, { goalId, attemptId: 'attempt-late', count: 1 });
+    expect(late.ok).toBe(false);
+    if (!late.ok) expect(late.error.code).toBe('failed-precondition');
+    const replay = await wsfContribute.run(
+      makeRequest(uid, { goalId, attemptId: 'attempt-durable', count: 20 })
+    );
+    expect(replay.alreadyRecorded).toBe(true);
+  });
+
+  test('R4 durability: own credit reflects an authorized downward correction', async () => {
+    const { goalId, communityGroupId } = await seedGoal();
+    const uid = uniq('corrected');
+    await seedMembership(communityGroupId, uid); // foundingChampion by default
+    await wsfContribute.run(
+      makeRequest(uid, { goalId, attemptId: 'attempt-corrected', count: 20 })
+    );
+    const adj = await wsfAdjustGoal.run(
+      makeRequest(uid, {
+        goalId,
+        delta: -5,
+        targetUid: uid,
+        reason: 'E4-A1-R4 test: five counted twice',
+      }) as any
+    );
+    expect(adj.sharedTotal).toBe(15);
+    expect(adj.targetMemberTotal).toBe(15);
+    const mine = await wsfMyContribution.run(makeRequest(uid, { goalId }) as any);
+    expect(mine.ownCredit).toBe(15);
   });
 });

@@ -11,22 +11,36 @@ import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase
 // GoArrive's; only appId is per-APP, and that is what makes this a distinct
 // registration. Analytics (measurementId) is deliberately omitted — WSF ships
 // no Analytics.
-const firebaseConfig = {
-  apiKey: 'AIzaSyBgLIP0uvGJ98fde3aZthZjILTg6unkkX0',
-  authDomain: 'goarrive.firebaseapp.com',
-  projectId: 'goarrive',
-  storageBucket: 'goarrive.firebasestorage.app',
-  messagingSenderId: '413741232388',
-  appId: '1:413741232388:web:30f3490b0a3b220dd42051',
-};
 
-// Emulator ports, matching firebase.westayfit.emulators.json.
-const EMULATOR_HOST = '127.0.0.1';
-const AUTH_EMULATOR_PORT = 9099;
-const FIRESTORE_EMULATOR_PORT = 8080;
-const FUNCTIONS_EMULATOR_PORT = 5001;
+// Project ids. Production is always the shared `goarrive` project. The
+// emulator id is selected ONLY when the build flag is on AND the page is
+// actually served from a loopback host, so a local browser run is namespaced
+// away from the real project's identifiers (E4-A1-R4).
+const PROD_PROJECT_ID = 'goarrive' as const;
+const EMULATOR_PROJECT_ID = 'goarrive-test' as const;
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+function isEmulatorFlagOn(raw: string | undefined): boolean {
+  return raw === '1' || raw?.trim().toLowerCase() === 'true';
+}
+
+// Pure selector for the projectId baked into firebaseConfig. Explicit inputs
+// and no globals, so every branch is unit-testable — including the SSR case
+// (hasWindow=false), which must NEVER select the emulator id: a static export
+// prerenders without a window and its HTML must carry the production id.
+export function selectProjectId(opts: {
+  flagRaw: string | undefined;
+  hasWindow: boolean;
+  hostname: string | undefined;
+}): typeof PROD_PROJECT_ID | typeof EMULATOR_PROJECT_ID {
+  if (!isEmulatorFlagOn(opts.flagRaw)) return PROD_PROJECT_ID;
+  if (!opts.hasWindow) return PROD_PROJECT_ID;
+  if (opts.hostname !== undefined && LOOPBACK_HOSTNAMES.has(opts.hostname)) {
+    return EMULATOR_PROJECT_ID;
+  }
+  return PROD_PROJECT_ID;
+}
 
 // Whether this build should talk to the local emulator suite instead of the
 // real project.
@@ -43,15 +57,37 @@ const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 // flow can be driven end to end locally. Without it that flow is only
 // assertable in pieces, and the ID-token-refresh fix in verify-email.tsx (the
 // one that decides whether a new member dead-ends) cannot be proven at all.
+//
+// Returns true under SSR (no window) because the connect*Emulator calls are
+// no-ops there; project selection above is deliberately stricter.
 function shouldUseEmulators(): boolean {
   const raw = process.env.EXPO_PUBLIC_WSF_USE_EMULATORS;
-  const flagged = raw === '1' || raw?.trim().toLowerCase() === 'true';
-  if (!flagged) return false;
+  if (!isEmulatorFlagOn(raw)) return false;
   if (typeof window === 'undefined') return true;
   return LOOPBACK_HOSTNAMES.has(window.location.hostname);
 }
 
 const emulated = shouldUseEmulators();
+const projectId = selectProjectId({
+  flagRaw: process.env.EXPO_PUBLIC_WSF_USE_EMULATORS,
+  hasWindow: typeof window !== 'undefined',
+  hostname: typeof window !== 'undefined' ? window.location.hostname : undefined,
+});
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyBgLIP0uvGJ98fde3aZthZjILTg6unkkX0',
+  authDomain: 'goarrive.firebaseapp.com',
+  projectId,
+  storageBucket: 'goarrive.firebasestorage.app',
+  messagingSenderId: '413741232388',
+  appId: '1:413741232388:web:30f3490b0a3b220dd42051',
+};
+
+// Emulator ports, matching firebase.westayfit.emulators.json.
+const EMULATOR_HOST = '127.0.0.1';
+const AUTH_EMULATOR_PORT = 9099;
+const FIRESTORE_EMULATOR_PORT = 8080;
+const FUNCTIONS_EMULATOR_PORT = 5001;
 
 let app: FirebaseApp | null = null;
 let authInstance: Auth | null = null;

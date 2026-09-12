@@ -37,7 +37,10 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
-const PROJECT_ID = 'goarrive';
+const FUNCTIONS_EMULATOR = 'http://127.0.0.1:5001';
+// E4-A1-R4: the browser run is namespaced to the emulator project. The client
+// selects this id only under the build flag on a loopback host (selectProjectId).
+const PROJECT_ID = 'goarrive-test';
 
 const ARTIFACTS_DIR = path.resolve(
   __dirname,
@@ -95,10 +98,19 @@ async function seedVerifiedUser(email: string, password: string): Promise<string
   return localId;
 }
 
-async function firestoreWrite(docPath: string, fields: Record<string, unknown>): Promise<void> {
+async function firestoreWrite(
+  docPath: string,
+  fields: Record<string, unknown>,
+  updateMask?: string[]
+): Promise<void> {
+  // Without an updateMask the REST PATCH replaces the whole document; with one
+  // it merges only the named fields (used for the closure/correction seams).
+  const mask = updateMask?.length
+    ? '?' + updateMask.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&')
+    : '';
   const url =
     `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}` +
-    `/databases/(default)/documents/${docPath}`;
+    `/databases/(default)/documents/${docPath}${mask}`;
   const res = await fetch(url, {
     method: 'PATCH',
     headers: {
@@ -263,18 +275,15 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await expect(pageB.getByTestId('wsf-contribute-shared-total')).toContainText('35');
   await snap(pageB, '04-B-after-15');
 
-  // ---- context A: reload; shared total is now 35 --------------------------
+  // ---- context A: reload; shared total is now 35, own credit still 20 ------
   //
-  // NOTE: the current /contribute page reads own credit only from a
-  // successful contribute response, not on initial load — a fresh reload
-  // shows 0 own credit until the user submits again. That's a follow-up
-  // (an authenticated wsfMyGoalCredit read is out of scope for R1 because
-  // it needs a rules change, which the R1 correction package explicitly
-  // excludes). What we DO assert here is that A's shared total picks up
-  // B's landed contribution — the public pulse layer is honest.
+  // R4: own credit is read from the server on load (wsfMyContribution,
+  // authenticated, keyed by uid), so a reload MUST show A's confirmed 20 —
+  // never 0, never B's 15, never the shared total.
   await pageA.reload();
   await expect(pageA.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 15_000 });
   await expect(pageA.getByTestId('wsf-contribute-shared-total')).toContainText('35');
+  await expect(pageA.getByTestId('wsf-contribute-own-credit')).toContainText('20');
   await snap(pageA, '05-A-reload-shared-35');
 
   // ---- context C: unauthenticated display sums both -----------------------
@@ -287,7 +296,50 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await expect(pageC.getByTestId('wsf-display-shared-total')).toContainText('35');
   // Percentage floors: 35 / 5000 = 0.7% → floor = 0. Assert 0% shows, never 1%.
   await expect(pageC.getByTestId('wsf-display-percent')).toContainText('0%');
+  // The public display never receives individual credit.
+  await expect(pageC.getByTestId('wsf-contribute-own-credit')).toHaveCount(0);
+  await expect(pageC.getByText(/confirmed credit/i)).toHaveCount(0);
   await snap(pageC, '06-C-display-shows-35');
+
+  // ---- unauthenticated call to the own-credit read is refused ------------
+  // The auth boundary is wsfMyContribution's explicit request.auth check.
+  const anon = await fetch(
+    `${FUNCTIONS_EMULATOR}/${PROJECT_ID}/us-central1/wsfMyContribution`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ data: { goalId } }),
+    }
+  );
+  expect(anon.status).toBe(401);
+  const anonBody = (await anon.json()) as { error?: { status?: string } };
+  expect(anonBody.error?.status).toBe('UNAUTHENTICATED');
+
+  // ---- closure: A's own credit survives; no new contributions ------------
+  await firestoreWrite(
+    `wsfGoals/${goalId}`,
+    { status: { stringValue: 'closed' }, closedAt: tsField(new Date()) },
+    ['status', 'closedAt']
+  );
+  await pageA.reload();
+  await expect(pageA.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 15_000 });
+  await expect(pageA.getByText('This goal is closed')).toBeVisible({ timeout: 15_000 });
+  await expect(pageA.getByTestId('wsf-contribute-own-credit')).toContainText('20');
+  await expect(pageA.getByTestId('wsf-contribute-shared-total')).toContainText('35');
+  await snap(pageA, '07-A-closed-own-20');
+
+  // ---- authorized downward correction: A reads the corrected value --------
+  // Test seam: the correction is seeded on the member-totals row the callable
+  // path writes (wsfAdjustGoal is exercised by the callable jest suite).
+  await firestoreWrite(
+    `wsfGoalMemberTotals/${goalId}_${uidA}`,
+    { total: { integerValue: '15' }, updatedAt: tsField(new Date()) },
+    ['total', 'updatedAt']
+  );
+  await pageA.reload();
+  await expect(pageA.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 15_000 });
+  await expect(pageA.getByTestId('wsf-contribute-own-credit')).toContainText('15');
+  await snap(pageA, '08-A-corrected-own-15');
 
   // ---- reviewer console-hygiene guard -------------------------------------
   for (const [label, errs] of [
