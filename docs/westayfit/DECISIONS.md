@@ -322,3 +322,52 @@ sign-up; sign-up fields (name + email + password vs name + phone + email); verif
 mixed-unit scoring; the final movement menu (sit-ups newly suggested). Brainstormed incentives
 (charity donation, giveaways, entries per move, multipliers) stay out of any UI until Devin
 approves them in the channel. The 2pm meeting is over; no new delivery date was promised.
+
+## 2026-09-11 — Strategic Master v3.0 and Implementation Plan v0.2 posted; ChatGPT directs delivery; PM dispatches frozen
+
+At 20:01 EDT 2026-09-11 two files were posted to `#dev-westayfit` from Devin's Slack account with
+the "Sent using ChatGPT" mark (thread `1789171311.144859`): **WE STAY FIT Strategic Master v3.0**
+(`F0C0WBUJW0P`, docx, SHA-256 `78af7698…46740d`) and **Implementation Plan and Operations Charter,
+working draft v0.2** (`F0C1BMG2MK4`, txt, SHA-256 `00dff4de…b71ced`). The master calls itself the
+"final strategic baseline under the delegated three-round process" and a "replacement reference for
+the project instructions"; its own text says file creation "does not install it in project
+instructions … change a repository, or authorize a release" and that repository adoption happens
+"when separately authorized … using the repository's established documentation conventions"
+(master §19 / Appendix E). **This repository's `WE_STAY_FIT_MASTER.md` (v1.2) therefore stays the
+in-repo reference until Devin authorizes the adoption; the PM will perform the adoption on his
+word** (Markdown edition into `docs/westayfit`, v1.2 marked superseded, decisions appended without
+reusing IDs).
+
+Roles per plan §4 and master §19: Devin owns product, money, brand verdict, legal/privacy, event and
+production authority; ChatGPT directs scope, priority, work packages, review, acceptance and change
+control; Maia implements; Manus does authorized dashboard work; "architecture/security review can be
+supplied by Claude Code … through this same delivery queue"; "one implementation owner per
+workflow … avoid competing dispatch streams". Not yet confirmed by Devin in this session; recorded
+as the posted charter. Consequences the PM has already applied:
+
+- The PM's parked Maia turns (email configuration; E3.5 turn B) stay frozen. Their scope now sits
+  inside plan packages IP-02 (verification-email delivery, identity) and IP-03/IP-10 (goal and
+  contribution truth, minimal community launch) and owner decisions D3 and D7.
+- The PM's open decision list maps onto the plan's queue: D-a′ (age floor) and D-b (legal text) →
+  D3; D-c (join-policy semantics) and D-d (community types/defaults) → D7; D-e (landing / E4
+  sequencing) is superseded by the plan's IP sequence. Decision A (email sender domain) → IP-02.
+- Freeze dates carried forward, not newly confirmed: Sep 28 feature freeze · Oct 4 code freeze ·
+  Oct 11 event.
+
+What happened next in the thread (all ChatGPT-directed, none PM-dispatched): Maia delivered the
+IP-00 read-only baseline report at 20:17 EDT (replies 16–25); ChatGPT "conditionally accepted" it as
+inventory evidence at 20:30 EDT with corrections (exact tagline is "Turn your community into a
+place that moves."; sample/staging partitions do not isolate a live backend; the Sep 6 staging
+receipts supersede the older Sep 3 expiry record; preserve E2/E3/E3.5 rather than the older gates
+branch) and assigned **E4-A1** — one testable phone-to-shared-result slice, LOCAL ONLY, in a new
+worktree `~/dev-goarrive-wsf-e4a1` cut from `2f0a9dc`, allowed files under `functions-westayfit/src`,
+`apps/westayfit`, `docs/westayfit`, no push/PR/deploy/live data/new dependency/shared-rules edits.
+Maia's first E4-A1 turn hit the bot's 45-minute turn deadline at 21:17 EDT; ChatGPT resumed her at
+22:14 EDT; at 22:15 EDT she reported the callable suite at 45/72 failing with timeouts in the fresh
+worktree and was investigating (IMPLEMENTER REPORTED, not verified by the PM).
+
+Record-location gap surfaced by IP-00: the PM's WSF record (MILESTONES, RELEASES, DECISIONS,
+runbook, dispatch specs, meeting note) lives on `claude/westay-fit-takeover-cont-c6ye55`, not on
+`main`, so a main-based audit read stale copies (the Sep 3 expiry, "no dated release entry" for
+E2/E3/E3.5). Recommendation for Devin: authorize a docs-only PR of `docs/westayfit/**` from the PM
+branch to `main` so future audits see the current record. Not done: no PR without his word.

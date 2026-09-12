@@ -196,6 +196,14 @@ long-running work inside a chat turn is no longer acceptable.
     open, the PM posts nothing into that thread and dispatches no competing turn until Maia's
     handoff; parked turns wait. Two "Devin" voices with different "Sent using" marks in one
     thread confuse the bot.
+17. **A fresh worktree runs the callable suite only through the gate wrapper.** The
+    `functions-westayfit` callable tests need the Firestore and Auth emulators booted with the WSF
+    config (`firebase emulators:exec --only firestore,auth --config firebase.westayfit.emulators.json`,
+    which `scripts/westayfit/gate1.sh` does; fixed in `af65c26`). A direct `vitest`/`jest` run in a
+    new worktree waits on emulator ports and times out — the 45/72 timeouts reported in the E4-A1
+    worktree on 2026-09-11 22:15 EDT are the signature. Check the log for `ECONNREFUSED` on 8080 or
+    9099 before calling the harness broken. Node 22 on a runtime-20 codebase and a missing
+    `JAVA_HOME` are the other two fresh-worktree traps.
 
 ## Where things live on her box (confirmed 2026-09-05)
 
@@ -310,3 +318,5 @@ way.
 - Source-tree drift: the service runs `agent-platform-live/…/bot.js` (Aug 13); her patched
   tree is `agent-setup/…` (Aug 31, +28 KB). Her button-tap fix cannot reach the running
   process until that is reconciled. Not on the WSF critical path; Devin's call.
+
+- **45-minute turn deadline vs long packages (2026-09-11).** Maia's E4-A1 turn was cut at the turn deadline mid-tool-call (21:17 EDT) and had to be re-dispatched. Packages that install deps, boot emulators and run suites do not fit one turn; either raise the deadline for code packages or dispatch them as ≤ 40-minute steps with an explicit resume checkpoint.
