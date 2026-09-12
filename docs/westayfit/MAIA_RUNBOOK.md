@@ -209,6 +209,8 @@ long-running work inside a chat turn is no longer acceptable.
 
 19. **"Stop after X is posted" means post X, then stop; say so in the dispatch.** On 2026-09-12 06:08 EDT Maia drafted the R2 upload-and-proposal reply to a file and halted asking for approval to post it verbatim, although the dispatch said to stop after the uploads and proposal; the attachments therefore did not land until the director answered again. Dispatches that end in a deliverable should say "post the reply and attachments in this thread without asking for approval; do not draft-and-wait".
 
+20. **An evidence summary must be traceable to an assertion or an artifact, never paraphrased from memory.** On 2026-09-12 the R1 Slack summary described screenshot 05 as "own credit 20 preserved" on reload; the uploaded spec asserts only the shared total there, its own comment admits the own-credit gap, and the evidence note in the upload says only "pageA reload sees shared 35". The director caught it by opening the screenshot. Dispatches should ask for the exact `expect(...)` line or artifact name next to every claim.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |
