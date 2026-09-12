@@ -24,7 +24,9 @@ import { expect, test, type Page } from '@playwright/test';
  */
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
-const PROJECT_ID = 'goarrive';
+// E4-A1-R4 lockstep: must match the emulators:exec --project flag in gate1.sh
+// and the id the flagged client selects on a loopback host (selectProjectId).
+const PROJECT_ID = 'goarrive-test';
 
 /**
  * Marks an address verified through the Auth emulator's admin API — copied

@@ -72,7 +72,7 @@ EXPO_PUBLIC_WSF_USE_EMULATORS=1 \
 # needs a real Admin SDK generatePasswordResetLink call — the emulator is what
 # lets the "unknown email" assertion be honest instead of a mock.
 echo "--- callable suite (firestore + auth, fast) ---"
-firebase emulators:exec --only firestore,auth --project goarrive \
+firebase emulators:exec --only firestore,auth --project goarrive-test \
   --config "$EMULATOR_CONFIG" \
   "npm --prefix functions-westayfit run test:callable"
 
@@ -81,9 +81,14 @@ echo "--- drive the flow ---"
 # hidden inside a package script so a new spec (E2's e2-join-flow, and future
 # ones) shows up in this file's diff — a spec that never runs is worse than no
 # spec at all.
+# E4-A1-R4 lockstep: the emulator-flagged build selects the `goarrive-test`
+# project id on a loopback host (selectProjectId in src/firebase.ts), and the
+# Functions emulator only serves callables under its own --project label, so
+# the browser step must run under the same id as the client and the specs'
+# emulator REST fixtures (PROJECT_ID in tests-e2e/*.spec.ts).
 WSF_PLAYWRIGHT_BASE_URL="http://127.0.0.1:${HOSTING_PORT}" \
   firebase emulators:exec \
-    --project goarrive \
+    --project goarrive-test \
     --config "$EMULATOR_CONFIG" \
     "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts tests-e2e/e35-home.spec.ts tests-e2e/e35-auth-polish.spec.ts"
 
