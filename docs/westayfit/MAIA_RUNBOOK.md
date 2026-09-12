@@ -205,6 +205,8 @@ long-running work inside a chat turn is no longer acceptable.
     9099 before calling the harness broken. Node 22 on a runtime-20 codebase and a missing
     `JAVA_HOME` are the other two fresh-worktree traps.
 
+18. **Answer Maia's options menu with the bare letter and nothing else; send the directive as the next message.** Her menu handler treats the whole reply as the option: a reply that does not start with a listed letter or label is bounced ("can't tell which option", 03:54 EDT 2026-09-12), and a reply of the form "C - More work needed. <directive>" keeps only the C and drops the directive (03:56 and 04:40 EDT, twice in one hour). "D - Something else" then opens a free-text prompt and she holds until a plain message arrives. So: letter first, wait for her ack, then the directive as plain text; or avoid the menu by saying "reply in text, no options menu" at the top of the dispatch. Bot-side fix filed as defect 3 in `dispatch/BOT-UNWEDGE.md`.
+
 ## Where things live on her box (confirmed 2026-09-05)
 
 | What | Where |

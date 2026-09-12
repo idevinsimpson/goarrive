@@ -57,6 +57,15 @@ could hold.
 - `maia: status` is also the acceptance probe for defect 1: it must answer while a turn is
   deliberately wedged.
 
+## Defect 3 — the options menu swallows the director's text (filed 2026-09-12, not yet fixed)
+
+Seen in the IP-00/E4-A1 thread (ts 1789171311.144859), 03:54–04:41 EDT 2026-09-12. When Maia ends a turn with an options menu (A/B/C/Other/None), the next reply is parsed only as an option:
+- A full review message that does not begin with a listed letter or label is bounced with "I got your reply but can't tell which option" and never reaches the model (03:54:46).
+- "C - More work needed." followed by a six-point directive starts a turn with only "C" as input; the directive text is dropped (03:56:13). The turn then guessed at what had been flagged and ended with another menu, against an explicit "do not ask Devin to choose a button".
+- "D - Something else - <directive>" is reduced to D and opens a free-text prompt; she holds until a further plain message arrives (04:40:39–04:41:08). The directive was lost a second time.
+
+Fix: when a menu reply carries text beyond the option label, pass the full reply (letter + text) to the turn as the user message; when a reply matches no option, fall through to a normal turn instead of bouncing it; honor a "no options menu" instruction in the dispatch. Acceptance: post a menu, answer "C - More work needed. Print the word PASSTHROUGH." and show the turn's first action quoting PASSTHROUGH; answer a menu with a sentence that names no option and show the turn starting normally. Same constraints as defects 0–2 (rule 12: patch against the captured running file, never `main`).
+
 ## Constraints
 
 - Same rules as `BOT-LIVE-PROGRESS.md`: running tree, timestamped backup, minimal diff,
