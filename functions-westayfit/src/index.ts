@@ -2215,6 +2215,115 @@ type AdjustGoalResponse = {
   targetMemberTotal: number | null;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfListGoals — the seam between a community and its goals.
+//
+// Every other wsfGoals access in this file is by explicit goalId, so a member
+// who did not create the goal had no way to learn its id. That, not a missing
+// primitive, is why the built goal loop was unreachable from the community.
+//
+// AUTHORIZATION IS ENFORCED HERE, IN THE HANDLER. The callable framework hands
+// the handler the caller's auth state; it does not gate on it. `invoker` only
+// controls who may reach Cloud Run, and how many functions carry
+// `invoker: 'public'` is not a test of anything. This handler requires
+// authentication AND an active membership in the requested group, and returns
+// the same not-found to a non-member as to a caller naming a group that does
+// not exist, so the response cannot be used to probe which groups exist.
+//
+// RESPONSE IS MINIMAL by design: goalId, title, target, unit, status, startsAt,
+// endsAt. No member identity, no per-member credit, no contributor list. The
+// shared total is not included — a caller that wants it asks wsfGoalPulse,
+// which is a separate surface with its own (currently unresolved) eligibility
+// question. This callable does not widen that.
+//
+// INDEX EXPECTATION, not an unconditional claim: the query filters on
+// `communityGroupId ==` and `status ==` with no range, no inequality and no
+// orderBy, so it is expected to be served by Firestore's automatic
+// single-field indexes, which can be merged for conjunctions of equality
+// filters. `firestore.indexes.json` is deliberately untouched. Note that the
+// emulator does NOT enforce compound-index requirements, so an emulator pass
+// cannot verify production index readiness — that is a deploy-time check.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ListGoalsRequest = { groupId?: unknown };
+
+type ListedGoal = {
+  goalId: string;
+  title: string;
+  target: number;
+  unit: string;
+  status: GoalStatus;
+  startsAt: string;
+  endsAt: string;
+};
+
+type ListGoalsResponse = { goals: ListedGoal[] };
+
+export const wsfListGoals = onCall<ListGoalsRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<ListGoalsResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) {
+      throw new HttpsError('invalid-argument', 'groupId is required.');
+    }
+
+    const db = getFirestore();
+
+    // Active membership in THIS group. An inactive membership, a membership in
+    // a different group, and no membership at all are the same answer, and it
+    // is the same answer a caller gets for a group that does not exist.
+    const membershipSnap = await db.doc(`wsfMemberships/${groupId}_${uid}`).get();
+    if (!membershipSnap.exists) {
+      throw new HttpsError('not-found', 'Community not found.');
+    }
+    const membership = membershipSnap.data() as { membershipStatus?: string };
+    if (membership.membershipStatus !== 'active') {
+      throw new HttpsError('not-found', 'Community not found.');
+    }
+
+    // Equality-only. A goal that has reached or passed its target is still
+    // `active` until it is closed, so it stays in this list — reaching the
+    // target is a reason to celebrate on the page, never a reason for the goal
+    // to disappear from under the people still contributing to it.
+    const snap = await db
+      .collection('wsfGoals')
+      .where('communityGroupId', '==', groupId)
+      .where('status', '==', 'active')
+      .get();
+
+    // More than one active goal is legitimate and is NOT collapsed: separately
+    // created goals stay separate, each with its own title, unit and window.
+    // The client decides how to present several; this callable does not pick
+    // one for it. Zero goals is an ordinary empty list, not an error — a
+    // community with no goal yet is the normal state before a champion starts
+    // one.
+    const goals: ListedGoal[] = snap.docs.map((docSnap) => {
+      const goal = docSnap.data() as GoalDoc;
+      return {
+        goalId: docSnap.id,
+        title: goal.title,
+        target: goal.target,
+        unit: goal.unit,
+        status: goal.status,
+        startsAt: goal.startsAt.toDate().toISOString(),
+        endsAt: goal.endsAt.toDate().toISOString(),
+      };
+    });
+
+    // Deterministic order so the interface does not reshuffle between polls.
+    // Sorted in the handler rather than with orderBy, which would add an index
+    // requirement this packet is not allowed to introduce.
+    goals.sort((a, b) => (a.endsAt === b.endsAt ? a.goalId.localeCompare(b.goalId) : a.endsAt.localeCompare(b.endsAt)));
+
+    return { goals };
+  }
+);
+
 export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
   { region: 'us-central1' },
   async (request): Promise<AdjustGoalResponse> => {

@@ -1,4 +1,4 @@
-import { Link, router } from 'expo-router';
+import { Link, router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useMemo, useState } from 'react';
@@ -48,14 +48,18 @@ function isoLocalDefault(offsetMs: number): string {
 
 export default function NewGoalPage() {
   const { ready, user } = useWsfAuth();
+  // The real path: a champion arrives from their community page, which passes
+  // the group it already knows. Package C's job was to make that path work;
+  // seeding a synthetic community from inside the product screen was a test
+  // scaffold and has moved to isolated test setup
+  // (apps/westayfit/tests-e2e/helpers/seed.ts).
+  const params = useLocalSearchParams<{ groupId?: string }>();
+  const groupIdParam = typeof params.groupId === 'string' ? params.groupId : '';
 
   const defaultStart = useMemo(() => isoLocalDefault(-60_000), []);
   const defaultEnd = useMemo(() => isoLocalDefault(60 * 60_000), []);
 
-  const [communityGroupId, setCommunityGroupId] = useState('');
-  const [displayName, setDisplayName] = useState('E4-A1 synthetic community');
-  const [seedError, setSeedError] = useState<string | null>(null);
-  const [seeding, setSeeding] = useState(false);
+  const [communityGroupId, setCommunityGroupId] = useState(groupIdParam);
 
   const [title, setTitle] = useState('E4-A1 synthetic goal');
   const [target, setTarget] = useState('5000');
@@ -68,38 +72,6 @@ export default function NewGoalPage() {
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedGoal | null>(null);
 
-  const onSeedCommunity = useCallback(async () => {
-    if (seeding) return;
-    setSeedError(null);
-    const trimmed = displayName.trim();
-    if (trimmed.length < 2 || trimmed.length > 80) {
-      setSeedError('displayName must be 2 to 80 characters.');
-      return;
-    }
-    setSeeding(true);
-    try {
-      const fn = httpsCallable<
-        { displayName: string; groupType: string; joinPolicy: string },
-        { groupId: string }
-      >(getFirebaseFunctions(), 'wsfCreateCommunity');
-      const result = await fn({
-        displayName: trimmed,
-        groupType: 'household',
-        joinPolicy: 'private',
-      });
-      setCommunityGroupId(result.data.groupId);
-    } catch (e) {
-      const message =
-        e instanceof FirebaseError
-          ? `${e.code}: ${e.message}`
-          : e instanceof Error
-            ? e.message
-            : 'Could not seed synthetic community.';
-      setSeedError(message);
-    } finally {
-      setSeeding(false);
-    }
-  }, [displayName, seeding]);
 
   const onSubmit = useCallback(async () => {
     if (submitting) return;
@@ -303,42 +275,18 @@ export default function NewGoalPage() {
       <Text style={styles.heading}>Start a new goal</Text>
 
       <View style={styles.card}>
-        <Text style={styles.subheading}>Step 1 — synthetic community</Text>
+        <Text style={styles.subheading}>Step 1 — community</Text>
         <Text style={styles.caption}>
-          Every goal must be bound to a community. Seed one via
-          wsfCreateCommunity, or paste an existing groupId.
+          Every goal is bound to a community. Arriving from a community page
+          fills this in; the field stays editable for local testing.
         </Text>
-        <Text style={styles.label}>Community display name</Text>
-        <TextInput
-          style={styles.input}
-          value={displayName}
-          onChangeText={setDisplayName}
-          editable={!seeding}
-          testID="wsf-new-goal-community-name"
-        />
-        <Pressable
-          style={[styles.secondary, seeding && styles.primaryDisabled]}
-          onPress={onSeedCommunity}
-          disabled={seeding}
-          testID="wsf-new-goal-seed-community"
-        >
-          <Text style={styles.secondaryText}>
-            {seeding ? 'Seeding…' : 'Seed synthetic community'}
-          </Text>
-        </Pressable>
-        {seedError ? (
-          <Text style={styles.errorText} testID="wsf-new-goal-seed-error">
-            {seedError}
-          </Text>
-        ) : null}
-
         <Text style={styles.label}>communityGroupId</Text>
         <TextInput
           style={styles.input}
           value={communityGroupId}
           onChangeText={setCommunityGroupId}
-          placeholder="Paste here after seeding, or type an existing id"
-          editable={!seeding && !submitting}
+          placeholder="Filled in when you arrive from your community"
+          editable={!submitting}
           testID="wsf-new-goal-group-id-input"
         />
       </View>

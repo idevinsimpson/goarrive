@@ -67,15 +67,26 @@ const PENDING_KEY_PREFIX = 'wsf.pendingContribution.';
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
 
-function pendingKey(goalId: string): string {
+// The key is scoped to the GOAL AND THE SIGNED-IN ACCOUNT.
+//
+// It used to be `wsf.pendingContribution.{goalId}` alone. On a shared laptop
+// that made an unsent attempt inherited by whoever signed in next — and
+// because the server's idempotency key is `{goalId}_{uid}_{attemptId}`,
+// replaying it under a different uid does not deduplicate. It books a NEW
+// contribution credited to the wrong member. Scoping the key is necessary;
+// the guards below are the rest of what makes the account switch safe.
+export function pendingKey(goalId: string, uid: string): string {
+  return `${PENDING_KEY_PREFIX}${goalId}.${uid}`;
+}
+
+/** The pre-fix key shape. Read only to retire it — never to restore from. */
+export function legacyPendingKey(goalId: string): string {
   return `${PENDING_KEY_PREFIX}${goalId}`;
 }
 
-function loadPending(goalId: string): PendingContribution | null {
-  if (typeof window === 'undefined' || !window.localStorage) return null;
+function parsePending(raw: string | null, goalId: string): PendingContribution | null {
+  if (!raw) return null;
   try {
-    const raw = window.localStorage.getItem(pendingKey(goalId));
-    if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (
       parsed &&
@@ -93,20 +104,57 @@ function loadPending(goalId: string): PendingContribution | null {
   return null;
 }
 
-function savePending(p: PendingContribution): void {
+export function loadPending(goalId: string, uid: string): PendingContribution | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    return parsePending(window.localStorage.getItem(pendingKey(goalId, uid)), goalId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retire a legacy unscoped record without transferring ownership.
+ *
+ * A record written before the key carried a uid belongs to an account we
+ * cannot identify. It is NOT adopted by whoever signs in next and it is NOT
+ * resubmitted — doing either would credit one person's effort to another.
+ * It is moved to an orphan key so the original attempt identity survives for
+ * reconciliation, and so it can never be picked up as a live pending attempt.
+ */
+export function retireLegacyPending(goalId: string): PendingContribution | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(legacyPendingKey(goalId));
+    if (!raw) return null;
+    const parsed = parsePending(raw, goalId);
+    window.localStorage.removeItem(legacyPendingKey(goalId));
+    if (parsed) {
+      window.localStorage.setItem(
+        `${PENDING_KEY_PREFIX}orphan.${goalId}.${parsed.attemptId}`,
+        JSON.stringify({ ...parsed, state: 'unknown', orphanedAt: Date.now() })
+      );
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function savePending(p: PendingContribution, uid: string): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    window.localStorage.setItem(pendingKey(p.goalId), JSON.stringify(p));
+    window.localStorage.setItem(pendingKey(p.goalId, uid), JSON.stringify(p));
   } catch {
     // Quota exceeded / disabled / private mode — best-effort. The retry
     // path still works within-session via attemptRef.
   }
 }
 
-function clearPending(goalId: string): void {
+function clearPending(goalId: string, uid: string): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    window.localStorage.removeItem(pendingKey(goalId));
+    window.localStorage.removeItem(pendingKey(goalId, uid));
   } catch {
     // best-effort
   }
@@ -143,18 +191,42 @@ export default function ContributeToGoal() {
   // idempotency). Cleared on each fresh "Log it" tap.
   const attemptRef = useRef<string | null>(null);
 
-  // On mount, restore any unconfirmed pending attempt for this goal so a
-  // reload can reconcile it without minting a fresh attemptId.
+  const uid = user?.uid ?? null;
+  // The identity a request belongs to. A response that arrives after the
+  // account changed is discarded rather than applied — that is what stops a
+  // delayed callback from restoring the previous person's state into the new
+  // session.
+  const identityRef = useRef<string | null>(uid);
+  const [legacyOrphan, setLegacyOrphan] = useState<PendingContribution | null>(null);
+
+  // Restore this ACCOUNT's unconfirmed attempt for this goal, and clear
+  // everything on sign-out, an account switch or a goal switch. Both the
+  // pending banner and the last receipt are cleared: a receipt shows a
+  // member's own credit and must not survive into someone else's session.
   useEffect(() => {
+    identityRef.current = uid;
+    attemptRef.current = null;
+    setPending(null);
+    setLastResult(null);
+    setLegacyOrphan(null);
+
     if (!goalId) return;
-    const existing = loadPending(goalId);
+
+    // A record written before the key carried a uid belongs to an account we
+    // cannot identify. It is retired, never adopted and never resubmitted.
+    const orphaned = retireLegacyPending(goalId);
+    if (orphaned) setLegacyOrphan(orphaned);
+
+    if (!uid) return;
+    const existing = loadPending(goalId, uid);
     if (existing) {
       setPending({ ...existing, state: 'unknown' });
-      // Persist the escalated state so a second reload shows the same
-      // banner even if the user does nothing.
-      savePending({ ...existing, state: 'unknown' });
+      // Persist the escalated state so a second reload shows the same banner
+      // even if the user does nothing. Restoring it NEVER makes it confirmed;
+      // only a server response does that.
+      savePending({ ...existing, state: 'unknown' }, uid);
     }
-  }, [goalId]);
+  }, [goalId, uid]);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -259,14 +331,22 @@ export default function ContributeToGoal() {
 
   const sendContribute = useCallback(
     async (attemptId: string, count: number) => {
+      // The identity that started this request. Captured now, compared when
+      // the response lands.
+      const owner = identityRef.current;
+      if (!owner) throw new Error('Sign in first.');
       const fn = httpsCallable<
         { goalId: string; attemptId: string; count: number },
         ContributeResult
       >(getFirebaseFunctions(), 'wsfContribute');
       const result = await fn({ goalId: goalId as string, attemptId, count });
+      // A delayed response for a previous account is discarded, not applied.
+      // The pending row stays under the ORIGINAL account's key so that person
+      // can still reconcile it when they sign back in.
+      if (identityRef.current !== owner) return;
       const data = result.data;
       // Server truth received — the pending row is no longer needed.
-      clearPending(goalId as string);
+      clearPending(goalId as string, owner);
       setPending(null);
       setLastResult(data);
       setState((prev) => ({
@@ -319,7 +399,7 @@ export default function ContributeToGoal() {
       ts: Date.now(),
       state: 'sending',
     };
-    savePending(pendingRow);
+    savePending(pendingRow, uid as string);
     setPending(pendingRow);
 
     try {
@@ -329,7 +409,7 @@ export default function ContributeToGoal() {
       // caller must reconcile. attemptRef stays populated so a retry from
       // this same session re-uses the id.
       const escalated: PendingContribution = { ...pendingRow, state: 'unknown' };
-      savePending(escalated);
+      savePending(escalated, uid as string);
       setPending(escalated);
 
       const message =
@@ -360,14 +440,14 @@ export default function ContributeToGoal() {
     attemptRef.current = pending.attemptId;
     // Flip the persisted state to 'sending' during the retry so a further
     // crash mid-retry still lands us on the banner.
-    savePending({ ...pending, state: 'sending' });
+    savePending({ ...pending, state: 'sending' }, uid as string);
     setPending({ ...pending, state: 'sending' });
 
     try {
       await sendContribute(pending.attemptId, pending.count);
     } catch (e) {
       const escalated: PendingContribution = { ...pending, state: 'unknown' };
-      savePending(escalated);
+      savePending(escalated, uid as string);
       setPending(escalated);
       const message =
         e instanceof FirebaseError &&
@@ -392,7 +472,7 @@ export default function ContributeToGoal() {
     // Discarding does NOT retract the server-side record if it landed —
     // this only removes the local reminder. The user is asserting "I know
     // this is fine; stop bugging me." No shared-total mutation happens.
-    clearPending(pending.goalId);
+    clearPending(pending.goalId, uid as string);
     setPending(null);
     setEntryError(null);
   }, [pending, submitting]);

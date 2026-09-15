@@ -47,6 +47,7 @@ type LoadState =
       memberCount: number | null;
       isSample: boolean;
       activeChallenge: ActiveChallenge | null;
+      goals: ListedGoal[];
     }
   | { kind: 'error'; message: string };
 
@@ -68,6 +69,18 @@ type MyCommunityItem = {
 };
 
 type MyCommunitiesResponse = { items: MyCommunityItem[] };
+
+type ListedGoal = {
+  goalId: string;
+  title: string;
+  target: number;
+  unit: string;
+  status: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+type ListGoalsResponse = { goals: ListedGoal[] };
 
 type ListChallengeResponse = {
   challenge:
@@ -174,6 +187,23 @@ export default function CommunityPage() {
           }
         }
 
+        // The seam this package exists to add. Every other wsfGoals access is
+        // by explicit goalId, so before wsfListGoals a member who did not
+        // create the goal had no way to reach it. A failure here is
+        // non-blocking: the rest of the community page still renders.
+        let goals: ListedGoal[] = [];
+        try {
+          const goalsFn = httpsCallable<{ groupId: string }, ListGoalsResponse>(
+            functions,
+            'wsfListGoals'
+          );
+          const goalsResult = await goalsFn({ groupId });
+          if (cancelled) return;
+          goals = goalsResult.data.goals ?? [];
+        } catch {
+          // Non-blocking — the page renders without the goal section.
+        }
+
         setState({
           kind: 'ready',
           group,
@@ -181,6 +211,7 @@ export default function CommunityPage() {
           memberCount,
           isSample,
           activeChallenge,
+          goals,
         });
       } catch (e) {
         if (cancelled) return;
@@ -276,7 +307,8 @@ export default function CommunityPage() {
     );
   }
 
-  const { group, role, memberCount, isSample, activeChallenge } = state;
+  const { group, role, memberCount, isSample, activeChallenge, goals } = state;
+  const isChampion = role === 'foundingChampion';
   const hasShareApi = typeof navigator !== 'undefined' && 'share' in navigator;
 
   return (
@@ -359,6 +391,52 @@ export default function CommunityPage() {
               Invite links arrive with the next update.
             </Text>
           )}
+        </View>
+
+        <View style={styles.section} testID="wsf-community-goals">
+          <Text style={styles.sectionHeading}>Goals</Text>
+          {goals.length ? (
+            goals.map((goal) => (
+              // Separately created goals stay separate — one card each, with
+              // its own unit and window. Nothing here sums or merges them.
+              <Link
+                key={goal.goalId}
+                href={`/contribute/${goal.goalId}` as never}
+                style={styles.goalCard}
+                testID={`wsf-community-goal-link-${goal.goalId}`}
+              >
+                <View>
+                  <Text style={styles.goalTitle}>{goal.title}</Text>
+                  <Text style={styles.goalMeta}>
+                    {`Goal: ${goal.target} ${goal.unit}`}
+                  </Text>
+                  <Text style={styles.goalCta}>Add your contribution</Text>
+                </View>
+              </Link>
+            ))
+          ) : (
+            <View
+              style={styles.noChallengeCard}
+              testID="wsf-community-no-goal"
+              {...({ 'data-state': 'empty' } as Record<string, unknown>)}
+            >
+              <Text style={styles.noChallengeTitle}>No goal running yet</Text>
+              <Text style={styles.body}>
+                {isChampion
+                  ? 'Start one and your community can begin contributing.'
+                  : 'Your Champion can start one for this community.'}
+              </Text>
+            </View>
+          )}
+          {isChampion ? (
+            <Link
+              href={`/goals/new?groupId=${encodeURIComponent(groupId)}` as never}
+              style={styles.goalStartLink}
+              testID="wsf-community-start-goal"
+            >
+              <Text style={styles.goalStartText}>Start a goal</Text>
+            </Link>
+          ) : null}
         </View>
 
         <View style={styles.section} testID="wsf-community-challenge-card">
@@ -549,6 +627,41 @@ const styles = StyleSheet.create({
     borderRadius: wsfTheme.radius.md,
     padding: wsfTheme.spacing.md,
     backgroundColor: wsfTheme.colors.surface,
+  },
+  goalCard: {
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    backgroundColor: wsfTheme.colors.surface,
+    borderRadius: wsfTheme.radius.md,
+    padding: wsfTheme.spacing.md,
+    marginBottom: wsfTheme.spacing.sm,
+    color: wsfTheme.colors.text,
+    textDecorationLine: 'none' as const,
+  },
+  goalTitle: {
+    color: wsfTheme.colors.text,
+    fontSize: wsfTheme.typography.subheading.fontSize,
+    fontWeight: wsfTheme.typography.subheading.fontWeight,
+    marginBottom: 2,
+  },
+  goalMeta: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.body.fontSize,
+  },
+  goalCta: {
+    color: wsfTheme.colors.primary,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '700',
+    marginTop: wsfTheme.spacing.xs,
+  },
+  goalStartLink: {
+    marginTop: wsfTheme.spacing.sm,
+    textDecorationLine: 'none' as const,
+  },
+  goalStartText: {
+    color: wsfTheme.colors.primary,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '700',
   },
   noChallengeTitle: {
     color: wsfTheme.colors.text,

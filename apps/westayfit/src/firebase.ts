@@ -139,3 +139,28 @@ export const wsfFirebaseProjectId = firebaseConfig.projectId;
 
 // Exported for the smoke test: a production build must never be emulated.
 export const wsfUsingEmulators = emulated;
+
+// ── WSF-only test-isolation surface (Execution Addendum 1 §2) ────────────────
+//
+// Exported so the local test path can assert, before it does anything, that
+// it is pointed at the emulator suite and not at live services. Production
+// behaviour is unchanged: nothing here runs in a deployed build, and the
+// values are the same ones the functions above already use.
+//
+// KNOWN GAP, reported rather than papered over: the emulator project id is
+// `goarrive-test`, not a `demo-` prefixed id. Firebase only guarantees that a
+// `demo-`prefixed project never reaches a real backend. Changing it here alone
+// would break the run — `scripts/westayfit/gate1.sh` and the jest emulator
+// configs pin `goarrive-test`, and both are outside Package C's allowed file
+// scope. The bootstrap below therefore verifies the emulator wiring explicitly
+// instead of relying on the id, and the gap stays on the record.
+export const wsfEmulatorTargets = {
+  projectId: firebaseConfig.projectId,
+  emulatorProjectId: EMULATOR_PROJECT_ID,
+  productionProjectId: PROD_PROJECT_ID,
+  host: EMULATOR_HOST,
+  authPort: AUTH_EMULATOR_PORT,
+  firestorePort: FIRESTORE_EMULATOR_PORT,
+  functionsPort: FUNCTIONS_EMULATOR_PORT,
+  emulated,
+} as const;
