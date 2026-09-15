@@ -7,7 +7,7 @@
  * Run:
  *   cd functions-westayfit
  *   firebase emulators:exec --only firestore \
- *     --config ../firebase.json --project goarrive-test \
+ *     --config ../firebase.json --project demo-wsf-local \
  *     "npm run test:rules"
  *
  * Or with a separately-running emulator:
@@ -26,7 +26,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 
-const PROJECT_ID = 'goarrive-test';
+const PROJECT_ID = 'demo-wsf-local';
 const RULES_PATH = resolve(__dirname, '../../../firestore.rules');
 
 const ALICE_UID = 'wsfAlice';

@@ -30,7 +30,7 @@ const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 // E4-A1-R4 lockstep: must match the emulators:exec --project flag in gate1.sh
 // and the id the flagged client selects on a loopback host (selectProjectId).
-const PROJECT_ID = 'goarrive-test';
+const PROJECT_ID = 'demo-wsf-local';
 
 /**
  * Emulator console noise this spec deliberately tolerates. Same list as

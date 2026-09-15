@@ -14,22 +14,22 @@ describe('selectProjectId (emulator project id gate)', () => {
     ).toBe('goarrive');
   });
 
-  it("(b) flag '1', localhost -> goarrive-test", () => {
+  it("(b) flag '1', localhost -> demo-wsf-local", () => {
     expect(
       selectProjectId({ flagRaw: '1', hasWindow: true, hostname: 'localhost' })
-    ).toBe('goarrive-test');
+    ).toBe('demo-wsf-local');
   });
 
-  it("(c) flag '1', 127.0.0.1 -> goarrive-test", () => {
+  it("(c) flag '1', 127.0.0.1 -> demo-wsf-local", () => {
     expect(
       selectProjectId({ flagRaw: '1', hasWindow: true, hostname: '127.0.0.1' })
-    ).toBe('goarrive-test');
+    ).toBe('demo-wsf-local');
   });
 
-  it("(d) flag 'true', localhost -> goarrive-test", () => {
+  it("(d) flag 'true', localhost -> demo-wsf-local", () => {
     expect(
       selectProjectId({ flagRaw: 'true', hasWindow: true, hostname: 'localhost' })
-    ).toBe('goarrive-test');
+    ).toBe('demo-wsf-local');
   });
 
   it("(e) flag '1', hosted origin -> goarrive (second guard holds)", () => {
@@ -57,10 +57,10 @@ describe('selectProjectId (emulator project id gate)', () => {
     ).toBe('goarrive');
   });
 
-  it("(h) flag 'true ' with whitespace, localhost -> goarrive-test (trim)", () => {
+  it("(h) flag 'true ' with whitespace, localhost -> demo-wsf-local (trim)", () => {
     expect(
       selectProjectId({ flagRaw: 'true ', hasWindow: true, hostname: 'localhost' })
-    ).toBe('goarrive-test');
+    ).toBe('demo-wsf-local');
   });
 
   it("(i) flag '1', window present but hostname unknown -> goarrive", () => {

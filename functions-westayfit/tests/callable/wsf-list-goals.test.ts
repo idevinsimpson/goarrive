@@ -20,7 +20,7 @@
  * Runs against the Firestore emulator via `.run(request)`.
  */
 
-process.env.GCLOUD_PROJECT = 'goarrive-test';
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 process.env.FIRESTORE_EMULATOR_HOST =
   process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 

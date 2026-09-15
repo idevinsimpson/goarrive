@@ -25,7 +25,7 @@
 // forces the emulator RPC channel open before the timed tests fire.
 process.env.METADATA_SERVER_DETECTION =
   process.env.METADATA_SERVER_DETECTION || 'none';
-process.env.GCLOUD_PROJECT = 'goarrive-test';
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 import { getFirestore } from 'firebase-admin/firestore';

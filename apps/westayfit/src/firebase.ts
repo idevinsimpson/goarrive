@@ -17,7 +17,7 @@ import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase
 // actually served from a loopback host, so a local browser run is namespaced
 // away from the real project's identifiers (E4-A1-R4).
 const PROD_PROJECT_ID = 'goarrive' as const;
-const EMULATOR_PROJECT_ID = 'goarrive-test' as const;
+const EMULATOR_PROJECT_ID = 'demo-wsf-local' as const;
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
@@ -148,10 +148,10 @@ export const wsfUsingEmulators = emulated;
 // values are the same ones the functions above already use.
 //
 // KNOWN GAP, reported rather than papered over: the emulator project id is
-// `goarrive-test`, not a `demo-` prefixed id. Firebase only guarantees that a
+// `demo-wsf-local`, not a `demo-` prefixed id. Firebase only guarantees that a
 // `demo-`prefixed project never reaches a real backend. Changing it here alone
 // would break the run — `scripts/westayfit/gate1.sh` and the jest emulator
-// configs pin `goarrive-test`, and both are outside Package C's allowed file
+// configs pin `demo-wsf-local`, and both are outside Package C's allowed file
 // scope. The bootstrap below therefore verifies the emulator wiring explicitly
 // instead of relying on the id, and the gap stays on the record.
 export const wsfEmulatorTargets = {

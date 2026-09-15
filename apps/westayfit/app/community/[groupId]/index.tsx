@@ -47,7 +47,6 @@ type LoadState =
       memberCount: number | null;
       isSample: boolean;
       activeChallenge: ActiveChallenge | null;
-      goals: ListedGoal[];
     }
   | { kind: 'error'; message: string };
 
@@ -82,6 +81,20 @@ type ListedGoal = {
 
 type ListGoalsResponse = { goals: ListedGoal[] };
 
+/**
+ * Three distinct states, deliberately not two.
+ *
+ * Catching the error and leaving an empty array made a failed load
+ * indistinguishable from a community that genuinely has no goal yet — and the
+ * page then told the member "No goal running yet", which is a claim about the
+ * community rather than about the request. "We could not load this" and
+ * "there is nothing here" are different facts and get different words.
+ */
+type GoalsState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; goals: ListedGoal[] }
+  | { kind: 'failed'; message: string };
+
 type ListChallengeResponse = {
   challenge:
     | { id: string; title: string; status: string; goalTarget: number | null }
@@ -99,6 +112,8 @@ export default function CommunityPage() {
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
+  const [goalsReloadToken, setGoalsReloadToken] = useState(0);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -187,23 +202,6 @@ export default function CommunityPage() {
           }
         }
 
-        // The seam this package exists to add. Every other wsfGoals access is
-        // by explicit goalId, so before wsfListGoals a member who did not
-        // create the goal had no way to reach it. A failure here is
-        // non-blocking: the rest of the community page still renders.
-        let goals: ListedGoal[] = [];
-        try {
-          const goalsFn = httpsCallable<{ groupId: string }, ListGoalsResponse>(
-            functions,
-            'wsfListGoals'
-          );
-          const goalsResult = await goalsFn({ groupId });
-          if (cancelled) return;
-          goals = goalsResult.data.goals ?? [];
-        } catch {
-          // Non-blocking — the page renders without the goal section.
-        }
-
         setState({
           kind: 'ready',
           group,
@@ -211,7 +209,6 @@ export default function CommunityPage() {
           memberCount,
           isSample,
           activeChallenge,
-          goals,
         });
       } catch (e) {
         if (cancelled) return;
@@ -223,6 +220,44 @@ export default function CommunityPage() {
       cancelled = true;
     };
   }, [ready, user, groupId]);
+
+  // The seam this package exists to add. Every other wsfGoals access is by
+  // explicit goalId, so before wsfListGoals a member who did not create the
+  // goal had no way to reach it.
+  //
+  // Its own effect, so a retry is a real action and a failure does not take
+  // the rest of the community page down with it. Reset to `loading` on every
+  // context change: results from a previous account or community must never
+  // be on screen while a different one loads.
+  useEffect(() => {
+    if (!wsfAuthEnabled) return;
+    if (!ready || !user || !groupId) return;
+
+    let cancelled = false;
+    setGoalsState({ kind: 'loading' });
+
+    (async () => {
+      try {
+        const fn = httpsCallable<{ groupId: string }, ListGoalsResponse>(
+          getFirebaseFunctions(),
+          'wsfListGoals'
+        );
+        const result = await fn({ groupId });
+        if (cancelled) return;
+        setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
+      } catch (e) {
+        if (cancelled) return;
+        setGoalsState({
+          kind: 'failed',
+          message: e instanceof Error ? e.message : 'Could not load goals.',
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, groupId, goalsReloadToken]);
 
   const inviteUrl = (() => {
     if (state.kind !== 'ready') return null;
@@ -307,7 +342,7 @@ export default function CommunityPage() {
     );
   }
 
-  const { group, role, memberCount, isSample, activeChallenge, goals } = state;
+  const { group, role, memberCount, isSample, activeChallenge } = state;
   const isChampion = role === 'foundingChampion';
   const hasShareApi = typeof navigator !== 'undefined' && 'share' in navigator;
 
@@ -395,8 +430,35 @@ export default function CommunityPage() {
 
         <View style={styles.section} testID="wsf-community-goals">
           <Text style={styles.sectionHeading}>Goals</Text>
-          {goals.length ? (
-            goals.map((goal) => (
+          {goalsState.kind === 'loading' ? (
+            <View
+              style={styles.noChallengeCard}
+              testID="wsf-community-goals-loading"
+              {...({ 'data-state': 'loading' } as Record<string, unknown>)}
+            >
+              <Text style={styles.body}>Loading goals…</Text>
+            </View>
+          ) : goalsState.kind === 'failed' ? (
+            <View
+              style={styles.noChallengeCard}
+              testID="wsf-community-goals-error"
+              {...({ 'data-state': 'error' } as Record<string, unknown>)}
+            >
+              <Text style={styles.noChallengeTitle}>Goals are unavailable right now</Text>
+              <Text style={styles.body}>
+                This is a problem loading them, not a community without goals.
+              </Text>
+              <Pressable
+                onPress={() => setGoalsReloadToken((n) => n + 1)}
+                style={styles.copyButton}
+                testID="wsf-community-goals-retry"
+                accessibilityRole="button"
+              >
+                <Text style={styles.copyButtonText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : goalsState.goals.length ? (
+            goalsState.goals.map((goal) => (
               // Separately created goals stay separate — one card each, with
               // its own unit and window. Nothing here sums or merges them.
               <Link
@@ -428,7 +490,7 @@ export default function CommunityPage() {
               </Text>
             </View>
           )}
-          {isChampion ? (
+          {isChampion && goalsState.kind !== 'failed' ? (
             <Link
               href={`/goals/new?groupId=${encodeURIComponent(groupId)}` as never}
               style={styles.goalStartLink}

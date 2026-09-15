@@ -40,7 +40,7 @@ const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 const FUNCTIONS_EMULATOR = 'http://127.0.0.1:5001';
 // E4-A1-R4: the browser run is namespaced to the emulator project. The client
 // selects this id only under the build flag on a loopback host (selectProjectId).
-const PROJECT_ID = 'goarrive-test';
+const PROJECT_ID = 'demo-wsf-local';
 
 const ARTIFACTS_DIR = path.resolve(
   __dirname,

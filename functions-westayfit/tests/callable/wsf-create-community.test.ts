@@ -3,11 +3,11 @@
  * Invokes the v2 handler via `.run(request)` against a live Firestore emulator.
  * Run:
  *   cd functions-westayfit
- *   firebase emulators:exec --only firestore --project goarrive-test \
+ *   firebase emulators:exec --only firestore --project demo-wsf-local \
  *     "npm run test:callable"
  */
 
-process.env.GCLOUD_PROJECT = 'goarrive-test';
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 import { getFirestore } from 'firebase-admin/firestore';

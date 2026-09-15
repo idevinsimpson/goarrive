@@ -24,7 +24,7 @@
 // the check-in happy-path from ~4s to ~0.5s on this suite.
 process.env.METADATA_SERVER_DETECTION =
   process.env.METADATA_SERVER_DETECTION || 'none';
-process.env.GCLOUD_PROJECT = 'goarrive-test';
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 process.env.FIRESTORE_EMULATOR_HOST =
   process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 

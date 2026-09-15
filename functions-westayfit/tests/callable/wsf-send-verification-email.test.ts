@@ -7,7 +7,7 @@
  *   cd functions-westayfit && npm run test:callable
  */
 
-process.env.GCLOUD_PROJECT = 'goarrive-test';
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 
 import { HttpsError } from 'firebase-functions/v2/https';
 import { retargetActionLink, wsfSendVerificationEmail } from '../../src/index';
