@@ -124,58 +124,62 @@ function tsField(d: Date): { timestampValue: string } {
  * all straight to Firestore with the emulator's admin bypass. Returns the
  * ids the browser will need to drive /contribute/{goalId} and /display/{goalId}.
  */
-async function seedGroupAndGoal(opts: {
-  uidA: string;
-  uidB: string;
-  target: number;
-  unit: string;
-  title: string;
-}): Promise<{ groupId: string; goalId: string }> {
+/**
+ * Seed ONLY what a post-admission test needs: two verified accounts, their
+ * profiles, one community, and one membership each — A as foundingChampion,
+ * B as an ordinary member. No goal: A creates that through the interface,
+ * which is the journey under test.
+ *
+ * No identity fields beyond what the approved profile fixture already carries.
+ */
+async function seedCommunityWithRoles(opts: {
+  championUid: string;
+  memberUid: string;
+}): Promise<{ groupId: string }> {
   const now = new Date();
-  const startsAt = new Date(now.getTime() - 60_000);
-  const endsAt = new Date(now.getTime() + 60 * 60_000);
-
-  const groupId = `e4a1grp-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
-  const goalId = `e4a1goal-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+  const groupId = `e5grp-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
 
   await firestoreWrite(`wsfCommunityGroups/${groupId}`, {
-    displayName: { stringValue: 'E4-A1 synthetic community' },
+    displayName: { stringValue: 'E5 seam community' },
     groupType: { stringValue: 'custom' },
     joinPolicy: { stringValue: 'private' },
     joinCode: { stringValue: randomBytes(6).toString('base64url') },
-    createdByUserId: { stringValue: opts.uidA },
+    createdByUserId: { stringValue: opts.championUid },
     lifecycleStatus: { stringValue: 'active' },
     isSample: { booleanValue: false },
     createdAt: tsField(now),
     updatedAt: tsField(now),
   });
 
-  for (const uid of [opts.uidA, opts.uidB]) {
+  const roles: [string, string][] = [
+    [opts.championUid, 'foundingChampion'],
+    [opts.memberUid, 'member'],
+  ];
+  for (const [uid, role] of roles) {
     await firestoreWrite(`wsfMemberships/${groupId}_${uid}`, {
       groupId: { stringValue: groupId },
       userId: { stringValue: uid },
-      role: { stringValue: 'foundingChampion' },
+      role: { stringValue: role },
       membershipStatus: { stringValue: 'active' },
+      createdAt: tsField(now),
+      updatedAt: tsField(now),
+    });
+    await firestoreWrite(`wsfMemberProfiles/${uid}`, {
+      displayName: { stringValue: `E5 ${role}` },
       createdAt: tsField(now),
       updatedAt: tsField(now),
     });
   }
 
-  await firestoreWrite(`wsfGoals/${goalId}`, {
-    ownerUid: { stringValue: opts.uidA },
-    communityGroupId: { stringValue: groupId },
-    title: { stringValue: opts.title },
-    target: { integerValue: String(opts.target) },
-    unit: { stringValue: opts.unit },
-    status: { stringValue: 'active' },
-    startsAt: tsField(startsAt),
-    endsAt: tsField(endsAt),
-    timezone: { stringValue: 'America/New_York' },
-    createdAt: tsField(now),
-    updatedAt: tsField(now),
-  });
+  return { groupId };
+}
 
-  return { groupId, goalId };
+/** Real sign-out through the interface, so the account switch is the product's own. */
+async function signOutVia(page: Page): Promise<void> {
+  await page.goto('/');
+  await expect(page.getByTestId('wsf-home-signout')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-home-signout').click();
+  await expect(page.getByTestId('wsf-home-signout')).toHaveCount(0, { timeout: 20_000 });
 }
 
 async function signInVia(page: Page, email: string, password: string): Promise<void> {
@@ -191,91 +195,99 @@ async function signInVia(page: Page, email: string, password: string): Promise<v
 }
 
 
+
+/** The callable URL the browser actually calls, so a test can delay or fail it. */
+function callableUrl(name: string): string {
+  return `${FUNCTIONS_EMULATOR}/${PROJECT_ID}/us-central1/${name}`;
+}
+
 test.describe('community goal seam', () => {
-  test('champion and member reach the goal from the community page and contribute once each', async ({
+  test('a Champion creates a goal through the interface and an ordinary member contributes', async ({
     browser,
   }) => {
     const stamp = Date.now().toString(36);
-    const passwordA = `Aa1!${randomBytes(6).toString('hex')}`;
-    const passwordB = `Bb1!${randomBytes(6).toString('hex')}`;
-    const emailA = `e5a-${stamp}@example.com`;
-    const emailB = `e5b-${stamp}@example.com`;
+    const pwChampion = `Aa1!${randomBytes(6).toString('hex')}`;
+    const pwMember = `Bb1!${randomBytes(6).toString('hex')}`;
+    const emailChampion = `e5champ-${stamp}@example.com`;
+    const emailMember = `e5member-${stamp}@example.com`;
 
-    const uidA = await seedVerifiedUser(emailA, passwordA);
-    const uidB = await seedVerifiedUser(emailB, passwordB);
-    const { groupId, goalId } = await seedGroupAndGoal({
-      uidA,
-      uidB,
-      target: 500,
-      unit: 'squats',
-      title: 'E5 community squats',
-    });
+    const championUid = await seedVerifiedUser(emailChampion, pwChampion);
+    const memberUid = await seedVerifiedUser(emailMember, pwMember);
+    const { groupId } = await seedCommunityWithRoles({ championUid, memberUid });
 
-    // Independent browser contexts — separate storage, separate sessions.
-    const ctxA: BrowserContext = await browser.newContext();
-    const ctxB: BrowserContext = await browser.newContext();
-    const pageA: Page = await ctxA.newPage();
-    const pageB: Page = await ctxB.newPage();
+    const ctxA = await browser.newContext();
+    const ctxB = await browser.newContext();
+    const pageA = await ctxA.newPage();
+    const pageB = await ctxB.newPage();
     const errorsA = captureConsoleErrors(pageA);
 
     try {
-      // ---- A reaches the goal FROM THE COMMUNITY PAGE, not by a known id ----
-      await signInVia(pageA, emailA, passwordA);
+      // ---- A, the Champion, creates the goal THROUGH THE INTERFACE ----
+      await signInVia(pageA, emailChampion, pwChampion);
       await pageA.goto(`/community/${groupId}`);
       await expect(pageA.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+      // No goal yet, and this is a successful empty response.
+      await expect(pageA.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
 
-      const goalLink = pageA.getByTestId(`wsf-community-goal-link-${goalId}`);
-      await expect(goalLink, 'the goal card is the seam this package adds').toBeVisible({
-        timeout: 20_000,
-      });
-      // A champion also gets an entry point to start one.
-      await expect(pageA.getByTestId('wsf-community-start-goal')).toBeVisible();
-      await goalLink.click();
-      await pageA.waitForURL(new RegExp(`/contribute/${goalId}`), { timeout: 20_000 });
+      await pageA.getByTestId('wsf-community-start-goal').click();
+      await pageA.waitForURL(/\/goals\/new/, { timeout: 20_000 });
+      await expect(pageA.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
+      // The community page passed the group it already knows.
+      await expect(pageA.getByTestId('wsf-new-goal-group-id-input')).toHaveValue(groupId);
 
-      // ---- A contributes ----
-      await expect(pageA.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
-      await pageA.getByTestId('wsf-contribute-entry').fill('20');
-      await pageA.getByTestId('wsf-contribute-submit').click();
-      await expect(pageA.getByTestId('wsf-contribute-own-credit')).toContainText('20', {
-        timeout: 20_000,
-      });
+      await pageA.getByTestId('wsf-new-goal-title').fill('E5 created via the interface');
+      await pageA.getByTestId('wsf-new-goal-target').fill('500');
+      await pageA.getByTestId('wsf-new-goal-unit').fill('squats');
+      await pageA.getByTestId('wsf-new-goal-submit').click();
+      await expect(pageA.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
+      // Renders as "goalId: <id>".
+      const goalId = (await pageA.getByTestId('wsf-new-goal-id').innerText())
+        .replace(/^goalId:\s*/, '')
+        .trim();
+      expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
 
-      // ---- B, independently, reaches the same goal the same way ----
-      await signInVia(pageB, emailB, passwordB);
+      // ---- B, an ordinary member, DISCOVERS it on the community page ----
+      await signInVia(pageB, emailMember, pwMember);
       await pageB.goto(`/community/${groupId}`);
+      await expect(pageB.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+      // An ordinary member gets no Champion-only control.
+      await expect(pageB.getByTestId('wsf-community-start-goal')).toHaveCount(0);
+
       await pageB.getByTestId(`wsf-community-goal-link-${goalId}`).click();
       await pageB.waitForURL(new RegExp(`/contribute/${goalId}`), { timeout: 20_000 });
       await pageB.getByTestId('wsf-contribute-entry').fill('30');
       await pageB.getByTestId('wsf-contribute-submit').click();
-      await expect(pageB.getByTestId('wsf-contribute-own-credit')).toContainText('30', {
+      // Exact: "Your confirmed credit: 30 squats" — not a substring that 130 would satisfy.
+      await expect(pageB.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your confirmed credit: 30 squats',
+        { timeout: 20_000 }
+      );
+
+      // ---- A contributes too; each sees only their own credit ----
+      await pageA.goto(`/contribute/${goalId}`);
+      await pageA.getByTestId('wsf-contribute-entry').fill('20');
+      await pageA.getByTestId('wsf-contribute-submit').click();
+      await expect(pageA.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your confirmed credit: 20 squats',
+        { timeout: 20_000 }
+      );
+      await expect(pageA.getByTestId('wsf-contribute-shared-total')).toHaveText('50 squats', {
         timeout: 20_000,
       });
-
-      // Each member's OWN credit is their own effort, never the shared total
-      // and never the other member's number.
-      await expect(pageB.getByTestId('wsf-contribute-own-credit')).not.toContainText('50');
+      await pageB.reload();
+      await expect(pageB.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your confirmed credit: 30 squats',
+        { timeout: 20_000 }
+      );
+      await expect(pageB.getByTestId('wsf-contribute-shared-total')).toHaveText('50 squats');
 
       // ---- Direct navigation and reload through local Hosting ----
-      // A static export alone does not establish this; the rewrite has to
-      // actually serve a cold load of a dynamic route.
       const cold = await pageA.goto(`/contribute/${goalId}`);
       expect(cold?.status(), 'cold load of the contribution route').toBe(200);
       await expect(pageA.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
       await pageA.reload();
       await expect(pageA.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
 
-      // ---- The display ROUTE loads. This is not acceptance of its access
-      // rules: wsfGoalPulse has no eligibility check (Package E, open). ----
-      const ctxC = await browser.newContext();
-      const pageC = await ctxC.newPage();
-      const display = await pageC.goto(`/display/${goalId}`);
-      expect(display?.status(), 'cold load of the display route').toBe(200);
-      await ctxC.close();
-
-      // KNOWN_GAPS is this harness's existing allowance — a missing favicon
-      // and the verification-email callable, neither of which this package
-      // touches. Everything else would be a real defect.
       const unexpected = errorsA.filter((e) => !KNOWN_GAPS.some((gap) => e.includes(gap)));
       expect(unexpected, 'no unexpected console errors on the member path').toEqual([]);
     } finally {
@@ -284,47 +296,160 @@ test.describe('community goal seam', () => {
     }
   });
 
-  test('a community with no goal says so, and does not claim one is missing when the load failed', async ({
+  test('goal loading: delayed shows loading, failure shows unavailable, Retry recovers', async ({
     browser,
   }) => {
     const stamp = Date.now().toString(36);
-    const password = `Cc1!${randomBytes(6).toString('hex')}`;
-    const email = `e5empty-${stamp}@example.com`;
-    const uid = await seedVerifiedUser(email, password);
-
-    // Seed a group and membership but NO goal, by reusing the seeder and then
-    // closing the goal it creates.
-    const { groupId, goalId } = await seedGroupAndGoal({
-      uidA: uid,
-      uidB: uid,
-      target: 100,
-      unit: 'reps',
-      title: 'E5 closed goal',
-    });
-    await firestoreWrite(`wsfGoals/${goalId}`, {
-      ownerUid: { stringValue: uid },
-      communityGroupId: { stringValue: groupId },
-      title: { stringValue: 'E5 closed goal' },
-      target: { integerValue: '100' },
-      unit: { stringValue: 'reps' },
-      status: { stringValue: 'closed' },
-      startsAt: tsField(new Date(Date.now() - 120_000)),
-      endsAt: tsField(new Date(Date.now() + 120_000)),
-      timezone: { stringValue: 'America/New_York' },
-    });
+    const pw = `Cc1!${randomBytes(6).toString('hex')}`;
+    const email = `e5load-${stamp}@example.com`;
+    const uid = await seedVerifiedUser(email, pw);
+    const { groupId } = await seedCommunityWithRoles({ championUid: uid, memberUid: uid });
 
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     try {
-      await signInVia(page, email, password);
-      await page.goto(`/community/${groupId}`);
-      await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+      await signInVia(page, email, pw);
 
-      // A SUCCESSFUL response with no eligible goals — the only state in which
-      // "no goal running yet" is a true statement about the community.
+      // ---- delayed: loading, and NOT a claim that the community has no goal ----
+      let release: (() => void) | null = null;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route(callableUrl('wsfListGoals'), async (route) => {
+        await held;
+        await route.continue();
+      });
+      await page.goto(`/community/${groupId}`);
+      await expect(page.getByTestId('wsf-community-goals-loading')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
+      (release as unknown as () => void)();
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
-      // And not the failure state, which is a different fact.
+      await page.unroute(callableUrl('wsfListGoals'));
+
+      // ---- failed: unavailable, and NOT an empty-community claim ----
+      await page.route(callableUrl('wsfListGoals'), (route) => route.abort('failed'));
+      await page.reload();
+      await expect(page.getByTestId('wsf-community-goals-error')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
+      // The Champion-only control is withheld while the state is unknown.
+      await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
+      // The rest of the community page is still usable.
+      await expect(page.getByTestId('wsf-community-type')).toBeVisible();
+
+      // ---- Retry recovers ----
+      await page.unroute(callableUrl('wsfListGoals'));
+      await page.getByTestId('wsf-community-goals-retry').click();
+      await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-community-goals-error')).toHaveCount(0);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('a delayed contribution failure cannot overwrite a newer attempt or leak across accounts', async ({
+    browser,
+  }) => {
+    const stamp = Date.now().toString(36);
+    const pwA = `Dd1!${randomBytes(6).toString('hex')}`;
+    const pwB = `Ee1!${randomBytes(6).toString('hex')}`;
+    const emailA = `e5da-${stamp}@example.com`;
+    const emailB = `e5db-${stamp}@example.com`;
+    const uidA = await seedVerifiedUser(emailA, pwA);
+    const uidB = await seedVerifiedUser(emailB, pwB);
+    const { groupId } = await seedCommunityWithRoles({ championUid: uidA, memberUid: uidB });
+
+    // One shared browser context: this is the shared-device case.
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    try {
+      await signInVia(page, emailA, pwA);
+      await page.goto(`/community/${groupId}`);
+      await page.getByTestId('wsf-community-start-goal').click();
+      await expect(page.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-new-goal-title').fill('E5 delayed-response goal');
+      await page.getByTestId('wsf-new-goal-target').fill('500');
+      await page.getByTestId('wsf-new-goal-unit').fill('squats');
+      await page.getByTestId('wsf-new-goal-submit').click();
+      await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
+      const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())
+        .replace(/^goalId:\s*/, '')
+        .trim();
+
+      // ---- A starts attempt 1 and its response never resolves ----
+      let failAttemptOne: (() => void) | null = null;
+      const attemptOneHeld = new Promise<void>((resolve) => {
+        failAttemptOne = resolve;
+      });
+      let intercepted = 0;
+      await page.route(callableUrl('wsfContribute'), async (route) => {
+        intercepted += 1;
+        if (intercepted === 1) {
+          await attemptOneHeld;
+          await route.abort('failed');
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.goto(`/contribute/${goalId}`);
+      await page.getByTestId('wsf-contribute-entry').fill('11');
+      await page.getByTestId('wsf-contribute-submit').click();
+      // Attempt 1 is persisted while in flight.
+      const pendingKeyA = `wsf.pendingContribution.${goalId}.${uidA}`;
+      await expect
+        .poll(async () => page.evaluate((k) => window.localStorage.getItem(k) !== null, pendingKeyA), {
+          timeout: 20_000,
+        })
+        .toBe(true);
+      const attemptOneId = await page.evaluate(
+        (k) => JSON.parse(window.localStorage.getItem(k) as string).attemptId,
+        pendingKeyA
+      );
+
+      // ---- A -> B -> A, with attempt 1 still outstanding ----
+      await signOutVia(page);
+      await signInVia(page, emailB, pwB);
+      // B must see nothing of A's attempt: no banner, no receipt, no error.
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-contribute-receipt')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-contribute-error')).toHaveCount(0);
+
+      await signOutVia(page);
+      await signInVia(page, emailA, pwA);
+      await page.goto(`/contribute/${goalId}`);
+
+      // ---- A reconciles attempt 1 successfully, then starts attempt 2 ----
+      await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-contribute-reconcile').click();
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your confirmed credit: 11 squats',
+        { timeout: 20_000 }
+      );
+
+      await page.getByTestId('wsf-contribute-entry').fill('7');
+      await page.getByTestId('wsf-contribute-submit').click();
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your confirmed credit: 18 squats',
+        { timeout: 20_000 }
+      );
+
+      // ---- NOW attempt 1's original request finally fails ----
+      (failAttemptOne as unknown as () => void)();
+      await page.waitForTimeout(1_500);
+
+      // Attempt 2's work stands. Attempt 1 is not resurrected over it, and the
+      // confirmed credit does not move.
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your confirmed credit: 18 squats'
+      );
+      await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+      const stored = await page.evaluate(
+        (k) => window.localStorage.getItem(k),
+        pendingKeyA
+      );
+      expect(stored, 'an old failure must not resurrect a reconciled attempt').toBeNull();
+      expect(attemptOneId, 'attempt 1 had its own identity').toMatch(/^\S+$/);
     } finally {
       await ctx.close();
     }

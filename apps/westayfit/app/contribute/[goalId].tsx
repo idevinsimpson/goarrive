@@ -11,10 +11,12 @@ import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { barPercent, integerPercent } from '../../src/goalPercent';
 import {
   clearPending,
+  clearPendingIfAttempt,
   isSameContext,
   loadPending,
   retireLegacyPending,
   savePending,
+  savePendingIfAttempt,
   type PendingContribution,
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
@@ -143,8 +145,15 @@ export default function ContributeToGoal() {
       // Persist the escalated state so a second reload shows the same banner
       // even if the user does nothing. Restoring it NEVER makes it confirmed;
       // only a server response does that.
-      savePending({ ...existing, state: 'unknown' }, uid);
+      savePendingIfAttempt({ ...existing, state: 'unknown' }, uid, existing.attemptId);
     }
+
+    return () => {
+      // Navigating away invalidates everything outstanding, so a response that
+      // lands after the screen unmounts — and after the member comes back —
+      // cannot be applied to the remounted screen.
+      generationRef.current += 1;
+    };
   }, [goalId, uid]);
 
   useEffect(() => {
@@ -276,7 +285,7 @@ export default function ContributeToGoal() {
       }
       const data = result.data;
       // Server truth received — the pending row is no longer needed.
-      clearPending(goalId as string, owner);
+      clearPendingIfAttempt(goalId as string, owner, attemptId);
       setPending(null);
       setLastResult(data);
       setState((prev) => ({
@@ -347,8 +356,11 @@ export default function ContributeToGoal() {
       // The persisted row is always escalated under the ORIGINAL account, so
       // the attempt stays reconcilable even if the context has moved on.
       const escalated: PendingContribution = { ...pendingRow, state: 'unknown' };
-      savePending(escalated, owner);
-      // Everything visible is guarded: a failure from a superseded context
+      // Conditional: this failure may only touch the record if the slot is
+      // still ITS attempt. A newer attempt for the same account and goal is
+      // never overwritten by an older one's failure.
+      savePendingIfAttempt(escalated, owner, attemptId);
+      // Everything visible is guarded too: a failure from a superseded context
       // must not surface a banner or an error under a different identity.
       if (!stillCurrent()) return;
       setPending(escalated);
@@ -392,16 +404,16 @@ export default function ContributeToGoal() {
 
     // Flip the persisted state to 'sending' during the retry so a further
     // crash mid-retry still lands us on the banner.
-    savePending({ ...pending, state: 'sending' }, owner);
+    savePendingIfAttempt({ ...pending, state: 'sending' }, owner, pending.attemptId);
     setPending({ ...pending, state: 'sending' });
 
     try {
       await sendContribute(pending.attemptId, pending.count);
     } catch (e) {
       const escalated: PendingContribution = { ...pending, state: 'unknown' };
-      // Persisted under the original account regardless; displayed only if
-      // this context is still the current one.
-      savePending(escalated, owner);
+      // Conditional, for the same reason as onSubmit: an old reconcile failure
+      // must not overwrite a newer attempt's record.
+      savePendingIfAttempt(escalated, owner, pending.attemptId);
       if (!stillCurrent()) return;
       setPending(escalated);
       const message =

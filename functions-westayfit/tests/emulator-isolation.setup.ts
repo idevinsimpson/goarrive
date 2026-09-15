@@ -42,11 +42,56 @@ if (!LOOPBACK.test(firestore)) {
   refuse(`FIRESTORE_EMULATOR_HOST "${firestore}" is not a loopback address.`);
 }
 
-// No live email. The WSF email sender reads a secret; leaving it unset means a
-// test can never reach a real provider, and asserting it here makes that a
-// property of the run rather than an accident.
+// Auth is required unless a run explicitly declares it does not use Auth.
+// A missing or remote Auth target must not pass preflight: several callables
+// mint links and read tokens through the Admin Auth SDK, and without the
+// emulator host those calls address the real service.
+//
+// WSF_TEST_DECLARE_NO_AUTH=1 is the declared Firestore-only escape hatch. It
+// means "this run does not use Auth" — it is NOT a statement that Auth was
+// verified, and nothing may describe it as one.
+const declaredNoAuth = process.env.WSF_TEST_DECLARE_NO_AUTH === '1';
+const auth = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+if (!declaredNoAuth) {
+  if (!auth) {
+    refuse(
+      'FIREBASE_AUTH_EMULATOR_HOST is not set. Set it, or declare a Firestore-only ' +
+        'run with WSF_TEST_DECLARE_NO_AUTH=1 — which asserts nothing about Auth.'
+    );
+  }
+  if (!LOOPBACK.test(auth)) {
+    refuse(`FIREBASE_AUTH_EMULATOR_HOST "${auth}" is not a loopback address.`);
+  }
+}
+
+// An unset email key is not proof that no external request is possible — it
+// is one variable. So the harness BLOCKS them: any fetch to a non-loopback
+// host throws. That covers the email sender, any SDK that falls back to HTTP,
+// and anything added later that nobody remembered to check.
 if (process.env.WSF_EMAIL_API_KEY) {
   refuse('WSF_EMAIL_API_KEY is set. Tests must not be able to send real email.');
+}
+
+const realFetch = globalThis.fetch;
+if (typeof realFetch === 'function') {
+  const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\]|::1|0\.0\.0\.0)$/;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const raw =
+      typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+    let host = '';
+    try {
+      host = new URL(raw).hostname;
+    } catch {
+      host = '';
+    }
+    if (host && !LOOPBACK_HOST.test(host)) {
+      throw new Error(
+        `WSF TEST BLOCKED AN EXTERNAL REQUEST to ${host}. The local harness only permits ` +
+          `loopback destinations. If a test needs this, it needs an emulator, not the internet.`
+      );
+    }
+    return realFetch(input as RequestInfo, init);
+  }) as typeof fetch;
 }
 
 // eslint-disable-next-line no-console

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  clearPendingIfAttempt,
   isSameContext,
   legacyPendingKey,
   loadPending,
   pendingKey,
   retireLegacyPending,
+  savePendingIfAttempt,
+  type PendingContribution,
   type RequestContext,
 } from '../src/pendingContribution';
 
@@ -156,5 +159,83 @@ describe('a legacy unscoped record is retired, never adopted', () => {
 
   it('is a no-op when there is no legacy record', () => {
     expect(retireLegacyPending(GOAL)).toBeNull();
+  });
+});
+
+describe('persisted state is guarded per attempt, not only per context', () => {
+  /**
+   * The defect these cover: both catch blocks persisted unconditionally, so a
+   * failure belonging to attempt 1 could overwrite attempt 2's record for the
+   * same account and goal — resurrecting reconciled work underneath work the
+   * member was still doing. The visible error was suppressed by the context
+   * guard; the write was not.
+   *
+   * These are helper-level tests. The browser test in
+   * tests-e2e/e5-community-goal-seam.spec.ts does NOT discriminate this case:
+   * a navigation-based account switch tears down the in-flight request, so the
+   * late catch never runs there. That is recorded rather than glossed.
+   */
+  const row = (attemptId: string, count: number): PendingContribution => ({
+    goalId: GOAL,
+    attemptId,
+    count,
+    ts: 1,
+    state: 'sending',
+  });
+
+  it('an old failure does not overwrite a newer attempt', () => {
+    // Attempt 2 owns the slot.
+    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+
+    // Attempt 1 fails late and tries to escalate its own row.
+    const wrote = savePendingIfAttempt(
+      { ...row('attempt-1', 11), state: 'unknown' },
+      A,
+      'attempt-1'
+    );
+
+    expect(wrote, 'the superseded attempt must not write').toBe(false);
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+    expect(loadPending(GOAL, A)?.count).toBe(7);
+  });
+
+  it('an old success does not clear a newer attempt', () => {
+    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    const cleared = clearPendingIfAttempt(GOAL, A, 'attempt-1');
+    expect(cleared, 'the superseded attempt must not clear').toBe(false);
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+  });
+
+  it('the attempt that owns the slot may still update and clear it', () => {
+    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    expect(savePendingIfAttempt({ ...row('attempt-2', 7), state: 'unknown' }, A, 'attempt-2')).toBe(
+      true
+    );
+    expect(loadPending(GOAL, A)?.state).toBe('unknown');
+    expect(clearPendingIfAttempt(GOAL, A, 'attempt-2')).toBe(true);
+    expect(loadPending(GOAL, A)).toBeNull();
+  });
+
+  it('the full sequence: attempt 1 reconciled, attempt 2 started, attempt 1 fails late', () => {
+    // A starts attempt 1.
+    savePendingIfAttempt(row('attempt-1', 11), A, 'attempt-1');
+    // A reconciles it successfully — the slot is released.
+    expect(clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
+    // A starts attempt 2.
+    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    // Attempt 1's original request finally fails.
+    savePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
+
+    // Attempt 2 stands; attempt 1 is not resurrected over it.
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+    expect(loadPending(GOAL, A)?.count).toBe(7);
+  });
+
+  it("does not touch another account's slot", () => {
+    savePendingIfAttempt(row('attempt-b', 5), B, 'attempt-b');
+    savePendingIfAttempt(row('attempt-a', 9), A, 'attempt-a');
+    expect(loadPending(GOAL, B)?.attemptId).toBe('attempt-b');
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-a');
   });
 });

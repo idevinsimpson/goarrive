@@ -116,6 +116,48 @@ export function savePending(p: PendingContribution, uid: string): void {
   }
 }
 
+/**
+ * Write a pending record ONLY if the stored record is still the same attempt.
+ *
+ * Guarding the visible state is not enough. An old request's `catch` used to
+ * persist unconditionally, so a failure belonging to attempt 1 could overwrite
+ * attempt 2's record for the same account and goal — resurrecting work the
+ * member had already reconciled, underneath work they were still doing. The
+ * error was invisible; the damage was not.
+ *
+ * Returns whether it wrote, so callers can tell "superseded" from "saved".
+ */
+export function savePendingIfAttempt(
+  p: PendingContribution,
+  uid: string,
+  attemptId: string
+): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    const current = loadPending(p.goalId, uid);
+    // Nothing stored: only the attempt that owns this slot may create it.
+    if (current && current.attemptId !== attemptId) return false;
+    if (!current && p.attemptId !== attemptId) return false;
+    window.localStorage.setItem(pendingKey(p.goalId, uid), JSON.stringify(p));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Clear ONLY if the stored record is still this attempt. An old success must not clear a newer one. */
+export function clearPendingIfAttempt(goalId: string, uid: string, attemptId: string): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    const current = loadPending(goalId, uid);
+    if (current && current.attemptId !== attemptId) return false;
+    window.localStorage.removeItem(pendingKey(goalId, uid));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function clearPending(goalId: string, uid: string): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
