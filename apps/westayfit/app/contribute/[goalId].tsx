@@ -15,8 +15,8 @@ import {
   isSameContext,
   loadPending,
   retireLegacyPending,
-  savePending,
-  savePendingIfAttempt,
+  savePendingNew,
+  updatePendingIfAttempt,
   type PendingContribution,
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
@@ -145,7 +145,7 @@ export default function ContributeToGoal() {
       // Persist the escalated state so a second reload shows the same banner
       // even if the user does nothing. Restoring it NEVER makes it confirmed;
       // only a server response does that.
-      savePendingIfAttempt({ ...existing, state: 'unknown' }, uid, existing.attemptId);
+      updatePendingIfAttempt({ ...existing, state: 'unknown' }, uid, existing.attemptId);
     }
 
     return () => {
@@ -338,7 +338,7 @@ export default function ContributeToGoal() {
       ts: Date.now(),
       state: 'sending',
     };
-    savePending(pendingRow, uid as string);
+    savePendingNew(pendingRow, uid as string);
     setPending(pendingRow);
 
     const generation = generationRef.current;
@@ -359,7 +359,7 @@ export default function ContributeToGoal() {
       // Conditional: this failure may only touch the record if the slot is
       // still ITS attempt. A newer attempt for the same account and goal is
       // never overwritten by an older one's failure.
-      savePendingIfAttempt(escalated, owner, attemptId);
+      updatePendingIfAttempt(escalated, owner, attemptId);
       // Everything visible is guarded too: a failure from a superseded context
       // must not surface a banner or an error under a different identity.
       if (!stillCurrent()) return;
@@ -404,7 +404,7 @@ export default function ContributeToGoal() {
 
     // Flip the persisted state to 'sending' during the retry so a further
     // crash mid-retry still lands us on the banner.
-    savePendingIfAttempt({ ...pending, state: 'sending' }, owner, pending.attemptId);
+    updatePendingIfAttempt({ ...pending, state: 'sending' }, owner, pending.attemptId);
     setPending({ ...pending, state: 'sending' });
 
     try {
@@ -413,7 +413,7 @@ export default function ContributeToGoal() {
       const escalated: PendingContribution = { ...pending, state: 'unknown' };
       // Conditional, for the same reason as onSubmit: an old reconcile failure
       // must not overwrite a newer attempt's record.
-      savePendingIfAttempt(escalated, owner, pending.attemptId);
+      updatePendingIfAttempt(escalated, owner, pending.attemptId);
       if (!stillCurrent()) return;
       setPending(escalated);
       const message =

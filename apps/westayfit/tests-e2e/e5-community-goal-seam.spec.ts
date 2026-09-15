@@ -136,6 +136,13 @@ async function seedCommunityWithRoles(opts: {
   championUid: string;
   memberUid: string;
 }): Promise<{ groupId: string }> {
+  if (opts.championUid === opts.memberUid) {
+    // The loop below writes both roles to wsfMemberships/{groupId}_{uid}. With
+    // one uid the second write wins, so the "Champion" would silently end up an
+    // ordinary member and any Champion-role assertion would prove nothing.
+    throw new Error('seedCommunityWithRoles needs two distinct accounts');
+  }
+
   const now = new Date();
   const groupId = `e5grp-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
 
@@ -296,21 +303,28 @@ test.describe('community goal seam', () => {
     }
   });
 
-  test('goal loading: delayed shows loading, failure shows unavailable, Retry recovers', async ({
+  test('goal loading: loading, failure and Retry, with the Champion control tracked throughout', async ({
     browser,
   }) => {
     const stamp = Date.now().toString(36);
-    const pw = `Cc1!${randomBytes(6).toString('hex')}`;
-    const email = `e5load-${stamp}@example.com`;
-    const uid = await seedVerifiedUser(email, pw);
-    const { groupId } = await seedCommunityWithRoles({ championUid: uid, memberUid: uid });
+    const pwChampion = `Cc1!${randomBytes(6).toString('hex')}`;
+    const pwMember = `Dd1!${randomBytes(6).toString('hex')}`;
+    const emailChampion = `e5loadchamp-${stamp}@example.com`;
+    const emailMember = `e5loadmember-${stamp}@example.com`;
+
+    // Two DISTINCT accounts. Passing one uid for both roles would write both
+    // memberships to the same document, leaving the "Champion" an ordinary
+    // member — and a missing Champion control would then prove nothing.
+    const championUid = await seedVerifiedUser(emailChampion, pwChampion);
+    const memberUid = await seedVerifiedUser(emailMember, pwMember);
+    const { groupId } = await seedCommunityWithRoles({ championUid, memberUid });
 
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     try {
-      await signInVia(page, email, pw);
+      await signInVia(page, emailChampion, pwChampion);
 
-      // ---- delayed: loading, and NOT a claim that the community has no goal ----
+      // ---- delayed: loading, and NOT a claim the community has no goal ----
       let release: (() => void) | null = null;
       const held = new Promise<void>((resolve) => {
         release = resolve;
@@ -322,8 +336,14 @@ test.describe('community goal seam', () => {
       await page.goto(`/community/${groupId}`);
       await expect(page.getByTestId('wsf-community-goals-loading')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
+
+      // The signed-in account really is the Champion — asserted, not assumed.
+      await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
+
       (release as unknown as () => void)();
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
+      // A successful load: the Champion control is present.
+      await expect(page.getByTestId('wsf-community-start-goal')).toBeVisible();
       await page.unroute(callableUrl('wsfListGoals'));
 
       // ---- failed: unavailable, and NOT an empty-community claim ----
@@ -331,16 +351,27 @@ test.describe('community goal seam', () => {
       await page.reload();
       await expect(page.getByTestId('wsf-community-goals-error')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
-      // The Champion-only control is withheld while the state is unknown.
+      // Still the Champion — so the control being absent is a deliberate
+      // withholding while the state is unknown, not a missing role.
+      await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
       // The rest of the community page is still usable.
       await expect(page.getByTestId('wsf-community-type')).toBeVisible();
 
-      // ---- Retry recovers ----
+      // ---- Retry recovers, and the control returns ----
       await page.unroute(callableUrl('wsfListGoals'));
       await page.getByTestId('wsf-community-goals-retry').click();
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-community-goals-error')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-start-goal')).toBeVisible();
+
+      // ---- an ordinary member never receives the Champion control ----
+      await signOutVia(page);
+      await signInVia(page, emailMember, pwMember);
+      await page.goto(`/community/${groupId}`);
+      await expect(page.getByTestId('wsf-community-role')).toContainText('Member');
+      await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
     } finally {
       await ctx.close();
     }

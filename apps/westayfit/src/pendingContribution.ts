@@ -117,17 +117,41 @@ export function savePending(p: PendingContribution, uid: string): void {
 }
 
 /**
- * Write a pending record ONLY if the stored record is still the same attempt.
+ * Create the record for a genuinely NEW attempt.
  *
- * Guarding the visible state is not enough. An old request's `catch` used to
- * persist unconditionally, so a failure belonging to attempt 1 could overwrite
- * attempt 2's record for the same account and goal — resurrecting work the
- * member had already reconciled, underneath work they were still doing. The
- * error was invisible; the damage was not.
- *
- * Returns whether it wrote, so callers can tell "superseded" from "saved".
+ * Unconditional by design: starting an attempt is the one moment a record is
+ * supposed to come into existence. Everything asynchronous uses
+ * `updatePendingIfAttempt` instead.
  */
-export function savePendingIfAttempt(
+export function savePendingNew(p: PendingContribution, uid: string): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    window.localStorage.setItem(pendingKey(p.goalId, uid), JSON.stringify(p));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Update an EXISTING record, and only if it is still the expected attempt.
+ *
+ * This is what every late callback must use. Two conditions, both required:
+ * a readable record is present AND it is this attempt, and the incoming row
+ * is this attempt too.
+ *
+ * An absent, cleared or unreadable slot is NOT permission to write. The
+ * earlier version treated an empty slot as writable whenever the incoming row
+ * matched the attempt it was told about — which is always true in the catch
+ * blocks — so after attempt 1 was reconciled and cleared, its late failure
+ * recreated it as `unknown`. The member saw a reminder to reconcile work they
+ * had already completed.
+ *
+ * This is a LOCAL REMINDER record only. Recreating it never double-counted
+ * anything: the server keys idempotency on goalId, uid and attemptId, and
+ * replaying a recorded attempt returns the original receipt.
+ */
+export function updatePendingIfAttempt(
   p: PendingContribution,
   uid: string,
   attemptId: string
@@ -135,9 +159,11 @@ export function savePendingIfAttempt(
   if (typeof window === 'undefined' || !window.localStorage) return false;
   try {
     const current = loadPending(p.goalId, uid);
-    // Nothing stored: only the attempt that owns this slot may create it.
-    if (current && current.attemptId !== attemptId) return false;
-    if (!current && p.attemptId !== attemptId) return false;
+    // No readable record: the attempt this callback belongs to is finished or
+    // was superseded. Nothing to update, and nothing to resurrect.
+    if (!current) return false;
+    if (current.attemptId !== attemptId) return false;
+    if (p.attemptId !== attemptId) return false;
     window.localStorage.setItem(pendingKey(p.goalId, uid), JSON.stringify(p));
     return true;
   } catch {

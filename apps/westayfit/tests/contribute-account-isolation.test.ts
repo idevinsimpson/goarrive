@@ -7,7 +7,8 @@ import {
   loadPending,
   pendingKey,
   retireLegacyPending,
-  savePendingIfAttempt,
+  savePendingNew,
+  updatePendingIfAttempt,
   type PendingContribution,
   type RequestContext,
 } from '../src/pendingContribution';
@@ -185,11 +186,11 @@ describe('persisted state is guarded per attempt, not only per context', () => {
 
   it('an old failure does not overwrite a newer attempt', () => {
     // Attempt 2 owns the slot.
-    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    savePendingNew(row('attempt-2', 7), A);
     expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
 
     // Attempt 1 fails late and tries to escalate its own row.
-    const wrote = savePendingIfAttempt(
+    const wrote = updatePendingIfAttempt(
       { ...row('attempt-1', 11), state: 'unknown' },
       A,
       'attempt-1'
@@ -201,17 +202,17 @@ describe('persisted state is guarded per attempt, not only per context', () => {
   });
 
   it('an old success does not clear a newer attempt', () => {
-    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    savePendingNew(row('attempt-2', 7), A);
     const cleared = clearPendingIfAttempt(GOAL, A, 'attempt-1');
     expect(cleared, 'the superseded attempt must not clear').toBe(false);
     expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
   });
 
   it('the attempt that owns the slot may still update and clear it', () => {
-    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
-    expect(savePendingIfAttempt({ ...row('attempt-2', 7), state: 'unknown' }, A, 'attempt-2')).toBe(
-      true
-    );
+    savePendingNew(row('attempt-2', 7), A);
+    expect(
+      updatePendingIfAttempt({ ...row('attempt-2', 7), state: 'unknown' }, A, 'attempt-2')
+    ).toBe(true);
     expect(loadPending(GOAL, A)?.state).toBe('unknown');
     expect(clearPendingIfAttempt(GOAL, A, 'attempt-2')).toBe(true);
     expect(loadPending(GOAL, A)).toBeNull();
@@ -219,13 +220,13 @@ describe('persisted state is guarded per attempt, not only per context', () => {
 
   it('the full sequence: attempt 1 reconciled, attempt 2 started, attempt 1 fails late', () => {
     // A starts attempt 1.
-    savePendingIfAttempt(row('attempt-1', 11), A, 'attempt-1');
+    savePendingNew(row('attempt-1', 11), A);
     // A reconciles it successfully — the slot is released.
     expect(clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
     // A starts attempt 2.
-    savePendingIfAttempt(row('attempt-2', 7), A, 'attempt-2');
+    savePendingNew(row('attempt-2', 7), A);
     // Attempt 1's original request finally fails.
-    savePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
+    updatePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
 
     // Attempt 2 stands; attempt 1 is not resurrected over it.
     expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
@@ -233,9 +234,100 @@ describe('persisted state is guarded per attempt, not only per context', () => {
   });
 
   it("does not touch another account's slot", () => {
-    savePendingIfAttempt(row('attempt-b', 5), B, 'attempt-b');
-    savePendingIfAttempt(row('attempt-a', 9), A, 'attempt-a');
+    savePendingNew(row('attempt-b', 5), B);
+    savePendingNew(row('attempt-a', 9), A);
     expect(loadPending(GOAL, B)?.attemptId).toBe('attempt-b');
     expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-a');
+  });
+});
+
+describe('a late callback cannot recreate a record the slot no longer holds', () => {
+  /**
+   * The hole these close: the conditional helper used to treat an EMPTY slot as
+   * writable whenever the incoming row matched the attempt it was told about —
+   * which is always true in the catch blocks, since each passes its own row and
+   * its own attempt id. So once an attempt was reconciled and cleared, its late
+   * failure recreated it as `unknown`, and the member was told to reconcile work
+   * they had already finished.
+   *
+   * This is a LOCAL REMINDER record. Recreating it never double-counted
+   * anything server-side: idempotency is keyed on goalId, uid and attemptId,
+   * and replaying a recorded attempt returns the original receipt.
+   */
+  const row = (attemptId: string, count: number): PendingContribution => ({
+    goalId: GOAL,
+    attemptId,
+    count,
+    ts: 1,
+    state: 'sending',
+  });
+
+  it('attempt 1 confirmed and cleared, then its old failure — storage stays empty', () => {
+    savePendingNew(row('attempt-1', 11), A);
+    expect(clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
+
+    const wrote = updatePendingIfAttempt(
+      { ...row('attempt-1', 11), state: 'unknown' },
+      A,
+      'attempt-1'
+    );
+
+    expect(wrote, 'an empty slot is not permission to recreate').toBe(false);
+    expect(loadPending(GOAL, A)).toBeNull();
+    expect(window.localStorage.getItem(pendingKey(GOAL, A))).toBeNull();
+  });
+
+  it('attempt 1 confirmed, attempt 2 confirmed and cleared, then attempt 1 fails — storage stays empty', () => {
+    savePendingNew(row('attempt-1', 11), A);
+    clearPendingIfAttempt(GOAL, A, 'attempt-1');
+    savePendingNew(row('attempt-2', 7), A);
+    clearPendingIfAttempt(GOAL, A, 'attempt-2');
+
+    updatePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
+
+    expect(loadPending(GOAL, A)).toBeNull();
+    expect(window.localStorage.getItem(pendingKey(GOAL, A))).toBeNull();
+  });
+
+  it('attempt 2 still pending when attempt 1 fails — attempt 2 is preserved', () => {
+    savePendingNew(row('attempt-2', 7), A);
+    const wrote = updatePendingIfAttempt(
+      { ...row('attempt-1', 11), state: 'unknown' },
+      A,
+      'attempt-1'
+    );
+    expect(wrote).toBe(false);
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+    expect(loadPending(GOAL, A)?.count).toBe(7);
+    expect(loadPending(GOAL, A)?.state).toBe('sending');
+  });
+
+  it('a matching existing attempt legitimately moves from sending to unknown', () => {
+    savePendingNew(row('attempt-1', 11), A);
+    const wrote = updatePendingIfAttempt(
+      { ...row('attempt-1', 11), state: 'unknown' },
+      A,
+      'attempt-1'
+    );
+    expect(wrote, 'the attempt that owns the slot may update it').toBe(true);
+    expect(loadPending(GOAL, A)?.state).toBe('unknown');
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-1');
+  });
+
+  it('an old success arriving while a newer attempt is pending preserves attempt 2', () => {
+    savePendingNew(row('attempt-2', 7), A);
+    const cleared = clearPendingIfAttempt(GOAL, A, 'attempt-1');
+    expect(cleared, "an old success must not clear a newer attempt").toBe(false);
+    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+  });
+
+  it('refuses to update when the stored record is unreadable', () => {
+    window.localStorage.setItem(pendingKey(GOAL, A), 'not json');
+    const wrote = updatePendingIfAttempt(
+      { ...row('attempt-1', 11), state: 'unknown' },
+      A,
+      'attempt-1'
+    );
+    expect(wrote, 'an unreadable slot is not permission to write').toBe(false);
   });
 });
