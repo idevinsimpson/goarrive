@@ -24,7 +24,7 @@ import { wsfTheme } from '../../src/theme';
 type Preview = {
   displayName: string;
   groupType: 'familyFriends' | 'custom';
-  memberCount: number;
+  joinPolicy: string;
 };
 
 type PreviewState =
@@ -163,9 +163,26 @@ export default function JoinPage() {
 
   const { preview } = previewState;
   const typeLabel = preview.groupType === 'familyFriends' ? 'Family and friends' : 'Community';
-  const memberLabel = preview.memberCount === 1 ? '1 member' : `${preview.memberCount} members`;
+  // D6: the preview shows the minimum needed to explain what someone is
+  // joining — name, supported type, and the joining conditions. The member
+  // count that used to appear here is deliberately gone: a count is
+  // information about the community's members, and an invitation preview is
+  // not the place to disclose it.
+  //
+  // Each supported policy states its own condition, and an unrecognised value
+  // states none. The two-branch form would have described any unexpected
+  // policy as link-only, which understates who can get in — the wrong
+  // direction to be wrong in on the screen where someone decides to join.
+  const joiningConditions =
+    preview.joinPolicy === 'public'
+      ? 'Anyone can find and join this community.'
+      : preview.joinPolicy === 'inviteOnly'
+        ? 'Anyone with this link can join. It keeps working until a Champion resets it.'
+        : '';
+  const metaLine = joiningConditions ? `${typeLabel} · ${joiningConditions}` : typeLabel;
 
-  // Signed out — preview is safe (only shown for public+active groups) so we
+  // Signed out — preview is safe (D4: only shown for link-joinable active
+  // groups, i.e. public or inviteOnly; private never previews) so we
   // show it and route to signup/signin. The pending join code sits in
   // sessionStorage; the auth chain reads it and routes back here on success.
   if (!user) {
@@ -174,9 +191,7 @@ export default function JoinPage() {
         <View style={styles.inner}>
           <Text style={styles.eyebrow}>Join a community</Text>
           <Text style={styles.heading}>{preview.displayName}</Text>
-          <Text style={styles.meta}>
-            {typeLabel} · {memberLabel}
-          </Text>
+          <Text style={styles.meta} testID="wsf-join-meta">{metaLine}</Text>
           <View style={styles.actions}>
             {/*
               `replace`, not push. If these Links pushed, the join screen would
@@ -217,9 +232,7 @@ export default function JoinPage() {
       <View style={styles.inner}>
         <Text style={styles.eyebrow}>Join a community</Text>
         <Text style={styles.heading}>{preview.displayName}</Text>
-        <Text style={styles.meta}>
-          {typeLabel} · {memberLabel}
-        </Text>
+        <Text style={styles.meta} testID="wsf-join-meta">{metaLine}</Text>
         {joinState.kind === 'error' ? (
           <ErrorText testID="wsf-join-submit-error">{joinState.message}</ErrorText>
         ) : null}

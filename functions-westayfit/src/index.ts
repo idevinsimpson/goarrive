@@ -32,6 +32,32 @@ export function mintJoinCode(): string {
   return randomBytes(16).toString('base64url');
 }
 
+/**
+ * Admission tiers a valid link can open. 'private' is deliberately absent:
+ * a forwarded general link never admits anyone to a private community —
+ * authorization there is per invitee (D5).
+ *
+ * 'public' remains the only tier that may ever be listed or discovered; this
+ * set is about link admission, not discoverability, and nothing here
+ * implements discovery.
+ */
+const LINK_JOINABLE: ReadonlySet<string> = new Set(['public', 'inviteOnly']);
+
+/**
+ * Membership states.
+ *
+ * 'removed' and 'departed' are deliberately different values, not one
+ * "inactive". A person who leaves is not banned; a person who was removed
+ * needs an explicit Champion action to come back. Every existing read already
+ * requires exactly 'active' (wsfListChallenge, wsfCheckIn,
+ * readActiveMembership, wsfContribute, wsfMyCommunities, and the preview's
+ * member aggregate), so both values close those doors the moment they can be
+ * written.
+ */
+const MEMBERSHIP_ACTIVE = 'active';
+const MEMBERSHIP_REMOVED = 'removed';
+const MEMBERSHIP_DEPARTED = 'departed';
+
 function normalizeJoinCode(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
@@ -569,7 +595,7 @@ type PreviewRequest = { joinCode?: unknown };
 type PreviewResponse = {
   displayName: string;
   groupType: GroupType;
-  memberCount: number;
+  joinPolicy: JoinPolicy;
 };
 
 export const wsfPreviewCommunity = onCall<PreviewRequest>(
@@ -601,27 +627,36 @@ export const wsfPreviewCommunity = onCall<PreviewRequest>(
       joinPolicy: JoinPolicy;
       lifecycleStatus: string;
     };
-    // Only 'public' groups on 'active' lifecycle preview. Anything else must
-    // return the same not-found as an unknown code — this is the oracle test.
-    if (group.joinPolicy !== 'public' || group.lifecycleStatus !== 'active') {
+    // D4: 'public' AND 'inviteOnly' preview on an 'active' lifecycle.
+    // 'private' and anything else return the same not-found as an unknown
+    // code — the oracle test still holds for every tier that is not link-
+    // addressable.
+    //
+    // WIDENING, named explicitly: this callable is invoker:'public', so an
+    // unauthenticated caller holding a code could previously confirm the
+    // existence, name and type of a 'public' community only. It can now do the
+    // same for an 'inviteOnly' community whose code it holds. That is what
+    // "Anyone with the link" requires. It stays bounded by the IP rate limit
+    // that fires before any code lookup, by the minimised response (D6), and
+    // by the unchanged not-found for 'private' and unknown codes.
+    if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
       notFound();
     }
 
-    // Aggregate count: cheaper than reading every membership doc and does not
-    // require a composite index for a single equality filter. Only counts
-    // active memberships so soft-removed rows (a future concern) never inflate
-    // the "how big is this community?" preview.
-    const countSnap = await db
-      .collection('wsfMemberships')
-      .where('groupId', '==', groupDoc.id)
-      .where('membershipStatus', '==', 'active')
-      .count()
-      .get();
-
+    // D6: the minimum needed to explain what someone is joining — name, the
+    // supported type, and the joining conditions the client renders from
+    // joinPolicy. NO member count.
+    //
+    // BEHAVIOUR CHANGE to an existing response: this callable used to return a
+    // `memberCount` aggregate over active memberships. It no longer does.
+    // Caller updated: apps/westayfit/app/join/[joinCode].tsx.
+    //
+    // No member names, goals, totals, history or locations are exposed here,
+    // and none ever were.
     return {
       displayName: group.displayName,
       groupType: group.groupType,
-      memberCount: countSnap.data().count,
+      joinPolicy: group.joinPolicy,
     };
   }
 );
@@ -671,15 +706,63 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
       const membershipRef = db.doc(`wsfMemberships/${groupDoc.id}_${uid}`);
       const membershipSnap = await tx.get(membershipRef);
 
-      // Existing members are grandfathered: a returning tap resolves even if
-      // the group has since flipped away from 'public' or gone inactive. The
-      // rule is "new joins require public+active", not "existing members lose
-      // access when the champion flips a setting."
+      // D3. This branch used to return before any policy check and WITHOUT
+      // consulting membershipStatus. Once a non-active value can be written,
+      // that would have routed a removed person straight back in on an old
+      // link. Each state now has a stated answer.
+      //
+      // Note the ordering that is deliberately preserved: the code lookup
+      // above already returned notFound() for an unknown — including a RESET —
+      // code before membership is read. So a reset code is unknown to
+      // everyone, members included (D1 wins over this grandfathering), and the
+      // code space stays unguessable.
       if (membershipSnap.exists) {
-        return { groupId: groupDoc.id, alreadyMember: true };
+        const existing = membershipSnap.data() as { membershipStatus?: string };
+        const status = existing.membershipStatus;
+
+        // ACTIVE MEMBER — the legitimate purpose of this branch. A returning
+        // tap on the CURRENT link resolves, and the membership is neither
+        // re-created nor duplicated, even if the Champion has since flipped
+        // the policy or the lifecycle.
+        if (status === MEMBERSHIP_ACTIVE) {
+          return { groupId: groupDoc.id, alreadyMember: true };
+        }
+
+        // REMOVED — a general link never reactivates a removed membership.
+        // The response is the same notFound() an unknown code gets, so it
+        // discloses nothing about the community's current state, its name, or
+        // even that this person was once a member. Reinstatement is an
+        // explicit Champion action (wsfReinstateMember).
+        if (status === MEMBERSHIP_REMOVED) {
+          notFound();
+        }
+
+        // VOLUNTARILY DEPARTED — not banned. They come back the ordinary way,
+        // so the normal admission rules below must pass: a valid link to a
+        // link-joinable community on an active lifecycle. If those pass, the
+        // existing record is reactivated rather than duplicated.
+        if (status === MEMBERSHIP_DEPARTED) {
+          if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
+            notFound();
+          }
+          tx.set(
+            membershipRef,
+            {
+              membershipStatus: MEMBERSHIP_ACTIVE,
+              rejoinedAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+          return { groupId: groupDoc.id, alreadyMember: false };
+        }
+
+        // Any other stored value is not a state this code understands, and
+        // guessing would be the wrong instinct for an admission decision.
+        notFound();
       }
 
-      if (group.joinPolicy !== 'public' || group.lifecycleStatus !== 'active') {
+      if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
         notFound();
       }
 
@@ -696,6 +779,341 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
       });
       return { groupId: groupDoc.id, alreadyMember: false };
     });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D — ADMISSION CONTROLS
+//
+// Everything below changes who may enter or remain in a community. None of it
+// touches contributions: no callable here writes wsfContributions,
+// wsfGoalCounters, wsfGoalMemberTotals, wsfGoalAdjustments, wsfCheckIns,
+// wsfChallengeCounters or wsfChallengeParticipants. Past valid contributions
+// stay counted when a membership ends — that is a deliberate property of these
+// handlers, not an accident of not having gotten to it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ChampionGroup = { joinPolicy: JoinPolicy; lifecycleStatus: string; joinCode?: string };
+type ChampionCheck = { groupRef: FirebaseFirestore.DocumentReference; group: ChampionGroup };
+
+/**
+ * Require an ACTIVE foundingChampion membership in this community, read inside
+ * the transaction. Same shape as the existing champion-gated callables; no new
+ * role is invented.
+ *
+ * A caller who is not a champion here gets the same not-found as a community
+ * that does not exist, so these callables cannot be used to probe which
+ * communities exist or who runs them.
+ */
+async function requireChampion(
+  tx: FirebaseFirestore.Transaction,
+  groupId: string,
+  uid: string
+): Promise<ChampionCheck> {
+  const db = getFirestore();
+  const groupRef = db.doc(`wsfCommunityGroups/${groupId}`);
+  const [groupSnap, membershipSnap] = await Promise.all([
+    tx.get(groupRef),
+    tx.get(db.doc(`wsfMemberships/${groupId}_${uid}`)),
+  ]);
+  if (!groupSnap.exists) notFound();
+  if (!membershipSnap.exists) notFound();
+  const membership = membershipSnap.data() as { role?: string; membershipStatus?: string };
+  if (membership.membershipStatus !== MEMBERSHIP_ACTIVE) notFound();
+  if (membership.role !== 'foundingChampion') notFound();
+  return { groupRef, group: groupSnap.data() as ChampionGroup };
+}
+
+/** Count active champions in a community. Used only by the last-Champion guard. */
+async function countActiveChampions(groupId: string): Promise<number> {
+  const snap = await getFirestore()
+    .collection('wsfMemberships')
+    .where('groupId', '==', groupId)
+    .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+    .where('role', '==', 'foundingChampion')
+    .count()
+    .get();
+  return snap.data().count;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D1 — wsfResetJoinCode. A Champion retires the current link.
+//
+// New admissions through the old link stop. Existing members are NOT removed
+// and contributions are NOT altered — this writes exactly one field on one
+// group document.
+//
+// After a reset the old code resolves exactly as an unknown code does, on both
+// the join and the preview path: the same notFound(), with no distinguishable
+// "this link was reset" response, so the code space stays unguessable. That
+// includes existing members: a reset code is unknown to everyone. An active
+// member who taps a retired link remains a member and reaches the community
+// through the current link or their own community list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ResetJoinCodeRequest = { groupId?: unknown };
+type ResetJoinCodeResponse = { groupId: string; joinCode: string };
+
+export const wsfResetJoinCode = onCall<ResetJoinCodeRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<ResetJoinCodeResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+
+    const db = getFirestore();
+
+    // Codes are looked up by equality on `joinCode`, so a collision would make
+    // one code resolve to two communities. Mint from 16 random bytes and check
+    // before committing; on the vanishingly unlikely collision, try again a
+    // bounded number of times and fail loudly rather than silently reusing.
+    let minted = '';
+    for (let attempt = 0; attempt < 5 && !minted; attempt += 1) {
+      const candidate = mintJoinCode();
+      const clash = await db
+        .collection('wsfCommunityGroups')
+        .where('joinCode', '==', candidate)
+        .limit(1)
+        .get();
+      if (clash.empty) minted = candidate;
+    }
+    if (!minted) {
+      throw new HttpsError('internal', 'Could not mint a unique join code. Try again.');
+    }
+
+    await db.runTransaction(async (tx) => {
+      const { groupRef } = await requireChampion(tx, groupId, uid);
+      // Admission only. One field.
+      tx.set(
+        groupRef,
+        { joinCode: minted, joinCodeResetAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+    });
+
+    return { groupId, joinCode: minted };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D2 — removal, voluntary departure, and reinstatement.
+//
+// Removal and departure are DIFFERENT STATES, not one "inactive". A person who
+// leaves is not banned: they return through the community's ordinary admission
+// path (see wsfJoinCommunity's departed branch). A person who was removed needs
+// an explicit Champion action.
+//
+// WHAT A STATUS FLIP ACTUALLY CLOSES — enumerated rather than assumed. Every
+// one of these requires membershipStatus === 'active' and therefore closes
+// immediately: wsfListChallenge, wsfCheckIn, readActiveMembership (which gates
+// wsfCreateGoal and wsfAdjustGoal), wsfContribute, wsfMyCommunities, and the
+// preview's active-membership aggregate.
+//
+// WHAT IT DOES NOT CLOSE, and is not this packet's to fix:
+//   - wsfMyContribution has no membership check by design — a member who left
+//     still sees the credit they earned, which is what "past valid
+//     contributions do not disappear" means.
+//   - wsfGoalPulse is a public aggregate read with no eligibility check at all.
+//     That is the Package E goal-read defect and is explicitly out of scope
+//     here. Removal does NOT close it, and no claim is made that it does.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type MembershipActionRequest = { groupId?: unknown; targetUid?: unknown };
+type MembershipActionResponse = { groupId: string; targetUid: string; membershipStatus: string };
+
+export const wsfRemoveMember = onCall<MembershipActionRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MembershipActionResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    const targetUid = normalizeStringId(request.data?.targetUid);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    if (!targetUid) throw new HttpsError('invalid-argument', 'targetUid is required.');
+    if (targetUid === uid) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Use leave-community to step down yourself; removal is for other members.'
+      );
+    }
+
+    // D7 guard, read before the transaction and re-checked inside it.
+    const championsBefore = await countActiveChampions(groupId);
+
+    const db = getFirestore();
+    await db.runTransaction(async (tx) => {
+      await requireChampion(tx, groupId, uid);
+      const targetRef = db.doc(`wsfMemberships/${groupId}_${targetUid}`);
+      const targetSnap = await tx.get(targetRef);
+      if (!targetSnap.exists) notFound();
+      const target = targetSnap.data() as { role?: string; membershipStatus?: string };
+      if (target.membershipStatus !== MEMBERSHIP_ACTIVE) {
+        throw new HttpsError('failed-precondition', 'That person is not an active member.');
+      }
+      // A community must never be left with nobody able to manage it.
+      if (target.role === 'foundingChampion' && championsBefore <= 1) {
+        throw new HttpsError(
+          'failed-precondition',
+          'This community would be left with no Champion. Designate another Champion first.'
+        );
+      }
+      tx.set(
+        targetRef,
+        {
+          membershipStatus: MEMBERSHIP_REMOVED,
+          removedAt: FieldValue.serverTimestamp(),
+          removedByUid: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return { groupId, targetUid, membershipStatus: MEMBERSHIP_REMOVED };
+  }
+);
+
+type LeaveRequest = { groupId?: unknown };
+
+export const wsfLeaveCommunity = onCall<LeaveRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MembershipActionResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+
+    const championsBefore = await countActiveChampions(groupId);
+
+    const db = getFirestore();
+    await db.runTransaction(async (tx) => {
+      const ref = db.doc(`wsfMemberships/${groupId}_${uid}`);
+      const snap = await tx.get(ref);
+      if (!snap.exists) notFound();
+      const membership = snap.data() as { role?: string; membershipStatus?: string };
+      if (membership.membershipStatus !== MEMBERSHIP_ACTIVE) {
+        throw new HttpsError('failed-precondition', 'You are not an active member.');
+      }
+      if (membership.role === 'foundingChampion' && championsBefore <= 1) {
+        throw new HttpsError(
+          'failed-precondition',
+          'You are this community\'s only Champion. Designate another Champion before you leave.'
+        );
+      }
+      tx.set(
+        ref,
+        {
+          membershipStatus: MEMBERSHIP_DEPARTED,
+          departedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return { groupId, targetUid: uid, membershipStatus: MEMBERSHIP_DEPARTED };
+  }
+);
+
+/**
+ * Reinstatement of a REMOVED member. Deliberate, Champion-only, and never an
+ * automatic consequence of tapping a link.
+ *
+ * A voluntarily departed person does not need this: they rejoin through the
+ * ordinary admission path. Applying the removed-member rule to them would be
+ * treating leaving as a ban.
+ */
+export const wsfReinstateMember = onCall<MembershipActionRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MembershipActionResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    const targetUid = normalizeStringId(request.data?.targetUid);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    if (!targetUid) throw new HttpsError('invalid-argument', 'targetUid is required.');
+
+    const db = getFirestore();
+    await db.runTransaction(async (tx) => {
+      await requireChampion(tx, groupId, uid);
+      const targetRef = db.doc(`wsfMemberships/${groupId}_${targetUid}`);
+      const targetSnap = await tx.get(targetRef);
+      if (!targetSnap.exists) notFound();
+      const target = targetSnap.data() as { membershipStatus?: string };
+      if (target.membershipStatus !== MEMBERSHIP_REMOVED) {
+        throw new HttpsError('failed-precondition', 'That membership is not in a removed state.');
+      }
+      tx.set(
+        targetRef,
+        {
+          membershipStatus: MEMBERSHIP_ACTIVE,
+          reinstatedAt: FieldValue.serverTimestamp(),
+          reinstatedByUid: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return { groupId, targetUid, membershipStatus: MEMBERSHIP_ACTIVE };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D7 — the last-Champion case. RESOLUTION CHOSEN: designate.
+//
+// From the source: wsfCreateCommunity writes role 'foundingChampion' and
+// wsfJoinCommunity writes role 'member'; before this packet no callable
+// promoted anyone, so a second Champion could not exist at all.
+//
+// "Block" alone would have left a sole Champion permanently unable to leave,
+// which is a trap rather than a resolution. So designation is the mechanism and
+// the block is its enforcement: the departure and removal paths above refuse
+// while the community would be left with zero Champions, and this callable is
+// how that is resolved. It reuses the existing foundingChampion role rather
+// than inventing an authority tier.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const wsfDesignateChampion = onCall<MembershipActionRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MembershipActionResponse & { role: string }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    const targetUid = normalizeStringId(request.data?.targetUid);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    if (!targetUid) throw new HttpsError('invalid-argument', 'targetUid is required.');
+    if (targetUid === uid) {
+      throw new HttpsError('failed-precondition', 'You are already a Champion of this community.');
+    }
+
+    const db = getFirestore();
+    await db.runTransaction(async (tx) => {
+      await requireChampion(tx, groupId, uid);
+      const targetRef = db.doc(`wsfMemberships/${groupId}_${targetUid}`);
+      const targetSnap = await tx.get(targetRef);
+      if (!targetSnap.exists) notFound();
+      const target = targetSnap.data() as { role?: string; membershipStatus?: string };
+      if (target.membershipStatus !== MEMBERSHIP_ACTIVE) {
+        throw new HttpsError('failed-precondition', 'That person is not an active member.');
+      }
+      if (target.role === 'foundingChampion') {
+        throw new HttpsError('failed-precondition', 'That person is already a Champion.');
+      }
+      tx.set(
+        targetRef,
+        {
+          role: 'foundingChampion',
+          designatedAt: FieldValue.serverTimestamp(),
+          designatedByUid: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return { groupId, targetUid, membershipStatus: MEMBERSHIP_ACTIVE, role: 'foundingChampion' };
   }
 );
 

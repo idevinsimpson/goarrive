@@ -10,10 +10,18 @@
  *      callable design exists to prevent.
  *
  *   2. Response projection is strict. Only { displayName, groupType,
- *      memberCount } comes back. groupId, createdByUserId, joinPolicy,
- *      lifecycle, timestamps, and every other field on the doc must stay
- *      server-side. If the shape ever expands here, the shape has to expand
- *      deliberately in the spec first.
+ *      joinPolicy } comes back. groupId, createdByUserId, lifecycle,
+ *      timestamps, and every other field on the doc must stay server-side. If
+ *      the shape ever expands here, the shape has to expand deliberately in
+ *      the spec first.
+ *
+ * Package D changed both pinned properties on purpose, and this file was
+ * updated to the decided policy rather than the implementation reverted:
+ *   - D6 removed `memberCount` from the response and added `joinPolicy`, so
+ *     the join screen states the joining conditions instead of a head count.
+ *   - D4 made 'inviteOnly' link-addressable, so it previews like 'public'.
+ * 'private' is untouched and still returns byte-identical not-found — the
+ * oracle test below is the one that must never be relaxed.
  *
  * Runs against the Firestore emulator via `.run(request)`, matching the
  * pattern established by wsf-create-community.test.ts.
@@ -99,7 +107,7 @@ describe('wsfPreviewCommunity', () => {
       .set({ at: Date.now() });
   }, 30_000);
 
-  test('public + active group returns strictly {displayName, groupType, memberCount}', async () => {
+  test('public + active group returns strictly {displayName, groupType, joinPolicy}', async () => {
     const joinCode = mintJoinCode();
     await seedGroup({
       displayName: 'FitLife Moves',
@@ -113,14 +121,19 @@ describe('wsfPreviewCommunity', () => {
     expect(result).toEqual({
       displayName: 'FitLife Moves',
       groupType: 'custom',
-      memberCount: 3,
+      joinPolicy: 'public',
     });
+    // D6, stated as its own assertion rather than left implicit in the
+    // toEqual: the group really does have 3 active members, and the count is
+    // still not in the response. A future change that re-adds the aggregate
+    // fails here by name.
+    expect(result).not.toHaveProperty('memberCount');
     // Strict shape: no extra fields leaked. Delete these keys and any leftover
     // is a new leak.
     const leftover = { ...(result as Record<string, unknown>) };
     delete leftover.displayName;
     delete leftover.groupType;
-    delete leftover.memberCount;
+    delete leftover.joinPolicy;
     expect(leftover).toEqual({});
   });
 
@@ -158,22 +171,28 @@ describe('wsfPreviewCommunity', () => {
     expect(privateResult.error.details).toEqual(unknownResult.error.details);
   });
 
-  test('inviteOnly group returns the same not-found as an unknown code', async () => {
+  test('D4: inviteOnly group previews like public, with the same strict shape', async () => {
+    // REVERSED BY PACKAGE D. This test used to assert that 'inviteOnly' was
+    // indistinguishable from an unknown code. D4 decided "Anyone with the
+    // link" applies to 'inviteOnly', so a holder of the code must be able to
+    // see what they are about to join. The widening is bounded: it takes the
+    // code, and the response is the same minimised projection.
     const inviteCode = mintJoinCode();
     await seedGroup({
       displayName: 'Invite-only Group',
       joinCode: inviteCode,
       joinPolicy: 'inviteOnly',
+      members: 2,
     });
 
-    const inviteResult = await tryRun({ joinCode: inviteCode });
-    const unknownResult = await tryRun({ joinCode: mintJoinCode() });
+    const result = await wsfPreviewCommunity.run(makeRequest({ joinCode: inviteCode }));
 
-    expect(inviteResult.ok).toBe(false);
-    expect(unknownResult.ok).toBe(false);
-    if (inviteResult.ok || unknownResult.ok) return;
-    expect(inviteResult.error.code).toBe(unknownResult.error.code);
-    expect(inviteResult.error.message).toBe(unknownResult.error.message);
+    expect(result).toEqual({
+      displayName: 'Invite-only Group',
+      groupType: 'custom',
+      joinPolicy: 'inviteOnly',
+    });
+    expect(result).not.toHaveProperty('memberCount');
   });
 
   test('§3.3 ORACLE: non-active lifecycle returns byte-identical not-found', async () => {

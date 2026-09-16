@@ -114,6 +114,9 @@ export default function CommunityPage() {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
+  const [resetting, setResetting] = useState(false);
+  const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
+  const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -142,6 +145,20 @@ export default function CommunityPage() {
           return;
         }
         const membership = membershipSnap.data() as { role: string; membershipStatus: string };
+        // D2/D3 DEFECT FOUND AND FIXED IN THIS PACKAGE. This gate used to be
+        // existence-only: it read membershipStatus and never looked at it.
+        // Removal and voluntary departure both LEAVE the membership document
+        // in place and change its status, so a removed person still satisfied
+        // `exists()` and this screen rendered for them — community name, the
+        // goal list, the invite link, and the Champion controls if their role
+        // said foundingChampion. The callables refuse them (proved in
+        // functions-westayfit/tests/callable/wsf-admission-controls.test.ts),
+        // but this screen is itself a member-only path and was not closing.
+        // Anything that is not an active membership is not a membership here.
+        if (membership.membershipStatus !== 'active') {
+          setState({ kind: 'notMember' });
+          return;
+        }
 
         const groupSnap = await getDoc(doc(db, 'wsfCommunityGroups', groupId));
         if (cancelled) return;
@@ -261,10 +278,13 @@ export default function CommunityPage() {
 
   const inviteUrl = (() => {
     if (state.kind !== 'ready') return null;
-    if (!state.group.joinCode) return null;
-    if (state.group.joinPolicy !== 'public') return null;
+    const code = resetJoinCode ?? state.group.joinCode;
+    if (!code) return null;
+    // D4: public AND inviteOnly are link-joinable. private is not — a general
+    // community link never admits anyone there.
+    if (state.group.joinPolicy !== 'public' && state.group.joinPolicy !== 'inviteOnly') return null;
     if (typeof window === 'undefined') return null;
-    return `${window.location.origin}/join/${state.group.joinCode}`;
+    return `${window.location.origin}/join/${code}`;
   })();
 
   const onCopyInvite = useCallback(async () => {
@@ -277,6 +297,36 @@ export default function CommunityPage() {
       setCopyStatus('failed');
     }
   }, [inviteUrl]);
+
+  /**
+   * D1: retire the current link. New admissions through the old one stop; no
+   * member is removed and no contribution is touched. The old code then
+   * resolves exactly as an unknown code does — for everyone, members included.
+   */
+  const onResetInvite = useCallback(async () => {
+    if (resetting || !groupId) return;
+    setResetting(true);
+    setResetOutcome('idle');
+    try {
+      const fn = httpsCallable<{ groupId: string }, { joinCode: string }>(
+        getFirebaseFunctions(),
+        'wsfResetJoinCode'
+      );
+      const result = await fn({ groupId });
+      setResetJoinCode(result.data.joinCode);
+      setCopyStatus('idle');
+      setResetOutcome('done');
+    } catch {
+      // A failure here is NOT cosmetic and must never be swallowed. The reason
+      // a Champion resets a link is usually that the old one got somewhere it
+      // should not have. Leaving the button to settle back to "Reset link"
+      // would let them walk away believing a live link is dead. The old link
+      // is still working, and the screen has to say so.
+      setResetOutcome('failed');
+    } finally {
+      setResetting(false);
+    }
+  }, [groupId, resetting]);
 
   const onShareInvite = useCallback(async () => {
     if (!inviteUrl) return;
@@ -385,7 +435,7 @@ export default function CommunityPage() {
 
         <View style={styles.section} testID="wsf-community-invite">
           <Text style={styles.sectionHeading}>Invite</Text>
-          {group.joinPolicy === 'public' && inviteUrl ? (
+          {inviteUrl ? (
             <View>
               <Text
                 style={styles.inviteUrl}
@@ -394,6 +444,22 @@ export default function CommunityPage() {
               >
                 {inviteUrl}
               </Text>
+              <Text style={styles.body} testID="wsf-community-invite-caveat">
+                {group.joinPolicy === 'inviteOnly'
+                  ? 'Anyone with this link can join, including someone it is forwarded to. It keeps working until you reset it.'
+                  : 'This community can be found and joined by anyone.'}
+              </Text>
+              {resetOutcome === 'done' ? (
+                <Text style={styles.body} testID="wsf-community-invite-reset-done">
+                  The old link no longer works. Share the new one above.
+                </Text>
+              ) : null}
+              {resetOutcome === 'failed' ? (
+                <Text style={styles.error} testID="wsf-community-invite-reset-error">
+                  The link could not be reset. The link above is still the live
+                  one and still lets people join. Try again.
+                </Text>
+              ) : null}
               <View style={styles.inviteActions}>
                 <Pressable
                   onPress={onCopyInvite}
@@ -409,6 +475,19 @@ export default function CommunityPage() {
                         : 'Copy link'}
                   </Text>
                 </Pressable>
+                {isChampion ? (
+                  <Pressable
+                    onPress={onResetInvite}
+                    disabled={resetting}
+                    style={styles.shareButton}
+                    testID="wsf-community-invite-reset"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.shareButtonText}>
+                      {resetting ? 'Resetting…' : 'Reset link'}
+                    </Text>
+                  </Pressable>
+                ) : null}
                 {hasShareApi ? (
                   <Pressable
                     onPress={onShareInvite}
