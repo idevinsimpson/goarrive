@@ -15,9 +15,13 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import {
   wsfContribute,
   wsfDesignateChampion,
+  wsfGoalPulse,
   wsfJoinCommunity,
   wsfLeaveCommunity,
   wsfListChallenge,
+  wsfListGoals,
+  wsfMyCommunities,
+  wsfMyContribution,
   wsfPreviewCommunity,
   wsfReinstateMember,
   wsfRemoveMember,
@@ -219,7 +223,8 @@ describe('D2 + D3 — removal, departure, and what a link does for each state', 
     await call(wsfRemoveMember, champion, { groupId, targetUid: member });
     expect(await statusOf(groupId, member)).toBe('removed');
 
-    // After: the enumerated member-only paths refuse.
+    // After: the enumerated member-only paths refuse. This list is the
+    // package's actual claim about removal — not "removal closes everything".
     await expectRefused(
       call(wsfContribute, member, { goalId, attemptId: 'd2-attempt-0002', count: 10 }),
       'permission-denied',
@@ -230,6 +235,51 @@ describe('D2 + D3 — removal, departure, and what a link does for each state', 
       'permission-denied',
       'listChallenge: '
     );
+    // Note the DIFFERENT refusal code, which is deliberate and not drift:
+    // wsfContribute and wsfListChallenge answer permission-denied, while
+    // wsfListGoals answers not-found so it does not confirm to a non-member
+    // that this community exists at all. Asserting the exact code each path
+    // returns is what keeps that distinction from being flattened later.
+    await expectRefused(call(wsfListGoals, member, { groupId }), 'not-found', 'listGoals: ');
+    // The community stops appearing in their own list of communities.
+    const mine = (await call(wsfMyCommunities, member, {})) as {
+      items: { groupId: string }[];
+    };
+    expect(mine.items.map((i) => i.groupId)).not.toContain(groupId);
+  });
+
+  it('states what removal does NOT close, so the boundary is not overclaimed', async () => {
+    // This test exists to stop "removal closes the member-only paths" from
+    // being read as "a removed person can no longer see anything". Two paths
+    // deliberately survive removal, and one of them is an open defect. If a
+    // later change closes either, this test fails and the claim gets revisited
+    // on purpose rather than drifting.
+    const champion = 'd2c-champ';
+    const member = 'd2c-member';
+    const { groupId } = await seedGroup('inviteOnly', champion);
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfContribute, member, { goalId, attemptId: 'd2c-attempt-0001', count: 25 });
+
+    await call(wsfRemoveMember, champion, { groupId, targetUid: member });
+
+    // 1. BY DESIGN: they can still read the credit they earned. The path is
+    //    derived from their own uid, so this is their own row and nobody
+    //    else's — see the note above wsfMyContribution.
+    const own = (await call(wsfMyContribution, member, { goalId })) as { ownCredit: number };
+    expect(own.ownCredit).toBe(25);
+
+    // 2. OPEN DEFECT, held as Package E: wsfGoalPulse is invoker:'public' with
+    //    no eligibility check at all — no membership test, no goal-visibility
+    //    test, no rate limit. A removed person, or anyone who ever saw the
+    //    goalId, still reads the community's shared progress. Package D does
+    //    not close this and must not be reported as if it did.
+    const pulse = (await call(wsfGoalPulse, null, { goalId })) as {
+      sharedTotal: number;
+      contributorCount: number;
+    };
+    expect(pulse.sharedTotal).toBe(25);
+    expect(pulse.contributorCount).toBe(1);
   });
 
   it('past valid contributions stay counted after removal', async () => {
