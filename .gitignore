@@ -38,3 +38,6 @@ functions-westayfit/lib/
 # WSF detached run receipts (per feedback_detached_marker_for_long_steps.md)
 .*-exit
 .functions-list-*.txt
+
+# google-github-actions/auth writes its federated credentials file here.
+gha-creds-*.json

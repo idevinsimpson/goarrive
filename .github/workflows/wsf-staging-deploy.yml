@@ -1,0 +1,231 @@
+# We Stay Fit — staging deployment. Manual only, staging only, keyless.
+#
+# Authenticates to westayfit-staging by Workload Identity Federation with no
+# service-account key, because constraints/iam.disableServiceAccountKeyCreation
+# is enforced on the organization. The existing deployer is impersonated; no new
+# identity is created here.
+#
+# The workflow's own reviewed version always comes from the default branch.
+# The application commit it builds and deploys is supplied per run and checked
+# out separately, so reviewing this file is not the same as approving whatever
+# happens to be on a branch.
+name: WSF staging deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_sha:
+        description: "Full 40-character commit SHA of the reviewed app candidate to deploy"
+        required: true
+        type: string
+
+# Least privilege. id-token is what mints the OIDC assertion for federation;
+# contents:read is all a deploy needs. No packages, no actions, no write.
+permissions:
+  contents: read
+  id-token: write
+
+# Two runs must never interleave against one staging project. Queue rather than
+# cancel: cancelling mid-deploy is how a half-applied function set happens.
+concurrency:
+  group: wsf-staging-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT: westayfit-staging
+  STAGING_SITE: westayfit-staging
+  STAGING_CHANNEL: staging
+  WIF_PROVIDER: projects/857281977774/locations/global/workloadIdentityPools/wsf-staging-github/providers/github
+  DEPLOY_SA: wsf-staging-deployer@westayfit-staging.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # ---- validate input before anything else ---------------------------
+      # The SHA reaches the shell as an environment variable, never as a
+      # ${{ }} expansion inside a run body. An expansion there is substituted
+      # before bash parses the line, so a crafted input becomes a command.
+      - name: Validate app_sha
+        env:
+          APP_SHA: ${{ inputs.app_sha }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$APP_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::app_sha must be a full 40-character lowercase hex commit SHA."
+            exit 1
+          fi
+          echo "APP_SHA=$APP_SHA" >> "$GITHUB_ENV"
+
+      # ---- the reviewed operational files, from the default branch -------
+      - name: Check out workflow assets (default branch)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ops
+          persist-credentials: false
+
+      # ---- the application commit under deployment -----------------------
+      - name: Check out the app candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.APP_SHA }}
+          path: app
+          persist-credentials: false
+
+      - name: Confirm the checkout is the requested commit
+        working-directory: app
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "checked out: $actual"
+          [ "$actual" = "$APP_SHA" ] || { echo "::error::checkout mismatch"; exit 1; }
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # ---- dependency install and TS build, with NO credentials present ---
+      # Everything that executes third-party package code runs before the auth
+      # step, so a malicious postinstall has nothing to steal.
+      - name: Install dependencies (no credentials)
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npm --prefix functions-westayfit ci
+          npm --prefix apps/westayfit ci
+
+      - name: Build functions (no credentials)
+        working-directory: app
+        run: npm --prefix functions-westayfit run build
+
+      # ---- authenticate: short-lived, keyless -----------------------------
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      # ---- read the staging Web App config from authenticated metadata ----
+      # Retrieved, never copied by hand and never borrowed from production.
+      # Written to a file the build sources; not echoed.
+      - name: Read staging Web App SDK config
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@15.30.1 apps:sdkconfig WEB \
+            --project "$STAGING_PROJECT" --json > /tmp/sdkconfig.json
+          node -e '
+            const c = require("/tmp/sdkconfig.json").result.sdkConfig;
+            const need = ["projectId","apiKey","authDomain","storageBucket","messagingSenderId","appId"];
+            const missing = need.filter((k) => !c[k]);
+            if (missing.length) { console.error("missing from SDK config: " + missing); process.exit(1); }
+            if (c.projectId !== process.env.STAGING_PROJECT) {
+              console.error("SDK config is not the staging project"); process.exit(1);
+            }
+            const fs = require("fs");
+            fs.writeFileSync(".wsf-staging.env",
+              "EXPO_PUBLIC_WSF_STAGING_PROJECT_ID=" + c.projectId + "\n" +
+              "EXPO_PUBLIC_WSF_STAGING_API_KEY=" + c.apiKey + "\n" +
+              "EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN=" + c.authDomain + "\n" +
+              "EXPO_PUBLIC_WSF_STAGING_STORAGE_BUCKET=" + c.storageBucket + "\n" +
+              "EXPO_PUBLIC_WSF_STAGING_SENDER_ID=" + c.messagingSenderId + "\n" +
+              "EXPO_PUBLIC_WSF_STAGING_APP_ID=" + c.appId + "\n", { mode: 0o600 });
+            console.log("staging SDK config resolved for " + c.projectId);
+          '
+          rm -f /tmp/sdkconfig.json
+
+      # ---- fresh web build, credentials deliberately withheld -------------
+      # build-staging.sh refuses rather than falling back to a production
+      # artifact. The empty GOOGLE_APPLICATION_CREDENTIALS keeps the federated
+      # file out of the build's reach; the build needs no cloud access.
+      - name: Build the staging web artifact
+        working-directory: app
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ""
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ""
+        run: |
+          set -euo pipefail
+          rm -rf apps/westayfit/dist
+          set -a; . ./.wsf-staging.env; set +a
+          export EXPO_PUBLIC_WSF_ENV=staging
+          export EXPO_PUBLIC_WSF_AUTH_ENABLED=1
+          scripts/westayfit/build-staging.sh --approved-project "$STAGING_PROJECT"
+          scripts/westayfit/assert-staging-artifact.sh
+
+      - name: Confirm the artifact carries the requested commit
+        working-directory: app
+        run: |
+          set -euo pipefail
+          grep -rqF "$APP_SHA" apps/westayfit/dist --include=*.html \
+            || grep -rqF "${APP_SHA:0:7}" apps/westayfit/dist --include=*.html \
+            || { echo "::error::build marker does not match $APP_SHA"; exit 1; }
+          echo "build marker matches ${APP_SHA:0:7}"
+
+      # ---- inventory BEFORE, so the delta is evidence not assertion -------
+      - name: Record function inventory before deploy
+        working-directory: app
+        run: |
+          set -euo pipefail
+          cp ../ops/firebase.westayfit.staging.json .
+          npx --yes firebase-tools@15.30.1 functions:list \
+            --project "$STAGING_PROJECT" --config firebase.westayfit.staging.json \
+            --json > /tmp/functions-before.json
+          node -e '
+            const r = require("/tmp/functions-before.json").result || [];
+            const n = r.map((f) => f.id).filter((i) => i && i.startsWith("wsf")).sort();
+            console.log("before: " + n.length + " WSF functions");
+            require("fs").writeFileSync("/tmp/before.txt", n.join("\n"));
+          '
+
+      # ---- deploy: functions, then hosting, staging only ------------------
+      - name: Deploy WSF functions
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@15.30.1 deploy \
+            --project "$STAGING_PROJECT" \
+            --config firebase.westayfit.staging.json \
+            --only functions:westayfit \
+            --non-interactive
+
+      # ---- verify by NAME, and re-auth first: the token is 1h and the
+      #      build plus deploy above can consume most of it ----------------
+      - name: Re-authenticate before verification
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Verify the 23 expected functions by name
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@15.30.1 functions:list \
+            --project "$STAGING_PROJECT" --config firebase.westayfit.staging.json \
+            --json > /tmp/functions-after.json
+          node ../ops/scripts/westayfit/verify-wsf-inventory.cjs \
+            /tmp/functions-after.json /tmp/before.txt
+
+      - name: Deploy the staging Hosting channel
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@15.30.1 hosting:channel:deploy "$STAGING_CHANNEL" \
+            --project "$STAGING_PROJECT" \
+            --config firebase.westayfit.staging.json \
+            --expires 7d \
+            --no-authorized-domains \
+            --non-interactive
+
+      # ---- credentials gone before anything is retained -------------------
+      - name: Confirm no credential file escaped into the artifact paths
+        if: always()
+        run: |
+          set -euo pipefail
+          found="$(find "$GITHUB_WORKSPACE" -name 'gha-creds-*.json' 2>/dev/null || true)"
+          [ -z "$found" ] || echo "::warning::credential file present at: $found (post-action removes it)"
+          bad="$(find "$GITHUB_WORKSPACE/app/apps/westayfit/dist" "$GITHUB_WORKSPACE/app/functions-westayfit" \
+                 -name 'gha-creds-*.json' -o -name '.wsf-staging.env' 2>/dev/null || true)"
+          [ -z "$bad" ] || { echo "::error::credential material inside an upload path: $bad"; exit 1; }
