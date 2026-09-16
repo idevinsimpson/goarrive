@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'crypto';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
-import { defineSecret } from 'firebase-functions/params';
+import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 initializeApp();
@@ -1177,9 +1177,12 @@ export const wsfDesignateChampion = onCall<MembershipActionRequest>(
 // under any pulse input (§5.7), sample groups excluded from real totals
 // (§5.8), no leaderboard, no body data.
 //
-// `minInstances: 1` on wsfCheckIn is intentional. A cold start between
-// someone's tap and their number moving is the one latency that matters at
-// the event.
+// A warm instance on wsfCheckIn is intentional IN PRODUCTION. A cold start
+// between someone's tap and their number moving is the one latency that
+// matters at the event. It is resolved per project at deploy time — one warm
+// instance on `goarrive`, none anywhere else — because a warm instance bills
+// continuously and a staging project has no event to be fast for. See
+// checkInMinInstances at the declaration.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CHALLENGE_SHARD_COUNT = 10;
@@ -1461,10 +1464,29 @@ function normalizeCheckInCode(v: unknown): string | null {
   return trimmed;
 }
 
+/**
+ * How many instances wsfCheckIn keeps warm, decided per PROJECT at deploy time.
+ *
+ * Production keeps one warm, for the reason in the E3 header: a cold start on
+ * this callable is the one latency anybody sees at the event. Staging keeps
+ * none, because a warm instance bills continuously and a staging project has
+ * no event to be fast for.
+ *
+ * `projectID` is firebase-functions' OWN built-in parameter — Manus supplies
+ * no extra environment variable for this. It resolves from whatever `--project`
+ * the deploy targets, and `.thenElse` compiles to a CEL expression that
+ * Firebase evaluates while it is DISCOVERING and preparing the function, so
+ * the right value is baked into the deployment rather than decided later at
+ * request time.
+ *
+ * Scoped deliberately to this one function. There is no global scaling
+ * override here, and no other WSF function sets a positive minimum.
+ */
+const PRODUCTION_PROJECT_ID = 'goarrive';
+const checkInMinInstances = projectID.equals(PRODUCTION_PROJECT_ID).thenElse(1, 0);
+
 export const wsfCheckIn = onCall<CheckInRequest>(
-  // minInstances:1 — see the E3 header. A cold start on this callable is the
-  // one visible latency at the event. Everything else can pay a cold start.
-  { region: 'us-central1', minInstances: 1 },
+  { region: 'us-central1', minInstances: checkInMinInstances },
   async (request): Promise<CheckInResponse> => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
