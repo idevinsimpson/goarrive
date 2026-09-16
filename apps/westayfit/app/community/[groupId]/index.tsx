@@ -1,4 +1,4 @@
-import { Link, useLocalSearchParams } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
@@ -114,9 +114,13 @@ export default function CommunityPage() {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
+  const router = useRouter();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
+  const [leaveState, setLeaveState] = useState<
+    { kind: 'idle' } | { kind: 'confirming' } | { kind: 'leaving' } | { kind: 'failed'; message: string }
+  >({ kind: 'idle' });
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -327,6 +331,37 @@ export default function CommunityPage() {
       setResetting(false);
     }
   }, [groupId, resetting]);
+
+  /**
+   * D2: leave a community of your own accord. This is the ONLY one of the
+   * membership actions that can be finished inside this package's scope,
+   * because it is the only one that acts on the caller themselves —
+   * wsfLeaveCommunity takes no target and reads the uid off the token.
+   * Removing, reinstating or designating someone else all need that person's
+   * account id, and nothing this screen loads yields another member's id.
+   *
+   * The sole-Champion refusal is deliberately surfaced verbatim rather than
+   * hidden by disabling the control: the server's message names what has to
+   * happen first, and a greyed-out button would not.
+   */
+  const onLeave = useCallback(async () => {
+    if (!groupId) return;
+    setLeaveState({ kind: 'leaving' });
+    try {
+      const fn = httpsCallable<{ groupId: string }, unknown>(
+        getFirebaseFunctions(),
+        'wsfLeaveCommunity'
+      );
+      await fn({ groupId });
+      router.replace('/');
+    } catch (e) {
+      const message =
+        typeof e === 'object' && e && 'message' in e
+          ? String((e as { message?: unknown }).message)
+          : 'Could not leave this community. Try again.';
+      setLeaveState({ kind: 'failed', message });
+    }
+  }, [groupId, router]);
 
   const onShareInvite = useCallback(async () => {
     if (!inviteUrl) return;
@@ -610,6 +645,68 @@ export default function CommunityPage() {
               </Text>
             </View>
           )}
+        </View>
+
+        <View style={styles.section} testID="wsf-community-membership">
+          <Text style={styles.sectionHeading}>Your membership</Text>
+          {leaveState.kind === 'idle' ? (
+            <Pressable
+              onPress={() => setLeaveState({ kind: 'confirming' })}
+              style={styles.copyButton}
+              testID="wsf-community-leave"
+              accessibilityRole="button"
+            >
+              <Text style={styles.copyButtonText}>Leave this community</Text>
+            </Pressable>
+          ) : null}
+          {leaveState.kind === 'confirming' ? (
+            <View testID="wsf-community-leave-confirm">
+              <Text style={styles.body}>
+                You will stop seeing this community's goals and can no longer
+                contribute to them. What you have already contributed stays
+                counted toward the community's totals. You can rejoin with a
+                current invite link.
+              </Text>
+              <View style={styles.inviteActions}>
+                <Pressable
+                  onPress={onLeave}
+                  style={styles.copyButton}
+                  testID="wsf-community-leave-confirm-yes"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.copyButtonText}>Yes, leave</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setLeaveState({ kind: 'idle' })}
+                  style={styles.shareButton}
+                  testID="wsf-community-leave-cancel"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.shareButtonText}>Stay</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+          {leaveState.kind === 'leaving' ? (
+            <Text style={styles.body} testID="wsf-community-leave-pending">
+              Leaving…
+            </Text>
+          ) : null}
+          {leaveState.kind === 'failed' ? (
+            <View>
+              <Text style={styles.error} testID="wsf-community-leave-error">
+                {leaveState.message}
+              </Text>
+              <Pressable
+                onPress={() => setLeaveState({ kind: 'idle' })}
+                style={styles.shareButton}
+                testID="wsf-community-leave-dismiss"
+                accessibilityRole="button"
+              >
+                <Text style={styles.shareButtonText}>OK</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <SecondaryLink href="/" label="Back to home" />

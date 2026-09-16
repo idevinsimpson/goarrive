@@ -326,13 +326,32 @@ test.describe('D — admission controls in the interface', () => {
       await pageMember.getByTestId('wsf-join-submit').click();
       await pageMember.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
 
-      // ---- they leave of their own accord (callable — no interface) ----
-      await callAs(member, 'wsfLeaveCommunity', { groupId });
+      // ---- they leave of their own accord, THROUGH THE INTERFACE ----
+      // This is a real click on a real control, not a callable invocation.
+      // Leaving is the one membership action that can be finished in this
+      // package, because it acts on the caller themselves and needs no way to
+      // identify anybody else.
+      await expect(pageMember.getByTestId('wsf-community-leave')).toBeVisible({ timeout: 20_000 });
+      await pageMember.getByTestId('wsf-community-leave').click();
+      // It asks first, and the confirmation states what leaving does and does
+      // not do — in particular that past contributions stay counted.
+      await expect(pageMember.getByTestId('wsf-community-leave-confirm')).toContainText(
+        'stays counted'
+      );
+      // Backing out really backs out.
+      await pageMember.getByTestId('wsf-community-leave-cancel').click();
+      await expect(pageMember.getByTestId('wsf-community-leave-confirm')).toHaveCount(0);
+      expect(await readMembershipStatus(groupId, member.uid)).toBe('active');
+
+      await pageMember.getByTestId('wsf-community-leave').click();
+      await pageMember.getByTestId('wsf-community-leave-confirm-yes').click();
+      await pageMember.waitForURL(/\/$/, { timeout: 20_000 });
       expect(await readMembershipStatus(groupId, member.uid)).toBe('departed');
 
-      // The community screen closes for them too — departure is not removal,
+      // Leaving returns them to home, so navigate back deliberately: the
+      // community screen must close for them too. Departure is not removal,
       // but a departed person is not a current member either.
-      await pageMember.reload();
+      await pageMember.goto(`/community/${groupId}`);
       await expect(pageMember.getByTestId('wsf-community-not-member')).toBeVisible({
         timeout: 20_000,
       });
@@ -348,6 +367,61 @@ test.describe('D — admission controls in the interface', () => {
       expect(await readMembershipStatus(groupId, member.uid)).toBe('active');
     } finally {
       await ctxMember.close();
+    }
+  });
+
+  test('D7 through the interface: the only Champion is refused when they try to leave, and told why', async ({
+    browser,
+  }) => {
+    // The refusal is surfaced verbatim rather than by disabling the button:
+    // a greyed-out control cannot say what has to happen first.
+    const champion = await seedAccount('solochamp');
+    const { groupId, joinCode } = await seedCommunity({
+      championUid: champion.uid,
+      joinPolicy: 'inviteOnly',
+    });
+    // A second, ordinary member so the community is not a single-person case —
+    // the guard is about CHAMPIONS, not about members.
+    const member = await seedAccount('solomember');
+
+    const ctxM = await browser.newContext();
+    const pageM = await ctxM.newPage();
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    try {
+      await signInVia(pageM, member);
+      await pageM.goto(`/join/${joinCode}`);
+      await pageM.getByTestId('wsf-join-submit').click();
+      await pageM.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
+
+      await signInVia(page, champion);
+      await page.goto(`/community/${groupId}`);
+      await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
+      await page.getByTestId('wsf-community-leave').click();
+      await page.getByTestId('wsf-community-leave-confirm-yes').click();
+
+      // Refused, and the message names the remedy.
+      await expect(page.getByTestId('wsf-community-leave-error')).toContainText(
+        'only Champion',
+        { timeout: 20_000 }
+      );
+      await expect(page.getByTestId('wsf-community-leave-error')).toContainText(
+        'Designate another Champion'
+      );
+      // Still a Champion, still in the community.
+      expect(await readMembershipStatus(groupId, champion.uid)).toBe('active');
+
+      // NOT DELIVERED, pinned so it cannot be mistaken for delivered: there is
+      // no control anywhere to designate that other Champion, so the remedy
+      // the message names cannot be carried out in the product. Finishing it
+      // needs a way to identify another member's account, which this package
+      // does not have and did not invent.
+      await expect(page.getByTestId('wsf-community-designate-champion')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-remove-member')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-reinstate-member')).toHaveCount(0);
+    } finally {
+      await ctx.close();
+      await ctxM.close();
     }
   });
 

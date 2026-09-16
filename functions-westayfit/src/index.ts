@@ -824,16 +824,37 @@ async function requireChampion(
   return { groupRef, group: groupSnap.data() as ChampionGroup };
 }
 
-/** Count active champions in a community. Used only by the last-Champion guard. */
-async function countActiveChampions(groupId: string): Promise<number> {
-  const snap = await getFirestore()
-    .collection('wsfMemberships')
-    .where('groupId', '==', groupId)
-    .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
-    .where('role', '==', 'foundingChampion')
-    .count()
-    .get();
-  return snap.data().count;
+/**
+ * Count active champions in a community, INSIDE the caller's transaction.
+ *
+ * DEFECT THIS FIXES, found in review of Package D. The first version ran an
+ * aggregate .count() outside the transaction and captured the result in a
+ * closure. That put the champion documents in no read set at all, and
+ * wsfLeaveCommunity's transaction touches only the caller's OWN membership
+ * doc — so two Champions leaving at the same time wrote to disjoint
+ * documents, never conflicted, both observed a count of 2, both passed the
+ * `<= 1` guard, and the community was left with zero Champions. Exactly the
+ * outcome D7 exists to prevent. A comment above the old call even claimed the
+ * guard was "re-checked inside" the transaction; it was not.
+ *
+ * Reading the champion docs through tx.get puts every one of them in the read
+ * set, so concurrent departures now overlap and Firestore aborts and retries
+ * the loser, which then sees the true remaining count and is refused. This is
+ * why it counts documents rather than using the cheaper .count() aggregate:
+ * the point is the read set, not the number.
+ */
+async function countActiveChampionsTx(
+  tx: FirebaseFirestore.Transaction,
+  groupId: string
+): Promise<number> {
+  const snap = await tx.get(
+    getFirestore()
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupId)
+      .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+      .where('role', '==', 'foundingChampion')
+  );
+  return snap.size;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -938,12 +959,12 @@ export const wsfRemoveMember = onCall<MembershipActionRequest>(
       );
     }
 
-    // D7 guard, read before the transaction and re-checked inside it.
-    const championsBefore = await countActiveChampions(groupId);
-
     const db = getFirestore();
     await db.runTransaction(async (tx) => {
       await requireChampion(tx, groupId, uid);
+      // D7 guard, counted inside the transaction so the champion documents
+      // are in this transaction's read set (see countActiveChampionsTx).
+      const championsBefore = await countActiveChampionsTx(tx, groupId);
       const targetRef = db.doc(`wsfMemberships/${groupId}_${targetUid}`);
       const targetSnap = await tx.get(targetRef);
       if (!targetSnap.exists) notFound();
@@ -984,10 +1005,13 @@ export const wsfLeaveCommunity = onCall<LeaveRequest>(
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
 
-    const championsBefore = await countActiveChampions(groupId);
-
     const db = getFirestore();
     await db.runTransaction(async (tx) => {
+      // Counted inside the transaction. This is the case the old out-of-band
+      // count got wrong: two Champions leaving at once touch only their own
+      // membership docs, so without the champion docs in the read set nothing
+      // made them conflict.
+      const championsBefore = await countActiveChampionsTx(tx, groupId);
       const ref = db.doc(`wsfMemberships/${groupId}_${uid}`);
       const snap = await tx.get(ref);
       if (!snap.exists) notFound();

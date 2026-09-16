@@ -86,6 +86,16 @@ async function statusOf(groupId: string, uid: string): Promise<string | undefine
   return (snap.data() as { membershipStatus?: string } | undefined)?.membershipStatus;
 }
 
+async function championCount(groupId: string): Promise<number> {
+  const snap = await getFirestore()
+    .collection('wsfMemberships')
+    .where('groupId', '==', groupId)
+    .where('membershipStatus', '==', 'active')
+    .where('role', '==', 'foundingChampion')
+    .get();
+  return snap.size;
+}
+
 async function seedGoal(groupId: string, uid: string): Promise<string> {
   const now = Date.now();
   const ref = getFirestore().collection('wsfGoals').doc();
@@ -405,6 +415,167 @@ describe('D2 + D3 — removal, departure, and what a link does for each state', 
     expect(recorded).toBe(contribution.status === 'fulfilled' ? 15 : 0);
     const totals = await getFirestore().doc(`wsfGoalMemberTotals/${goalId}_${member}`).get();
     expect(totals.exists ? (totals.data() as { total: number }).total : 0).toBe(recorded);
+  });
+});
+
+describe('concurrency — the orderings the controls have to survive', () => {
+  // Every test here overlaps two operations with Promise.allSettled and then
+  // asserts the AUTHORIZED END STATE. None of them assert a winner: the point
+  // of a race test is that either ordering leaves a state the rules permit.
+
+  it('RACE 1 — a join racing a link reset lands on exactly one coherent answer', async () => {
+    const champion = 'r1-champ';
+    const joiner = 'r1-joiner';
+    const { groupId, joinCode } = await seedGroup('inviteOnly', champion);
+    await seedProfile(joiner);
+
+    const [join, reset] = await Promise.allSettled([
+      call(wsfJoinCommunity, joiner, { joinCode }),
+      call(wsfResetJoinCode, champion, { groupId }),
+    ]);
+
+    // The reset is a Champion action on the group and must always succeed.
+    expect(reset.status).toBe('fulfilled');
+    const newCode = (reset as PromiseFulfilledResult<{ joinCode: string }>).value.joinCode;
+    expect(newCode).not.toBe(joinCode);
+
+    if (join.status === 'fulfilled') {
+      // The join got in before the code was retired: they are a member, and a
+      // retired link does not evict them.
+      expect(await statusOf(groupId, joiner)).toBe('active');
+    } else {
+      // The join lost: the old code was already unknown. It must NOT have
+      // half-created a membership.
+      expect(await statusOf(groupId, joiner)).toBeUndefined();
+      // And the new code still admits them — a lost race is not a ban.
+      await call(wsfJoinCommunity, joiner, { joinCode: newCode });
+      expect(await statusOf(groupId, joiner)).toBe('active');
+    }
+
+    // Either way the old code is now dead for everyone.
+    await expectRefused(call(wsfPreviewCommunity, null, { joinCode }), 'not-found');
+  });
+
+  it('RACE 2 — a join racing a removal never leaves the removed person active', async () => {
+    const champion = 'r2-champ';
+    const member = 'r2-member';
+    const { groupId, joinCode } = await seedGroup('inviteOnly', champion);
+    await seedMember(groupId, member);
+
+    const [rejoin, remove] = await Promise.allSettled([
+      call(wsfJoinCommunity, member, { joinCode }),
+      call(wsfRemoveMember, champion, { groupId, targetUid: member }),
+    ]);
+
+    // Removal is the Champion's authority over their community and wins.
+    expect(remove.status).toBe('fulfilled');
+    const status = await statusOf(groupId, member);
+    expect(status).toBe('removed');
+
+    // If the join resolved first it can only have been the idempotent
+    // already-a-member answer, never a NEW membership that outlives removal.
+    if (rejoin.status === 'fulfilled') {
+      expect((rejoin.value as { alreadyMember: boolean }).alreadyMember).toBe(true);
+    }
+
+    // And the removal holds: retrying the link now gets the unknown-code answer.
+    await expectRefused(call(wsfJoinCommunity, member, { joinCode }), 'not-found');
+  });
+
+  it('RACE 4a — two Champions leaving at once cannot empty the community', async () => {
+    // THIS IS THE TEST THAT FOUND A REAL DEFECT. The first implementation
+    // counted champions with an aggregate OUTSIDE the transaction, and each
+    // departure's transaction touched only the caller's own membership doc.
+    // Disjoint writes never conflict, so both callers observed 2 champions,
+    // both passed the `<= 1` guard, and the community was left with none.
+    const a = 'r4-champ-a';
+    const b = 'r4-champ-b';
+    const { groupId } = await seedGroup('inviteOnly', a);
+    await getFirestore().doc(`wsfMemberships/${groupId}_${b}`).set({
+      groupId,
+      userId: b,
+      role: 'foundingChampion',
+      membershipStatus: 'active',
+    });
+    await seedProfile(b);
+    expect(await championCount(groupId)).toBe(2);
+
+    const results = await Promise.allSettled([
+      call(wsfLeaveCommunity, a, { groupId }),
+      call(wsfLeaveCommunity, b, { groupId }),
+    ]);
+
+    // Exactly one may leave. The other must be refused, whichever it is.
+    const left = results.filter((r) => r.status === 'fulfilled');
+    expect(left).toHaveLength(1);
+    // THE INVARIANT: a community is never left with no Champion.
+    expect(await championCount(groupId)).toBe(1);
+  });
+
+  it('RACE 4b — two Champions removing each other at once cannot empty the community', async () => {
+    const a = 'r4b-champ-a';
+    const b = 'r4b-champ-b';
+    const { groupId } = await seedGroup('inviteOnly', a);
+    await getFirestore().doc(`wsfMemberships/${groupId}_${b}`).set({
+      groupId,
+      userId: b,
+      role: 'foundingChampion',
+      membershipStatus: 'active',
+    });
+    await seedProfile(b);
+
+    await Promise.allSettled([
+      call(wsfRemoveMember, a, { groupId, targetUid: b }),
+      call(wsfRemoveMember, b, { groupId, targetUid: a }),
+    ]);
+
+    expect(await championCount(groupId)).toBe(1);
+  });
+
+  it('RACE 5 — a removed member replaying a confirmed attempt does not count again', async () => {
+    const champion = 'r5-champ';
+    const member = 'r5-member';
+    const { groupId } = await seedGroup('inviteOnly', champion);
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, champion);
+
+    // Confirmed WHILE ACTIVE. This contribution was validly accepted and
+    // removal must not erase it.
+    await call(wsfContribute, member, { goalId, attemptId: 'r5-attempt-0001', count: 30 });
+    await call(wsfRemoveMember, champion, { groupId, targetUid: member });
+
+    // The champion adds more AFTER the removal, so the current shared total
+    // differs from what the removed member last legitimately saw.
+    await call(wsfContribute, champion, { goalId, attemptId: 'r5-champ-0001', count: 45 });
+
+    const replay = (await call(wsfContribute, member, {
+      goalId,
+      attemptId: 'r5-attempt-0001',
+      count: 30,
+    })) as Record<string, unknown>;
+
+    // PROPERTY A — it does not count again.
+    expect(replay.alreadyRecorded).toBe(true);
+    expect(replay.addedCount).toBe(30);
+    const contribs = await getFirestore()
+      .collection('wsfContributions')
+      .where('goalId', '==', goalId)
+      .get();
+    expect(contribs.size).toBe(2); // the member's one, plus the champion's one
+    const totals = await getFirestore().doc(`wsfGoalMemberTotals/${goalId}_${member}`).get();
+    expect((totals.data() as { total: number }).total).toBe(30);
+
+    // PROPERTY B — what the RESPONSE discloses. This is a separate question
+    // from double-counting and is recorded here as the CURRENT behaviour, not
+    // as an endorsement of it: the replay branch returns before the membership
+    // check, and sharedTotal is re-read after the transaction, so a removed
+    // person holding one old attemptId learns the community's progress
+    // INCLUDING the 45 contributed after they were removed.
+    //
+    // If this is later closed, this assertion is the one that must change, and
+    // changing it is the signal that the disclosure was closed deliberately.
+    expect(replay.sharedTotal).toBe(75);
+    expect(replay.ownCredit).toBe(30);
   });
 });
 
