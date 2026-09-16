@@ -467,16 +467,28 @@ test('CASE 3 — a display response held from before a revocation cannot bring t
   const displayCtx: BrowserContext = await browser.newContext();
   const display = await displayCtx.newPage();
 
-  // `held` is the successful response we capture BEFORE the revocation and
-  // release AFTER the refusal has already landed. Everything else passes
-  // straight through.
-  let held: Route | null = null;
+  // `held` is a real SERVER RESPONSE, fetched while the goal is still
+  // authorized and withheld from the page until after the refusal has landed.
+  //
+  // Holding the ROUTE and calling continue() later would not reproduce this at
+  // all: continue() forwards the request at the moment it is called, so the
+  // server would answer it AFTER the revocation and return the refusal. The
+  // response has to be captured up front, which is what makes it genuinely
+  // older than the refusal the screen has already accepted.
+  let held: { route: Route; status: number; headers: Record<string, string>; body: string } | null =
+    null;
   let holdNext = false;
   await display.route('**/wsfGoalPulse', async (route: Route) => {
     if (holdNext && !held) {
       holdNext = false;
-      held = route;
-      return; // never fulfilled, never aborted — just held
+      const response = await route.fetch();
+      held = {
+        route,
+        status: response.status(),
+        headers: response.headers(),
+        body: await response.text(),
+      };
+      return; // fetched, but deliberately not delivered to the page
     }
     return route.continue();
   });
@@ -491,6 +503,10 @@ test('CASE 3 — a display response held from before a revocation cannot bring t
   // response this route captures is a SUCCESSFUL one carrying 137.
   holdNext = true;
   await expect.poll(() => held !== null, { timeout: 20_000 }).toBe(true);
+  // Prove the held response really is the protected total, so that releasing
+  // it below is a genuine attempt to repaint 137 and not a no-op.
+  expect(held!.status).toBe(200);
+  expect(held!.body).toContain('137');
 
   // ---- revoke while that older response is still in flight ----------------
   await toggle.click();
@@ -507,7 +523,11 @@ test('CASE 3 — a display response held from before a revocation cannot bring t
   // It carries 137 and it is perfectly valid — it was authorized when it was
   // issued. It is simply older than the refusal, and the screen must not take
   // it.
-  await held!.continue();
+  await held!.route.fulfill({
+    status: held!.status,
+    headers: held!.headers,
+    body: held!.body,
+  });
 
   // Give the released response, and several more poll intervals, every chance
   // to repaint the screen.
