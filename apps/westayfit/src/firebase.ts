@@ -85,25 +85,19 @@ const productionConfig: WsfFirebaseConfig = {
   appId: '1:413741232388:web:30f3490b0a3b220dd42051',
 };
 
-// Staging, when and only when this build declares it AND supplies a complete
-// config for a project that is not production. resolveStagingConfig throws
-// rather than falling back, so a half-configured "staging" build fails loudly
-// at load instead of quietly becoming a second front door to live data.
+// Staging, when and only when this build declares it AND supplies a complete,
+// internally coherent config for a project that is not production.
 //
-// Note the order: the emulator path above is untouched and still wins for a
-// loopback run. Staging is a third destination, not a loosening of that gate.
+// resolveStagingConfig returns null ONLY for an unambiguous production build —
+// no selector and no staging values. Every ambiguous shape throws: a
+// misspelled selector, staging values with the selector missing, a partial
+// config, production's own identifiers, or staging together with the emulator
+// flag. The emulator/staging conflict is checked inside the resolver rather
+// than here, so it is covered by the resolver's own tests.
+//
+// The emulator path above is untouched and still wins for a loopback run.
+// Staging is a third destination, not a loosening of that gate.
 const stagingConfig = resolveStagingConfig(readStagingEnv());
-
-// Mutually exclusive by construction. A build that declares staging AND turns
-// on the emulator flag has two different answers for "which backend", and
-// guessing between them is exactly the class of mistake this file exists to
-// prevent.
-if (stagingConfig && emulated) {
-  throw new Error(
-    'EXPO_PUBLIC_WSF_ENV=staging and EXPO_PUBLIC_WSF_USE_EMULATORS are both set. ' +
-      'A build targets the staging backend or the local emulator suite, never both.'
-  );
-}
 
 const firebaseConfig: WsfFirebaseConfig = stagingConfig ?? productionConfig;
 
