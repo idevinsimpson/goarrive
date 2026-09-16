@@ -454,7 +454,7 @@ describe('concurrency — the orderings the controls have to survive', () => {
 
     // Either way the old code is now dead for everyone.
     await expectRefused(call(wsfPreviewCommunity, null, { joinCode }), 'not-found');
-  });
+  }, 30_000);
 
   it('RACE 2 — a join racing a removal never leaves the removed person active', async () => {
     const champion = 'r2-champ';
@@ -480,7 +480,7 @@ describe('concurrency — the orderings the controls have to survive', () => {
 
     // And the removal holds: retrying the link now gets the unknown-code answer.
     await expectRefused(call(wsfJoinCommunity, member, { joinCode }), 'not-found');
-  });
+  }, 30_000);
 
   it('RACE 4a — two Champions leaving at once cannot empty the community', async () => {
     // THIS IS THE TEST THAT FOUND A REAL DEFECT. The first implementation
@@ -510,7 +510,7 @@ describe('concurrency — the orderings the controls have to survive', () => {
     expect(left).toHaveLength(1);
     // THE INVARIANT: a community is never left with no Champion.
     expect(await championCount(groupId)).toBe(1);
-  });
+  }, 30_000);
 
   it('RACE 4b — two Champions removing each other at once cannot empty the community', async () => {
     const a = 'r4b-champ-a';
@@ -530,7 +530,43 @@ describe('concurrency — the orderings the controls have to survive', () => {
     ]);
 
     expect(await championCount(groupId)).toBe(1);
-  });
+  }, 30_000);
+
+  it('RACE 4c — one Champion leaving while removing the other cannot empty the community', async () => {
+    // Adversarial review of this package proposed that A-leaves ‖ A-removes-B
+    // is a second path to zero Champions, because the two operations write to
+    // different documents.
+    //
+    // MEASURED, NOT ASSUMED: it is not. Running this test with the original
+    // out-of-transaction count restored at BOTH call sites, RACE 4a fails and
+    // this one still passes. The pairing is self-correcting for a reason
+    // independent of the count — whichever order lands, requireChampion puts
+    // the caller's own membership document in the removal's read set, so once
+    // A's departure commits the removal sees A as no longer active and is
+    // refused outright.
+    //
+    // So this test does NOT discriminate the defect, and is not offered as
+    // evidence for the fix. It is kept because the invariant is worth pinning
+    // and because a future change to requireChampion could make this pairing
+    // live. RACE 4a is the test that catches the defect.
+    const a = 'r4c-champ-a';
+    const b = 'r4c-champ-b';
+    const { groupId } = await seedGroup('inviteOnly', a);
+    await getFirestore().doc(`wsfMemberships/${groupId}_${b}`).set({
+      groupId,
+      userId: b,
+      role: 'foundingChampion',
+      membershipStatus: 'active',
+    });
+    await seedProfile(b);
+
+    await Promise.allSettled([
+      call(wsfLeaveCommunity, a, { groupId }),
+      call(wsfRemoveMember, a, { groupId, targetUid: b }),
+    ]);
+
+    expect(await championCount(groupId)).toBe(1);
+  }, 30_000);
 
   it('RACE 5 — a removed member replaying a confirmed attempt does not count again', async () => {
     const champion = 'r5-champ';
@@ -565,15 +601,22 @@ describe('concurrency — the orderings the controls have to survive', () => {
     const totals = await getFirestore().doc(`wsfGoalMemberTotals/${goalId}_${member}`).get();
     expect((totals.data() as { total: number }).total).toBe(30);
 
-    // PROPERTY B — what the RESPONSE discloses. This is a separate question
-    // from double-counting and is recorded here as the CURRENT behaviour, not
-    // as an endorsement of it: the replay branch returns before the membership
-    // check, and sharedTotal is re-read after the transaction, so a removed
-    // person holding one old attemptId learns the community's progress
-    // INCLUDING the 45 contributed after they were removed.
+    // PROPERTY B — what the RESPONSE discloses. A separate question from
+    // double-counting, recorded as current behaviour rather than endorsed:
+    // the replay branch returns BEFORE the membership check, and sharedTotal
+    // is re-read after the transaction, so a removed person holding one old
+    // attemptId learns the community's progress INCLUDING the 45 contributed
+    // after they were removed, plus the goal's current target, unit and status.
     //
-    // If this is later closed, this assertion is the one that must change, and
-    // changing it is the signal that the disclosure was closed deliberately.
+    // SEVERITY, stated precisely so this is not mistaken for an independent
+    // leak: every one of those four fields is ALREADY served to anyone at all
+    // by wsfGoalPulse, which is invoker:'public', needs no auth, no membership
+    // and no attemptId, and returns a superset. So this replay discloses
+    // nothing that is protected today — which is a statement about how little
+    // is protected, not about this branch being harmless. Closing this branch
+    // alone would close nothing while the Package E gap stands; closing E
+    // alone would leave this branch as a second way in. Both are needed, and
+    // this assertion is what makes a change to either one visible.
     expect(replay.sharedTotal).toBe(75);
     expect(replay.ownCredit).toBe(30);
   });
