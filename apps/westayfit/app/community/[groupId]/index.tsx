@@ -128,6 +128,13 @@ export default function CommunityPage() {
     | { kind: 'saving'; goalId: string; intended: boolean }
     | { kind: 'unconfirmed'; goalId: string; intended: boolean }
     | { kind: 'failed'; goalId: string; intended: boolean }
+    // `confirmed` exists for one case the card cannot cover itself. Revoking
+    // on a CLOSED goal removes the only thing keeping it in the list, so the
+    // card — and with it every word about what just happened — disappears at
+    // the moment of success. The Champion would see the goal vanish and have
+    // no way to tell a completed revocation from a crash. The title is carried
+    // because the card that held it is gone by the time this renders.
+    | { kind: 'confirmed'; goalId: string; intended: boolean; title: string }
   >({ kind: 'idle' });
 
   // A response that lands after the screen has moved on must not write into
@@ -425,7 +432,7 @@ export default function CommunityPage() {
   );
 
   const onSetDisplayAuth = useCallback(
-    async (targetGoalId: string, intended: boolean) => {
+    async (targetGoalId: string, intended: boolean, title: string) => {
       // Scoped to this account, this community and this goal. `requestGroupId`
       // and `requestUid` are captured now and compared when the response
       // lands, so a slow response cannot write into a different community's
@@ -443,7 +450,7 @@ export default function CommunityPage() {
         >(getFirebaseFunctions(), 'wsfSetGoalDisplayAuthorization');
         await fn({ goalId: targetGoalId, authorized: intended });
         if (!stillTheSameContext()) return;
-        setDisplayAuth({ kind: 'idle' });
+        setDisplayAuth({ kind: 'confirmed', goalId: targetGoalId, intended, title });
         setGoalsReloadToken((n) => n + 1);
       } catch {
         if (!stillTheSameContext()) return;
@@ -464,7 +471,7 @@ export default function CommunityPage() {
         setGoalsReloadToken((n) => n + 1);
         setDisplayAuth(
           stored === intended
-            ? { kind: 'idle' }
+            ? { kind: 'confirmed', goalId: targetGoalId, intended, title }
             : { kind: 'failed', goalId: targetGoalId, intended }
         );
       }
@@ -759,7 +766,8 @@ export default function CommunityPage() {
                         onPress={() =>
                           onSetDisplayAuth(
                             goal.goalId,
-                            unsettled ? unsettled.intended : !goal.aggregateDisplayAuthorized
+                            unsettled ? unsettled.intended : !goal.aggregateDisplayAuthorized,
+                            goal.title
                           )
                         }
                         disabled={saving}
@@ -810,6 +818,24 @@ export default function CommunityPage() {
               </Text>
             </View>
           )}
+          {/*
+            The confirmation for a change whose card is no longer here to show
+            it. Revoking on a closed goal takes the goal out of the list, so
+            without this the Champion clicks the control and watches the goal
+            disappear with nothing said about why.
+          */}
+          {displayAuth.kind === 'confirmed' &&
+          goalsState.kind === 'loaded' &&
+          !goalsState.goals.some((g) => g.goalId === displayAuth.goalId) ? (
+            <Text
+              style={styles.body}
+              testID="wsf-goal-display-auth-confirmed-absent"
+            >
+              {displayAuth.intended
+                ? `Public display is now authorized for \u201C${displayAuth.title}\u201D.`
+                : `Public display has been removed for \u201C${displayAuth.title}\u201D. That goal has closed, so it is no longer listed here.`}
+            </Text>
+          ) : null}
           {isChampion && goalsState.kind !== 'failed' ? (
             <Link
               href={`/goals/new?groupId=${encodeURIComponent(groupId)}` as never}
