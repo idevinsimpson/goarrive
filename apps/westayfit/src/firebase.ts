@@ -3,6 +3,8 @@ import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase/functions';
 
+import { readStagingEnv, resolveStagingConfig, type WsfFirebaseConfig } from './stagingEnv';
+
 // Real registration for the "We Stay Fit" Web App in the shared `goarrive`
 // Firebase project (console receipt posted to #dev-westayfit on 2026-08-26).
 // These are publishable client identifiers, not secrets — Firebase web config
@@ -74,7 +76,7 @@ const projectId = selectProjectId({
   hostname: typeof window !== 'undefined' ? window.location.hostname : undefined,
 });
 
-const firebaseConfig = {
+const productionConfig: WsfFirebaseConfig = {
   apiKey: 'AIzaSyBgLIP0uvGJ98fde3aZthZjILTg6unkkX0',
   authDomain: 'goarrive.firebaseapp.com',
   projectId,
@@ -82,6 +84,31 @@ const firebaseConfig = {
   messagingSenderId: '413741232388',
   appId: '1:413741232388:web:30f3490b0a3b220dd42051',
 };
+
+// Staging, when and only when this build declares it AND supplies a complete
+// config for a project that is not production. resolveStagingConfig throws
+// rather than falling back, so a half-configured "staging" build fails loudly
+// at load instead of quietly becoming a second front door to live data.
+//
+// Note the order: the emulator path above is untouched and still wins for a
+// loopback run. Staging is a third destination, not a loosening of that gate.
+const stagingConfig = resolveStagingConfig(readStagingEnv());
+
+// Mutually exclusive by construction. A build that declares staging AND turns
+// on the emulator flag has two different answers for "which backend", and
+// guessing between them is exactly the class of mistake this file exists to
+// prevent.
+if (stagingConfig && emulated) {
+  throw new Error(
+    'EXPO_PUBLIC_WSF_ENV=staging and EXPO_PUBLIC_WSF_USE_EMULATORS are both set. ' +
+      'A build targets the staging backend or the local emulator suite, never both.'
+  );
+}
+
+const firebaseConfig: WsfFirebaseConfig = stagingConfig ?? productionConfig;
+
+/** True only in a build pointed at a verified separate staging backend. */
+export const wsfIsStaging = stagingConfig !== null;
 
 // Emulator ports, matching firebase.westayfit.emulators.json.
 const EMULATOR_HOST = '127.0.0.1';
