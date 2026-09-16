@@ -10,6 +10,20 @@ import { FormShell, SecondaryLink } from '../../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../src/firebase';
 import {
+  beginContext,
+  confirmedButAbsent,
+  displayAuthValueToSend,
+  dismissOutcome,
+  initialDisplayAuthState,
+  operationIsCurrent,
+  outcomeFor,
+  settleOperation,
+  startOperation,
+  unsettledFor,
+  type DisplayAuthState,
+  type OperationScope,
+} from '../../../src/displayAuthControl';
+import {
   challengeParticipationLabel,
   groupTypeLabel,
   joinPolicyLabel,
@@ -119,33 +133,34 @@ export default function CommunityPage() {
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
-  // PACKAGE E. Three distinct states, because a failed request does not
+  // PACKAGE E. Three distinct outcomes, because a failed request does not
   // establish what the server did: it may have saved the change before the
   // connection dropped. `unconfirmed` is that case, and it is not an error
   // message dressed up — it is the honest answer until a read settles it.
-  const [displayAuth, setDisplayAuth] = useState<
-    | { kind: 'idle' }
-    | { kind: 'saving'; goalId: string; intended: boolean }
-    | { kind: 'unconfirmed'; goalId: string; intended: boolean }
-    | { kind: 'failed'; goalId: string; intended: boolean }
-    // `confirmed` exists for one case the card cannot cover itself. Revoking
-    // on a CLOSED goal removes the only thing keeping it in the list, so the
-    // card — and with it every word about what just happened — disappears at
-    // the moment of success. The Champion would see the goal vanish and have
-    // no way to tell a completed revocation from a crash. The title is carried
-    // because the card that held it is gone by the time this renders.
-    | { kind: 'confirmed'; goalId: string; intended: boolean; title: string }
-  >({ kind: 'idle' });
+  //
+  // Per GOAL, not one shared slot. See src/displayAuthControl: a single slot
+  // meant starting an action on one goal erased another goal's unresolved
+  // outcome while its request was still in flight, taking its warning, its
+  // intended retry value and its disabled control with it.
+  const [displayAuth, setDisplayAuth] = useState<DisplayAuthState>(initialDisplayAuthState);
 
   // A response that lands after the screen has moved on must not write into
-  // whatever is on screen now. These hold the account and community the screen
-  // is currently showing, so a late response can ask whether it still applies
-  // before it changes anything.
-  const groupIdRef = useRef(groupId);
-  const uidRef = useRef<string | null>(user?.uid ?? null);
+  // whatever is on screen now. Account and community alone cannot tell
+  // A → B → A from never having left, so the context carries a generation
+  // that advances every time it is (re-)established. The refs let a late
+  // response read the CURRENT context without being re-created on every change.
+  const contextRef = useRef<{ groupId: string; uid: string | null }>({
+    groupId,
+    uid: user?.uid ?? null,
+  });
+  const displayAuthRef = useRef<DisplayAuthState>(displayAuth);
+  displayAuthRef.current = displayAuth;
   useEffect(() => {
-    groupIdRef.current = groupId;
-    uidRef.current = user?.uid ?? null;
+    contextRef.current = { groupId, uid: user?.uid ?? null };
+    // A new context. Everything the previous one had to say about permissions
+    // goes with it, and the generation advances so nothing still outstanding
+    // from the old one can write here again.
+    setDisplayAuth((prev) => beginContext(prev));
   }, [groupId, user?.uid]);
 
   const [leaveState, setLeaveState] = useState<
@@ -433,51 +448,68 @@ export default function CommunityPage() {
 
   const onSetDisplayAuth = useCallback(
     async (targetGoalId: string, intended: boolean, title: string) => {
-      // Scoped to this account, this community and this goal. `requestGroupId`
-      // and `requestUid` are captured now and compared when the response
-      // lands, so a slow response cannot write into a different community's
-      // screen or a different signed-in account's.
-      const requestGroupId = groupId;
-      const requestUid = user?.uid ?? null;
-      const stillTheSameContext = () =>
-        groupIdRef.current === requestGroupId && uidRef.current === requestUid;
+      // The operation's identity, fixed now. Generation is what makes this
+      // more than a uid/groupId comparison: an operation begun on an earlier
+      // visit to THIS SAME community, by THIS SAME account, carries an older
+      // generation and is recognisably not the current one.
+      const scope: OperationScope = {
+        generation: displayAuthRef.current.generation,
+        groupId,
+        uid: user?.uid ?? null,
+        goalId: targetGoalId,
+      };
+      const stillCurrent = () =>
+        operationIsCurrent(displayAuthRef.current, scope, contextRef.current);
 
-      setDisplayAuth({ kind: 'saving', goalId: targetGoalId, intended });
+      setDisplayAuth((prev) => startOperation(prev, scope, intended, title));
       try {
         const fn = httpsCallable<
           { goalId: string; authorized: boolean },
           { aggregateDisplayAuthorized: boolean }
         >(getFirebaseFunctions(), 'wsfSetGoalDisplayAuthorization');
         await fn({ goalId: targetGoalId, authorized: intended });
-        if (!stillTheSameContext()) return;
-        setDisplayAuth({ kind: 'confirmed', goalId: targetGoalId, intended, title });
+        if (!stillCurrent()) return;
+        setDisplayAuth((prev) =>
+          settleOperation(prev, scope, { kind: 'confirmed', intended, title })
+        );
         setGoalsReloadToken((n) => n + 1);
       } catch {
-        if (!stillTheSameContext()) return;
+        if (!stillCurrent()) return;
         // The request did not come back. That is not the same as the change
         // not happening — the server may have saved it before the connection
         // dropped — so read the stored value rather than assert an outcome.
         const stored = await readStoredDisplayAuth(targetGoalId);
-        if (!stillTheSameContext()) return;
+        if (!stillCurrent()) return;
         if (stored === null) {
           // Both the write and the read-back failed. Nothing is known, and the
-          // screen says exactly that.
-          setDisplayAuth({ kind: 'unconfirmed', goalId: targetGoalId, intended });
+          // screen says exactly that. A failed read is never turned into an
+          // assumed permission value.
+          setDisplayAuth((prev) =>
+            settleOperation(prev, scope, { kind: 'unconfirmed', intended, title })
+          );
           return;
         }
         // The read-back settled it. Show the stored permission either way, and
         // when it disagrees with what was asked for, say the change did not
         // take effect instead of leaving a silent no-op.
         setGoalsReloadToken((n) => n + 1);
-        setDisplayAuth(
-          stored === intended
-            ? { kind: 'confirmed', goalId: targetGoalId, intended, title }
-            : { kind: 'failed', goalId: targetGoalId, intended }
+        setDisplayAuth((prev) =>
+          settleOperation(
+            prev,
+            scope,
+            stored === intended
+              ? { kind: 'confirmed', intended, title }
+              : { kind: 'failed', intended, title }
+          )
         );
       }
     },
     [groupId, user?.uid, readStoredDisplayAuth]
   );
+
+  const onDismissDisplayAuth = useCallback((targetGoalId: string) => {
+    setDisplayAuth((prev) => dismissOutcome(prev, targetGoalId));
+  }, []);
 
   const onShareInvite = useCallback(async () => {
     if (!inviteUrl) return;
@@ -690,19 +722,14 @@ export default function CommunityPage() {
           ) : goalsState.goals.length ? (
             goalsState.goals.map((goal) => {
               const goalIsOpen = goal.status === 'active';
-              const saving =
-                displayAuth.kind === 'saving' && displayAuth.goalId === goal.goalId;
+              const outcome = outcomeFor(displayAuth, goal.goalId);
+              const saving = outcome?.kind === 'saving';
               // Unsettled covers the two cases where the last request left
               // something to say: the outcome is unknown, or it is known and
               // the change did not take. Both carry the value that was asked
-              // for, so the retry sends that explicit value — never the
-              // inverse of whatever the card happens to be showing, which
-              // would undo a request that had in fact succeeded.
-              const unsettled =
-                (displayAuth.kind === 'unconfirmed' || displayAuth.kind === 'failed') &&
-                displayAuth.goalId === goal.goalId
-                  ? displayAuth
-                  : null;
+              // for. src/displayAuthControl decides what the control sends;
+              // this file does not keep its own copy of that rule.
+              const unsettled = unsettledFor(displayAuth, goal.goalId);
               // A closed goal keeps no contribution controls, but a display
               // permission granted while it ran is still in force: closing a
               // goal does not revoke it. So the Champion keeps the revoke
@@ -766,7 +793,7 @@ export default function CommunityPage() {
                         onPress={() =>
                           onSetDisplayAuth(
                             goal.goalId,
-                            unsettled ? unsettled.intended : !goal.aggregateDisplayAuthorized,
+                            displayAuthValueToSend(unsettled, goal.aggregateDisplayAuthorized),
                             goal.title
                           )
                         }
@@ -788,16 +815,31 @@ export default function CommunityPage() {
                         </Text>
                       </Pressable>
                       {unsettled ? (
-                        <Text
-                          style={styles.error}
-                          testID={`wsf-goal-display-auth-unsettled-${goal.goalId}`}
-                        >
-                          {unsettled.kind === 'unconfirmed'
-                            ? 'We could not confirm this goal\u2019s current display permission. What is shown above may be out of date until this succeeds.'
-                            : unsettled.intended
-                              ? 'That change did not take effect. Public display is still not authorized for this goal.'
-                              : 'That change did not take effect. Public display is still authorized for this goal.'}
-                        </Text>
+                        <View>
+                          <Text
+                            style={styles.error}
+                            testID={`wsf-goal-display-auth-unsettled-${goal.goalId}`}
+                          >
+                            {unsettled.kind === 'unconfirmed'
+                              ? 'We could not confirm this goal\u2019s current display permission. What is shown above may be out of date until this succeeds.'
+                              : unsettled.intended
+                                ? 'That change did not take effect. Public display is still not authorized for this goal.'
+                                : 'That change did not take effect. Public display is still authorized for this goal.'}
+                          </Text>
+                          {/*
+                            The only way an unresolved outcome leaves this card
+                            other than being settled. Work on another goal must
+                            never clear it silently.
+                          */}
+                          <Pressable
+                            onPress={() => onDismissDisplayAuth(goal.goalId)}
+                            style={styles.copyButton}
+                            testID={`wsf-goal-display-auth-dismiss-${goal.goalId}`}
+                            accessibilityRole="button"
+                          >
+                            <Text style={styles.copyButtonText}>Dismiss this notice</Text>
+                          </Pressable>
+                        </View>
                       ) : null}
                     </View>
                   ) : null}
@@ -824,18 +866,22 @@ export default function CommunityPage() {
             without this the Champion clicks the control and watches the goal
             disappear with nothing said about why.
           */}
-          {displayAuth.kind === 'confirmed' &&
-          goalsState.kind === 'loaded' &&
-          !goalsState.goals.some((g) => g.goalId === displayAuth.goalId) ? (
-            <Text
-              style={styles.body}
-              testID="wsf-goal-display-auth-confirmed-absent"
-            >
-              {displayAuth.intended
-                ? `Public display is now authorized for \u201C${displayAuth.title}\u201D.`
-                : `Public display has been removed for \u201C${displayAuth.title}\u201D. That goal has closed, so it is no longer listed here.`}
-            </Text>
-          ) : null}
+          {goalsState.kind === 'loaded'
+            ? confirmedButAbsent(
+                displayAuth,
+                goalsState.goals.map((g) => g.goalId)
+              ).map((done) => (
+                <Text
+                  key={done.goalId}
+                  style={styles.body}
+                  testID="wsf-goal-display-auth-confirmed-absent"
+                >
+                  {done.intended
+                    ? `Public display is now authorized for \u201C${done.title}\u201D.`
+                    : `Public display has been removed for \u201C${done.title}\u201D. That goal has closed, so it is no longer listed here.`}
+                </Text>
+              ))
+            : null}
           {isChampion && goalsState.kind !== 'failed' ? (
             <Link
               href={`/goals/new?groupId=${encodeURIComponent(groupId)}` as never}

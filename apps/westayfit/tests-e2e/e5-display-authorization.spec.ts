@@ -101,6 +101,8 @@ function tsField(d: Date): { timestampValue: string } {
 type Fixture = {
   groupId: string;
   goalId: string;
+  /** Only seeded when seedFixture is asked for a second goal. */
+  goalId2: string | null;
   championUid: string;
   memberUid: string;
   championEmail: string;
@@ -113,7 +115,7 @@ type Fixture = {
  * distinction matters: e4-a1 makes both users foundingChampion, which cannot
  * show that the control is Champion-only.
  */
-async function seedFixture(tag: string): Promise<Fixture> {
+async function seedFixture(tag: string, opts: { goals?: 1 | 2 } = {}): Promise<Fixture> {
   const stamp = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
   const password = 'e5-password';
   const championEmail = `wsf-e5-champ-${tag}-${stamp}@example.com`;
@@ -158,21 +160,38 @@ async function seedFixture(tag: string): Promise<Fixture> {
 
   // Display permission is deliberately ABSENT, not false: an existing goal
   // carries no such field, and the default has to be OFF for those too.
-  await firestoreWrite(`wsfGoals/${goalId}`, {
-    ownerUid: { stringValue: championUid },
-    communityGroupId: { stringValue: groupId },
-    title: { stringValue: 'Package E synthetic goal' },
-    target: { integerValue: '5000' },
-    unit: { stringValue: 'squats' },
-    status: { stringValue: 'active' },
-    startsAt: tsField(new Date(now.getTime() - 60_000)),
-    endsAt: tsField(new Date(now.getTime() + 60 * 60_000)),
-    timezone: { stringValue: 'America/New_York' },
-    createdAt: tsField(now),
-    updatedAt: tsField(now),
-  });
+  const writeGoal = (id: string, title: string) =>
+    firestoreWrite(`wsfGoals/${id}`, {
+      ownerUid: { stringValue: championUid },
+      communityGroupId: { stringValue: groupId },
+      title: { stringValue: title },
+      target: { integerValue: '5000' },
+      unit: { stringValue: 'squats' },
+      status: { stringValue: 'active' },
+      startsAt: tsField(new Date(now.getTime() - 60_000)),
+      endsAt: tsField(new Date(now.getTime() + 60 * 60_000)),
+      timezone: { stringValue: 'America/New_York' },
+      createdAt: tsField(now),
+      updatedAt: tsField(now),
+    });
 
-  return { groupId, goalId, championUid, memberUid, championEmail, memberEmail, password };
+  await writeGoal(goalId, 'Package E synthetic goal');
+  let goalId2: string | null = null;
+  if (opts.goals === 2) {
+    goalId2 = `e5goal2-${stamp}`;
+    await writeGoal(goalId2, 'Package E second goal');
+  }
+
+  return {
+    groupId,
+    goalId,
+    goalId2,
+    championUid,
+    memberUid,
+    championEmail,
+    memberEmail,
+    password,
+  };
 }
 
 async function signInVia(page: Page, email: string, password: string): Promise<void> {
@@ -541,4 +560,238 @@ test('CASE 3 — a display response held from before a revocation cannot bring t
   await championCtx.close();
   await memberCtx.close();
   await displayCtx.close();
+});
+
+test('CASE 4 — a refusal ends the session, so a success the server produced earlier cannot repaint the total', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const fx = await seedFixture('c4');
+
+  const championCtx: BrowserContext = await browser.newContext();
+  const champion = await championCtx.newPage();
+  await signInVia(champion, fx.championEmail, fx.password);
+  await champion.goto(`/community/${fx.groupId}`);
+  const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${fx.goalId}`);
+  const stateText = champion.getByTestId(`wsf-goal-display-auth-state-${fx.goalId}`);
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  await toggle.click();
+  await expect(stateText).toContainText('Public display is authorized for this goal.', {
+    timeout: 20_000,
+  });
+
+  const memberCtx: BrowserContext = await browser.newContext();
+  const member = await memberCtx.newPage();
+  await signInVia(member, fx.memberEmail, fx.password);
+  await member.goto(`/contribute/${fx.goalId}`);
+  await expect(member.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 20_000 });
+  await member.getByTestId('wsf-contribute-entry').fill('241');
+  await member.getByTestId('wsf-contribute-submit').click();
+  await expect(member.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
+
+  /**
+   * THE CASE CASE 3 DOES NOT COVER.
+   *
+   * CASE 3 has the success issued FIRST and the refusal second, which ordering
+   * by issue sequence already handles. Issue order is not server processing
+   * order, though, so the refusal can just as easily be the earlier request:
+   *
+   *   request 1 is issued, then stalls before its authorization lookup
+   *   request 2 is issued, reaches the server while publication is authorized,
+   *     and its successful response is held in flight
+   *   the Champion revokes
+   *   request 1 finally runs, and returns not-found
+   *
+   * The refusal now carries the LOWER sequence and the held success the
+   * higher, so ordering alone lets the success through after the screen has
+   * already accepted the refusal. Nothing about stopping the poll timer
+   * changes that — the response was already outstanding.
+   */
+  const displayCtx: BrowserContext = await browser.newContext();
+  const display = await displayCtx.newPage();
+
+  type HeldResponse = {
+    route: Route;
+    status: number;
+    headers: Record<string, string>;
+    body: string;
+  };
+  let phase: 'pass' | 'capture1' | 'capture2' | 'sealed' = 'pass';
+  let request1: Route | null = null;
+  let held2: HeldResponse | null = null;
+
+  await display.route('**/wsfGoalPulse', async (route: Route) => {
+    if (phase === 'capture1' && !request1) {
+      // Issued first and NOT forwarded. The server has not seen it yet, which
+      // is what makes it the request that reaches its authorization lookup
+      // late.
+      request1 = route;
+      phase = 'capture2';
+      return;
+    }
+    if (phase === 'capture2' && !held2) {
+      // Issued second, and it reaches the server NOW, while publication is
+      // still authorized. Its success exists from this moment; it is simply
+      // not delivered to the page yet.
+      const response = await route.fetch();
+      held2 = {
+        route,
+        status: response.status(),
+        headers: response.headers(),
+        body: await response.text(),
+      };
+      phase = 'sealed';
+      return;
+    }
+    if (phase === 'sealed') {
+      // Nothing else gets through, so the only refusal the page can receive is
+      // request 1's. An aborted poll is a transient error, which deliberately
+      // does not disturb a total already on screen.
+      return route.abort('failed');
+    }
+    return route.continue();
+  });
+
+  await display.goto(`/display/${fx.goalId}`);
+  await expect(display.getByTestId('wsf-display-shared-total')).toHaveText('241', {
+    timeout: 20_000,
+  });
+  await snap(display, '40-display-showing-protected-total');
+
+  phase = 'capture1';
+  await expect.poll(() => held2 !== null, { timeout: 30_000 }).toBe(true);
+  // Request 2's response really is the protected total, so releasing it later
+  // is a genuine attempt to repaint 241.
+  expect(held2!.status).toBe(200);
+  expect(held2!.body).toContain('241');
+
+  // ---- revoke while request 1 has not even been sent ----------------------
+  await toggle.click();
+  await expect(stateText).toHaveText('Public display is not authorized for this goal.', {
+    timeout: 20_000,
+  });
+  expect(await readGoalAuthorization(fx.goalId)).toBe(false);
+
+  // ---- request 1 finally reaches the server, and is refused ---------------
+  await request1!.continue();
+  await expect(display.getByTestId('wsf-display-not-available')).toBeVisible({ timeout: 30_000 });
+  await snap(display, '41-display-stopped-on-earlier-issued-refusal');
+
+  // ---- release the success the server produced BEFORE the revocation ------
+  await held2!.route.fulfill({
+    status: held2!.status,
+    headers: held2!.headers,
+    body: held2!.body,
+  });
+  await champion.waitForTimeout(6_000);
+
+  // It has the higher sequence number. It must still not be admitted: the
+  // session it belongs to ended when the refusal was accepted.
+  await expect(display.getByTestId('wsf-display-not-available')).toBeVisible();
+  await expect(display.getByTestId('wsf-display-shared-total')).toHaveCount(0);
+  await expect(display.getByText('241')).toHaveCount(0);
+  await snap(display, '42-held-success-refused-admission');
+
+  // ---- recovery is a fresh session, and only the explicit action starts one
+  await champion.getByTestId(`wsf-goal-display-auth-toggle-${fx.goalId}`).click();
+  await expect(stateText).toContainText('Public display is authorized for this goal.', {
+    timeout: 20_000,
+  });
+  // Still nothing, because the refused session stays closed on its own.
+  await expect(display.getByTestId('wsf-display-not-available')).toBeVisible();
+
+  phase = 'pass';
+  await display.getByTestId('wsf-display-recheck').click();
+  await expect(display.getByTestId('wsf-display-shared-total')).toHaveText('241', {
+    timeout: 30_000,
+  });
+  await snap(display, '43-recovered-through-a-fresh-session');
+
+  await championCtx.close();
+  await memberCtx.close();
+  await displayCtx.close();
+});
+
+test('CASE 5 — one goal’s unresolved outcome survives work on another goal', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const fx = await seedFixture('c5', { goals: 2 });
+  const goalA = fx.goalId;
+  const goalB = fx.goalId2!;
+
+  const ctx: BrowserContext = await browser.newContext();
+  const champion = await ctx.newPage();
+  await signInVia(champion, fx.championEmail, fx.password);
+  await champion.goto(`/community/${fx.groupId}`);
+
+  const toggleA = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalA}`);
+  const toggleB = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalB}`);
+  const stateA = champion.getByTestId(`wsf-goal-display-auth-state-${goalA}`);
+  const stateB = champion.getByTestId(`wsf-goal-display-auth-state-${goalB}`);
+  const unsettledA = champion.getByTestId(`wsf-goal-display-auth-unsettled-${goalA}`);
+  const unsettledB = champion.getByTestId(`wsf-goal-display-auth-unsettled-${goalB}`);
+
+  await expect(toggleA).toBeVisible({ timeout: 20_000 });
+  await expect(toggleB).toBeVisible();
+
+  // ---- leave goal A unresolved --------------------------------------------
+  let blockWrite = true;
+  let blockRead = true;
+  await champion.route('**/wsfSetGoalDisplayAuthorization', async (route: Route) => {
+    if (blockWrite) return route.abort('failed');
+    return route.continue();
+  });
+  await champion.route('**/wsfListGoals', async (route: Route) => {
+    if (blockRead) return route.abort('failed');
+    return route.continue();
+  });
+
+  await toggleA.click();
+  await expect(unsettledA).toContainText('could not confirm', { timeout: 30_000 });
+  await expect(toggleA).toHaveText('Try again: authorize public display');
+  await snap(champion, '50-goal-A-unresolved');
+
+  // ---- now do a complete, successful piece of work on goal B --------------
+  blockWrite = false;
+  blockRead = false;
+  await toggleB.click();
+  await expect(stateB).toContainText('Public display is authorized for this goal.', {
+    timeout: 30_000,
+  });
+  expect(await readGoalAuthorization(goalB)).toBe(true);
+
+  // THE ASSERTIONS THIS CASE EXISTS FOR. One shared slot for every card meant
+  // B's work replaced A's outcome: the warning vanished, the retry lost the
+  // value it was carrying, and A's control came back as an ordinary toggle
+  // while A's own request was still outstanding.
+  await expect(unsettledA).toContainText('could not confirm');
+  await expect(toggleA).toHaveText('Try again: authorize public display');
+  await expect(unsettledB).toHaveCount(0);
+  await expect(stateA).toHaveText('Public display is not authorized for this goal.');
+  await snap(champion, '51-goal-A-outcome-survived-goal-B');
+
+  // ---- A's retry still sends what A asked for -----------------------------
+  await toggleA.click();
+  await expect(stateA).toContainText('Public display is authorized for this goal.', {
+    timeout: 30_000,
+  });
+  expect(await readGoalAuthorization(goalA)).toBe(true);
+  // B is untouched throughout.
+  expect(await readGoalAuthorization(goalB)).toBe(true);
+  await snap(champion, '52-goal-A-retry-sent-its-own-value');
+
+  // ---- an unresolved outcome leaves only by being settled or dismissed ----
+  blockWrite = true;
+  blockRead = true;
+  await toggleA.click();
+  await expect(unsettledA).toContainText('could not confirm', { timeout: 30_000 });
+  await champion.getByTestId(`wsf-goal-display-auth-dismiss-${goalA}`).click();
+  await expect(unsettledA).toHaveCount(0);
+  // Dismissing A's notice says nothing about the permission, which is still
+  // whatever the server holds.
+  expect(await readGoalAuthorization(goalA)).toBe(true);
+  await snap(champion, '53-dismissed');
+
+  await ctx.close();
 });

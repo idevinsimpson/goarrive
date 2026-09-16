@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { barPercent, integerPercent } from '../../src/goalPercent';
@@ -34,6 +34,17 @@ export default function DisplayGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
   const [state, setState] = useState<DisplayState>({ kind: 'loading' });
+  // Bumping this starts a brand-new polling session. It is the ONLY way to
+  // recover from a refusal, and it exists so that recovery is an explicit act
+  // rather than something an outstanding old response can perform.
+  const [pollSession, setPollSession] = useState(0);
+
+  // A different goal is a different context. Clear what the previous goal put
+  // on screen at once, rather than leaving its total up until the first
+  // response for the new one lands.
+  useEffect(() => {
+    setState({ kind: 'loading' });
+  }, [goalId]);
 
   useEffect(() => {
     if (!goalId) {
@@ -47,19 +58,44 @@ export default function DisplayGoal() {
     let timer: ReturnType<typeof setInterval> | null = null;
 
     // Ticks overlap: the poll fires every 2s but a request can take longer, so
-    // responses are not guaranteed to arrive in the order they were sent. Each
-    // request carries the sequence number it was issued with, and a response is
-    // only allowed to change the screen if it is newer than whatever is already
-    // rendered.
+    // responses are not guaranteed to arrive in the order they were sent.
     //
-    // This is a privacy property, not a tidiness one. Without it, revoking
-    // public display can be undone by physics: an older successful response
-    // still in flight lands after the refusal and paints the protected total
-    // back onto a screen that is no longer permitted to show it.
+    // TWO SEPARATE RULES, because ordering alone is not enough.
+    //
+    // 1. ORDER. Each request carries the sequence it was issued with, and a
+    //    response may only change the screen if it is newer than what is
+    //    already rendered. This stops an earlier-issued success that arrives
+    //    after a later-issued refusal from repainting the total.
+    //
+    // 2. A REFUSAL CLOSES THE SESSION. Issue order is not server processing
+    //    order, so rule 1 does not cover the case where the refusal was issued
+    //    FIRST and the success second: request 1 stalls before its
+    //    authorization lookup, request 2 reaches the server while publication
+    //    is still authorized and its success is held in flight, the Champion
+    //    revokes, request 1 then runs and returns not-found. The refusal has a
+    //    lower sequence, so under rule 1 alone the held success — with the
+    //    higher sequence — would still be allowed to repaint the total.
+    //
+    //    Stopping the timer does not help: it prevents new requests, it does
+    //    not invalidate outstanding ones. So a refusal marks the session
+    //    CLOSED, and every outstanding response from that session is refused
+    //    admission from that moment on, whatever sequence it carries.
+    //
+    // This is about what the running application renders once it has learned
+    // that access is refused. It makes no claim about anything already
+    // received elsewhere — a screenshot, a recording, a number someone wrote
+    // down — which this application cannot reach and does not pretend to.
+    //
+    // Recovery is deliberately not automatic. A closed session stays closed;
+    // getting back to a live display takes a fresh session, which only the
+    // explicit re-check action below starts.
     let issued = 0;
     let applied = 0;
+    let sessionClosed = false;
+
     const apply = (seq: number, next: DisplayState | ((prev: DisplayState) => DisplayState)) => {
       if (cancelled) return false;
+      if (sessionClosed) return false;
       if (seq <= applied) return false;
       applied = seq;
       setState(next as DisplayState);
@@ -78,21 +114,25 @@ export default function DisplayGoal() {
       } catch (e) {
         if (cancelled) return;
         if (e instanceof FirebaseError && e.code === 'functions/not-found') {
-          // A refusal is terminal for this display: stop polling whether or not
-          // this response is the newest one, so no further request can be
-          // issued against a goal the server has just refused. The `apply`
-          // guard still decides what is rendered.
+          // Terminal for this session, and applied without consulting the
+          // ordering guard: a refusal is not competing with the successes, it
+          // is ending the session they belong to. Marking `sessionClosed`
+          // before rendering means a success that resolves in the very same
+          // tick of the event loop is already inadmissible.
+          if (sessionClosed) return;
+          sessionClosed = true;
           if (timer) {
             clearInterval(timer);
             timer = null;
           }
-          apply(seq, { kind: 'notFound' });
+          setState({ kind: 'notFound' });
           return;
         }
         // Transient errors are surfaced once but do not stop the poll — the
         // next tick reconciles automatically. A total already on screen is
         // left alone; a transient network error is not evidence that the
         // permission changed.
+        if (sessionClosed) return;
         if (seq <= applied) return;
         applied = seq;
         setState((prev) =>
@@ -112,7 +152,7 @@ export default function DisplayGoal() {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [goalId]);
+  }, [goalId, pollSession]);
 
   if (state.kind === 'loading') {
     return (
@@ -133,6 +173,20 @@ export default function DisplayGoal() {
           This display is not set up, or its community has not turned on public
           display for this goal.
         </Text>
+        {/*
+          The only route back. A display on a wall whose permission is restored
+          needs a way to resume without someone finding a keyboard, and this
+          starts a FRESH session: a new generation of requests, checked from
+          scratch. No response from the refused session can perform this.
+        */}
+        <Pressable
+          onPress={() => setPollSession((n) => n + 1)}
+          style={styles.recheckButton}
+          testID="wsf-display-recheck"
+          accessibilityRole="button"
+        >
+          <Text style={styles.recheckButtonText}>Check again</Text>
+        </Pressable>
       </View>
     );
   }
@@ -259,6 +313,18 @@ const styles = StyleSheet.create({
     paddingVertical: wsfTheme.spacing.xs,
     borderRadius: wsfTheme.radius.pill,
     overflow: 'hidden',
+  },
+  recheckButton: {
+    backgroundColor: wsfTheme.colors.primary,
+    paddingHorizontal: wsfTheme.spacing.lg,
+    paddingVertical: wsfTheme.spacing.sm,
+    borderRadius: wsfTheme.radius.pill,
+  },
+  recheckButtonText: {
+    ...wsfTheme.typography.body,
+    color: wsfTheme.colors.surface,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   testPill: {
     color: '#FFFFFF',
