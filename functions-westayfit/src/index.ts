@@ -1452,9 +1452,20 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
 );
 
 type CheckInRequest = { moveId?: unknown; code?: unknown };
+/**
+ * PACKAGE E. `totals` is the challenge's CURRENT shared community state, so it
+ * is optional for the same reason wsfContribute's shared fields are: the
+ * check-in replay branch returns before the membership gate, so a removed
+ * member replaying a valid code used to receive current totals.
+ *
+ * `alreadyCheckedIn` is about the caller's own action and is always returned.
+ * There is no display-authorization escape here — Package E deliberately did
+ * not invent a publication model for the legacy challenge aggregate, so the
+ * only thing that entitles a caller to these totals is active membership.
+ */
 type CheckInResponse = {
   alreadyCheckedIn: boolean;
-  totals: PulseTotals;
+  totals?: PulseTotals;
 };
 
 function normalizeCheckInCode(v: unknown): string | null {
@@ -1529,7 +1540,7 @@ export const wsfCheckIn = onCall<CheckInRequest>(
     //      and rejected an existing-member retry that sent a wrong or absent
     //      code — the same tap that succeeded once would fail on the retry.
     //   5. Otherwise validate status active + membership active, then write.
-    const { alreadyCheckedIn, goalTarget } = await db.runTransaction(
+    const { alreadyCheckedIn, goalTarget, callerIsActiveMember } = await db.runTransaction(
       async (tx) => {
         const challengeSnap = await tx.get(challengeRef);
         if (!challengeSnap.exists) {
@@ -1557,7 +1568,17 @@ export const wsfCheckIn = onCall<CheckInRequest>(
           // never re-gate on challenge.status, membership state, or the
           // paired code. A member who already succeeded is grandfathered
           // against any change that happened after their first tap.
-          return { alreadyCheckedIn: true as const, goalTarget: gt };
+          // Idempotent as before — no write. It now also reports whether the
+          // caller is still an active member, so the handler can decide
+          // whether they may be told where the challenge stands now.
+          const replayMembership = membershipSnap.exists
+            ? (membershipSnap.data() as { membershipStatus?: string })
+            : null;
+          return {
+            alreadyCheckedIn: true as const,
+            goalTarget: gt,
+            callerIsActiveMember: replayMembership?.membershipStatus === 'active',
+          };
         }
 
         // §E3 review fix 2 — requiresCode is real. Honour system is still
@@ -1619,9 +1640,17 @@ export const wsfCheckIn = onCall<CheckInRequest>(
             createdAt: FieldValue.serverTimestamp(),
           });
         }
-        return { alreadyCheckedIn: false as const, goalTarget: gt };
+        // Reached only past the active-membership gate above.
+        return { alreadyCheckedIn: false as const, goalTarget: gt, callerIsActiveMember: true };
       }
     );
+
+    if (!callerIsActiveMember) {
+      // A removed member replaying a check-in. Their own check-in is
+      // acknowledged honestly; the challenge's current standing is not
+      // disclosed, and readChallengeTotals is not called.
+      return { alreadyCheckedIn };
+    }
 
     const totals = await readChallengeTotals(move.challengeId, goalTarget);
     return { alreadyCheckedIn, totals };
@@ -1775,32 +1804,63 @@ export const wsfChallengePulse = onCall<PulseRequest>(
       throw new HttpsError('invalid-argument', 'challengeId is required.');
     }
 
-    // Cache first — hits return public-safe totals with no Firestore reads
-    // and no limiter bump. Misses fall through to the limiter and reads.
-    const cached = pulseCacheGet(challengeId, now);
-    if (cached) return cached;
+    // AUTHORIZATION BEFORE CACHE. The cache used to be consulted first, which
+    // was correct while these totals were genuinely public and is a hole now.
+    // Two ways it leaked: a cached entry would be handed to an unauthenticated
+    // caller with the membership check never running, and — because the key is
+    // the challengeId alone — to an active member of a DIFFERENT community who
+    // happened to hold this challenge's id.
+    //
+    // So the cache moved below the membership check entirely. It still saves
+    // the expensive part (readChallengeTotals is ~13 document reads); it no
+    // longer saves the decision about who is asking. A shared cache keyed by
+    // an id can only ever be consulted once the caller is known to be entitled
+    // to that id's data.
+    if (!request.auth) notFound();
+    const callerUid = request.auth.uid;
 
     const ip = extractIp(request.rawRequest as any);
     await enforcePreviewRateLimit(ip, now);
 
+    // PACKAGE E. This read was anonymous, and its authorization was an
+    // accident: it fetches the group document but casts it to { isSample } and
+    // checks only that, so joinPolicy never entered into it. A 'public'
+    // community and a 'private' one were treated identically, and possession
+    // of a challengeId was permission.
+    //
+    // It is now an ACTIVE-MEMBER read, following wsfListGoals. No second
+    // anonymous-publication model is invented here: the per-goal authorization
+    // Package E introduces is for GOALS, and extending it to the legacy
+    // challenge model would be deciding a publication policy nobody approved.
+    // If a FitLife requirement genuinely needs legacy challenge aggregates
+    // shown anonymously, that is a separate compatibility decision.
+    //
+    // Transport stays invoker:'public' — unchanged, and not the boundary.
     const db = getFirestore();
     const challengeSnap = await db.doc(`wsfChallenges/${challengeId}`).get();
-    if (!challengeSnap.exists) {
-      throw new HttpsError('not-found', 'Challenge not found.');
-    }
+    if (!challengeSnap.exists) notFound();
     const challenge = challengeSnap.data() as ChallengeDoc;
+
+    const membershipSnap = await db
+      .doc(`wsfMemberships/${challenge.groupId}_${callerUid}`)
+      .get();
+    if (!membershipSnap.exists) notFound();
+    if ((membershipSnap.data() as { membershipStatus?: string }).membershipStatus !== 'active') {
+      notFound();
+    }
 
     const groupSnap = await db
       .doc(`wsfCommunityGroups/${challenge.groupId}`)
       .get();
-    if (!groupSnap.exists) {
-      throw new HttpsError('not-found', 'Challenge not found.');
-    }
+    if (!groupSnap.exists) notFound();
     const group = groupSnap.data() as { isSample?: boolean };
     if (group.isSample === true) {
       // §5.8 — sample data must never surface in a total presented as real.
-      throw new HttpsError('not-found', 'Challenge not found.');
+      notFound();
     }
+
+    const cached = pulseCacheGet(challengeId, now);
+    if (cached) return cached;
 
     const totals = await readChallengeTotals(challengeId, challenge.goalTarget ?? null);
     pulseCacheSet(challengeId, now, totals);
@@ -2011,14 +2071,51 @@ type GoalDoc = {
   isSample?: boolean;
   createdAt?: FirebaseFirestore.Timestamp;
   closedAt?: FirebaseFirestore.Timestamp;
+  /**
+   * PACKAGE E. Explicit permission for ONE thing: this goal's approved
+   * aggregate progress may be presented through the authorized unauthenticated
+   * aggregate-display path.
+   *
+   * It does NOT mean the community is discoverable, that anyone may join, that
+   * member information or individual contributions are public, that future
+   * goals are authorized, or that the goal may be used for unrelated public
+   * proof. Those are separate concepts and none of them implies this one.
+   *
+   * Optional on purpose: absent means false. Existing goals were written
+   * before this field existed and must behave exactly as unauthorized, so
+   * nothing is backfilled and every read goes through
+   * isAggregateDisplayAuthorized() rather than reading the field directly.
+   */
+  aggregateDisplayAuthorized?: boolean;
+  aggregateDisplayAuthorizedAt?: FirebaseFirestore.Timestamp;
+  aggregateDisplayAuthorizedBy?: string;
 };
 
+/**
+ * The ONLY way this package asks "may this goal's aggregate be displayed?".
+ *
+ * Absent, false, null, and any non-boolean all mean no. Written as an explicit
+ * `=== true` so a truthy-but-wrong value (a string "false", say, from a hand
+ * edit or an import) can never authorize publication.
+ */
+function isAggregateDisplayAuthorized(goal: Pick<GoalDoc, 'aggregateDisplayAuthorized'>): boolean {
+  return goal.aggregateDisplayAuthorized === true;
+}
+
+/**
+ * The anonymous aggregate response. PACKAGE E removed `contributorCount`:
+ * it had no approved public-display purpose, and it was being returned by
+ * inertia rather than by decision. Nothing replaces it — a substitute metric
+ * would be the same unapproved disclosure under another name.
+ *
+ * Member identities, individual contribution records, personal credit and
+ * member lists are not here and never were.
+ */
 type GoalPulseTotals = {
   sharedTotal: number;
   target: number;
   unit: string;
   status: GoalStatus;
-  contributorCount: number;
 };
 
 function randomGoalShardIndex(): number {
@@ -2044,14 +2141,11 @@ async function sumGoalShards(goalId: string): Promise<number> {
   return total;
 }
 
-async function countGoalContributors(goalId: string): Promise<number> {
-  const snap = await getFirestore()
-    .collection('wsfGoalMemberTotals')
-    .where('goalId', '==', goalId)
-    .count()
-    .get();
-  return snap.data().count;
-}
+// countGoalContributors was removed with PACKAGE E. It existed only to fill
+// `contributorCount` in the anonymous aggregate response, which has no approved
+// public-display purpose. The function is gone rather than left unused, so the
+// number cannot be quietly reintroduced by a later caller finding a helper
+// already sitting there.
 
 // Same 2-second TTL and per-instance LRU as wsfChallengePulse — a poller at
 // 2s cadence never loses precision, and burst traffic collapses to one real
@@ -2343,14 +2437,31 @@ type ContributeRequest = {
   count?: unknown;
 };
 
+/**
+ * PACKAGE E. The four fields describing CURRENT SHARED COMMUNITY STATE are
+ * optional because a caller may be entitled to the first three and not to
+ * them.
+ *
+ * addedCount, ownCredit and alreadyRecorded are about the CALLER'S OWN
+ * contribution. They are returned to whoever made it, including someone who
+ * has since been removed — a person's own history is theirs, and that is the
+ * same position wsfMyContribution already takes.
+ *
+ * sharedTotal, target, unit and status are the community's current state.
+ * They are returned only to an active member, or to anyone when the goal is
+ * explicitly display-authorized (in which case they are public anyway). A
+ * removed member replaying a valid attemptId used to receive all four, read
+ * fresh, because the replay branch returned before the membership check ever
+ * ran. That is the hole this closes.
+ */
 type ContributeResponse = {
   addedCount: number;
   ownCredit: number;
-  sharedTotal: number;
-  target: number;
-  unit: string;
-  status: GoalStatus;
   alreadyRecorded: boolean;
+  sharedTotal?: number;
+  target?: number;
+  unit?: string;
+  status?: GoalStatus;
 };
 
 export const wsfContribute = onCall<ContributeRequest>(
@@ -2395,7 +2506,15 @@ export const wsfContribute = onCall<ContributeRequest>(
     // membership in parallel. Mirrors wsfCheckIn's §E3-fix-3 shape — the
     // "all reads before writes" rule stops at the first write, so sequential
     // tx.get() plus a Promise.all is legal.
-    const { addedCount, alreadyRecorded, goalTarget, goalUnit, goalStatus } =
+    const {
+      addedCount,
+      alreadyRecorded,
+      goalTarget,
+      goalUnit,
+      goalStatus,
+      callerIsActiveMember,
+      goalDisplayAuthorized,
+    } =
       await db.runTransaction(async (tx) => {
         const goalSnap = await tx.get(goalRef);
         if (!goalSnap.exists) {
@@ -2429,12 +2548,23 @@ export const wsfContribute = onCall<ContributeRequest>(
           if (prev.userId !== uid) {
             throw new HttpsError('internal', 'Contribution record mismatch.');
           }
+          // Idempotency is untouched: this returns without writing, so the
+          // attempt is still counted exactly once. What changed is that the
+          // branch now reports whether the caller is STILL an active member,
+          // so the handler below can decide what they may be told. Deciding
+          // that here would mean reading shared state before knowing whether
+          // it may be disclosed.
+          const replayMembership = membershipSnap.exists
+            ? (membershipSnap.data() as { membershipStatus?: string })
+            : null;
           return {
             addedCount: typeof prev.count === 'number' ? prev.count : 0,
             alreadyRecorded: true as const,
             goalTarget: goal.target,
             goalUnit: goal.unit,
             goalStatus: goal.status,
+            callerIsActiveMember: replayMembership?.membershipStatus === 'active',
+            goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
           };
         }
 
@@ -2510,21 +2640,40 @@ export const wsfContribute = onCall<ContributeRequest>(
           { merge: true }
         );
 
+        // Reached only after the active-membership gate above, so this caller
+        // is an active member by construction.
         return {
           addedCount: count,
           alreadyRecorded: false as const,
           goalTarget: goal.target,
           goalUnit: goal.unit,
           goalStatus: goal.status,
+          callerIsActiveMember: true,
+          goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
         };
       });
 
-    const [sharedTotal, ownCreditSnap] = await Promise.all([
-      sumGoalShards(goalId),
-      memberTotalRef.get(),
-    ]);
+    // May this caller be told the community's CURRENT shared state? An active
+    // member may. Anyone may when the goal is explicitly display-authorized,
+    // because then the same numbers are served by wsfGoalPulse anyway and
+    // withholding them here would protect nothing.
+    const maySeeCurrentSharedState = callerIsActiveMember || goalDisplayAuthorized;
+
+    // Their own credit is theirs either way, and is read for both cases. It is
+    // derived from their own uid, never from anyone else's row.
+    const ownCreditSnap = await memberTotalRef.get();
     const ownCredit =
       (ownCreditSnap.data() as { total?: number } | undefined)?.total ?? 0;
+
+    if (!maySeeCurrentSharedState) {
+      // A removed member replaying a valid attempt. They keep the honest
+      // answer about their own contribution — it happened, it counted once,
+      // here is what it was — and learn nothing about where the community
+      // stands now. sumGoalShards is not even called.
+      return { addedCount, ownCredit, alreadyRecorded };
+    }
+
+    const sharedTotal = await sumGoalShards(goalId);
 
     return {
       addedCount,
@@ -2539,14 +2688,32 @@ export const wsfContribute = onCall<ContributeRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wsfGoalPulse — public read of the shared total for `goalId`.
+// wsfGoalPulse — the AUTHORIZED unauthenticated aggregate-display read.
 //
-// Public invoker: a kiosk / audience display uses this unauthenticated.
-// Cache-first (2s TTL, per-instance LRU) mirrors wsfChallengePulse so a
-// display polling every 2s does not pay a Firestore read on every tick.
-// No rate-limit / no isSample filter / no eligibility check — the E4-A1
-// slice reads the goal doc verbatim by id. Hardening beyond the cache TTL
-// is deferred to its own review per the scope correction 2026-09-11.
+// PACKAGE E. This callable used to return a goal's shared total to anyone who
+// held its id: no auth, no membership, no visibility check. Possession of a
+// goalId was, in effect, permission — which meant a private community's
+// progress was readable by a stranger who had seen the id once, and a removed
+// member kept reading it after removal.
+//
+// It is now gated on ONE thing: the goal itself carries an explicit
+// aggregateDisplayAuthorized, set deliberately by a Champion of that goal's
+// community. Nothing else grants it. Not the community's joinPolicy, not
+// discoverability, not membership, not the goal's lifecycle, not isSample, and
+// not the fact that a display is what is asking.
+//
+// The refusal is the byte-identical not-found an unknown id gets, following
+// wsfPreviewCommunity and wsfListGoals: an unauthorized goal and a goal that
+// does not exist must be indistinguishable, or this becomes an oracle for
+// which ids are real.
+//
+// Transport stays public on purpose. The Cloud Run invoker is not the
+// authorization boundary; this handler is. A publicly reachable endpoint that
+// returns nothing without authorization is the intended shape.
+//
+// The 2s per-instance cache is kept, and is keyed by goalId AFTER the
+// authorization check, so a cached entry can only ever exist for a goal that
+// was authorized when it was cached — see the revocation note below.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type GoalPulseRequest = { goalId?: unknown };
@@ -2561,26 +2728,68 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
       throw new HttpsError('invalid-argument', 'goalId is required.');
     }
 
+    const db = getFirestore();
+    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+    if (!goalSnap.exists) notFound();
+    const goal = goalSnap.data() as GoalDoc;
+
+    // THE GATE — two independent routes to the same aggregate, which is the
+    // whole model: membership permits the member experience, per-goal
+    // authorization permits the display experience, and neither implies the
+    // other.
+    //
+    //   1. An ACTIVE MEMBER of this goal's community. This is the member
+    //      experience — the contribution screen polls here so a peer's
+    //      contribution surfaces — and it does not depend on the goal being
+    //      authorized for public display. A member of a private community
+    //      that publishes nothing still sees their own community's progress.
+    //   2. ANYONE, when the goal itself carries an explicit
+    //      aggregateDisplayAuthorized. This is the display route.
+    //
+    // Read before the cache is consulted, so a revocation takes effect on the
+    // next read rather than lingering for the cache TTL, and so a cached entry
+    // can never stand in for the decision. That costs a document read per
+    // poll and is the right trade: a Champion who revokes expects it revoked,
+    // not revoked in two seconds.
+    let authorizedAsMember = false;
+    if (request.auth) {
+      const membershipSnap = await db
+        .doc(`wsfMemberships/${goal.communityGroupId}_${request.auth.uid}`)
+        .get();
+      authorizedAsMember =
+        membershipSnap.exists &&
+        (membershipSnap.data() as { membershipStatus?: string }).membershipStatus === 'active';
+    }
+    if (!authorizedAsMember && !isAggregateDisplayAuthorized(goal)) notFound();
+
+    // Sample data may never be presented as real progress (§5.8), and this is
+    // a SUPPRESSION, not an authorization: isSample can stop a display, it can
+    // never start one. The authorization check above already ran.
+    //
+    // Members are exempt: a sample community's own members are looking at
+    // their own community, and §5.8 is about sample data surfacing in a total
+    // PRESENTED AS REAL to an outside audience.
+    const groupSnap = await db.doc(`wsfCommunityGroups/${goal.communityGroupId}`).get();
+    if (!groupSnap.exists) notFound();
+    if (!authorizedAsMember && (groupSnap.data() as { isSample?: boolean }).isSample === true) {
+      notFound();
+    }
+
+    // The cache is keyed by goalId, so it may only be consulted once the
+    // caller is known to be entitled to that goal's aggregate. Both routes
+    // above yield the identical response, so one shared entry is correct.
+
     const cached = goalPulseCacheGet(goalId, now);
     if (cached) return cached;
 
-    const db = getFirestore();
-    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
-    if (!goalSnap.exists) {
-      throw new HttpsError('not-found', 'Goal not found.');
-    }
-    const goal = goalSnap.data() as GoalDoc;
-
-    const [sharedTotal, contributorCount] = await Promise.all([
-      sumGoalShards(goalId),
-      countGoalContributors(goalId),
-    ]);
+    // contributorCount is deliberately not computed. It is not in the response
+    // and countGoalContributors is not called on this path.
+    const sharedTotal = await sumGoalShards(goalId);
     const totals: GoalPulseTotals = {
       sharedTotal,
       target: goal.target,
       unit: goal.unit,
       status: goal.status,
-      contributorCount,
     };
     goalPulseCacheSet(goalId, now, totals);
     return totals;
@@ -2719,6 +2928,7 @@ type ListedGoal = {
   status: GoalStatus;
   startsAt: string;
   endsAt: string;
+  aggregateDisplayAuthorized: boolean;
 };
 
 type ListGoalsResponse = { goals: ListedGoal[] };
@@ -2776,6 +2986,11 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
         status: goal.status,
         startsAt: goal.startsAt.toDate().toISOString(),
         endsAt: goal.endsAt.toDate().toISOString(),
+        // PACKAGE E. Members of the community may know whether their own
+        // goal's aggregate is authorized for public display — arguably they
+        // should. It is a property of their goal, not of anyone's identity,
+        // and this callable is already active-member-gated.
+        aggregateDisplayAuthorized: isAggregateDisplayAuthorized(goal),
       };
     });
 
@@ -2785,6 +3000,84 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     goals.sort((a, b) => (a.endsAt === b.endsAt ? a.goalId.localeCompare(b.goalId) : a.endsAt.localeCompare(b.endsAt)));
 
     return { goals };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfSetGoalDisplayAuthorization — PACKAGE E. The Champion's explicit,
+// revocable permission for one goal's aggregate to appear on a public display.
+//
+// Deliberately its own callable rather than a field on goal creation. Making
+// publication a checkbox in a creation form is how it becomes an incidental
+// side effect of starting a goal; it should be a decision somebody took on
+// purpose, separately, and can take back.
+//
+// Authority is the EXISTING community-scoped Champion authority — an active
+// foundingChampion of the community that owns this goal. No global claim, no
+// new role, no platform-wide publisher.
+//
+// It works after the goal is closed, on purpose: an authorized completed goal
+// may go on supporting "what we've done" and recap presentation. Closing is not
+// revocation, and revocation is not closing — they stay separate lifecycle
+// concepts and this callable touches only the authorization.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type SetGoalDisplayAuthorizationRequest = { goalId?: unknown; authorized?: unknown };
+type SetGoalDisplayAuthorizationResponse = { goalId: string; aggregateDisplayAuthorized: boolean };
+
+export const wsfSetGoalDisplayAuthorization = onCall<SetGoalDisplayAuthorizationRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<SetGoalDisplayAuthorizationResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+    // Strictly boolean. A missing or coerced value must never be read as an
+    // instruction to publish.
+    if (typeof request.data?.authorized !== 'boolean') {
+      throw new HttpsError('invalid-argument', 'authorized must be true or false.');
+    }
+    const authorized = request.data.authorized;
+
+    const db = getFirestore();
+
+    await db.runTransaction(async (tx) => {
+      const goalRef = db.doc(`wsfGoals/${goalId}`);
+      const goalSnap = await tx.get(goalRef);
+      // A goal that does not exist and a goal the caller has no authority over
+      // are the same answer, matching wsfListGoals and wsfPreviewCommunity.
+      if (!goalSnap.exists) notFound();
+      const goal = goalSnap.data() as GoalDoc;
+
+      const membershipSnap = await tx.get(
+        db.doc(`wsfMemberships/${goal.communityGroupId}_${uid}`)
+      );
+      if (!membershipSnap.exists) notFound();
+      const membership = membershipSnap.data() as { role?: string; membershipStatus?: string };
+      if (membership.membershipStatus !== MEMBERSHIP_ACTIVE) notFound();
+      if (membership.role !== 'foundingChampion') notFound();
+
+      // Deliberately does NOT touch status, closedAt, or any contribution
+      // record. Revoking removes the permission; it never deletes the goal or
+      // its history.
+      tx.set(
+        goalRef,
+        {
+          aggregateDisplayAuthorized: authorized,
+          aggregateDisplayAuthorizedAt: FieldValue.serverTimestamp(),
+          aggregateDisplayAuthorizedBy: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return { goalId, aggregateDisplayAuthorized: authorized };
   }
 );
 

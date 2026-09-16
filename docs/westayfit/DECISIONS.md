@@ -279,3 +279,61 @@ custom`, places first) with an optional free-text place label and no address or 
 Discovery/search, the landing redesign and Champion "start a challenge" are the M-U5/M-U6
 surface the FitLife reduction cut ("M-U6 cut entirely"); they are written up as an E4
 proposal in the same spec for Devin to sequence against E4–E6.
+
+## 2026-09-16 — Package E: per-goal aggregate-display authorization
+
+Decided by Devin under Strategic Master v3.0 (*The Living WE System*, 2026-09-11), which
+governs this and is held outside this repository. Recorded here because the defect and its
+status had lived only in source and test comments — `RISKS.md` and this file carried
+nothing, so nothing outside the code knew it was open.
+
+**The defect.** `wsfGoalPulse` was `invoker: 'public'` with no eligibility check of any
+kind. Possession of a `goalId` was, in effect, permission: a private community's progress
+was readable by anyone who had once seen the id, and a removed member kept reading it.
+`wsfChallengePulse` had the same shape by a different route — it fetched the group document
+but checked only `isSample`, so `joinPolicy` never entered into it.
+
+**The decision.** Publication authorization is **per goal**, on the goal, default **off**.
+
+- The field is `aggregateDisplayAuthorized`, named for exactly the permission it grants:
+  *this goal's approved aggregate progress may be presented through the authorized
+  unauthenticated aggregate-display path.* It does not mean the community is discoverable,
+  that anyone may join, that member information or individual contributions are public,
+  or that any future goal is authorized.
+- Only an **active foundingChampion of the community that owns the goal** may change it,
+  through the existing community-scoped authority. There is no global Champion claim and
+  no platform-wide publisher.
+- It **survives goal closure**, so an authorized completed goal can go on supporting
+  "what we've done" and recap presentation, and it stays **revocable** after closure.
+  Closing is not revoking; revoking is not closing.
+- **Absent means false.** Nothing was backfilled. Every goal written before this decision
+  behaves exactly as unauthorized.
+
+**Explicitly not sources of authorization**, each separately: community `joinPolicy`,
+public discoverability, membership, possession of a `goalId`, goal lifecycle or status,
+`isSample`, and the fact that a display is what is asking. `isSample` remains a
+truthfulness property — it can suppress a display, it can never start one.
+
+**contributorCount is excluded** from the anonymous aggregate response. It had no approved
+public-display purpose and was being returned by inertia. Nothing replaces it; a substitute
+metric would be the same unapproved disclosure under another name.
+
+**Two routes, neither implying the other.** Membership permits the member experience —
+an active member reads their community's shared progress whether or not it is published.
+Per-goal authorization permits the display experience. A signed-out display gets the
+aggregate only for an authorized goal, and the refusal is byte-identical to an unknown id,
+so the endpoint is not an oracle for which goals exist.
+
+**Replay.** A previously recorded attempt stays idempotent and is never counted twice, but
+a caller who is no longer an active member no longer receives current shared state with it.
+They keep what is theirs — the attempt is acknowledged, counted once, own credit returned.
+The same correction was applied to `wsfCheckIn`, which had the identical shape.
+
+**Legacy challenges.** `wsfChallengePulse` became an active-member read. Package E did
+**not** invent a second publication model for the legacy challenge aggregate; if a FitLife
+requirement genuinely needs those shown anonymously, that is a separate compatibility
+decision, not a silent policy set here.
+
+**Transport is not authorization.** The Cloud Run invoker stays public. Nothing in IAM,
+organization policy, Hosting or Auth configuration was changed to implement this; the
+handler decides what is returned.

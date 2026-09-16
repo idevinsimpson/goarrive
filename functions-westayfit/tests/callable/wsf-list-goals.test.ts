@@ -113,9 +113,22 @@ describe('wsfListGoals', () => {
     expect(goal.target).toBe(5000);
     expect(goal.unit).toBe('squats');
     expect(goal.status).toBe('active');
-    // Minimal by design: no member identity, no credit, no shared total.
+    // PACKAGE E added aggregateDisplayAuthorized: a member may know whether
+    // their own community's goal is authorized for public display. Still
+    // minimal in the way that matters — no member identity, no individual
+    // credit, no shared total.
+    expect(goal.aggregateDisplayAuthorized).toBe(false);
     expect(Object.keys(goal).sort()).toEqual(
-      ['endsAt', 'goalId', 'startsAt', 'status', 'target', 'title', 'unit'].sort()
+      [
+        'aggregateDisplayAuthorized',
+        'endsAt',
+        'goalId',
+        'startsAt',
+        'status',
+        'target',
+        'title',
+        'unit',
+      ].sort()
     );
   });
 

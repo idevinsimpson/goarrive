@@ -26,6 +26,7 @@ import {
   wsfReinstateMember,
   wsfRemoveMember,
   wsfResetJoinCode,
+  wsfSetGoalDisplayAuthorization,
 } from '../../src/index';
 
 const VERIFIED = { email_verified: true } as Record<string, unknown>;
@@ -258,12 +259,13 @@ describe('D2 + D3 — removal, departure, and what a link does for each state', 
     expect(mine.items.map((i) => i.groupId)).not.toContain(groupId);
   });
 
-  it('states what removal does NOT close, so the boundary is not overclaimed', async () => {
-    // This test exists to stop "removal closes the member-only paths" from
-    // being read as "a removed person can no longer see anything". Two paths
-    // deliberately survive removal, and one of them is an open defect. If a
-    // later change closes either, this test fails and the claim gets revisited
-    // on purpose rather than drifting.
+  it('states what removal does and does not close, so the boundary is not overclaimed', async () => {
+    // Written under Package D to stop "removal closes the member-only paths"
+    // from being read as "a removed person can no longer see anything", and to
+    // FAIL LOUDLY when the open defect it recorded was closed. PACKAGE E
+    // closed it, so this is now reframed rather than deleted: the path that
+    // deliberately survives removal is still asserted, and the one that was a
+    // defect is asserted CLOSED.
     const champion = 'd2c-champ';
     const member = 'd2c-member';
     const { groupId } = await seedGroup('inviteOnly', champion);
@@ -279,17 +281,18 @@ describe('D2 + D3 — removal, departure, and what a link does for each state', 
     const own = (await call(wsfMyContribution, member, { goalId })) as { ownCredit: number };
     expect(own.ownCredit).toBe(25);
 
-    // 2. OPEN DEFECT, held as Package E: wsfGoalPulse is invoker:'public' with
-    //    no eligibility check at all — no membership test, no goal-visibility
-    //    test, no rate limit. A removed person, or anyone who ever saw the
-    //    goalId, still reads the community's shared progress. Package D does
-    //    not close this and must not be reported as if it did.
-    const pulse = (await call(wsfGoalPulse, null, { goalId })) as {
-      sharedTotal: number;
-      contributorCount: number;
-    };
-    expect(pulse.sharedTotal).toBe(25);
-    expect(pulse.contributorCount).toBe(1);
+    // 2. CLOSED BY PACKAGE E. This goal carries no display authorization, so
+    //    holding its id gets nothing — for the removed member and for anyone
+    //    else. Under Package D this returned sharedTotal 25 to any caller.
+    await expectRefused(call(wsfGoalPulse, null, { goalId }), 'not-found', 'anonymous pulse: ');
+
+    //    And it is the AUTHORIZATION that decides, not who is asking: the same
+    //    anonymous call succeeds once a Champion authorizes the goal. Removal
+    //    and publication are separate concepts and this pins both directions.
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+    const authorized = (await call(wsfGoalPulse, null, { goalId })) as { sharedTotal: number };
+    expect(authorized.sharedTotal).toBe(25);
+    expect(authorized).not.toHaveProperty('contributorCount');
   });
 
   it('past valid contributions stay counted after removal', async () => {
@@ -601,23 +604,18 @@ describe('concurrency — the orderings the controls have to survive', () => {
     const totals = await getFirestore().doc(`wsfGoalMemberTotals/${goalId}_${member}`).get();
     expect((totals.data() as { total: number }).total).toBe(30);
 
-    // PROPERTY B — what the RESPONSE discloses. A separate question from
-    // double-counting, recorded as current behaviour rather than endorsed:
-    // the replay branch returns BEFORE the membership check, and sharedTotal
-    // is re-read after the transaction, so a removed person holding one old
-    // attemptId learns the community's progress INCLUDING the 45 contributed
-    // after they were removed, plus the goal's current target, unit and status.
+    // PROPERTY B — what the RESPONSE discloses. Under Package D this returned
+    // sharedTotal 75, including the 45 contributed after removal, because the
+    // replay branch returned before the membership check ever ran.
     //
-    // SEVERITY, stated precisely so this is not mistaken for an independent
-    // leak: every one of those four fields is ALREADY served to anyone at all
-    // by wsfGoalPulse, which is invoker:'public', needs no auth, no membership
-    // and no attemptId, and returns a superset. So this replay discloses
-    // nothing that is protected today — which is a statement about how little
-    // is protected, not about this branch being harmless. Closing this branch
-    // alone would close nothing while the Package E gap stands; closing E
-    // alone would leave this branch as a second way in. Both are needed, and
-    // this assertion is what makes a change to either one visible.
-    expect(replay.sharedTotal).toBe(75);
+    // PACKAGE E closed it. The caller is no longer an active member and this
+    // goal is not display-authorized, so the four fields describing CURRENT
+    // shared community state are absent. What they keep is their own: the
+    // attempt is acknowledged, counted once, and their own credit returned.
+    expect(replay.sharedTotal).toBeUndefined();
+    expect(replay.target).toBeUndefined();
+    expect(replay.unit).toBeUndefined();
+    expect(replay.status).toBeUndefined();
     expect(replay.ownCredit).toBe(30);
   });
 });

@@ -96,3 +96,19 @@ The `auth/email-already-in-use` collision above was found and written up on 2026
 The audit was right. The record of it was a chat message, so what survived was a label and a wrong summary.
 
 **Mitigation:** an audit whose conclusion matters to a later decision lands in this repo, in `RISKS.md` or `DECISIONS.md`, in the same work session — not in the channel where the work was discussed. When an audit clears a gate, write down the scenarios it *did not* clear as explicitly as the ones it did.
+
+## R-WSF-E1 — goal-read authorization (CLOSED 2026-09-16, pending review)
+
+**Was:** possession of a `goalId` returned a community's shared progress to anyone, through
+`wsfGoalPulse`; `wsfChallengePulse` did the same for challenge aggregates. Package D's
+removal controls did not close it, and its own tests said so.
+
+**Now:** closed in source by Package E — per-goal `aggregateDisplayAuthorized`, default off,
+Champion-controlled, plus an active-member route for the member experience. See DECISIONS.md
+2026-09-16.
+
+**Residual, and deliberately not closed here:** the transport remains publicly reachable,
+which is correct and is not the boundary. Whether the legacy challenge aggregate should ever
+be shown anonymously is an open compatibility decision, not a defect. And this is verified
+locally against `demo-wsf-local` only — it is **not** hosted verification, and Package E is
+not accepted until Devin reviews it and the staging smoke re-runs.

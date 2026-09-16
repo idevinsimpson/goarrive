@@ -103,6 +103,18 @@ async function tryRun(uid: string | null, data: Record<string, unknown>) {
   }
 }
 
+/**
+ * PACKAGE E: a reader for these aggregates must now be an ACTIVE MEMBER of the
+ * challenge's community. Seeds one and returns their uid.
+ */
+let viewerSeq = 0;
+async function seedViewer(groupId: string): Promise<string> {
+  viewerSeq += 1;
+  const uid = `wsfPulseViewer_${Date.now().toString(36)}_${viewerSeq}`;
+  await seedActiveMember(groupId, uid);
+  return uid;
+}
+
 describe('wsfChallengePulse', () => {
   beforeAll(async () => {
     // First-touch warm-up: open the Firestore emulator RPC channel before
@@ -112,16 +124,47 @@ describe('wsfChallengePulse', () => {
       .set({ at: Date.now() });
   }, 30_000);
 
-  test('unauthenticated caller: OK — public kiosk endpoint', async () => {
+  test('PACKAGE E: an unauthenticated caller is refused — this is no longer a public endpoint', async () => {
+    // It used to answer anyone holding a challengeId. Its authorization was an
+    // accident: it fetched the group document and checked only isSample, so
+    // joinPolicy never entered into it and possession of the id was
+    // permission. Package E did NOT invent a publication model for the legacy
+    // challenge aggregate; it made this an active-member read instead.
     const groupId = await seedGroup();
     const challengeId = await seedChallenge(groupId, 2000);
 
-    const result = await wsfChallengePulse.run(makeRequest(null, { challengeId }));
+    const r = await tryRun(null, { challengeId });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('not-found');
+  });
+
+  test('an active member of the community is served', async () => {
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId, 2000);
+    const viewer = await seedViewer(groupId);
+
+    const result = await wsfChallengePulse.run(makeRequest(viewer, { challengeId }));
     expect(result).toEqual({
       participantCount: 0,
       completedCount: 0,
       goalTarget: 2000,
     });
+  });
+
+  test('a cached entry is never served across communities', async () => {
+    // The cache is keyed by challengeId alone, so it sits below the membership
+    // check: warming it as a legitimate member must not make it readable by an
+    // active member of a different community.
+    const groupId = await seedGroup();
+    const challengeId = await seedChallenge(groupId, 2000);
+    const insider = await seedViewer(groupId);
+    await wsfChallengePulse.run(makeRequest(insider, { challengeId }));
+
+    const otherGroupId = await seedGroup();
+    const outsider = await seedViewer(otherGroupId);
+    const r = await tryRun(outsider, { challengeId });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('not-found');
   });
 
   test('§5.7 response keys are exactly the aggregate whitelist — no member identity leaked', async () => {
@@ -140,13 +183,18 @@ describe('wsfChallengePulse', () => {
       } as any);
     }
 
+    // PACKAGE E: the reader must be an active member. Deliberately a
+    // DIFFERENT member from the three who checked in above, so "no member
+    // identity leaks" is still a real question for this caller.
+    const viewer = await seedViewer(groupId);
+
     // Try every input the caller could smuggle a member identity through.
     // The response must be byte-identical to the challengeId-only call.
     const canonical = await wsfChallengePulse.run(
-      makeRequest(null, { challengeId })
+      makeRequest(viewer, { challengeId })
     );
     const withInjected = await wsfChallengePulse.run(
-      makeRequest(null, {
+      makeRequest(viewer, {
         challengeId,
         // Ignored fields — must not appear in response and must not change it.
         includeMembers: true,
@@ -205,7 +253,8 @@ describe('wsfChallengePulse', () => {
   test('goalTarget null flows through as null', async () => {
     const groupId = await seedGroup();
     const challengeId = await seedChallenge(groupId, null);
-    const result = await wsfChallengePulse.run(makeRequest(null, { challengeId }));
+    const viewer = await seedViewer(groupId);
+    const result = await wsfChallengePulse.run(makeRequest(viewer, { challengeId }));
     expect(result.goalTarget).toBeNull();
   });
 
@@ -231,9 +280,14 @@ describe('wsfChallengePulse', () => {
 
     const groupId = await seedGroup();
     const challengeId = await seedChallenge(groupId);
+    // PACKAGE E: authenticated, because the auth gate now runs BEFORE the
+    // limiter. That ordering is deliberate and cheaper — an unauthenticated
+    // flood is refused without a Firestore read at all — so reaching the
+    // limiter, which is what this test is about, requires a real caller.
+    const viewer = await seedViewer(groupId);
 
     const req = {
-      auth: undefined,
+      auth: { uid: viewer, token: { email_verified: true } as any } as any,
       data: { challengeId } as any,
       rawRequest: {
         headers: { 'x-forwarded-for': `${spoof}, ${realClient}` },
@@ -272,7 +326,7 @@ describe('wsfChallengePulse', () => {
     async function pulseAt(mockedNow: number) {
       const spy = jest.spyOn(Date, 'now').mockReturnValue(mockedNow);
       try {
-        return await wsfChallengePulse.run(makeRequest(null, { challengeId }));
+        return await wsfChallengePulse.run(makeRequest(uid, { challengeId }));
       } finally {
         spy.mockRestore();
       }

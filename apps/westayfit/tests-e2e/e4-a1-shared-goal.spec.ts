@@ -286,20 +286,53 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await expect(pageA.getByTestId('wsf-contribute-own-credit')).toContainText('20');
   await snap(pageA, '05-A-reload-shared-35');
 
-  // ---- context C: unauthenticated display sums both -----------------------
+  // ---- context C: the unauthenticated display ----------------------------
+  //
+  // REFRAMED BY PACKAGE E. This block used to assert that an anonymous browser
+  // reads a PRIVATE community's shared total off /display/{goalId}. That was
+  // the goal-read defect in its purest form — private community, zero
+  // credentials, full progress — and it was evidence of the defect, never
+  // desired behaviour.
+  //
+  // What it pins now is the actual model: the display shows nothing until the
+  // goal itself is explicitly authorized, and then it shows only the
+  // aggregate. The community stays 'private' throughout, which is the point —
+  // authorization is a property of the goal, not of the community's tier.
   const contextC: BrowserContext = await browser.newContext();
   const pageC = await contextC.newPage();
   const errorsC = captureConsoleErrors(pageC);
 
+  // Unauthorized: the display has nothing to show, and does not leak the total.
   await pageC.goto(`/display/${goalId}`);
+  await expect(pageC.getByTestId('wsf-display-not-available')).toBeVisible({ timeout: 15_000 });
+  await expect(pageC.getByText('35')).toHaveCount(0);
+  await snap(pageC, '06-C-display-unauthorized');
+
+  // The Champion authorizes THIS goal. Nothing about the community changes.
+  await firestoreWrite(
+    `wsfGoals/${goalId}`,
+    { aggregateDisplayAuthorized: { booleanValue: true } },
+    ['aggregateDisplayAuthorized']
+  );
+
+  // The unauthorized probe above deliberately provoked a 404 from
+  // wsfGoalPulse — that refusal IS the behaviour under test, not a defect — so
+  // it is discarded before the console-error guard runs on the authorized
+  // phase. Everything after this point is held to the usual zero-errors bar.
+  errorsC.length = 0;
+
+  await pageC.reload();
   await expect(pageC.getByTestId('wsf-display-screen')).toBeVisible({ timeout: 15_000 });
   await expect(pageC.getByTestId('wsf-display-shared-total')).toContainText('35');
   // Percentage floors: 35 / 5000 = 0.7% → floor = 0. Assert 0% shows, never 1%.
   await expect(pageC.getByTestId('wsf-display-percent')).toContainText('0%');
-  // The public display never receives individual credit.
+  // The authorized display still never receives individual credit, member
+  // identities, or a contributor count.
   await expect(pageC.getByTestId('wsf-contribute-own-credit')).toHaveCount(0);
   await expect(pageC.getByText(/confirmed credit/i)).toHaveCount(0);
-  await snap(pageC, '06-C-display-shows-35');
+  await expect(pageC.getByTestId('wsf-display-contributors')).toHaveCount(0);
+  await expect(pageC.getByText(/contributors?$/i)).toHaveCount(0);
+  await snap(pageC, '06-C-display-authorized-shows-35');
 
   // ---- unauthenticated call to the own-credit read is refused ------------
   // The auth boundary is wsfMyContribution's explicit request.auth check.

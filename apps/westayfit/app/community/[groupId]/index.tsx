@@ -77,6 +77,7 @@ type ListedGoal = {
   status: string;
   startsAt: string;
   endsAt: string;
+  aggregateDisplayAuthorized: boolean;
 };
 
 type ListGoalsResponse = { goals: ListedGoal[] };
@@ -118,6 +119,10 @@ export default function CommunityPage() {
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
+  // PACKAGE E: which goal's display authorization is being changed right now.
+  const [displayAuthPending, setDisplayAuthPending] = useState<string | null>(null);
+  const [displayAuthError, setDisplayAuthError] = useState<string | null>(null);
+
   const [leaveState, setLeaveState] = useState<
     { kind: 'idle' } | { kind: 'confirming' } | { kind: 'leaving' } | { kind: 'failed'; message: string }
   >({ kind: 'idle' });
@@ -363,6 +368,36 @@ export default function CommunityPage() {
     }
   }, [groupId, router]);
 
+  /**
+   * PACKAGE E. Authorize or revoke this goal's aggregate for the public
+   * display. Deliberately a separate, explicit act — not part of creating a
+   * goal — and available only to a Champion, whose authority is scoped to this
+   * community.
+   */
+  const onSetDisplayAuth = useCallback(
+    async (goalId: string, authorized: boolean) => {
+      setDisplayAuthPending(goalId);
+      setDisplayAuthError(null);
+      try {
+        const fn = httpsCallable<
+          { goalId: string; authorized: boolean },
+          { aggregateDisplayAuthorized: boolean }
+        >(getFirebaseFunctions(), 'wsfSetGoalDisplayAuthorization');
+        await fn({ goalId, authorized });
+        setGoalsReloadToken((n) => n + 1);
+      } catch {
+        setDisplayAuthError(
+          authorized
+            ? 'Could not turn on the public display for this goal. Nothing changed.'
+            : 'Could not turn off the public display for this goal. It is still on.'
+        );
+      } finally {
+        setDisplayAuthPending(null);
+      }
+    },
+    []
+  );
+
   const onShareInvite = useCallback(async () => {
     if (!inviteUrl) return;
     if (typeof navigator === 'undefined' || !('share' in navigator)) return;
@@ -575,20 +610,53 @@ export default function CommunityPage() {
             goalsState.goals.map((goal) => (
               // Separately created goals stay separate — one card each, with
               // its own unit and window. Nothing here sums or merges them.
-              <Link
-                key={goal.goalId}
-                href={`/contribute/${goal.goalId}` as never}
-                style={styles.goalCard}
-                testID={`wsf-community-goal-link-${goal.goalId}`}
-              >
-                <View>
-                  <Text style={styles.goalTitle}>{goal.title}</Text>
-                  <Text style={styles.goalMeta}>
-                    {`Goal: ${goal.target} ${goal.unit}`}
-                  </Text>
-                  <Text style={styles.goalCta}>Add your contribution</Text>
-                </View>
-              </Link>
+              <View key={goal.goalId}>
+                <Link
+                  href={`/contribute/${goal.goalId}` as never}
+                  style={styles.goalCard}
+                  testID={`wsf-community-goal-link-${goal.goalId}`}
+                >
+                  <View>
+                    <Text style={styles.goalTitle}>{goal.title}</Text>
+                    <Text style={styles.goalMeta}>
+                      {`Goal: ${goal.target} ${goal.unit}`}
+                    </Text>
+                    <Text style={styles.goalCta}>Add your contribution</Text>
+                  </View>
+                </Link>
+                {/*
+                  PACKAGE E. Champion-only, and secondary to the goal itself:
+                  the goal is the thing, this is a permission about it. The
+                  copy states the consequence plainly rather than naming a
+                  setting, because "public display" is what actually happens.
+                */}
+                {isChampion ? (
+                  <View testID={`wsf-goal-display-auth-${goal.goalId}`}>
+                    <Text style={styles.body}>
+                      {goal.aggregateDisplayAuthorized
+                        ? 'This goal\u2019s total can appear on a public display. Individual contributions and member names never do.'
+                        : 'This goal\u2019s total is not on any public display.'}
+                    </Text>
+                    <Pressable
+                      onPress={() =>
+                        onSetDisplayAuth(goal.goalId, !goal.aggregateDisplayAuthorized)
+                      }
+                      disabled={displayAuthPending === goal.goalId}
+                      style={styles.copyButton}
+                      testID={`wsf-goal-display-auth-toggle-${goal.goalId}`}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.copyButtonText}>
+                        {displayAuthPending === goal.goalId
+                          ? 'Saving\u2026'
+                          : goal.aggregateDisplayAuthorized
+                            ? 'Stop showing on a public display'
+                            : 'Allow on a public display'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
             ))
           ) : (
             <View
@@ -646,6 +714,12 @@ export default function CommunityPage() {
             </View>
           )}
         </View>
+
+        {displayAuthError ? (
+          <Text style={styles.error} testID="wsf-goal-display-auth-error">
+            {displayAuthError}
+          </Text>
+        ) : null}
 
         <View style={styles.section} testID="wsf-community-membership">
           <Text style={styles.sectionHeading}>Your membership</Text>

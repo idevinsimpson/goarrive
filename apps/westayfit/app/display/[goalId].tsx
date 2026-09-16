@@ -14,7 +14,6 @@ type GoalPulse = {
   target: number;
   unit: string;
   status: 'active' | 'closed';
-  contributorCount: number;
 };
 
 type DisplayState =
@@ -93,9 +92,17 @@ export default function DisplayGoal() {
     );
   }
   if (state.kind === 'notFound') {
+    // PACKAGE E: one screen for "no such goal" and "not authorized for public
+    // display", deliberately. Telling them apart would make this display an
+    // oracle for which goal ids exist, which is exactly what the server's
+    // byte-identical not-found refuses to do.
     return (
-      <View style={styles.screen}>
-        <Text style={styles.heading}>Goal not found</Text>
+      <View style={styles.screen} testID="wsf-display-not-available">
+        <Text style={styles.heading}>Nothing to show here</Text>
+        <Text style={styles.body}>
+          This display is not set up, or its community has not turned on public
+          display for this goal.
+        </Text>
       </View>
     );
   }
@@ -108,7 +115,7 @@ export default function DisplayGoal() {
     );
   }
 
-  const { sharedTotal, target, unit, status, contributorCount } = state.pulse;
+  const { sharedTotal, target, unit, status } = state.pulse;
   const pct = barPercent(sharedTotal, target);
   const truePct = integerPercent(sharedTotal, target);
   const remaining = Math.max(0, target - sharedTotal);
@@ -151,11 +158,6 @@ export default function DisplayGoal() {
           : remaining === 0
             ? 'Goal reached'
             : `${remaining} to go`}
-      </Text>
-      <Text style={styles.caption} testID="wsf-display-contributors">
-        {contributorCount === 1
-          ? '1 contributor'
-          : `${contributorCount} contributors`}
       </Text>
       {status === 'closed' ? (
         <Text style={styles.closedPill} testID="wsf-display-closed">

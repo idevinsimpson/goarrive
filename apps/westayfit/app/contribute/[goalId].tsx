@@ -35,7 +35,6 @@ type GoalPulse = {
   target: number;
   unit: string;
   status: 'active' | 'closed';
-  contributorCount: number;
 };
 
 type ContributeResult = {
@@ -288,20 +287,32 @@ export default function ContributeToGoal() {
       clearPendingIfAttempt(goalId as string, owner, attemptId);
       setPending(null);
       setLastResult(data);
-      setState((prev) => ({
-        kind: data.status === 'active' ? 'ready' : 'closed',
+      // PACKAGE E: the shared-state fields come back only when the caller is
+      // still authorized to see them. An active member on this screen always
+      // is. The guard exists so a caller who has lost membership mid-session
+      // cannot render `undefined` as community progress — they fall to
+      // notFound, the same non-enumerating answer the rest of this screen
+      // uses, rather than being shown a broken total.
+      if (
+        data.sharedTotal === undefined ||
+        data.target === undefined ||
+        data.unit === undefined ||
+        data.status === undefined
+      ) {
+        setState({ kind: 'notFound' });
+        return;
+      }
+      const nextStatus = data.status;
+      setState({
+        kind: nextStatus === 'active' ? 'ready' : 'closed',
         pulse: {
           sharedTotal: data.sharedTotal,
           target: data.target,
           unit: data.unit,
-          status: data.status,
-          contributorCount:
-            prev.kind === 'ready' || prev.kind === 'closed'
-              ? prev.pulse.contributorCount
-              : 0,
+          status: nextStatus,
         },
         ownCredit: data.ownCredit,
-      }));
+      });
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
