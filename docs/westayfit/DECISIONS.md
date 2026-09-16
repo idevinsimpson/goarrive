@@ -337,3 +337,61 @@ decision, not a silent policy set here.
 **Transport is not authorization.** The Cloud Run invoker stays public. Nothing in IAM,
 organization policy, Hosting or Auth configuration was changed to implement this; the
 handler decides what is returned.
+
+## 2026-09-16 — Package E follow-up: the control, not just the boundary
+
+Package E's authorization decision above is unchanged. This records what the follow-up pass
+corrected in how that decision reaches a person, and one thing it deliberately did not do.
+
+**A failed request is not an outcome.** The control reported "could not save" and kept
+showing the old value, which is a claim it had not established — the server may have saved
+the change before the connection dropped. There are three facts, not two: saving; the
+confirmed current permission; and outcome unknown. A failed request now triggers a read-back
+of the stored permission. Only when that read also fails does the screen say the setting
+could not be confirmed, and it then says what is shown may be out of date. When the read
+succeeds and disagrees with what was asked for, the screen says the change did not take
+effect rather than leaving a silent no-op.
+
+**A retry sends the value that was asked for.** Never the inverse of what the card shows.
+The card can be stale, and inverting it can undo a request that succeeded. The rule lives in
+`src/displayAuthControl` because it is not observable from the screen: whenever a retry is
+offered the card happens to show the negation of the intended value, so the correct rule and
+the defect compute the same answer. That coincidence is a property of today's screen, not of
+the rule, and it ends the moment the goal list can refresh on its own.
+
+**The words describe the permission, not the world.** "Public display is not authorized for
+this goal" is supportable. "This total is not on any public display" is not — the
+application cannot speak for screens, saved images or snapshots already shared.
+
+**Revocation survives closure in the interface too.** The decision above says a display
+permission survives goal closure and stays revocable. `wsfListGoals` selected only active
+goals, so a closed goal left the list and took the control with it: the permission stayed in
+force and the person responsible for it lost the way to turn it off. The list now also
+returns closed goals that are still authorized. Revoking then removes the only thing keeping
+such a goal in the list, so the card disappears at the moment of success — the screen names
+what happened and which goal it happened to, rather than letting the goal vanish silently.
+Closed goals carry the revoke control and nothing else; no contribution controls return.
+
+**Physics is not a permission.** The display polls, polls overlap, and an older successful
+response could land after a refusal and repaint a total the display was no longer permitted
+to show. Responses now carry the sequence they were issued with and may only change the
+screen if they are newer than what is rendered. The test that proves this had to hold a
+fetched *response*; holding the request and forwarding it later asks the server after the
+revocation and gets the refusal, which proves nothing.
+
+**One rule, not two copies.** The replay branch of `wsfContribute` and `wsfGoalPulse` answer
+the same eligibility question and each had its own copy. Both now go through
+`evaluateGoalAggregateAccess`, and the agreement is pinned across authorization and
+`isSample`, where the two previously diverged.
+
+**The boundary extends to every read that answers the same question.** `wsfMyContribution`
+answered any signed-in caller, so a stranger holding a `goalId` learned the goal existed and
+what it was counted in — the same disclosure the display path refuses, through the
+own-credit endpoint. It now requires an active membership or a record of the caller's own.
+The test is that the record exists, not that it is positive: a correction that zeroes
+someone's credit must not erase their history.
+
+**Not done here, recorded once as R-WSF-E2:** the Living WE surface and the member-facing
+experience around an authorized goal, including the founder-smoke observations. Deferred out
+of Package E on purpose so the authorization boundary could be reviewed on its own terms. It
+needs its own packet. No Package E change is justified by it.

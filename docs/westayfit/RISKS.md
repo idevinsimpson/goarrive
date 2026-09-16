@@ -97,18 +97,46 @@ The audit was right. The record of it was a chat message, so what survived was a
 
 **Mitigation:** an audit whose conclusion matters to a later decision lands in this repo, in `RISKS.md` or `DECISIONS.md`, in the same work session — not in the channel where the work was discussed. When an audit clears a gate, write down the scenarios it *did not* clear as explicitly as the ones it did.
 
-## R-WSF-E1 — goal-read authorization (CLOSED 2026-09-16, pending review)
+## R-WSF-E1 — goal-read authorization (OPEN — source implementation pending acceptance and hosted verification)
 
 **Was:** possession of a `goalId` returned a community's shared progress to anyone, through
 `wsfGoalPulse`; `wsfChallengePulse` did the same for challenge aggregates. Package D's
 removal controls did not close it, and its own tests said so.
 
-**Now:** closed in source by Package E — per-goal `aggregateDisplayAuthorized`, default off,
-Champion-controlled, plus an active-member route for the member experience. See DECISIONS.md
-2026-09-16.
+**Now: source implementation pending acceptance and hosted verification.** The risk stays
+OPEN. It was briefly recorded as CLOSED on 2026-09-16; that was wrong, and the correction is
+the point of this entry. Nothing that reaches a deployed environment has changed. What exists
+is source on `claude/wsf-package-e-display-auth` — per-goal `aggregateDisplayAuthorized`,
+default off, Champion-controlled through a real interface control, plus an active-member
+route for the member experience. See DECISIONS.md 2026-09-16.
 
-**Residual, and deliberately not closed here:** the transport remains publicly reachable,
-which is correct and is not the boundary. Whether the legacy challenge aggregate should ever
-be shown anonymously is an open compatibility decision, not a defect. And this is verified
-locally against `demo-wsf-local` only — it is **not** hosted verification, and Package E is
-not accepted until Devin reviews it and the staging smoke re-runs.
+**The deployed baseline is still `1cbf231`, which does not contain any of it.** Until a
+deployment of this branch is verified against hosted staging, every deployed WSF surface
+behaves exactly as it did before Package E: `wsfGoalPulse` serves any caller holding a
+`goalId`. Treat the defect as live in every environment.
+
+**What "closed" will require**, all three: Devin accepts the source; the branch deploys;
+the hosted staging smoke re-runs against the deployed build and shows the refusal and the
+authorized path behaving as they do locally. Local verification is against `demo-wsf-local`
+only and is not hosted verification.
+
+**Residual even then, and deliberately not closed here:** the transport remains publicly
+reachable, which is correct and is not the boundary. Whether the legacy challenge aggregate
+should ever be shown anonymously is an open compatibility decision, not a defect.
+
+## R-WSF-E2 — the member experience around an authorized goal is unreviewed (OPEN)
+
+Package E made publication a deliberate permission and proved the boundary holds. It did
+**not** look at what a member or a visitor actually experiences around an authorized goal:
+the Living WE surface, what a display communicates beyond a number, and the member-facing
+copy and flow raised during the founder smoke. That work was deferred out of Package E on
+purpose so the authorization boundary could be reviewed on its own terms.
+
+**Why it is a risk and not just a backlog item:** the permission is now real and Champions
+can turn it on. The experience it turns on has not been designed or reviewed, so the first
+community to use it is the review.
+
+**Deliberately not scoped here.** This entry records the deferral once so it is not
+rediscovered as a surprise. It is not a licence to redesign anything inside Package E, and
+no Package E change should be justified by it. It needs its own packet and its own owner
+decision about scope before any of it is built.
