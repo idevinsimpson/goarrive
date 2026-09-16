@@ -395,3 +395,45 @@ someone's credit must not erase their history.
 experience around an authorized goal, including the founder-smoke observations. Deferred out
 of Package E on purpose so the authorization boundary could be reviewed on its own terms. It
 needs its own packet. No Package E change is justified by it.
+
+## 2026-09-16 — Package E follow-up 2: what a screen may show after a refusal
+
+Three corrections from review. All client-side; no callable changed, so the deployment
+delta's function lists are unchanged by them.
+
+**A refusal ends the polling session.** Ordering responses by the sequence they were issued
+with closed one case and left its mirror image open, because issue order is not server
+processing order. A request can stall before its authorization lookup while a later request
+reaches the server, succeeds, and has its response held in flight; if the permission is
+revoked in between, the stalled request returns not-found with the *lower* sequence and the
+held success carries the higher one. Ordering alone then admits the success after the screen
+has already accepted the refusal. Stopping the poll timer never helped — it prevents new
+requests, it does not invalidate outstanding ones.
+
+A refusal now closes the session, and every outstanding response from it is refused
+admission from that moment regardless of sequence. Both rules are kept and both are tested:
+ordering handles the success-then-refusal case, session closure handles the
+refusal-then-success case, and a mutation that removes closure fails only the second.
+
+**Recovery is explicit.** A closed session stays closed; the only way back is a **Check
+again** action that starts a fresh session. No response from the refused session can perform
+that recovery. A different goal also clears the previous goal's rendered state at once.
+
+This concerns what the running application renders once it has learned access is refused. It
+is not a claim about anything already received elsewhere — a screenshot, a recording, a
+number someone wrote down — which this application cannot reach.
+
+**Outcomes are per goal, and scoped by generation.** One shared slot meant starting an
+action on one goal erased another's unresolved outcome while its request was still in
+flight, taking its warning, its intended retry value and its disabled control with it.
+Outcomes are keyed by goal and leave only by being settled or explicitly dismissed. Scoping
+by account and community alone cannot tell A → B → A from never having left, so an operation
+also carries a generation that advances each time the context is established.
+
+**A tested rule with no call site is not a tested control.** `displayAuthValueToSend` and
+`unsettledFor` shipped with unit tests and no importer — the screen kept its own inline copy.
+The wiring was written but still uncommitted when the client mutation harness ran
+`git checkout` over `app/`, and the commit went out afterwards. Mutation runs now require a
+clean tree and verify restoration. The division of evidence is: helper mutations prove the
+helper's behaviour, and a browser case proves the control uses it. An equivalent browser
+mutant proves neither, and is not counted as coverage.

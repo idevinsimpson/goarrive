@@ -80,6 +80,19 @@ environment.
 
 The web build must be rebuilt and redeployed for any of the interface behaviour to exist —
 the Champion control, the closed-goal rendering, the truthful saving / confirmed / unknown
-states, and the display screen's response sequencing all live in the client bundle. A
-functions-only deploy leaves the control absent while the boundary tightens, which is a
-coherent state but not the intended one.
+states, the per-goal scoping of those outcomes, and the display screen's session rules all
+live in the client bundle. A functions-only deploy leaves the control absent while the
+boundary tightens, which is a coherent state but not the intended one.
+
+The follow-up corrections after the first review are client-only. They changed no callable,
+so the function lists above are unchanged by them. Two are worth naming for whoever runs the
+hosted smoke, because both are about what a screen shows after a permission changes:
+
+- **A display refusal ends that display's polling session.** Once the display is refused it
+  stays blank, and it does not come back on its own even if the permission is restored. The
+  way back is the **Check again** button on the refused screen, which starts a fresh
+  session. A smoke that revokes, re-authorizes, and then waits for the display to recover by
+  itself will wait forever, and that is correct behaviour rather than a fault.
+- **Each goal's control keeps its own outcome.** A warning left on one goal stays there
+  while another goal is changed, and it leaves only when it is settled or dismissed with its
+  own **Dismiss this notice** button.
