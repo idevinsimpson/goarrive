@@ -7,7 +7,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
+import { getFirebaseFunctions, wsfIsStaging, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 
 // The minimum surface needed to make the E4-A1 slice self-testable end to
@@ -45,6 +45,10 @@ function isoLocalDefault(offsetMs: number): string {
     `T${pad(t.getHours())}:${pad(t.getMinutes())}`
   );
 }
+
+// Names the environment this screen is actually writing into, so a
+// screenshot cannot be mistaken for the other one — or for production.
+const SYNTHETIC_LABEL = wsfIsStaging ? 'STAGING SYNTHETIC TEST' : 'LOCAL SYNTHETIC TEST';
 
 export default function NewGoalPage() {
   const { ready, user } = useWsfAuth();
@@ -177,20 +181,35 @@ export default function NewGoalPage() {
 
   // Hard gate. Production bundles that somehow route here render a refusal
   // panel and never call any callable — no accidental production writes.
-  if (!wsfUsingEmulators) {
+  //
+  // WIDENED, NOT REMOVED. The gate now admits two synthetic environments: the
+  // local emulator suite, and a staging build. It still refuses production,
+  // and `wsfIsStaging` is only true when resolveStagingConfig verified a
+  // COMPLETE config for a project that is not `goarrive` (src/stagingEnv.ts)
+  // — so this cannot be turned on by setting one env var, and it cannot be
+  // turned on at all for a build pointed at production.
+  //
+  // Worth stating because it is load-bearing for how much this gate is worth:
+  // the restriction is CLIENT-SIDE ONLY. wsfCreateGoal has no environment,
+  // origin or hostname condition — it checks auth, a verified email, and an
+  // active foundingChampion membership, and nothing else. This screen is
+  // therefore a guard against accidental production writes, not a security
+  // boundary against deliberate ones.
+  if (!wsfUsingEmulators && !wsfIsStaging) {
     return (
       <View style={styles.screen}>
         <View style={[styles.card, styles.testBanner]}>
           <Text style={styles.testBannerText} testID="wsf-new-goal-gated-off">
-            LOCAL SYNTHETIC TEST — DISABLED
+            SYNTHETIC TEST ONLY — DISABLED
           </Text>
           <Text style={styles.body}>
-            /goals/new is only available when the WSF web app is running against
-            the local Firestore emulator on a loopback host.
+            /goals/new is only available in a synthetic test environment: the
+            local Firestore emulator on a loopback host, or a staging build
+            pointed at a separate staging backend.
           </Text>
           <Text style={styles.caption}>
-            Set EXPO_PUBLIC_WSF_USE_EMULATORS=1 and load this page over
-            localhost / 127.0.0.1. This screen writes SYNTHETIC data only.
+            This screen writes SYNTHETIC data only. It is disabled in a
+            production build by design.
           </Text>
         </View>
       </View>
@@ -223,7 +242,7 @@ export default function NewGoalPage() {
     return (
       <View style={styles.screen} testID="wsf-new-goal-created">
         <TestBanner />
-        <Text style={styles.heading}>LOCAL SYNTHETIC TEST — goal is live</Text>
+        <Text style={styles.heading}>{SYNTHETIC_LABEL} — goal is live</Text>
         <View style={styles.card}>
           <Text style={styles.subheading}>{created.title}</Text>
           <Text style={styles.body}>
@@ -369,7 +388,7 @@ export default function NewGoalPage() {
 function TestBanner() {
   return (
     <View style={styles.testBanner} testID="wsf-new-goal-test-banner">
-      <Text style={styles.testBannerText}>LOCAL SYNTHETIC TEST</Text>
+      <Text style={styles.testBannerText}>{SYNTHETIC_LABEL}</Text>
     </View>
   );
 }
