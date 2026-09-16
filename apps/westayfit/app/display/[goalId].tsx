@@ -1,7 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
@@ -34,37 +34,67 @@ export default function DisplayGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
   const [state, setState] = useState<DisplayState>({ kind: 'loading' });
-  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (!goalId) {
       setState({ kind: 'error', message: 'Missing goal id.' });
       return;
     }
-    cancelledRef.current = false;
+    // Scoped to this polling session rather than held in a ref across runs, so
+    // a new goal id starts from a clean sequence and a stale run can never
+    // resurrect itself.
+    let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
+    // Ticks overlap: the poll fires every 2s but a request can take longer, so
+    // responses are not guaranteed to arrive in the order they were sent. Each
+    // request carries the sequence number it was issued with, and a response is
+    // only allowed to change the screen if it is newer than whatever is already
+    // rendered.
+    //
+    // This is a privacy property, not a tidiness one. Without it, revoking
+    // public display can be undone by physics: an older successful response
+    // still in flight lands after the refusal and paints the protected total
+    // back onto a screen that is no longer permitted to show it.
+    let issued = 0;
+    let applied = 0;
+    const apply = (seq: number, next: DisplayState | ((prev: DisplayState) => DisplayState)) => {
+      if (cancelled) return false;
+      if (seq <= applied) return false;
+      applied = seq;
+      setState(next as DisplayState);
+      return true;
+    };
+
     const tick = async () => {
+      const seq = ++issued;
       try {
         const fn = httpsCallable<{ goalId: string }, GoalPulse>(
           getFirebaseFunctions(),
           'wsfGoalPulse'
         );
         const result = await fn({ goalId });
-        if (cancelledRef.current) return;
-        setState({ kind: 'ready', pulse: result.data });
+        apply(seq, { kind: 'ready', pulse: result.data });
       } catch (e) {
-        if (cancelledRef.current) return;
+        if (cancelled) return;
         if (e instanceof FirebaseError && e.code === 'functions/not-found') {
-          setState({ kind: 'notFound' });
+          // A refusal is terminal for this display: stop polling whether or not
+          // this response is the newest one, so no further request can be
+          // issued against a goal the server has just refused. The `apply`
+          // guard still decides what is rendered.
           if (timer) {
             clearInterval(timer);
             timer = null;
           }
+          apply(seq, { kind: 'notFound' });
           return;
         }
         // Transient errors are surfaced once but do not stop the poll — the
-        // next tick reconciles automatically.
+        // next tick reconciles automatically. A total already on screen is
+        // left alone; a transient network error is not evidence that the
+        // permission changed.
+        if (seq <= applied) return;
+        applied = seq;
         setState((prev) =>
           prev.kind === 'ready'
             ? prev
@@ -79,7 +109,7 @@ export default function DisplayGoal() {
     void tick();
     timer = setInterval(tick, POLL_INTERVAL_MS);
     return () => {
-      cancelledRef.current = true;
+      cancelled = true;
       if (timer) clearInterval(timer);
     };
   }, [goalId]);

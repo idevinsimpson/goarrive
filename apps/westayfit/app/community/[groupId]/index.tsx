@@ -1,7 +1,7 @@
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../../src/auth';
@@ -119,9 +119,27 @@ export default function CommunityPage() {
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
-  // PACKAGE E: which goal's display authorization is being changed right now.
-  const [displayAuthPending, setDisplayAuthPending] = useState<string | null>(null);
-  const [displayAuthError, setDisplayAuthError] = useState<string | null>(null);
+  // PACKAGE E. Three distinct states, because a failed request does not
+  // establish what the server did: it may have saved the change before the
+  // connection dropped. `unconfirmed` is that case, and it is not an error
+  // message dressed up — it is the honest answer until a read settles it.
+  const [displayAuth, setDisplayAuth] = useState<
+    | { kind: 'idle' }
+    | { kind: 'saving'; goalId: string; intended: boolean }
+    | { kind: 'unconfirmed'; goalId: string; intended: boolean }
+    | { kind: 'failed'; goalId: string; intended: boolean }
+  >({ kind: 'idle' });
+
+  // A response that lands after the screen has moved on must not write into
+  // whatever is on screen now. These hold the account and community the screen
+  // is currently showing, so a late response can ask whether it still applies
+  // before it changes anything.
+  const groupIdRef = useRef(groupId);
+  const uidRef = useRef<string | null>(user?.uid ?? null);
+  useEffect(() => {
+    groupIdRef.current = groupId;
+    uidRef.current = user?.uid ?? null;
+  }, [groupId, user?.uid]);
 
   const [leaveState, setLeaveState] = useState<
     { kind: 'idle' } | { kind: 'confirming' } | { kind: 'leaving' } | { kind: 'failed'; message: string }
@@ -370,32 +388,88 @@ export default function CommunityPage() {
 
   /**
    * PACKAGE E. Authorize or revoke this goal's aggregate for the public
-   * display. Deliberately a separate, explicit act — not part of creating a
-   * goal — and available only to a Champion, whose authority is scoped to this
-   * community.
+   * display. A separate, explicit act — not part of creating a goal — and
+   * available only to a Champion, whose authority is scoped to this community.
+   *
+   * The interesting part is failure. The first version caught any error and
+   * told the Champion "Nothing changed" or "It is still on". Neither is a fact
+   * a lost response establishes: the server may well have saved it. So a
+   * failure is not reported as an outcome. It triggers a READ-BACK of the
+   * authoritative value, and only if that also fails does the screen say, in
+   * those words, that it could not confirm the setting.
+   *
+   * `intended` is the explicit value that was asked for, carried through the
+   * retry. Retrying by inverting whatever the card currently shows could undo
+   * a request that actually succeeded.
    */
+  const readStoredDisplayAuth = useCallback(
+    async (targetGoalId: string): Promise<boolean | null> => {
+      // The authoritative read. wsfListGoals reports the stored permission for
+      // every goal this Champion can see, closed ones included. `null` means
+      // the read itself did not settle anything — it is not `false`, and it
+      // must not be rendered as one.
+      try {
+        const fn = httpsCallable<{ groupId: string }, ListGoalsResponse>(
+          getFirebaseFunctions(),
+          'wsfListGoals'
+        );
+        const result = await fn({ groupId });
+        const found = (result.data.goals ?? []).find((g) => g.goalId === targetGoalId);
+        if (!found) return null;
+        return found.aggregateDisplayAuthorized === true;
+      } catch {
+        return null;
+      }
+    },
+    [groupId]
+  );
+
   const onSetDisplayAuth = useCallback(
-    async (goalId: string, authorized: boolean) => {
-      setDisplayAuthPending(goalId);
-      setDisplayAuthError(null);
+    async (targetGoalId: string, intended: boolean) => {
+      // Scoped to this account, this community and this goal. `requestGroupId`
+      // and `requestUid` are captured now and compared when the response
+      // lands, so a slow response cannot write into a different community's
+      // screen or a different signed-in account's.
+      const requestGroupId = groupId;
+      const requestUid = user?.uid ?? null;
+      const stillTheSameContext = () =>
+        groupIdRef.current === requestGroupId && uidRef.current === requestUid;
+
+      setDisplayAuth({ kind: 'saving', goalId: targetGoalId, intended });
       try {
         const fn = httpsCallable<
           { goalId: string; authorized: boolean },
           { aggregateDisplayAuthorized: boolean }
         >(getFirebaseFunctions(), 'wsfSetGoalDisplayAuthorization');
-        await fn({ goalId, authorized });
+        await fn({ goalId: targetGoalId, authorized: intended });
+        if (!stillTheSameContext()) return;
+        setDisplayAuth({ kind: 'idle' });
         setGoalsReloadToken((n) => n + 1);
       } catch {
-        setDisplayAuthError(
-          authorized
-            ? 'Could not turn on the public display for this goal. Nothing changed.'
-            : 'Could not turn off the public display for this goal. It is still on.'
+        if (!stillTheSameContext()) return;
+        // The request did not come back. That is not the same as the change
+        // not happening — the server may have saved it before the connection
+        // dropped — so read the stored value rather than assert an outcome.
+        const stored = await readStoredDisplayAuth(targetGoalId);
+        if (!stillTheSameContext()) return;
+        if (stored === null) {
+          // Both the write and the read-back failed. Nothing is known, and the
+          // screen says exactly that.
+          setDisplayAuth({ kind: 'unconfirmed', goalId: targetGoalId, intended });
+          return;
+        }
+        // The read-back settled it. Show the stored permission either way, and
+        // when it disagrees with what was asked for, say the change did not
+        // take effect instead of leaving a silent no-op.
+        setGoalsReloadToken((n) => n + 1);
+        setDisplayAuth(
+          stored === intended
+            ? { kind: 'idle' }
+            : { kind: 'failed', goalId: targetGoalId, intended }
         );
-      } finally {
-        setDisplayAuthPending(null);
       }
     },
-    []
+    [groupId, user?.uid, readStoredDisplayAuth]
   );
 
   const onShareInvite = useCallback(async () => {
@@ -607,57 +681,121 @@ export default function CommunityPage() {
               </Pressable>
             </View>
           ) : goalsState.goals.length ? (
-            goalsState.goals.map((goal) => (
-              // Separately created goals stay separate — one card each, with
-              // its own unit and window. Nothing here sums or merges them.
-              <View key={goal.goalId}>
-                <Link
-                  href={`/contribute/${goal.goalId}` as never}
-                  style={styles.goalCard}
-                  testID={`wsf-community-goal-link-${goal.goalId}`}
-                >
-                  <View>
-                    <Text style={styles.goalTitle}>{goal.title}</Text>
-                    <Text style={styles.goalMeta}>
-                      {`Goal: ${goal.target} ${goal.unit}`}
-                    </Text>
-                    <Text style={styles.goalCta}>Add your contribution</Text>
-                  </View>
-                </Link>
-                {/*
-                  PACKAGE E. Champion-only, and secondary to the goal itself:
-                  the goal is the thing, this is a permission about it. The
-                  copy states the consequence plainly rather than naming a
-                  setting, because "public display" is what actually happens.
-                */}
-                {isChampion ? (
-                  <View testID={`wsf-goal-display-auth-${goal.goalId}`}>
-                    <Text style={styles.body}>
-                      {goal.aggregateDisplayAuthorized
-                        ? 'This goal\u2019s total can appear on a public display. Individual contributions and member names never do.'
-                        : 'This goal\u2019s total is not on any public display.'}
-                    </Text>
-                    <Pressable
-                      onPress={() =>
-                        onSetDisplayAuth(goal.goalId, !goal.aggregateDisplayAuthorized)
-                      }
-                      disabled={displayAuthPending === goal.goalId}
-                      style={styles.copyButton}
-                      testID={`wsf-goal-display-auth-toggle-${goal.goalId}`}
-                      accessibilityRole="button"
+            goalsState.goals.map((goal) => {
+              const goalIsOpen = goal.status === 'active';
+              const saving =
+                displayAuth.kind === 'saving' && displayAuth.goalId === goal.goalId;
+              // Unsettled covers the two cases where the last request left
+              // something to say: the outcome is unknown, or it is known and
+              // the change did not take. Both carry the value that was asked
+              // for, so the retry sends that explicit value — never the
+              // inverse of whatever the card happens to be showing, which
+              // would undo a request that had in fact succeeded.
+              const unsettled =
+                (displayAuth.kind === 'unconfirmed' || displayAuth.kind === 'failed') &&
+                displayAuth.goalId === goal.goalId
+                  ? displayAuth
+                  : null;
+              // A closed goal keeps no contribution controls, but a display
+              // permission granted while it ran is still in force: closing a
+              // goal does not revoke it. So the Champion keeps the revoke
+              // control on a closed goal that is still authorized, and that is
+              // the only control a closed goal carries.
+              const showDisplayControl =
+                isChampion && (goalIsOpen || goal.aggregateDisplayAuthorized);
+              return (
+                // Separately created goals stay separate — one card each, with
+                // its own unit and window. Nothing here sums or merges them.
+                <View key={goal.goalId}>
+                  {goalIsOpen ? (
+                    <Link
+                      href={`/contribute/${goal.goalId}` as never}
+                      style={styles.goalCard}
+                      testID={`wsf-community-goal-link-${goal.goalId}`}
                     >
-                      <Text style={styles.copyButtonText}>
-                        {displayAuthPending === goal.goalId
-                          ? 'Saving\u2026'
-                          : goal.aggregateDisplayAuthorized
-                            ? 'Stop showing on a public display'
-                            : 'Allow on a public display'}
+                      <View>
+                        <Text style={styles.goalTitle}>{goal.title}</Text>
+                        <Text style={styles.goalMeta}>
+                          {`Goal: ${goal.target} ${goal.unit}`}
+                        </Text>
+                        <Text style={styles.goalCta}>Add your contribution</Text>
+                      </View>
+                    </Link>
+                  ) : (
+                    <View
+                      style={styles.goalCard}
+                      testID={`wsf-community-goal-closed-${goal.goalId}`}
+                      {...({ 'data-state': 'closed' } as Record<string, unknown>)}
+                    >
+                      <Text style={styles.goalTitle}>{goal.title}</Text>
+                      <Text style={styles.goalMeta}>
+                        {`Goal: ${goal.target} ${goal.unit}`}
                       </Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </View>
-            ))
+                      <Text style={styles.goalMeta}>
+                        This goal has closed. It is no longer taking
+                        contributions.
+                      </Text>
+                    </View>
+                  )}
+                  {/*
+                    PACKAGE E. Champion-only, and secondary to the goal itself:
+                    the goal is the thing, this is a permission about it. The
+                    copy describes the permission this application controls. It
+                    does not claim anything about screens, saved images or
+                    snapshots already shared, which this application cannot
+                    reach and cannot speak for.
+                  */}
+                  {showDisplayControl ? (
+                    <View testID={`wsf-goal-display-auth-${goal.goalId}`}>
+                      <Text
+                        style={styles.body}
+                        testID={`wsf-goal-display-auth-state-${goal.goalId}`}
+                      >
+                        {goal.aggregateDisplayAuthorized
+                          ? 'Public display is authorized for this goal. A public display can show the running total only \u2014 never individual contributions or member names.'
+                          : 'Public display is not authorized for this goal.'}
+                      </Text>
+                      <Pressable
+                        onPress={() =>
+                          onSetDisplayAuth(
+                            goal.goalId,
+                            unsettled ? unsettled.intended : !goal.aggregateDisplayAuthorized
+                          )
+                        }
+                        disabled={saving}
+                        style={styles.copyButton}
+                        testID={`wsf-goal-display-auth-toggle-${goal.goalId}`}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.copyButtonText}>
+                          {saving
+                            ? 'Saving\u2026'
+                            : unsettled
+                              ? unsettled.intended
+                                ? 'Try again: authorize public display'
+                                : 'Try again: remove public display'
+                              : goal.aggregateDisplayAuthorized
+                                ? 'Remove public display'
+                                : 'Authorize public display'}
+                        </Text>
+                      </Pressable>
+                      {unsettled ? (
+                        <Text
+                          style={styles.error}
+                          testID={`wsf-goal-display-auth-unsettled-${goal.goalId}`}
+                        >
+                          {unsettled.kind === 'unconfirmed'
+                            ? 'We could not confirm this goal\u2019s current display permission. What is shown above may be out of date until this succeeds.'
+                            : unsettled.intended
+                              ? 'That change did not take effect. Public display is still not authorized for this goal.'
+                              : 'That change did not take effect. Public display is still authorized for this goal.'}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
           ) : (
             <View
               style={styles.noChallengeCard}
@@ -714,12 +852,6 @@ export default function CommunityPage() {
             </View>
           )}
         </View>
-
-        {displayAuthError ? (
-          <Text style={styles.error} testID="wsf-goal-display-auth-error">
-            {displayAuthError}
-          </Text>
-        ) : null}
 
         <View style={styles.section} testID="wsf-community-membership">
           <Text style={styles.sectionHeading}>Your membership</Text>

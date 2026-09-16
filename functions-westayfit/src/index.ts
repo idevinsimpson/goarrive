@@ -931,13 +931,20 @@ export const wsfResetJoinCode = onCall<ResetJoinCodeRequest>(
 // wsfCreateGoal and wsfAdjustGoal), wsfContribute, wsfMyCommunities, and the
 // preview's active-membership aggregate.
 //
-// WHAT IT DOES NOT CLOSE, and is not this packet's to fix:
-//   - wsfMyContribution has no membership check by design — a member who left
-//     still sees the credit they earned, which is what "past valid
-//     contributions do not disappear" means.
-//   - wsfGoalPulse is a public aggregate read with no eligibility check at all.
-//     That is the Package E goal-read defect and is explicitly out of scope
-//     here. Removal does NOT close it, and no claim is made that it does.
+// WHAT IT DOES NOT CLOSE, deliberately:
+//   - wsfMyContribution still answers a former member about their OWN credit.
+//     That is what "past valid contributions do not disappear" means, and it
+//     survives Package E unchanged. What Package E added there is a
+//     non-enumeration check, not a membership check: a caller with no record
+//     of their own AND no active membership gets the unknown-goal answer, so
+//     the own-credit endpoint stopped being a way for a signed-in stranger to
+//     confirm that a protected goal exists and learn its unit.
+//   - wsfGoalPulse was a public aggregate read with no eligibility check at
+//     all, and removal did not close it. PACKAGE E closed it: the read now
+//     requires an active membership in the goal's community OR an explicit
+//     per-goal display authorization. Removal therefore does now close the
+//     pulse path for an unauthorized goal, and deliberately does not close it
+//     for an authorized one — those numbers are public by explicit decision.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type MembershipActionRequest = { groupId?: unknown; targetUid?: unknown };
@@ -2103,6 +2110,55 @@ function isAggregateDisplayAuthorized(goal: Pick<GoalDoc, 'aggregateDisplayAutho
 }
 
 /**
+ * THE single policy for "may this caller be told this goal's CURRENT shared
+ * state?". Every path that can disclose it calls this — the display read and
+ * the contribution replay both — so a second path cannot quietly apply a
+ * weaker rule than the first.
+ *
+ * It exists because they HAD diverged: wsfGoalPulse required the community to
+ * exist and refused a sample community, while the replay path checked only
+ * membership-or-authorization. A non-member replaying an authorized goal in a
+ * sample community would have received state the display itself refuses.
+ *
+ * Two independent routes, neither implying the other:
+ *   asMember  — an active member of the goal's community. The member
+ *               experience does not depend on publication, and is not subject
+ *               to the sample suppression: a sample community's own members
+ *               are looking at their own community.
+ *   asDisplay — the goal carries an explicit aggregateDisplayAuthorized, the
+ *               community exists, and it is not sample data. §5.8: sample data
+ *               may never surface in a total presented as real to an outside
+ *               audience.
+ */
+type GoalAggregateAccess = { asMember: boolean; asDisplay: boolean; allowed: boolean };
+
+async function evaluateGoalAggregateAccess(
+  goal: Pick<GoalDoc, 'communityGroupId' | 'aggregateDisplayAuthorized'>,
+  callerUid: string | null
+): Promise<GoalAggregateAccess> {
+  const db = getFirestore();
+
+  let asMember = false;
+  if (callerUid) {
+    const membershipSnap = await db
+      .doc(`wsfMemberships/${goal.communityGroupId}_${callerUid}`)
+      .get();
+    asMember =
+      membershipSnap.exists &&
+      (membershipSnap.data() as { membershipStatus?: string }).membershipStatus === 'active';
+  }
+
+  let asDisplay = false;
+  if (isAggregateDisplayAuthorized(goal)) {
+    const groupSnap = await db.doc(`wsfCommunityGroups/${goal.communityGroupId}`).get();
+    asDisplay =
+      groupSnap.exists && (groupSnap.data() as { isSample?: boolean }).isSample !== true;
+  }
+
+  return { asMember, asDisplay, allowed: asMember || asDisplay };
+}
+
+/**
  * The anonymous aggregate response. PACKAGE E removed `contributorCount`:
  * it had no approved public-display purpose, and it was being returned by
  * inertia rather than by decision. Nothing replaces it — a substitute metric
@@ -2514,6 +2570,7 @@ export const wsfContribute = onCall<ContributeRequest>(
       goalStatus,
       callerIsActiveMember,
       goalDisplayAuthorized,
+      goalCommunityGroupId,
     } =
       await db.runTransaction(async (tx) => {
         const goalSnap = await tx.get(goalRef);
@@ -2565,6 +2622,7 @@ export const wsfContribute = onCall<ContributeRequest>(
             goalStatus: goal.status,
             callerIsActiveMember: replayMembership?.membershipStatus === 'active',
             goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
+            goalCommunityGroupId: goal.communityGroupId,
           };
         }
 
@@ -2650,14 +2708,26 @@ export const wsfContribute = onCall<ContributeRequest>(
           goalStatus: goal.status,
           callerIsActiveMember: true,
           goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
+          goalCommunityGroupId: goal.communityGroupId,
         };
       });
 
-    // May this caller be told the community's CURRENT shared state? An active
-    // member may. Anyone may when the goal is explicitly display-authorized,
-    // because then the same numbers are served by wsfGoalPulse anyway and
-    // withholding them here would protect nothing.
-    const maySeeCurrentSharedState = callerIsActiveMember || goalDisplayAuthorized;
+    // May this caller be told the community's CURRENT shared state? Decided by
+    // evaluateGoalAggregateAccess — the SAME policy wsfGoalPulse uses — so a
+    // replay can never bypass a restriction the display path enforces. It
+    // previously checked only membership-or-authorization, which meant a
+    // non-member replaying an authorized goal in a SAMPLE community received
+    // state the display itself refuses.
+    //
+    // The caller's own receipt is decided separately below and is not subject
+    // to this: addedCount, ownCredit and alreadyRecorded are theirs.
+    const { allowed: maySeeCurrentSharedState } = await evaluateGoalAggregateAccess(
+      {
+        communityGroupId: goalCommunityGroupId,
+        aggregateDisplayAuthorized: goalDisplayAuthorized ? true : undefined,
+      },
+      callerIsActiveMember ? uid : null
+    );
 
     // Their own credit is theirs either way, and is read for both cases. It is
     // derived from their own uid, never from anyone else's row.
@@ -2751,29 +2821,8 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     // can never stand in for the decision. That costs a document read per
     // poll and is the right trade: a Champion who revokes expects it revoked,
     // not revoked in two seconds.
-    let authorizedAsMember = false;
-    if (request.auth) {
-      const membershipSnap = await db
-        .doc(`wsfMemberships/${goal.communityGroupId}_${request.auth.uid}`)
-        .get();
-      authorizedAsMember =
-        membershipSnap.exists &&
-        (membershipSnap.data() as { membershipStatus?: string }).membershipStatus === 'active';
-    }
-    if (!authorizedAsMember && !isAggregateDisplayAuthorized(goal)) notFound();
-
-    // Sample data may never be presented as real progress (§5.8), and this is
-    // a SUPPRESSION, not an authorization: isSample can stop a display, it can
-    // never start one. The authorization check above already ran.
-    //
-    // Members are exempt: a sample community's own members are looking at
-    // their own community, and §5.8 is about sample data surfacing in a total
-    // PRESENTED AS REAL to an outside audience.
-    const groupSnap = await db.doc(`wsfCommunityGroups/${goal.communityGroupId}`).get();
-    if (!groupSnap.exists) notFound();
-    if (!authorizedAsMember && (groupSnap.data() as { isSample?: boolean }).isSample === true) {
-      notFound();
-    }
+    const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
+    if (!access.allowed) notFound();
 
     // The cache is keyed by goalId, so it may only be consulted once the
     // caller is known to be entitled to that goal's aggregate. Both routes
@@ -2832,10 +2881,37 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
       db.doc(`wsfGoals/${goalId}`).get(),
       db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`).get(),
     ]);
-    if (!goalSnap.exists) {
-      throw new HttpsError('not-found', 'Goal not found.');
-    }
+    if (!goalSnap.exists) notFound();
     const goal = goalSnap.data() as GoalDoc;
+
+    // PACKAGE E. This used to answer ANY authenticated caller, so a signed-in
+    // stranger holding a goalId learned that the goal existed and what its
+    // unit was — an enumeration surface on a protected goal, reached through
+    // the own-credit endpoint rather than the display one.
+    //
+    // Two legitimate readers, and the rule keeps both:
+    //   1. An ACTIVE MEMBER, who may see their own zero before they have
+    //      contributed anything.
+    //   2. ANYONE WITH THEIR OWN RECORD here, including a former member. The
+    //      test is that the totals document EXISTS, not that it is positive —
+    //      a correction that zeroes someone's total must never erase their
+    //      legitimate history, and their own past contribution stays theirs.
+    //
+    // Everyone else gets the non-enumerating answer an unknown goal gets.
+    // Membership is not required to keep what is yours, and having something
+    // of your own here is not membership.
+    const hasOwnRecord = memberSnap.exists;
+    let isActiveMember = false;
+    if (!hasOwnRecord) {
+      const membershipSnap = await db
+        .doc(`wsfMemberships/${goal.communityGroupId}_${uid}`)
+        .get();
+      isActiveMember =
+        membershipSnap.exists &&
+        (membershipSnap.data() as { membershipStatus?: string }).membershipStatus === 'active';
+    }
+    if (!hasOwnRecord && !isActiveMember) notFound();
+
     const total =
       (memberSnap.data() as { total?: number } | undefined)?.total ?? 0;
     return { ownCredit: total, unit: goal.unit };
@@ -2964,11 +3040,31 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     // `active` until it is closed, so it stays in this list — reaching the
     // target is a reason to celebrate on the page, never a reason for the goal
     // to disappear from under the people still contributing to it.
-    const snap = await db
-      .collection('wsfGoals')
-      .where('communityGroupId', '==', groupId)
-      .where('status', '==', 'active')
-      .get();
+    // Two equality-only queries. PACKAGE E adds the second: a goal that is no
+    // longer active but is STILL display-authorized has to stay reachable, or
+    // "survives closure but remains revocable" is only true of the callable
+    // and not of the product — the Champion would have no way to turn it off.
+    //
+    // Equality-only on both, so Firestore serves them from single-field
+    // indexes and no composite index is introduced. firestore.indexes.json is
+    // untouched.
+    const [activeSnap, authorizedSnap] = await Promise.all([
+      db
+        .collection('wsfGoals')
+        .where('communityGroupId', '==', groupId)
+        .where('status', '==', 'active')
+        .get(),
+      db
+        .collection('wsfGoals')
+        .where('communityGroupId', '==', groupId)
+        .where('aggregateDisplayAuthorized', '==', true)
+        .get(),
+    ]);
+
+    const byId = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    for (const d of activeSnap.docs) byId.set(d.id, d);
+    for (const d of authorizedSnap.docs) byId.set(d.id, d);
+    const snap = { docs: [...byId.values()] };
 
     // More than one active goal is legitimate and is NOT collapsed: separately
     // created goals stay separate, each with its own title, unit and window.

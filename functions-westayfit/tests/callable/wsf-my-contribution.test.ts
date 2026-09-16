@@ -7,6 +7,9 @@
  *   * a member who never contributed reads 0
  *   * a member who contributed 20 reads 20
  *   * a member reads only their own row: another member's 20 is not visible
+ *   * PACKAGE E: a caller who is neither an active member nor the holder of
+ *     their own record gets the unknown-goal answer (pinned in
+ *     wsf-package-e-member-access, alongside the former-member case)
  *   * closure does not clear own credit
  *   * an authorized downward correction is reflected (via wsfAdjustGoal)
  *
@@ -108,9 +111,17 @@ describe('wsfMyContribution', () => {
     if (!r.ok) expect(r.error.code).toBe('not-found');
   });
 
+  // PACKAGE E. These two cases say "member", and until Package E the fixture
+  // never made anybody one — wsfMyContribution answered any signed-in caller,
+  // so an unseeded uid passed and the gap between the name and the fixture was
+  // invisible. The membership seed is what the case always claimed to be
+  // testing; a caller who is genuinely not a member is now refused, and that
+  // is pinned separately in wsf-package-e-member-access.
   test('(c) member who never contributed reads 0 with the goal unit', async () => {
-    const { goalId } = await seedGoal();
-    const r = await tryMine(uniq('fresh'), { goalId });
+    const { goalId, communityGroupId } = await seedGoal();
+    const uid = uniq('fresh');
+    await seedMembership(communityGroupId, uid);
+    const r = await tryMine(uid, { goalId });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value).toEqual({ ownCredit: 0, unit: 'squats' });
   });
@@ -130,6 +141,7 @@ describe('wsfMyContribution', () => {
     const contributor = uniq('contrib');
     const reader = uniq('reader');
     await seedMembership(communityGroupId, contributor);
+    await seedMembership(communityGroupId, reader);
     await contribute(contributor, goalId, 'attempt-other-20', 20);
     const r = await tryMine(reader, { goalId });
     expect(r.ok).toBe(true);

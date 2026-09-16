@@ -16,6 +16,7 @@ import { Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import {
+  wsfAdjustGoal,
   wsfChallengePulse,
   wsfContribute,
   wsfGoalPulse,
@@ -304,5 +305,282 @@ describe('wsfChallengePulse is no longer an anonymous aggregate read', () => {
 
     await call(wsfRemoveMember, champion, { groupId, targetUid: member });
     await expectRefused(call(wsfChallengePulse, member, { challengeId }), 'not-found');
+  });
+});
+
+
+/**
+ * ITEM 4 — the authorization boundary has to hold across every read that can
+ * answer the same question, not just the one named in the packet.
+ *
+ * wsfGoalPulse is the obvious display read. wsfMyContribution is the one that
+ * is easy to miss: it answers about a goal, it takes a goalId, and before
+ * Package E it answered ANY signed-in caller. That made it a second oracle for
+ * "does this goal exist, and what is it counted in" — reachable by anybody with
+ * an account, on a goal whose display permission is OFF.
+ */
+describe('wsfMyContribution does not tell a stranger that a protected goal exists', () => {
+  it('refuses an unrelated signed-in caller holding a real goalId', async () => {
+    const champion = uniq('champ');
+    const outsider = uniq('outsider');
+    const groupId = await seedGroup(champion);
+    // The outsider is a real, verified account — just not of this community.
+    await seedGroup(outsider);
+    const goalId = await seedGoal(groupId, champion);
+
+    await expectRefused(call(wsfMyContribution, outsider, { goalId }), 'not-found');
+  });
+
+  it('refuses identically for a goalId that does not exist at all', async () => {
+    const outsider = uniq('outsider');
+    await seedGroup(outsider);
+
+    // The point of the pairing: a stranger cannot tell a real protected goal
+    // from a fabricated id. Same code, same message, so neither the existence
+    // of the goal nor its unit leaks.
+    let realCode = '';
+    let realMessage = '';
+    const champion = uniq('champ');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfMyContribution, outsider, { goalId }).catch((e: HttpsError) => {
+      realCode = e.code;
+      realMessage = e.message;
+    });
+
+    let fakeCode = '';
+    let fakeMessage = '';
+    await call(wsfMyContribution, outsider, { goalId: uniq('nosuchgoal') }).catch(
+      (e: HttpsError) => {
+        fakeCode = e.code;
+        fakeMessage = e.message;
+      }
+    );
+
+    expect({ code: realCode, message: realMessage }).toEqual({
+      code: fakeCode,
+      message: fakeMessage,
+    });
+    expect(realCode).toBe('not-found');
+  });
+
+  it('still refuses a stranger when the goal IS display-authorized', async () => {
+    // Display authorization permits the aggregate, through the display path.
+    // It is not a grant of the member path, and own-credit is a member path.
+    const champion = uniq('champ');
+    const outsider = uniq('outsider');
+    const groupId = await seedGroup(champion);
+    await seedGroup(outsider);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+
+    // The aggregate is readable by anyone, as decided.
+    const pulse = (await call(wsfGoalPulse, null, { goalId })) as { sharedTotal: number };
+    expect(pulse.sharedTotal).toBe(0);
+    // The outsider's own-credit read is still refused.
+    await expectRefused(call(wsfMyContribution, outsider, { goalId }), 'not-found');
+  });
+
+  it('serves an ACTIVE member who has contributed nothing yet, as zero', async () => {
+    // Zero credit is an answer, not a refusal. A member who has not started
+    // must be able to open the screen and see that they are at zero.
+    const champion = uniq('champ');
+    const member = uniq('m');
+    const groupId = await seedGroup(champion);
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, champion);
+
+    const own = (await call(wsfMyContribution, member, { goalId })) as {
+      ownCredit: number;
+      unit: string;
+    };
+    expect(own).toEqual({ ownCredit: 0, unit: 'reps' });
+  });
+
+  it('keeps a former member’s history when a correction has zeroed their credit', async () => {
+    // The check is that their record EXISTS, not that it is positive. A
+    // Champion correcting a mis-recording down to zero must not also delete
+    // the person's ability to see their own history.
+    const champion = uniq('champ');
+    const member = uniq('m');
+    const groupId = await seedGroup(champion);
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfContribute, member, { goalId, attemptId: uniq('a'), count: 40 });
+
+    await call(wsfAdjustGoal, champion, {
+      goalId,
+      targetUid: member,
+      delta: -40,
+      reason: 'Tally counter double-counted this member.',
+    });
+    await call(wsfRemoveMember, champion, { groupId, targetUid: member });
+
+    // Removed, and corrected to zero — and still answered.
+    const own = (await call(wsfMyContribution, member, { goalId })) as {
+      ownCredit: number;
+      unit: string;
+    };
+    expect(own).toEqual({ ownCredit: 0, unit: 'reps' });
+  });
+});
+
+/**
+ * ITEM 4b — one policy, two call sites.
+ *
+ * The replay branch of wsfContribute answers the same question wsfGoalPulse
+ * answers: may this caller see this goal's current shared state? Two
+ * independent copies of that rule is how they drift. Both now go through
+ * evaluateGoalAggregateAccess, and these cases pin that they agree — including
+ * on the case that is easy to get wrong, where display authorization is set
+ * but the community is a sample community and the display read is refused
+ * anyway.
+ */
+describe('public-read eligibility is the same rule for the pulse and the replay', () => {
+  async function pulseAllowed(goalId: string): Promise<boolean> {
+    try {
+      await call(wsfGoalPulse, null, { goalId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it('agrees on all four combinations of authorization and sample community', async () => {
+    for (const isSample of [false, true]) {
+      for (const authorized of [false, true]) {
+        const champion = uniq('champ');
+        const member = uniq('m');
+        const groupId = await seedGroup(champion);
+        if (isSample) {
+          await getFirestore()
+            .doc(`wsfCommunityGroups/${groupId}`)
+            .set({ isSample: true }, { merge: true });
+        }
+        await seedMember(groupId, member);
+        const goalId = await seedGoal(groupId, champion);
+        const attemptId = uniq('attempt');
+
+        await call(wsfContribute, member, { goalId, attemptId, count: 30 });
+        if (authorized) {
+          await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+        }
+        // Removed, so the replay's only possible route to shared state is the
+        // display permission — the same route the anonymous pulse uses.
+        await call(wsfRemoveMember, champion, { groupId, targetUid: member });
+
+        const replay = (await call(wsfContribute, member, {
+          goalId,
+          attemptId,
+          count: 30,
+        })) as Record<string, unknown>;
+
+        const label = `isSample=${isSample} authorized=${authorized}: `;
+        expect(`${label}${await pulseAllowed(goalId)}`).toBe(
+          `${label}${replay.sharedTotal !== undefined}`
+        );
+        // And the expected value of that shared decision.
+        expect(`${label}${replay.sharedTotal !== undefined}`).toBe(
+          `${label}${authorized && !isSample}`
+        );
+      }
+    }
+  });
+});
+
+/**
+ * ITEM 2 — revocation has to remain reachable after a goal closes.
+ *
+ * Closing a goal does not revoke a display permission granted while it ran, by
+ * decision. That makes "the control disappears when the goal closes" a real
+ * defect rather than a cosmetic one: the permission stays in force and the
+ * person responsible for it loses the only way to turn it off.
+ */
+describe('a Champion can still revoke display after the goal closes', () => {
+  async function closeGoal(goalId: string): Promise<void> {
+    await getFirestore().doc(`wsfGoals/${goalId}`).set({ status: 'closed' }, { merge: true });
+  }
+
+  it('closure does not revoke: the display keeps serving a closed authorized goal', async () => {
+    const champion = uniq('champ');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+    await closeGoal(goalId);
+
+    const pulse = (await call(wsfGoalPulse, null, { goalId })) as { status: string };
+    expect(pulse.status).toBe('closed');
+  });
+
+  it('wsfListGoals still returns the closed goal, so the control is reachable', async () => {
+    const champion = uniq('champ');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+    await closeGoal(goalId);
+
+    const listed = (await call(wsfListGoals, champion, { groupId })) as {
+      goals: { goalId: string; status: string; aggregateDisplayAuthorized: boolean }[];
+    };
+    const found = listed.goals.find((g) => g.goalId === goalId);
+    expect(found).toBeDefined();
+    expect({ status: found!.status, authorized: found!.aggregateDisplayAuthorized }).toEqual({
+      status: 'closed',
+      authorized: true,
+    });
+  });
+
+  it('a closed goal that was never authorized stays out of the list', async () => {
+    // Closure still means "gone from the list" in the ordinary case. The list
+    // widened for exactly one reason, and it is not a general un-closing.
+    const champion = uniq('champ');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    await closeGoal(goalId);
+
+    const listed = (await call(wsfListGoals, champion, { groupId })) as {
+      goals: { goalId: string }[];
+    };
+    expect(listed.goals.map((g) => g.goalId)).not.toContain(goalId);
+  });
+
+  it('revoking on the closed goal stops the display, through the ordinary control', async () => {
+    const champion = uniq('champ');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+    await closeGoal(goalId);
+
+    // No database edit and no privileged path: the same callable the interface
+    // drives, called as the Champion.
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: false });
+
+    await expectRefused(call(wsfGoalPulse, null, { goalId }), 'not-found');
+    // And it drops back out of the list, because nothing holds it there now.
+    const listed = (await call(wsfListGoals, champion, { groupId })) as {
+      goals: { goalId: string }[];
+    };
+    expect(listed.goals.map((g) => g.goalId)).not.toContain(goalId);
+  });
+
+  it('an ordinary member still cannot revoke on a closed goal', async () => {
+    const champion = uniq('champ');
+    const member = uniq('m');
+    const groupId = await seedGroup(champion);
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, champion);
+    await call(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+    await closeGoal(goalId);
+
+    // not-found, not permission-denied: the callable refuses a non-Champion
+    // with the same answer an unknown goal gets, matching wsfListGoals and
+    // wsfPreviewCommunity. Closure does not change that.
+    await expectRefused(
+      call(wsfSetGoalDisplayAuthorization, member, { goalId, authorized: false }),
+      'not-found'
+    );
+    // Unchanged.
+    const pulse = (await call(wsfGoalPulse, null, { goalId })) as { status: string };
+    expect(pulse.status).toBe('closed');
   });
 });
