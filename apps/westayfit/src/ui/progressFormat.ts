@@ -30,6 +30,21 @@ export function fillRatio(completed: number, target: number): number {
 }
 
 /**
+ * The fill ratio as a four-decimal string for the DOM, ROUNDED DOWN, so it can
+ * only read "1.0000" at or beyond the target. (`toFixed` rounds to nearest,
+ * which would print a literal full ratio for 29,999 of 30,000.)
+ */
+export function fillRatioAttribute(completed: number, target: number): string {
+  const ratio = fillRatio(completed, target);
+  if (ratio >= 1) return '1.0000';
+  const tenThousandths =
+    Number.isInteger(completed) && Number.isInteger(target)
+      ? Math.floor((completed * 10000) / target)
+      : Math.floor(ratio * 10000);
+  return (tenThousandths / 10000).toFixed(4);
+}
+
+/**
  * One-decimal percentage, rounded down, capped at 100 at or beyond the target.
  * Integer inputs are computed with integer arithmetic so 261 of 500 is exactly
  * 52.2 and never 52.199999.

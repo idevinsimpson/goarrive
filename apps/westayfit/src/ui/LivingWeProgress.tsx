@@ -3,7 +3,7 @@ import { Animated, Image, StyleSheet, View } from 'react-native';
 
 import { monogramFillGreen, monogramUnfilledNavy, monogramUnfilledWhite } from './brandAssets';
 import { heightFractionForFill, LIVING_WE_ASPECT } from './livingWeCalibration';
-import { fillRatio, percentLabel, totalOfTargetLabel } from './progressFormat';
+import { fillRatio, fillRatioAttribute, percentLabel, totalOfTargetLabel } from './progressFormat';
 import { useReducedMotion } from './useReducedMotion';
 
 /**
@@ -85,14 +85,15 @@ export function LivingWeProgress({
   const label = `${totalOfTargetLabel(completed, target, unit)}, ${percentLabel(completed, target)} filled`;
 
   // react-native-web maps dataSet to data-* attributes; the browser tests read
-  // the fill ratio off data-fill-ratio.
+  // the fill ratio off data-fill-ratio. It is rounded DOWN so the DOM never
+  // carries a literal full ratio before the target.
   return (
     <View
       style={{ width, height }}
       accessibilityRole="image"
       accessibilityLabel={label}
       testID={testID}
-      {...({ dataSet: { 'fill-ratio': ratio.toFixed(4) } } as Record<string, unknown>)}
+      {...({ dataSet: { 'fill-ratio': fillRatioAttribute(completed, target) } } as Record<string, unknown>)}
     >
       <Image source={unfilled} style={[styles.layer, { width, height }]} resizeMode="contain" />
       <Animated.View style={[styles.clip, { width, height: anim }]}>

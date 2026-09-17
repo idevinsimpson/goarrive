@@ -14,6 +14,7 @@ import {
   beyondTarget,
   decimalPercent,
   fillRatio,
+  fillRatioAttribute,
   isNearGoal,
   isReached,
   percentLabel,
@@ -153,5 +154,20 @@ describe('4,999 of 5,000 stays below complete everywhere', () => {
     expect(isReached(4999, 5000)).toBe(false);
     expect(progressPhase(4999, 5000, 'active')).toBe('nearGoal');
     expect(statusLine(4999, 5000, 'active')).toBe('Only 1 to go');
+  });
+});
+
+describe('the DOM fill-ratio attribute is rounded down', () => {
+  it('only reads 1.0000 at or beyond the target', () => {
+    expect(fillRatioAttribute(4999, 5000)).toBe('0.9998');
+    expect(fillRatioAttribute(19999, 20000)).toBe('0.9999');
+    expect(fillRatioAttribute(29999, 30000)).toBe('0.9999');
+    expect(fillRatioAttribute(99999, 100000)).toBe('0.9999');
+    expect(fillRatioAttribute(999999, 1000000)).toBe('0.9999');
+    expect(fillRatioAttribute(500, 500)).toBe('1.0000');
+    expect(fillRatioAttribute(620, 500)).toBe('1.0000');
+    expect(fillRatioAttribute(0, 500)).toBe('0.0000');
+    expect(fillRatioAttribute(241, 500)).toBe('0.4820');
+    expect(fillRatioAttribute(1, 30000)).toBe('0.0000');
   });
 });

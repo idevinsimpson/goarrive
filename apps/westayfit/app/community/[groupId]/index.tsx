@@ -68,16 +68,19 @@ function ButtonLink({
   textStyle,
   testID,
   label,
+  onPress,
 }: {
   href: string;
   style: StyleProp<ViewStyle>;
   textStyle: StyleProp<TextStyle>;
   testID: string;
   label: string;
+  /** Runs before the navigation (Link calls the child's onPress first). */
+  onPress?: () => void;
 }) {
   return (
     <Link href={href as never} asChild>
-      <Pressable style={style} testID={testID} accessibilityRole="link">
+      <Pressable style={style} testID={testID} accessibilityRole="link" onPress={onPress}>
         <Text style={textStyle}>{label}</Text>
       </Pressable>
     </Link>
@@ -466,6 +469,11 @@ export default function CommunityPage() {
     useCallback(() => {
       if (focusedBefore.current) setProgressReloadToken((n) => n + 1);
       focusedBefore.current = true;
+      // Leaving the screen closes the Champion tools sheet. The sheet is a
+      // portal over the whole window, and the stack keeps this screen
+      // mounted underneath the next one, so an open sheet would otherwise
+      // sit on top of the screen being navigated to.
+      return () => setManageOpen(false);
     }, [])
   );
 
@@ -927,11 +935,19 @@ export default function CommunityPage() {
       onRequestClose={() => setManageOpen(false)}
     >
       <View style={styles.sheetBackdrop}>
+        {/*
+          Tapping outside closes the sheet. The scrim is deliberately not a
+          focusable or announced control: the focus trap would otherwise land
+          on it first and a single key press would dismiss the sheet before
+          any Champion control was reached. The Close button is the
+          accessible way out.
+        */}
         <Pressable
           style={styles.sheetScrim}
           onPress={() => setManageOpen(false)}
-          accessibilityRole="button"
-          accessibilityLabel="Close Champion tools"
+          accessible={false}
+          tabIndex={-1}
+          aria-hidden
           testID="wsf-community-manage-scrim"
         />
         <View style={[styles.sheet, { maxHeight: Math.min(windowHeight * 0.88, 760) }]} testID="wsf-community-manage-panel">
@@ -992,6 +1008,7 @@ export default function CommunityPage() {
                 textStyle={styles.secondaryButtonText}
                 testID="wsf-community-start-goal"
                 label="Start another goal"
+                onPress={() => setManageOpen(false)}
               />
             ) : null}
           </ScrollView>
@@ -1015,8 +1032,8 @@ export default function CommunityPage() {
             <Pressable
               onPress={() => setManageOpen(true)}
               accessibilityRole="button"
-              accessibilityState={{ expanded: manageOpen }}
-              accessibilityLabel="Champion tools"
+              aria-expanded={manageOpen}
+              accessibilityLabel="Manage: Champion tools"
               style={styles.manageButton}
               testID="wsf-community-manage"
             >
@@ -1296,7 +1313,7 @@ export default function CommunityPage() {
             <Pressable
               onPress={() => setDetailsOpen((v) => !v)}
               accessibilityRole="button"
-              accessibilityState={{ expanded: detailsOpen }}
+              aria-expanded={detailsOpen}
               style={styles.detailsToggle}
               testID="wsf-community-details-toggle"
             >

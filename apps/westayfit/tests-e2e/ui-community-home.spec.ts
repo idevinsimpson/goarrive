@@ -409,6 +409,18 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await page.getByTestId('wsf-community-manage-close').click();
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
 
+  // "Start another goal" from inside the sheet leaves for the new-goal
+  // screen and takes the sheet with it: nothing stays overlaid on the form.
+  await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+  await page.getByTestId('wsf-community-start-goal').click();
+  await expect(page.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-manage-scrim')).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByTestId('wsf-community-goal-hero')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+
   writeFileSync(
     path.join(ARTIFACTS_DIR, 'fixture.json'),
     JSON.stringify(
@@ -439,6 +451,9 @@ const STATES: Array<{
   { key: '450-of-500', total: 450, target: 500, percent: '90%', status: 'Only 50 to go', ratio: '0.9000' },
   { key: '4999-of-5000', total: 4999, target: 5000, percent: '99.9%', status: 'Only 1 to go', ratio: '0.9998' },
   { key: '500-of-500', total: 500, target: 500, percent: '100%', status: 'Goal reached · still open', ratio: '1.0000' },
+  // A large target where round-to-nearest would have printed a literal full
+  // ratio before the goal; the attribute is rounded down instead.
+  { key: '29999-of-30000', total: 29999, target: 30000, percent: '99.9%', status: 'Only 1 to go', ratio: '0.9999' },
 ];
 
 test('Living WE static states through the real data path', async ({ page }) => {
