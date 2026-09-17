@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "The application commit this workflow is approved to deploy.",
+    "",
+    "A 40-hex app_sha input establishes SYNTAX, not approval. Every commit on",
+    "every branch is 40 hex characters. This file is the approval, it lives on",
+    "the default branch, and changing it is a reviewed change.",
+    "",
+    "The candidate checkout never supplies its own approval: this file is read",
+    "from the operational checkout (the commit the workflow itself ran from),",
+    "never from the application commit under deployment.",
+    "",
+    "Future acceptances are a one-line edit here, reviewed like any other."
+  ],
+  "project": "westayfit-staging",
+  "approvedAppSha": "8e1a3ed485a5c0eadbcb23c1f35becad455923c7",
+  "packageLabel": "Package E — per-goal aggregate display authorization",
+  "sourceAcceptedOn": "2026-09-16"
+}
