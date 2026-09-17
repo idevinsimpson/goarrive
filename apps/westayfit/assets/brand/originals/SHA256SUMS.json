@@ -1,0 +1,82 @@
+{
+  "source": "WSF_ORIGINAL_BRAND_SOURCE_SUPPLEMENT_2026-09-17.zip",
+  "note": "byte-for-byte copies of the owner uploads; renamed only",
+  "files": [
+    {
+      "original_filename": "Untitled design - 1(3).png",
+      "archive_path": "originals/Untitled design - 1(3).png",
+      "role": "Full WE STAY FIT wordmark, navy and green",
+      "bytes": 265655,
+      "sha256": "47619b9a640ccb70c99bcf794eecb010d9d7a8344d4bb32e18e315e2c3b5ed54",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "mode": "RGBA",
+      "alpha_bounds": [
+        56,
+        833,
+        1944,
+        1087
+      ],
+      "repository_path": "apps/westayfit/assets/brand/originals/wordmark-navy-green.original.png"
+    },
+    {
+      "original_filename": "Untitled design - 2(5).png",
+      "archive_path": "originals/Untitled design - 2(5).png",
+      "role": "WE monogram, navy and green",
+      "bytes": 697713,
+      "sha256": "68abc868cb0190210c78e50e63de8733e6ea2d9c0ad789f1a55c10b9c71c39ae",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "mode": "RGBA",
+      "alpha_bounds": [
+        172,
+        576,
+        1823,
+        1378
+      ],
+      "repository_path": "apps/westayfit/assets/brand/originals/monogram-navy-green.original.png"
+    },
+    {
+      "original_filename": "Untitled design - 3(4).png",
+      "archive_path": "originals/Untitled design - 3(4).png",
+      "role": "Full WE STAY FIT wordmark, white and green",
+      "bytes": 318348,
+      "sha256": "3055b5650bf38d97903384b2621774bbba15914712f80319d86a523e64080574",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "mode": "RGBA",
+      "alpha_bounds": [
+        56,
+        832,
+        1945,
+        1092
+      ],
+      "repository_path": "apps/westayfit/assets/brand/originals/wordmark-white-green.original.png"
+    },
+    {
+      "original_filename": "Untitled design - 4(2).png",
+      "archive_path": "originals/Untitled design - 4(2).png",
+      "role": "WE monogram, white and green",
+      "bytes": 541357,
+      "sha256": "654b64277ff79389384fcaacfc359d004a198372d37acb6bce92308d66412b02",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "mode": "RGBA",
+      "alpha_bounds": [
+        157,
+        587,
+        1849,
+        1410
+      ],
+      "repository_path": "apps/westayfit/assets/brand/originals/monogram-white-green.original.png"
+    }
+  ]
+}

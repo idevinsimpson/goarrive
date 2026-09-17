@@ -208,6 +208,17 @@ async function snap(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(ARTIFACTS_DIR, `${name}.png`), fullPage: true });
 }
 
+// The Champion's display-authorization controls live behind the collapsed
+// "Manage" panel on Community Home. Opening it is the real interaction a
+// Champion performs, so every Champion visit goes through it; the
+// authorization assertions below are unchanged.
+async function openManage(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('CASE 1 — the permission is granted, used, withheld from members, and revoked, all through the interface', async ({
@@ -220,6 +231,7 @@ test('CASE 1 — the permission is granted, used, withheld from members, and rev
   const champion = await championCtx.newPage();
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
+  await openManage(champion);
 
   const control = champion.getByTestId(`wsf-goal-display-auth-${fx.goalId}`);
   const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${fx.goalId}`);
@@ -312,6 +324,7 @@ test('CASE 1 — the permission is granted, used, withheld from members, and rev
 
   // ---- the Champion can still revoke AFTER closure -----------------------
   await champion.reload();
+  await openManage(champion);
   // The closed goal is distinct: no contribution route off it.
   await expect(champion.getByTestId(`wsf-community-goal-closed-${fx.goalId}`)).toBeVisible({
     timeout: 20_000,
@@ -354,6 +367,7 @@ test('CASE 2 — a lost response is reported as unknown, and the retry sends the
   const champion = await ctx.newPage();
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
+  await openManage(champion);
 
   const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${fx.goalId}`);
   const stateText = champion.getByTestId(`wsf-goal-display-auth-state-${fx.goalId}`);
@@ -463,6 +477,7 @@ test('CASE 3 — a display response held from before a revocation cannot bring t
   const champion = await championCtx.newPage();
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
+  await openManage(champion);
   const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${fx.goalId}`);
   const stateText = champion.getByTestId(`wsf-goal-display-auth-state-${fx.goalId}`);
   await expect(toggle).toBeVisible({ timeout: 20_000 });
@@ -572,6 +587,7 @@ test('CASE 4 — a refusal ends the session, so a success the server produced ea
   const champion = await championCtx.newPage();
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
+  await openManage(champion);
   const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${fx.goalId}`);
   const stateText = champion.getByTestId(`wsf-goal-display-auth-state-${fx.goalId}`);
   await expect(toggle).toBeVisible({ timeout: 20_000 });
@@ -724,6 +740,7 @@ test('CASE 5 — one goal’s unresolved outcome survives work on another goal',
   const champion = await ctx.newPage();
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
+  await openManage(champion);
 
   const toggleA = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalA}`);
   const toggleB = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalB}`);
