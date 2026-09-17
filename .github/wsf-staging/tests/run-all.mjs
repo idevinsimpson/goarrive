@@ -9,7 +9,6 @@ const suites = [
   'scan-evidence.test.mjs',
   'cleanup-synthetic.test.mjs',
   'hosted-smoke-contract.test.mjs',
-  'recovery-35248719827.test.mjs',
   'write-sdk-config.test.mjs',
   'verify-deployment.test.mjs',
 ];

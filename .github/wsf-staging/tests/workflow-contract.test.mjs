@@ -58,7 +58,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
 });
 
 test('both scan steps carry the id their upload references', () => {
-  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence', 'scan-recovery-evidence']) {
+  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence']) {
     assert.ok(text.includes(`id: ${id}`), `scan step id ${id} is missing`);
     assert.ok(text.includes(`steps.${id}.outcome == 'success'`), `nothing references ${id}`);
   }
@@ -74,7 +74,7 @@ test('the gate job has no OIDC capability', () => {
 });
 
 test('privileged jobs declare the wsf-staging environment', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'recover']) {
+  for (const j of ['config', 'deploy', 'hosted-verify']) {
     assert.match(jobs[j], /environment: wsf-staging/, `${j} must declare the environment the trust condition requires`);
   }
 });
@@ -99,7 +99,7 @@ test('the hosted job runs the candidate-local Playwright binary', () => {
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'recover']) {
+  for (const j of ['config', 'deploy', 'hosted-verify']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -172,7 +172,6 @@ const WIRING = [
   ['hosted-verify', 'Run the Package E hosted authorization checks', '.github/wsf-staging/hosted-package-e-smoke.mjs'],
   ['hosted-verify', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
   ['deploy', 'Verify the deployed state', '.github/wsf-staging/verify-deployment.mjs'],
-  ['recover', "Remove the preserved run's synthetic fixtures with the current cleanup", '.github/wsf-staging/cleanup-synthetic.mjs'],
 ];
 for (const [job, step, script] of WIRING) {
   test(`${path.basename(script)}: every required WSF_* variable is supplied by its step`, () => {
@@ -215,132 +214,6 @@ test('the config job documents both consumers of the staging env artifact', () =
 test('nothing in the hosted job prints the SDK config or the env artifact', () => {
   const j = jobs['hosted-verify'].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
   assert.equal(/\b(cat|echo|printenv|env)\b[^\n]*(wsf-staging\.env|WSF_SDK_CONFIG_FILE|WSF_STAGING_API_KEY|EXPO_PUBLIC)/.test(j), false);
-});
-
-
-// ---- recovery mode (temporary, pinned to hosted run 35248719827) -----------
-const PINS = JSON.parse(fs.readFileSync(path.resolve('.github/wsf-staging/recovery-35248719827.json'), 'utf8'));
-const RECOVER_MODE = 'recover-35248719827';
-const NORMAL_JOBS = ['gate', 'config', 'build', 'deploy', 'hosted-verify'];
-const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\npermissions:'));
-const recover = jobs.recover;
-const recoverCode = recover.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-
-test('recovery is OFF by default: mode is a choice that defaults to deploy', () => {
-  const mode = onBlock.slice(onBlock.indexOf('      mode:'));
-  assert.match(mode, /type: choice/);
-  assert.match(mode, /default: deploy/);
-  const options = [...mode.matchAll(/^\s+- (\S+)$/gm)].map((m) => m[1]);
-  assert.deepEqual(options, ['deploy', RECOVER_MODE], 'exactly two modes');
-});
-
-test('no input can name a run, artifact, manifest, tag or hash', () => {
-  const inputNames = [...onBlock.matchAll(/^      ([a-z_]+):$/gm)].map((m) => m[1]);
-  assert.deepEqual(inputNames, ['app_sha', 'mode']);
-  assert.equal(/run[-_ ]?id|artifact|manifest|run[-_ ]?tag|sha256/i.test(onBlock.replace(/description:.*$/gm, '')), false);
-});
-
-test('normal deploy and recovery are mutually exclusive', () => {
-  for (const j of NORMAL_JOBS) {
-    assert.ok(jobs[j], `job ${j} missing`);
-    assert.match(jobs[j], new RegExp(`^    if: \\$\\{\\{ inputs\\.mode != '${RECOVER_MODE}' \\}\\}$`, 'm'), `${j} must be skipped in recovery mode`);
-  }
-  assert.ok(recover, 'recover job missing');
-  assert.match(recover, new RegExp(`^    if: \\$\\{\\{ inputs\\.mode == '${RECOVER_MODE}' \\}\\}$`, 'm'));
-  assert.equal(/^    needs:/m.test(recover), false, 'recovery depends on no normal job');
-  const jobNames = Object.keys(jobs);
-  assert.deepEqual(jobNames, [...NORMAL_JOBS, 'recover'], 'no other job exists');
-});
-
-test('the exact old run, artifact, tag, hash and counts are pinned and the download uses those literals', () => {
-  assert.equal(PINS.runId, 35248719827);
-  assert.equal(PINS.artifactName, 'wsf-hosted-evidence');
-  assert.equal(PINS.sha256, '102a92a0fd55c51ea2566224b7a66422f09bd3691e19e92725ebfe639dc55ad0');
-  assert.equal(PINS.project, 'westayfit-staging');
-  assert.equal(PINS.runTag, 'e5h-mu5rq05h-ea157c');
-  assert.equal(PINS.users, 9);
-  assert.equal(PINS.documents, 74);
-  const download = stepBlock('recover', 'Download the preserved evidence of run 35248719827');
-  assert.match(download, /^\s+run-id: 35248719827$/m, 'run-id is the literal pinned run');
-  assert.match(download, /^\s+name: wsf-hosted-evidence$/m);
-  assert.equal(/pattern:|merge-multiple:/.test(download), false);
-  assert.match(download, /github-token: \$\{\{ github\.token \}\}/, 'the run\'s own token, no secret');
-});
-
-test('arbitrary run ids or artifacts cannot be supplied: inputs are referenced only by the mode switch', () => {
-  const inputRefs = [...recoverCode.matchAll(/inputs\.[a-z_]+/g)].map((m) => m[0]);
-  assert.deepEqual([...new Set(inputRefs)], ['inputs.mode']);
-  assert.equal(/\$\{\{\s*inputs\.(app_sha|run|artifact)/.test(recoverCode), false);
-});
-
-test('recovery verifies the manifest BEFORE authenticating, and verifies the receipt AFTER cleanup', () => {
-  const at = (name) => { const i = recoverCode.indexOf(`- name: ${name}`); assert.notEqual(i, -1, name); return i; };
-  const download = at('Download the preserved evidence of run 35248719827');
-  const verify = at('Verify the preserved manifest against the pinned recovery record');
-  const auth = at('Authenticate to Google Cloud');
-  const cleanup = at("Remove the preserved run's synthetic fixtures with the current cleanup");
-  const receipt = at('Require the receipt to prove COMPLETE with nothing unresolved');
-  const scan = at('Scan evidence before upload');
-  const upload = recoverCode.indexOf('name: wsf-recovery-evidence');
-  assert.ok(download < verify && verify < auth && auth < cleanup && cleanup < receipt && receipt < scan && scan < upload);
-  const verifyStep = stepBlock('recover', 'Verify the preserved manifest against the pinned recovery record');
-  assert.match(verifyStep, /recovery-35248719827\.mjs verify-manifest/);
-  assert.match(verifyStep, /ops\/\.github\/wsf-staging\/recovery-35248719827\.json/);
-  assert.match(verifyStep, /recovery\/old\/cleanup-manifest\.json/);
-  const receiptStep = stepBlock('recover', 'Require the receipt to prove COMPLETE with nothing unresolved');
-  assert.match(receiptStep, /recovery-35248719827\.mjs verify-receipt/);
-  assert.match(receiptStep, /if: always\(\)/);
-});
-
-test('recovery uses the cleanup and provenance code of THIS commit, never anything from the downloaded artifact', () => {
-  const checkout = stepBlock('recover', 'Check out operational assets at the running workflow commit');
-  assert.match(checkout, /ref: \$\{\{ github\.sha \}\}/);
-  assert.match(checkout, /path: ops/);
-  assert.match(recoverCode, /node ops\/\.github\/wsf-staging\/cleanup-synthetic\.mjs/);
-  assert.equal(/node recovery\//.test(recoverCode), false, 'nothing under the downloaded artifact is executed');
-  assert.equal(/recovery\/old\/[^ \n"]*\.(mjs|js|sh)(?=[\s"']|$)/m.test(recoverCode), false, 'no script from the downloaded artifact is referenced');
-  const cleanupStep = stepBlock('recover', "Remove the preserved run's synthetic fixtures with the current cleanup");
-  assert.match(cleanupStep, /WSF_CLEANUP_MANIFEST: \$\{\{ github\.workspace \}\}\/recovery\/old\/cleanup-manifest\.json/);
-  assert.match(cleanupStep, /WSF_CLEANUP_RECEIPT: \$\{\{ github\.workspace \}\}\/wsf-recovery-evidence\/cleanup-receipt\.json/);
-});
-
-test('recovery targets only westayfit-staging and cannot be pointed at production', () => {
-  assert.match(text, /^  STAGING_PROJECT: westayfit-staging$/m);
-  assert.match(text, /^  DEPLOY_SA: wsf-staging-deployer@westayfit-staging\.iam\.gserviceaccount\.com$/m);
-  const cleanupSrc = fs.readFileSync(path.resolve('.github/wsf-staging/cleanup-synthetic.mjs'), 'utf8');
-  assert.match(cleanupSrc, /^const PROJECT_ID = 'westayfit-staging';$/m);
-  assert.equal(PINS.project, 'westayfit-staging');
-  // No production identifier anywhere in executable workflow lines.
-  for (const line of code.split('\n')) {
-    assert.equal(/project[^\n]*\bgoarrive\b|\bgoarrive\.(web\.app|firebaseapp\.com)|\bgoarrive-[a-z]/.test(line), false, `production reference: ${line.trim()}`);
-  }
-  assert.equal(/--project/.test(recoverCode), false, 'the recovery job issues no project-selecting CLI command');
-});
-
-test('no job permission is broadened; the recovery job holds exactly contents/actions read and id-token write', () => {
-  const perms = (job) => {
-    const lines = jobs[job].split('\n');
-    const i = lines.findIndex((l) => l === '    permissions:');
-    assert.notEqual(i, -1, `${job} has no permissions block`);
-    const out = [];
-    for (let k = i + 1; k < lines.length && /^      \S/.test(lines[k]); k += 1) out.push(lines[k].trim());
-    return out;
-  };
-  assert.deepEqual(perms('gate'), ['contents: read']);
-  assert.deepEqual(perms('config'), ['contents: read', 'id-token: write']);
-  assert.deepEqual(perms('build'), ['contents: read']);
-  assert.deepEqual(perms('deploy'), ['contents: read', 'id-token: write']);
-  assert.deepEqual(perms('hosted-verify'), ['contents: read', 'id-token: write']);
-  assert.deepEqual(perms('recover'), ['contents: read', 'actions: read', 'id-token: write']);
-  assert.match(text, /^permissions: \{\}$/m);
-});
-
-test('the recovery evidence is scanned and uploaded only when clean, and the job cannot end green without COMPLETE', () => {
-  const final = stepBlock('recover', 'Require the recovery to have completed');
-  for (const id of ['recovery-cleanup', 'recovery-receipt', 'scan-recovery-evidence']) {
-    assert.match(final, new RegExp(`steps\\.${id}\\.outcome`), `${id} outcome must gate the job`);
-  }
-  assert.match(recoverCode, /if: \$\{\{ always\(\) && steps\.scan-recovery-evidence\.outcome == 'success' \}\}\n\s+with:\n\s+name: wsf-recovery-evidence/);
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);
