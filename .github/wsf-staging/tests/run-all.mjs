@@ -3,6 +3,9 @@
 import { spawnSync } from 'node:child_process';
 const suites = [
   'resolve-candidate.test.mjs',
+  'check-build-stamp.test.mjs',
+  'read-inventory.test.mjs',
+  'workflow-contract.test.mjs',
   'scan-evidence.test.mjs',
   'cleanup-synthetic.test.mjs',
   'verify-deployment.test.mjs',

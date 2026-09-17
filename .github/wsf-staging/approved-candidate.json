@@ -14,6 +14,8 @@
   ],
   "project": "westayfit-staging",
   "approvedAppSha": "8e1a3ed485a5c0eadbcb23c1f35becad455923c7",
-  "packageLabel": "Package E — per-goal aggregate display authorization",
-  "sourceAcceptedOn": "2026-09-16"
+  "packageLabel": "Package E \u2014 per-goal aggregate display authorization",
+  "sourceAcceptedOn": "2026-09-16",
+  "expectedPriorFunctions": 22,
+  "_expectedPriorFunctionsNote": "The WSF inventory staging is expected to carry BEFORE this deployment (the 1cbf231 baseline). Reviewed per candidate; the next package will have a different prior count."
 }

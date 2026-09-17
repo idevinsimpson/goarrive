@@ -9,12 +9,32 @@
 # dependency installation and the application build run in jobs that have no
 # id-token permission at all, and cannot obtain one.
 #
-# WHAT THIS STILL CANNOT ISOLATE, stated rather than glossed: `firebase deploy
-# --only functions` spawns the candidate's own compiled code in a child process
-# to discover its triggers (firebase-tools spawnFunctionsProcess). Deployment
-# therefore executes application code inside the privileged job by design. That
-# is precisely why the commit is pinned to a reviewed, approved SHA and why the
-# gate below refuses anything else — pinning is the control, not isolation.
+# WHAT EXECUTES WHERE. Not all of this is credential-isolated, and saying so
+# plainly matters more than the claim would be worth:
+#
+#   gate, build        NO OIDC capability. These jobs cannot obtain a Google
+#                      credential by any route, which is what makes them the
+#                      right place for `npm ci` and the application build —
+#                      third-party lifecycle scripts run where there is nothing
+#                      to take.
+#
+#   deploy             PRIVILEGED, and it necessarily executes the pinned
+#                      candidate's COMPILED FUNCTIONS CODE: `firebase deploy
+#                      --only functions` spawns the source in a child process to
+#                      discover its triggers (firebase-tools
+#                      spawnFunctionsProcess). There is no way to deploy without
+#                      that happening. The control is that the commit is pinned
+#                      to a reviewed, approved SHA and the gate refuses anything
+#                      else — pinning, not isolation.
+#
+#   hosted-verify      PRIVILEGED, and it executes reviewed operational harness
+#                      code from this directory plus browser tooling pinned by
+#                      the candidate's committed lockfile. It does not run the
+#                      candidate's own application code directly; it drives the
+#                      deployed site over HTTP.
+#
+# Privileged jobs install dependencies with --ignore-scripts, so package
+# lifecycle code never runs alongside a credential.
 name: WSF staging deploy
 
 on:
@@ -178,8 +198,13 @@ jobs:
           set -euo pipefail
           grep -rqF "${APPROVED:0:7}" apps/westayfit/dist --include=*.html \
             || { echo "::error::build marker does not match ${APPROVED:0:7}"; exit 1; }
-          printf '%s\n' "$APPROVED" > apps/westayfit/dist/.wsf-build-sha
-          printf '%s\n' "$APPROVED" > functions-westayfit/lib/.wsf-build-sha
+          # Deliberately NOT a dotfile. actions/upload-artifact excludes hidden
+          # files by default, so a .wsf-build-sha stamp would vanish in transit
+          # and the deploy-side check would fail on a correct build. Enabling
+          # hidden-file upload would fix the symptom by widening the artifact
+          # surface; naming the file properly costs nothing.
+          printf '%s\n' "$APPROVED" > apps/westayfit/dist/wsf-build-sha.txt
+          printf '%s\n' "$APPROVED" > functions-westayfit/lib/wsf-build-sha.txt
 
       # Credential-boundary check runs BEFORE the upload, not after it.
       - name: Refuse to upload anything credential-shaped
@@ -238,11 +263,10 @@ jobs:
           APPROVED: ${{ needs.gate.outputs.app_sha }}
         run: |
           set -euo pipefail
-          for f in app/apps/westayfit/dist/.wsf-build-sha app/functions-westayfit/lib/.wsf-build-sha; do
-            [ -f "$f" ] || { echo "::error::artifact stamp $f missing"; exit 1; }
-            [ "$(cat "$f")" = "$APPROVED" ] || { echo "::error::artifact stamp in $f is not $APPROVED"; exit 1; }
-          done
-          rm -f app/apps/westayfit/dist/.wsf-build-sha app/functions-westayfit/lib/.wsf-build-sha
+          node ops/.github/wsf-staging/check-build-stamp.mjs "$APPROVED" \
+            app/apps/westayfit/dist/wsf-build-sha.txt \
+            app/functions-westayfit/lib/wsf-build-sha.txt
+          rm -f app/apps/westayfit/dist/wsf-build-sha.txt app/functions-westayfit/lib/wsf-build-sha.txt
           echo "artifact belongs to $APPROVED"
 
       # --ignore-scripts: this job holds id-token, so no package lifecycle code
@@ -261,25 +285,25 @@ jobs:
           service_account: ${{ env.DEPLOY_SA }}
 
       - name: Read-only preflight before any change
+        working-directory: app
         run: |
           set -euo pipefail
-          cp ops/firebase.westayfit.staging.json app/
-          ./node_modules/.bin/firebase projects:list --json > /dev/null
-          ./node_modules/.bin/firebase functions:list \
+          cp ../ops/firebase.westayfit.staging.json .
+          # A read-only call first: it proves the federated credential works
+          # before anything is changed.
+          ../node_modules/.bin/firebase projects:list --json > /dev/null
+
+          # No `|| true`. The exit status is captured and handed to the reader,
+          # which refuses to invent a baseline from a failed read.
+          set +e
+          ../node_modules/.bin/firebase functions:list \
             --project "$STAGING_PROJECT" --config firebase.westayfit.staging.json --json \
-            > /tmp/functions-before-raw.json || true
-          node -e '
-            const fs = require("fs");
-            let raw;
-            try { raw = JSON.parse(fs.readFileSync("/tmp/functions-before-raw.json", "utf8")); }
-            catch { console.error("::error::pre-deploy inventory is not readable JSON"); process.exit(1); }
-            const list = raw.result || [];
-            if (!Array.isArray(list)) { console.error("::error::pre-deploy inventory has an unexpected shape"); process.exit(1); }
-            const names = list.map((f) => String(f.id || "").toLowerCase()).filter((n) => n.startsWith("wsf")).sort();
-            fs.writeFileSync("/tmp/inventory-before.json", JSON.stringify({ functions: names }));
-            console.log("PREFLIGHT_BEFORE=" + names.length);
-          '
-        working-directory: app
+            > /tmp/functions-before-raw.json
+          cli_status=$?
+          set -e
+          node ../ops/.github/wsf-staging/read-inventory.mjs \
+            "$cli_status" /tmp/functions-before-raw.json /tmp/inventory-before.json \
+            ../ops/.github/wsf-staging/approved-candidate.json
 
       - name: Deploy WSF functions
         working-directory: app
@@ -329,11 +353,15 @@ jobs:
           node ops/.github/wsf-staging/verify-deployment.mjs
 
       - name: Scan evidence before upload
+        id: scan-deployment-evidence
         if: always()
         run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-evidence"
 
+      # Gated on the SCAN, not merely on always(). With `if: always()` alone a
+      # scanner that found a credential would fail the step and the upload would
+      # still run, publishing the very material the scan rejected.
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        if: always()
+        if: ${{ always() && steps.scan-deployment-evidence.outcome == 'success' }}
         with:
           name: wsf-deployment-evidence
           path: wsf-evidence
@@ -375,12 +403,37 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install browser tooling without lifecycle scripts
+      # This job holds id-token: write, so it must not run a package-resolution
+      # path that can reach the registry for something not in the lockfile.
+      # `npx --yes playwright ...` would do exactly that: with @playwright/test
+      # installed but no `playwright` binary resolvable, npx silently fetches a
+      # `playwright` package from the registry and runs it. The CLI used here is
+      # the one the accepted candidate's committed lockfile installed.
+      - name: Install candidate dependencies without lifecycle scripts
+        working-directory: app
+        run: npm --prefix apps/westayfit ci --ignore-scripts
+
+      - name: Install browsers using the candidate's pinned Playwright CLI
         working-directory: app
         run: |
           set -euo pipefail
-          npm --prefix apps/westayfit ci --ignore-scripts
-          npx --yes playwright install --with-deps chromium
+          PW="apps/westayfit/node_modules/.bin/playwright"
+          [ -x "$PW" ] || { echo "::error::the candidate's Playwright CLI is not present at $PW"; exit 1; }
+          # Prove the binary belongs to the candidate installation rather than a
+          # registry download, and record the version in the log.
+          resolved="$(node -e '
+            const {createRequire} = require("node:module");
+            const req = createRequire(require("path").resolve("apps/westayfit/package.json"));
+            console.log(req.resolve("@playwright/test/package.json"));
+          ')"
+          case "$resolved" in
+            "$PWD/apps/westayfit/node_modules/"*) : ;;
+            *) echo "::error::@playwright/test resolved outside the candidate installation: $resolved"; exit 1 ;;
+          esac
+          echo "PLAYWRIGHT_CLI=$PW"
+          echo "PLAYWRIGHT_PACKAGE=$resolved"
+          echo "PLAYWRIGHT_VERSION=$("$PW" --version)"
+          "$PW" install --with-deps chromium
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
@@ -437,11 +490,13 @@ jobs:
 
       # Redacting scan, BEFORE the upload rather than after it.
       - name: Scan evidence before upload
+        id: scan-hosted-evidence
         if: always()
         run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-evidence"
 
+      # Same gate as the deployment job: rejected evidence is never uploaded.
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        if: always()
+        if: ${{ always() && steps.scan-hosted-evidence.outcome == 'success' }}
         with:
           name: wsf-hosted-evidence
           path: wsf-evidence
@@ -455,3 +510,5 @@ jobs:
           set -euo pipefail
           [ "${{ steps.smoke.outcome }}" = "success" ] \
             || { echo "::error::hosted verification did not pass — the deployment is NOT verified"; exit 1; }
+          [ "${{ steps.scan-hosted-evidence.outcome }}" = "success" ] \
+            || { echo "::error::evidence scan rejected the hosted evidence; it was not uploaded and this run is not verified"; exit 1; }
