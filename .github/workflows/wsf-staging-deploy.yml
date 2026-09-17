@@ -1,0 +1,514 @@
+# We Stay Fit — staging deployment and hosted verification. Manual, staging only, keyless.
+#
+# WHY FIVE JOBS AND NOT ONE.
+# `id-token: write` is a property of a JOB, not of a step. A job that holds it
+# can mint a fresh OIDC token at any point, so moving the auth step later,
+# clearing an environment variable or deleting the credentials file between
+# steps does not take the capability away — it only makes the capability less
+# visible. The only real boundary is a separate job on a separate runner. So
+# dependency installation and the application build run in jobs that have no
+# id-token permission at all, and cannot obtain one.
+#
+# WHAT EXECUTES WHERE. Not all of this is credential-isolated, and saying so
+# plainly matters more than the claim would be worth:
+#
+#   gate, build        NO OIDC capability. These jobs cannot obtain a Google
+#                      credential by any route, which is what makes them the
+#                      right place for `npm ci` and the application build —
+#                      third-party lifecycle scripts run where there is nothing
+#                      to take.
+#
+#   deploy             PRIVILEGED, and it necessarily executes the pinned
+#                      candidate's COMPILED FUNCTIONS CODE: `firebase deploy
+#                      --only functions` spawns the source in a child process to
+#                      discover its triggers (firebase-tools
+#                      spawnFunctionsProcess). There is no way to deploy without
+#                      that happening. The control is that the commit is pinned
+#                      to a reviewed, approved SHA and the gate refuses anything
+#                      else — pinning, not isolation.
+#
+#   hosted-verify      PRIVILEGED, and it executes reviewed operational harness
+#                      code from this directory plus browser tooling pinned by
+#                      the candidate's committed lockfile. It does not run the
+#                      candidate's own application code directly; it drives the
+#                      deployed site over HTTP.
+#
+# Privileged jobs install dependencies with --ignore-scripts, so package
+# lifecycle code never runs alongside a credential.
+name: WSF staging deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_sha:
+        description: "Optional confirmation. Must equal the approved candidate in .github/wsf-staging/approved-candidate.json. Leave blank to deploy the approved commit."
+        required: false
+        type: string
+
+# Nothing is granted at workflow level. Each job takes only what it needs.
+permissions: {}
+
+concurrency:
+  group: wsf-staging-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT: westayfit-staging
+  STAGING_SITE: westayfit-staging
+  STAGING_CHANNEL: staging
+  STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+  FIREBASE_TOOLS: firebase-tools@15.30.1
+  WIF_PROVIDER: projects/857281977774/locations/global/workloadIdentityPools/wsf-staging-github/providers/github
+  DEPLOY_SA: wsf-staging-deployer@westayfit-staging.iam.gserviceaccount.com
+
+jobs:
+  # ---------------------------------------------------------------- gate ----
+  # No credentials and no candidate code. Decides what may be deployed before
+  # anything is fetched or authenticated.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      app_sha: ${{ steps.candidate.outputs.app_sha }}
+    steps:
+      # github.sha is the exact commit this workflow run was dispatched from, so
+      # the operational assets are pinned to one commit rather than read from a
+      # branch that could move between steps.
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve the approved candidate
+        id: candidate
+        env:
+          WSF_REQUESTED_SHA: ${{ inputs.app_sha }}
+        run: node .github/wsf-staging/resolve-candidate.mjs .github/wsf-staging/approved-candidate.json
+
+  # -------------------------------------------------------------- config ----
+  # Privileged, and deliberately tiny: it reads the staging Web App's public
+  # SDK config and nothing else. No application code is checked out here, so
+  # the credential is never in a workspace containing candidate code.
+  config:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Install pinned deployment tooling
+        run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Read the staging Web App SDK config
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/firebase apps:sdkconfig WEB \
+            --project "$STAGING_PROJECT" --json > sdkconfig.json
+          node .github/wsf-staging/prepare-staging.mjs sdkconfig.json wsf-staging.env "$STAGING_PROJECT"
+          rm -f sdkconfig.json
+
+      # The six values are publishable client identifiers, but they are still
+      # passed as an artifact rather than printed, and the artifact is consumed
+      # only by the build job.
+      - name: Upload the staging build configuration
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: wsf-staging-env
+          path: wsf-staging.env
+          retention-days: 1
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- build ----
+  # NO id-token. This job cannot obtain a Google credential by any means, which
+  # is what makes it safe to run `npm ci` and the application build here.
+  build:
+    needs: [gate, config]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the approved candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.app_sha }}
+          persist-credentials: false
+
+      - name: Confirm the checkout is the approved commit
+        env:
+          APPROVED: ${{ needs.gate.outputs.app_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          [ "$actual" = "$APPROVED" ] || { echo "::error::checkout is $actual, expected $APPROVED"; exit 1; }
+          echo "building $actual"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-staging-env
+
+      # Third-party lifecycle scripts run here, where there is nothing to steal.
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          npm --prefix functions-westayfit ci
+          npm --prefix apps/westayfit ci
+
+      - name: Build functions
+        run: npm --prefix functions-westayfit run build
+
+      - name: Build the staging web artifact
+        run: |
+          set -euo pipefail
+          rm -rf apps/westayfit/dist
+          set -a; . ./wsf-staging.env; set +a
+          export EXPO_PUBLIC_WSF_ENV=staging
+          export EXPO_PUBLIC_WSF_AUTH_ENABLED=1
+          scripts/westayfit/build-staging.sh --approved-project "$STAGING_PROJECT"
+          scripts/westayfit/assert-staging-artifact.sh
+
+      - name: Stamp and check the artifact against the approved commit
+        env:
+          APPROVED: ${{ needs.gate.outputs.app_sha }}
+        run: |
+          set -euo pipefail
+          grep -rqF "${APPROVED:0:7}" apps/westayfit/dist --include=*.html \
+            || { echo "::error::build marker does not match ${APPROVED:0:7}"; exit 1; }
+          # Deliberately NOT a dotfile. actions/upload-artifact excludes hidden
+          # files by default, so a .wsf-build-sha stamp would vanish in transit
+          # and the deploy-side check would fail on a correct build. Enabling
+          # hidden-file upload would fix the symptom by widening the artifact
+          # surface; naming the file properly costs nothing.
+          printf '%s\n' "$APPROVED" > apps/westayfit/dist/wsf-build-sha.txt
+          printf '%s\n' "$APPROVED" > functions-westayfit/lib/wsf-build-sha.txt
+
+      # Credential-boundary check runs BEFORE the upload, not after it.
+      - name: Refuse to upload anything credential-shaped
+        run: |
+          set -euo pipefail
+          bad="$(find apps/westayfit/dist functions-westayfit/lib \
+                 \( -name 'gha-creds-*.json' -o -name '*.env' -o -name '*service-account*' \) 2>/dev/null || true)"
+          [ -z "$bad" ] || { echo "::error::credential-shaped file in an upload path: $bad"; exit 1; }
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: wsf-build
+          path: |
+            apps/westayfit/dist
+            functions-westayfit/lib
+          retention-days: 3
+          if-no-files-found: error
+
+  # -------------------------------------------------------------- deploy ----
+  deploy:
+    needs: [gate, config, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      deployed_sha: ${{ needs.gate.outputs.app_sha }}
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - name: Check out the approved candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.app_sha }}
+          path: app
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-build
+          path: app
+
+      - name: Confirm the artifact belongs to the approved commit
+        env:
+          APPROVED: ${{ needs.gate.outputs.app_sha }}
+        run: |
+          set -euo pipefail
+          node ops/.github/wsf-staging/check-build-stamp.mjs "$APPROVED" \
+            app/apps/westayfit/dist/wsf-build-sha.txt \
+            app/functions-westayfit/lib/wsf-build-sha.txt
+          rm -f app/apps/westayfit/dist/wsf-build-sha.txt app/functions-westayfit/lib/wsf-build-sha.txt
+          echo "artifact belongs to $APPROVED"
+
+      # --ignore-scripts: this job holds id-token, so no package lifecycle code
+      # runs here. The staging config declares no predeploy hook, so nothing is
+      # rebuilt — lib/ comes from the unprivileged build job.
+      - name: Install runtime dependencies without lifecycle scripts
+        run: |
+          set -euo pipefail
+          npm --prefix app/functions-westayfit ci --ignore-scripts
+          npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Read-only preflight before any change
+        working-directory: app
+        run: |
+          set -euo pipefail
+          cp ../ops/firebase.westayfit.staging.json .
+          # A read-only call first: it proves the federated credential works
+          # before anything is changed.
+          ../node_modules/.bin/firebase projects:list --json > /dev/null
+
+          # No `|| true`. The exit status is captured and handed to the reader,
+          # which refuses to invent a baseline from a failed read.
+          set +e
+          ../node_modules/.bin/firebase functions:list \
+            --project "$STAGING_PROJECT" --config firebase.westayfit.staging.json --json \
+            > /tmp/functions-before-raw.json
+          cli_status=$?
+          set -e
+          node ../ops/.github/wsf-staging/read-inventory.mjs \
+            "$cli_status" /tmp/functions-before-raw.json /tmp/inventory-before.json \
+            ../ops/.github/wsf-staging/approved-candidate.json
+
+      - name: Deploy WSF functions
+        working-directory: app
+        run: |
+          set -euo pipefail
+          ../node_modules/.bin/firebase deploy \
+            --project "$STAGING_PROJECT" \
+            --config firebase.westayfit.staging.json \
+            --only functions:westayfit \
+            --non-interactive
+
+      - name: Deploy the staging Hosting channel
+        working-directory: app
+        run: |
+          set -euo pipefail
+          ../node_modules/.bin/firebase hosting:channel:deploy "$STAGING_CHANNEL" \
+            --project "$STAGING_PROJECT" \
+            --config firebase.westayfit.staging.json \
+            --expires 7d \
+            --no-authorized-domains \
+            --non-interactive
+
+      # Re-auth: the federated token lasts an hour and the deploy above can
+      # consume most of it.
+      - name: Re-authenticate before verification
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Verify the deployed state
+        env:
+          WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
+          WSF_INVENTORY_BEFORE: /tmp/inventory-before.json
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-evidence
+        run: |
+          set -euo pipefail
+          export WSF_GOOGLE_ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null || true)"
+          if [ -z "$WSF_GOOGLE_ACCESS_TOKEN" ]; then
+            export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+              const {GoogleAuth} = require("google-auth-library");
+              new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+                .getAccessToken().then((t)=>process.stdout.write(t||""));
+            ')"
+          fi
+          export WSF_STAGING_URL="$STAGING_URL"
+          node ops/.github/wsf-staging/verify-deployment.mjs
+
+      - name: Scan evidence before upload
+        id: scan-deployment-evidence
+        if: always()
+        run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-evidence"
+
+      # Gated on the SCAN, not merely on always(). With `if: always()` alone a
+      # scanner that found a credential would fail the step and the upload would
+      # still run, publishing the very material the scan rejected.
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-deployment-evidence.outcome == 'success' }}
+        with:
+          name: wsf-deployment-evidence
+          path: wsf-evidence
+          retention-days: 7
+          if-no-files-found: error
+
+  # ------------------------------------------------------- hosted-verify ----
+  # The assignment is reviewed source -> deployment -> HOSTED verification ->
+  # evidence. A green deploy with the behaviour unassigned is not the deliverable.
+  #
+  # Privileged, because synthetic fixture setup and cleanup need admin REST
+  # calls. The authorization assertions themselves do NOT use that access: the
+  # synthetic users sign in through the public Identity Toolkit endpoints with
+  # the Web App's API key and act as themselves in a real browser.
+  hosted-verify:
+    needs: [gate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - name: Check out the deployed candidate (for its Playwright dependency)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.app_sha }}
+          path: app
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # This job holds id-token: write, so it must not run a package-resolution
+      # path that can reach the registry for something not in the lockfile.
+      # `npx --yes playwright ...` would do exactly that: with @playwright/test
+      # installed but no `playwright` binary resolvable, npx silently fetches a
+      # `playwright` package from the registry and runs it. The CLI used here is
+      # the one the accepted candidate's committed lockfile installed.
+      - name: Install candidate dependencies without lifecycle scripts
+        working-directory: app
+        run: npm --prefix apps/westayfit ci --ignore-scripts
+
+      - name: Install browsers using the candidate's pinned Playwright CLI
+        working-directory: app
+        run: |
+          set -euo pipefail
+          PW="apps/westayfit/node_modules/.bin/playwright"
+          [ -x "$PW" ] || { echo "::error::the candidate's Playwright CLI is not present at $PW"; exit 1; }
+          # Prove the binary belongs to the candidate installation rather than a
+          # registry download, and record the version in the log.
+          resolved="$(node -e '
+            const {createRequire} = require("node:module");
+            const req = createRequire(require("path").resolve("apps/westayfit/package.json"));
+            console.log(req.resolve("@playwright/test/package.json"));
+          ')"
+          case "$resolved" in
+            "$PWD/apps/westayfit/node_modules/"*) : ;;
+            *) echo "::error::@playwright/test resolved outside the candidate installation: $resolved"; exit 1 ;;
+          esac
+          echo "PLAYWRIGHT_CLI=$PW"
+          echo "PLAYWRIGHT_PACKAGE=$resolved"
+          echo "PLAYWRIGHT_VERSION=$("$PW" --version)"
+          "$PW" install --with-deps chromium
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-staging-env
+          path: cfg
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Run the Package E hosted authorization checks
+        id: smoke
+        working-directory: app
+        env:
+          WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-evidence
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-evidence/cleanup-manifest.json
+        run: |
+          set -euo pipefail
+          set -a; . ../cfg/wsf-staging.env; set +a
+          export WSF_STAGING_API_KEY="$EXPO_PUBLIC_WSF_STAGING_API_KEY"
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ../ops/.github/wsf-staging/hosted-package-e-smoke.mjs
+
+      # Cleanup runs whatever the smoke did, and re-authenticates first because
+      # the smoke can outlive the token that started it.
+      - name: Re-authenticate before cleanup
+        if: always()
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Remove synthetic fixtures
+        if: always()
+        env:
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-evidence/cleanup-manifest.json
+          WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-evidence/cleanup-receipt.json
+        run: |
+          set -euo pipefail
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      # Redacting scan, BEFORE the upload rather than after it.
+      - name: Scan evidence before upload
+        id: scan-hosted-evidence
+        if: always()
+        run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-evidence"
+
+      # Same gate as the deployment job: rejected evidence is never uploaded.
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-hosted-evidence.outcome == 'success' }}
+        with:
+          name: wsf-hosted-evidence
+          path: wsf-evidence
+          retention-days: 7
+          if-no-files-found: error
+
+      # An incomplete or failed hosted check must not leave a green run.
+      - name: Require the hosted checks to have passed
+        if: always()
+        run: |
+          set -euo pipefail
+          [ "${{ steps.smoke.outcome }}" = "success" ] \
+            || { echo "::error::hosted verification did not pass — the deployment is NOT verified"; exit 1; }
+          [ "${{ steps.scan-hosted-evidence.outcome }}" = "success" ] \
+            || { echo "::error::evidence scan rejected the hosted evidence; it was not uploaded and this run is not verified"; exit 1; }

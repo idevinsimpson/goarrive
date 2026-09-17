@@ -1,0 +1,83 @@
+{
+  "_comment": [
+    "STAGING deploy config for We Stay Fit. Used only by the reviewed",
+    "wsf-staging-deploy GitHub Actions workflow, which copies this file into the",
+    "checkout of the app commit it deploys.",
+    "",
+    "It exists because firebase.json is the production default: its hosting has no",
+    "site (so it resolves to GoArrive's) and it carries the `default` functions",
+    "codebase alongside `westayfit`. Deploying staging through it is the",
+    "repository-default shortcut this workflow must never take.",
+    "",
+    "Only the westayfit codebase is declared here, so `--only functions:westayfit`",
+    "cannot reach GoArrive's functions even by mistake. firestore and storage are",
+    "deliberately absent: rules and indexes are not part of any WSF deploy.",
+    "",
+    "hosting mirrors firebase.westayfit.json exactly except for the site. Keep the",
+    "two in sync; a rewrite that differs here is a staging build that does not test",
+    "what ships.",
+    "",
+    "gha-creds-*.json appears in both ignore lists because google-github-actions/auth",
+    "writes its credentials file into GITHUB_WORKSPACE. Neither upload path should",
+    "reach the workspace root, and this makes that structural rather than incidental."
+  ],
+  "functions": [
+    {
+      "source": "functions-westayfit",
+      "codebase": "westayfit",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "gha-creds-*.json"
+      ]
+    }
+  ],
+  "hosting": {
+    "site": "westayfit-staging",
+    "public": "apps/westayfit/dist",
+    "ignore": [
+      "firebase.json",
+      "firebase.westayfit.json",
+      "firebase.westayfit.staging.json",
+      "gha-creds-*.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "rewrites": [
+      { "source": "/community/*/challenge", "destination": "/community/__dynamic/challenge.html" },
+      { "source": "/community/**", "destination": "/community/__dynamic.html" },
+      { "source": "/join/**", "destination": "/join/__dynamic.html" },
+      { "source": "/contribute/**", "destination": "/contribute/__dynamic.html" },
+      { "source": "/display/**", "destination": "/display/__dynamic.html" }
+    ],
+    "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+        ]
+      },
+      {
+        "source": "/index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "Content-Type", "value": "text/html; charset=utf-8" }
+        ]
+      },
+      {
+        "source": "/_expo/static/js/**/*.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+          { "key": "Content-Type", "value": "application/javascript; charset=utf-8" }
+        ]
+      }
+    ]
+  }
+}
