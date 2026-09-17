@@ -2,7 +2,17 @@ import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rout
 import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
+} from 'react-native';
 
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
@@ -43,6 +53,35 @@ import {
   totalOfTargetLabel,
 } from '../../../src/ui/progressFormat';
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
+
+/**
+ * A link that looks and lays out like a button. Expo Router's Link renders a
+ * text anchor on web, so flex centring and minimum heights on it do nothing;
+ * `asChild` hands the href and press handling to a Pressable that can carry
+ * the button styles. The anchor keeps its href for cold loads and the testID
+ * stays on the element a test clicks.
+ */
+function ButtonLink({
+  href,
+  style,
+  textStyle,
+  testID,
+  label,
+}: {
+  href: string;
+  style: StyleProp<ViewStyle>;
+  textStyle: StyleProp<TextStyle>;
+  testID: string;
+  label: string;
+}) {
+  return (
+    <Link href={href as never} asChild>
+      <Pressable style={style} testID={testID} accessibilityRole="link">
+        <Text style={textStyle}>{label}</Text>
+      </Pressable>
+    </Link>
+  );
+}
 
 type GroupDoc = {
   displayName: string;
@@ -705,7 +744,7 @@ export default function CommunityPage() {
   const smallWeWidth = 104;
 
   const contributeHref = (goalId: string, mode: 'move' | 'record') =>
-    `/contribute/${goalId}?groupId=${encodeURIComponent(groupId)}&mode=${mode}` as never;
+    `/contribute/${goalId}?groupId=${encodeURIComponent(groupId)}&mode=${mode}`;
 
   const renderDisplayAuthControl = (goal: ListedGoal) => {
     const goalIsOpen = goal.status === 'active';
@@ -873,7 +912,9 @@ export default function CommunityPage() {
               style={[styles.manageButton, manageOpen ? styles.manageButtonOpen : null]}
               testID="wsf-community-manage"
             >
-              <Text style={styles.manageButtonText}>{manageOpen ? 'Close' : 'Manage'}</Text>
+              <Text style={[styles.manageButtonText, manageOpen ? styles.manageButtonTextOpen : null]}>
+                {manageOpen ? 'Close' : 'Manage'}
+              </Text>
             </Pressable>
           ) : null}
         </View>
@@ -912,7 +953,7 @@ export default function CommunityPage() {
                   Public display is a permission you grant per goal. A display shows the
                   running total only.
                 </Text>
-                {loadedGoals.map((goal) => renderDisplayAuthControl(goal))}
+                {[...activeGoals, ...closedGoals].map((goal) => renderDisplayAuthControl(goal))}
               </View>
             ) : goalsState.kind === 'loaded' ? (
               <Text style={styles.body}>No goals yet. Start one below the community name.</Text>
@@ -944,13 +985,13 @@ export default function CommunityPage() {
                 ))
               : null}
             {goalsState.kind === 'loaded' && activeGoals.length ? (
-              <Link
-                href={`/goals/new?groupId=${encodeURIComponent(groupId)}` as never}
+              <ButtonLink
+                href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
                 style={styles.secondaryButton}
+                textStyle={styles.secondaryButtonText}
                 testID="wsf-community-start-goal"
-              >
-                <Text style={styles.secondaryButtonText}>Start another goal</Text>
-              </Link>
+                label="Start another goal"
+              />
             ) : null}
           </View>
         ) : null}
@@ -1011,22 +1052,20 @@ export default function CommunityPage() {
                   {renderProgressFacts(featured, p, true)}
                   {renderFreshness(p)}
                   <View style={styles.actions}>
-                    <Link
+                    <ButtonLink
                       href={contributeHref(featured.goalId, 'move')}
                       style={styles.primaryButton}
+                      textStyle={styles.primaryButtonText}
                       testID={`wsf-community-goal-link-${featured.goalId}`}
-                    >
-                      <Text style={styles.primaryButtonText}>Start moving</Text>
-                    </Link>
-                    <Link
+                      label="Start moving"
+                    />
+                    <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
                       style={styles.secondaryButtonWide}
+                      textStyle={styles.secondaryButtonText}
                       testID={`wsf-community-goal-record-${featured.goalId}`}
-                    >
-                      <Text style={styles.secondaryButtonText}>
-                        {`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
-                      </Text>
-                    </Link>
+                      label={`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
+                    />
                   </View>
                 </View>
               );
@@ -1045,13 +1084,13 @@ export default function CommunityPage() {
                   : 'Your Champion can start one for this community.'}
               </Text>
               {isChampion ? (
-                <Link
-                  href={`/goals/new?groupId=${encodeURIComponent(groupId)}` as never}
+                <ButtonLink
+                  href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
                   style={styles.primaryButton}
+                  textStyle={styles.primaryButtonText}
                   testID="wsf-community-start-goal"
-                >
-                  <Text style={styles.primaryButtonText}>Start a goal</Text>
-                </Link>
+                  label="Start a goal"
+                />
               ) : null}
             </View>
           )}
@@ -1069,13 +1108,13 @@ export default function CommunityPage() {
                         ? `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`
                         : 'You haven’t added to this goal yet. Your first contribution counts here.'}
                     </Text>
-                    <Link
+                    <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
                       style={styles.inlineLink}
+                      textStyle={styles.inlineLinkText}
                       testID={`wsf-community-your-part-link-${featured.goalId}`}
-                    >
-                      <Text style={styles.inlineLinkText}>See your activity →</Text>
-                    </Link>
+                      label="See your activity →"
+                    />
                   </View>
                 );
               })()
@@ -1104,13 +1143,13 @@ export default function CommunityPage() {
                     {renderProgressFacts(goal, p, false)}
                   </View>
                 </View>
-                <Link
+                <ButtonLink
                   href={contributeHref(goal.goalId, 'move')}
                   style={styles.secondaryButtonWide}
+                  textStyle={styles.secondaryButtonText}
                   testID={`wsf-community-goal-link-${goal.goalId}`}
-                >
-                  <Text style={styles.secondaryButtonText}>Add your contribution</Text>
-                </Link>
+                  label="Add your contribution"
+                />
               </View>
             );
           })}
@@ -1194,7 +1233,7 @@ export default function CommunityPage() {
 
         {/* About the community: simple, human, and secondary. */}
         <View style={styles.section} testID="wsf-community-about">
-          <Text style={styles.sectionEyebrow}>About {group.displayName}</Text>
+          <Text style={styles.sectionEyebrow}>About this community</Text>
           <View style={styles.cardQuiet}>
             {memberCount != null ? (
               <Row label="Members" value={memberCountLabel(memberCount)} testID="wsf-community-members-row" />
@@ -1394,6 +1433,7 @@ const styles = StyleSheet.create({
   },
   manageButtonOpen: { backgroundColor: NAVY },
   manageButtonText: { color: NAVY, fontWeight: '600', fontSize: 15 },
+  manageButtonTextOpen: { color: wsfTheme.colors.surface },
   identity: { gap: 4 },
   headingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   heading: {

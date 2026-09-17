@@ -67,13 +67,15 @@ export function LivingWeProgress({
   const unfilled = surface === 'dark' ? monogramUnfilledOnDark : monogramUnfilledOnLight;
   const label = `${totalOfTargetLabel(completed, target, unit)}, ${percentLabel(completed, target)} filled`;
 
+  // react-native-web maps dataSet to data-* attributes; the browser tests read
+  // the fill ratio off data-fill-ratio.
   return (
     <View
       style={{ width, height }}
       accessibilityRole="image"
       accessibilityLabel={label}
       testID={testID}
-      {...({ 'data-fill-ratio': ratio.toFixed(4) } as Record<string, unknown>)}
+      {...({ dataSet: { 'fill-ratio': ratio.toFixed(4) } } as Record<string, unknown>)}
     >
       <Image source={unfilled} style={[styles.layer, { width, height }]} resizeMode="contain" />
       <Animated.View style={[styles.clip, { width, height: anim }]}>
