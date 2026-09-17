@@ -280,6 +280,16 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   // ---- 1. start moving ------------------------------------------------------
   await expect(page.getByTestId('wsf-contribute-move-screen')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-entry-screen')).toHaveCount(0);
+  // The only guidance is about the app, with the goal's unit in place of
+  // the generic "reps"; nothing about form, tempo, depth or a target.
+  await expect(page.getByTestId('wsf-contribute-move-screen')).toContainText('Ready when you are.');
+  await expect(page.getByTestId('wsf-contribute-move-screen')).toContainText(
+    'Count your own squats. When you’re finished, enter the number you completed.'
+  );
+  await expect(page.getByTestId('wsf-contribute-done')).toHaveText('I’m done — enter my squats');
+  await expect(page.getByTestId('wsf-contribute-skip-timer')).toHaveText('Skip timer and enter squats');
+  const moveText = await page.getByTestId('wsf-contribute-move-screen').innerText();
+  expect(moveText).not.toMatch(/depth|tempo|form|safety|target|at least|should|must/i);
   await expect(page.getByTestId('wsf-contribute-community')).toHaveText('Maple Street Movers', { timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-goal-title')).toHaveText('Squats together this week');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('241 of 500 squats');
@@ -521,6 +531,33 @@ test('unknown outcome keeps the same attempt; replaying a landed attempt is "alr
   expect(Number(memberTotal?.total?.integerValue)).toBe(27);
   await page.waitForTimeout(300);
   await snap(page, '10-already-recorded-replay');
+
+  // ---- 10b. the same, after this member has been removed --------------------------
+  // The attempt landed, the response was lost, and the Champion removed the
+  // member before they replayed it. The server answers about THEIR effort only:
+  // it counted once, here is their total — and nothing about the community.
+  await page.getByTestId('wsf-contribute-another').click();
+  await page.getByTestId('wsf-contribute-entry').fill('3');
+  await page.getByTestId('wsf-contribute-review').click();
+  mode = 'landButDrop';
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 20_000 });
+  await firestoreWrite(`wsfMemberships/${fx.groupId}_${fx.memberUid}`, { membershipStatus: { stringValue: 'removed' } }, ['membershipStatus']);
+  mode = 'pass';
+  await page.getByTestId('wsf-contribute-reconcile').click();
+  await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'ownOnly');
+  await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('This contribution was already recorded.');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 30 squats');
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-we')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-another')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-not-found')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to home');
+  const ownOnly = await page.getByTestId('wsf-contribute-screen').innerText();
+  expect(ownOnly).not.toMatch(/of 500|Maple Street|WE did it|closer|%/);
+  expect(await page.evaluate((k) => window.localStorage.getItem(k), key)).toBeNull();
+  await snap(page, '10b-already-recorded-own-only');
 });
 
 test('a definitive refusal retires the reminder and says what was not recorded', async ({ page }) => {
@@ -539,7 +576,12 @@ test('a definitive refusal retires the reminder and says what was not recorded',
   await page.getByTestId('wsf-contribute-entry').fill('20');
   await page.getByTestId('wsf-contribute-review').click();
   await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible();
-  await firestoreWrite(`wsfGoals/${goalId}`, { status: { stringValue: 'closed' } }, ['status']);
+  // The goal closes after Record is tapped and before the server runs it, so
+  // the screen state at the tap is deterministic (no poll can flip it first).
+  await page.route(callableUrl('wsfContribute'), async (route: Route) => {
+    await firestoreWrite(`wsfGoals/${goalId}`, { status: { stringValue: 'closed' } }, ['status']);
+    await route.continue();
+  });
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-refused')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-refused')).toHaveAttribute('data-reason', 'closed');
@@ -558,7 +600,11 @@ test('a definitive refusal retires the reminder and says what was not recorded',
   await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('wsf-contribute-entry').fill('12');
   await page.getByTestId('wsf-contribute-review').click();
-  await firestoreWrite(`wsfMemberships/${fx.groupId}_${fx.memberUid}`, { membershipStatus: { stringValue: 'removed' } }, ['membershipStatus']);
+  await page.unroute(callableUrl('wsfContribute'));
+  await page.route(callableUrl('wsfContribute'), async (route: Route) => {
+    await firestoreWrite(`wsfMemberships/${fx.groupId}_${fx.memberUid}`, { membershipStatus: { stringValue: 'removed' } }, ['membershipStatus']);
+    await route.continue();
+  });
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-refused')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-refused')).toHaveAttribute('data-reason', 'notMember');

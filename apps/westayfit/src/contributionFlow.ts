@@ -167,17 +167,24 @@ export function resultVariant(r: ContributeReceipt): ResultVariant {
 
 export function resultCopy(
   r: ContributeReceipt,
-  communityName: string | null
+  communityName: string | null,
+  /** The goal's unit as already loaded on the screen, for a receipt that carries none. */
+  unitHint: string | null = null
 ): { headline: string; subline: string; standing: string | null } {
   const variant = resultVariant(r);
-  const unit = r.unit ?? '';
+  const unit = r.unit ?? unitHint ?? '';
   const added = `${formatCount(r.addedCount)} ${unit}`.trim();
   const who = communityName ?? 'We';
   const isAre = communityName ? 'is' : 'are';
   if (variant === 'ownOnly') {
+    // The server answered about this member's own contribution only. It
+    // happened, it counted once, here is what it was — and nothing about
+    // where the community stands now, which this account may no longer see.
     return {
       headline: r.alreadyRecorded ? 'This contribution was already recorded.' : `You added ${added}.`,
-      subline: `Your confirmed total on this goal is ${formatCount(r.ownCredit)}${unit ? ` ${unit}` : ''}.`,
+      subline: r.alreadyRecorded
+        ? `It counted once. Your confirmed total on this goal is ${formatCount(r.ownCredit)}${unit ? ` ${unit}` : ''}.`
+        : `Your confirmed total on this goal is ${formatCount(r.ownCredit)}${unit ? ` ${unit}` : ''}.`,
       standing: null,
     };
   }

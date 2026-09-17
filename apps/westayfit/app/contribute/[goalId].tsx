@@ -197,6 +197,9 @@ export default function ContributeToGoal() {
     setStep(initialStep);
     setContext({ kind: 'none' });
     setState({ kind: 'loading' });
+    setTimerBase(0);
+    setTimerStartedAt(null);
+    setTimerRunning(false);
 
     if (!goalId) return;
 
@@ -380,6 +383,11 @@ export default function ContributeToGoal() {
     setTimerStartedAt(null);
     setTimerRunning(false);
   }, []);
+  // Leaving the movement screen: a running timer is paused, not lost.
+  const onDoneMoving = useCallback(() => {
+    if (timerRunning) onTimerPause();
+    setStep('enter');
+  }, [timerRunning, onTimerPause]);
 
   const sendContribute = useCallback(
     async (attemptId: string, count: number) => {
@@ -413,18 +421,22 @@ export default function ContributeToGoal() {
       setPending(null);
       setLastResult(data);
       // PACKAGE E: the shared-state fields come back only when the caller is
-      // still authorized to see them. An active member on this screen always
-      // is. The guard exists so a caller who has lost membership mid-session
-      // cannot render `undefined` as community progress — they fall to
-      // notFound, the same non-enumerating answer the rest of this screen
-      // uses, rather than being shown a broken total.
+      // still authorized to see them. A caller who lost membership mid-session
+      // and replays a landed attempt gets the server's own-only receipt: the
+      // effort happened, it counted once, here is what it was — and nothing
+      // about where the community stands now. The receipt renders as exactly
+      // that (no shared numbers, no mark, no further contribution). The load
+      // state is left untouched so nothing invents community progress, and
+      // the next load of this route answers with the same non-enumerating
+      // not-found the display path gives.
       if (
         data.sharedTotal === undefined ||
         data.target === undefined ||
         data.unit === undefined ||
         data.status === undefined
       ) {
-        setState({ kind: 'notFound' });
+        attemptRef.current = null;
+        setReviewCount(null);
         return;
       }
       const nextStatus = data.status;
@@ -578,9 +590,15 @@ export default function ContributeToGoal() {
     if (submitting || !pending) return;
     // Discarding does NOT retract the server-side record if it landed —
     // this only removes the local reminder. No shared-total mutation happens.
+    // The member has said they are sure; they return to a clean entry, and
+    // anything they record next is a genuinely new attempt.
     clearPending(pending.goalId, uid as string);
     setPending(null);
     setEntryError(null);
+    setEntry('');
+    setReviewCount(null);
+    attemptRef.current = null;
+    setStep('enter');
   }, [pending, submitting, uid]);
 
   const onAnother = useCallback(() => {
@@ -602,7 +620,6 @@ export default function ContributeToGoal() {
   // ---- render ---------------------------------------------------------------
 
   const communityName = context.kind === 'verified' ? context.communityName : null;
-  const goalTitle = context.kind === 'verified' ? context.goalTitle : null;
   const backHref = context.kind === 'verified' ? `/community/${context.groupId}` : '/';
   const backLabel = context.kind === 'verified' ? 'Back to community' : 'Back to home';
   const heroWeWidth = Math.max(160, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
@@ -762,7 +779,7 @@ export default function ContributeToGoal() {
   if (lastResult) {
     const r = lastResult;
     const variant = resultVariant(r);
-    const copy = resultCopy(r, communityName);
+    const copy = resultCopy(r, communityName, unit);
     const hasShared = variant !== 'ownOnly';
     return screen(
       <>
@@ -815,15 +832,15 @@ export default function ContributeToGoal() {
             </>
           ) : null}
         </View>
-        {hasShared ? ownCreditLine(r.ownCredit, r.unit) : <Text style={styles.ownCredit} testID="wsf-contribute-own-credit">{copy.subline}</Text>}
-        {renderContextLabels()}
+        {ownCreditLine(r.ownCredit, hasShared ? r.unit : unit)}
+        {hasShared ? renderContextLabels() : null}
         <View style={styles.actions}>
           <ButtonLink
-            href={backHref}
+            href={hasShared ? backHref : '/'}
             style={styles.primaryButton}
             textStyle={styles.primaryButtonText}
             testID="wsf-contribute-back"
-            label={backLabel}
+            label={hasShared ? backLabel : 'Back to home'}
           />
           {hasShared && r.status === 'active' ? (
             <Pressable
@@ -1082,7 +1099,7 @@ export default function ContributeToGoal() {
           </View>
           <View style={styles.actions}>
             <Pressable
-              onPress={() => setStep('enter')}
+              onPress={onDoneMoving}
               accessibilityRole="button"
               style={styles.primaryButton}
               testID="wsf-contribute-done"
@@ -1091,7 +1108,7 @@ export default function ContributeToGoal() {
             </Pressable>
             {!timerUsed ? (
               <Pressable
-                onPress={() => setStep('enter')}
+                onPress={onDoneMoving}
                 accessibilityRole="button"
                 style={styles.tertiaryButton}
                 testID="wsf-contribute-skip-timer"
