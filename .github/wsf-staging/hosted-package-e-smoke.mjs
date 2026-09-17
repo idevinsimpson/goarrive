@@ -467,14 +467,41 @@ async function caseUncertainAndPerGoal(browser) {
     const stateB = champion.getByTestId(`wsf-goal-display-auth-state-${goalB}`);
     const unsettledA = champion.getByTestId(`wsf-goal-display-auth-unsettled-${goalA}`);
 
+    // Prove the page reached its settled initial state BEFORE any failure is
+    // armed. Run 35248719827 armed the list-goals abort straight after
+    // navigation and caught the page's own initial read: the toggles never
+    // rendered and the case timed out on a click unrelated to the behaviour
+    // under test.
+    await visible(toggleA, 30_000);
+    await visible(toggleB, 30_000);
+    await textEquals(stateA, 'Public display is not authorized for this goal.');
+    await textEquals(stateB, 'Public display is not authorized for this goal.');
+
+    // Failure injection tied to the action under test. Only goal A's own
+    // authorization write is aborted, and the reconciliation read the app
+    // issues after a failed write is armed from inside that abort — so no
+    // initial or background list read can ever be the thing that failed.
+    const blocked = { writes: 0, reads: 0 };
     let blockWrite = true;
-    let blockRead = true;
-    await champion.route('**/wsfSetGoalDisplayAuthorization', async (route) => blockWrite ? route.abort('failed') : route.continue());
-    await champion.route('**/wsfListGoals', async (route) => blockRead ? route.abort('failed') : route.continue());
+    let blockRead = false;
+    await champion.route('**/wsfSetGoalDisplayAuthorization', async (route) => {
+      const forGoalA = (route.request().postData() || '').includes(goalA);
+      if (!blockWrite || !forGoalA) return route.continue();
+      blocked.writes += 1;
+      blockRead = true;
+      return route.abort('failed');
+    });
+    await champion.route('**/wsfListGoals', async (route) => {
+      if (!blockRead) return route.continue();
+      blocked.reads += 1;
+      return route.abort('failed');
+    });
 
     await toggleA.click();
     await textContains(unsettledA, 'could not confirm', 30_000);
     await textContains(toggleA, 'Try again: authorize public display');
+    assert(blocked.writes >= 1, 'The intended authorization write for goal A was never intercepted');
+    assert(blocked.reads >= 1, 'The reconciliation read after the failed write was never intercepted');
     assert((await readAuthorization(goalA)) === false, 'Blocked write unexpectedly changed goal A');
 
     blockWrite = false;
