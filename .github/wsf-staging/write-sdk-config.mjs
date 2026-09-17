@@ -46,7 +46,16 @@ if (inside(process.env.GITHUB_WORKSPACE) || inside(process.env.WSF_RESULT_DIR)) 
   process.exit(1);
 }
 
+// The directory must be created HERE. mkdir's mode option does not re-chmod a
+// directory that already exists, so writing into a pre-existing directory
+// (RUNNER_TEMP itself, say) would only look like the 0700 invariant. The
+// workflow passes a dedicated child of RUNNER_TEMP for exactly this reason.
+const dir = path.dirname(resolved);
+if (fs.existsSync(dir)) {
+  console.error('::error::the SDK config directory must not already exist; pass a dedicated directory this script creates');
+  process.exit(1);
+}
 process.umask(0o077);
-fs.mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
+fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 fs.writeFileSync(resolved, JSON.stringify({ projectId, apiKey }) + '\n', { mode: 0o600 });
 console.log(`SDK_CONFIG_FILE=written for ${projectId}`);

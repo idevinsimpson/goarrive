@@ -196,10 +196,19 @@ test('the smoke step derives WSF_SDK_CONFIG_FILE from the staging env artifact',
   assert.match(run, /export WSF_STAGING_API_KEY="\$EXPO_PUBLIC_WSF_STAGING_API_KEY"/);
 });
 
-test('the SDK config file lives in the runner temp dir, not the checkout or evidence', () => {
+test('the SDK config file lives in a DEDICATED CHILD of the runner temp dir, not the checkout or evidence', () => {
   const block = stepBlock('hosted-verify', 'Run the Package E hosted authorization checks');
-  assert.match(block, /export WSF_SDK_CONFIG_FILE="\$RUNNER_TEMP\/[a-z-]+\.json"/);
+  // A child directory, so the writer creates it (0700) rather than writing
+  // into RUNNER_TEMP, which already exists and would keep the runner's mode.
+  assert.match(block, /export WSF_SDK_CONFIG_FILE="\$RUNNER_TEMP\/[a-z-]+\/[a-z-]+\.json"/);
+  assert.equal(/WSF_SDK_CONFIG_FILE="\$RUNNER_TEMP\/[a-z-]+\.json"/.test(block), false, 'the file must not sit directly in RUNNER_TEMP');
   assert.equal(/WSF_SDK_CONFIG_FILE="[^"]*(github\.workspace|wsf-evidence)/.test(block), false);
+});
+
+test('the config job documents both consumers of the staging env artifact', () => {
+  const comment = text.split('\n').filter((l) => /^\s*#/.test(l)).join('\n');
+  assert.equal(/artifact is consumed\s*#?\s*only by the build job/.test(comment), false, 'stale: hosted-verify downloads it too');
+  assert.match(comment, /consumed by\s*\n?\s*#\s*the downstream build job[^\n]*\n?\s*#?[^\n]*hosted-verify/);
 });
 
 test('nothing in the hosted job prints the SDK config or the env artifact', () => {
