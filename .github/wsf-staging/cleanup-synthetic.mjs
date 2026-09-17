@@ -14,11 +14,23 @@
  *   NO_FIXTURES  the manifest exists and records nothing to remove
  *   COMPLETE     everything in the manifest is gone, confirmed by reading back
  *   INCOMPLETE   something remains; the manifest is PRESERVED for recovery
- *   MANIFEST_UNUSABLE  absent or malformed — scope unknown, nothing claimed
+ *   MANIFEST_UNUSABLE  absent, malformed, or not provably this run's — scope
+ *                unknown or unsafe, nothing deleted, nothing claimed
  *
- * The old code collapsed the last two into `manifestFound: false, errors: []`
- * and exited 0. A missing manifest is the case where cleanup is least able to
- * promise anything, so it is the one case that must never look like success.
+ * Provenance. Run 35248719827 showed that "every identifier contains the run
+ * tag" is the wrong rule: Firebase Auth localIds are random, and the profile
+ * document keyed by one (wsfMemberProfiles/<uid>) inherits that. The rule is
+ * now:
+ *   - an ordinary Firestore path must contain the run tag;
+ *   - an Auth user need not — but before ANY deletion its account is looked
+ *     up and its email must match the run-specific synthetic pattern the
+ *     hosted harness creates, wsf-<runTag>-…@example.com; an already-absent
+ *     account is "already absent", not unsafe;
+ *   - wsfMemberProfiles/<uid> is the ONE untagged document shape allowed, and
+ *     only when <uid> is in manifest.users AND the manifest carries a
+ *     run-tagged wsfMemberships/…_<uid> path for that same uid.
+ * The whole manifest is validated first. One unsafe identifier means
+ * MANIFEST_UNUSABLE with zero deletions attempted.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,12 +107,30 @@ function finish(status, extra, exitCode) {
   process.exit(exitCode);
 }
 
+/**
+ * Look up the requested Auth users. Returns a Map of localId → account for
+ * the ones that exist; absent ones are simply not in the map. `{}` (no
+ * `users` key) is the documented "none found" response.
+ */
+async function lookupUsers(localIds) {
+  if (!localIds.length) return new Map();
+  const { parsed } = await api(`${identityBase}/accounts:lookup`, { method: 'POST', body: { localId: localIds } });
+  if (parsed.users !== undefined && !Array.isArray(parsed.users)) {
+    throw new Error('Auth lookup returned a users field of unexpected type');
+  }
+  const present = new Map();
+  for (const u of parsed.users || []) {
+    if (u && typeof u.localId === 'string') present.set(u.localId, u);
+  }
+  return present;
+}
+
 // ---- manifest ------------------------------------------------------------
 if (!fs.existsSync(MANIFEST)) {
   finish('MANIFEST_UNUSABLE', {
     reason: 'manifest file absent — the scope of what was created is unknown',
     manifestPreserved: false,
-    recovery: 'Identify run-tagged fixtures (wsfMemberProfiles/e5h-*, wsfCommunityGroups/e5h-*) by console query before the next run.',
+    recovery: 'Identify run-tagged fixtures (wsfCommunityGroups/e5grp-<runTag>-*, wsfGoals/e5goal-<runTag>-*) and Auth users with emails wsf-<runTag>-*@example.com by console query before the next run.',
   }, 1);
 }
 
@@ -119,14 +149,62 @@ if (manifest?.project !== PROJECT_ID || !/^e5h-[A-Za-z0-9_-]+$/.test(runTag)) {
 
 const docs = [...new Set(manifest.docs || [])].filter((v) => typeof v === 'string' && v.length);
 const users = [...new Set(manifest.users || [])].filter((v) => typeof v === 'string' && v.length);
+const userSet = new Set(users);
 
-// Every identifier must carry this run's tag. A manifest entry that does not is
-// not this run's to delete.
-const strayDocs = docs.filter((d) => !d.includes(runTag));
-const strayUsers = users.filter((u) => !u.includes(runTag));
-if (strayDocs.length || strayUsers.length) {
+// ---- provenance: validate EVERYTHING before deleting ANYTHING -------------
+const unsafe = [];
+
+// Documents. Tagged paths are this run's by construction. The single untagged
+// shape allowed is the profile keyed by a synthetic uid, and only when the
+// manifest itself ties that uid to this run through a tagged membership.
+const membershipUids = new Set();
+for (const d of docs) {
+  const m = /^wsfMemberships\/([^/]+)_([^/_]+)$/.exec(d);
+  if (m && d.includes(runTag)) membershipUids.add(m[2]);
+}
+let profileDocumentsLinked = 0;
+for (const d of docs) {
+  if (d.includes(runTag)) continue;
+  const profile = /^wsfMemberProfiles\/([^/]+)$/.exec(d);
+  if (!profile) { unsafe.push(`document ${d}: not tagged ${runTag}`); continue; }
+  const uid = profile[1];
+  if (!userSet.has(uid)) { unsafe.push(`document ${d}: profile uid is not in manifest.users`); continue; }
+  if (!membershipUids.has(uid)) { unsafe.push(`document ${d}: no run-tagged wsfMemberships path links this uid to ${runTag}`); continue; }
+  profileDocumentsLinked += 1;
+}
+
+// Users. A localId is random and proves nothing; the account's synthetic
+// email does. Lookup is a read, so it is safe before validation completes.
+const emailPattern = new RegExp(`^wsf-${runTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[^@\\s]*@example\\.com$`, 'i');
+let presentBefore = new Map();
+try {
+  presentBefore = await lookupUsers(users);
+} catch (e) {
   finish('MANIFEST_UNUSABLE', {
-    reason: `manifest contains ${strayDocs.length + strayUsers.length} identifiers not tagged ${runTag}`,
+    reason: `could not establish Auth user provenance before deletion: ${e.message}`,
+    manifestPreserved: true,
+  }, 1);
+}
+let usersVerifiedByEmail = 0;
+let usersAlreadyAbsent = 0;
+for (const uid of users) {
+  const account = presentBefore.get(uid);
+  if (!account) { usersAlreadyAbsent += 1; continue; }
+  const email = typeof account.email === 'string' ? account.email : '';
+  if (!emailPattern.test(email)) {
+    // Never print the email: it is either someone else's or misattributed.
+    unsafe.push(`user ${uid}: existing account email does not match the ${runTag} synthetic pattern`);
+    continue;
+  }
+  usersVerifiedByEmail += 1;
+}
+
+if (unsafe.length) {
+  finish('MANIFEST_UNUSABLE', {
+    reason: `${unsafe.length} identifier(s) failed provenance validation for ${runTag}; nothing was deleted`,
+    unsafeIdentifiers: unsafe.length,
+    // Identifiers are run-scoped paths or opaque uids, never emails.
+    unsafeDetails: unsafe.slice(0, 20),
     manifestPreserved: true,
   }, 1);
 }
@@ -151,13 +229,14 @@ for (const docPath of [...docs].sort((a, b) => b.split('/').length - a.split('/'
   }
 }
 
-let usersRequested = users.length;
+// Only accounts that exist AND passed the email check are sent for deletion.
+const usersToDelete = users.filter((uid) => presentBefore.has(uid));
 let usersReportedDeleted = 0;
-if (users.length) {
+if (usersToDelete.length) {
   try {
     const { parsed } = await api(`${identityBase}/accounts:batchDelete`, {
       method: 'POST',
-      body: { localIds: users, force: true },
+      body: { localIds: usersToDelete, force: true },
     });
     // batchDelete returns {} on full success and {errors:[{index,message}]} on
     // partial failure. Absence of `errors` only means success when the body is
@@ -167,9 +246,9 @@ if (users.length) {
       problems.push('Auth batchDelete returned an errors field of unexpected type');
     } else if (failures.length) {
       problems.push(`Auth batchDelete reported ${failures.length} per-user failures`);
-      usersReportedDeleted = Math.max(0, users.length - failures.length);
+      usersReportedDeleted = Math.max(0, usersToDelete.length - failures.length);
     } else {
-      usersReportedDeleted = users.length;
+      usersReportedDeleted = usersToDelete.length;
     }
   } catch (e) {
     problems.push(`Auth batchDelete: ${e.message}`);
@@ -187,44 +266,42 @@ for (const docPath of docs) {
   }
 }
 
+// Every requested user, not only the ones deleted this pass: COMPLETE means
+// none of them exist any more.
 const stillPresentUsers = [];
 if (users.length) {
   try {
-    const { parsed } = await api(`${identityBase}/accounts:lookup`, {
-      method: 'POST',
-      body: { localId: users },
-    });
-    const remaining = Array.isArray(parsed?.users) ? parsed.users : [];
-    for (const u of remaining) if (u?.localId) stillPresentUsers.push(u.localId);
+    const remaining = await lookupUsers(users);
+    for (const uid of remaining.keys()) stillPresentUsers.push(uid);
   } catch (e) {
     problems.push(`verify users: ${e.message}`);
   }
 }
 
 const complete = problems.length === 0 && stillPresentDocs.length === 0 && stillPresentUsers.length === 0;
+const counts = {
+  requestedDocuments: docs.length,
+  documentsDeleted: docsDeleted,
+  documentsAlreadyAbsent: docsAlreadyGone,
+  profileDocumentsLinked,
+  requestedUsers: users.length,
+  usersVerifiedByEmail,
+  usersAlreadyAbsent,
+  usersDeleted: usersReportedDeleted,
+};
 
 if (complete) {
   fs.rmSync(MANIFEST, { force: true });
-  finish('COMPLETE', {
-    requestedDocuments: docs.length,
-    documentsDeleted: docsDeleted,
-    documentsAlreadyAbsent: docsAlreadyGone,
-    requestedUsers: usersRequested,
-    usersDeleted: usersReportedDeleted,
-    manifestPreserved: false,
-  }, 0);
+  finish('COMPLETE', { ...counts, manifestPreserved: false }, 0);
 }
 
 // Incomplete: the manifest is the only record of what remains, so it stays.
 finish('INCOMPLETE', {
-  requestedDocuments: docs.length,
-  documentsDeleted: docsDeleted,
-  documentsAlreadyAbsent: docsAlreadyGone,
-  requestedUsers: usersRequested,
-  usersDeleted: usersReportedDeleted,
+  ...counts,
   unresolvedDocuments: stillPresentDocs.length,
   unresolvedUsers: stillPresentUsers.length,
-  // Run-tagged identifiers are not secret and are exactly what recovery needs.
+  // Run-tagged identifiers and opaque uids are not secret and are exactly what
+  // recovery needs.
   unresolvedDocumentPaths: stillPresentDocs,
   unresolvedUserIds: stillPresentUsers,
   problems,

@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
- * Cleanup regressions, driven against a local mock of the Google APIs.
+ * Cleanup regressions, driven against a local stateful fake of the two Google
+ * APIs the script touches (Identity Toolkit lookup/batchDelete, Firestore
+ * GET/DELETE).
  *
- * The first case is the one that motivated the rewrite: an HTTP 200 whose body
- * is HTML. The previous implementation parsed that to {}, found no `errors`
- * key, and reported every user deleted.
+ * Two lessons shaped this file. First, an HTTP 200 whose body is HTML must
+ * never read as success. Second — run 35248719827 — Firebase Auth localIds
+ * are random and never contain the run tag, so provenance has to come from
+ * the account's synthetic email, established by lookup BEFORE any deletion.
+ * The fixtures here use realistic 28-character uids for that reason.
  */
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -15,20 +20,73 @@ import { spawn } from 'node:child_process';
 
 const CLEANUP = path.resolve('.github/wsf-staging/cleanup-synthetic.mjs');
 const RUN_TAG = 'e5h-testrun01';
+const OTHER_TAG = 'e5h-someotherrun';
 let passed = 0;
 
-function startMock(handler) {
-  const server = http.createServer(handler);
+// Firebase-style localId: 28 alphanumerics, no run tag anywhere in it.
+function firebaseUid() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(28);
+  let out = '';
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  assert.equal(out.includes('e5h-'), false);
+  return out;
+}
+// The email shape hosted-package-e-smoke.mjs creates: wsf-<runTag>-<label>-<hex>@example.com
+const syntheticEmail = (tag, label) => `wsf-${tag}-${label}-${crypto.randomBytes(2).toString('hex')}@example.com`;
+
+/**
+ * Stateful fake: `accounts` is uid → email for existing Auth users, `docs` the
+ * set of existing Firestore paths. `calls` records every mutating request so
+ * a test can prove nothing was deleted. `behave` overrides specific endpoints.
+ */
+function startFake({ accounts = new Map(), docs = new Set(), behave = {} } = {}) {
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (d) => { raw += d; });
+    req.on('end', () => {
+      const json = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+      const body = raw ? JSON.parse(raw) : {};
+      if (req.url.includes('accounts:lookup')) {
+        if (behave.lookup) return behave.lookup(req, res, body);
+        const found = (body.localId || []).filter((id) => accounts.has(id)).map((id) => ({ localId: id, email: accounts.get(id) }));
+        return json(200, found.length ? { users: found } : {});
+      }
+      if (req.url.includes('accounts:batchDelete')) {
+        calls.push({ kind: 'batchDelete', ids: body.localIds || [] });
+        if (behave.batchDelete) return behave.batchDelete(req, res, body, accounts);
+        for (const id of body.localIds || []) accounts.delete(id);
+        return json(200, {});
+      }
+      const m = /\/documents\/(.+)$/.exec(req.url);
+      const docPath = m ? decodeURIComponent(m[1]) : null;
+      if (req.method === 'DELETE') {
+        calls.push({ kind: 'deleteDoc', path: docPath });
+        if (behave.deleteDoc) return behave.deleteDoc(req, res, docPath, docs);
+        if (!docs.has(docPath)) return json(404, { error: { status: 'NOT_FOUND' } });
+        docs.delete(docPath);
+        return json(200, {});
+      }
+      if (req.method === 'GET') {
+        if (docs.has(docPath)) return json(200, { name: docPath, fields: {} });
+        return json(404, { error: { status: 'NOT_FOUND' } });
+      }
+      json(404, { error: { status: 'NOT_FOUND' } });
+    });
+  });
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}` }));
+    server.listen(0, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}`, calls, accounts, docs }));
   });
 }
+const mutations = (calls) => calls.filter((c) => c.kind === 'batchDelete' || c.kind === 'deleteDoc');
+
 function writeManifest(dir, manifest) {
   const p = path.join(dir, 'manifest.json');
   fs.writeFileSync(p, JSON.stringify(manifest));
   return p;
 }
-// Must be async: the mock server runs in THIS process, so a synchronous child
+// Must be async: the fake server runs in THIS process, so a synchronous child
 // would block the event loop and the server could never answer it.
 function runCleanup(base, manifestPath, receiptPath) {
   return new Promise((resolve) => {
@@ -57,91 +115,338 @@ async function test(name, fn) {
   passed += 1;
   console.log(`  ok  ${name}`);
 }
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
 
-const fullManifest = {
-  project: 'westayfit-staging',
-  runTag: RUN_TAG,
-  docs: [`wsfCommunityGroups/${RUN_TAG}-grp`],
-  users: [`uid-${RUN_TAG}-a`, `uid-${RUN_TAG}-b`],
-};
+/**
+ * One synthetic fixture exactly as seedFixture() in the smoke lays it down:
+ * three users (champion, member, outsider), a group, memberships and profiles
+ * for champion and member, N goals each with 10 counter shards, optionally a
+ * challenge, plus whatever the case tracks afterwards.
+ */
+function fixture(tag, label, { goals = 1, challenge = false, contribution = false, challengeShards = false } = {}) {
+  const users = { champion: firebaseUid(), member: firebaseUid(), outsider: firebaseUid() };
+  const emails = new Map([
+    [users.champion, syntheticEmail(tag, `${label}-champion`)],
+    [users.member, syntheticEmail(tag, `${label}-member`)],
+    [users.outsider, syntheticEmail(tag, `${label}-outsider`)],
+  ]);
+  const stamp = `${tag}-${label}`;
+  const groupId = `e5grp-${stamp}`;
+  const docs = [`wsfCommunityGroups/${groupId}`];
+  for (const uid of [users.champion, users.member]) {
+    docs.push(`wsfMemberships/${groupId}_${uid}`);
+    docs.push(`wsfMemberProfiles/${uid}`);
+  }
+  const goalIds = [];
+  for (let i = 1; i <= goals; i += 1) {
+    const goalId = `e5goal-${stamp}-${i}`;
+    goalIds.push(goalId);
+    docs.push(`wsfGoals/${goalId}`);
+    for (let s = 0; s < 10; s += 1) docs.push(`wsfGoalCounters/${goalId}/shards/${s}`);
+  }
+  if (challenge) {
+    docs.push(`wsfChallenges/e5challenge-${stamp}`);
+    if (challengeShards) for (let s = 0; s < 10; s += 1) docs.push(`wsfChallengeCounters/e5challenge-${stamp}/shards/${s}`);
+  }
+  if (contribution) {
+    docs.push(`wsfContributions/${goalIds[0]}_${users.member}_att1`);
+    docs.push(`wsfGoalMemberTotals/${goalIds[0]}_${users.member}`);
+  }
+  return { users, emails, docs, groupId, goalIds };
+}
+/** The three fixtures run 35248719827 created, in its manifest's shape. */
+function runShapeManifest(tag = RUN_TAG) {
+  const parts = [
+    fixture(tag, 'roundtrip', { goals: 1, challenge: true, challengeShards: true, contribution: true }),
+    fixture(tag, 'protected', { goals: 1, contribution: true }),
+    fixture(tag, 'uncertain', { goals: 2 }),
+  ];
+  const users = parts.flatMap((p) => Object.values(p.users));
+  const docs = parts.flatMap((p) => p.docs);
+  const emails = new Map(parts.flatMap((p) => [...p.emails]));
+  return { manifest: { project: 'westayfit-staging', runTag: tag, users, docs }, emails, parts };
+}
+function backendFor({ manifest, emails }, { everythingPresent = true } = {}) {
+  return {
+    accounts: new Map(everythingPresent ? [...emails] : []),
+    docs: new Set(everythingPresent ? manifest.docs : []),
+  };
+}
 
-await test('HTML body with HTTP 200 does NOT report success', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
-  const { server, base } = await startMock((req, res) => {
-    if (req.url.includes('accounts:batchDelete')) {
-      res.writeHead(200, { 'content-type': 'text/html' });
-      res.end('<html><body>Sign in to continue</body></html>');
-      return;
-    }
-    res.writeHead(404); res.end('{}');
+// ---- the actual run shape ---------------------------------------------------
+
+await test('the run-35248719827 manifest shape is exactly modelled: 9 random uids, 74 docs, 6 untagged profiles', async () => {
+  const { manifest } = runShapeManifest();
+  assert.equal(manifest.users.length, 9);
+  assert.equal(manifest.docs.length, 74);
+  const untagged = manifest.docs.filter((d) => !d.includes(RUN_TAG));
+  assert.equal(untagged.length, 6);
+  for (const d of untagged) assert.match(d, /^wsfMemberProfiles\/[A-Za-z0-9]{28}$/);
+  for (const u of manifest.users) assert.equal(u.includes(RUN_TAG), false);
+});
+
+await test('that shape passes provenance and is cleaned COMPLETE with read-back', async () => {
+  const d = tmp();
+  const shape = runShapeManifest();
+  const fake = await startFake(backendFor(shape));
+  const mp = writeManifest(d, shape.manifest);
+  const r = await runCleanup(fake.base, mp, path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.equal(r.receipt.status, 'COMPLETE');
+  assert.equal(r.receipt.requestedUsers, 9);
+  assert.equal(r.receipt.usersVerifiedByEmail, 9);
+  assert.equal(r.receipt.usersDeleted, 9);
+  assert.equal(r.receipt.requestedDocuments, 74);
+  assert.equal(r.receipt.documentsDeleted, 74);
+  assert.equal(r.receipt.profileDocumentsLinked, 6);
+  assert.equal(fake.accounts.size, 0, 'read-back: no Auth users remain');
+  assert.equal(fake.docs.size, 0, 'read-back: no documents remain');
+  assert.equal(fs.existsSync(mp), false);
+});
+
+await test('old-run recovery: the same shape against a backend where the smoke already removed everything proves clean', async () => {
+  const d = tmp();
+  const shape = runShapeManifest();
+  const fake = await startFake(backendFor(shape, { everythingPresent: false }));
+  const r = await runCleanup(fake.base, writeManifest(d, shape.manifest), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.equal(r.receipt.status, 'COMPLETE');
+  assert.equal(r.receipt.usersAlreadyAbsent, 9);
+  assert.equal(r.receipt.usersDeleted, 0);
+  assert.equal(r.receipt.documentsAlreadyAbsent, 74);
+  assert.equal(r.receipt.documentsDeleted, 0);
+  assert.equal(fake.calls.filter((c) => c.kind === 'batchDelete').length, 0, 'nothing to batchDelete when no account exists');
+});
+
+// ---- Auth provenance --------------------------------------------------------
+
+await test('a random uid whose looked-up synthetic email carries the run tag is accepted, deleted, and proven absent', async () => {
+  const d = tmp();
+  const uid = firebaseUid();
+  const fake = await startFake({ accounts: new Map([[uid, syntheticEmail(RUN_TAG, 'solo-outsider')]]) });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: [uid], docs: [] }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.equal(r.receipt.status, 'COMPLETE');
+  assert.equal(r.receipt.usersVerifiedByEmail, 1);
+  assert.equal(r.receipt.usersDeleted, 1);
+  assert.deepEqual(fake.calls.filter((c) => c.kind === 'batchDelete').map((c) => c.ids), [[uid]]);
+  assert.equal(fake.accounts.has(uid), false, 'read-back proves absence');
+});
+
+await test('an outsider uid with no profile or membership is still validated through its run-tagged email alone', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'protected');
+  const fake = await startFake({ accounts: new Map(fx.emails), docs: new Set(fx.docs) });
+  // The outsider has an account but appears in no document path at all.
+  assert.equal(fx.docs.some((p) => p.includes(fx.users.outsider)), false);
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.equal(r.receipt.status, 'COMPLETE');
+  assert.equal(r.receipt.usersVerifiedByEmail, 3);
+  assert.equal(fake.accounts.has(fx.users.outsider), false);
+});
+
+await test('a random uid whose actual email belongs to ANOTHER run is refused before any deletion', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'roundtrip');
+  const accounts = new Map(fx.emails);
+  accounts.set(fx.users.member, syntheticEmail(OTHER_TAG, 'roundtrip-member'));
+  const fake = await startFake({ accounts, docs: new Set(fx.docs) });
+  const mp = writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs });
+  const r = await runCleanup(fake.base, mp, path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(r.receipt.unsafeIdentifiers, 1);
+  assert.equal(mutations(fake.calls).length, 0, 'zero deletions attempted');
+  assert.equal(fake.accounts.size, 3, 'no account removed');
+  assert.equal(fake.docs.size, fx.docs.length, 'no document removed');
+  assert.equal(fs.existsSync(mp), true);
+  assert.equal(JSON.stringify(r.receipt).includes('@example.com'), false, 'the mismatching email is never written to the receipt');
+});
+
+await test('a random uid whose actual email is not synthetic at all (a real-looking account) is refused before any deletion', async () => {
+  const d = tmp();
+  const uid = firebaseUid();
+  const fake = await startFake({ accounts: new Map([[uid, 'someone@goa.fit']]) });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: [uid], docs: [] }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0);
+  assert.equal(fake.accounts.has(uid), true);
+  assert.equal(r.out.includes('goa.fit') || JSON.stringify(r.receipt).includes('goa.fit'), false);
+});
+
+await test('a lookup that cannot establish provenance (HTML 200) refuses before any deletion', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'protected');
+  const fake = await startFake({
+    accounts: new Map(fx.emails), docs: new Set(fx.docs),
+    behave: { lookup: (req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html>Sign in</html>'); } },
   });
-  const r = await runCleanup(base, writeManifest(d, fullManifest), path.join(d, 'receipt.json'));
-  server.close();
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.match(r.receipt.reason, /provenance/);
+  assert.equal(mutations(fake.calls).length, 0);
+});
+
+// ---- profile documents ---------------------------------------------------------
+
+await test('wsfMemberProfiles/<random uid> is accepted only through manifest.users plus a run-tagged membership', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'roundtrip');
+  const fake = await startFake({ accounts: new Map(fx.emails), docs: new Set(fx.docs) });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.equal(r.receipt.profileDocumentsLinked, 2);
+  assert.equal(fake.docs.has(`wsfMemberProfiles/${fx.users.champion}`), false);
+});
+
+await test('an untagged profile whose uid is NOT in manifest.users is refused, nothing deleted', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'roundtrip');
+  const stranger = firebaseUid();
+  const docs = [...fx.docs, `wsfMemberProfiles/${stranger}`];
+  const fake = await startFake({ accounts: new Map(fx.emails), docs: new Set(docs) });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.ok(r.receipt.unsafeDetails.some((s) => s.includes('not in manifest.users')));
+  assert.equal(mutations(fake.calls).length, 0);
+  assert.equal(fake.docs.size, docs.length);
+});
+
+await test('an untagged profile whose uid IS in manifest.users but has no run-tagged membership is refused, nothing deleted', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'roundtrip');
+  // The outsider is a synthetic user of this run, but no membership ties a
+  // profile document to it, so a profile keyed by it is not provably ours.
+  const docs = [...fx.docs, `wsfMemberProfiles/${fx.users.outsider}`];
+  const fake = await startFake({ accounts: new Map(fx.emails), docs: new Set(docs) });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.ok(r.receipt.unsafeDetails.some((s) => s.includes('no run-tagged wsfMemberships path')));
+  assert.equal(mutations(fake.calls).length, 0);
+});
+
+await test('a membership tagged for ANOTHER run does not link a profile', async () => {
+  const d = tmp();
+  const uid = firebaseUid();
+  const docs = [`wsfMemberships/e5grp-${OTHER_TAG}-x_${uid}`, `wsfMemberProfiles/${uid}`];
+  const fake = await startFake({ accounts: new Map([[uid, syntheticEmail(RUN_TAG, 'x')]]), docs: new Set(docs) });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: [uid], docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(r.receipt.unsafeIdentifiers, 2, 'both the foreign membership and the now-unlinked profile');
+  assert.equal(mutations(fake.calls).length, 0);
+});
+
+await test('an ordinary untagged Firestore path is still refused, nothing deleted', async () => {
+  const d = tmp();
+  const fake = await startFake({ docs: new Set(['wsfCommunityGroups/founder-smoke-KEEP-ME']) });
+  const mp = writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, docs: ['wsfCommunityGroups/founder-smoke-KEEP-ME'], users: [] });
+  const r = await runCleanup(fake.base, mp, path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0, 'nothing may be deleted against an untagged identifier');
+  assert.equal(fs.existsSync(mp), true);
+});
+
+await test('one unsafe identifier among 74 good ones still means ZERO deletions', async () => {
+  const d = tmp();
+  const shape = runShapeManifest();
+  shape.manifest.docs.push('wsfGoals/not-ours');
+  const fake = await startFake(backendFor(shape));
+  const r = await runCleanup(fake.base, writeManifest(d, shape.manifest), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0);
+  assert.equal(fake.docs.size, 75);
+  assert.equal(fake.accounts.size, 9);
+});
+
+// ---- honest outcomes after deletion --------------------------------------------
+
+await test('HTML body with HTTP 200 on batchDelete does NOT report success', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'protected');
+  const fake = await startFake({
+    accounts: new Map(fx.emails), docs: new Set(fx.docs),
+    behave: { batchDelete: (req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html><body>Sign in to continue</body></html>'); } },
+  });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
   assert.equal(r.code, 1, 'an HTML 200 must fail cleanup');
   assert.equal(r.receipt.status, 'INCOMPLETE');
-  assert.notEqual(r.receipt.usersDeleted, 2, 'must not claim users were deleted');
+  assert.equal(r.receipt.usersDeleted, 0, 'must not claim users were deleted');
   assert.ok(r.receipt.problems.some((p) => /not JSON/.test(p)), 'must name the body-shape failure');
 });
 
-await test('a genuinely successful cleanup reports COMPLETE and removes the manifest', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
-  let deleted = false;
-  const { server, base } = await startMock((req, res) => {
-    if (req.url.includes('accounts:batchDelete')) { deleted = true; res.writeHead(200, {'content-type':'application/json'}); res.end('{}'); return; }
-    if (req.url.includes('accounts:lookup')) { res.writeHead(200, {'content-type':'application/json'}); res.end('{}'); return; }
-    if (req.method === 'DELETE') { res.writeHead(200, {'content-type':'application/json'}); res.end('{}'); return; }
-    res.writeHead(404, {'content-type':'application/json'}); res.end('{"error":{"status":"NOT_FOUND"}}');
+await test('records that survive deletion are reported, not glossed, and the manifest is preserved', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'protected');
+  const fake = await startFake({
+    accounts: new Map(fx.emails), docs: new Set(fx.docs),
+    // batchDelete "succeeds" but one account stays behind
+    behave: { batchDelete: (req, res, body, accounts) => { for (const id of body.localIds) if (id !== fx.users.member) accounts.delete(id); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); } },
   });
-  const mp = writeManifest(d, fullManifest);
-  const r = await runCleanup(base, mp, path.join(d, 'receipt.json'));
-  server.close();
-  assert.equal(r.code, 0);
-  assert.equal(r.receipt.status, 'COMPLETE');
-  assert.equal(r.receipt.usersDeleted, 2);
-  assert.ok(deleted);
-  assert.equal(fs.existsSync(mp), false, 'manifest is removed only on a confirmed complete cleanup');
-});
-
-await test('records that survive deletion are reported, not glossed', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
-  const { server, base } = await startMock((req, res) => {
-    if (req.url.includes('accounts:batchDelete')) { res.writeHead(200,{'content-type':'application/json'}); res.end('{}'); return; }
-    // read-back says one user is still there
-    if (req.url.includes('accounts:lookup')) {
-      res.writeHead(200,{'content-type':'application/json'});
-      res.end(JSON.stringify({ users: [{ localId: `uid-${RUN_TAG}-b` }] })); return;
-    }
-    res.writeHead(200,{'content-type':'application/json'}); res.end('{}');
-  });
-  const mp = writeManifest(d, fullManifest);
-  const r = await runCleanup(base, mp, path.join(d, 'receipt.json'));
-  server.close();
+  const mp = writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs });
+  const r = await runCleanup(fake.base, mp, path.join(d, 'receipt.json'));
+  fake.server.close();
   assert.equal(r.code, 1, 'a surviving record must fail cleanup');
   assert.equal(r.receipt.status, 'INCOMPLETE');
   assert.equal(r.receipt.unresolvedUsers, 1);
-  assert.deepEqual(r.receipt.unresolvedUserIds, [`uid-${RUN_TAG}-b`]);
+  assert.deepEqual(r.receipt.unresolvedUserIds, [fx.users.member]);
   assert.equal(fs.existsSync(mp), true, 'the recovery manifest must survive a failed cleanup');
 });
 
-await test('partial per-user failure is surfaced', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
-  const { server, base } = await startMock((req, res) => {
-    if (req.url.includes('accounts:batchDelete')) {
-      res.writeHead(200,{'content-type':'application/json'});
-      res.end(JSON.stringify({ errors: [{ index: 1, message: 'NOT_DELETED' }] })); return;
-    }
-    if (req.url.includes('accounts:lookup')) { res.writeHead(200,{'content-type':'application/json'}); res.end('{}'); return; }
-    res.writeHead(200,{'content-type':'application/json'}); res.end('{}');
+await test('a document that survives deletion produces INCOMPLETE with its path listed', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'protected');
+  const sticky = `wsfGoals/${fx.goalIds[0]}`;
+  const fake = await startFake({
+    accounts: new Map(fx.emails), docs: new Set(fx.docs),
+    behave: { deleteDoc: (req, res, docPath, docs) => { if (docPath !== sticky) docs.delete(docPath); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); } },
   });
-  const r = await runCleanup(base, writeManifest(d, fullManifest), path.join(d, 'receipt.json'));
-  server.close();
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
   assert.equal(r.code, 1);
   assert.equal(r.receipt.status, 'INCOMPLETE');
-  assert.equal(r.receipt.usersDeleted, 1);
+  assert.deepEqual(r.receipt.unresolvedDocumentPaths, [sticky]);
 });
 
+await test('partial per-user failure is surfaced', async () => {
+  const d = tmp();
+  const fx = fixture(RUN_TAG, 'protected');
+  const fake = await startFake({
+    accounts: new Map(fx.emails), docs: new Set(fx.docs),
+    behave: { batchDelete: (req, res, body, accounts) => { body.localIds.slice(1).forEach((id) => accounts.delete(id)); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ errors: [{ index: 0, message: 'NOT_DELETED' }] })); } },
+  });
+  const r = await runCleanup(fake.base, writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, users: Object.values(fx.users), docs: fx.docs }), path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.code, 1);
+  assert.equal(r.receipt.status, 'INCOMPLETE');
+  assert.equal(r.receipt.usersDeleted, 2);
+  assert.equal(r.receipt.unresolvedUsers, 1);
+});
+
+// ---- manifest states ---------------------------------------------------------------
+
 await test('a missing manifest is MANIFEST_UNUSABLE, never a clean pass', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
+  const d = tmp();
   const r = await runCleanup('http://127.0.0.1:1', path.join(d, 'absent.json'), path.join(d, 'receipt.json'));
   assert.equal(r.code, 1, 'an absent manifest must not exit 0');
   assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
@@ -149,7 +454,7 @@ await test('a missing manifest is MANIFEST_UNUSABLE, never a clean pass', async 
 });
 
 await test('an empty manifest is NO_FIXTURES — distinct from a missing one', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
+  const d = tmp();
   const mp = writeManifest(d, { project: 'westayfit-staging', runTag: RUN_TAG, docs: [], users: [] });
   const r = await runCleanup('http://127.0.0.1:1', mp, path.join(d, 'receipt.json'));
   assert.equal(r.code, 0);
@@ -157,7 +462,7 @@ await test('an empty manifest is NO_FIXTURES — distinct from a missing one', a
 });
 
 await test('malformed manifest JSON is refused and preserved', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
+  const d = tmp();
   const mp = path.join(d, 'manifest.json');
   fs.writeFileSync(mp, '{not json');
   const r = await runCleanup('http://127.0.0.1:1', mp, path.join(d, 'receipt.json'));
@@ -167,30 +472,11 @@ await test('malformed manifest JSON is refused and preserved', async () => {
   assert.equal(fs.existsSync(mp), true);
 });
 
-await test('an identifier not carrying this run tag is refused, not deleted', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
-  let sawDelete = false;
-  const { server, base } = await startMock((req, res) => {
-    if (req.method === 'DELETE') sawDelete = true;
-    res.writeHead(200,{'content-type':'application/json'}); res.end('{}');
-  });
-  const mp = writeManifest(d, {
-    project: 'westayfit-staging', runTag: RUN_TAG,
-    docs: ['wsfCommunityGroups/founder-smoke-KEEP-ME'], users: [],
-  });
-  const r = await runCleanup(base, mp, path.join(d, 'receipt.json'));
-  server.close();
-  assert.equal(r.code, 1);
-  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
-  assert.equal(sawDelete, false, 'nothing may be deleted against an untagged identifier');
-});
-
-
 await test('early smoke failure: no evidence dir, no manifest → a real MANIFEST_UNUSABLE receipt', async () => {
   // Run 35244445618: the smoke threw at module load, so the evidence directory
   // was never created. Cleanup then crashed with ENOENT writing its receipt,
   // and the run showed no cleanup outcome at all.
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
+  const d = tmp();
   const evidence = path.join(d, 'wsf-evidence');
   assert.equal(fs.existsSync(evidence), false);
   const receiptPath = path.join(evidence, 'cleanup-receipt.json');
