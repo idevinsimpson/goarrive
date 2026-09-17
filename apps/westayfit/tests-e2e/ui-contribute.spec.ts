@@ -596,7 +596,7 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await expect(page.getByTestId('wsf-contribute-community')).toHaveText('Maple Street Movers', { timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to community');
   const closedText = await page.getByTestId('wsf-contribute-screen').innerText();
-  expect(closedText).not.toMatch(/failed|missed|complete\b(?! )|incomplete/i);
+  expect(closedText).not.toMatch(/failed|missed|completed|incomplete/i);
   await page.waitForTimeout(400);
   await snap(page, '09-closed-goal');
 

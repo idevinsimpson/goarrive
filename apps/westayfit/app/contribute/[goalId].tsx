@@ -959,7 +959,7 @@ export default function ContributeToGoal() {
   if (state.kind === 'closed') {
     return screen(
       <>
-        {renderChrome(true)}
+        {renderChrome(false)}
         {renderContextLabels()}
         <View style={styles.hero} testID="wsf-contribute-closed">
           <Text style={styles.heroEyebrow}>Closed</Text>
@@ -1294,7 +1294,10 @@ const styles = StyleSheet.create({
   // entry
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   entryInput: {
+    // flex: 1 alone lets a text input keep its intrinsic width and overflow
+    // the row on web; minWidth 0 lets it shrink to the space that is there.
     flex: 1,
+    minWidth: 0,
     minHeight: 72,
     borderWidth: 2,
     borderColor: NAVY,

@@ -274,6 +274,8 @@ test.describe('community goal seam', () => {
 
       await pageB.getByTestId(`wsf-community-goal-link-${goalId}`).click();
       await pageB.waitForURL(new RegExp(`/contribute/${goalId}`), { timeout: 20_000 });
+      // "Start moving" enters the movement screen; finishing it opens entry.
+      await pageB.getByTestId('wsf-contribute-done').click();
       await pageB.getByTestId('wsf-contribute-entry').fill('30');
       await pageB.getByTestId('wsf-contribute-review').click();
       await pageB.getByTestId('wsf-contribute-submit').click();
