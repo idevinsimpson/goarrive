@@ -35,6 +35,16 @@
 #
 # Privileged jobs install dependencies with --ignore-scripts, so package
 # lifecycle code never runs alongside a credential.
+#
+# RECOVERY MODE (temporary). The `mode` input has exactly two values. `deploy`
+# (the default) is everything above. `recover-35248719827` runs ONLY the
+# `recover` job, which exists to clean up the synthetic fixtures that hosted
+# run 35248719827 left behind: it is pinned to that run, that artifact, that
+# manifest's SHA-256 and its counts (.github/wsf-staging/recovery-35248719827
+# .json), verifies all of that BEFORE any credential exists, and then runs the
+# cleanup on THIS commit — the corrected provenance rules, not the old run's.
+# No input names a run, an artifact, or a manifest. Remove the mode and the job
+# once its receipt is COMPLETE.
 name: WSF staging deploy
 
 on:
@@ -44,6 +54,14 @@ on:
         description: "Optional confirmation. Must equal the approved candidate in .github/wsf-staging/approved-candidate.json. Leave blank to deploy the approved commit."
         required: false
         type: string
+      mode:
+        description: "deploy (default): the normal staging deployment and hosted verification. recover-35248719827: ONLY the one-time cleanup of hosted run 35248719827's preserved manifest; nothing is deployed."
+        required: false
+        type: choice
+        default: deploy
+        options:
+          - deploy
+          - recover-35248719827
 
 # Nothing is granted at workflow level. Each job takes only what it needs.
 permissions: {}
@@ -66,6 +84,7 @@ jobs:
   # No credentials and no candidate code. Decides what may be deployed before
   # anything is fetched or authenticated.
   gate:
+    if: ${{ inputs.mode != 'recover-35248719827' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -93,6 +112,7 @@ jobs:
   # SDK config and nothing else. No application code is checked out here, so
   # the credential is never in a workspace containing candidate code.
   config:
+    if: ${{ inputs.mode != 'recover-35248719827' }}
     needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -143,6 +163,7 @@ jobs:
   # NO id-token. This job cannot obtain a Google credential by any means, which
   # is what makes it safe to run `npm ci` and the application build here.
   build:
+    if: ${{ inputs.mode != 'recover-35248719827' }}
     needs: [gate, config]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -226,6 +247,7 @@ jobs:
 
   # -------------------------------------------------------------- deploy ----
   deploy:
+    if: ${{ inputs.mode != 'recover-35248719827' }}
     needs: [gate, config, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -378,6 +400,7 @@ jobs:
   # synthetic users sign in through the public Identity Toolkit endpoints with
   # the Web App's API key and act as themselves in a real browser.
   hosted-verify:
+    if: ${{ inputs.mode != 'recover-35248719827' }}
     needs: [gate, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -529,3 +552,114 @@ jobs:
             || { echo "::error::hosted verification did not pass — the deployment is NOT verified"; exit 1; }
           [ "${{ steps.scan-hosted-evidence.outcome }}" = "success" ] \
             || { echo "::error::evidence scan rejected the hosted evidence; it was not uploaded and this run is not verified"; exit 1; }
+
+  # ------------------------------------------------------------- recover ----
+  # ONE-TIME, RECOVERY-ONLY. Runs only when `mode` selects it, and then nothing
+  # else in this workflow runs. Every identifier of what it may touch is a
+  # literal here or in the committed recovery record: no input names a run, an
+  # artifact or a manifest, so this job cannot be pointed at anything else.
+  # Permissions: `actions: read` is what downloading another run's artifact
+  # needs; `id-token: write` is the same keyless path every privileged job
+  # uses; `contents: read` checks out the reviewed scripts. Nothing more.
+  recover:
+    if: ${{ inputs.mode == 'recover-35248719827' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: wsf-staging
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # google-auth-library, for the REST token, exactly as hosted-verify does.
+      - name: Install pinned deployment tooling
+        run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
+
+      # Only this run, only this artifact, by literal. The run's own token with
+      # actions: read is all that reading another run's artifact requires.
+      - name: Download the preserved evidence of run 35248719827
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-hosted-evidence
+          run-id: 35248719827
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: recovery/old
+
+      # Fail closed BEFORE any credential exists: the manifest must be the
+      # exact reviewed file — SHA-256, project, run tag, counts, uniqueness.
+      - name: Verify the preserved manifest against the pinned recovery record
+        run: >-
+          node ops/.github/wsf-staging/recovery-35248719827.mjs verify-manifest
+          ops/.github/wsf-staging/recovery-35248719827.json
+          recovery/old/cleanup-manifest.json
+          "${{ github.workspace }}/wsf-recovery-evidence/recovery-verification.json"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      # The cleanup on THIS commit: provenance is validated for the whole
+      # manifest before any deletion (tagged paths, run-specific synthetic
+      # emails for any Auth user still present, linked profiles only), and
+      # every document and user is read back before COMPLETE is reported.
+      - name: Remove the preserved run's synthetic fixtures with the current cleanup
+        id: recovery-cleanup
+        env:
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/recovery/old/cleanup-manifest.json
+          WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-recovery-evidence/cleanup-receipt.json
+        run: |
+          set -euo pipefail
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      # COMPLETE for exactly the pinned counts, nothing unresolved, manifest
+      # removed — i.e. absence was proven by read-back, not assumed.
+      - name: Require the receipt to prove COMPLETE with nothing unresolved
+        id: recovery-receipt
+        if: always()
+        run: >-
+          node ops/.github/wsf-staging/recovery-35248719827.mjs verify-receipt
+          ops/.github/wsf-staging/recovery-35248719827.json
+          "${{ github.workspace }}/wsf-recovery-evidence/cleanup-receipt.json"
+
+      - name: Scan evidence before upload
+        id: scan-recovery-evidence
+        if: always()
+        run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-recovery-evidence"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-recovery-evidence.outcome == 'success' }}
+        with:
+          name: wsf-recovery-evidence
+          path: wsf-recovery-evidence
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Require the recovery to have completed
+        if: always()
+        run: |
+          set -euo pipefail
+          [ "${{ steps.recovery-cleanup.outcome }}" = "success" ] \
+            || { echo "::error::the recovery cleanup did not complete"; exit 1; }
+          [ "${{ steps.recovery-receipt.outcome }}" = "success" ] \
+            || { echo "::error::the recovery receipt did not prove COMPLETE"; exit 1; }
+          [ "${{ steps.scan-recovery-evidence.outcome }}" = "success" ] \
+            || { echo "::error::evidence scan rejected the recovery evidence; it was not uploaded"; exit 1; }
