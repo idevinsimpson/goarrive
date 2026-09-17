@@ -242,6 +242,8 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await snap(pageA, '01-A-contribute-empty');
 
   await pageA.getByTestId('wsf-contribute-entry').fill('20');
+  // The real flow: review first, then the explicit Record confirmation.
+  await pageA.getByTestId('wsf-contribute-review').click();
   await pageA.getByTestId('wsf-contribute-submit').click();
   await expect(pageA.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 15_000 });
 
@@ -268,6 +270,7 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await snap(pageB, '03-B-sees-shared-20-own-0');
 
   await pageB.getByTestId('wsf-contribute-entry').fill('15');
+  await pageB.getByTestId('wsf-contribute-review').click();
   await pageB.getByTestId('wsf-contribute-submit').click();
   await expect(pageB.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 15_000 });
 

@@ -1,0 +1,147 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  classifyContributeError,
+  parseEntry,
+  refusalCopy,
+  resultCopy,
+  resultVariant,
+  stepEntry,
+} from '../src/contributionFlow';
+
+describe('entry: only a whole number from 1 to 100,000 becomes a submission', () => {
+  it.each([
+    ['', false],
+    ['  ', false],
+    ['0', false],
+    ['-5', false],
+    ['1.5', false],
+    ['abc', false],
+    ['100001', false],
+    ['1', true],
+    ['20', true],
+    [' 20 ', true],
+    ['100000', true],
+  ])('%j → ok=%s', (text, ok) => {
+    expect(parseEntry(text).ok).toBe(ok);
+  });
+
+  it('returns the parsed count', () => {
+    const r = parseEntry('20');
+    expect(r).toEqual({ ok: true, count: 20 });
+  });
+
+  it('steps with +/− and clamps at 0 and the maximum', () => {
+    expect(stepEntry('', 1)).toBe('1');
+    expect(stepEntry('20', 1)).toBe('21');
+    expect(stepEntry('20', -1)).toBe('19');
+    expect(stepEntry('0', -1)).toBe('0');
+    expect(stepEntry('abc', 10)).toBe('10');
+    expect(stepEntry('100000', 5)).toBe('100000');
+  });
+});
+
+describe('a callable error is a definitive refusal or an unknown outcome', () => {
+  it('treats closed, window and membership refusals as definitive', () => {
+    expect(classifyContributeError({ code: 'functions/failed-precondition', message: 'This goal is closed.' })).toEqual({ kind: 'refused', reason: 'closed' });
+    expect(classifyContributeError({ code: 'functions/failed-precondition', message: 'Goal has not started yet.' })).toEqual({ kind: 'refused', reason: 'notStarted' });
+    expect(classifyContributeError({ code: 'functions/failed-precondition', message: 'Goal window has ended.' })).toEqual({ kind: 'refused', reason: 'windowEnded' });
+    expect(classifyContributeError({ code: 'functions/permission-denied', message: 'Members only.' })).toEqual({ kind: 'refused', reason: 'notMember' });
+    expect(classifyContributeError({ code: 'functions/not-found', message: 'Goal not found.' })).toEqual({ kind: 'refused', reason: 'notFound' });
+    expect(classifyContributeError({ code: 'functions/unauthenticated', message: 'Sign in first.' })).toEqual({ kind: 'refused', reason: 'signedOut' });
+    expect(classifyContributeError({ code: 'functions/invalid-argument', message: 'count' })).toEqual({ kind: 'refused', reason: 'invalid' });
+  });
+
+  it('keeps every other failure unknown, so the attempt keeps its identity', () => {
+    for (const e of [
+      { code: 'functions/unavailable', message: 'unavailable' },
+      { code: 'functions/deadline-exceeded', message: 'deadline' },
+      { code: 'functions/internal', message: 'Contribution record mismatch.' },
+      new TypeError('Failed to fetch'),
+      'string error',
+      null,
+      undefined,
+    ]) {
+      expect(classifyContributeError(e).kind).toBe('unknown');
+    }
+  });
+
+  it('names what was not recorded in every refusal', () => {
+    for (const reason of ['closed', 'windowEnded', 'notStarted', 'notMember', 'notFound', 'signedOut', 'invalid'] as const) {
+      const c = refusalCopy(reason, 20, 'squats');
+      expect(c.body).toContain('20 squats were not recorded');
+      expect(c.headline.length).toBeGreaterThan(0);
+    }
+    expect(refusalCopy('closed', 20, 'squats').headline).toBe('This goal is no longer accepting contributions.');
+    expect(refusalCopy('notMember', 20, 'squats').headline).toBe('This contribution can’t be recorded from this account.');
+    // Non-enumerating: the not-found copy does not say which of the reasons applies.
+    expect(refusalCopy('notFound', 20, 'squats').body).not.toMatch(/member|group|permission/i);
+  });
+});
+
+describe('the confirmed result never credits someone else’s work to this member', () => {
+  const base = { ownCredit: 20, alreadyRecorded: false, unit: 'squats', status: 'active' as const };
+
+  it('is ordinary below the target', () => {
+    const r = { ...base, addedCount: 20, sharedTotal: 261, target: 500 };
+    expect(resultVariant(r)).toBe('ordinary');
+    const c = resultCopy(r, 'Smyrna Strong');
+    expect(c.headline).toBe('You added 20 squats.');
+    expect(c.subline).toBe('You moved us closer.');
+    expect(c.standing).toBe('Smyrna Strong is now at 261 of 500 squats · 52.2%.');
+  });
+
+  it('under concurrency reports the current total without assigning the difference', () => {
+    // Someone else's 15 landed too. The member added 20; the total is 276.
+    const r = { ...base, addedCount: 20, sharedTotal: 276, target: 500 };
+    const c = resultCopy(r, 'Smyrna Strong');
+    expect(c.headline).toBe('You added 20 squats.');
+    expect(c.standing).toBe('Smyrna Strong is now at 276 of 500 squats · 55.2%.');
+    expect(JSON.stringify(c)).not.toMatch(/241|→|35 /);
+  });
+
+  it('claims a crossing only when the total without this addition was below the target', () => {
+    expect(resultVariant({ ...base, addedCount: 20, sharedTotal: 510, target: 500 })).toBe('crossed');
+    expect(resultVariant({ ...base, addedCount: 20, sharedTotal: 500, target: 500 })).toBe('crossed');
+    // The total already passed the target before this addition (someone else crossed).
+    expect(resultVariant({ ...base, addedCount: 20, sharedTotal: 525, target: 500 })).toBe('postTarget');
+    expect(resultVariant({ ...base, addedCount: 5, sharedTotal: 515, target: 500 })).toBe('postTarget');
+  });
+
+  it('writes the collective crossing copy with the true total and overshoot', () => {
+    const c = resultCopy({ ...base, addedCount: 20, sharedTotal: 510, target: 500 }, 'Smyrna Strong');
+    expect(c.headline).toBe('You added 20 squats.');
+    expect(c.subline).toBe('WE did it.');
+    expect(c.standing).toBe('Our 500-squats goal is reached and still open. Smyrna Strong is at 510 of 500 squats.');
+  });
+
+  it('never says "closer" once the goal is reached', () => {
+    const c = resultCopy({ ...base, addedCount: 5, sharedTotal: 515, target: 500 }, null);
+    expect(c.headline).toBe('You added 5 squats.');
+    expect(c.subline).toBe('We’re now at 515 of 500 squats together.');
+    expect(JSON.stringify(c)).not.toMatch(/closer/);
+  });
+
+  it('does not celebrate an already-recorded replay', () => {
+    const r = { ...base, addedCount: 20, sharedTotal: 261, target: 500, alreadyRecorded: true };
+    expect(resultVariant(r)).toBe('alreadyRecorded');
+    const c = resultCopy(r, 'Smyrna Strong');
+    expect(c.headline).toBe('This contribution was already recorded.');
+    expect(c.subline).toContain('counted once');
+    expect(c.subline).toContain('20 squats');
+    expect(JSON.stringify(c)).not.toMatch(/WE did it|closer/);
+  });
+
+  it('shows only the member’s own credit when the shared state is withheld', () => {
+    const r = { addedCount: 20, ownCredit: 20, alreadyRecorded: false };
+    expect(resultVariant(r)).toBe('ownOnly');
+    const c = resultCopy(r, null);
+    expect(c.headline).toBe('You added 20.');
+    expect(c.standing).toBeNull();
+  });
+
+  it('uses a generic subject when the community context is not verified', () => {
+    const c = resultCopy({ ...base, addedCount: 20, sharedTotal: 261, target: 500 }, null);
+    expect(c.standing).toBe('We are now at 261 of 500 squats · 52.2%.');
+  });
+});

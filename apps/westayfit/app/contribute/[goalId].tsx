@@ -1,14 +1,32 @@
-import { Link, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
+import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
+import {
+  classifyContributeError,
+  parseEntry,
+  refusalCopy,
+  resultCopy,
+  resultVariant,
+  stepEntry,
+  type RefusalReason,
+} from '../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
-import { barPercent, integerPercent } from '../../src/goalPercent';
+import { getFirebaseFirestore, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import {
   clearPending,
   clearPendingIfAttempt,
@@ -20,13 +38,22 @@ import {
   type PendingContribution,
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
+import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
+import { ButtonLink } from '../../src/ui/ButtonLink';
+import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
+import {
+  formatCount,
+  percentLabel,
+  statusLine,
+  totalOfTargetLabel,
+} from '../../src/ui/progressFormat';
+import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
 // surfaces without a manual refresh. Matches GOAL_PULSE_CACHE_TTL_MS in
 // functions-westayfit — a shorter poll pays a Firestore round-trip on every
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
-
 
 // Response shapes mirror wsfContribute / wsfGoalPulse / wsfMyContribution in
 // functions-westayfit.
@@ -59,13 +86,28 @@ type LoadState =
   | { kind: 'ready'; pulse: GoalPulse; ownCredit: number }
   | { kind: 'error'; message: string };
 
-// A persisted attempt (goalId, attemptId, count) that MAY not have reached
-// the server. Stored under `wsf.pendingContribution.{goalId}` in
-// localStorage so a page reload can reconcile the same attempt via
-// idempotent replay — the server counts the attemptId once regardless of
-// how many times the client sends it.
+/**
+ * Optional labels for the screen, shown only once the SERVER has confirmed
+ * both facts a route parameter merely hints at: the signed-in account is an
+ * active member of that community (wsfListGoals refuses everyone else) and
+ * this goal belongs to it (it appears in that list). The community name then
+ * comes from the group document, which only members can read. Anything short
+ * of that renders the generic experience: no name, no title, no leak.
+ */
+type ScreenContext =
+  | { kind: 'none' }
+  | { kind: 'verified'; groupId: string; communityName: string; goalTitle: string };
+
+type ListedGoal = { goalId: string; title: string };
+
+// The pre-write steps. Everything after "Record" is derived from the
+// attempt's own state (sending, unknown, refused, confirmed), not from here.
+type Step = 'move' | 'enter' | 'review';
+
+type Refusal = { reason: RefusalReason; count: number };
+
 // A single-tap attempt id — used to make wsfContribute idempotent. A new
-// one is minted per submission; a double-tap of "Log it" reuses the
+// one is minted per submission; a double-tap of "Record" reuses the
 // in-flight id so the server counts it once regardless of network retries.
 function mintAttemptId(): string {
   const g: any = globalThis;
@@ -77,23 +119,45 @@ function mintAttemptId(): string {
     .slice(2, 10)}`;
 }
 
-// barPercent + integerPercent moved to src/goalPercent so the arithmetic
-// can be unit-tested without pulling this whole tsx module through jsdom.
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
 
 export default function ContributeToGoal() {
-  const params = useLocalSearchParams<{ goalId: string }>();
+  const params = useLocalSearchParams<{ goalId: string; groupId?: string; mode?: string }>();
   const goalId = params.goalId;
+  const groupIdHint = typeof params.groupId === 'string' && params.groupId ? params.groupId : null;
+  // Community Home already chose the branch; a cold link without a mode
+  // starts at result entry, the most direct path.
+  const initialStep: Step = params.mode === 'move' ? 'move' : 'enter';
   const { ready, user } = useWsfAuth();
+  const { width: windowWidth } = useWindowDimensions();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
+  const [step, setStep] = useState<Step>(initialStep);
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ContributeResult | null>(null);
   const [pending, setPending] = useState<PendingContribution | null>(null);
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
   // re-render (would risk generating a new id mid-submit and defeat
-  // idempotency). Cleared on each fresh "Log it" tap.
+  // idempotency). Cleared on each fresh "Record" tap.
   const attemptRef = useRef<string | null>(null);
+
+  // Optional timer on the movement screen. It measures nothing the app
+  // records; it is a stopwatch for the member's own reference.
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerBase, setTimerBase] = useState(0); // elapsed ms accumulated while paused
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
+  const [timerNow, setTimerNow] = useState(0);
+  const timerElapsed = timerBase + (timerRunning && timerStartedAt != null ? timerNow - timerStartedAt : 0);
+  const timerUsed = timerRunning || timerBase > 0;
 
   const uid = user?.uid ?? null;
   // The identity a request belongs to. A response that arrives after the
@@ -112,7 +176,7 @@ export default function ContributeToGoal() {
 
   // Restore this ACCOUNT's unconfirmed attempt for this goal, and clear
   // everything on sign-out, an account switch or a goal switch. Both the
-  // pending banner and the last receipt are cleared: a receipt shows a
+  // pending screen and the last receipt are cleared: a receipt shows a
   // member's own credit and must not survive into someone else's session.
   useEffect(() => {
     generationRef.current += 1;
@@ -120,14 +184,18 @@ export default function ContributeToGoal() {
     contextRef.current = { uid, goalId };
     attemptRef.current = null;
     // Nothing from the previous context stays on screen while the new one
-    // loads: not the pending banner, not the receipt, not the typed entry,
-    // not an error, and not the previous ready-state totals.
+    // loads: not the pending screen, not the receipt, not the typed entry,
+    // not an error, not a refusal, and not the previous ready-state totals.
     setPending(null);
     setLastResult(null);
     setLegacyOrphan(null);
+    setRefusal(null);
     setEntry('');
     setEntryError(null);
+    setReviewCount(null);
     setSubmitting(false);
+    setStep(initialStep);
+    setContext({ kind: 'none' });
     setState({ kind: 'loading' });
 
     if (!goalId) return;
@@ -141,7 +209,7 @@ export default function ContributeToGoal() {
     const existing = loadPending(goalId, uid);
     if (existing) {
       setPending({ ...existing, state: 'unknown' });
-      // Persist the escalated state so a second reload shows the same banner
+      // Persist the escalated state so a second reload shows the same screen
       // even if the user does nothing. Restoring it NEVER makes it confirmed;
       // only a server response does that.
       updatePendingIfAttempt({ ...existing, state: 'unknown' }, uid, existing.attemptId);
@@ -153,6 +221,9 @@ export default function ContributeToGoal() {
       // cannot be applied to the remounted screen.
       generationRef.current += 1;
     };
+    // initialStep is derived from the route's mode param; a mode change on
+    // the same goal is not a context change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goalId, uid]);
 
   useEffect(() => {
@@ -210,12 +281,41 @@ export default function ContributeToGoal() {
     };
   }, [ready, user, goalId]);
 
-  // Second effect: once the initial load has landed us on ready/closed,
-  // poll wsfGoalPulse so peer contributions surface within the cache TTL.
-  // Kept as a separate effect from the initial-load one so that transient
-  // poll errors never clobber the load state — display/[goalId].tsx uses
-  // one effect because it has no other state to protect.
-  const shouldPoll = state.kind === 'ready' || state.kind === 'closed';
+  // Optional labels, verified server-side before they are shown together.
+  // Independent of the goal load: a failure here only means the generic
+  // experience, never a blocked contribution.
+  useEffect(() => {
+    if (!wsfAuthEnabled || !ready || !user || !goalId || !groupIdHint) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const listFn = httpsCallable<{ groupId: string }, { goals: ListedGoal[] }>(
+          getFirebaseFunctions(),
+          'wsfListGoals'
+        );
+        const listed = await listFn({ groupId: groupIdHint });
+        if (cancelled) return;
+        const goal = listed.data.goals.find((g) => g.goalId === goalId);
+        if (!goal) return;
+        const snap = await getDoc(doc(getFirebaseFirestore(), 'wsfCommunityGroups', groupIdHint));
+        if (cancelled) return;
+        const name = (snap.data() as { displayName?: unknown } | undefined)?.displayName;
+        if (typeof name !== 'string' || !name) return;
+        setContext({ kind: 'verified', groupId: groupIdHint, communityName: name, goalTitle: goal.title });
+      } catch {
+        // Not a member, unknown group, or a read refused: stay generic.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, goalId, groupIdHint]);
+
+  // Poll wsfGoalPulse only while the member is still before the write. Once
+  // an attempt is in flight, unknown, refused or confirmed, the screen shows
+  // that attempt's own truth and a cached poll must not overwrite it.
+  const beforeWrite = !pending && !refusal && !lastResult;
+  const shouldPoll = beforeWrite && (state.kind === 'ready' || state.kind === 'closed');
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready || !user || !goalId) return;
@@ -255,6 +355,31 @@ export default function ContributeToGoal() {
       clearInterval(timer);
     };
   }, [ready, user, goalId, shouldPoll]);
+
+  // Timer tick, only while running.
+  useEffect(() => {
+    if (!timerRunning) return;
+    setTimerNow(Date.now());
+    const t = setInterval(() => setTimerNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [timerRunning]);
+
+  const onTimerStart = useCallback(() => {
+    const now = Date.now();
+    setTimerStartedAt(now);
+    setTimerNow(now);
+    setTimerRunning(true);
+  }, []);
+  const onTimerPause = useCallback(() => {
+    if (timerStartedAt != null) setTimerBase((b) => b + (Date.now() - timerStartedAt));
+    setTimerStartedAt(null);
+    setTimerRunning(false);
+  }, [timerStartedAt]);
+  const onTimerReset = useCallback(() => {
+    setTimerBase(0);
+    setTimerStartedAt(null);
+    setTimerRunning(false);
+  }, []);
 
   const sendContribute = useCallback(
     async (attemptId: string, count: number) => {
@@ -316,23 +441,35 @@ export default function ContributeToGoal() {
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
+      setReviewCount(null);
     },
     [goalId]
   );
 
-  const onSubmit = useCallback(async () => {
+  // Entry → review. No network write happens here.
+  const onReview = useCallback(() => {
+    if (state.kind !== 'ready') return;
+    const parsed = parseEntry(entry);
+    if (!parsed.ok) {
+      setEntryError(parsed.message);
+      return;
+    }
+    setEntryError(null);
+    setReviewCount(parsed.count);
+    setStep('review');
+  }, [state.kind, entry]);
+
+  const onEdit = useCallback(() => {
+    setStep('enter');
+  }, []);
+
+  // Review → record. The explicit confirmation boundary: the only place a
+  // new attempt is created and sent.
+  const onRecord = useCallback(async () => {
     if (state.kind !== 'ready') return;
     if (submitting) return;
-    const trimmed = entry.trim();
-    if (!/^[0-9]+$/.test(trimmed)) {
-      setEntryError('Type a whole number.');
-      return;
-    }
-    const count = Number.parseInt(trimmed, 10);
-    if (!Number.isInteger(count) || count < 1 || count > 100_000) {
-      setEntryError('Enter a count from 1 to 100000.');
-      return;
-    }
+    if (reviewCount == null) return;
+    const count = reviewCount;
     setEntryError(null);
     setSubmitting(true);
 
@@ -364,45 +501,41 @@ export default function ContributeToGoal() {
     try {
       await sendContribute(attemptId, count);
     } catch (e) {
-      // The persisted row is always escalated under the ORIGINAL account, so
-      // the attempt stays reconcilable even if the context has moved on.
-      const escalated: PendingContribution = { ...pendingRow, state: 'unknown' };
-      // Conditional: this failure may only touch the record if the slot is
-      // still ITS attempt. A newer attempt for the same account and goal is
-      // never overwritten by an older one's failure.
-      updatePendingIfAttempt(escalated, owner, attemptId);
-      // Everything visible is guarded too: a failure from a superseded context
-      // must not surface a banner or an error under a different identity.
-      if (!stillCurrent()) return;
-      setPending(escalated);
-
-      const message =
-        e instanceof FirebaseError &&
-        e.code === 'functions/failed-precondition'
-          ? 'This goal is closed or outside its window.'
-          : e instanceof FirebaseError && e.code === 'functions/not-found'
-            ? 'Goal not found.'
-            : e instanceof FirebaseError &&
-                e.code === 'functions/permission-denied'
-              ? 'Members only.'
-              : e instanceof Error
-                ? e.message
-                : 'Contribution failed.';
-      setEntryError(message);
+      const failure = classifyContributeError(e);
+      if (failure.kind === 'refused') {
+        // The server ran the request and refused it: nothing was recorded and
+        // nothing will be. The reminder would only ask the member to replay a
+        // request that will be refused again, so it is retired — under the
+        // ORIGINAL account, and only if the slot is still this attempt.
+        clearPendingIfAttempt(goalId as string, owner, attemptId);
+        if (!stillCurrent()) return;
+        setPending(null);
+        attemptRef.current = null;
+        setRefusal({ reason: failure.reason, count });
+      } else {
+        // Unknown outcome: the persisted row is escalated under the ORIGINAL
+        // account, so the attempt stays reconcilable even if the context has
+        // moved on. Conditional: this failure may only touch the record if
+        // the slot is still ITS attempt.
+        const escalated: PendingContribution = { ...pendingRow, state: 'unknown' };
+        updatePendingIfAttempt(escalated, owner, attemptId);
+        if (!stillCurrent()) return;
+        setPending(escalated);
+      }
     } finally {
       // A superseded request's finally must not re-enable the new context's
       // form, which the new context already reset.
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [state, submitting, entry, goalId, uid, sendContribute]);
+  }, [state.kind, submitting, reviewCount, goalId, uid, sendContribute]);
 
+  // Replay the SAME attempt. The server keys idempotency on goal, account and
+  // attemptId and returns the original receipt if the earlier call landed.
   const onReconcile = useCallback(async () => {
     if (!pending) return;
     if (submitting) return;
     setSubmitting(true);
     setEntryError(null);
-    // Same attemptId + count as the persisted row. Server-side idempotency
-    // returns the original body if the earlier call did land.
     attemptRef.current = pending.attemptId;
     const generation = generationRef.current;
     const owner = uid as string;
@@ -413,33 +546,29 @@ export default function ContributeToGoal() {
         { generation: generationRef.current, uid: identityRef.current, goalId }
       );
 
-    // Flip the persisted state to 'sending' during the retry so a further
-    // crash mid-retry still lands us on the banner.
+    // Flip the persisted state to 'sending' during the replay so a further
+    // crash mid-replay still lands us on the pending screen.
     updatePendingIfAttempt({ ...pending, state: 'sending' }, owner, pending.attemptId);
     setPending({ ...pending, state: 'sending' });
 
     try {
       await sendContribute(pending.attemptId, pending.count);
     } catch (e) {
-      const escalated: PendingContribution = { ...pending, state: 'unknown' };
-      // Conditional, for the same reason as onSubmit: an old reconcile failure
-      // must not overwrite a newer attempt's record.
-      updatePendingIfAttempt(escalated, owner, pending.attemptId);
-      if (!stillCurrent()) return;
-      setPending(escalated);
-      const message =
-        e instanceof FirebaseError &&
-        e.code === 'functions/failed-precondition'
-          ? 'This goal is closed or outside its window.'
-          : e instanceof FirebaseError && e.code === 'functions/not-found'
-            ? 'Goal not found.'
-            : e instanceof FirebaseError &&
-                e.code === 'functions/permission-denied'
-              ? 'Members only.'
-              : e instanceof Error
-                ? e.message
-                : 'Retry failed.';
-      setEntryError(message);
+      const failure = classifyContributeError(e);
+      if (failure.kind === 'refused') {
+        clearPendingIfAttempt(goalId as string, owner, pending.attemptId);
+        if (!stillCurrent()) return;
+        setPending(null);
+        attemptRef.current = null;
+        setRefusal({ reason: failure.reason, count: pending.count });
+      } else {
+        const escalated: PendingContribution = { ...pending, state: 'unknown' };
+        // Conditional, for the same reason as onRecord: an old replay failure
+        // must not overwrite a newer attempt's record.
+        updatePendingIfAttempt(escalated, owner, pending.attemptId);
+        if (!stillCurrent()) return;
+        setPending(escalated);
+      }
     } finally {
       if (stillCurrent()) setSubmitting(false);
     }
@@ -448,340 +577,792 @@ export default function ContributeToGoal() {
   const onDiscardPending = useCallback(() => {
     if (submitting || !pending) return;
     // Discarding does NOT retract the server-side record if it landed —
-    // this only removes the local reminder. The user is asserting "I know
-    // this is fine; stop bugging me." No shared-total mutation happens.
+    // this only removes the local reminder. No shared-total mutation happens.
     clearPending(pending.goalId, uid as string);
     setPending(null);
     setEntryError(null);
-  }, [pending, submitting]);
+  }, [pending, submitting, uid]);
+
+  const onAnother = useCallback(() => {
+    // A genuinely new attempt: a fresh id is minted on the next Record.
+    setLastResult(null);
+    setRefusal(null);
+    setEntry('');
+    setEntryError(null);
+    setReviewCount(null);
+    attemptRef.current = null;
+    setStep('enter');
+  }, []);
+
+  const onRefusalEdit = useCallback(() => {
+    setRefusal(null);
+    setStep('enter');
+  }, []);
+
+  // ---- render ---------------------------------------------------------------
+
+  const communityName = context.kind === 'verified' ? context.communityName : null;
+  const goalTitle = context.kind === 'verified' ? context.goalTitle : null;
+  const backHref = context.kind === 'verified' ? `/community/${context.groupId}` : '/';
+  const backLabel = context.kind === 'verified' ? 'Back to community' : 'Back to home';
+  const heroWeWidth = Math.max(160, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
+  const contextWeWidth = 88;
+
+  const renderChrome = (showBack: boolean) => (
+    <View style={styles.chrome}>
+      <WsfWordmark variant="navy" height={20} testID="wsf-contribute-wordmark" />
+      {showBack ? (
+        <ButtonLink
+          href={backHref}
+          style={styles.chromeLink}
+          textStyle={styles.chromeLinkText}
+          testID="wsf-contribute-back"
+          label={backLabel}
+        />
+      ) : null}
+    </View>
+  );
+
+  const renderTestNote = () =>
+    wsfUsingEmulators ? (
+      <Text style={styles.testNote} testID="wsf-contribute-test-banner">
+        Local synthetic test
+      </Text>
+    ) : null;
+
+  // The community/goal labels, shown together only when verified.
+  const renderContextLabels = () =>
+    context.kind === 'verified' ? (
+      <View style={styles.contextLabels}>
+        <Text style={styles.contextCommunity} testID="wsf-contribute-community">
+          {context.communityName}
+        </Text>
+        <Text style={styles.contextGoal} testID="wsf-contribute-goal-title">
+          {context.goalTitle}
+        </Text>
+      </View>
+    ) : null;
+
+  const screen = (children: React.ReactNode, testID?: string) => (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+      testID={testID}
+    >
+      <View style={styles.inner}>{children}</View>
+    </ScrollView>
+  );
 
   if (!wsfAuthEnabled) {
-    return (
-      <AuthFlagOffPanel
-        title="Contribute"
-        testID="wsf-contribute-disabled"
-      />
-    );
+    return <AuthFlagOffPanel title="Contribute" testID="wsf-contribute-disabled" />;
   }
   if (state.kind === 'loading') {
-    return (
-      <View style={styles.screen}>
-        <Text style={styles.body}>Loading goal…</Text>
-      </View>
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.quietCard}>
+          <ActivityIndicator color={NAVY} />
+          <Text style={styles.body}>Loading goal…</Text>
+        </View>
+      </>
     );
   }
   if (state.kind === 'notSignedIn') {
-    return (
-      <View style={styles.screen}>
-        <Text style={styles.heading}>Sign in to contribute</Text>
-        <Link
-          href="/signin"
-          style={styles.link}
-          testID="wsf-contribute-signin-link"
-        >
-          Sign in
-        </Link>
-      </View>
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-signed-out">
+          <Text style={styles.heading}>Sign in to contribute</Text>
+          <Text style={styles.body}>
+            Contributions are recorded to your account, so sign in before you record one.
+          </Text>
+          <ButtonLink
+            href="/signin"
+            style={styles.primaryButton}
+            textStyle={styles.primaryButtonText}
+            testID="wsf-contribute-signin-link"
+            label="Sign in"
+          />
+        </View>
+      </>
     );
   }
   if (state.kind === 'notFound') {
-    return (
-      <View style={styles.screen}>
-        <Text style={styles.heading}>Goal not found</Text>
-        <Text style={styles.body}>
-          This goal does not exist or is not visible.
-        </Text>
-      </View>
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-not-found">
+          <Text style={styles.heading}>Goal not found</Text>
+          <Text style={styles.body}>
+            This goal doesn’t exist or isn’t available to this account.
+          </Text>
+          <ButtonLink
+            href="/"
+            style={styles.secondaryButton}
+            textStyle={styles.secondaryButtonText}
+            testID="wsf-contribute-home"
+            label="Back to home"
+          />
+        </View>
+      </>
     );
   }
   if (state.kind === 'error') {
-    return (
-      <View style={styles.screen}>
-        <Text style={styles.heading}>Something went wrong</Text>
-        <Text style={styles.body}>{state.message}</Text>
-      </View>
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-load-error">
+          <Text style={styles.heading}>Something went wrong</Text>
+          <Text style={styles.body}>{state.message}</Text>
+          <ButtonLink
+            href="/"
+            style={styles.secondaryButton}
+            textStyle={styles.secondaryButtonText}
+            testID="wsf-contribute-home"
+            label="Back to home"
+          />
+        </View>
+      </>
     );
   }
 
   const pulse = state.pulse;
-  const pct = barPercent(pulse.sharedTotal, pulse.target);
-  const truePct = integerPercent(pulse.sharedTotal, pulse.target);
-  const ownCredit =
-    state.kind === 'ready' || state.kind === 'closed' ? state.ownCredit : 0;
-  const remaining = Math.max(0, pulse.target - pulse.sharedTotal);
-  const overshoot = pulse.sharedTotal > pulse.target;
+  const unit = pulse.unit;
+  const ownCredit = state.ownCredit;
 
-  return (
-    <View style={styles.screen} testID="wsf-contribute-screen">
-      {wsfUsingEmulators ? (
-        <Text style={styles.testPill} testID="wsf-contribute-test-banner">
-          LOCAL SYNTHETIC TEST
+  const ownCreditLine = (value: number, u: string) => (
+    <Text style={styles.ownCredit} testID="wsf-contribute-own-credit">
+      {`Your confirmed total: ${formatCount(value)} ${u}`}
+    </Text>
+  );
+
+  // Compact confirmed context: small navy WE beside the exact numbers.
+  const renderCompactProgress = () => (
+    <View style={styles.compactProgress} testID="wsf-contribute-context">
+      <LivingWeProgress
+        completed={pulse.sharedTotal}
+        target={pulse.target}
+        unit={unit}
+        width={contextWeWidth}
+        surface="light"
+        testID="wsf-contribute-context-we"
+      />
+      <View style={styles.compactText}>
+        <Text style={styles.compactTotal} testID="wsf-contribute-shared-total">
+          {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
         </Text>
-      ) : null}
-      <View style={styles.card}>
-        <Text style={styles.subheading}>Shared total</Text>
-        <Text style={styles.bigNumber} testID="wsf-contribute-shared-total">
-          {pulse.sharedTotal} <Text style={styles.unit}>{pulse.unit}</Text>
-        </Text>
-        <Text style={styles.body}>
-          Goal: {pulse.target} {pulse.unit}
-        </Text>
-        <View
-          style={styles.barTrack}
-          accessibilityLabel={`${truePct}% of goal`}
-          testID="wsf-contribute-bar"
-        >
-          <View
-            style={[
-              styles.barFill,
-              {
-                width: `${pct}%`,
-                backgroundColor: overshoot
-                  ? wsfTheme.colors.accent
-                  : wsfTheme.colors.primary,
-              },
-            ]}
-          />
-        </View>
-        <Text style={styles.caption} testID="wsf-contribute-remaining">
-          {overshoot
-            ? `Past the goal by ${pulse.sharedTotal - pulse.target}`
-            : remaining === 0
-              ? 'Goal reached'
-              : `${remaining} to go`}
-        </Text>
-        <Text style={styles.caption} testID="wsf-contribute-own-credit">
-          Your confirmed credit: {ownCredit} {pulse.unit}
-        </Text>
+        <Text style={styles.compactPercent}>{`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}</Text>
+        {ownCreditLine(ownCredit, unit)}
       </View>
+    </View>
+  );
 
-      {pending ? (
-        <View style={styles.pendingCard} testID="wsf-contribute-pending">
-          <Text style={styles.pendingHead}>
-            {pending.state === 'sending'
-              ? 'Sending your count…'
-              : 'Your last submission is pending'}
+  // ---- confirmed result: the signature moment -------------------------------
+  if (lastResult) {
+    const r = lastResult;
+    const variant = resultVariant(r);
+    const copy = resultCopy(r, communityName);
+    const hasShared = variant !== 'ownOnly';
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View
+          style={styles.hero}
+          testID="wsf-contribute-receipt"
+          {...({ dataSet: { variant } } as Record<string, unknown>)}
+        >
+          <Text style={styles.heroEyebrow}>
+            {variant === 'alreadyRecorded' ? 'Already recorded' : 'Recorded'}
           </Text>
+          <Text style={styles.heroHeadline} testID="wsf-contribute-result-headline">
+            {copy.headline}
+          </Text>
+          <Text
+            style={[styles.heroSubline, variant === 'crossed' ? styles.heroSublineBig : null]}
+            testID="wsf-contribute-result-subline"
+          >
+            {copy.subline}
+          </Text>
+          {hasShared ? (
+            <>
+              <View style={styles.weWrap}>
+                <LivingWeProgress
+                  completed={r.sharedTotal}
+                  target={r.target}
+                  unit={r.unit}
+                  width={heroWeWidth}
+                  surface="dark"
+                  testID="wsf-contribute-we"
+                />
+              </View>
+              <View style={styles.heroFacts}>
+                <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
+                  {totalOfTargetLabel(r.sharedTotal, r.target, r.unit)}
+                </Text>
+                <Text style={styles.heroPercent} testID="wsf-contribute-percent">
+                  {`${percentLabel(r.sharedTotal, r.target)} complete`}
+                </Text>
+                <Text style={styles.heroStatus} testID="wsf-contribute-status">
+                  {statusLine(r.sharedTotal, r.target, r.status)}
+                </Text>
+              </View>
+              {copy.standing ? (
+                <Text style={styles.heroStanding} testID="wsf-contribute-result-standing">
+                  {copy.standing}
+                </Text>
+              ) : null}
+            </>
+          ) : null}
+        </View>
+        {hasShared ? ownCreditLine(r.ownCredit, r.unit) : <Text style={styles.ownCredit} testID="wsf-contribute-own-credit">{copy.subline}</Text>}
+        {renderContextLabels()}
+        <View style={styles.actions}>
+          <ButtonLink
+            href={backHref}
+            style={styles.primaryButton}
+            textStyle={styles.primaryButtonText}
+            testID="wsf-contribute-back"
+            label={backLabel}
+          />
+          {hasShared && r.status === 'active' ? (
+            <Pressable
+              onPress={onAnother}
+              accessibilityRole="button"
+              style={styles.secondaryButton}
+              testID="wsf-contribute-another"
+            >
+              <Text style={styles.secondaryButtonText}>Add another contribution</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
+  // ---- definitive refusal ---------------------------------------------------
+  if (refusal) {
+    const copy = refusalCopy(refusal.reason, refusal.count, unit);
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-refused" {...({ dataSet: { reason: refusal.reason } } as Record<string, unknown>)}>
+          <Text style={styles.eyebrowMuted}>Not recorded</Text>
+          <Text style={styles.heading} testID="wsf-contribute-refused-headline">
+            {copy.headline}
+          </Text>
+          <Text style={styles.body} testID="wsf-contribute-refused-body">
+            {copy.body}
+          </Text>
+          <View style={styles.actions}>
+            {refusal.reason === 'invalid' ? (
+              <Pressable
+                onPress={onRefusalEdit}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                testID="wsf-contribute-refused-edit"
+              >
+                <Text style={styles.primaryButtonText}>Edit the number</Text>
+              </Pressable>
+            ) : null}
+            <ButtonLink
+              href={refusal.reason === 'signedOut' ? '/signin' : backHref}
+              style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
+              textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
+              testID="wsf-contribute-back"
+              label={refusal.reason === 'signedOut' ? 'Sign in' : backLabel}
+            />
+          </View>
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
+  // ---- recording (in flight) -------------------------------------------------
+  if (pending && pending.state === 'sending') {
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-recording">
+          <ActivityIndicator color={NAVY} size="large" />
+          <Text style={styles.heading}>Recording your contribution…</Text>
+          <Text style={styles.body}>{`${formatCount(pending.count)} ${unit}`}</Text>
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
+  // ---- unknown outcome --------------------------------------------------------
+  if (pending) {
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.pendingCard} testID="wsf-contribute-pending">
+          <Text style={styles.eyebrowMuted}>Not confirmed yet</Text>
+          <Text style={styles.heading}>We’re checking your contribution.</Text>
           <Text style={styles.body}>
-            You entered {pending.count} {pulse.unit}. We don't yet have
-            confirmation from the server. Retry is safe — the server counts
-            this attempt once regardless of how many times you send it.
+            We don’t have confirmation yet. Don’t record this effort again.
+          </Text>
+          <Text style={styles.pendingCount} testID="wsf-contribute-pending-count">
+            {`You entered ${formatCount(pending.count)} ${unit}.`}
           </Text>
           <Pressable
-            style={[styles.primary, submitting && styles.primaryDisabled]}
             onPress={onReconcile}
             disabled={submitting}
+            accessibilityRole="button"
+            style={styles.primaryButton}
             testID="wsf-contribute-reconcile"
           >
-            <Text style={styles.primaryText}>
-              {submitting ? 'Retrying…' : 'Retry same submission'}
+            <Text style={styles.primaryButtonText}>Confirm this contribution</Text>
+          </Pressable>
+          <Text style={styles.caption}>
+            This sends the same attempt again. If it already reached us, it will not count twice.
+          </Text>
+          <View style={styles.pendingSecondary}>
+            <Pressable
+              onPress={onDiscardPending}
+              disabled={submitting}
+              accessibilityRole="button"
+              style={styles.tertiaryButton}
+              testID="wsf-contribute-discard-pending"
+            >
+              <Text style={styles.tertiaryButtonText}>Remove this reminder</Text>
+            </Pressable>
+            <Text style={styles.caption}>
+              Only removes the reminder on this device. It does not record or undo anything, and
+              it will not tell you whether the effort counted.
             </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.secondary, submitting && styles.primaryDisabled]}
-            onPress={onDiscardPending}
-            disabled={submitting}
-            testID="wsf-contribute-discard-pending"
-          >
-            <Text style={styles.secondaryText}>Discard local reminder</Text>
-          </Pressable>
+          </View>
         </View>
-      ) : null}
+        <View style={styles.actions}>
+          <ButtonLink
+            href={backHref}
+            style={styles.tertiaryButton}
+            textStyle={styles.tertiaryButtonText}
+            testID="wsf-contribute-back"
+            label={backLabel}
+          />
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
 
-      {state.kind === 'closed' ? (
-        <View style={styles.card}>
-          <Text style={styles.subheading}>This goal is closed</Text>
-          <Text style={styles.body}>No more contributions accepted.</Text>
+  // ---- closed goal ------------------------------------------------------------
+  if (state.kind === 'closed') {
+    return screen(
+      <>
+        {renderChrome(true)}
+        {renderContextLabels()}
+        <View style={styles.hero} testID="wsf-contribute-closed">
+          <Text style={styles.heroEyebrow}>Closed</Text>
+          <Text style={styles.heroHeadline}>This goal is closed.</Text>
+          <View style={styles.weWrap}>
+            <LivingWeProgress
+              completed={pulse.sharedTotal}
+              target={pulse.target}
+              unit={unit}
+              width={heroWeWidth}
+              surface="dark"
+              testID="wsf-contribute-we"
+            />
+          </View>
+          <View style={styles.heroFacts}>
+            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
+              {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
+            </Text>
+            <Text style={styles.heroPercent} testID="wsf-contribute-percent">
+              {`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}
+            </Text>
+            <Text style={styles.heroStatus} testID="wsf-contribute-status">
+              {statusLine(pulse.sharedTotal, pulse.target, pulse.status)}
+            </Text>
+          </View>
         </View>
-      ) : (
-        <View style={styles.card}>
-          <Text style={styles.subheading}>Add your count</Text>
+        {ownCreditLine(ownCredit, unit)}
+        <Text style={styles.body}>It is no longer taking contributions.</Text>
+        <View style={styles.actions}>
+          <ButtonLink
+            href={backHref}
+            style={styles.primaryButton}
+            textStyle={styles.primaryButtonText}
+            testID="wsf-contribute-back"
+            label={backLabel}
+          />
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
+  // ---- review ---------------------------------------------------------------
+  if (step === 'review' && reviewCount != null) {
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-review-screen">
+          <Text style={styles.eyebrowMuted}>Review</Text>
+          <Text style={styles.heading}>Review your contribution</Text>
+          {renderContextLabels()}
+          <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
+            {`${formatCount(reviewCount)} ${unit}`}
+          </Text>
+          <Text style={styles.body}>This will be recorded once toward this goal.</Text>
+          <View style={styles.actions}>
+            <Pressable
+              onPress={onRecord}
+              disabled={submitting}
+              accessibilityRole="button"
+              style={styles.primaryButton}
+              testID="wsf-contribute-submit"
+            >
+              <Text style={styles.primaryButtonText}>{`Record ${formatCount(reviewCount)} ${unit}`}</Text>
+            </Pressable>
+            <Pressable
+              onPress={onEdit}
+              disabled={submitting}
+              accessibilityRole="button"
+              style={styles.secondaryButton}
+              testID="wsf-contribute-edit"
+            >
+              <Text style={styles.secondaryButtonText}>Edit</Text>
+            </Pressable>
+          </View>
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
+  // ---- start moving -----------------------------------------------------------
+  if (step === 'move') {
+    return screen(
+      <>
+        {renderChrome(true)}
+        {renderContextLabels()}
+        {renderCompactProgress()}
+        <View style={styles.card} testID="wsf-contribute-move-screen">
+          <Text style={styles.heading}>Ready when you are.</Text>
+          <Text style={styles.body}>
+            {`Count your own ${unit}. When you’re finished, enter the number you completed.`}
+          </Text>
+          <View style={styles.timerBox} testID="wsf-contribute-timer">
+            <Text style={styles.eyebrowMuted}>Optional timer</Text>
+            <Text style={styles.timerClock} testID="wsf-contribute-timer-clock">
+              {formatElapsed(timerElapsed)}
+            </Text>
+            <View style={styles.timerActions}>
+              {timerRunning ? (
+                <Pressable onPress={onTimerPause} accessibilityRole="button" style={styles.secondaryButton} testID="wsf-contribute-timer-pause">
+                  <Text style={styles.secondaryButtonText}>Pause</Text>
+                </Pressable>
+              ) : (
+                <Pressable onPress={onTimerStart} accessibilityRole="button" style={styles.secondaryButton} testID="wsf-contribute-timer-start">
+                  <Text style={styles.secondaryButtonText}>{timerBase > 0 ? 'Resume' : 'Start timer'}</Text>
+                </Pressable>
+              )}
+              {timerUsed ? (
+                <Pressable onPress={onTimerReset} accessibilityRole="button" style={styles.tertiaryButton} testID="wsf-contribute-timer-reset">
+                  <Text style={styles.tertiaryButtonText}>Reset</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={styles.caption}>
+              For your own reference. It doesn’t record anything or change the community total.
+            </Text>
+          </View>
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => setStep('enter')}
+              accessibilityRole="button"
+              style={styles.primaryButton}
+              testID="wsf-contribute-done"
+            >
+              <Text style={styles.primaryButtonText}>I’m done — enter my {unit}</Text>
+            </Pressable>
+            {!timerUsed ? (
+              <Pressable
+                onPress={() => setStep('enter')}
+                accessibilityRole="button"
+                style={styles.tertiaryButton}
+                testID="wsf-contribute-skip-timer"
+              >
+                <Text style={styles.tertiaryButtonText}>Skip timer and enter {unit}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
+  // ---- enter result -----------------------------------------------------------
+  return screen(
+    <>
+      {renderChrome(true)}
+      {renderContextLabels()}
+      {renderCompactProgress()}
+      <View style={styles.card} testID="wsf-contribute-entry-screen">
+        <Text style={styles.heading}>{`How many ${unit} did you complete?`}</Text>
+        <View style={styles.entryRow}>
+          <Pressable
+            onPress={() => setEntry((v) => stepEntry(v, -1))}
+            accessibilityRole="button"
+            accessibilityLabel="One fewer"
+            style={styles.stepButton}
+            testID="wsf-contribute-minus"
+          >
+            <Text style={styles.stepButtonText}>−</Text>
+          </Pressable>
           <TextInput
-            style={styles.input}
+            style={styles.entryInput}
             value={entry}
-            onChangeText={setEntry}
+            onChangeText={(v) => {
+              setEntry(v);
+              if (entryError) setEntryError(null);
+            }}
             keyboardType="number-pad"
             inputMode="numeric"
-            placeholder="e.g. 20"
-            editable={!submitting && !pending}
+            placeholder="0"
+            placeholderTextColor="#9AA6B8"
+            accessibilityLabel={`Number of ${unit} completed`}
             testID="wsf-contribute-entry"
           />
-          {entryError ? (
-            <Text style={styles.errorText} testID="wsf-contribute-error">
-              {entryError}
-            </Text>
-          ) : null}
           <Pressable
-            style={[
-              styles.primary,
-              (submitting || !!pending) && styles.primaryDisabled,
-            ]}
-            onPress={onSubmit}
-            disabled={submitting || !!pending}
-            testID="wsf-contribute-submit"
+            onPress={() => setEntry((v) => stepEntry(v, 1))}
+            accessibilityRole="button"
+            accessibilityLabel="One more"
+            style={styles.stepButton}
+            testID="wsf-contribute-plus"
           >
-            <Text style={styles.primaryText}>
-              {submitting ? 'Logging…' : pending ? 'Reconcile first' : 'Log it'}
-            </Text>
+            <Text style={styles.stepButtonText}>+</Text>
           </Pressable>
-          {lastResult ? (
-            <View style={styles.receipt} testID="wsf-contribute-receipt">
-              <Text style={styles.receiptHead}>
-                {lastResult.alreadyRecorded
-                  ? 'Already recorded.'
-                  : `+${lastResult.addedCount} added.`}
-              </Text>
-              <Text style={styles.receiptLine}>
-                Your total: {lastResult.ownCredit} {lastResult.unit}
-              </Text>
-              <Text style={styles.receiptLine}>
-                Shared: {lastResult.sharedTotal} / {lastResult.target}{' '}
-                {lastResult.unit}
-              </Text>
-            </View>
-          ) : null}
         </View>
-      )}
-    </View>
+        <View style={styles.quickRow}>
+          {[5, 10, 25].map((n) => (
+            <Pressable
+              key={n}
+              onPress={() => setEntry((v) => stepEntry(v, n))}
+              accessibilityRole="button"
+              style={styles.quickChip}
+              testID={`wsf-contribute-plus-${n}`}
+            >
+              <Text style={styles.quickChipText}>{`+${n}`}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {entryError ? (
+          <Text style={styles.errorText} testID="wsf-contribute-error">
+            {entryError}
+          </Text>
+        ) : null}
+        <View style={styles.actions}>
+          <Pressable
+            onPress={onReview}
+            accessibilityRole="button"
+            style={styles.primaryButton}
+            testID="wsf-contribute-review"
+          >
+            <Text style={styles.primaryButtonText}>Review my contribution</Text>
+          </Pressable>
+        </View>
+      </View>
+      {renderTestNote()}
+    </>,
+    'wsf-contribute-screen'
   );
 }
 
+const NAVY = wsfTheme.colors.primary;
+const CREAM = wsfTheme.colors.background;
+const CARD_BORDER = '#E3E7E1';
+const HERO_MUTED = 'rgba(247,245,240,0.78)';
+
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    padding: wsfTheme.spacing.lg,
-    gap: wsfTheme.spacing.md,
-    backgroundColor: wsfTheme.colors.background,
+  scroll: { flex: 1, backgroundColor: CREAM },
+  container: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 48,
+    backgroundColor: CREAM,
   },
+  inner: { maxWidth: 560, width: '100%', gap: 16 },
+  chrome: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+  },
+  chromeLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  chromeLinkText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
+  contextLabels: { gap: 2 },
+  contextCommunity: { color: wsfTheme.colors.textMuted, fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
+  contextGoal: { color: wsfTheme.colors.text, fontSize: 20, fontWeight: '800', lineHeight: 26 },
+  compactProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: wsfTheme.colors.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+  },
+  compactText: { flex: 1, gap: 2 },
+  compactTotal: { color: wsfTheme.colors.text, fontSize: 17, fontWeight: '800' },
+  compactPercent: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
+  ownCredit: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
+
   card: {
     backgroundColor: wsfTheme.colors.surface,
-    padding: wsfTheme.spacing.lg,
-    borderRadius: wsfTheme.radius.md,
+    borderRadius: 20,
+    padding: 20,
+    gap: 12,
     borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    gap: wsfTheme.spacing.sm,
+    borderColor: CARD_BORDER,
+  },
+  quietCard: {
+    alignItems: 'center',
+    gap: 12,
+    padding: 24,
   },
   pendingCard: {
-    backgroundColor: '#FFF5E5',
-    padding: wsfTheme.spacing.lg,
-    borderRadius: wsfTheme.radius.md,
+    backgroundColor: '#FFF8E8',
+    borderRadius: 20,
+    padding: 20,
+    gap: 12,
     borderWidth: 1,
-    borderColor: '#F5A623',
-    gap: wsfTheme.spacing.sm,
+    borderColor: '#EAD9A6',
   },
-  pendingHead: {
-    ...wsfTheme.typography.subheading,
-    color: '#7A4A00',
-  },
-  testPill: {
-    color: '#FFFFFF',
-    backgroundColor: '#B0342A',
-    fontWeight: '700',
-    letterSpacing: 1,
+  pendingCount: { color: wsfTheme.colors.text, fontSize: 18, fontWeight: '800' },
+  pendingSecondary: { gap: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EAD9A6' },
+  eyebrowMuted: {
+    color: wsfTheme.colors.textMuted,
     fontSize: 12,
-    paddingHorizontal: wsfTheme.spacing.md,
-    paddingVertical: wsfTheme.spacing.xs,
-    borderRadius: wsfTheme.radius.sm,
-    overflow: 'hidden',
-    alignSelf: 'flex-start',
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   heading: {
-    ...wsfTheme.typography.heading,
     color: wsfTheme.colors.text,
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 32,
+    letterSpacing: -0.3,
   },
-  subheading: {
-    ...wsfTheme.typography.subheading,
-    color: wsfTheme.colors.text,
+  body: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22 },
+  caption: { color: wsfTheme.colors.textMuted, fontSize: 13, lineHeight: 18 },
+  errorText: { color: '#B4232C', fontSize: 15, lineHeight: 21 },
+
+  // hero (result, closed)
+  hero: {
+    backgroundColor: NAVY,
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 22,
+    gap: 8,
   },
-  body: {
-    ...wsfTheme.typography.body,
-    color: wsfTheme.colors.text,
-  },
-  caption: {
-    ...wsfTheme.typography.caption,
-    color: wsfTheme.colors.textMuted,
-  },
-  bigNumber: {
-    fontSize: 48,
+  heroEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 12,
     fontWeight: '700',
-    color: wsfTheme.colors.primary,
-    lineHeight: 56,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
-  unit: {
-    fontSize: 20,
-    fontWeight: '400',
-    color: wsfTheme.colors.textMuted,
-  },
-  barTrack: {
-    height: 12,
-    backgroundColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.pill,
-    overflow: 'hidden',
-  },
-  barFill: {
-    height: '100%',
-    borderRadius: wsfTheme.radius.pill,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.sm,
-    paddingVertical: wsfTheme.spacing.sm,
-    paddingHorizontal: wsfTheme.spacing.md,
-    fontSize: 20,
+  heroHeadline: { color: CREAM, fontSize: 28, fontWeight: '800', lineHeight: 34, letterSpacing: -0.3 },
+  heroSubline: { color: PROGRESS_GREEN, fontSize: 18, fontWeight: '700', lineHeight: 24 },
+  heroSublineBig: { fontSize: 30, lineHeight: 36, letterSpacing: -0.3 },
+  weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
+  heroFacts: { alignItems: 'center', gap: 2 },
+  heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 19, fontWeight: '700', textAlign: 'center' },
+  heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  heroStanding: { color: CREAM, fontSize: 15, lineHeight: 21, textAlign: 'center', paddingTop: 6 },
+
+  // entry
+  entryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  entryInput: {
+    flex: 1,
+    minHeight: 72,
+    borderWidth: 2,
+    borderColor: NAVY,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    fontSize: 40,
+    fontWeight: '800',
     color: wsfTheme.colors.text,
-    backgroundColor: wsfTheme.colors.background,
+    textAlign: 'center',
+    backgroundColor: CREAM,
   },
-  primary: {
-    backgroundColor: wsfTheme.colors.primary,
-    paddingVertical: wsfTheme.spacing.md,
-    borderRadius: wsfTheme.radius.pill,
+  stepButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5,
+    borderColor: NAVY,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryDisabled: {
-    opacity: 0.6,
+  stepButtonText: { color: NAVY, fontSize: 28, fontWeight: '700', lineHeight: 32 },
+  quickRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  quickChip: {
+    minHeight: 40,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: '#EEF2F6',
+    justifyContent: 'center',
   },
-  primaryText: {
-    color: wsfTheme.colors.surface,
-    fontSize: 16,
-    fontWeight: '600',
+  quickChipText: { color: NAVY, fontSize: 15, fontWeight: '700' },
+  reviewQuantity: { color: wsfTheme.colors.text, fontSize: 44, fontWeight: '800', lineHeight: 52, letterSpacing: -0.5 },
+
+  // timer
+  timerBox: {
+    backgroundColor: CREAM,
+    borderRadius: 16,
+    padding: 14,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
   },
-  secondary: {
-    paddingVertical: wsfTheme.spacing.sm,
-    borderRadius: wsfTheme.radius.pill,
+  timerClock: { color: wsfTheme.colors.text, fontSize: 36, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  timerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+
+  // buttons
+  actions: { gap: 10, marginTop: 4 },
+  primaryButton: {
+    backgroundColor: PROGRESS_GREEN,
+    borderRadius: 14,
+    minHeight: 54,
+    paddingHorizontal: 20,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
+    justifyContent: 'center',
   },
-  secondaryText: {
-    color: wsfTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '500',
+  primaryButtonText: { color: NAVY, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  secondaryButton: {
+    alignSelf: 'stretch',
+    backgroundColor: wsfTheme.colors.surface,
+    borderWidth: 1.5,
+    borderColor: NAVY,
+    borderRadius: 14,
+    minHeight: 48,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  errorText: {
-    ...wsfTheme.typography.caption,
-    color: '#B0342A',
-  },
-  receipt: {
-    marginTop: wsfTheme.spacing.md,
-    padding: wsfTheme.spacing.md,
-    borderRadius: wsfTheme.radius.sm,
-    backgroundColor: wsfTheme.colors.background,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    gap: wsfTheme.spacing.xs,
-  },
-  receiptHead: {
-    ...wsfTheme.typography.subheading,
-    color: wsfTheme.colors.text,
-  },
-  receiptLine: {
-    ...wsfTheme.typography.body,
-    color: wsfTheme.colors.text,
-  },
-  link: {
-    ...wsfTheme.typography.body,
-    color: wsfTheme.colors.primary,
-    textDecorationLine: 'underline',
-  },
+  secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  tertiaryButton: { alignSelf: 'center', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  tertiaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
+  testNote: { color: wsfTheme.colors.textMuted, fontSize: 11, textAlign: 'center', letterSpacing: 1, textTransform: 'uppercase' },
 });

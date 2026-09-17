@@ -494,6 +494,7 @@ test('CASE 3 — a display response held from before a revocation cannot bring t
   await member.goto(`/contribute/${fx.goalId}`);
   await expect(member.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 20_000 });
   await member.getByTestId('wsf-contribute-entry').fill('137');
+  await member.getByTestId('wsf-contribute-review').click();
   await member.getByTestId('wsf-contribute-submit').click();
   await expect(member.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
 
@@ -602,6 +603,7 @@ test('CASE 4 — a refusal ends the session, so a success the server produced ea
   await member.goto(`/contribute/${fx.goalId}`);
   await expect(member.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 20_000 });
   await member.getByTestId('wsf-contribute-entry').fill('241');
+  await member.getByTestId('wsf-contribute-review').click();
   await member.getByTestId('wsf-contribute-submit').click();
   await expect(member.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
 
