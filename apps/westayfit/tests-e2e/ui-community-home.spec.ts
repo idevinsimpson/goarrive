@@ -204,9 +204,14 @@ async function snapFull(page: Page, name: string): Promise<void> {
   await page.waitForTimeout(300);
 }
 
-/** Scrolls whatever element actually scrolls so a given fraction of its content is above the fold. */
+/**
+ * Scrolls the page the way a thumb would, with wheel/touch deltas, so a given
+ * fraction of the content is above the fold. Under mobile emulation Chromium
+ * promotes the full-height ScrollView to the root scroller, and programmatic
+ * element.scrollTo on it is ignored; input-driven scrolling is honoured.
+ */
 async function scrollTo(page: Page, fraction: number): Promise<void> {
-  await page.evaluate((f) => {
+  const { max } = await page.evaluate(() => {
     const all = Array.from(document.querySelectorAll('*'));
     const scroller =
       all.find((e) => {
@@ -215,10 +220,15 @@ async function scrollTo(page: Page, fraction: number): Promise<void> {
           e.scrollHeight > e.clientHeight + 10 && (cs.overflowY === 'auto' || cs.overflowY === 'scroll')
         );
       }) ?? document.scrollingElement!;
-    const max = scroller.scrollHeight - scroller.clientHeight;
-    scroller.scrollTo({ top: Math.round(max * f), behavior: 'instant' as ScrollBehavior });
-  }, fraction);
-  await page.waitForTimeout(300);
+    return { max: scroller.scrollHeight - scroller.clientHeight };
+  });
+  await page.mouse.move(PHONE.width / 2, PHONE.height / 2);
+  // Back to the top first, then down to the requested position.
+  await page.mouse.wheel(0, -(max + PHONE.height));
+  await page.waitForTimeout(150);
+  const target = Math.round(max * fraction);
+  if (target > 0) await page.mouse.wheel(0, target);
+  await page.waitForTimeout(350);
 }
 
 async function waitForProgress(page: Page, goalId: string): Promise<void> {
