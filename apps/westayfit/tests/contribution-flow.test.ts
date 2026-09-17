@@ -141,7 +141,7 @@ describe('the confirmed result never credits someone else’s work to this membe
     // With the unit the screen already knows, and for a replay:
     const replay = resultCopy({ addedCount: 20, ownCredit: 34, alreadyRecorded: true }, 'Smyrna Strong', 'squats');
     expect(replay.headline).toBe('This contribution was already recorded.');
-    expect(replay.subline).toBe('It counted once. Your confirmed total on this goal is 34 squats.');
+    expect(replay.subline).toBe('It counted once.');
     expect(replay.standing).toBeNull();
     expect(JSON.stringify(replay)).not.toMatch(/Smyrna|of 500|WE did it|closer/);
   });

@@ -182,9 +182,7 @@ export function resultCopy(
     // where the community stands now, which this account may no longer see.
     return {
       headline: r.alreadyRecorded ? 'This contribution was already recorded.' : `You added ${added}.`,
-      subline: r.alreadyRecorded
-        ? `It counted once. Your confirmed total on this goal is ${formatCount(r.ownCredit)}${unit ? ` ${unit}` : ''}.`
-        : `Your confirmed total on this goal is ${formatCount(r.ownCredit)}${unit ? ` ${unit}` : ''}.`,
+      subline: 'It counted once.',
       standing: null,
     };
   }

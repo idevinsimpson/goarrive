@@ -789,9 +789,7 @@ export default function ContributeToGoal() {
           testID="wsf-contribute-receipt"
           {...({ dataSet: { variant } } as Record<string, unknown>)}
         >
-          <Text style={styles.heroEyebrow}>
-            {variant === 'alreadyRecorded' ? 'Already recorded' : 'Recorded'}
-          </Text>
+          <Text style={styles.heroEyebrow}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
           <Text style={styles.heroHeadline} testID="wsf-contribute-result-headline">
             {copy.headline}
           </Text>
