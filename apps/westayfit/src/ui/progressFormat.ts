@@ -6,7 +6,8 @@
  * Devin on 2026-09-17.
  *   - actual progress is T / G; the FILL uses the true ratio, clamped to [0, 1]
  *   - below the target the percentage TEXT shows at most one decimal, rounded
- *     DOWN: floor(1000 × T / G) / 10 — 4,999 of 5,000 is 99.9%, never 100%
+ *     DOWN: floor(1000 × T / G) / 10 — 4,999 of 5,000 is 99.9%, never 100%;
+ *     a whole number prints without a trailing ".0" (450 of 500 is 90%)
  *   - positive progress below 0.1% reads "less than 0.1%"; zero reads "0%"
  *   - at or beyond the target the mark reads 100% and stops at full; the
  *     stored total is never capped, so the exact total and the amount beyond
@@ -44,14 +45,18 @@ export function decimalPercent(completed: number, target: number): number {
   return tenths / 10;
 }
 
-/** The text a person reads: "0%", "less than 0.1%", "48.2%", "100%". */
+/**
+ * The text a person reads: "0%", "less than 0.1%", "48.2%", "90%", "100%".
+ * At most one decimal below completion, and no trailing ".0": 450 of 500 is
+ * "90%", not "90.0%".
+ */
 export function percentLabel(completed: number, target: number): string {
   if (!Number.isFinite(target) || target <= 0) return '0%';
   if (completed <= 0) return '0%';
   if (completed >= target) return '100%';
   const pct = decimalPercent(completed, target);
   if (pct < 0.1) return 'less than 0.1%';
-  return `${pct.toFixed(1)}%`;
+  return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
 }
 
 export function remaining(completed: number, target: number): number {

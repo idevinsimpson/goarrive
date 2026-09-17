@@ -155,6 +155,18 @@ async function callAs(
   return body.result;
 }
 
+/**
+ * The administrative rows (type, joining, status, your role) sit behind the
+ * "Community details" control on Community Home. Opening it is the real
+ * interaction; the assertions on those rows are unchanged.
+ */
+async function openCommunityDetails(page: Page): Promise<void> {
+  const toggle = page.getByTestId('wsf-community-details-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
 async function signInVia(page: Page, account: Account): Promise<void> {
   await page.goto('/signin');
   await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 15_000 });
@@ -196,6 +208,7 @@ test.describe('D — admission controls in the interface', () => {
       await signInVia(pageChampion, champion);
       await pageChampion.goto(`/community/${groupId}`);
       await expect(pageChampion.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+      await openCommunityDetails(pageChampion);
       await expect(pageChampion.getByTestId('wsf-community-role')).toContainText(
         'Founding Champion'
       );
@@ -217,6 +230,7 @@ test.describe('D — admission controls in the interface', () => {
       expect(meta).not.toMatch(/\d+\s+members?/);
       await pageEarly.getByTestId('wsf-join-submit').click();
       await pageEarly.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
+      await openCommunityDetails(pageEarly);
       await expect(pageEarly.getByTestId('wsf-community-role')).toContainText('Member');
 
       // ---- D1: the Champion resets the link ----
@@ -245,6 +259,7 @@ test.describe('D — admission controls in the interface', () => {
       // ---- and the early member, who joined on the RETIRED link, is still in ----
       // A reset retires a link. It does not evict anybody.
       await pageEarly.reload();
+      await openCommunityDetails(pageEarly);
       await expect(pageEarly.getByTestId('wsf-community-role')).toContainText('Member', {
         timeout: 20_000,
       });
@@ -361,6 +376,7 @@ test.describe('D — admission controls in the interface', () => {
       await expect(pageMember.getByTestId('wsf-join-signed-in')).toBeVisible({ timeout: 20_000 });
       await pageMember.getByTestId('wsf-join-submit').click();
       await pageMember.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
+      await openCommunityDetails(pageMember);
       await expect(pageMember.getByTestId('wsf-community-role')).toContainText('Member', {
         timeout: 20_000,
       });
@@ -396,6 +412,7 @@ test.describe('D — admission controls in the interface', () => {
 
       await signInVia(page, champion);
       await page.goto(`/community/${groupId}`);
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
       await page.getByTestId('wsf-community-leave').click();
       await page.getByTestId('wsf-community-leave-confirm-yes').click();
@@ -449,6 +466,7 @@ test.describe('D — admission controls in the interface', () => {
       await signInVia(page, champion);
       await page.goto(`/community/${groupId}`);
       await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
 
       // No link — a general link never admits to a private community…

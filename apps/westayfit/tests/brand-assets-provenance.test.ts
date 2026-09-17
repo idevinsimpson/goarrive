@@ -60,8 +60,8 @@ describe('brand derived files', () => {
       'wordmark-white-green.png',
       'monogram-silhouette.png',
       'monogram-fill-green.png',
-      'monogram-unfilled-on-light.png',
-      'monogram-unfilled-on-dark.png',
+      'monogram-unfilled-navy.png',
+      'monogram-unfilled-white.png',
       'living-we-calibration.json',
     ];
     for (const name of expected) {

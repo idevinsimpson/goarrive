@@ -55,6 +55,18 @@ const KNOWN_GAPS = [
 /**
  * Marks an address verified through the Auth emulator's admin API.
  */
+/**
+ * The administrative rows (type, joining, status, your role) sit behind the
+ * "Community details" control on Community Home. Opening it is the real
+ * interaction; the assertions on those rows are unchanged.
+ */
+async function openCommunityDetails(page: Page): Promise<void> {
+  const toggle = page.getByTestId('wsf-community-details-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
 async function markEmailVerified(email: string): Promise<void> {
   const headers = { authorization: 'Bearer owner', 'content-type': 'application/json' };
   const base = `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1`;
@@ -163,6 +175,7 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(communityName)).toBeVisible();
   // E3.5 A6: raw enums are gone.
+  await openCommunityDetails(page);
   await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
   await expect(page.getByTestId('wsf-community-status')).toContainText('Active');
   // F9 — the pill I clicked and the stored policy match: I picked Public,

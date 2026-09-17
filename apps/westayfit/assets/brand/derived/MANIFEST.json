@@ -2,8 +2,8 @@
   "generator": "scripts/westayfit/brand/derive-brand-assets.py",
   "parameters": {
     "progressGreen": "#91CB7D",
-    "unfilledOnLight": "#D6DCD4",
-    "unfilledOnDark": "#3A4E6B",
+    "unfilledNavy": "#0B1F3A",
+    "unfilledWhite": "#FFFFFF",
     "wordmarkDeliveryWidth": 1200,
     "monogramDeliveryWidth": 1200,
     "calibrationSteps": 1000,
@@ -20,8 +20,8 @@
     "wordmark-white-green.png": "f4a7200cc332025419532a540a43e88e07c0b662e3a752fdf3a7b643222ba307",
     "monogram-silhouette.png": "137c59948d0f845d2c7b068c5b062c43d7c1f811be176051db8248c97ff203af",
     "monogram-fill-green.png": "a1fe3113e417fe94bd9bbfc5a7eb116caeffb0f37ea97e5960640cc545f8d2b7",
-    "monogram-unfilled-on-light.png": "1220990316627130e74586873c6046ca486bb3511b5ed9d61934e97d86625e6d",
-    "monogram-unfilled-on-dark.png": "c8ebb7d104ba5ada5a0f69fd57e365271cffe5eb49ff5c8eed4019c93419c11e",
+    "monogram-unfilled-navy.png": "185c485f5cc9b3258bce281335c0b73a0fd8187b06d9901b6464d7b47ad61531",
+    "monogram-unfilled-white.png": "137c59948d0f845d2c7b068c5b062c43d7c1f811be176051db8248c97ff203af",
     "living-we-calibration.json": "8709a85a5d90c095465b060952f42602a7430ead6800cb0548a1b87d0946e8e8"
   }
 }

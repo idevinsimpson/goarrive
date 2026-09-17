@@ -3,6 +3,7 @@ import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -208,8 +209,9 @@ export default function CommunityPage() {
   const [progress, setProgress] = useState<Record<string, GoalProgress>>({});
   const [progressReloadToken, setProgressReloadToken] = useState(0);
   const [manageOpen, setManageOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const router = useRouter();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
@@ -829,7 +831,7 @@ export default function CommunityPage() {
   const renderFreshness = (p: GoalProgress) =>
     p.kind === 'ok' ? (
       <View style={styles.freshnessRow}>
-        <Text style={styles.freshness} testID="wsf-community-progress-updated">
+        <Text style={styles.heroFreshness} testID="wsf-community-progress-updated">
           {`Updated ${formatClock(p.at)}`}
         </Text>
         <Pressable
@@ -838,52 +840,74 @@ export default function CommunityPage() {
           testID="wsf-community-progress-refresh"
           style={styles.freshnessButton}
         >
-          <Text style={styles.freshnessButtonText}>Refresh</Text>
+          <Text style={styles.heroFreshnessLink}>Refresh</Text>
         </Pressable>
       </View>
     ) : null;
 
-  const renderProgressFacts = (goal: ListedGoal, p: GoalProgress, large: boolean) => {
+  // `hero` is the navy active-goal surface; `card` is a light card; `closed`
+  // is the compact past-goal record (exact result and period, no "complete"
+  // line: "Closed at 62.4%" already says it).
+  const renderProgressFacts = (goal: ListedGoal, p: GoalProgress, variant: 'hero' | 'card' | 'closed') => {
+    const onDark = variant === 'hero';
     if (p.kind === 'loading') {
       return (
-        <Text style={styles.body} testID={`wsf-community-goal-progress-loading-${goal.goalId}`}>
+        <Text
+          style={onDark ? styles.heroBody : styles.body}
+          testID={`wsf-community-goal-progress-loading-${goal.goalId}`}
+        >
           Loading progress…
         </Text>
       );
     }
     if (p.kind === 'failed') {
       return (
-        <View testID={`wsf-community-goal-progress-error-${goal.goalId}`}>
-          <Text style={styles.body}>Progress couldn’t be loaded just now.</Text>
+        <View style={onDark ? styles.heroCentered : null} testID={`wsf-community-goal-progress-error-${goal.goalId}`}>
+          <Text style={onDark ? styles.heroBody : styles.body}>Progress couldn’t be loaded just now.</Text>
           <Pressable
             onPress={refreshProgress}
             accessibilityRole="button"
-            style={styles.secondaryButton}
+            style={onDark ? styles.heroOutlineButton : styles.secondaryButton}
             testID={`wsf-community-goal-progress-retry-${goal.goalId}`}
           >
-            <Text style={styles.secondaryButtonText}>Try again</Text>
+            <Text style={onDark ? styles.heroOutlineButtonText : styles.secondaryButtonText}>Try again</Text>
           </Pressable>
         </View>
       );
     }
     const { sharedTotal, target, unit, status } = p.pulse;
     const phase = progressPhase(sharedTotal, target, status);
+    if (variant === 'closed') {
+      return (
+        <View style={styles.factsSmall}>
+          <Text style={styles.totalSmall} testID={`wsf-community-goal-total-${goal.goalId}`}>
+            {totalOfTargetLabel(sharedTotal, target, unit)}
+          </Text>
+          <Text style={styles.closedResult} testID={`wsf-community-goal-status-${goal.goalId}`}>
+            {statusLine(sharedTotal, target, status)}
+          </Text>
+        </View>
+      );
+    }
     return (
-      <View style={large ? styles.factsLarge : styles.factsSmall}>
+      <View style={onDark ? styles.factsLarge : styles.factsSmall}>
         <Text
-          style={large ? styles.totalLarge : styles.totalSmall}
+          style={onDark ? styles.heroTotal : styles.totalSmall}
           testID={`wsf-community-goal-total-${goal.goalId}`}
         >
           {totalOfTargetLabel(sharedTotal, target, unit)}
         </Text>
         <Text
-          style={large ? styles.percentLarge : styles.percentSmall}
+          style={onDark ? styles.heroPercent : styles.percentSmall}
           testID={`wsf-community-goal-percent-${goal.goalId}`}
         >
           {`${percentLabel(sharedTotal, target)} complete`}
         </Text>
         <Text
-          style={[styles.statusLine, phase === 'nearGoal' ? styles.statusLineNear : null]}
+          style={[
+            onDark ? styles.heroStatus : styles.statusLine,
+            phase === 'nearGoal' ? (onDark ? styles.heroStatusNear : styles.statusLineNear) : null,
+          ]}
           testID={`wsf-community-goal-status-${goal.goalId}`}
         >
           {statusLine(sharedTotal, target, status)}
@@ -892,63 +916,40 @@ export default function CommunityPage() {
     );
   };
 
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.container}
-      testID="wsf-community"
-      {...({ 'data-state': 'ready' } as Record<string, unknown>)}
+  // The management surface: a sheet over the page, so opening it never
+  // pushes the community's own content down. Every Package E control lives
+  // here with its existing testID, copy and outcome handling.
+  const renderManageSheet = () => (
+    <Modal
+      visible={isChampion && manageOpen}
+      transparent
+      animationType="none"
+      onRequestClose={() => setManageOpen(false)}
     >
-      <View style={styles.inner}>
-        {/* Product chrome: the full wordmark, compact; Champion tools behind one quiet control. */}
-        <View style={styles.productHeader}>
-          <WsfWordmark variant="navy" height={22} testID="wsf-community-wordmark" />
-          {isChampion ? (
+      <View style={styles.sheetBackdrop}>
+        <Pressable
+          style={styles.sheetScrim}
+          onPress={() => setManageOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close Champion tools"
+          testID="wsf-community-manage-scrim"
+        />
+        <View style={[styles.sheet, { maxHeight: Math.min(windowHeight * 0.88, 760) }]} testID="wsf-community-manage-panel">
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Champion tools</Text>
             <Pressable
-              onPress={() => setManageOpen((v) => !v)}
+              onPress={() => setManageOpen(false)}
               accessibilityRole="button"
-              accessibilityState={{ expanded: manageOpen }}
-              accessibilityLabel="Champion tools"
-              style={[styles.manageButton, manageOpen ? styles.manageButtonOpen : null]}
-              testID="wsf-community-manage"
+              style={styles.sheetClose}
+              testID="wsf-community-manage-close"
             >
-              <Text style={[styles.manageButtonText, manageOpen ? styles.manageButtonTextOpen : null]}>
-                {manageOpen ? 'Close' : 'Manage'}
-              </Text>
+              <Text style={styles.sheetCloseText}>Close</Text>
             </Pressable>
-          ) : null}
-        </View>
-
-        {/* Community identity: the main character. */}
-        <View style={styles.identity}>
-          <View style={styles.headingRow}>
-            <Text style={styles.heading} testID="wsf-community-name">
-              {group.displayName}
-            </Text>
-            {isSample ? (
-              <Text style={styles.sampleBadge} testID="wsf-community-sample-badge">
-                Sample
-              </Text>
-            ) : null}
           </View>
-          {goalsState.kind === 'loaded' ? (
-            <Text style={styles.humanLine} testID="wsf-community-human-line">
-              {featured ? `Moving together on “${featured.title}”.` : 'Ready for the next goal.'}
-            </Text>
-          ) : null}
-          {memberCount != null ? (
-            <Text style={styles.identityMeta} testID="wsf-community-member-count">
-              {memberCountLabel(memberCount)}
-            </Text>
-          ) : null}
-        </View>
-
-        {/* Champion tools: closed by default, one control to open. */}
-        {isChampion && manageOpen ? (
-          <View style={styles.managePanel} testID="wsf-community-manage-panel">
-            <Text style={styles.sectionEyebrow}>Champion tools</Text>
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
             {goalsState.kind === 'loaded' && loadedGoals.length ? (
-              <View>
+              <View style={styles.sheetSection}>
                 <Text style={styles.manageIntro}>
                   Public display is a permission you grant per goal. A display shows the
                   running total only.
@@ -956,7 +957,7 @@ export default function CommunityPage() {
                 {[...activeGoals, ...closedGoals].map((goal) => renderDisplayAuthControl(goal))}
               </View>
             ) : goalsState.kind === 'loaded' ? (
-              <Text style={styles.body}>No goals yet. Start one below the community name.</Text>
+              <Text style={styles.body}>No goals yet. Close this and start one from the community page.</Text>
             ) : goalsState.kind === 'failed' ? (
               <Text style={styles.body}>Goals could not be loaded, so there is nothing to manage yet.</Text>
             ) : (
@@ -993,38 +994,91 @@ export default function CommunityPage() {
                 label="Start another goal"
               />
             ) : null}
-          </View>
-        ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
 
-        {/* The active goal: what we're doing. */}
+  return (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      testID="wsf-community"
+      {...({ 'data-state': 'ready' } as Record<string, unknown>)}
+    >
+      <View style={styles.inner}>
+        {/* Product chrome: the full wordmark, compact; Champion tools behind one quiet control. */}
+        <View style={styles.productHeader}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-community-wordmark" />
+          {isChampion ? (
+            <Pressable
+              onPress={() => setManageOpen(true)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: manageOpen }}
+              accessibilityLabel="Champion tools"
+              style={styles.manageButton}
+              testID="wsf-community-manage"
+            >
+              <Text style={styles.manageButtonText}>Manage</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {renderManageSheet()}
+
+        {/* Community identity: the main character. */}
+        <View style={styles.identity}>
+          <View style={styles.headingRow}>
+            <Text style={styles.heading} testID="wsf-community-name">
+              {group.displayName}
+            </Text>
+            {isSample ? (
+              <Text style={styles.sampleBadge} testID="wsf-community-sample-badge">
+                Sample
+              </Text>
+            ) : null}
+          </View>
+          {featured ? (
+            <Text style={styles.humanLine} testID="wsf-community-human-line">
+              Moving together.
+            </Text>
+          ) : null}
+          {memberCount != null ? (
+            <Text style={styles.identityMeta} testID="wsf-community-member-count">
+              {memberCountLabel(memberCount)}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* The active goal: the product hero, on its own navy surface. */}
         <View style={styles.section} testID="wsf-community-goals">
           {goalsState.kind === 'loading' ? (
             <View
-              style={styles.heroCard}
+              style={styles.hero}
               testID="wsf-community-goals-loading"
               {...({ 'data-state': 'loading' } as Record<string, unknown>)}
             >
-              <Text style={styles.sectionEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.body}>Loading goals…</Text>
+              <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
+              <Text style={styles.heroBody}>Loading goals…</Text>
             </View>
           ) : goalsState.kind === 'failed' ? (
             <View
-              style={styles.heroCard}
+              style={styles.hero}
               testID="wsf-community-goals-error"
               {...({ 'data-state': 'error' } as Record<string, unknown>)}
             >
-              <Text style={styles.sectionEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.cardTitle}>Goals couldn&apos;t be loaded</Text>
-              <Text style={styles.body}>
+              <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
+              <Text style={styles.heroTitle}>Goals couldn&apos;t be loaded</Text>
+              <Text style={styles.heroBody}>
                 This is a problem loading them, not a community without goals.
               </Text>
               <Pressable
                 onPress={() => setGoalsReloadToken((n) => n + 1)}
-                style={styles.secondaryButton}
+                style={styles.heroOutlineButton}
                 testID="wsf-community-goals-retry"
                 accessibilityRole="button"
               >
-                <Text style={styles.secondaryButtonText}>Try again</Text>
+                <Text style={styles.heroOutlineButtonText}>Try again</Text>
               </Pressable>
             </View>
           ) : featured ? (
@@ -1032,8 +1086,8 @@ export default function CommunityPage() {
               const p = progress[featured.goalId] ?? { kind: 'loading' as const };
               const ends = formatEndsAt(featured.endsAt);
               return (
-                <View style={styles.heroCard} testID="wsf-community-goal-hero">
-                  <Text style={styles.sectionEyebrow}>What we&apos;re doing</Text>
+                <View style={styles.hero} testID="wsf-community-goal-hero">
+                  <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
                   <Text style={styles.heroTitle} testID={`wsf-community-goal-title-${featured.goalId}`}>
                     {featured.title}
                   </Text>
@@ -1045,11 +1099,12 @@ export default function CommunityPage() {
                         target={p.pulse.target}
                         unit={p.pulse.unit}
                         width={heroWeWidth}
+                        surface="dark"
                         testID={`wsf-community-goal-we-${featured.goalId}`}
                       />
                     </View>
                   ) : null}
-                  {renderProgressFacts(featured, p, true)}
+                  {renderProgressFacts(featured, p, 'hero')}
                   {renderFreshness(p)}
                   <View style={styles.actions}>
                     <ButtonLink
@@ -1061,8 +1116,8 @@ export default function CommunityPage() {
                     />
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
-                      style={styles.secondaryButtonWide}
-                      textStyle={styles.secondaryButtonText}
+                      style={styles.heroOutlineButtonWide}
+                      textStyle={styles.heroOutlineButtonText}
                       testID={`wsf-community-goal-record-${featured.goalId}`}
                       label={`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
                     />
@@ -1072,25 +1127,27 @@ export default function CommunityPage() {
             })()
           ) : (
             <View
-              style={styles.heroCard}
+              style={styles.hero}
               testID="wsf-community-no-goal"
               {...({ 'data-state': 'empty' } as Record<string, unknown>)}
             >
-              <Text style={styles.sectionEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.cardTitle}>No goal running yet</Text>
-              <Text style={styles.body}>
+              <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
+              <Text style={styles.heroTitle}>No goal running yet</Text>
+              <Text style={styles.heroBody}>
                 {isChampion
                   ? 'Start one and your community can begin contributing.'
                   : 'Your Champion can start one for this community.'}
               </Text>
               {isChampion ? (
-                <ButtonLink
-                  href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
-                  style={styles.primaryButton}
-                  textStyle={styles.primaryButtonText}
-                  testID="wsf-community-start-goal"
-                  label="Start a goal"
-                />
+                <View style={styles.actions}>
+                  <ButtonLink
+                    href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
+                    style={styles.primaryButton}
+                    textStyle={styles.primaryButtonText}
+                    testID="wsf-community-start-goal"
+                    label="Start a goal"
+                  />
+                </View>
               ) : null}
             </View>
           )}
@@ -1106,14 +1163,14 @@ export default function CommunityPage() {
                     <Text style={styles.body}>
                       {p.ownCredit > 0
                         ? `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`
-                        : 'You haven’t added to this goal yet. Your first contribution counts here.'}
+                        : 'Your first contribution counts here.'}
                     </Text>
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
                       style={styles.inlineLink}
                       textStyle={styles.inlineLinkText}
                       testID={`wsf-community-your-part-link-${featured.goalId}`}
-                      label="See your activity →"
+                      label={p.ownCredit > 0 ? `Record more ${p.pulse.unit}` : `Record ${p.pulse.unit}`}
                     />
                   </View>
                 );
@@ -1133,6 +1190,7 @@ export default function CommunityPage() {
                       target={p.pulse.target}
                       unit={p.pulse.unit}
                       width={smallWeWidth}
+                      surface="light"
                       testID={`wsf-community-goal-we-${goal.goalId}`}
                     />
                   ) : null}
@@ -1140,7 +1198,7 @@ export default function CommunityPage() {
                     <Text style={styles.cardTitle} testID={`wsf-community-goal-title-${goal.goalId}`}>
                       {goal.title}
                     </Text>
-                    {renderProgressFacts(goal, p, false)}
+                    {renderProgressFacts(goal, p, 'card')}
                   </View>
                 </View>
                 <ButtonLink
@@ -1155,9 +1213,13 @@ export default function CommunityPage() {
           })}
         </View>
 
-        {/* Community challenge (E3), unchanged in substance. */}
-        <View style={styles.section} testID="wsf-community-challenge-card">
-          {activeChallenge ? (
+        {/*
+          Community challenge (E3), unchanged in substance. Rendered only when
+          a challenge is actually running: an empty "no challenge" card under
+          an active goal read as a contradiction.
+        */}
+        {activeChallenge ? (
+          <View style={styles.section} testID="wsf-community-challenge-card">
             <Link
               href={`/community/${groupId}/challenge` as never}
               style={styles.card}
@@ -1174,28 +1236,20 @@ export default function CommunityPage() {
                 </Text>
               </View>
             </Link>
-          ) : (
-            <View
-              style={styles.cardQuiet}
-              testID="wsf-community-no-challenge"
-              {...({ 'data-state': 'empty' } as Record<string, unknown>)}
-            >
-              <Text style={styles.sectionEyebrow}>Community challenge</Text>
-              <Text style={styles.body}>No challenge running yet.</Text>
-            </View>
-          )}
-        </View>
+          </View>
+        ) : null}
 
         {/*
-          What we've done. wsfListGoals returns a closed goal only while it is
-          still authorized for public display, so this is the AVAILABLE subset
-          of the community's history, labelled as such — never "no history"
-          when it is empty, which is why the section is omitted then.
+          Past goals. wsfListGoals returns a closed goal only while it is still
+          authorized for public display, so this is the AVAILABLE subset of the
+          community's history, not a complete archive — hence "Past goals",
+          never "everything we've done", and omitted rather than "no history"
+          when it is empty. A complete history needs a data source that does
+          not exist yet.
         */}
         {closedGoals.length ? (
           <View style={styles.section} testID="wsf-community-history">
-            <Text style={styles.sectionEyebrow}>What we&apos;ve done</Text>
-            <Text style={styles.sectionCaption}>Closed goals still on public display.</Text>
+            <Text style={styles.sectionEyebrow}>{closedGoals.length > 1 ? 'Past goals' : 'Past goal'}</Text>
             {closedGoals.map((goal) => {
               const p = progress[goal.goalId] ?? { kind: 'loading' as const };
               const period = formatPeriod(goal.startsAt, goal.endsAt);
@@ -1213,25 +1267,23 @@ export default function CommunityPage() {
                         target={p.pulse.target}
                         unit={p.pulse.unit}
                         width={smallWeWidth}
+                        surface="light"
                         testID={`wsf-community-goal-we-${goal.goalId}`}
                       />
                     ) : null}
                     <View style={styles.smallGoalText}>
                       <Text style={styles.cardTitle}>{goal.title}</Text>
-                      {renderProgressFacts(goal, p, false)}
+                      {renderProgressFacts(goal, p, 'closed')}
                       {period ? <Text style={styles.cardMeta}>{period}</Text> : null}
                     </View>
                   </View>
-                  <Text style={styles.cardMeta}>
-                    This goal has closed. It is no longer taking contributions.
-                  </Text>
                 </View>
               );
             })}
           </View>
         ) : null}
 
-        {/* About the community: simple, human, and secondary. */}
+        {/* About the community: the human facts, with the administrative rows folded away. */}
         <View style={styles.section} testID="wsf-community-about">
           <Text style={styles.sectionEyebrow}>About this community</Text>
           <View style={styles.cardQuiet}>
@@ -1241,23 +1293,31 @@ export default function CommunityPage() {
             {createdLabel ? (
               <Row label="Community since" value={createdLabel} testID="wsf-community-created" />
             ) : null}
-            <Row label="Type" value={groupTypeLabel(group.groupType)} testID="wsf-community-type" />
-            <Row
-              label="Joining"
-              value={joinPolicyLabel(group.joinPolicy)}
-              testID="wsf-community-policy"
-            />
-            <Row
-              label="Status"
-              value={statusLabel(group.lifecycleStatus)}
-              testID="wsf-community-status"
-            />
-            <Row label="Your role" value={roleLabel(role)} testID="wsf-community-role" />
+            <Pressable
+              onPress={() => setDetailsOpen((v) => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: detailsOpen }}
+              style={styles.detailsToggle}
+              testID="wsf-community-details-toggle"
+            >
+              <Text style={styles.detailsToggleText}>
+                {detailsOpen ? 'Hide community details' : 'Community details'}
+              </Text>
+            </Pressable>
+            {detailsOpen ? (
+              <View style={styles.details} testID="wsf-community-details">
+                <Row label="Type" value={groupTypeLabel(group.groupType)} testID="wsf-community-type" quiet />
+                <Row label="Joining" value={joinPolicyLabel(group.joinPolicy)} testID="wsf-community-policy" quiet />
+                <Row label="Status" value={statusLabel(group.lifecycleStatus)} testID="wsf-community-status" quiet />
+                <Row label="Your role" value={roleLabel(role)} testID="wsf-community-role" quiet />
+              </View>
+            ) : null}
           </View>
 
-          <View style={styles.cardQuiet} testID="wsf-community-invite">
-            <Text style={styles.cardTitle}>Invite your people</Text>
-            {inviteUrl ? (
+          {/* Invite: only when this viewer actually has a working link to share. */}
+          {inviteUrl ? (
+            <View style={styles.cardQuiet} testID="wsf-community-invite">
+              <Text style={styles.cardTitle}>Invite your people</Text>
               <View>
                 <Text style={styles.inviteUrl} selectable testID="wsf-community-invite-url">
                   {inviteUrl}
@@ -1318,12 +1378,8 @@ export default function CommunityPage() {
                   ) : null}
                 </View>
               </View>
-            ) : (
-              <Text style={styles.body} testID="wsf-community-invite-pending">
-                Invite links arrive with the next update.
-              </Text>
-            )}
-          </View>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.section} testID="wsf-community-membership">
@@ -1395,17 +1451,31 @@ export default function CommunityPage() {
   );
 }
 
-function Row({ label, value, testID }: { label: string; value: string; testID?: string }) {
+function Row({
+  label,
+  value,
+  testID,
+  quiet = false,
+}: {
+  label: string;
+  value: string;
+  testID?: string;
+  quiet?: boolean;
+}) {
   return (
     <View style={styles.row} testID={testID}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
+      <Text style={quiet ? styles.rowLabelQuiet : styles.rowLabel}>{label}</Text>
+      <Text style={quiet ? styles.rowValueQuiet : styles.rowValue}>{value}</Text>
     </View>
   );
 }
 
 const NAVY = wsfTheme.colors.primary;
+const CREAM = wsfTheme.colors.background;
 const CARD_BORDER = '#E3E7E1';
+// Cream at reduced strength on the navy hero: still well above 4.5:1.
+const HERO_MUTED = 'rgba(247,245,240,0.78)';
+const HERO_RULE = 'rgba(247,245,240,0.35)';
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: wsfTheme.colors.background },
@@ -1416,7 +1486,7 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
     backgroundColor: wsfTheme.colors.background,
   },
-  inner: { maxWidth: 640, width: '100%', gap: 16 },
+  inner: { maxWidth: 640, width: '100%', gap: 18 },
   productHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1431,9 +1501,7 @@ const styles = StyleSheet.create({
     minHeight: 40,
     justifyContent: 'center',
   },
-  manageButtonOpen: { backgroundColor: NAVY },
   manageButtonText: { color: NAVY, fontWeight: '600', fontSize: 15 },
-  manageButtonTextOpen: { color: wsfTheme.colors.surface },
   identity: { gap: 4 },
   headingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   heading: {
@@ -1465,46 +1533,81 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
-  sectionCaption: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
-  heroCard: {
-    backgroundColor: wsfTheme.colors.surface,
-    borderRadius: 20,
-    padding: 20,
+
+  // ---- the hero: navy surface, cream type, green for confirmed progress ----
+  hero: {
+    backgroundColor: NAVY,
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 22,
     gap: 10,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+  },
+  heroEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   heroTitle: {
-    color: wsfTheme.colors.text,
-    fontSize: 26,
+    color: CREAM,
+    fontSize: 27,
     fontWeight: '800',
-    lineHeight: 32,
+    lineHeight: 33,
     letterSpacing: -0.3,
   },
-  heroMeta: { color: wsfTheme.colors.textMuted, fontSize: 15, lineHeight: 20 },
-  weWrap: { alignItems: 'center', paddingVertical: 8 },
+  heroMeta: { color: HERO_MUTED, fontSize: 15, lineHeight: 20 },
+  heroBody: { color: CREAM, fontSize: 16, lineHeight: 22 },
+  heroCentered: { alignItems: 'center', gap: 8 },
+  weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
   factsLarge: { alignItems: 'center', gap: 2 },
   factsSmall: { gap: 2 },
-  totalLarge: { color: wsfTheme.colors.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  totalSmall: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
-  percentLarge: { color: wsfTheme.colors.text, fontSize: 18, fontWeight: '600', textAlign: 'center' },
-  percentSmall: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
-  statusLine: { color: wsfTheme.colors.textMuted, fontSize: 15, lineHeight: 20, textAlign: 'center' },
-  statusLineNear: { color: wsfTheme.colors.text, fontWeight: '700' },
+  heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 19, fontWeight: '700', textAlign: 'center' },
+  heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
-  freshness: { color: wsfTheme.colors.textMuted, fontSize: 13 },
+  heroFreshness: { color: HERO_MUTED, fontSize: 13 },
   freshnessButton: { minHeight: 32, justifyContent: 'center' },
-  freshnessButtonText: { color: NAVY, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
-  actions: { gap: 10, marginTop: 4 },
+  heroFreshnessLink: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
+  actions: { gap: 10, marginTop: 8 },
   primaryButton: {
     backgroundColor: PROGRESS_GREEN,
     borderRadius: 14,
-    minHeight: 52,
+    minHeight: 54,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: { color: NAVY, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  heroOutlineButtonWide: {
+    borderWidth: 1.5,
+    borderColor: HERO_RULE,
+    borderRadius: 14,
+    minHeight: 48,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroOutlineButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1.5,
+    borderColor: HERO_RULE,
+    borderRadius: wsfTheme.radius.pill,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  heroOutlineButtonText: { color: CREAM, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+
+  // ---- light cards, quieter than the hero ----
+  totalSmall: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
+  percentSmall: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
+  statusLine: { color: wsfTheme.colors.textMuted, fontSize: 15, lineHeight: 20 },
+  statusLineNear: { color: wsfTheme.colors.text, fontWeight: '700' },
+  closedResult: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
   secondaryButtonWide: {
     backgroundColor: wsfTheme.colors.surface,
     borderWidth: 1.5,
@@ -1540,10 +1643,10 @@ const styles = StyleSheet.create({
     borderColor: CARD_BORDER,
   },
   cardQuiet: {
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: 16,
     padding: 16,
-    gap: 8,
+    gap: 6,
     borderWidth: 1,
     borderColor: CARD_BORDER,
   },
@@ -1551,17 +1654,43 @@ const styles = StyleSheet.create({
   cardMeta: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
   smallGoalRow: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   smallGoalText: { flex: 1, gap: 4 },
-  managePanel: {
-    backgroundColor: '#EEF2F6',
-    borderRadius: 16,
-    padding: 16,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: '#D5DCE5',
+
+  // ---- Champion tools sheet ----
+  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(11,31,58,0.55)' },
+  sheetScrim: { ...StyleSheet.absoluteFillObject },
+  sheet: {
+    backgroundColor: CREAM,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
   },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#C9CFD8',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+  },
+  sheetTitle: { color: wsfTheme.colors.text, fontSize: 20, fontWeight: '800' },
+  sheetClose: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'flex-end' },
+  sheetCloseText: { color: NAVY, fontSize: 16, fontWeight: '700', textDecorationLine: 'underline' },
+  sheetScroll: { flexGrow: 0 },
+  sheetContent: { gap: 12, paddingBottom: 8 },
+  sheetSection: { gap: 10 },
   manageIntro: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
-  manageGoal: { gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#D5DCE5' },
+  manageGoal: { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#D5DCE5' },
   manageGoalTitle: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
+
+  // ---- about ----
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1570,6 +1699,11 @@ const styles = StyleSheet.create({
   },
   rowLabel: { color: wsfTheme.colors.textMuted, fontSize: 15 },
   rowValue: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '600', textAlign: 'right', flexShrink: 1 },
+  rowLabelQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13 },
+  rowValueQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 1 },
+  detailsToggle: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', marginTop: 2 },
+  detailsToggleText: { color: NAVY, fontSize: 14, fontWeight: '700', textDecorationLine: 'underline' },
+  details: { borderTopWidth: 1, borderTopColor: CARD_BORDER, paddingTop: 4 },
   body: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22 },
   error: { color: '#B4232C', fontSize: 15, lineHeight: 21 },
   inviteUrl: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '600' },

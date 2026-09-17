@@ -182,6 +182,18 @@ async function seedCommunityWithRoles(opts: {
 }
 
 /** Real sign-out through the interface, so the account switch is the product's own. */
+/**
+ * The administrative rows (type, joining, status, your role) sit behind the
+ * "Community details" control on Community Home. Opening it is the real
+ * interaction; the assertions on those rows are unchanged.
+ */
+async function openCommunityDetails(page: Page): Promise<void> {
+  const toggle = page.getByTestId('wsf-community-details-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
 async function signOutVia(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.getByTestId('wsf-home-signout')).toBeVisible({ timeout: 20_000 });
@@ -338,6 +350,7 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
 
       // The signed-in account really is the Champion — asserted, not assumed.
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
 
       (release as unknown as () => void)();
@@ -353,6 +366,7 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
       // Still the Champion — so the control being absent is a deliberate
       // withholding while the state is unknown, not a missing role.
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
       // The rest of the community page is still usable.
@@ -369,6 +383,7 @@ test.describe('community goal seam', () => {
       await signOutVia(page);
       await signInVia(page, emailMember, pwMember);
       await page.goto(`/community/${groupId}`);
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Member');
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);

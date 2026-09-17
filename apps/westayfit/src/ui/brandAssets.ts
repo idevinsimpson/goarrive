@@ -14,10 +14,12 @@ export const wordmarkWhiteGreen = {
   height: 165,
 };
 export const monogramFillGreen = require('../../assets/brand/derived/monogram-fill-green.png') as number;
-export const monogramUnfilledOnLight =
-  require('../../assets/brand/derived/monogram-unfilled-on-light.png') as number;
-export const monogramUnfilledOnDark =
-  require('../../assets/brand/derived/monogram-unfilled-on-dark.png') as number;
+/** Unfilled WE on light surfaces: brand navy, the owner's navy colourway. */
+export const monogramUnfilledNavy =
+  require('../../assets/brand/derived/monogram-unfilled-navy.png') as number;
+/** Unfilled WE on the navy surface: white, the owner's white colourway. */
+export const monogramUnfilledWhite =
+  require('../../assets/brand/derived/monogram-unfilled-white.png') as number;
 
 /** Owner-selected confirmed-progress green. */
 export const PROGRESS_GREEN = '#91CB7D';

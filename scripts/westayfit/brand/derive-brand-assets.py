@@ -21,12 +21,16 @@ Outputs (apps/westayfit/assets/brand/derived/):
       is the rendering mask for the data-driven progress WE. The static green
       patches of the original are deliberately NOT carried into the progress
       instrument: static branding is not measured progress.
-  monogram-fill-green.png, monogram-unfilled-on-light.png,
-  monogram-unfilled-on-dark.png
+  monogram-fill-green.png, monogram-unfilled-navy.png,
+  monogram-unfilled-white.png
       The same silhouette pre-tinted: confirmed-progress green #91CB7D for
-      the filled layer, and a neutral for the unfilled layer on light and on
-      navy surfaces. Pre-tinting keeps the rendered colour identical on web
-      and native instead of depending on a runtime tint filter.
+      the filled layer; brand navy #0B1F3A for the unfilled layer on light
+      surfaces; white #FFFFFF for the unfilled layer on the navy surface.
+      These are the owner's own two colourways of the mark (navy/green and
+      white/green) with the green reserved for measured progress, so an
+      unfilled WE still reads as the brand mark, never as a disabled shape.
+      Pre-tinting keeps the rendered colour identical on web and native
+      instead of depending on a runtime tint filter.
   living-we-calibration.json
       For the silhouette, the cumulative opaque AREA from the bottom edge
       upward, sampled per 0.1% of fill, expressed as the fraction of the
@@ -97,8 +101,8 @@ def derive_silhouette() -> tuple[Path, Image.Image]:
 
 
 PROGRESS_GREEN = (0x91, 0xCB, 0x7D)
-UNFILLED_ON_LIGHT = (0xD6, 0xDC, 0xD4)
-UNFILLED_ON_DARK = (0x3A, 0x4E, 0x6B)
+BRAND_NAVY = (0x0B, 0x1F, 0x3A)
+WHITE = (0xFF, 0xFF, 0xFF)
 
 
 def tinted(silhouette: Image.Image, rgb: tuple[int, int, int], out: Path) -> Path:
@@ -155,8 +159,8 @@ def main() -> None:
     sil_path, sil = derive_silhouette()
     outputs.append(sil_path)
     outputs.append(tinted(sil, PROGRESS_GREEN, DERIVED / "monogram-fill-green.png"))
-    outputs.append(tinted(sil, UNFILLED_ON_LIGHT, DERIVED / "monogram-unfilled-on-light.png"))
-    outputs.append(tinted(sil, UNFILLED_ON_DARK, DERIVED / "monogram-unfilled-on-dark.png"))
+    outputs.append(tinted(sil, BRAND_NAVY, DERIVED / "monogram-unfilled-navy.png"))
+    outputs.append(tinted(sil, WHITE, DERIVED / "monogram-unfilled-white.png"))
     cal = calibrate(sil)
     cal_path = DERIVED / "living-we-calibration.json"
     cal_path.write_text(json.dumps(cal, separators=(",", ":")) + "\n")
@@ -165,8 +169,8 @@ def main() -> None:
         "generator": "scripts/westayfit/brand/derive-brand-assets.py",
         "parameters": {
             "progressGreen": "#91CB7D",
-            "unfilledOnLight": "#D6DCD4",
-            "unfilledOnDark": "#3A4E6B",
+            "unfilledNavy": "#0B1F3A",
+            "unfilledWhite": "#FFFFFF",
             "wordmarkDeliveryWidth": WORDMARK_DELIVERY_WIDTH,
             "monogramDeliveryWidth": MONOGRAM_DELIVERY_WIDTH,
             "calibrationSteps": CALIBRATION_STEPS,

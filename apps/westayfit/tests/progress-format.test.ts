@@ -23,7 +23,7 @@ import {
   totalOfTargetLabel,
 } from '../src/ui/progressFormat';
 
-describe('percentage text: one decimal, rounded down, capped at the goal', () => {
+describe('percentage text: at most one decimal, rounded down, capped at the goal', () => {
   it.each([
     [0, 5000, '0%'],
     [1, 5000, 'less than 0.1%'],
@@ -32,7 +32,9 @@ describe('percentage text: one decimal, rounded down, capped at the goal', () =>
     [35, 5000, '0.7%'],
     [241, 500, '48.2%'],
     [261, 500, '52.2%'],
-    [450, 500, '90.0%'],
+    [450, 500, '90%'],
+    [100, 1000, '10%'],
+    [250, 500, '50%'],
     [4999, 5000, '99.9%'],
     [499, 500, '99.8%'],
     [500, 500, '100%'],
@@ -40,6 +42,12 @@ describe('percentage text: one decimal, rounded down, capped at the goal', () =>
     [5120, 5000, '100%'],
   ])('%i of %i reads %s', (completed, target, label) => {
     expect(percentLabel(completed, target)).toBe(label);
+  });
+
+  it('prints a whole number without a trailing .0', () => {
+    expect(percentLabel(450, 500)).toBe('90%');
+    expect(percentLabel(45, 500)).toBe('9%');
+    expect(percentLabel(451, 500)).toBe('90.2%');
   });
 
   it('never rounds up: 999 of 1000 is 99.9, and 1 of 3 is 33.3', () => {
@@ -134,5 +142,16 @@ describe('the exact total is retained beyond the goal', () => {
     expect(statusLine(500, 500, 'closed')).toBe('Goal reached');
     expect(statusLine(620, 500, 'closed')).toBe('Goal reached · 120 beyond it');
     expect(statusLine(312, 500, 'closed')).toBe('Closed at 62.4%');
+  });
+});
+
+describe('4,999 of 5,000 stays below complete everywhere', () => {
+  it('text, ratio, phase and status all say "not yet"', () => {
+    expect(percentLabel(4999, 5000)).toBe('99.9%');
+    expect(fillRatio(4999, 5000)).toBeLessThan(1);
+    expect(fillRatio(4999, 5000)).toBeCloseTo(0.9998, 10);
+    expect(isReached(4999, 5000)).toBe(false);
+    expect(progressPhase(4999, 5000, 'active')).toBe('nearGoal');
+    expect(statusLine(4999, 5000, 'active')).toBe('Only 1 to go');
   });
 });

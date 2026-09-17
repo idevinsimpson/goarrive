@@ -318,6 +318,11 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
     'You’ve added 60 squats'
   );
+  // The control is a contribution action, named as one — not an activity history.
+  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
+    'Record more squats'
+  );
+  await expect(page.getByTestId('wsf-community-human-line')).toHaveText('Moving together.');
   await expect(page.getByTestId(`wsf-community-goal-link-${featured}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
   // The second open goal prints its own honest number: 35 of 5,000 is 0.7%.
@@ -325,15 +330,29 @@ test('Community Home at phone size — member view, Champion view, full page', a
     timeout: 30_000,
   });
   // Closed history is separate from reached, and separate from the open goal.
+  // It is the available subset, labelled "Past goal", not a complete archive.
   await expect(page.getByTestId(`wsf-community-goal-closed-${closed}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-community-goal-status-${closed}`)).toHaveText(
     'Closed at 62.4%',
     { timeout: 30_000 }
   );
+  await expect(page.getByTestId('wsf-community-history')).toContainText('Past goal');
+  await expect(page.getByTestId('wsf-community-history')).not.toContainText('public display');
+  // No empty challenge card under an active goal, and no invite placeholder
+  // for a viewer who has no working link.
+  await expect(page.getByTestId('wsf-community-challenge-card')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-invite')).toHaveCount(0);
   // No Champion tools for a member.
   await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-invite-reset')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-member-count')).toContainText('2 members');
+  // Administrative rows are folded away until asked for; the state is intact.
+  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
+  await page.getByTestId('wsf-community-details-toggle').click();
+  await expect(page.getByTestId('wsf-community-role')).toContainText('Member');
+  await expect(page.getByTestId('wsf-community-status')).toContainText('Active');
+  await page.getByTestId('wsf-community-details-toggle').click();
+  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
 
   await scrollTo(page, 0);
   await snapViewport(page, 'member-01-top');
@@ -367,15 +386,28 @@ test('Community Home at phone size — member view, Champion view, full page', a
   const manage = page.getByTestId('wsf-community-manage');
   await expect(manage).toBeVisible();
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+  // The Champion's own view of the community is the member view plus one control.
+  await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
+    'Your first contribution counts here.'
+  );
+  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
+    'Record squats'
+  );
   await scrollTo(page, 0);
   await snapViewport(page, 'champion-01-top-manage-closed');
+  const heroBoxBefore = await page.getByTestId('wsf-community-goal-hero').boundingBox();
   await manage.click();
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
   await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${featured}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${closed}`)).toBeVisible();
+  // Management is a surface over the page: the hero has not moved.
+  const heroBoxAfter = await page.getByTestId('wsf-community-goal-hero').boundingBox();
+  expect(heroBoxAfter?.y).toBe(heroBoxBefore?.y);
   await page.waitForTimeout(300);
   await snapViewport(page, 'champion-02-top-manage-open');
   await snapFull(page, 'champion-full-page-manage-open');
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
 
   writeFileSync(
     path.join(ARTIFACTS_DIR, 'fixture.json'),
@@ -404,7 +436,7 @@ const STATES: Array<{
   { key: '0-of-500', total: 0, target: 500, percent: '0%', status: '500 to go', ratio: '0.0000' },
   { key: '241-of-500', total: 241, target: 500, percent: '48.2%', status: '259 to go', ratio: '0.4820' },
   { key: '261-of-500', total: 261, target: 500, percent: '52.2%', status: '239 to go', ratio: '0.5220' },
-  { key: '450-of-500', total: 450, target: 500, percent: '90.0%', status: 'Only 50 to go', ratio: '0.9000' },
+  { key: '450-of-500', total: 450, target: 500, percent: '90%', status: 'Only 50 to go', ratio: '0.9000' },
   { key: '4999-of-5000', total: 4999, target: 5000, percent: '99.9%', status: 'Only 1 to go', ratio: '0.9998' },
   { key: '500-of-500', total: 500, target: 500, percent: '100%', status: 'Goal reached · still open', ratio: '1.0000' },
 ];

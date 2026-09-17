@@ -7,7 +7,8 @@
 `derived/` holds what the app actually loads, produced only by
 `scripts/westayfit/brand/derive-brand-assets.py` from those originals:
 trimmed, downscaled wordmarks (letterforms and proportions untouched), the
-monogram silhouette, pre-tinted fill/unfilled layers for the progress WE, and
+monogram silhouette, pre-tinted layers for the progress WE (green fill, navy
+unfilled for light surfaces, white unfilled for the navy surface), and
 the area-calibration table that maps a fill ratio to a clip height for the
 irregular letterform. `derived/MANIFEST.json` records the checksums of every
 input and output. Re-run the script rather than editing a derived file.

@@ -69,3 +69,15 @@ describe('Living WE calibration table', () => {
     expect(LIVING_WE_ASPECT).toBeLessThan(3);
   });
 });
+
+describe('near-but-below the goal', () => {
+  it('4,999 of 5,000 never resolves to a full ratio or a full clip height', () => {
+    // The text says 99.9% and the mark must not be set to a literal full
+    // state before the target. At phone raster sizes the 0.1% remainder can
+    // be sub-pixel, which is a rendering limitation, not a data one.
+    const ratio = 4999 / 5000;
+    expect(ratio).toBeLessThan(1);
+    expect(heightFractionForFill(ratio)).toBeLessThan(1);
+    expect(heightFractionForFill(ratio)).toBeGreaterThan(0.98);
+  });
+});

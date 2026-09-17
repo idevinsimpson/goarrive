@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * E3.5 supplementary — pins surfaces `mu2-flow.spec.ts` does not touch:
@@ -39,6 +39,18 @@ const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 // E4-A1-R4 lockstep: must match the emulators:exec --project flag in gate1.sh
 // and the id the flagged client selects on a loopback host (selectProjectId).
 const PROJECT_ID = 'demo-wsf-local';
+
+/**
+ * The administrative rows (type, joining, status, your role) sit behind the
+ * "Community details" control on Community Home. Opening it is the real
+ * interaction; the assertions on those rows are unchanged.
+ */
+async function openCommunityDetails(page: Page): Promise<void> {
+  const toggle = page.getByTestId('wsf-community-details-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
 
 async function markEmailVerified(email: string): Promise<void> {
   const headers = { authorization: 'Bearer owner', 'content-type': 'application/json' };
@@ -333,6 +345,7 @@ test('F9: a Private community shows Private + type label + members count', async
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(communityName)).toBeVisible();
   // Human labels, not raw enums.
+  await openCommunityDetails(page);
   await expect(page.getByTestId('wsf-community-policy')).toContainText('Private');
   await expect(page.getByTestId('wsf-community-type')).toContainText('Family and friends');
   await expect(page.getByTestId('wsf-community-member-count')).toContainText('1 member');
