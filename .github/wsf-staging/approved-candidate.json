@@ -16,6 +16,6 @@
   "approvedAppSha": "8e1a3ed485a5c0eadbcb23c1f35becad455923c7",
   "packageLabel": "Package E \u2014 per-goal aggregate display authorization",
   "sourceAcceptedOn": "2026-09-16",
-  "expectedPriorFunctions": 22,
-  "_expectedPriorFunctionsNote": "The WSF inventory staging is expected to carry BEFORE this deployment (the 1cbf231 baseline). Reviewed per candidate; the next package will have a different prior count."
+  "expectedPriorFunctions": 23,
+  "_expectedPriorFunctionsNote": "The WSF inventory staging is expected to carry BEFORE this deployment. This continuation is approved against the exact 23-function staging state created by partial Package E run 35231922274/35235969855 (the original 22 pre-Package-E functions plus wsfSetGoalDisplayAuthorization), independently verified after the single-service Invoker-IAM-check-disabled transport correction on wsfsetgoaldisplayauthorization. Reviewed per candidate; the next package will have a different prior count."
 }
