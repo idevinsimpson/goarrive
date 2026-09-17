@@ -413,6 +413,13 @@ jobs:
         working-directory: app
         run: npm --prefix apps/westayfit ci --ignore-scripts
 
+      # The REST fixture token is minted through google-auth-library. The deploy
+      # job has it only as a transitive dependency of the pinned firebase-tools
+      # install; this job had neither, so the first hosted run failed before a
+      # single fixture was created. Same pinned tooling, same --ignore-scripts.
+      - name: Install pinned deployment tooling
+        run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
+
       - name: Install browsers using the candidate's pinned Playwright CLI
         working-directory: app
         run: |
