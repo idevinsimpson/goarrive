@@ -185,4 +185,26 @@ await test('an identifier not carrying this run tag is refused, not deleted', as
   assert.equal(sawDelete, false, 'nothing may be deleted against an untagged identifier');
 });
 
+
+await test('early smoke failure: no evidence dir, no manifest → a real MANIFEST_UNUSABLE receipt', async () => {
+  // Run 35244445618: the smoke threw at module load, so the evidence directory
+  // was never created. Cleanup then crashed with ENOENT writing its receipt,
+  // and the run showed no cleanup outcome at all.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cl-'));
+  const evidence = path.join(d, 'wsf-evidence');
+  assert.equal(fs.existsSync(evidence), false);
+  const receiptPath = path.join(evidence, 'cleanup-receipt.json');
+  const r = await runCleanup('http://127.0.0.1:1', path.join(evidence, 'cleanup-manifest.json'), receiptPath);
+  assert.equal(r.code, 1, 'must still exit nonzero');
+  assert.equal(fs.existsSync(receiptPath), true, 'the receipt must be written even though its directory did not exist');
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(r.receipt.manifestPreserved, false);
+  assert.equal('usersDeleted' in r.receipt, false, 'must not claim any deletion');
+  assert.equal('docsDeleted' in r.receipt, false, 'must not claim any deletion');
+  assert.match(r.out, /CLEANUP_STATUS=MANIFEST_UNUSABLE/);
+  assert.equal(/CLEANUP_STATUS=(COMPLETE|NO_FIXTURES)/.test(r.out), false);
+  assert.equal(fs.statSync(evidence).mode & 0o777, 0o700, 'the created directory is restrictive');
+  assert.equal(fs.statSync(receiptPath).mode & 0o777, 0o600);
+});
+
 console.log(`\ncleanup-synthetic: ${passed} passed`);

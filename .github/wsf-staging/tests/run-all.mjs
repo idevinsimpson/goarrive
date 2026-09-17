@@ -8,6 +8,7 @@ const suites = [
   'workflow-contract.test.mjs',
   'scan-evidence.test.mjs',
   'cleanup-synthetic.test.mjs',
+  'write-sdk-config.test.mjs',
   'verify-deployment.test.mjs',
 ];
 let failed = 0;

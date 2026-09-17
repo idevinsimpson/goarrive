@@ -465,6 +465,12 @@ jobs:
           set -euo pipefail
           set -a; . ../cfg/wsf-staging.env; set +a
           export WSF_STAGING_API_KEY="$EXPO_PUBLIC_WSF_STAGING_API_KEY"
+          # The smoke reads its project id and Web API key from a JSON file,
+          # not from WSF_STAGING_API_KEY. Re-shape the values the env artifact
+          # already carries into the runner's temp directory (outside the
+          # checkout and the evidence directory), mode 0600, never echoed.
+          export WSF_SDK_CONFIG_FILE="$RUNNER_TEMP/wsf-sdk-config.json"
+          node ../ops/.github/wsf-staging/write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"
           export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
             const {GoogleAuth} = require("google-auth-library");
             new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})

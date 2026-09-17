@@ -139,4 +139,72 @@ test('only workflow_dispatch triggers it', () => {
   }
 });
 
+
+// ---- script/step wiring ----------------------------------------------------
+// The first hosted run failed on a variable the smoke requires and the step
+// never set. That class of defect is static: every WSF_* name a script refuses
+// to run without must be supplied by the step that invokes it.
+function stepBlock(job, stepName) {
+  const lines = jobs[job].split('\n');
+  const start = lines.findIndex((l) => l.trim() === `- name: ${stepName}`);
+  assert.notEqual(start, -1, `step "${stepName}" not found in job ${job}`);
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s{6}- (name|uses):/.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start, end).join('\n');
+}
+function requiredEnv(scriptPath) {
+  const src = fs.readFileSync(path.resolve(scriptPath), 'utf8');
+  const names = new Set();
+  // `if (!X) throw new Error('WSF_… is required')` and the template form used
+  // by verify-deployment's loop over a list of names.
+  for (const m of src.matchAll(/throw new Error\('(WSF_[A-Z_]+) is required'\)/g)) names.add(m[1]);
+  for (const m of src.matchAll(/for \(const \[k, v\] of Object\.entries\(\{([^}]*)\}\)\)/g)) {
+    for (const n of m[1].matchAll(/(WSF_[A-Z_]+)/g)) names.add(n[1]);
+  }
+  return [...names];
+}
+function supplied(block, name) {
+  return new RegExp(`^\\s+${name}:`, 'm').test(block) || new RegExp(`export ${name}=`).test(block);
+}
+const WIRING = [
+  ['hosted-verify', 'Run the Package E hosted authorization checks', '.github/wsf-staging/hosted-package-e-smoke.mjs'],
+  ['hosted-verify', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
+  ['deploy', 'Verify the deployed state', '.github/wsf-staging/verify-deployment.mjs'],
+];
+for (const [job, step, script] of WIRING) {
+  test(`${path.basename(script)}: every required WSF_* variable is supplied by its step`, () => {
+    const block = stepBlock(job, step);
+    assert.match(block, new RegExp(path.basename(script).replace('.', '\\.')), 'the step must invoke the script');
+    const names = requiredEnv(script);
+    assert.ok(names.length >= 3, `expected to find the script's required variables, got ${names.join(',')}`);
+    for (const n of names) assert.ok(supplied(block, n), `${step}: ${n} is required by ${script} but not supplied`);
+  });
+}
+
+test('the smoke step derives WSF_SDK_CONFIG_FILE from the staging env artifact', () => {
+  const block = stepBlock('hosted-verify', 'Run the Package E hosted authorization checks');
+  const run = block.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const source = run.indexOf('. ../cfg/wsf-staging.env');
+  const exportLine = run.indexOf('export WSF_SDK_CONFIG_FILE=');
+  const writer = run.indexOf('write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"');
+  const smoke = run.indexOf('hosted-package-e-smoke.mjs');
+  assert.ok(source !== -1 && exportLine !== -1 && writer !== -1 && smoke !== -1);
+  assert.ok(source < exportLine && exportLine < writer && writer < smoke, 'source env, export path, write file, then run the smoke — in that order');
+  // The existing API-key export stays; the smoke simply does not read it.
+  assert.match(run, /export WSF_STAGING_API_KEY="\$EXPO_PUBLIC_WSF_STAGING_API_KEY"/);
+});
+
+test('the SDK config file lives in the runner temp dir, not the checkout or evidence', () => {
+  const block = stepBlock('hosted-verify', 'Run the Package E hosted authorization checks');
+  assert.match(block, /export WSF_SDK_CONFIG_FILE="\$RUNNER_TEMP\/[a-z-]+\.json"/);
+  assert.equal(/WSF_SDK_CONFIG_FILE="[^"]*(github\.workspace|wsf-evidence)/.test(block), false);
+});
+
+test('nothing in the hosted job prints the SDK config or the env artifact', () => {
+  const j = jobs['hosted-verify'].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.equal(/\b(cat|echo|printenv|env)\b[^\n]*(wsf-staging\.env|WSF_SDK_CONFIG_FILE|WSF_STAGING_API_KEY|EXPO_PUBLIC)/.test(j), false);
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);
