@@ -128,8 +128,9 @@ jobs:
           rm -f sdkconfig.json
 
       # The six values are publishable client identifiers, but they are still
-      # passed as an artifact rather than printed, and the artifact is consumed
-      # only by the build job.
+      # passed as an artifact rather than printed. The artifact is consumed by
+      # the downstream build job (the web bundle) and by hosted-verify (the
+      # SDK config file the smoke reads).
       - name: Upload the staging build configuration
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
@@ -465,6 +466,15 @@ jobs:
           set -euo pipefail
           set -a; . ../cfg/wsf-staging.env; set +a
           export WSF_STAGING_API_KEY="$EXPO_PUBLIC_WSF_STAGING_API_KEY"
+          # The smoke reads its project id and Web API key from a JSON file,
+          # not from WSF_STAGING_API_KEY. Re-shape the values the env artifact
+          # already carries into a dedicated child of the runner's temp
+          # directory (outside the checkout and the evidence directory). The
+          # writer creates that child itself at 0700 — mkdir's mode never
+          # re-chmods an existing directory, so RUNNER_TEMP itself would not
+          # carry the invariant — and the file is 0600, never echoed.
+          export WSF_SDK_CONFIG_FILE="$RUNNER_TEMP/wsf-sdk/wsf-sdk-config.json"
+          node ../ops/.github/wsf-staging/write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"
           export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
             const {GoogleAuth} = require("google-auth-library");
             new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})

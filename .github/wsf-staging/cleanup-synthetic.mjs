@@ -21,6 +21,7 @@
  * promise anything, so it is the one case that must never look like success.
  */
 import fs from 'node:fs';
+import path from 'node:path';
 
 const PROJECT_ID = 'westayfit-staging';
 const TOKEN = process.env.WSF_GOOGLE_ACCESS_TOKEN;
@@ -80,6 +81,10 @@ function finish(status, extra, exitCode) {
     status,
     ...extra,
   };
+  // A smoke that dies before creating the evidence directory must still get
+  // a receipt: without this, the honest MANIFEST_UNUSABLE outcome below was
+  // replaced by an ENOENT crash and the run showed no cleanup result at all.
+  fs.mkdirSync(path.dirname(RECEIPT), { recursive: true, mode: 0o700 });
   fs.writeFileSync(RECEIPT, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
   console.log(`CLEANUP_STATUS=${status}`);
   for (const [k, v] of Object.entries(extra)) {
