@@ -4,8 +4,8 @@ Recovery point. If the session stops: read this file, then the newest PR #327 co
 
 | Field | Value |
 |---|---|
-| Updated (ET) | 09:42 |
-| Current task | Expanded scope (Devin, session, ~08:58 ET): 9 Opus workers running in isolated worktrees on W2 recent additions, W3 repeat policy, W4 guided rules, W5 crossing event, W6 history, W7+W12 share/coaching, W8 QR join, W9 kiosk, and a feasibility report for W1/W10/W11/W13; all return patches by 10:00 ET for Fable to integrate. P0 hardening from the adversarial review being finished (rules positive controls + 2 cases, deterministic D-1 spec, spec added to gate1, stale comments fixed). Ops worktree: harness compat + D-5 hosted proof + D-1 gate check committed locally (`80a789e` on `claude/wsf-staging-ops-2026-09-18`), ops suite 9/9 green; next: rules-deploy step + approved SHA, push, draft ops PR |
+| Updated (ET) | 09:50 |
+| Current task | Waiting on 8 Opus worker patches (W2, W3, W4, W5, W6, W7+12, W8, W9; due 10:00 ET) to integrate one at a time. Ops: draft PR **#329** open from `claude/wsf-staging-ops-2026-09-18` @ `80a789e` (harness compat + D-5 hosted proof + D-1 gate check; ops suite green). Pending on #329: approved SHA; the rules-deploy step is an owner decision (patch filed) |
 | Branch / head | `claude/wsf-ui-member-experience` @ `5a3fbde` (D-5 + D-1 committed and pushed); base unchanged `3560936` |
 | Latest ChatGPT review read | `[CHATGPT URGENT HANDOFF 08:32 ET]`, `[CHATGPT OWNER SCOPE UPDATE 08:23 ET]` — now IN SCOPE per Devin's direct session instruction (~08:58 ET), which supersedes my 08:53 ET PR position. No 09:15 review seen yet (checked 09:27) |
 | What changed | D-5: `wsfIsGroupMember` now requires `membershipStatus == 'active'` (one helper, one call site: `wsfCommunityGroups` read); two rules tests added. D-1: trailing `router.replace('/verify-email')` removed from `signup.tsx` `onSubmit`; slow-send regression spec added |
