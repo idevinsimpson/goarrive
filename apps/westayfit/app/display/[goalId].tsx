@@ -39,7 +39,16 @@ export default function DisplayGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
   const { width: windowWidth } = useWindowDimensions();
-  const wide = windowWidth >= 900;
+  // The static export renders the phone layout (no window at export time),
+  // so the first client render must produce the same tree or React reports a
+  // hydration mismatch (#418) and re-renders from scratch. The wide layout is
+  // chosen only once hydrated; a wide display shows the phone loading card
+  // for a single frame before its first poll answers.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+  const wide = hydrated && windowWidth >= 900;
   const [state, setState] = useState<DisplayState>({ kind: 'loading' });
   // Bumping this starts a brand-new polling session. It is the ONLY way to
   // recover from a refusal, and it exists so that recovery is an explicit act
