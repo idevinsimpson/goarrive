@@ -2112,6 +2112,17 @@ type GoalDoc = {
   reachedAttemptId?: string;
   reachedSharedTotal?: number;
   /**
+   * Optional per-goal counting-guide override. The client keys its counting
+   * guide off the goal's `unit`; when a Champion wants a different guide than
+   * the unit's own words would pick, this field names it and wins.
+   *
+   * It carries no authority over anything recorded: the contribution count,
+   * the shared total and every permission are untouched by it. Absent means
+   * "derive the guide from the unit", which is what every goal written before
+   * this field existed does. Nothing is backfilled.
+   */
+  activityGuideKey?: string;
+  /**
    * PACKAGE E. Explicit permission for ONE thing: this goal's approved
    * aggregate progress may be presented through the authorized unauthenticated
    * aggregate-display path.
@@ -2343,6 +2354,25 @@ function normalizeGoalUnit(v: unknown): string | null {
   return trimmed;
 }
 
+/**
+ * Optional per-goal counting-guide key. Same shape and same 40-char ceiling as
+ * the unit it stands in for — it is a key into the client's guide table, not
+ * prose, so it is stored trimmed and verbatim and the client normalizes it
+ * (lowercase, plural/synonym folding) exactly as it normalizes a unit. An
+ * unknown key is not an error here: the client falls back to the unit.
+ *
+ * Returns undefined when the caller sent nothing, null when they sent
+ * something unusable — the two are different answers to the callable.
+ */
+function normalizeActivityGuideKey(v: unknown): string | null | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 1 || trimmed.length > 40) return null;
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 function normalizeAttemptId(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
@@ -2447,6 +2477,7 @@ type CreateGoalRequest = {
   startsAt?: unknown; // ISO 8601
   endsAt?: unknown; // ISO 8601
   timezone?: unknown; // IANA
+  activityGuideKey?: unknown; // optional counting-guide override, 1..40 chars
 };
 
 type CreateGoalResponse = { goalId: string };
@@ -2518,6 +2549,16 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         'timezone must be a valid IANA identifier.'
       );
     }
+    // Optional. Omitting it is the ordinary case and writes no field at all,
+    // so a goal without an override is byte-identical to one created before
+    // this argument existed.
+    const activityGuideKey = normalizeActivityGuideKey(request.data?.activityGuideKey);
+    if (activityGuideKey === null) {
+      throw new HttpsError(
+        'invalid-argument',
+        'activityGuideKey, when provided, must be 1..40 chars; no ASCII control characters.'
+      );
+    }
 
     const db = getFirestore();
     const goalRef = db.collection('wsfGoals').doc();
@@ -2547,6 +2588,7 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         title,
         target,
         unit,
+        ...(activityGuideKey === undefined ? {} : { activityGuideKey }),
         status: 'active',
         startsAt: Timestamp.fromDate(startsAtDate),
         endsAt: Timestamp.fromDate(endsAtDate),
@@ -3064,7 +3106,14 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
 
 type MyContributionRequest = { goalId?: unknown };
 
-type MyContributionResponse = { ownCredit: number; unit: string };
+type MyContributionResponse = {
+  ownCredit: number;
+  unit: string;
+  // Optional per-goal counting-guide override, present only when the goal
+  // carries one. It rides this authenticated member-only read rather than
+  // wsfGoalPulse, whose nine-field authorized display payload is fixed.
+  activityGuideKey?: string;
+};
 
 export const wsfMyContribution = onCall<MyContributionRequest>(
   { region: 'us-central1' },
@@ -3115,7 +3164,17 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
 
     const total =
       (memberSnap.data() as { total?: number } | undefined)?.total ?? 0;
-    return { ownCredit: total, unit: goal.unit };
+    // Only ever a non-empty string; a legacy or malformed value is simply not
+    // published and the client derives the guide from the unit.
+    const activityGuideKey =
+      typeof goal.activityGuideKey === 'string' && goal.activityGuideKey.trim() !== ''
+        ? goal.activityGuideKey.trim()
+        : undefined;
+    return {
+      ownCredit: total,
+      unit: goal.unit,
+      ...(activityGuideKey === undefined ? {} : { activityGuideKey }),
+    };
   }
 );
 

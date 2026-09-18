@@ -39,9 +39,20 @@ import {
   roleLabel,
   statusLabel,
 } from '../../../src/labels';
+import { communityMomentumLine } from '../../../src/communityMomentum';
+import {
+  canShareGoalDisplay,
+  displayShareUrl,
+  shareControlLabel,
+  shareRoute,
+  SHARE_DISCLOSURE,
+  type ShareStatus,
+} from '../../../src/shareGoalDisplay';
 import { wsfTheme } from '../../../src/theme';
 import { PROGRESS_GREEN } from '../../../src/ui/brandAssets';
 import { ButtonLink } from '../../../src/ui/ButtonLink';
+import { JoinQrCode } from '../../../src/ui/JoinQrCode';
+import { buildJoinUrl, isLinkJoinable } from '../../../src/ui/joinLink';
 import {
   formatActiveWindowLabel,
   formatClock,
@@ -52,6 +63,7 @@ import {
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
   formatCount,
+  isReached,
   percentLabel,
   progressPhase,
   statusLine,
@@ -200,6 +212,10 @@ export default function CommunityPage() {
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  // W7. The display-link control keeps its OWN state and its own timer. It is
+  // a different link to a different audience from the invite link, and a copy
+  // of one must never light up the other's confirmation.
+  const [shareStatus, setShareStatus] = useState<ShareStatus>('idle');
   const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
   const [progress, setProgress] = useState<Record<string, GoalProgress>>({});
@@ -246,6 +262,15 @@ export default function CommunityPage() {
     }
   }, []);
   useEffect(() => clearCopyReset, [clearCopyReset]);
+  // The same one-timer-at-a-time rule for the display-link control.
+  const shareResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearShareReset = useCallback(() => {
+    if (shareResetRef.current) {
+      clearTimeout(shareResetRef.current);
+      shareResetRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearShareReset, [clearShareReset]);
   useEffect(() => {
     contextRef.current = { groupId, uid: user?.uid ?? null };
     // A new context. Everything the previous one had to say about permissions
@@ -259,6 +284,7 @@ export default function CommunityPage() {
     setResetJoinCode(null);
     setResetOutcome('idle');
     setCopyStatus('idle');
+    setShareStatus('idle');
   }, [groupId, user?.uid]);
 
   const [leaveState, setLeaveState] = useState<
@@ -500,16 +526,18 @@ export default function CommunityPage() {
 
   const refreshProgress = useCallback(() => setProgressReloadToken((n) => n + 1), []);
 
-  const inviteUrl = (() => {
-    if (state.kind !== 'ready') return null;
-    const code = resetJoinCode ?? state.group.joinCode;
-    if (!code) return null;
-    // D4: public AND inviteOnly are link-joinable. private is not — a general
-    // community link never admits anyone there.
-    if (state.group.joinPolicy !== 'public' && state.group.joinPolicy !== 'inviteOnly') return null;
-    if (typeof window === 'undefined') return null;
-    return `${window.location.origin}/join/${code}`;
-  })();
+  // D4: public AND inviteOnly are link-joinable. private is not — a general
+  // community link never admits anyone there. The rule itself lives in
+  // `src/ui/joinLink.ts` so the QR in the Champion sheet encodes the SAME
+  // string this control copies, rather than a second derivation of it.
+  const inviteUrl =
+    state.kind === 'ready'
+      ? buildJoinUrl({
+          origin: typeof window === 'undefined' ? null : window.location.origin,
+          joinCode: resetJoinCode ?? state.group.joinCode,
+          joinPolicy: state.group.joinPolicy,
+        })
+      : null;
 
   const onCopyInvite = useCallback(async () => {
     if (!inviteUrl || typeof navigator === 'undefined') return;
@@ -724,6 +752,49 @@ export default function CommunityPage() {
     }
   }, [inviteUrl]);
 
+  /**
+   * W7. Share the PUBLIC DISPLAY link for a goal — the one artefact that is
+   * safe to hand to someone outside the community, and only once the Champion
+   * has authorized it. src/shareGoalDisplay decides the URL and the route;
+   * this callback only performs it.
+   *
+   * Web Share route: the sheet is the confirmation, so nothing on the page
+   * changes. A rejection is a dismissal as often as it is a failure, and the
+   * two are indistinguishable here, so neither is reported as an outcome —
+   * the same rule the invite Share control already follows.
+   *
+   * Clipboard route: the existing invite behaviour, "Copied" for two seconds,
+   * and a failure that is NOT timed out because nothing was copied.
+   */
+  const onShareGoalDisplay = useCallback(
+    async (url: string) => {
+      const route = shareRoute(typeof navigator === 'undefined' ? null : navigator);
+      if (route === 'unavailable') return;
+      clearShareReset();
+      if (route === 'webShare') {
+        try {
+          await (navigator as Navigator & {
+            share: (data: ShareData) => Promise<void>;
+          }).share({ url });
+        } catch {
+          /* dismissed or blocked — no claim either way */
+        }
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareStatus('copied');
+        shareResetRef.current = setTimeout(() => {
+          shareResetRef.current = null;
+          setShareStatus('idle');
+        }, 2_000);
+      } catch {
+        setShareStatus('failed');
+      }
+    },
+    [clearShareReset]
+  );
+
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Your community" testID="wsf-community-disabled" />;
   }
@@ -829,6 +900,31 @@ export default function CommunityPage() {
   // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
   const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
   const smallWeWidth = 104;
+
+  // W7. The display link for the featured goal, or null — which is the normal
+  // case. Everything that has to be true is decided in src/shareGoalDisplay:
+  // the goal is authorized, the community is not sample data, this browser has
+  // a mechanism, and an absolute origin exists to build the URL from. Both
+  // browser reads happen at render, but the hero that carries the control only
+  // exists after the async loads have answered, so the static export never
+  // renders it and there is nothing for hydration to disagree with.
+  const goalShareRoute = shareRoute(typeof navigator === 'undefined' ? null : navigator);
+  const featuredShareUrl =
+    featured && canShareGoalDisplay(featured, { isSample }) && goalShareRoute !== 'unavailable'
+      ? displayShareUrl(typeof window === 'undefined' ? null : window.location.origin, featured.goalId)
+      : null;
+
+  // W7. One roll-up across the community's open goals, from pulses already on
+  // hand. Null — no line at all — whenever it cannot be said completely; see
+  // src/communityMomentum for each of the three suppressing rules.
+  const momentumLine = communityMomentumLine(
+    activeGoals.map((goal) => {
+      const p = progress[goal.goalId];
+      return p?.kind === 'ok'
+        ? { confirmed: true, reached: isReached(p.pulse.sharedTotal, p.pulse.target) }
+        : { confirmed: false, reached: false };
+    })
+  );
 
   const contributeHref = (goalId: string, mode: 'move' | 'record') =>
     `/contribute/${goalId}?groupId=${encodeURIComponent(groupId)}&mode=${mode}`;
@@ -1220,6 +1316,32 @@ export default function CommunityPage() {
                 }
                 return null;
               })}
+            {/*
+              The join link as something a phone can scan. Champion-only by
+              construction: this whole Modal is `visible={isChampion && ...}`,
+              so a member or a signed-out visitor never renders it — the QR is
+              not hidden from them, it does not exist for them.
+
+              It carries no authority of its own. It is the same `/join/<code>`
+              URL the invite card copies, and a scan lands on the same join
+              page with the same identity requirements behind it. Resetting the
+              link re-derives `inviteUrl`, which re-encodes the symbol.
+            */}
+            <View style={styles.sheetSection} testID="wsf-community-qr-section">
+              <Text style={styles.sheetSectionTitle}>Invite by QR</Text>
+              {isLinkJoinable(group.joinPolicy) ? (
+                inviteUrl ? (
+                  <JoinQrCode url={inviteUrl} />
+                ) : (
+                  <Text style={styles.manageIntro} testID="wsf-community-qr-pending">
+                    This community&apos;s invite link is not ready yet, so there is nothing to
+                    encode. Close this and open it again.
+                  </Text>
+                )
+              ) : (
+                <JoinQrCode url={null} />
+              )}
+            </View>
             {goalsState.kind === 'loaded' && activeGoals.length ? (
               <ButtonLink
                 href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
@@ -1389,6 +1511,36 @@ export default function CommunityPage() {
                       label={`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
                     />
                   </View>
+                  {/*
+                    W7. Sharing, and only what is already published. The control
+                    exists only when this goal's aggregate is authorized for
+                    public display, because the public display is the only thing
+                    here that is safe to put in front of a stranger. Nothing in
+                    this control invites anyone, names anyone, or asks the member
+                    to recruit: it hands over a URL and stops.
+                  */}
+                  {featuredShareUrl ? (
+                    <View style={styles.shareBlock} testID={`wsf-community-goal-share-block-${featured.goalId}`}>
+                      <Pressable
+                        onPress={() => onShareGoalDisplay(featuredShareUrl)}
+                        style={styles.heroOutlineButtonWide}
+                        testID={`wsf-community-goal-share-${featured.goalId}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${featured.title}: share the public display link`}
+                      >
+                        <Text style={styles.heroOutlineButtonText}>
+                          {shareControlLabel(goalShareRoute, shareStatus)}
+                        </Text>
+                      </Pressable>
+                      {/* Said before the link leaves, not after. */}
+                      <Text
+                        style={styles.heroShareNote}
+                        testID={`wsf-community-goal-share-note-${featured.goalId}`}
+                      >
+                        {SHARE_DISCLOSURE}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               );
             })()
@@ -1418,6 +1570,19 @@ export default function CommunityPage() {
               ) : null}
             </View>
           )}
+
+          {/*
+            W7. Community momentum: one line across the open goals, and only
+            when every one of them has answered. It counts GOALS, never people
+            — no server surface here counts contributors, and none is invented.
+            Members only, which this whole screen already is: a non-member is
+            refused at `state.kind === 'notMember'` above and never reaches it.
+          */}
+          {momentumLine ? (
+            <Text style={styles.momentumLine} testID="wsf-community-momentum">
+              {momentumLine}
+            </Text>
+          ) : null}
 
           {/* Your part: exact own credit, no ranking, no comparison. */}
           {featured
@@ -1820,6 +1985,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   humanLine: { color: wsfTheme.colors.textMuted, fontSize: 17, lineHeight: 24 },
+  // W7. One quiet line between the hero and "Your part": a fact about the
+  // community's goals, not a leaderboard and not a nudge.
+  momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   identityMeta: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
   section: { gap: 12 },
   sectionEyebrow: {
@@ -1897,6 +2065,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   heroOutlineButtonText: { color: CREAM, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  // W7. The share control sits under the contribution actions, quieter than
+  // both, with its disclosure directly beneath it rather than behind a tap.
+  shareBlock: { gap: 8, marginTop: 12 },
+  heroShareNote: { color: HERO_MUTED, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
   // ---- light cards, quieter than the hero ----
   totalSmall: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
@@ -1987,6 +2159,7 @@ const styles = StyleSheet.create({
   sheetScroll: { flexGrow: 0 },
   sheetContent: { gap: 12, paddingBottom: 8 },
   sheetSection: { gap: 10 },
+  sheetSectionTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
   manageIntro: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
   manageGoal: { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#D5DCE5' },
   manageGoalTitle: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
