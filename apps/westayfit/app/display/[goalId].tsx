@@ -244,8 +244,13 @@ export default function DisplayGoal() {
   const closed = status === 'closed';
   const percent = percentLabel(sharedTotal, target);
   const percentText = phase === 'closedUnreached' ? `${percent} of our goal` : `${percent} complete`;
-  const ends = formatEndsAt(pulse.endsAt);
-  const period = formatPeriod(pulse.startsAt, pulse.endsAt);
+  // The window is rendered in the GOAL's published zone, so every display —
+  // phone or wide, in any local zone — shows the same period and the same
+  // "ends" meaning. An unusable zone withholds the date rather than claiming
+  // a calendar day from the wrong zone; the status stays "Open" / "Closed".
+  const zone = { timeZone: pulse.timezone };
+  const ends = formatEndsAt(pulse.endsAt, zone);
+  const period = formatPeriod(pulse.startsAt, pulse.endsAt, zone);
   const periodText = closed ? period : ends ? `Open · ${ends}` : 'Open';
   const headline =
     phase === 'reachedOpen'

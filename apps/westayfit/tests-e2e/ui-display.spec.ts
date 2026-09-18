@@ -104,6 +104,9 @@ type GoalSeed = {
   status: 'active' | 'closed';
   endsInMs: number;
   authorized: boolean;
+  /** Explicit window instants, for fixtures placed on a UTC date boundary. */
+  startsAtIso?: string;
+  endsAtIso?: string;
 };
 
 async function seedGoal(fx: Fx, g: GoalSeed): Promise<string> {
@@ -116,9 +119,11 @@ async function seedGoal(fx: Fx, g: GoalSeed): Promise<string> {
     target: { integerValue: String(g.target) },
     unit: { stringValue: g.unit },
     status: { stringValue: g.status },
-    startsAt: tsField(new Date(now.getTime() + g.endsInMs - 14 * 24 * 60 * 60_000)),
-    endsAt: tsField(new Date(now.getTime() + g.endsInMs)),
-    timezone: { stringValue: 'America/New_York' },
+    startsAt: g.startsAtIso
+      ? { timestampValue: g.startsAtIso }
+      : tsField(new Date(now.getTime() + g.endsInMs - 14 * 24 * 60 * 60_000)),
+    endsAt: g.endsAtIso ? { timestampValue: g.endsAtIso } : tsField(new Date(now.getTime() + g.endsInMs)),
+    timezone: { stringValue: GOAL_TZ },
     createdAt: tsField(now),
     updatedAt: tsField(now),
   };
@@ -149,14 +154,26 @@ async function expectNoLeak(page: Page, fx: Fx): Promise<void> {
 }
 
 const OPEN = 3 * 24 * 60 * 60_000;
+// Every fixture goal is published in New York time. The window instants below
+// sit on UTC date boundaries so a label derived in the device's zone (the test
+// runner is UTC) would read a DIFFERENT calendar day than the goal's zone:
+//   building  ends 2026-10-06T03:30:00Z = Mon Oct 5, 11:30 PM EDT → "Ends Mon, Oct 5"
+//   closed    Aug 2 03:00Z – Aug 16 03:59Z = Aug 1 – 15 in New York (UTC: Aug 2 – 16)
+const GOAL_TZ = 'America/New_York';
+const BUILDING_START = '2026-09-15T04:00:00.000Z';
+const BUILDING_END = '2026-10-06T03:30:00.000Z';
+const CLOSED_START = '2026-08-02T03:00:00.000Z';
+const CLOSED_END = '2026-08-16T03:59:00.000Z';
+const EXPECT_OPEN_PERIOD = 'Open · Ends Mon, Oct 5';
+const EXPECT_CLOSED_PERIOD = 'Aug 1 – 15';
 const STATES: GoalSeed[] = [
-  { key: 'building', title: 'Squats together this week', target: 500, unit: 'squats', total: 241, status: 'active', endsInMs: OPEN, authorized: true },
+  { key: 'building', title: 'Squats together this week', target: 500, unit: 'squats', total: 241, status: 'active', endsInMs: OPEN, authorized: true, startsAtIso: BUILDING_START, endsAtIso: BUILDING_END },
   { key: 'zero', title: 'Squats together this week', target: 500, unit: 'squats', total: 0, status: 'active', endsInMs: OPEN, authorized: true },
   { key: 'near', title: 'Squats together this week', target: 500, unit: 'squats', total: 450, status: 'active', endsInMs: OPEN, authorized: true },
   { key: 'almost', title: 'Minutes walked in September', target: 5000, unit: 'minutes', total: 4999, status: 'active', endsInMs: OPEN, authorized: true },
   { key: 'reached', title: 'Squats together this week', target: 500, unit: 'squats', total: 515, status: 'active', endsInMs: OPEN, authorized: true },
-  { key: 'closedreached', title: 'Squats together this week', target: 500, unit: 'squats', total: 515, status: 'closed', endsInMs: -20 * 24 * 60 * 60_000, authorized: true },
-  { key: 'closedshort', title: 'August push-ups', target: 500, unit: 'push-ups', total: 312, status: 'closed', endsInMs: -20 * 24 * 60 * 60_000, authorized: true },
+  { key: 'closedreached', title: 'Squats together this week', target: 500, unit: 'squats', total: 515, status: 'closed', endsInMs: -20 * 24 * 60 * 60_000, authorized: true, startsAtIso: CLOSED_START, endsAtIso: CLOSED_END },
+  { key: 'closedshort', title: 'August push-ups', target: 500, unit: 'push-ups', total: 312, status: 'closed', endsInMs: -20 * 24 * 60 * 60_000, authorized: true, startsAtIso: CLOSED_START, endsAtIso: CLOSED_END },
 ];
 
 const EXPECT: Record<string, { total: string; percent?: string; status: string; headline?: string; together?: string; target?: string }> = {
@@ -181,6 +198,11 @@ async function expectState(page: Page, key: string, closed: boolean): Promise<vo
   else await expect(page.getByTestId('wsf-display-headline')).toHaveCount(0);
   if (e.together) await expect(page.getByTestId('wsf-display-together')).toHaveText(e.together);
   await expect(page.getByTestId('wsf-display-closed')).toHaveCount(closed ? 1 : 0);
+  // The window is the goal's, in the goal's zone, on every device.
+  if (key === 'building') await expect(page.getByTestId('wsf-display-period')).toHaveText(EXPECT_OPEN_PERIOD);
+  if (key === 'closedreached' || key === 'closedshort') {
+    await expect(page.getByTestId('wsf-display-period')).toHaveText(EXPECT_CLOSED_PERIOD);
+  }
   await expect(page.getByTestId('wsf-display-stale')).toHaveCount(0);
   await expect(page.getByTestId('wsf-display-confirmed-at')).toContainText('Confirmed');
   const text = await page.getByTestId('wsf-display-screen').innerText();
@@ -211,7 +233,7 @@ test.describe('phone 390×844', () => {
       await expectNoLeak(page, fx);
       if (key === 'building') {
         await expect(page.getByTestId('wsf-display-goal-title')).toHaveText('Squats together this week');
-        await expect(page.getByTestId('wsf-display-period')).toContainText('Open · Ends');
+        await expect(page.getByTestId('wsf-display-period')).toHaveText(EXPECT_OPEN_PERIOD);
         await expect(page.getByTestId('wsf-display-we')).toHaveAttribute('data-fill-ratio', '0.4820');
         await expect(page.getByTestId('wsf-display-shared-total')).toHaveText('241');
       }
@@ -220,7 +242,7 @@ test.describe('phone 390×844', () => {
         await expect(page.getByTestId('wsf-display-screen')).toHaveAttribute('data-phase', 'nearGoal');
       }
       if (key === 'reached') await expect(page.getByTestId('wsf-display-we')).toHaveAttribute('data-fill-ratio', '1.0000');
-      if (key === 'closedshort') expect(await page.getByTestId('wsf-display-period').innerText()).toMatch(/–/);
+      if (key === 'closedshort') expect(await page.getByTestId('wsf-display-period').innerText()).toBe(EXPECT_CLOSED_PERIOD);
       await page.waitForTimeout(400);
       await snap(page, name);
     }

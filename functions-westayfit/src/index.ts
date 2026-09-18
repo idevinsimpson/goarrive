@@ -2874,7 +2874,9 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     // the request.
     if (!access.communityDisplayName) notFound();
     const goalTitle = typeof goal.title === 'string' ? goal.title.trim() : '';
-    const timezone = typeof goal.timezone === 'string' ? goal.timezone.trim() : '';
+    // The same IANA normalization goal creation applies: an unusable stored
+    // zone is never published as if it were authoritative.
+    const timezone = normalizeIanaTimezone(goal.timezone) ?? '';
     const startsAt = goal.startsAt?.toDate?.();
     const endsAt = goal.endsAt?.toDate?.();
     if (!goalTitle || !timezone || !startsAt || !endsAt) notFound();
