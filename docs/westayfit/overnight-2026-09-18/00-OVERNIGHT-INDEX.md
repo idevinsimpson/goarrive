@@ -12,7 +12,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 
 | # | Task | Status | Head after task | Doc |
 |---|---|---|---|---|
-| 1 | Baseline freeze + Gate 1 investigation | done | (see commit) | [01-BASELINE-AND-GATE1.md](01-BASELINE-AND-GATE1.md) |
+| 1 | Baseline freeze + Gate 1 investigation | done | `4852371` | [01-BASELINE-AND-GATE1.md](01-BASELINE-AND-GATE1.md) |
 | 2 | Security + privacy adversarial audit | pending | | [02-SECURITY-PRIVACY-AUDIT.md](02-SECURITY-PRIVACY-AUDIT.md) |
 | 3 | Contribution resilience torture | pending | | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
 | 4 | Display + authorization race torture | pending | | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
