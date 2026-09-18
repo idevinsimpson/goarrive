@@ -1066,6 +1066,230 @@ async function caseVisualProof(browser) {
  * deploys functions and Hosting only. Run 35358182490 showed the cost of
  * letting it abort the suite — the D-1 gate check never ran.
  */
+
+// ---- Candidate B workstreams (2026-09-18, owner-authorized hosted checks) ----
+// Each case below mirrors a green local spec and runs on its OWN isolated row:
+// a harness mistake here must never hide a Package E, D-5 or D-1 verdict.
+// Every synthetic write they cause is tracked for cleanup.
+
+async function authorizeDisplay(fx, goalId) {
+  const token = await signInToken(fx.champion);
+  const r = await callFunction('wsfSetGoalDisplayAuthorization', { goalId, authorized: true }, token);
+  assert(r.ok, `Fixture authorization via the product callable failed: HTTP ${r.status}`);
+  assert((await readAuthorization(goalId)) === true, 'Fixture authorization did not persist');
+}
+function trackContribution(goalId, uid, attemptId) {
+  trackDoc(`wsfContributions/${goalId}_${uid}_${attemptId}`);
+  trackDoc(`wsfGoalMemberTotals/${goalId}_${uid}`);
+  trackDoc(`wsfGoals/${goalId}/recentAdditions/${attemptId}`);
+}
+async function contributeAs(fx, user, goalId, attemptId, count) {
+  trackContribution(goalId, user.uid, attemptId);
+  const token = await signInToken(user);
+  return callFunction('wsfContribute', { goalId, attemptId, count }, token);
+}
+/** Firebase Auth's persisted records (IndexedDB), the same read the local kiosk spec makes. */
+async function readAuthRecords(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const req = indexedDB.open('firebaseLocalStorageDb');
+    req.onerror = () => resolve([]);
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('firebaseLocalStorage')) { db.close(); resolve([]); return; }
+      const all = db.transaction('firebaseLocalStorage', 'readonly').objectStore('firebaseLocalStorage').getAllKeys();
+      all.onsuccess = () => { db.close(); resolve(all.result.map(String)); };
+      all.onerror = () => { db.close(); resolve([]); };
+    };
+  }));
+}
+
+// W2 — recent public additions: amount + minute only, gated exactly like the
+// pulse, and the ONE new callable's hosted transport (the reason run 3 failed).
+async function caseW2RecentAdditions() {
+  const fx = await seedFixture('w2', 2, false);
+  const [authorized, unauthorized] = fx.goalIds;
+  await authorizeDisplay(fx, authorized);
+  const attemptId = `attempt-${runTag}-w2`;
+  const first = await contributeAs(fx, fx.member, authorized, attemptId, 12);
+  assert(first.ok, `W2 fixture contribution failed: HTTP ${first.status}`);
+
+  const anon = await callFunction('wsfGoalRecentAdditions', { goalId: authorized });
+  assert(anon.status !== 403 && anon.status !== 401, `wsfGoalRecentAdditions is not publicly invokable on staging: HTTP ${anon.status} (transport)`);
+  assert(anon.ok, `wsfGoalRecentAdditions failed: HTTP ${anon.status} ${sanitize(JSON.stringify(anon.body).slice(0, 200))}`);
+  const data = callableData(anon);
+  assert(Object.keys(data || {}).join(',') === 'additions', `Recent additions carried keys other than 'additions': ${Object.keys(data || {}).join(',')}`);
+  assert(Array.isArray(data.additions) && data.additions.length >= 1, 'The recorded contribution is missing from the recent tail');
+  const entry = data.additions[0];
+  assert(Object.keys(entry).sort().join(',') === 'amount,at,unit', `An addition carried unapproved keys: ${Object.keys(entry).sort().join(',')}`);
+  assert(entry.amount === 12 && entry.unit === 'squats' && typeof entry.at === 'string', 'The addition does not describe the contribution');
+  const json = JSON.stringify(data);
+  assert(!json.includes(fx.member.uid) && !json.includes(fx.champion.uid) && !json.includes(attemptId), 'Recent additions leaked an identity or attempt id');
+
+  const refused = await callFunction('wsfGoalRecentAdditions', { goalId: unauthorized });
+  assert(isNotFound(refused), `An unauthorized goal's recent additions were not refused generically: HTTP ${refused.status}`);
+  check('recent public additions (W2)', 'PASS', 'new callable publicly reachable; amount/unit/minute only; unauthorized goal refused generically');
+  return fx;
+}
+
+// W3 — repeat policy is enforced by the server: 'once' refuses a second
+// attempt but keeps the first's replay; an absent policy stays 'multiple'.
+async function caseW3RepeatPolicy() {
+  const fx = await seedFixture('w3', 2, false);
+  const [onceGoal, legacyGoal] = fx.goalIds;
+  await putDoc(`wsfGoals/${onceGoal}`, { repeatPolicy: 'once', updatedAt: new Date() }, ['repeatPolicy', 'updatedAt']);
+
+  const a1 = await contributeAs(fx, fx.member, onceGoal, `attempt-${runTag}-w3-a1`, 5);
+  assert(a1.ok && callableData(a1)?.ownCredit === 5, `First 'once' contribution failed: HTTP ${a1.status}`);
+  const a2 = await contributeAs(fx, fx.member, onceGoal, `attempt-${runTag}-w3-a2`, 5);
+  assert(!a2.ok && a2.body?.error?.status === 'FAILED_PRECONDITION', `A second contribution to a 'once' goal was not refused with FAILED_PRECONDITION: HTTP ${a2.status}`);
+  const replay = await contributeAs(fx, fx.member, onceGoal, `attempt-${runTag}-w3-a1`, 5);
+  assert(replay.ok && callableData(replay)?.alreadyRecorded === true && callableData(replay)?.ownCredit === 5, 'Replaying the recorded attempt lost its receipt');
+
+  const l1 = await contributeAs(fx, fx.member, legacyGoal, `attempt-${runTag}-w3-l1`, 3);
+  const l2 = await contributeAs(fx, fx.member, legacyGoal, `attempt-${runTag}-w3-l2`, 4);
+  assert(l1.ok && l2.ok && callableData(l2)?.ownCredit === 7, 'A goal without a stored policy did not keep accepting contributions (absent must mean multiple)');
+  check('repeat policy (W3)', 'PASS', "'once' refused the second attempt (FAILED_PRECONDITION) and kept the first's replay; absent policy accepted both");
+  return fx;
+}
+
+// W5 — the crossing is a one-time goal-level event and NO attempt is credited.
+async function caseW5ReachedState() {
+  const fx = await seedFixture('w5', 1, false);
+  const goalId = fx.goalIds[0];
+  await putDoc(`wsfGoals/${goalId}`, { crossingTracked: true, updatedAt: new Date() }, ['crossingTracked', 'updatedAt']);
+  const r = await contributeAs(fx, fx.member, goalId, `attempt-${runTag}-w5`, 5000);
+  assert(r.ok && callableData(r)?.sharedTotal === 5000, `Crossing contribution failed: HTTP ${r.status}`);
+  assert(callableData(r)?.crossedTarget !== true, 'A member was told their attempt crossed the line');
+  const goal = (await getDoc(`wsfGoals/${goalId}`)).body?.fields || {};
+  assert(typeof goal.reachedAt?.timestampValue === 'string', 'The goal did not record reachedAt');
+  assert(goal.reachedSharedTotal?.integerValue === '5000', `reachedSharedTotal is not 5000: ${JSON.stringify(goal.reachedSharedTotal)}`);
+  assert(goal.reachedAttemptId && 'nullValue' in goal.reachedAttemptId, 'reachedAttemptId was credited to an attempt');
+  const listed = await callFunction('wsfListGoals', { groupId: fx.groupId }, await signInToken(fx.member));
+  const row = (callableData(listed)?.goals || []).find((g) => g.goalId === goalId);
+  assert(row && typeof row.reachedAt === 'string', 'wsfListGoals does not carry the reached state to members');
+  check('target-crossing event (W5)', 'PASS', 'one goal-level reachedAt/reachedSharedTotal recorded; reachedAttemptId null; crossedTarget never true; listed to members');
+  return fx;
+}
+
+// W6 — durable history: closed goals return to active members on request only.
+async function caseW6History() {
+  const fx = await seedFixture('w6', 2, false);
+  const [activeGoal, closedGoal] = fx.goalIds;
+  await closeGoal(closedGoal);
+  const memberToken = await signInToken(fx.member);
+  const plain = callableData(await callFunction('wsfListGoals', { groupId: fx.groupId }, memberToken))?.goals || [];
+  assert(plain.some((g) => g.goalId === activeGoal) && !plain.some((g) => g.goalId === closedGoal), 'The plain list changed shape (closed goal present or active goal missing)');
+  const history = callableData(await callFunction('wsfListGoals', { groupId: fx.groupId, includeHistory: true }, memberToken))?.goals || [];
+  const closedRow = history.find((g) => g.goalId === closedGoal);
+  assert(closedRow && closedRow.status === 'closed', 'includeHistory did not return the closed goal');
+  const outsider = await callFunction('wsfListGoals', { groupId: fx.groupId, includeHistory: true }, await signInToken(fx.outsider));
+  assert(isNotFound(outsider), `An unrelated account could read history: HTTP ${outsider.status}`);
+  const pulse = await callFunction('wsfGoalPulse', { goalId: closedGoal });
+  assert(isNotFound(pulse), 'A closed, never-authorized goal answered a public pulse');
+  check('durable history (W6)', 'PASS', 'closed goal absent from the plain list, present with includeHistory for an active member, refused to an outsider; public pulse untouched');
+  return fx;
+}
+
+// W4 / W7 / W8 / W9 — member-facing flows, on a phone, mirroring the local specs.
+async function caseW4W7W8Browser(browser) {
+  const fx = await seedFixture('w478', 1, false);
+  const goalId = fx.goalIds[0];
+  await authorizeDisplay(fx, goalId);
+  await putDoc(`wsfGoals/${goalId}`, { activityGuideKey: 'squats', updatedAt: new Date() }, ['activityGuideKey', 'updatedAt']);
+  const memberCtx = await browser.newContext(PHONE_CONTEXT);
+  const championCtx = await browser.newContext(PHONE_CONTEXT);
+  try {
+    const member = await memberCtx.newPage();
+    await signInPage(member, fx.member);
+    await member.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await visible(member.getByTestId(`wsf-community-goal-link-${goalId}`), 30_000);
+    // W7: honest momentum roll-up and the share control for an authorized goal; no QR for a member.
+    await visible(member.getByTestId('wsf-community-momentum'));
+    const momentum = await member.getByTestId('wsf-community-momentum').innerText();
+    assert(!momentum.includes(fx.member.uid) && !momentum.includes(fx.champion.uid), 'Momentum copy leaked a uid');
+    await visible(member.getByTestId(`wsf-community-goal-share-${goalId}`));
+    assert((await member.getByTestId('wsf-community-qr-section').count()) === 0, 'A member can see the Champion join QR section');
+    assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'A member has the Manage surface');
+    await snap(member, '17-phone-community-home-w7-share-momentum');
+    // W4: the counting guide on the entry screen, from the goal's guide key.
+    await member.goto(`${BASE_URL}/contribute/${goalId}`);
+    await visible(member.getByTestId('wsf-contribute-entry-screen'), 30_000);
+    await visible(member.getByTestId('wsf-contribute-guide'));
+    if ((await member.getByTestId('wsf-contribute-guide-panel').count()) === 0) await member.getByTestId('wsf-contribute-guide-toggle').click();
+    await visible(member.getByTestId('wsf-contribute-guide-panel'));
+    const guide = await member.getByTestId('wsf-contribute-guide-panel').innerText();
+    assert(!/medical|doctor|diagnos|injur|treat/i.test(guide), 'The guide carries medical wording');
+    await snap(member, '18-phone-contribution-guide-w4');
+    // W8: the Champion's join QR lives inside Manage only.
+    const champion = await championCtx.newPage();
+    await signInPage(champion, fx.champion);
+    await champion.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await openManage(champion);
+    await visible(champion.getByTestId('wsf-community-qr-section'));
+    await visible(champion.getByTestId('wsf-community-qr'));
+    await snap(champion, '19-phone-champion-join-qr-w8');
+    check('guided rules, share + momentum, join QR (W4/W7/W8)', 'PASS', 'guide panel (non-medical) on entry; momentum + share control for the member, no QR/Manage; Champion QR inside Manage');
+  } finally {
+    await Promise.all([memberCtx, championCtx].map((ctx) => ctx.close().catch(() => undefined)));
+  }
+  return fx;
+}
+
+async function caseW9Kiosk(browser) {
+  const fx = await seedFixture('w9', 1, false);
+  const goalId = fx.goalIds[0];
+  await authorizeDisplay(fx, goalId);
+  const ctx = await browser.newContext(PHONE_CONTEXT);
+  try {
+    const page = await ctx.newPage();
+    let attemptId = null;
+    await page.route('**/wsfContribute', async (route) => {
+      try { const body = JSON.parse(route.request().postData() || '{}'); if (typeof body?.data?.attemptId === 'string') attemptId = body.data.attemptId; } catch {}
+      return route.continue();
+    });
+    await page.goto(`${BASE_URL}/kiosk/${goalId}`);
+    await visible(page.getByTestId('wsf-kiosk-screen'), 30_000);
+    await textEquals(page.getByTestId('wsf-kiosk-community'), fx.communityDisplayName);
+    assert((await page.getByTestId('wsf-kiosk-screen').innerText()).match(/verif|witness|proof|scan your/i) === null, 'The kiosk claims to witness');
+    await snap(page, '20-phone-kiosk-start-w9');
+    await page.getByTestId('wsf-kiosk-start').click();
+    await page.waitForURL(/\/contribute\/.*kiosk=1/, { timeout: 20_000 });
+    await visible(page.getByTestId('wsf-contribute-signed-out'));
+    await page.getByTestId('wsf-contribute-signin-link').click();
+    await visible(page.getByTestId('wsf-signin-email'));
+    await page.getByTestId('wsf-signin-email').fill(fx.member.email);
+    await page.getByTestId('wsf-signin-password').fill(fx.member.password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL(/\/contribute\/.*kiosk=1/, { timeout: 20_000 });
+    await visible(page.getByTestId('wsf-contribute-entry-screen'));
+    assert((await page.getByTestId('wsf-contribute-back').count()) === 0, 'The kiosk offers a way into the member community');
+    await page.getByTestId('wsf-contribute-entry').fill('7');
+    await page.getByTestId('wsf-contribute-review').click();
+    await visible(page.getByTestId('wsf-contribute-review-screen'));
+    await page.getByTestId('wsf-contribute-submit').click();
+    await visible(page.getByTestId('wsf-contribute-receipt'), 30_000);
+    assert(typeof attemptId === 'string' && attemptId.length > 0, 'The kiosk contribution never sent an attempt id');
+    trackContribution(goalId, fx.member.uid, attemptId);
+    await visible(page.getByTestId('wsf-kiosk-finish'));
+    assert((await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:')), 'No signed-in account before Finish, so the reset below would prove nothing');
+    await snap(page, '21-phone-kiosk-receipt-finish-w9');
+    await page.getByTestId('wsf-kiosk-finish').click();
+    await page.waitForURL(new RegExp(`/kiosk/${goalId}$`), { timeout: 20_000 });
+    await visible(page.getByTestId('wsf-kiosk-screen'));
+    assert(!(await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:')), 'Finish left the account signed in');
+    const session = await page.evaluate(() => Object.keys(window.sessionStorage));
+    assert(!session.some((k) => k.startsWith('wsf.kiosk')), `Finish left kiosk keys behind: ${session.join(',')}`);
+    await page.getByTestId('wsf-kiosk-start').click();
+    await page.waitForURL(/\/contribute\/.*kiosk=1/, { timeout: 20_000 });
+    await visible(page.getByTestId('wsf-contribute-signed-out'));
+    await snap(page, '22-phone-kiosk-next-visitor-signed-out-w9');
+    check('kiosk mode (W9)', 'PASS', 'start → sign in → contribute → Finish signed out and cleared kiosk keys; next visitor meets the sign-in gate');
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+  return fx;
+}
+
 async function isolated(name, run) {
   try {
     return await run();
@@ -1112,6 +1336,12 @@ try {
   await isolated('membership status rules (D-5)', () => caseD5MembershipStatusRules());
   await caseD1SignupGate(browser);
   await caseVisualProof(browser);
+  await isolated('recent public additions (W2)', () => caseW2RecentAdditions());
+  await isolated('repeat policy (W3)', () => caseW3RepeatPolicy());
+  await isolated('target-crossing event (W5)', () => caseW5ReachedState());
+  await isolated('durable history (W6)', () => caseW6History());
+  await isolated('guided rules, share + momentum, join QR (W4/W7/W8)', () => caseW4W7W8Browser(browser));
+  await isolated('kiosk mode (W9)', () => caseW9Kiosk(browser));
 } catch (error) {
   mainError = error;
   diagnostics.push(sanitize(error?.stack || error?.message || error));
@@ -1154,6 +1384,7 @@ const receipt = {
     'The D-1 case blocks wsfSendVerificationEmail in the browser, so staging sends no verification mail; the account it creates is tracked for cleanup by its run-tagged synthetic address.',
     'The D-5 case is isolated: its failure is its own row and the cases after it still run, because the ruleset it asserts is not deployed by this workflow.',
     'The visual-proof captures show a run-tagged synthetic community, goal and members only; the one contribution they record is removed by cleanup.',
+    'The candidate B cases (W2, W3, W5, W6, W4/W7/W8, W9) each run on an isolated row; every contribution they record (and its recent-additions entry) is removed by cleanup.',
   ],
   diagnostics,
 };
