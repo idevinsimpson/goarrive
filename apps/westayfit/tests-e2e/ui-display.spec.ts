@@ -183,7 +183,7 @@ const EXPECT: Record<string, { total: string; percent?: string; status: string; 
   almost: { total: '4,999 of 5,000 minutes', percent: '99.9% complete', status: 'Only 1 to go' },
   reached: { total: '515 of 500 squats', percent: '100% complete', status: '15 beyond our goal · still open', headline: 'WE did it.' },
   closedreached: { total: '515 squats completed together.', target: 'Goal: 500 squats', status: '15 beyond our goal', headline: 'Look what WE did.' },
-  closedshort: { total: '312 of 500 push-ups', percent: '62.4% of our goal', status: 'Closed at 62.4%', together: '312 push-ups completed together.' },
+  closedshort: { total: '312 of 500 push-ups', percent: '62.4% complete', status: 'Closed at 62.4%', together: '312 push-ups completed together.' },
 };
 
 async function expectState(page: Page, key: string, closed: boolean): Promise<void> {

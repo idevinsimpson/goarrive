@@ -243,7 +243,8 @@ export default function DisplayGoal() {
   const phase = progressPhase(sharedTotal, target, status);
   const closed = status === 'closed';
   const percent = percentLabel(sharedTotal, target);
-  const percentText = phase === 'closedUnreached' ? `${percent} of our goal` : `${percent} complete`;
+  // Same percent language as Community Home and the contribution flow.
+  const percentText = `${percent} complete`;
   // The window is rendered in the GOAL's published zone, so every display —
   // phone or wide, in any local zone — shows the same period and the same
   // "ends" meaning. An unusable zone withholds the date rather than claiming
@@ -515,9 +516,11 @@ const styles = StyleSheet.create({
   togetherWide: { fontSize: 24, lineHeight: 30 },
 
   // freshness
-  freshness: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 4 },
+  // The stale pill and the clock share a row on a wide screen and stack on a
+  // phone; neither is allowed to break mid-phrase.
+  freshness: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 4 },
   freshnessStale: {},
-  freshnessText: { color: HERO_MUTED, fontSize: 13, letterSpacing: 0.3 },
+  freshnessText: { color: HERO_MUTED, fontSize: 13, letterSpacing: 0.3, textAlign: 'center' },
   freshnessStaleText: {
     color: NAVY,
     backgroundColor: '#F2C94C',
