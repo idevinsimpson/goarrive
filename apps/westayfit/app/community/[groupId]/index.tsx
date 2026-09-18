@@ -781,9 +781,21 @@ export default function CommunityPage() {
         <Text style={styles.manageGoalTitle}>{goal.title}</Text>
         <Text style={styles.body} testID={`wsf-goal-display-auth-state-${goal.goalId}`}>
           {goal.aggregateDisplayAuthorized
-            ? 'Public display is authorized for this goal. A public display can show the running total only — never individual contributions or member names.'
+            ? 'Public display is authorized for this goal. It can show the community name, goal, period, and shared progress — never individual contributions or member names.'
             : 'Public display is not authorized for this goal.'}
         </Text>
+        {/*
+          The publication decision, stated BEFORE it is made. Authorizing a
+          goal publishes its context as well as its progress (owner decision,
+          2026-09-18), so the Champion reads exactly what a display may show
+          before granting it.
+        */}
+        {!goal.aggregateDisplayAuthorized ? (
+          <Text style={styles.manageIntro} testID={`wsf-goal-display-auth-explain-${goal.goalId}`}>
+            A public display can show this community’s name, this goal’s name and period, and the
+            shared progress. It never shows individual contributions or member names.
+          </Text>
+        ) : null}
         <Pressable
           onPress={() =>
             onSetDisplayAuth(
@@ -967,8 +979,9 @@ export default function CommunityPage() {
             {goalsState.kind === 'loaded' && loadedGoals.length ? (
               <View style={styles.sheetSection}>
                 <Text style={styles.manageIntro}>
-                  Public display is a permission you grant per goal. A display shows the
-                  running total only.
+                  Public display is a permission you grant per goal. An authorized display can
+                  show the community name, the goal and its period, and the shared progress —
+                  nothing about individual members.
                 </Text>
                 {[...activeGoals, ...closedGoals].map((goal) => renderDisplayAuthControl(goal))}
               </View>
