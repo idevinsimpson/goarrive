@@ -266,7 +266,13 @@ test('the D-5 verdict is isolated: its failure is its own row and cannot stop th
   assert.ok(iso.includes("check(name, 'FAIL'"), 'an isolated failure must still be a FAIL row');
   assert.ok(iso.includes('diagnostics.push('), 'an isolated failure must keep its diagnostics');
   // Only D-5 is isolated: every other case still aborts the suite.
-  assert.strictEqual((main.match(/await isolated\(/g) || []).length, 1, 'isolated() must wrap exactly one case');
+  const isolatedNames = [...main.matchAll(/await isolated\('([^']+)'/g)].map((m) => m[1]);
+  assert.deepStrictEqual(isolatedNames, [
+    'membership status rules (D-5)',
+    'recent public additions (W2)', 'repeat policy (W3)', 'target-crossing event (W5)', 'durable history (W6)',
+    'guided rules, share + momentum, join QR (W4/W7/W8)', 'kiosk mode (W9)',
+  ], 'only D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
+  assert.ok(main.indexOf("isolated('recent public additions (W2)'") > main.indexOf('await caseVisualProof(browser);'), 'the candidate B rows run after the Package E, D-5, D-1 and visual rows');
 });
 
 test('the visual proof captures every owner-required surface on a phone, the display wide, from a synthetic fixture it owns', () => {
@@ -296,6 +302,35 @@ test('the visual proof captures every owner-required surface on a phone, the dis
   assert.ok(body.includes('trackDoc(`wsfGoalMemberTotals/${goalId}_${fx.member.uid}`)'), 'the member total is not tracked for cleanup');
   assert.ok(body.includes("check('visual proof captures', 'PASS'"), 'the visual proof has no PASS row');
   assert.ok(SMOKE.includes('await caseVisualProof(browser);'), 'the suite never runs the visual proof');
+});
+
+
+test('the candidate B hosted rows exist, each own their synthetic writes, and prove what they claim', () => {
+  for (const name of ['caseW2RecentAdditions', 'caseW3RepeatPolicy', 'caseW5ReachedState', 'caseW6History', 'caseW4W7W8Browser', 'caseW9Kiosk']) {
+    assert.ok(SMOKE.includes(`async function ${name}(`), `${name} is missing`);
+  }
+  const helper = SMOKE.slice(SMOKE.indexOf('function trackContribution('), SMOKE.indexOf('async function contributeAs('));
+  for (const doc of ['wsfContributions/${goalId}_${uid}_${attemptId}', 'wsfGoalMemberTotals/${goalId}_${uid}', 'wsfGoals/${goalId}/recentAdditions/${attemptId}']) {
+    assert.ok(helper.includes('trackDoc(`' + doc + '`)'), `contributions must track ${doc}`);
+  }
+  const w2 = fnBody('caseW2RecentAdditions');
+  assert.ok(w2.includes("callFunction('wsfGoalRecentAdditions', { goalId: authorized })"), 'W2 must call the new callable anonymously');
+  assert.ok(w2.includes("=== 'amount,at,unit'"), 'W2 must pin the addition shape exactly');
+  assert.ok(w2.includes('isNotFound(refused)'), 'W2 must prove the generic refusal on an unauthorized goal');
+  const w3 = fnBody('caseW3RepeatPolicy');
+  assert.ok(w3.includes("a2.body?.error?.status === 'FAILED_PRECONDITION'"), 'W3 must prove the once refusal');
+  assert.ok(w3.includes('ownCredit === 7'), 'W3 must prove absent = multiple');
+  const w5 = fnBody('caseW5ReachedState');
+  assert.ok(w5.includes("'nullValue' in goal.reachedAttemptId"), 'W5 must prove no attempt is credited');
+  assert.ok(w5.includes('crossedTarget !== true'), 'W5 must prove no member is told they crossed');
+  const w6 = fnBody('caseW6History');
+  assert.ok(w6.includes('includeHistory: true') && w6.includes('isNotFound(outsider)') && w6.includes('isNotFound(pulse)'), 'W6 must prove the gate and the untouched pulse');
+  const w9 = fnBody('caseW9Kiosk');
+  assert.ok(w9.includes("readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:'))"), 'W9 must read the real auth persistence');
+  assert.ok(w9.includes('trackContribution(goalId, fx.member.uid, attemptId)'), 'W9 must own the kiosk contribution');
+  const w478 = fnBody('caseW4W7W8Browser');
+  assert.ok(w478.includes("getByTestId('wsf-community-qr-section').count()) === 0"), 'W8 must prove the member has no QR section');
+  assert.ok(w478.includes('/medical|doctor|diagnos|injur|treat/i'), 'W4 must check for medical wording');
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);
