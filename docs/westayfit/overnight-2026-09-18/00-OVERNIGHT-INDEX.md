@@ -17,7 +17,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | 3 | Contribution resilience torture | done | `e531433` | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
 | 4 | Display + authorization race torture | done | `0b0797c` | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
 | 5 | Accessibility + responsive QA | done | `963d0df` (+ index 9669c53) | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
-| 6 | Performance + operational quality | done | TASK6_HEAD | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
+| 6 | Performance + operational quality | done | `6a0a776` | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
 | 7 | Cross-surface product quality audit | pending | | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
 | 8 | Final candidate hardening + evidence pack | pending | | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
 
