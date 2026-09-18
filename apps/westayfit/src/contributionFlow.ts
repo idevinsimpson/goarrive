@@ -140,9 +140,27 @@ export type ContributeReceipt = {
   target?: number;
   unit?: string;
   status?: 'active' | 'closed';
+  /**
+   * THE SERVER'S ONE-TIME CROSSING SIGNAL. True on exactly one attempt per
+   * goal — the one whose transaction moved the shared total from below the
+   * target to at or beyond it — and stored on that attempt, so a replay of
+   * the same attemptId says the same thing forever.
+   *
+   * The client never computes this and never falls back to computing it. When
+   * the field is absent (an older server, or a caller who may not be told the
+   * community's state) the result reads as it did before: the stable, honest
+   * variants that attribute nothing to anyone.
+   */
+  crossedTarget?: boolean;
 };
 
-export type ResultVariant = 'alreadyRecorded' | 'reached' | 'postTarget' | 'ordinary' | 'ownOnly';
+export type ResultVariant =
+  | 'alreadyRecorded'
+  | 'crossed'
+  | 'reached'
+  | 'postTarget'
+  | 'ordinary'
+  | 'ownOnly';
 
 /**
  * Which story the confirmed result tells.
@@ -164,15 +182,23 @@ export type ResultVariant = 'alreadyRecorded' | 'reached' | 'postTarget' | 'ordi
  *     total the screen showed; null when unknown (a replay after a reload)
  *     falls to `reached`, which is still true.
  *
- * DESIGN / DATA GAP — AUTHORITATIVE TARGET-CROSSING EVENT: a one-time
- * collective "WE did it" moment needs an authoritative crossing signal or
- * achievement state from the server that cannot be misattributed or
- * replayed. This package ships none.
+ * THE ONE EXCEPTION — `crossed` — IS THE SERVER'S TO GRANT. The receipt now
+ * carries `crossedTarget`, set by the wsfContribute transaction on exactly
+ * the attempt that moved the total across the target and stored on that
+ * attempt for its replays. It takes precedence over every variant below,
+ * because it is the only thing here that knows whose work crossed the line.
+ * A missing or false signal changes nothing: the stable variants stand, and
+ * everyone who did not cross reads the same words they read before.
  */
 export function resultVariant(r: ContributeReceipt, sharedBefore: number | null = null): ResultVariant {
   if (r.sharedTotal == null || r.target == null || r.unit == null || r.status == null) {
     return 'ownOnly';
   }
+  // Server-authoritative, and ahead of `alreadyRecorded` on purpose: the
+  // replay of the crossing attempt is the same attempt, and it is still true
+  // that it was the one that took us past the goal. The copy below keeps the
+  // "already recorded / it counted once" facts in the same breath.
+  if (r.crossedTarget === true) return 'crossed';
   if (r.alreadyRecorded) return 'alreadyRecorded';
   if (!isReached(r.sharedTotal, r.target)) return 'ordinary';
   if (sharedBefore != null && isReached(sharedBefore, r.target)) return 'postTarget';
@@ -202,6 +228,9 @@ export function resultCopy(
     };
   }
   const total = totalOfTargetLabel(r.sharedTotal!, r.target!, unit);
+  const reachedStanding = `Our goal of ${formatCount(r.target!)} ${unit} is reached${
+    r.status === 'active' ? ' and still open' : ''
+  }. ${who} ${isAre} now at ${total}.`;
   switch (variant) {
     case 'alreadyRecorded':
       return {
@@ -209,13 +238,26 @@ export function resultCopy(
         subline: 'It counted once.',
         standing: `${who} ${isAre} at ${total}.`,
       };
+    case 'crossed':
+      // The ONLY sentence in the product that ties one member to the moment
+      // the target was met, and it is said only to that member, on their own
+      // receipt, on the server's word. The shared display never says it: it
+      // states "WE did it." as a state of the goal and names nobody.
+      //
+      // It says what happened, not that they won it. The goal is ours; the
+      // contribution that carried it over the line was theirs.
+      return {
+        headline: r.alreadyRecorded ? 'This contribution was already recorded.' : `You added ${added}.`,
+        subline: r.alreadyRecorded
+          ? 'It counted once, and it took us past our goal.'
+          : 'This one took us past our goal.',
+        standing: reachedStanding,
+      };
     case 'reached':
       return {
         headline: `You added ${added}.`,
         subline: 'Our goal is reached.',
-        standing: `Our goal of ${formatCount(r.target!)} ${unit} is reached${
-          r.status === 'active' ? ' and still open' : ''
-        }. ${who} ${isAre} now at ${total}.`,
+        standing: reachedStanding,
       };
     case 'postTarget':
       // A7. Named like every other variant: the community says this, not a

@@ -174,3 +174,82 @@ describe('the confirmed result never credits someone else’s work to this membe
     expect(c.standing).toBe('We are now at 261 of 500 squats.');
   });
 });
+
+describe('the server’s one-time crossing signal, and only it, credits the moment', () => {
+  const base = {
+    ownCredit: 20,
+    alreadyRecorded: false,
+    unit: 'squats',
+    status: 'active' as const,
+    target: 500,
+  };
+
+  it('says this contribution took us past the goal when the server says it did', () => {
+    const r = { ...base, addedCount: 20, sharedTotal: 505, crossedTarget: true };
+    expect(resultVariant(r, 485)).toBe('crossed');
+    const c = resultCopy(r, 'Smyrna Strong', null, 485);
+    expect(c.headline).toBe('You added 20 squats.');
+    expect(c.subline).toBe('This one took us past our goal.');
+    expect(c.standing).toBe(
+      'Our goal of 500 squats is reached and still open. Smyrna Strong is now at 505 of 500 squats.'
+    );
+    // Plain and collective. No exclamation, no "you won it", and not the
+    // display's own headline.
+    expect(JSON.stringify(c)).not.toMatch(/!|WE did it|winning|you crossed|closer/i);
+  });
+
+  it('does not need the before-total: the signal alone decides', () => {
+    const r = { ...base, addedCount: 20, sharedTotal: 505, crossedTarget: true };
+    for (const before of [485, 0, null]) {
+      expect(resultVariant(r, before)).toBe('crossed');
+      expect(resultCopy(r, 'Smyrna Strong', null, before).subline).toBe(
+        'This one took us past our goal.'
+      );
+    }
+  });
+
+  it('a replay of the crossing attempt says the same thing, and that it counted once', () => {
+    const r = {
+      ...base,
+      addedCount: 20,
+      sharedTotal: 640,
+      crossedTarget: true,
+      alreadyRecorded: true,
+    };
+    expect(resultVariant(r, 620)).toBe('crossed');
+    const c = resultCopy(r, 'Smyrna Strong', null, 620);
+    expect(c.headline).toBe('This contribution was already recorded.');
+    expect(c.subline).toBe('It counted once, and it took us past our goal.');
+    expect(c.standing).toBe(
+      'Our goal of 500 squats is reached and still open. Smyrna Strong is now at 640 of 500 squats.'
+    );
+  });
+
+  it('everyone else keeps the stable, unattributed variants', () => {
+    // Concurrent attempt that lost the race: reached, and says so about US.
+    const lost = { ...base, addedCount: 20, sharedTotal: 505, crossedTarget: false };
+    expect(resultVariant(lost, 485)).toBe('reached');
+    expect(resultCopy(lost, 'Smyrna Strong', null, 485).subline).toBe('Our goal is reached.');
+    // Overshoot after the crossing.
+    const over = { ...base, addedCount: 5, sharedTotal: 515, crossedTarget: false };
+    expect(resultVariant(over, 510)).toBe('postTarget');
+    // Below the target with a false signal is an ordinary contribution.
+    const below = { ...base, addedCount: 20, sharedTotal: 261, crossedTarget: false };
+    expect(resultVariant(below, 241)).toBe('ordinary');
+    for (const c of [lost, over, below]) {
+      expect(JSON.stringify(resultCopy(c, 'Smyrna Strong', null, 485))).not.toMatch(
+        /took us past/i
+      );
+    }
+  });
+
+  it('never invents the signal when the server withheld the shared state', () => {
+    // A caller who may not be told where the community stands is not told
+    // this either — the receipt is their own contribution and nothing more.
+    const ownOnly = { addedCount: 20, ownCredit: 20, alreadyRecorded: true };
+    expect(resultVariant(ownOnly)).toBe('ownOnly');
+    const c = resultCopy(ownOnly, 'Smyrna Strong', 'squats');
+    expect(c.subline).toBe('It counted once.');
+    expect(JSON.stringify(c)).not.toMatch(/took us past|reached/i);
+  });
+});

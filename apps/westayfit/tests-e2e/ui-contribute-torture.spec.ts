@@ -594,10 +594,16 @@ test('R11 — a stale before-total never inverts the confirmed result copy', asy
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 30_000 });
 
   // The server's current truth: 460 + 50, a first booking of this attempt.
+  // The correction had put the community back under its target and this goal
+  // carries no crossing event yet, so this transaction is the one that moves
+  // the total from below the target to past it — the server says so, and the
+  // receipt says what the server said.
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('510 of 500 squats');
-  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'reached');
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'crossed');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 50 squats.');
-  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('Our goal is reached.');
+  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText(
+    'This one took us past our goal.'
+  );
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
     'Our goal of 500 squats is reached and still open. Maple Street Movers is now at 510 of 500 squats.'
   );

@@ -2082,6 +2082,36 @@ type GoalDoc = {
   createdAt?: FirebaseFirestore.Timestamp;
   closedAt?: FirebaseFirestore.Timestamp;
   /**
+   * THE TARGET-CROSSING EVENT. Written exactly once, by the wsfContribute
+   * transaction that moved the shared total from below `target` to at or
+   * beyond it, and never written again by anything in this file.
+   *
+   * These three fields are a HISTORICAL RECORD of a moment, not a live state.
+   * "Is this goal reached right now?" stays derived from the current shared
+   * total against the current target (isReached on the client, progressPhase
+   * on every surface) — so a later downward correction, or a raised target,
+   * honestly makes the live state false again while the event stays as what
+   * happened. They are separate facts and are never collapsed into one.
+   *
+   * THE RULE, stated once (see wsfContribute and wsfAdjustGoal):
+   *   • wsfContribute writes them only when `reachedAt` is absent AND the
+   *     total it is committing moves from below target to >= target.
+   *   • Nothing overwrites them: overshoot, later contributions, corrections,
+   *     target changes and closure all leave them exactly as written.
+   *   • Nothing in this package clears them, so a second event can never be
+   *     emitted for a goal that already carries one. A goal whose total dips
+   *     below target and crosses again reports the FIRST crossing, which is
+   *     the one that happened; claiming a second "first time" would be false.
+   *
+   * `reachedAttemptId` is the attemptId of the crossing attempt — enough to
+   * identify the attempt for the member replaying it (the contribution key is
+   * goal + uid + attemptId, and only that member can present that uid). No
+   * uid is stored here: the shared display must not be able to name a person.
+   */
+  reachedAt?: FirebaseFirestore.Timestamp;
+  reachedAttemptId?: string;
+  reachedSharedTotal?: number;
+  /**
    * PACKAGE E. Explicit permission for ONE thing: this goal's approved
    * aggregate progress may be presented through the authorized unauthenticated
    * aggregate-display path.
@@ -2574,6 +2604,21 @@ type ContributeResponse = {
   target?: number;
   unit?: string;
   status?: GoalStatus;
+  /**
+   * TRUE on exactly one attempt per goal: the one whose transaction moved the
+   * shared total from below the target to at or beyond it. Stored on that
+   * attempt's contribution document, so a replay of the SAME attemptId
+   * returns the same answer forever and no other attempt can ever be told it
+   * crossed — not an overshoot, not a concurrent attempt that lost the race,
+   * not a contribution after a correction dropped the total back down.
+   *
+   * It sits with the current-shared-state fields, not with the caller's own
+   * three, because "the community's total reached its target" is a fact about
+   * the community. A caller who may not be told where the community stands is
+   * not told this either; their own receipt (addedCount, ownCredit,
+   * alreadyRecorded) is unchanged and still true.
+   */
+  crossedTarget?: boolean;
 };
 
 export const wsfContribute = onCall<ContributeRequest>(
@@ -2621,6 +2666,7 @@ export const wsfContribute = onCall<ContributeRequest>(
     const {
       addedCount,
       alreadyRecorded,
+      crossedTarget,
       goalTarget,
       goalUnit,
       goalStatus,
@@ -2654,6 +2700,7 @@ export const wsfContribute = onCall<ContributeRequest>(
           const prev = contribSnap.data() as {
             count?: number;
             userId?: string;
+            crossedTarget?: boolean;
           };
           // The key is scoped by uid, so an existing doc IS this caller's own
           // earlier attempt. If storage ever disagreed that would be corruption,
@@ -2673,6 +2720,13 @@ export const wsfContribute = onCall<ContributeRequest>(
           return {
             addedCount: typeof prev.count === 'number' ? prev.count : 0,
             alreadyRecorded: true as const,
+            // Read from the ATTEMPT, never recomputed. The stored outcome is
+            // what this attempt did when it landed; recomputing it from the
+            // current total would let a replay claim a crossing someone else
+            // made, or deny one this attempt really made after a correction.
+            // An attempt recorded before this field existed carries no value
+            // and is reported as false — it is not evidence of a crossing.
+            crossedTarget: prev.crossedTarget === true,
             goalTarget: goal.target,
             goalUnit: goal.unit,
             goalStatus: goal.status,
@@ -2721,6 +2775,55 @@ export const wsfContribute = onCall<ContributeRequest>(
           );
         }
 
+        //   4. THE TARGET-CROSSING EVENT, decided here and nowhere else.
+        //
+        // The shared total lives in shards, so "did THIS contribution move us
+        // from below the target to at or beyond it?" can only be answered by
+        // reading the shards inside this transaction — the same read
+        // wsfAdjustGoal already performs. Doing it after the transaction
+        // would be an inference from a total that may already contain someone
+        // else's work, which is exactly the misattribution this replaces.
+        //
+        // The read is skipped entirely once `reachedAt` exists, so the goal
+        // pays the ten-document read (and the contention that comes with it)
+        // only while the crossing is still ahead of it. Afterwards every
+        // contribution keeps the cheap single-shard write it has today.
+        //
+        // CONCURRENCY. Two attempts that together cross both read the shards
+        // in their own transaction and one of them writes a shard the other
+        // read, so Firestore aborts and retries the loser. The retry re-reads
+        // the committed total and the committed `reachedAt`, finds the goal
+        // already crossed, and records `crossedTarget: false`. Exactly one
+        // attempt is ever told it crossed, and it is the one whose
+        // transaction actually committed the crossing.
+        let crossed = false;
+        let crossingSharedTotal = 0;
+        if (goal.reachedAt == null) {
+          const shardSnaps = await Promise.all(
+            Array.from({ length: GOAL_SHARD_COUNT }, (_, i) =>
+              tx.get(goalShardRef(goalId, i))
+            )
+          );
+          const previousSharedTotal = shardSnaps.reduce((sum, snap) => {
+            const data = snap.data() as { count?: number } | undefined;
+            return sum + (typeof data?.count === 'number' ? data.count : 0);
+          }, 0);
+          const nextSharedTotal = previousSharedTotal + count;
+          // A crossing is a MOVE across the line: strictly below before, at or
+          // beyond after. A goal already at or beyond its target when this
+          // field was introduced (or after an upward correction) never crossed
+          // while anyone was watching, so no attempt is credited with a moment
+          // that did not happen. A non-positive target has no line to cross.
+          if (
+            goal.target > 0 &&
+            previousSharedTotal < goal.target &&
+            nextSharedTotal >= goal.target
+          ) {
+            crossed = true;
+            crossingSharedTotal = nextSharedTotal;
+          }
+        }
+
         const shardIndex = randomGoalShardIndex();
         const shard = goalShardRef(goalId, shardIndex);
 
@@ -2732,8 +2835,21 @@ export const wsfContribute = onCall<ContributeRequest>(
           shardIndex,
           unit: goal.unit,
           communityGroupId: goal.communityGroupId,
+          // Part of the attempt's stored outcome, exactly like `count`: a
+          // replay reports it rather than deciding it again.
+          crossedTarget: crossed,
           createdAt: FieldValue.serverTimestamp(),
         });
+        if (crossed) {
+          // update(), not set(merge) — the goal document must already exist
+          // (it was read above) and the three fields are written together or
+          // not at all. No other field of the goal is touched.
+          tx.update(goalRef, {
+            reachedAt: FieldValue.serverTimestamp(),
+            reachedAttemptId: attemptId,
+            reachedSharedTotal: crossingSharedTotal,
+          });
+        }
         tx.set(
           shard,
           { count: FieldValue.increment(count) },
@@ -2759,6 +2875,7 @@ export const wsfContribute = onCall<ContributeRequest>(
         return {
           addedCount: count,
           alreadyRecorded: false as const,
+          crossedTarget: crossed,
           goalTarget: goal.target,
           goalUnit: goal.unit,
           goalStatus: goal.status,
@@ -2795,7 +2912,10 @@ export const wsfContribute = onCall<ContributeRequest>(
       // A removed member replaying a valid attempt. They keep the honest
       // answer about their own contribution — it happened, it counted once,
       // here is what it was — and learn nothing about where the community
-      // stands now. sumGoalShards is not even called.
+      // stands now. sumGoalShards is not even called, and `crossedTarget` is
+      // withheld with the rest: whether the community's total reached its
+      // target is the community's state, and this caller is not entitled to
+      // it. Nothing false is said; a fact they may not see is not shown.
       return { addedCount, ownCredit, alreadyRecorded };
     }
 
@@ -2809,6 +2929,7 @@ export const wsfContribute = onCall<ContributeRequest>(
       unit: goalUnit,
       status: goalStatus,
       alreadyRecorded,
+      crossedTarget,
     };
   }
 );
@@ -3027,6 +3148,19 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
 // adjustment that would drive shared total or the addressed member total
 // below zero — "no monotonic-only total" does not mean "allow negative
 // totals," it means "downward corrections are permitted."
+//
+// THE TARGET-CROSSING EVENT IS NOT TOUCHED HERE, in either direction, and
+// that is the whole rule (see GoalDoc.reachedAt):
+//   • A correction that drops the total back below the target does NOT clear
+//     `reachedAt`. The live "reached" state is derived from the current total
+//     and honestly becomes false again; the event stays as the record of a
+//     moment that did happen. Two different facts, both kept.
+//   • A correction that pushes the total past the target does NOT create an
+//     event. A crossing is something a member's contribution did; an
+//     accounting correction is not that, and no attempt exists to credit.
+//   • Because nothing here clears the field, a later contribution that
+//     crosses the target a second time emits nothing. The goal keeps the
+//     first crossing, which is the one that happened.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type AdjustGoalRequest = {
@@ -3085,6 +3219,19 @@ type ListedGoal = {
   startsAt: string;
   endsAt: string;
   aggregateDisplayAuthorized: boolean;
+  /**
+   * When this goal's shared total first crossed its target, as an ISO instant;
+   * null for a goal that never has. A MEMBER-AUTHORIZED field: this callable
+   * refuses everyone who is not an active member of the community, so the date
+   * travels with the member experience and nowhere else. It is deliberately
+   * NOT on wsfGoalPulse — the public aggregate contract is fixed at nine
+   * fields and a publication decision for the total is not a publication
+   * decision for the community's history.
+   *
+   * It names no person and carries no attempt id. "WE reached it on this day"
+   * is the whole of it.
+   */
+  reachedAt: string | null;
 };
 
 type ListGoalsResponse = { goals: ListedGoal[] };
@@ -3167,6 +3314,12 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
         // should. It is a property of their goal, not of anyone's identity,
         // and this callable is already active-member-gated.
         aggregateDisplayAuthorized: isAggregateDisplayAuthorized(goal),
+        // The historical event, not a live "is it reached" flag: the caller
+        // still derives that from the current total against the current
+        // target. Absent stays absent — nothing is backfilled from a total
+        // that happens to be at or beyond the target today, because that is
+        // not evidence of a moment anyone lived through.
+        reachedAt: goal.reachedAt ? goal.reachedAt.toDate().toISOString() : null,
       };
     });
 

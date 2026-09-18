@@ -675,7 +675,12 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
 
   // ---- 11. the goal is reached, with a peer's 20 landing between review and record ------------
   // The member saw 470, entered 20, and a peer's 20 landed first. The server
-  // returns 510. Nothing may say THIS member crossed the target.
+  // returns 510. The CLIENT still infers nothing from 470 → 510; what it says
+  // now comes from the server's one-time crossing signal, and here the signal
+  // is true: the transaction that recorded this member's 20 found the total
+  // at 490 and committed it at 510. That crossing was theirs, and the receipt
+  // says so in the member's own words — the shared display still says only
+  // "WE did it." and names nobody.
   await page.goto(`/contribute/${crossId}?groupId=${fx.groupId}&mode=record`);
   await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('470 of 500 squats');
@@ -684,9 +689,11 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await addToShard(crossId, 20);
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'reached');
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'crossed');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 20 squats.');
-  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('Our goal is reached.');
+  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText(
+    'This one took us past our goal.'
+  );
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
     'Our goal of 500 squats is reached and still open. Maple Street Movers is now at 510 of 500 squats.'
   );

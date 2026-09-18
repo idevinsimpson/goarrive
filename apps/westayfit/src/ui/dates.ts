@@ -169,6 +169,39 @@ export function formatPeriod(
   return `${md.format(a)} – ${md.format(b)}`;
 }
 
+/**
+ * "Reached Sep 18" — the day the shared total first crossed the target,
+ * written in the GOAL's zone so every member names the same day whatever
+ * clock they are reading it on.
+ *
+ * The instant comes from the server's one-time crossing event (wsfListGoals'
+ * `reachedAt`, a member-authorized field). This helper only writes it down:
+ * it does not decide whether a goal is reached now, which stays derived from
+ * the current total against the current target. A goal can be past its
+ * crossing and below its target again after a correction — the date is still
+ * the day it happened.
+ *
+ * The year is carried whenever the crossing is not in the reader's current
+ * year, judged in the goal's zone, on the same rule as formatPeriod. An
+ * unparsable instant or an unusable zone withholds the label (null) rather
+ * than naming a day in the wrong calendar.
+ */
+export function formatReachedOn(iso: string, opts?: DateOptions & { now?: Date }): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const zone = resolveZone(opts);
+  if (!zone.ok) return null;
+  const [dy] = ymd(d, opts?.locale, zone.timeZone).split('-');
+  const [ny] = ymd(opts?.now ?? new Date(), opts?.locale, zone.timeZone).split('-');
+  const label = new Intl.DateTimeFormat(opts?.locale, {
+    timeZone: zone.timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(dy === ny ? {} : { year: 'numeric' as const }),
+  }).format(d);
+  return `Reached ${label}`;
+}
+
 /** "September 2026" */
 export function formatMonthYear(d: Date): string | null {
   if (Number.isNaN(d.getTime())) return null;

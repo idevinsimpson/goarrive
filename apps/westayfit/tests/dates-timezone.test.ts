@@ -8,6 +8,7 @@ import {
   formatActiveWindowLabel,
   formatEndsAt,
   formatPeriod,
+  formatReachedOn,
   hasWindowEnded,
   isValidTimeZone,
 } from '../src/ui/dates';
@@ -204,5 +205,35 @@ describe('an active goal whose window has already ended', () => {
     expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: 'Not/AZone', now: new Date('2026-09-18T12:00:00.000Z') })).toBe('Open');
     expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: 'Not/AZone', now: new Date('2026-10-13T12:00:00.000Z') })).toBe('Ended');
     expect(formatActiveWindowLabel('not-a-date', { ...en, timeZone: NY })).toBe('Open');
+  });
+});
+
+describe('the day we reached it is written in the goal’s zone', () => {
+  it('an instant on Sep 19 UTC is still Fri, Sep 18 in New York', () => {
+    // 2026-09-19T01:30:00Z = Fri 2026-09-18 21:30 EDT.
+    expect(formatReachedOn('2026-09-19T01:30:00.000Z', { ...en, timeZone: NY })).toBe(
+      'Reached Sep 18'
+    );
+    expect(
+      formatReachedOn('2026-09-19T01:30:00.000Z', { ...en, timeZone: 'Australia/Sydney' })
+    ).toBe('Reached Sep 19');
+  });
+
+  it('carries the year once the crossing is not in the reader’s current year', () => {
+    expect(formatReachedOn('2025-12-31T18:00:00.000Z', { ...en, timeZone: NY })).toBe(
+      'Reached Dec 31, 2025'
+    );
+    expect(
+      formatReachedOn('2026-09-18T16:00:00.000Z', {
+        ...en,
+        timeZone: NY,
+        now: new Date('2027-01-05T12:00:00.000Z'),
+      })
+    ).toBe('Reached Sep 18, 2026');
+  });
+
+  it('withholds the label rather than naming a day it cannot place', () => {
+    expect(formatReachedOn('not-a-date', { ...en, timeZone: NY })).toBeNull();
+    expect(formatReachedOn('2026-09-18T16:00:00.000Z', { ...en, timeZone: 'Not/AZone' })).toBeNull();
   });
 });

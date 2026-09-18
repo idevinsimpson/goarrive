@@ -47,6 +47,7 @@ import {
   formatClock,
   formatMonthYear,
   formatPeriod,
+  formatReachedOn,
 } from '../../../src/ui/dates';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
@@ -121,6 +122,18 @@ type ListedGoal = {
   startsAt: string;
   endsAt: string;
   aggregateDisplayAuthorized: boolean;
+  /**
+   * The server's one-time target-crossing event, as an ISO instant, or null
+   * for a goal that never crossed. Member-authorized: wsfListGoals refuses
+   * anyone who is not an active member, and wsfGoalPulse — the public
+   * aggregate — does not carry it.
+   *
+   * It is the DAY IT HAPPENED, not a live "reached" flag. Whether the goal
+   * stands at or beyond its target right now still comes from the confirmed
+   * total and target below (progressPhase), so a correction that drops the
+   * total back honestly changes the state and leaves the history alone.
+   */
+  reachedAt?: string | null;
 };
 
 type ListGoalsResponse = { goals: ListedGoal[] };
@@ -981,6 +994,19 @@ export default function CommunityPage() {
     }
     const { sharedTotal, target, unit, status } = p.pulse;
     const phase = progressPhase(sharedTotal, target, status);
+    // THE DAY WE REACHED IT. The instant is the server's one-time crossing
+    // event, read on the member-authorized goal list; the zone is the goal's
+    // own, from the confirmed pulse, so every member reads the same day.
+    //
+    // Shown only while the goal is at or beyond its target, because the LIVE
+    // state is what this page reports. After a correction that drops the
+    // total back below the line, the page says what is true now ("40 to go")
+    // and does not print a past date beside it as if it still stood; the
+    // event itself is not erased — it is simply not the current state.
+    const reachedOn =
+      goal.reachedAt && (phase === 'reachedOpen' || phase === 'closedReached')
+        ? formatReachedOn(goal.reachedAt, { timeZone: p.pulse.timezone })
+        : null;
     if (variant === 'closed') {
       return (
         <View style={styles.factsSmall}>
@@ -990,6 +1016,11 @@ export default function CommunityPage() {
           <Text style={styles.closedResult} testID={`wsf-community-goal-status-${goal.goalId}`}>
             {statusLine(sharedTotal, target, status)}
           </Text>
+          {reachedOn ? (
+            <Text style={styles.statusLine} testID={`wsf-community-goal-reached-${goal.goalId}`}>
+              {reachedOn}
+            </Text>
+          ) : null}
         </View>
       );
     }
@@ -1016,6 +1047,14 @@ export default function CommunityPage() {
         >
           {statusLine(sharedTotal, target, status)}
         </Text>
+        {reachedOn ? (
+          <Text
+            style={onDark ? styles.heroStatus : styles.statusLine}
+            testID={`wsf-community-goal-reached-${goal.goalId}`}
+          >
+            {reachedOn}
+          </Text>
+        ) : null}
       </View>
     );
   };

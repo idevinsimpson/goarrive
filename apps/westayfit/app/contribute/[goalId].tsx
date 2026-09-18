@@ -81,6 +81,10 @@ type ContributeResult = {
   unit: string;
   status: 'active' | 'closed';
   alreadyRecorded: boolean;
+  // The server's one-time target-crossing signal, present with the shared
+  // fields and only with them. Carried straight through to the receipt copy —
+  // this screen never derives it and never substitutes for it.
+  crossedTarget?: boolean;
 };
 
 // Authenticated own credit for the signed-in member. Read from the server on
