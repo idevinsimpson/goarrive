@@ -13,7 +13,11 @@ import {
 } from '../src/ui/dates';
 
 const NY = 'America/New_York';
-const en = { locale: 'en-US' };
+// A pinned "now" inside the fixtures' year, so the year-carrying period
+// format (windows outside the reader's current year) does not start firing on
+// these 2026 fixtures when the wall clock reaches 2027. Cases that care about
+// "today" pass their own `now` and override this.
+const en = { locale: 'en-US', now: new Date('2026-09-18T12:00:00.000Z') };
 
 describe('goal window labels are derived in the goal time zone', () => {
   it('UTC boundary: an instant on Oct 6 UTC is still Mon, Oct 5 in New York', () => {
@@ -59,6 +63,51 @@ describe('goal window labels are derived in the goal time zone', () => {
     expect(formatPeriod('2027-01-01T04:00:00.000Z', '2027-01-15T04:00:00.000Z', { ...en, timeZone: NY })).toBe(
       'Dec 31, 2026 – Jan 14, 2027'
     );
+  });
+
+  it('A8: a window outside the reader’s current year carries the year on both ends', () => {
+    const now2026 = new Date('2026-09-18T12:00:00.000Z');
+    // Same-year window, but not THIS year: "Jun 1 – Jul 14" would read as 2026.
+    expect(
+      formatPeriod('2025-06-01T04:00:00.000Z', '2025-07-15T03:59:00.000Z', {
+        ...en,
+        timeZone: NY,
+        now: now2026,
+      })
+    ).toBe('Jun 1, 2025 – Jul 14, 2025');
+    // Same month, still a past year: the short "Aug 1 – 15" form is withheld.
+    expect(
+      formatPeriod('2025-08-02T03:00:00.000Z', '2025-08-16T03:59:00.000Z', {
+        ...en,
+        timeZone: NY,
+        now: now2026,
+      })
+    ).toBe('Aug 1, 2025 – Aug 15, 2025');
+    // A future year is the same rule.
+    expect(
+      formatPeriod('2027-08-02T03:00:00.000Z', '2027-08-16T03:59:00.000Z', {
+        ...en,
+        timeZone: NY,
+        now: now2026,
+      })
+    ).toBe('Aug 1, 2027 – Aug 15, 2027');
+    // The reader's current year keeps the short form.
+    expect(
+      formatPeriod('2026-08-02T03:00:00.000Z', '2026-08-16T03:59:00.000Z', {
+        ...en,
+        timeZone: NY,
+        now: now2026,
+      })
+    ).toBe('Aug 1 – 15');
+    // "Current year" is judged in the GOAL's zone, not the reader's device:
+    // 2027-01-01T03:00Z is still Dec 31 2026 in New York.
+    expect(
+      formatPeriod('2026-12-20T05:00:00.000Z', '2026-12-31T05:00:00.000Z', {
+        ...en,
+        timeZone: NY,
+        now: new Date('2027-01-01T03:00:00.000Z'),
+      })
+    ).toBe('Dec 20 – 31');
   });
 
   it('is DST-safe: the zone designation follows the instant', () => {

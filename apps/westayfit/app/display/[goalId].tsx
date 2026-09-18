@@ -227,6 +227,42 @@ export default function DisplayGoal() {
   // and a revoked authorization all look the same here: telling them apart
   // would make this display an oracle for which goal ids exist.
   if (state.kind !== 'ready') {
+    // A9. LOADING IS PART OF THE READY PAGE, NOT A DIFFERENT PRODUCT. On a
+    // phone the ready display is a cream page carrying a navy hero card, so a
+    // navy full-bleed loading state made every cold load — and every Check
+    // again — flash navy and then repaint cream. The loading state now uses
+    // the same page chrome as the state it is on its way to: cream canvas,
+    // navy wordmark, the block inside the navy hero card.
+    //
+    // The refusal states are deliberately NOT changed. They are approved as
+    // they stand, they are terminal rather than transitional, and they are
+    // the one place where looking unlike the ready page is the point.
+    if (state.kind === 'loading' && !wide) {
+      return (
+        <View
+          key="loading-phone"
+          style={[styles.canvas, styles.canvasPhonePage]}
+          testID="wsf-display-loading"
+          {...({ dataSet: { layout: 'phone' } } as Record<string, unknown>)}
+        >
+          <View style={styles.phoneHeader}>
+            <WsfWordmark variant="navy" height={22} testID="wsf-display-wordmark" />
+          </View>
+          <View style={styles.phoneHero} testID="wsf-display-phone-hero">
+            <View style={styles.genericBlock}>
+              <Text
+                style={styles.genericHeadline}
+                accessibilityRole="header"
+                {...({ 'aria-level': 1 } as Record<string, unknown>)}
+              >
+                Loading display…
+              </Text>
+            </View>
+          </View>
+          {testNote}
+        </View>
+      );
+    }
     const copy =
       state.kind === 'loading'
         ? { headline: 'Loading display…', body: null, testID: 'wsf-display-loading', action: false }
@@ -373,7 +409,7 @@ export default function DisplayGoal() {
 
   const freshness = (
     <View
-      style={[styles.freshness, stale ? styles.freshnessStale : null]}
+      style={styles.freshness}
       testID="wsf-display-freshness"
       // D-2. The stale pill appears WITHOUT any action by the viewer — the
       // poll simply stopped succeeding — so nothing would announce it. Polite:
@@ -481,7 +517,7 @@ export default function DisplayGoal() {
       <View style={styles.phoneHeader}>
         <WsfWordmark variant="navy" height={22} testID="wsf-display-wordmark" />
       </View>
-      <View style={styles.phoneHero}>
+      <View style={styles.phoneHero} testID="wsf-display-phone-hero">
         {identity}
         {we}
         {facts}
@@ -596,7 +632,6 @@ const styles = StyleSheet.create({
   // The stale pill and the clock share a row on a wide screen and stack on a
   // phone; neither is allowed to break mid-phrase.
   freshness: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 4 },
-  freshnessStale: {},
   freshnessText: { color: HERO_MUTED, fontSize: 13, letterSpacing: 0.3, textAlign: 'center' },
   freshnessStaleText: {
     color: NAVY,

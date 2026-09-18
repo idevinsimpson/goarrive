@@ -511,6 +511,12 @@ test('Living WE static states through the real data path', async ({ page }) => {
       `${state.total.toLocaleString('en-US')} of ${state.target.toLocaleString('en-US')} squats`
     );
     await expect(page.getByTestId(`wsf-community-goal-status-${goalId}`)).toHaveText(state.status);
+    // A3. The hero eyebrow is the one place this surface says the target is
+    // met while the goal is still open. Every other state keeps the neutral
+    // "What we're doing".
+    await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText(
+      state.key === '500-of-500' ? 'Goal reached' : 'What we’re doing'
+    );
     const we = page.getByTestId(`wsf-community-goal-we-${goalId}`);
     await expect(we).toHaveAttribute('data-fill-ratio', state.ratio);
     await expect(we).toHaveAttribute(

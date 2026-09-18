@@ -606,7 +606,9 @@ test('R11 — a stale before-total never inverts the confirmed result copy', asy
     'Your total on this goal: 50 squats'
   );
   const receipt = await page.getByTestId('wsf-contribute-receipt').innerText();
-  expect(receipt, 'not the "we were already past it" reading').not.toMatch(/We’re now at .* together/);
+  // A7 changed this subline to name the community ("<name> is now at X
+  // together."), so the guard matches on the part that stayed: "… together."
+  expect(receipt, 'not the "we were already past it" reading').not.toMatch(/is now at .* together/);
   expect(receipt, 'a first booking, not a replay of a landed one').not.toMatch(/already recorded/i);
   expect(attemptId).toMatch(/^\S+$/);
   const memberTotal = await firestoreRead(`wsfGoalMemberTotals/${goalId}_${fx.memberUid}`);

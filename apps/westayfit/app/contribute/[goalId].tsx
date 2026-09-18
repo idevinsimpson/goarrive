@@ -39,10 +39,12 @@ import {
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { ButtonLink } from '../../src/ui/ButtonLink';
+import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import {
   formatCount,
   percentLabel,
+  progressPhase,
   statusLine,
   totalOfTargetLabel,
 } from '../../src/ui/progressFormat';
@@ -143,6 +145,10 @@ export default function ContributeToGoal() {
   const { ready, user } = useWsfAuth();
   const { width: windowWidth } = useWindowDimensions();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // A6. When this screen last heard a confirmed answer about the goal — set by
+  // the cold load and by every successful poll tick. Client receipt time, the
+  // same fact (and the same wording) as Community Home and the public display.
+  const [pulseAt, setPulseAt] = useState<Date | null>(null);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
   const [step, setStep] = useState<Step>(initialStep);
   const [entry, setEntry] = useState('');
@@ -282,6 +288,7 @@ export default function ContributeToGoal() {
         if (cancelled) return;
         const pulse = pulseRes.data;
         const ownCredit = mineRes.data.ownCredit;
+        setPulseAt(new Date());
         if (pulse.status !== 'active') {
           setState({ kind: 'closed', pulse, ownCredit });
           return;
@@ -306,9 +313,12 @@ export default function ContributeToGoal() {
           setState({ kind: 'notSignedIn' });
           return;
         }
+        // A1. The server's sentence is a developer fact, not member copy. It
+        // is logged; the screen says what the member can act on.
+        console.warn('[wsf] goal load failed', e);
         setState({
           kind: 'error',
-          message: e instanceof Error ? e.message : 'Failed to load goal.',
+          message: 'We couldn’t load this goal right now. Check your connection and try again.',
         });
       }
     })();
@@ -387,6 +397,7 @@ export default function ContributeToGoal() {
         if (seq <= applied) return;
         applied = seq;
         const pulse = result.data;
+        setPulseAt(new Date());
         setState((prev) => {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
@@ -870,7 +881,15 @@ export default function ContributeToGoal() {
                 <Text style={styles.heroPercent} testID="wsf-contribute-percent">
                   {`${percentLabel(r.sharedTotal, r.target)} complete`}
                 </Text>
-                <Text style={styles.heroStatus} testID="wsf-contribute-status">
+                <Text
+                  style={[
+                    styles.heroStatus,
+                    progressPhase(r.sharedTotal, r.target, r.status) === 'nearGoal'
+                      ? styles.heroStatusNear
+                      : null,
+                  ]}
+                  testID="wsf-contribute-status"
+                >
                   {statusLine(r.sharedTotal, r.target, r.status)}
                 </Text>
               </View>
@@ -1050,8 +1069,20 @@ export default function ContributeToGoal() {
         <Text style={styles.compactTotal} testID="wsf-contribute-shared-total">
           {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
         </Text>
-        <Text style={styles.compactPercent}>{`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}</Text>
+        <Text style={styles.compactPercent} testID="wsf-contribute-context-percent">
+          {`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}
+        </Text>
         {ownCreditLine(ownCredit, unit)}
+        {/*
+          A6. The compact total is live (a 2s poll), so it needs the same
+          "as of" honesty Community Home and the public display carry. No
+          refresh control: nothing here is waiting to be asked.
+        */}
+        {pulseAt ? (
+          <Text style={styles.contextUpdated} testID="wsf-contribute-context-updated">
+            {`Confirmed ${formatClock(pulseAt)}`}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -1079,10 +1110,21 @@ export default function ContributeToGoal() {
             <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
               {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
             </Text>
-            <Text style={styles.heroPercent} testID="wsf-contribute-percent">
-              {`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}
-            </Text>
-            <Text style={styles.heroStatus} testID="wsf-contribute-status">
+            {/*
+              A5. No "N% complete" line on a closed goal: the status line below
+              is "Closed at N%" (or "Goal reached"), which already says it, and
+              two percentages on one card invite the reader to reconcile them.
+              Same rule as Community Home's past-goal card.
+            */}
+            <Text
+              style={[
+                styles.heroStatus,
+                progressPhase(pulse.sharedTotal, pulse.target, pulse.status) === 'nearGoal'
+                  ? styles.heroStatusNear
+                  : null,
+              ]}
+              testID="wsf-contribute-status"
+            >
               {statusLine(pulse.sharedTotal, pulse.target, pulse.status)}
             </Text>
           </View>
@@ -1359,6 +1401,8 @@ const styles = StyleSheet.create({
   compactTotal: { color: wsfTheme.colors.text, fontSize: 17, fontWeight: '800' },
   compactPercent: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
   ownCredit: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
+  // A6. Freshness under the live compact total.
+  contextUpdated: { color: wsfTheme.colors.textMuted, fontSize: 12, lineHeight: 18, letterSpacing: 0.3 },
 
   card: {
     backgroundColor: wsfTheme.colors.surface,
@@ -1422,6 +1466,9 @@ const styles = StyleSheet.create({
   heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
   heroPercent: { color: PROGRESS_GREEN, fontSize: 19, fontWeight: '700', textAlign: 'center' },
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  // A4. Same near-goal emphasis as Community Home's hero and the public
+  // display: the last stretch is the one line worth leaning on.
+  heroStatusNear: { color: CREAM, fontWeight: '700' },
   heroStanding: { color: CREAM, fontSize: 15, lineHeight: 21, textAlign: 'center', paddingTop: 6 },
 
   // entry

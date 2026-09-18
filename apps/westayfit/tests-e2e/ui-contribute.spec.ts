@@ -294,6 +294,11 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   await expect(page.getByTestId('wsf-contribute-goal-title')).toHaveText('Squats together this week');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('241 of 500 squats');
   await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 0 squats');
+  // A6. The compact context is polled live, so it says when it was last
+  // confirmed — the same fact, in the same words, as Community Home and the
+  // public display. No refresh control: nothing is waiting to be asked.
+  await expect(page.getByTestId('wsf-contribute-context-percent')).toHaveText('48.2% complete');
+  await expect(page.getByTestId('wsf-contribute-context-updated')).toHaveText(/^Confirmed \d{1,2}:\d{2}/);
   await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to community');
   await page.waitForTimeout(400);
   await snap(page, '01-start-moving');
@@ -652,8 +657,12 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await expect(page.getByTestId('wsf-contribute-closed')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-closed')).toContainText('This goal is closed.');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('312 of 500 push-ups');
-  await expect(page.getByTestId('wsf-contribute-percent')).toHaveText('62.4% complete');
+  // A5. A closed goal states its result once: "Closed at 62.4%" IS the
+  // percentage, so the "N% complete" line is not repeated above it. Same rule
+  // as Community Home's past-goal card.
+  await expect(page.getByTestId('wsf-contribute-percent')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-status')).toHaveText('Closed at 62.4%');
+  expect(await page.getByTestId('wsf-contribute-closed').innerText()).not.toContain('62.4% complete');
   await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 40 push-ups');
   await expect(page.getByTestId('wsf-contribute-entry')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-submit')).toHaveCount(0);
@@ -703,7 +712,10 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'postTarget');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 5 squats.');
-  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('We’re now at 515 of 500 squats together.');
+  // A7. Named like every other variant.
+  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText(
+    'Maple Street Movers is now at 515 of 500 squats together.'
+  );
   await expect(page.getByTestId('wsf-contribute-status')).toHaveText('15 beyond our goal · still open');
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveCount(0);
   const post = await page.getByTestId('wsf-contribute-receipt').innerText();

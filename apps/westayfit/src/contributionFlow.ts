@@ -160,7 +160,7 @@ export type ResultVariant = 'alreadyRecorded' | 'reached' | 'postTarget' | 'ordi
  *     attributes nothing to anyone; when the confirmed total this member
  *     saw BEFORE recording was already at or beyond the target, the goal
  *     was reached before they acted and the result reads as `postTarget`
- *     ("We're now at X together."). `sharedBefore` is the last confirmed
+ *     ("<community> is now at X together."). `sharedBefore` is the last confirmed
  *     total the screen showed; null when unknown (a replay after a reload)
  *     falls to `reached`, which is still true.
  *
@@ -218,9 +218,12 @@ export function resultCopy(
         }. ${who} ${isAre} now at ${total}.`,
       };
     case 'postTarget':
+      // A7. Named like every other variant: the community says this, not a
+      // generic "we". Falls back to "We are" only when no verified name is on
+      // hand, exactly as `who`/`isAre` do above.
       return {
         headline: `You added ${added}.`,
-        subline: `We’re now at ${total} together.`,
+        subline: `${who} ${isAre} now at ${total} together.`,
         standing: null,
       };
     case 'ordinary':

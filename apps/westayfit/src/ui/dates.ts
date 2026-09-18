@@ -132,8 +132,21 @@ export function formatActiveWindowLabel(
   return ended ? label : `Open · ${label}`;
 }
 
-/** "Jun 1 – 14" or "Jun 1 – Jul 14" or "Dec 20, 2025 – Jan 3, 2026" — in the goal's zone when given. */
-export function formatPeriod(startIso: string, endIso: string, opts?: DateOptions): string | null {
+/**
+ * "Jun 1 – 14" or "Jun 1 – Jul 14" or "Dec 20, 2025 – Jan 3, 2026" — in the
+ * goal's zone when given.
+ *
+ * A8. The year is dropped only when the window is in the year the READER is
+ * currently in, judged in the goal's own zone. A window that begins and ends
+ * inside one year is still a different year from this one — a 2025 goal read
+ * in 2026 must not print a bare "Jun 1 – Jul 14", which reads as this year.
+ * `opts.now` is for tests; the default is the real clock.
+ */
+export function formatPeriod(
+  startIso: string,
+  endIso: string,
+  opts?: DateOptions & { now?: Date }
+): string | null {
   const a = new Date(startIso);
   const b = new Date(endIso);
   if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
@@ -142,12 +155,15 @@ export function formatPeriod(startIso: string, endIso: string, opts?: DateOption
   const tz = zone.timeZone;
   const [ay, am, ad] = ymd(a, opts?.locale, tz).split('-');
   const [by, bm] = ymd(b, opts?.locale, tz).split('-');
+  const [ny] = ymd(opts?.now ?? new Date(), opts?.locale, tz).split('-');
   const sameYear = ay === by;
-  const sameMonth = sameYear && am === bm;
+  const thisYear = sameYear && ay === ny;
+  const sameMonth = thisYear && am === bm;
   const md = new Intl.DateTimeFormat(opts?.locale, { timeZone: tz, month: 'short', day: 'numeric' });
   const mdy = new Intl.DateTimeFormat(opts?.locale, { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' });
   const dayOnly = new Intl.DateTimeFormat(opts?.locale, { timeZone: tz, day: 'numeric' });
-  if (!sameYear) return `${mdy.format(a)} – ${mdy.format(b)}`;
+  // Either end outside the reader's current year carries the year on both ends.
+  if (!thisYear) return `${mdy.format(a)} – ${mdy.format(b)}`;
   if (sameMonth) return `${md.format(a)} – ${dayOnly.format(b)}`;
   void ad;
   return `${md.format(a)} – ${md.format(b)}`;

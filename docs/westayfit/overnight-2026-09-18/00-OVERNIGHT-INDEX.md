@@ -18,10 +18,10 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | 4 | Display + authorization race torture | done | `0b0797c` | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
 | 5 | Accessibility + responsive QA | done | `963d0df` (+ index 9669c53) | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
 | 6 | Performance + operational quality | done | `6a0a776` | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
-| 7 | Cross-surface product quality audit | pending | | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
+| 7 | Cross-surface product quality audit | done | TASK7_HEAD | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
 | 8 | Final candidate hardening + evidence pack | pending | | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
 
-Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
+Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three surfaces, the journey strip, the honest states, reflow thumbnails) and `OVERNIGHT-VISUAL-BOARD-WIDE.png` (1440×900 display states). Both rendered from the local emulator build with synthetic fixtures.
 
 ## Task 1 — Baseline freeze + Gate 1 investigation
 
@@ -78,6 +78,15 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 - Receipts: `ui-perf` 3/3; 16 regression specs green; callable 238; Vitest 232; TS + functions build clean.
 - ChatGPT review instruction: none present (checked at task start and at close).
 
+## Task 7 — Cross-surface product quality audit
+
+- Opus audit derived every surface's strings for every state from the shared helpers and checked the owner's consistency list; Opus implementer fixed the objective inconsistencies and built `ui-matrix` (the same synthetic goal captured on all three surfaces, asserted on exact strings and fill ratio before each capture); boards composed with PIL; Fable integrated.
+- **Matrix**: 0 / 48.2 / 90 / overshoot-open / closed-reached / closed-unreached / stale agree on percent, total, status and fill across Community Home, contribute and the display, except where designed (no percent on closed goals on the member surfaces; the closed-reached display's achievement wording; display-only headlines; no status line in the compact context).
+- **Fixed** (A1–A10): raw SDK error text replaced by fixed member copy on both member surfaces; duplicated `ButtonLink` removed; Community Home shows `Goal reached` at reached-open; near-goal emphasis on the receipt; no percent on contribute's closed hero (Community Home's rule); freshness line on the polled contribute context; `postTarget` subline names the community; periods outside the current year carry the year; the phone display no longer flips navy → cream while loading; dead style removed.
+- **Recorded**: token/typography drift (refactor), closed-marker differences and the display's larger WE (approved), "Past goals" heading wording (owner copy decision), the intentional gaps all confirmed un-claimed.
+- Receipts: `ui-matrix` 2/2 + 12 regression specs green; Vitest 233; TS + build clean.
+- ChatGPT review instruction: none present (checked at task start and at close).
+
 ## Defect ledger (running)
 
 | # | Found in | Defect | Class | Status |
@@ -110,3 +119,6 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 | D-25 | Task 5 | no enterKeyHint on the entry field | a11y / phone | fixed + test |
 | D-26 | Task 5 | duplicate accessible names for per-goal controls | a11y (2.4.6) | fixed + test |
 | D-27 | Task 5 | h1 overflows at 195 px with an 80-char community name; display unavailable state has no h1 | a11y / responsive | fixed in Task 6 commit |
+| D-28 | Task 7 | raw SDK error sentence rendered to members on Community Home and contribute | copy / honesty | fixed |
+| D-29 | Task 7 | Community Home had no reached signal; receipt lacked near-goal emphasis; closed hero printed the percent twice; polled context had no freshness line; postTarget subline wording; phone display chrome flip on load | cross-surface consistency | fixed + tests |
+| D-30 | Task 7 | `formatPeriod` dropped the year for windows in another year | dates truth | fixed + unit tests |

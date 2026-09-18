@@ -10,9 +10,6 @@ import {
   Text,
   useWindowDimensions,
   View,
-  type StyleProp,
-  type TextStyle,
-  type ViewStyle,
 } from 'react-native';
 
 import { useWsfAuth } from '../../../src/auth';
@@ -44,6 +41,7 @@ import {
 } from '../../../src/labels';
 import { wsfTheme } from '../../../src/theme';
 import { PROGRESS_GREEN } from '../../../src/ui/brandAssets';
+import { ButtonLink } from '../../../src/ui/ButtonLink';
 import {
   formatActiveWindowLabel,
   formatClock,
@@ -59,38 +57,6 @@ import {
   totalOfTargetLabel,
 } from '../../../src/ui/progressFormat';
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
-
-/**
- * A link that looks and lays out like a button. Expo Router's Link renders a
- * text anchor on web, so flex centring and minimum heights on it do nothing;
- * `asChild` hands the href and press handling to a Pressable that can carry
- * the button styles. The anchor keeps its href for cold loads and the testID
- * stays on the element a test clicks.
- */
-function ButtonLink({
-  href,
-  style,
-  textStyle,
-  testID,
-  label,
-  onPress,
-}: {
-  href: string;
-  style: StyleProp<ViewStyle>;
-  textStyle: StyleProp<TextStyle>;
-  testID: string;
-  label: string;
-  /** Runs before the navigation (Link calls the child's onPress first). */
-  onPress?: () => void;
-}) {
-  return (
-    <Link href={href as never} asChild>
-      <Pressable style={style} testID={testID} accessibilityRole="link" onPress={onPress}>
-        <Text style={textStyle}>{label}</Text>
-      </Pressable>
-    </Link>
-  );
-}
 
 type GroupDoc = {
   displayName: string;
@@ -397,7 +363,14 @@ export default function CommunityPage() {
         });
       } catch (e) {
         if (cancelled) return;
-        setState({ kind: 'error', message: e instanceof Error ? e.message : 'Load failed.' });
+        // A1. The server's own sentence is a developer fact, not member copy —
+        // it can name a callable, a region or an internal reason. It goes to
+        // the console; the screen says what the member can act on.
+        console.warn('[wsf] community load failed', e);
+        setState({
+          kind: 'error',
+          message: 'We couldn’t load this community right now. Check your connection and try again.',
+        });
       }
     })();
 
@@ -432,10 +405,11 @@ export default function CommunityPage() {
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
         if (cancelled) return;
-        setGoalsState({
-          kind: 'failed',
-          message: e instanceof Error ? e.message : 'Could not load goals.',
-        });
+        // A1. Same rule as the community load: the raw reason is logged, the
+        // screen keeps its own fixed copy (rendered by the goals-error hero
+        // and the Champion panel, neither of which prints this message).
+        console.warn('[wsf] goal list failed', e);
+        setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();
 
@@ -791,7 +765,10 @@ export default function CommunityPage() {
     return (
       <FormShell heading="Something went wrong" testID="wsf-community-error">
         <View {...({ 'data-state': 'error' } as Record<string, unknown>)}>
-          <Text style={styles.error}>{state.message}</Text>
+          {/* A1. Body copy, like the contribution screen's: this is a state
+              of the page, not a validation error the member can correct. The
+              red `styles.error` stays for the real validation errors below. */}
+          <Text style={styles.body}>{state.message}</Text>
         </View>
         <ButtonLink
           href="/"
@@ -1322,7 +1299,17 @@ export default function CommunityPage() {
                   : 'Open';
               return (
                 <View style={styles.hero} testID="wsf-community-goal-hero">
-                  <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
+                  {/*
+                    A3. The one place this surface can say the target is met
+                    while the goal is still open. Confirmed pulse only — an
+                    unconfirmed or failed read keeps the neutral eyebrow.
+                  */}
+                  <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
+                    {p.kind === 'ok' &&
+                    progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen'
+                      ? 'Goal reached'
+                      : 'What we\u2019re doing'}
+                  </Text>
                   <Text
                     style={styles.heroTitle}
                     testID={`wsf-community-goal-title-${featured.goalId}`}

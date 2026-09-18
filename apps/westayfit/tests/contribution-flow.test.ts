@@ -126,7 +126,8 @@ describe('the confirmed result never credits someone else’s work to this membe
     expect(resultVariant(r, 500)).toBe('postTarget');
     const c = resultCopy(r, 'Maple Street Movers', null, 510);
     expect(c.headline).toBe('You added 5 squats.');
-    expect(c.subline).toBe('We’re now at 515 of 500 squats together.');
+    // A7: named like every other variant, not a bare "We're".
+    expect(c.subline).toBe('Maple Street Movers is now at 515 of 500 squats together.');
     expect(c.standing).toBeNull();
     expect(JSON.stringify(c)).not.toMatch(/closer|WE did it/);
   });
