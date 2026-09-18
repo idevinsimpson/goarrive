@@ -54,6 +54,14 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
 
+// D-1. This screen is a sequence of whole-screen states, and each one states
+// what it is in a single sentence at the top. That sentence is the state's
+// heading, and until now it was not one programmatically. react-native-web
+// turns accessibilityRole="header" plus a level into a real <h1>, carrying
+// exactly the styles the line already had, so nothing changes on screen.
+// `aria-level` is not in the React Native prop types, hence the cast.
+const HEADING_1 = { accessibilityRole: 'header', 'aria-level': 1 } as Record<string, unknown>;
+
 // Response shapes mirror wsfContribute / wsfGoalPulse / wsfMyContribution in
 // functions-westayfit.
 type GoalPulse = {
@@ -755,7 +763,7 @@ export default function ContributeToGoal() {
       <>
         {renderChrome(false)}
         <View style={styles.card} testID="wsf-contribute-signed-out">
-          <Text style={styles.heading}>Sign in to contribute</Text>
+          <Text style={styles.heading} {...HEADING_1}>Sign in to contribute</Text>
           <Text style={styles.body}>
             Contributions are recorded to your account, so sign in before you record one.
           </Text>
@@ -775,7 +783,7 @@ export default function ContributeToGoal() {
       <>
         {renderChrome(false)}
         <View style={styles.card} testID="wsf-contribute-load-error">
-          <Text style={styles.heading}>Something went wrong</Text>
+          <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
           <ButtonLink
             href="/"
@@ -819,10 +827,13 @@ export default function ContributeToGoal() {
         <View
           style={styles.hero}
           testID="wsf-contribute-receipt"
+          // D-2. The outcome replaces the form in place rather than by
+          // navigating, so the receipt has to announce itself.
+          aria-live="polite"
           {...({ dataSet: { variant } } as Record<string, unknown>)}
         >
           <Text style={styles.heroEyebrow}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
-          <Text style={styles.heroHeadline} testID="wsf-contribute-result-headline">
+          <Text style={styles.heroHeadline} testID="wsf-contribute-result-headline" {...HEADING_1}>
             {copy.headline}
           </Text>
           <Text style={styles.heroSubline} testID="wsf-contribute-result-subline">
@@ -888,9 +899,14 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.card} testID="wsf-contribute-refused" {...({ dataSet: { reason: refusal.reason } } as Record<string, unknown>)}>
+        <View
+          style={styles.card}
+          testID="wsf-contribute-refused"
+          aria-live="polite"
+          {...({ dataSet: { reason: refusal.reason } } as Record<string, unknown>)}
+        >
           <Text style={styles.eyebrowMuted}>Not recorded</Text>
-          <Text style={styles.heading} testID="wsf-contribute-refused-headline">
+          <Text style={styles.heading} testID="wsf-contribute-refused-headline" {...HEADING_1}>
             {copy.headline}
           </Text>
           <Text style={styles.body} testID="wsf-contribute-refused-body">
@@ -927,9 +943,9 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.card} testID="wsf-contribute-recording">
+        <View style={styles.card} testID="wsf-contribute-recording" aria-live="polite">
           <ActivityIndicator color={NAVY} size="large" />
-          <Text style={styles.heading}>Recording your contribution…</Text>
+          <Text style={styles.heading} {...HEADING_1}>Recording your contribution…</Text>
           <Text style={styles.body}>{effortLabel(pending.count, unitKnown)}</Text>
         </View>
         {renderTestNote()}
@@ -943,9 +959,9 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.pendingCard} testID="wsf-contribute-pending">
+        <View style={styles.pendingCard} testID="wsf-contribute-pending" aria-live="polite">
           <Text style={styles.eyebrowMuted}>Not confirmed yet</Text>
-          <Text style={styles.heading}>We couldn’t confirm your contribution yet.</Text>
+          <Text style={styles.heading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
           <Text style={styles.body}>
             We don’t know whether this effort was recorded. Don’t record it again.
           </Text>
@@ -988,7 +1004,7 @@ export default function ContributeToGoal() {
       <>
         {renderChrome(false)}
         <View style={styles.card} testID="wsf-contribute-not-found">
-          <Text style={styles.heading}>Goal not found</Text>
+          <Text style={styles.heading} {...HEADING_1}>Goal not found</Text>
           <Text style={styles.body}>
             This goal doesn’t exist or isn’t available to this account.
           </Text>
@@ -1036,7 +1052,7 @@ export default function ContributeToGoal() {
         {renderContextLabels()}
         <View style={styles.hero} testID="wsf-contribute-closed">
           <Text style={styles.heroEyebrow}>Closed</Text>
-          <Text style={styles.heroHeadline}>This goal is closed.</Text>
+          <Text style={styles.heroHeadline} {...HEADING_1}>This goal is closed.</Text>
           <View style={styles.weWrap}>
             <LivingWeProgress
               completed={pulse.sharedTotal}
@@ -1083,7 +1099,7 @@ export default function ContributeToGoal() {
         {renderChrome(false)}
         <View style={styles.card} testID="wsf-contribute-review-screen">
           <Text style={styles.eyebrowMuted}>Review</Text>
-          <Text style={styles.heading}>Review your contribution</Text>
+          <Text style={styles.heading} {...HEADING_1}>Review your contribution</Text>
           {renderContextLabels()}
           <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
             {`${formatCount(reviewCount)} ${unit}`}
@@ -1124,7 +1140,7 @@ export default function ContributeToGoal() {
         {renderContextLabels()}
         {renderCompactProgress()}
         <View style={styles.card} testID="wsf-contribute-move-screen">
-          <Text style={styles.heading}>Ready when you are.</Text>
+          <Text style={styles.heading} {...HEADING_1}>Ready when you are.</Text>
           <Text style={styles.body}>
             {`Count your own ${unit}. When you’re finished, enter the number you completed.`}
           </Text>
@@ -1187,7 +1203,7 @@ export default function ContributeToGoal() {
       {renderContextLabels()}
       {renderCompactProgress()}
       <View style={styles.card} testID="wsf-contribute-entry-screen">
-        <Text style={styles.heading}>{`How many ${unit} did you complete?`}</Text>
+        <Text style={styles.heading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
         {(() => {
           const minus = (
             <Pressable
@@ -1221,8 +1237,9 @@ export default function ContributeToGoal() {
               }}
               keyboardType="number-pad"
               inputMode="numeric"
+              enterKeyHint="done"
               placeholder="0"
-              placeholderTextColor="#9AA6B8"
+              placeholderTextColor={wsfTheme.colors.textMuted}
               accessibilityLabel={`Number of ${unit} completed`}
               testID="wsf-contribute-entry"
             />
@@ -1263,7 +1280,13 @@ export default function ContributeToGoal() {
           ))}
         </View>
         {entryError ? (
-          <Text style={styles.errorText} testID="wsf-contribute-error">
+          <Text
+            style={styles.errorText}
+            testID="wsf-contribute-error"
+            // D-2. The entry is refused in place: nothing moves, nothing takes
+            // focus, so without this the refusal is silent to a screen reader.
+            accessibilityRole="alert"
+          >
             {entryError}
           </Text>
         ) : null}
@@ -1421,7 +1444,8 @@ const styles = StyleSheet.create({
   stepButtonText: { color: NAVY, fontSize: 28, fontWeight: '700', lineHeight: 32 },
   quickRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
   quickChip: {
-    minHeight: 40,
+    // D-4. 44 px: the owner's minimum touch target.
+    minHeight: 44,
     paddingHorizontal: 16,
     borderRadius: 999,
     backgroundColor: '#EEF2F6',

@@ -17,7 +17,7 @@ import {
 
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
-import { FormShell, SecondaryLink } from '../../../src/AuthFormPrimitives';
+import { FormShell } from '../../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../src/firebase';
 import {
@@ -729,7 +729,13 @@ export default function CommunityPage() {
         intro="Sign in to view this community."
         testID="wsf-community-signed-out"
       >
-        <SecondaryLink href="/signin" label="Sign in" />
+        <ButtonLink
+          href="/signin"
+          style={SHELL_LINK}
+          textStyle={styles.tertiaryButtonText}
+          testID="wsf-community-signin"
+          label="Sign in"
+        />
       </FormShell>
     );
   }
@@ -741,7 +747,13 @@ export default function CommunityPage() {
         intro="You are not a member of this community."
         testID="wsf-community-not-member"
       >
-        <SecondaryLink href="/" label="Back to home" />
+        <ButtonLink
+          href="/"
+          style={SHELL_LINK}
+          textStyle={styles.tertiaryButtonText}
+          testID="wsf-community-not-member-home"
+          label="Back to home"
+        />
       </FormShell>
     );
   }
@@ -752,7 +764,13 @@ export default function CommunityPage() {
         <View {...({ 'data-state': 'error' } as Record<string, unknown>)}>
           <Text style={styles.error}>{state.message}</Text>
         </View>
-        <SecondaryLink href="/" label="Back to home" />
+        <ButtonLink
+          href="/"
+          style={SHELL_LINK}
+          textStyle={styles.tertiaryButtonText}
+          testID="wsf-community-error-home"
+          label="Back to home"
+        />
       </FormShell>
     );
   }
@@ -859,6 +877,13 @@ export default function CommunityPage() {
           style={styles.secondaryButton}
           testID={`wsf-goal-display-auth-toggle-${goal.goalId}`}
           accessibilityRole="button"
+          // D-9. With two goals in the sheet the visible label is the same on
+          // both controls ("Authorize public display"), so by name alone they
+          // are indistinguishable. The name says which goal; the visible text
+          // is untouched.
+          accessibilityLabel={`${goal.title}: ${
+            goal.aggregateDisplayAuthorized ? 'Remove' : 'Authorize'
+          } public display`}
         >
           <Text style={styles.secondaryButtonText}>
             {saving
@@ -910,6 +935,7 @@ export default function CommunityPage() {
           accessibilityRole="button"
           testID="wsf-community-progress-refresh"
           style={styles.freshnessButton}
+          accessibilityLabel="Refresh confirmed progress"
         >
           <Text style={styles.heroFreshnessLink}>Refresh</Text>
         </Pressable>
@@ -940,6 +966,7 @@ export default function CommunityPage() {
             accessibilityRole="button"
             style={onDark ? styles.heroOutlineButton : styles.secondaryButton}
             testID={`wsf-community-goal-progress-retry-${goal.goalId}`}
+            accessibilityLabel={`Try again: ${goal.title} progress`}
           >
             <Text style={onDark ? styles.heroOutlineButtonText : styles.secondaryButtonText}>Try again</Text>
           </Pressable>
@@ -996,6 +1023,10 @@ export default function CommunityPage() {
       transparent
       animationType="none"
       onRequestClose={() => setManageOpen(false)}
+      // D-3. react-native-web renders the modal as role="dialog" and spreads
+      // the rest of its props onto that element. Without a name the dialog is
+      // announced as just "dialog"; this is the sheet's own visible title.
+      aria-label="Champion tools"
     >
       <View style={styles.sheetBackdrop}>
         {/*
@@ -1016,7 +1047,7 @@ export default function CommunityPage() {
         <View style={[styles.sheet, { maxHeight: Math.min(windowHeight * 0.88, 760) }]} testID="wsf-community-manage-panel">
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Champion tools</Text>
+            <Text style={styles.sheetTitle} {...HEADING_2}>Champion tools</Text>
             <Pressable
               onPress={() => setManageOpen(false)}
               accessibilityRole="button"
@@ -1104,6 +1135,9 @@ export default function CommunityPage() {
                         style={styles.secondaryButton}
                         testID={`wsf-goal-display-auth-toggle-${goalId}`}
                         accessibilityRole="button"
+                        accessibilityLabel={`${outcome.title}: ${
+                          outcome.intended ? 'Remove' : 'Authorize'
+                        } public display`}
                       >
                         <Text style={styles.secondaryButtonText}>
                           {outcome.intended
@@ -1186,7 +1220,12 @@ export default function CommunityPage() {
         {/* Community identity: the main character. */}
         <View style={styles.identity}>
           <View style={styles.headingRow}>
-            <Text style={styles.heading} testID="wsf-community-name">
+            {/*
+              D-1. The community is what this page is about, so its name is
+              the page's one top-level heading. Role and level only — the
+              styles, and therefore the rendering, are unchanged.
+            */}
+            <Text style={styles.heading} testID="wsf-community-name" {...HEADING_1}>
               {group.displayName}
             </Text>
             {isSample ? (
@@ -1225,7 +1264,7 @@ export default function CommunityPage() {
               {...({ 'data-state': 'error' } as Record<string, unknown>)}
             >
               <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.heroTitle}>Goals couldn&apos;t be loaded</Text>
+              <Text style={styles.heroTitle} {...HEADING_2}>Goals couldn&apos;t be loaded</Text>
               <Text style={styles.heroBody}>
                 This is a problem loading them, not a community without goals.
               </Text>
@@ -1255,7 +1294,11 @@ export default function CommunityPage() {
               return (
                 <View style={styles.hero} testID="wsf-community-goal-hero">
                   <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
-                  <Text style={styles.heroTitle} testID={`wsf-community-goal-title-${featured.goalId}`}>
+                  <Text
+                    style={styles.heroTitle}
+                    testID={`wsf-community-goal-title-${featured.goalId}`}
+                    {...HEADING_2}
+                  >
                     {featured.title}
                   </Text>
                   <Text style={styles.heroMeta} testID={`wsf-community-goal-period-${featured.goalId}`}>
@@ -1301,7 +1344,7 @@ export default function CommunityPage() {
               {...({ 'data-state': 'empty' } as Record<string, unknown>)}
             >
               <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.heroTitle}>No goal running yet</Text>
+              <Text style={styles.heroTitle} {...HEADING_2}>No goal running yet</Text>
               <Text style={styles.heroBody}>
                 {isChampion
                   ? 'Start one and your community can begin contributing.'
@@ -1620,7 +1663,13 @@ export default function CommunityPage() {
         </View>
 
         <View style={styles.footer}>
-          <SecondaryLink href="/" label="Back to home" />
+          <ButtonLink
+            href="/"
+            style={FOOTER_LINK}
+            textStyle={styles.tertiaryButtonText}
+            testID="wsf-community-home-link"
+            label="Back to home"
+          />
         </View>
       </View>
     </ScrollView>
@@ -1648,6 +1697,13 @@ function Row({
 
 const NAVY = wsfTheme.colors.primary;
 const CREAM = wsfTheme.colors.background;
+// D-1. react-native-web turns accessibilityRole="header" plus a level into a
+// real <h1>/<h2> carrying exactly the styles the line already had, so these
+// add structure and change nothing on screen. `aria-level` is not in the
+// React Native prop types, hence the casts.
+const HEADING_1 = { accessibilityRole: 'header', 'aria-level': 1 } as Record<string, unknown>;
+const HEADING_2 = { accessibilityRole: 'header', 'aria-level': 2 } as Record<string, unknown>;
+
 const CARD_BORDER = '#E3E7E1';
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
@@ -1674,7 +1730,7 @@ const styles = StyleSheet.create({
     borderColor: NAVY,
     borderRadius: wsfTheme.radius.pill,
     paddingHorizontal: 14,
-    minHeight: 40,
+    minHeight: 44,
     justifyContent: 'center',
   },
   manageButtonText: { color: NAVY, fontWeight: '600', fontSize: 15 },
@@ -1745,7 +1801,7 @@ const styles = StyleSheet.create({
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
   heroFreshness: { color: HERO_MUTED, fontSize: 13 },
-  freshnessButton: { minHeight: 32, justifyContent: 'center' },
+  freshnessButton: { minHeight: 44, justifyContent: 'center' },
   heroFreshnessLink: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
   actions: { gap: 10, marginTop: 8 },
   primaryButton: {
@@ -1807,8 +1863,13 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   tertiaryButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  // The two places a tertiary link stands in for the old inline anchor: it
+  // keeps that anchor's spacing in a form shell, and its centring in the
+  // page footer.
+  shellLink: { marginTop: wsfTheme.spacing.md },
+  footerLink: { alignSelf: 'center' },
   tertiaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
-  inlineLink: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center' },
+  inlineLink: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
   inlineLinkText: { color: NAVY, fontSize: 15, fontWeight: '700' },
   card: {
     backgroundColor: wsfTheme.colors.surface,
@@ -1880,7 +1941,7 @@ const styles = StyleSheet.create({
   rowValue: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
   rowLabelQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, flexShrink: 1, minWidth: 0 },
   rowValueQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
-  detailsToggle: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', marginTop: 2 },
+  detailsToggle: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', marginTop: 2 },
   detailsToggleText: { color: NAVY, fontSize: 14, fontWeight: '700', textDecorationLine: 'underline' },
   details: { borderTopWidth: 1, borderTopColor: CARD_BORDER, paddingTop: 4 },
   body: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22 },
@@ -1889,3 +1950,11 @@ const styles = StyleSheet.create({
   inviteActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
   footer: { alignItems: 'center', paddingTop: 8 },
 });
+
+// expo-router's `Link asChild` merges the child's style into the link's by
+// OBJECT SPREAD (@radix-ui/react-slot). An array of styles survives that as
+// { 0: …, 1: … }, which react-native-web then fails to apply — it takes the
+// whole screen down. So the two composed link styles are flattened here,
+// once, rather than written as an array at the call site.
+const SHELL_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.shellLink]);
+const FOOTER_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.footerLink]);

@@ -8,6 +8,7 @@ import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
+import { communityNameType, goalTitleType, totalLineType } from '../../src/ui/displayTypeScale';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -285,9 +286,24 @@ export default function DisplayGoal() {
     ? Math.min(640, Math.round(windowWidth * 0.42))
     : Math.max(96, Math.min(320, windowWidth - 2 * 20 - 2 * 22));
 
+  // D-6 / D-7. THE DISPLAY CANNOT SCROLL. The wide canvas is a fixed
+  // two-column page and the phone page is a single unscrollable card, so a
+  // community name, goal title or unit longer than the ones on the approved
+  // fixtures does not push the page down — it grows the column past the
+  // viewport, and the wide body centres its rows, so the overflow is clipped
+  // off BOTH ends. These sizes are pure functions of the strings the server
+  // confirmed (src/ui/displayTypeScale.ts); the first tier of each scale is
+  // the approved size exactly, so every reviewed fixture is untouched, and
+  // each is applied AFTER the stylesheet entry it refines.
+  const layout = wide ? 'wide' : 'phone';
+  const titleType = goalTitleType(pulse.goalTitle, layout);
+  const communityType = communityNameType(pulse.communityDisplayName, layout);
+  const openTotalText = `${formatCount(sharedTotal)} of ${formatCount(target)} ${unit}`;
+  const closedTotalText = `${formatCount(sharedTotal)} ${unit} completed together.`;
+
   const totalLine = (
     <Text
-      style={[styles.total, wide ? styles.totalWide : null]}
+      style={[styles.total, wide ? styles.totalWide : null, totalLineType(openTotalText, layout)]}
       testID="wsf-display-total-line"
     >
       <Text testID="wsf-display-shared-total">{formatCount(sharedTotal)}</Text>
@@ -299,7 +315,10 @@ export default function DisplayGoal() {
     <View style={[styles.facts, wide ? styles.factsWide : null]}>
       {phase === 'closedReached' ? (
         <>
-          <Text style={[styles.total, wide ? styles.totalWide : null]} testID="wsf-display-total-line">
+          <Text
+            style={[styles.total, wide ? styles.totalWide : null, totalLineType(closedTotalText, layout)]}
+            testID="wsf-display-total-line"
+          >
             <Text testID="wsf-display-shared-total">{formatCount(sharedTotal)}</Text>
             {` ${unit} completed together.`}
           </Text>
@@ -330,7 +349,14 @@ export default function DisplayGoal() {
   );
 
   const freshness = (
-    <View style={[styles.freshness, stale ? styles.freshnessStale : null]} testID="wsf-display-freshness">
+    <View
+      style={[styles.freshness, stale ? styles.freshnessStale : null]}
+      testID="wsf-display-freshness"
+      // D-2. The stale pill appears WITHOUT any action by the viewer — the
+      // poll simply stopped succeeding — so nothing would announce it. Polite:
+      // it is a change of standing, not an interruption.
+      aria-live="polite"
+    >
       {stale ? (
         <Text style={[styles.freshnessText, styles.freshnessStaleText]} testID="wsf-display-stale">
           Connection interrupted
@@ -344,10 +370,20 @@ export default function DisplayGoal() {
 
   const identity = (
     <View style={[styles.identity, wide ? styles.identityWide : null]}>
-      <Text style={[styles.community, wide ? styles.communityWide : null]} testID="wsf-display-community">
+      <Text style={[styles.community, wide ? styles.communityWide : null, communityType]} testID="wsf-display-community">
         {pulse.communityDisplayName}
       </Text>
-      <Text style={[styles.goalTitle, wide ? styles.goalTitleWide : null]} testID="wsf-display-goal-title">
+      {/*
+        D-1. The goal is what this display is OF, so it is the page's one
+        top-level heading. Role and level only: the size comes from the same
+        styles as before.
+      */}
+      <Text
+        style={[styles.goalTitle, wide ? styles.goalTitleWide : null, titleType]}
+        testID="wsf-display-goal-title"
+        accessibilityRole="header"
+        {...({ 'aria-level': 1 } as Record<string, unknown>)}
+      >
         {pulse.goalTitle}
       </Text>
       <View style={styles.periodRow}>

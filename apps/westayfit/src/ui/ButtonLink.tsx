@@ -1,5 +1,5 @@
 import { Link } from 'expo-router';
-import { Pressable, Text, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 /**
  * A link that looks and lays out like a button. Expo Router's Link renders a
@@ -26,7 +26,11 @@ export function ButtonLink({
 }) {
   return (
     <Link href={href as never} asChild>
-      <Pressable style={style} testID={testID} accessibilityRole="link" onPress={onPress}>
+      {/*
+        Flattened on purpose: Link asChild merges the child's style by object
+        spread, so an ARRAY style would become {0: …, 1: …} and blank the route.
+      */}
+      <Pressable style={StyleSheet.flatten(style)} testID={testID} accessibilityRole="link" onPress={onPress}>
         <Text style={textStyle}>{label}</Text>
       </Pressable>
     </Link>
