@@ -324,7 +324,11 @@ describe('unapproved document fields never travel', () => {
     const champion = uniq('champ');
     const groupId = await seedCommunity(champion, {
       joinCode: 'SECRETJOIN',
-      memberCount: 17,
+      // Values that cannot occur in the response by accident: a two-digit
+      // count collides with the clock (the nine-field response carries ISO
+      // timestamps, and '17' matched one at 15:17 UTC), so the needles below
+      // are strings no timestamp, count or id can contain.
+      memberCount: 9040171,
       contributorCount: 9,
       ownerEmail: 'owner@example.com',
       location: 'Maple Street',
@@ -348,7 +352,7 @@ describe('unapproved document fields never travel', () => {
     const json = JSON.stringify(value);
     for (const needle of [
       'SECRETJOIN',
-      '17',
+      '9040171',
       'owner@example.com',
       'Maple Street',
       'invite',
