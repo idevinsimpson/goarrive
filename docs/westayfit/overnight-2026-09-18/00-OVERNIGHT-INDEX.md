@@ -18,7 +18,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | 4 | Display + authorization race torture | done | `0b0797c` | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
 | 5 | Accessibility + responsive QA | done | `963d0df` (+ index 9669c53) | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
 | 6 | Performance + operational quality | done | `6a0a776` | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
-| 7 | Cross-surface product quality audit | done | TASK7_HEAD | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
+| 7 | Cross-surface product quality audit | done | `97e84ab` | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
 | 8 | Final candidate hardening + evidence pack | pending | | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
 
 Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three surfaces, the journey strip, the honest states, reflow thumbnails) and `OVERNIGHT-VISUAL-BOARD-WIDE.png` (1440×900 display states). Both rendered from the local emulator build with synthetic fixtures.
