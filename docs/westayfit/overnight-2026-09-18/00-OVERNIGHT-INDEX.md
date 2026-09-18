@@ -19,7 +19,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | 5 | Accessibility + responsive QA | done | `963d0df` (+ index 9669c53) | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
 | 6 | Performance + operational quality | done | `6a0a776` | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
 | 7 | Cross-surface product quality audit | done | `97e84ab` | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
-| 8 | Final candidate hardening + evidence pack | pending | | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
+| 8 | Final candidate hardening + evidence pack | done | `96d0380` (code) | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
 
 Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three surfaces, the journey strip, the honest states, reflow thumbnails) and `OVERNIGHT-VISUAL-BOARD-WIDE.png` (1440×900 display states). Both rendered from the local emulator build with synthetic fixtures.
 
@@ -87,6 +87,15 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three
 - Receipts: `ui-matrix` 2/2 + 12 regression specs green; Vitest 233; TS + build clean.
 - ChatGPT review instruction: none present (checked at task start and at close).
 
+## Task 8 — Final candidate hardening + evidence pack
+
+- Complete battery from a clean state on the final code head `96d0380`: app TS clean; Vitest 233/16 files; complete browser suite 33 specs **122/122**; functions build clean; callable 238/18 files; rules 22; deploy-config 8; **`gate1.sh` CLEAR** (31/31 browser step).
+- The first battery pass on `bafef52` caught one real defect through the e4-a1 console-error assertion: **D-31** the display reported a React hydration mismatch (#418) on wide clients because the static export carries the phone loading tree; fixed by choosing the wide layout only after hydration. One transient 30 s timeout (community goal seam) under full parallel load passed on the re-run and in every per-spec run; recorded.
+- Diff audit vs base: 79 files, all under `apps/westayfit`, `functions-westayfit`, `scripts/westayfit/brand`, the overnight docs folder, plus one `.gitignore` line. Nothing under `apps/goarrive`, `functions/`, rules/indexes, `.github`, the staging workflow, IAM/WIF, `approved-candidate.json` or production config.
+- Receipt: [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md); harness delta: [hosted-harness-compat-delta.md](hosted-harness-compat-delta.md).
+- ChatGPT review instruction: none appeared during the entire run (checked at the start and close of every task).
+- **PR #327 remains a DRAFT. Nothing merged or deployed.**
+
 ## Defect ledger (running)
 
 | # | Found in | Defect | Class | Status |
@@ -122,3 +131,4 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three
 | D-28 | Task 7 | raw SDK error sentence rendered to members on Community Home and contribute | copy / honesty | fixed |
 | D-29 | Task 7 | Community Home had no reached signal; receipt lacked near-goal emphasis; closed hero printed the percent twice; polled context had no freshness line; postTarget subline wording; phone display chrome flip on load | cross-surface consistency | fixed + tests |
 | D-30 | Task 7 | `formatPeriod` dropped the year for windows in another year | dates truth | fixed + unit tests |
+| D-31 | Task 8 | display hydration mismatch (React #418) on wide clients: static export carries the phone loading tree | frontend / ops | fixed (wide layout chosen after hydration) + caught by e4-a1's console assertion |
