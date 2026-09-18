@@ -53,7 +53,8 @@
       { "source": "/community/**", "destination": "/community/__dynamic.html" },
       { "source": "/join/**", "destination": "/join/__dynamic.html" },
       { "source": "/contribute/**", "destination": "/contribute/__dynamic.html" },
-      { "source": "/display/**", "destination": "/display/__dynamic.html" }
+      { "source": "/display/**", "destination": "/display/__dynamic.html" },
+      { "source": "/kiosk/**", "destination": "/kiosk/__dynamic.html" }
     ],
     "headers": [
       {

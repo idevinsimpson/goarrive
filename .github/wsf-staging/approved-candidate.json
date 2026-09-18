@@ -13,9 +13,9 @@
     "Future acceptances are a one-line edit here, reviewed like any other."
   ],
   "project": "westayfit-staging",
-  "approvedAppSha": "8e1a3ed485a5c0eadbcb23c1f35becad455923c7",
-  "packageLabel": "Package E \u2014 per-goal aggregate display authorization",
-  "sourceAcceptedOn": "2026-09-16",
+  "approvedAppSha": "0a062015617fcaa9de53f6f1ea56bba015090231",
+  "packageLabel": "UI member experience + D-5 status-aware membership rule + D-1 single signup navigation + uncredited target-crossing event",
+  "sourceAcceptedOn": "2026-09-18",
   "expectedPriorFunctions": 23,
-  "_expectedPriorFunctionsNote": "The WSF inventory staging is expected to carry BEFORE this deployment. This continuation is approved against the exact 23-function staging state created by partial Package E run 35231922274/35235969855 (the original 22 pre-Package-E functions plus wsfSetGoalDisplayAuthorization), independently verified after the single-service Invoker-IAM-check-disabled transport correction on wsfsetgoaldisplayauthorization. Reviewed per candidate; the next package will have a different prior count."
+  "_expectedPriorFunctionsNote": "The WSF inventory staging is expected to carry BEFORE this deployment: the same 23-function state Package E left (22 pre-Package-E functions plus wsfSetGoalDisplayAuthorization). This candidate adds NO function: wsfGoalPulse keeps its nine-field contract, wsfContribute/wsfListGoals gain fields only. Reviewed per candidate; the next package will have a different prior count."
 }

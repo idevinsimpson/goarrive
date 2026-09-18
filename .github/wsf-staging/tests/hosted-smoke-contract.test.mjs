@@ -69,6 +69,182 @@ test('no fixed sleep was used as the fix', () => {
   assert.equal(/setTimeout/.test(code), false, 'the uncertain case must not wait on a fixed sleep');
 });
 
+/**
+ * The UI-candidate compatibility delta (sections A–G). These are the parts of
+ * the smoke that a future edit could quietly undo without any local suite
+ * noticing, because they only fail against the deployed app: the Manage sheet
+ * that now carries the Champion controls, the approved public-pulse shape, and
+ * the refusal assertions that must stay paired with every refusal check.
+ */
+test('every Champion arrival on Community Home opens the Manage sheet before touching a display control', () => {
+  const lines = SMOKE.split('\n');
+  let arrivals = 0;
+  lines.forEach((line, i) => {
+    const arrival =
+      /await champion\.goto\(`\$\{BASE_URL\}\/community\//.test(line) || /await champion\.reload\(\);/.test(line);
+    if (!arrival) return;
+    arrivals += 1;
+    assert.match(
+      lines[i + 1] ?? '',
+      /await openManage\(champion\);/,
+      `line ${i + 1} navigates the Champion to Community Home without opening the Manage sheet`
+    );
+  });
+  assert.ok(arrivals >= 4, `expected every Champion arrival to be covered, saw ${arrivals}`);
+  assert.match(SMOKE, /getByTestId\('wsf-community-manage'\)/);
+  assert.match(SMOKE, /getByTestId\('wsf-community-manage-panel'\)/);
+});
+
+test('the approved public goal-pulse shape is pinned as a whole key set, not as a denylist', () => {
+  const approved = SMOKE.match(/const APPROVED_PULSE_KEYS = \[([^\]]*)\]/);
+  assert.ok(approved, 'APPROVED_PULSE_KEYS missing');
+  const keys = [...approved[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(keys, [
+    'communityDisplayName', 'endsAt', 'goalTitle', 'sharedTotal',
+    'startsAt', 'status', 'target', 'timezone', 'unit',
+  ]);
+  assert.deepEqual(keys, [...keys].sort(), 'the approved list is compared against a sorted key list');
+  assert.match(SMOKE, /JSON\.stringify\(pulseKeys\) === JSON\.stringify\(APPROVED_PULSE_KEYS\)/);
+  // The pre-existing narrower assertion is kept, not replaced by the shape check.
+  assert.match(SMOKE, /!\('contributorCount' in publicPulseData\)/);
+  for (const leaked of ['joinCode', 'joinPolicy', 'groupType', 'createdByUserId', 'memberCount', 'contributorCount']) {
+    assert.ok(SMOKE.includes(`'${leaked}'`), `the named no-leak list lost ${leaked}`);
+  }
+});
+
+test('every display refusal is also checked for a context leak', () => {
+  const refusals = SMOKE.split("visible(display.getByTestId('wsf-display-not-available')").length - 1;
+  const leakChecks = SMOKE.split('assertNoContextLeak(display').length - 1;
+  assert.ok(refusals > 0, 'the refusal checks disappeared');
+  assert.equal(leakChecks, refusals, `${refusals} refusal checks but ${leakChecks} no-leak checks`);
+  assert.match(SMOKE, /getByText\(fx\.communityDisplayName\)\.count\(\)\) === 0/);
+  assert.match(SMOKE, /getByText\(`Package E \$\{fx\.label\} goal 1`\)\.count\(\)\) === 0/);
+});
+
+test('the display window is pinned in the goal\u2019s own zone, recomputed on every poll', () => {
+  assert.match(SMOKE, /const GOAL_ZONE = 'America\/New_York';/);
+  assert.match(SMOKE, /timezone: 'America\/New_York',/, 'the fixture must seed the zone the labels are pinned to');
+  assert.match(SMOKE, /expectedActiveWindowLabel\(fx\.endsAtIso\)/);
+  assert.match(SMOKE, /expectedPeriodLabel\(fx\.startsAtIso, fx\.endsAtIso\)/);
+  // A captured expectation would be the stale side of a midnight boundary.
+  assert.match(SMOKE, /async function textEqualsLive\(locator, compute,/);
+  assert.match(SMOKE, /\(text\) => text\.trim\(\) === compute\(\)/);
+});
+
+test('the member-facing copy matches the approved UI', () => {
+  for (const kept of [
+    "textEquals(member.getByTestId('wsf-contribute-own-credit'), 'Your total on this goal: 137 squats')",
+    "textEquals(member.getByTestId('wsf-contribute-shared-total'), '137 of 5,000 squats')",
+    "textEquals(state, 'Public display is not authorized for this goal.')",
+    "textContains(state, 'Public display is authorized for this goal.')",
+    "textContains(champion.getByTestId('wsf-goal-display-auth-confirmed-absent'), 'Public display has been removed')",
+  ]) assert.ok(SMOKE.includes(kept), `missing: ${kept}`);
+});
+
+test('the Champion-only boundary covers the surface that now carries the controls', () => {
+  assert.match(SMOKE, /getByTestId\(`wsf-goal-display-auth-\$\{goalId\}`\)\.count\(\)\) === 0/);
+  assert.match(SMOKE, /getByTestId\('wsf-community-manage'\)\.count\(\)\) === 0/);
+});
+
+/**
+ * D-5 and D-1. Two cases that reach parts of the deployed system nothing else
+ * in this suite touches: the Firestore ruleset (which every callable path
+ * bypasses) and the signup gate (which every other case skips by minting its
+ * accounts through the admin API). Both handle material the run must not keep.
+ */
+test('both new cases exist and are registered in the suite', () => {
+  for (const name of ['clientReadGroup', 'caseD5MembershipStatusRules', 'caseD1SignupGate']) {
+    assert.ok(SMOKE.includes(`async function ${name}(`), `${name} is missing`);
+  }
+  const main = SMOKE.slice(SMOKE.indexOf('browser = await chromium.launch('));
+  for (const call of ['await caseD5MembershipStatusRules();', 'await caseD1SignupGate(browser);']) {
+    assert.ok(main.includes(call), `the suite never runs ${call}`);
+  }
+  for (const name of ['membership status rules (D-5)', 'signup verification gate (D-1)']) {
+    assert.ok(SMOKE.includes(`check('${name}', 'PASS'`), `check ${name} missing`);
+  }
+});
+
+test('the D-5 read is made with an end-user ID token, never the admin OAuth token', () => {
+  const fn = SMOKE.slice(
+    SMOKE.indexOf('async function clientReadGroup('),
+    SMOKE.indexOf('async function caseD5MembershipStatusRules(')
+  );
+  assert.match(fn, /bearer: idToken/, 'the client read must carry the member\u2019s own ID token');
+  assert.equal(/oauth:\s*true/.test(fn), false, 'a rules assertion must not be made on admin privilege');
+  // The two identities are kept apart at the transport, not by convention.
+  assert.match(SMOKE, /if \(oauth && bearer\) throw new Error/);
+  const body = fnBody('caseD5MembershipStatusRules');
+  assert.match(body, /signInToken\(fx\.member\)/);
+  assert.match(body, /signInToken\(fx\.outsider\)/);
+  assert.equal(/oauth:\s*true/.test(body), false, 'the case itself must not read the group with the admin token');
+});
+
+test('D-5 uses the membership status strings the product writes, and names the cause when they are not enforced', () => {
+  assert.match(SMOKE, /const MEMBERSHIP_ACTIVE = 'active';/);
+  assert.match(SMOKE, /const MEMBERSHIP_REMOVED = 'removed';/);
+  assert.match(SMOKE, /const MEMBERSHIP_DEPARTED = 'departed';/);
+  const body = fnBody('caseD5MembershipStatusRules');
+  assert.match(body, /\[MEMBERSHIP_REMOVED, MEMBERSHIP_DEPARTED\]/);
+  assert.match(
+    body,
+    /staging ruleset is not status-aware \(D-5 rules not deployed to \$\{PROJECT_ID\}\)/,
+    'a 200 on a non-active membership must name its cause'
+  );
+  // The refusal is pinned to the verdict, not merely to "not 200".
+  assert.match(body, /=== 403 && after\.body\?\.error\?\.status === 'PERMISSION_DENIED'/);
+  assert.match(body, /asOutsider\.status === 403 && asOutsider\.body\?\.error\?\.status === 'PERMISSION_DENIED'/);
+});
+
+test('the join code is asserted by existence only and never emitted', () => {
+  const lines = SMOKE.split('\n');
+  let seen = 0;
+  lines.forEach((line, i) => {
+    if (!/joinCode/i.test(line)) return;
+    seen += 1;
+    assert.equal(
+      /console\.|diagnostics\.push|results\.push|check\(|snap\(|writeFileSync/.test(line),
+      false,
+      `line ${i + 1} carries a join code into output`
+    );
+    assert.equal(
+      /(?:const|let|var)\s+\w+\s*=[^=].*joinCode/.test(line),
+      false,
+      `line ${i + 1} reads the join code into a variable`
+    );
+  });
+  assert.ok(seen > 0, 'the join code assertions disappeared');
+  assert.match(SMOKE, /fields\?\.joinCode !== undefined/, 'the 200 case must assert presence, not value');
+  assert.match(SMOKE, /REDACTED_JOIN_CODE/, 'sanitize must redact a join code out of any diagnostic');
+});
+
+test('the signup gate case sends no mail and owns the account it creates', () => {
+  const body = fnBody('caseD1SignupGate');
+  assert.match(body, /route\('\*\*\/wsfSendVerificationEmail'/, 'the send callable must be routed');
+  assert.match(body, /status: 503/);
+  assert.equal(/route\.continue\(\)/.test(body), false, 'the send callable must never be allowed through');
+  // cleanup-synthetic.mjs validates an Auth account by its address before it
+  // will delete it, so the address shape is part of the cleanup contract.
+  assert.match(body, /`wsf-\$\{suffix\}@example\.com`/);
+  assert.match(body, /\$\{runTag\}-d1signup-/);
+  assert.match(body, /trackUser\(uid\)/);
+  assert.match(body, /synthetic\.users\.push\(uid\)/);
+  // The lookup runs in a finally, so a failed gate assertion still hands the
+  // account to cleanup.
+  assert.ok(body.indexOf('} finally {') < body.indexOf('trackUser(uid)'), 'the account must be tracked from a finally');
+});
+
+test('the D-1 gate is asserted to HOLD, not merely to appear', () => {
+  const body = fnBody('caseD1SignupGate');
+  assert.match(body, /getByTestId\('wsf-signup-displayName'\)/);
+  assert.match(body, /getByTestId\('wsf-signup-email'\)/);
+  assert.match(body, /getByTestId\('wsf-signup-password'\)/);
+  assert.match(body, /getByTestId\('wsf-signup-submit'\)\.click\(\)/);
+  assert.match(body, /visible\(page\.getByTestId\('wsf-verify'\), 30_000\)/);
+  assert.match(body, /staysAbsent\(page\.getByTestId\('wsf-signup'\), 6_000\)/);
+  assert.match(body, /page\.url\(\)\.includes\('\/verify-email'\)/);
+});
+
 test('the untouched cases still carry their acceptance checks', () => {
   for (const name of ['round-trip display authorization', 'display session lifecycle', 'closed-goal authorization lifecycle',
     'legacy challenge pulse boundary', 'protected own-credit read', 'former Member history and replay',
