@@ -1226,6 +1226,9 @@ function pulseCacheSet(challengeId: string, now: number, value: PulseTotals): vo
     const oldest = pulseCache.keys().next().value;
     if (oldest !== undefined) pulseCache.delete(oldest);
   }
+  // Map.set on a live key keeps its position; delete first so a re-set
+  // entry moves to the tail and the insertion-order eviction stays LRU.
+  pulseCache.delete(challengeId);
   pulseCache.set(challengeId, { ts: now, value });
 }
 
@@ -2280,6 +2283,8 @@ function goalPulseCacheSet(
     const oldest = goalPulseCache.keys().next().value;
     if (oldest !== undefined) goalPulseCache.delete(oldest);
   }
+  // Same as pulseCacheSet: delete before set so eviction order stays LRU.
+  goalPulseCache.delete(goalId);
   goalPulseCache.set(goalId, { ts: now, value });
 }
 
@@ -2842,8 +2847,6 @@ type GoalPulseRequest = { goalId?: unknown };
 export const wsfGoalPulse = onCall<GoalPulseRequest>(
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<GoalPulseTotals> => {
-    const now = Date.now();
-
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
       throw new HttpsError('invalid-argument', 'goalId is required.');
@@ -2896,6 +2899,10 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     // correct: a display can never be served a member-shaped entry missing
     // its context, and an unentitled caller never reaches the lookup.
 
+    // Stamped when the cache is consulted, after the access reads: a slow
+    // read must not stretch an entry's freshness past the TTL the display's
+    // poll is matched to.
+    const now = Date.now();
     const cached = goalPulseCacheGet(goalId, now);
     if (cached) return cached;
 
