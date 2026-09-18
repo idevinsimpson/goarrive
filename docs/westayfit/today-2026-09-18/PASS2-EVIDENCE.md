@@ -7,9 +7,9 @@ deployment authorization.
 
 | Field | Value |
 |---|---|
-| Candidate C | `__SHA__` on `claude/wsf-ui-member-experience` (pass 1 `a45ff2e` + pass 2 `__SHA__`) |
+| Candidate C | `80c26ffcf426306264b71d5a8388d71225dc9f3d` on `claude/wsf-ui-member-experience` (pass 1 `a45ff2e` + pass 2 `80c26ffcf426306264b71d5a8388d71225dc9f3d`) |
 | Deployed on staging today | still `65d258d` (candidate B); nothing in this document is deployed |
-| Approval file on `main` | `.github/wsf-staging/approved-candidate.json` pins `65d258db…`; the one-line change to `__SHA__` is proposed as an ops PR, not merged |
+| Approval file on `main` | `.github/wsf-staging/approved-candidate.json` pins `65d258db…`; the one-line change to `80c26ffcf426306264b71d5a8388d71225dc9f3d` is proposed as an ops PR, not merged |
 | Owner action needed | authorize the approval PR merge and ONE `wsf-staging-deploy` dispatch |
 
 ## Completion gate
@@ -26,7 +26,7 @@ deployment authorization.
 | Adversarial visual review | visual/a11y lens over every capture: 11 findings, all confirmed ones fixed and re-captured |
 | Accessibility review | 44 px targets, focus ring, animation, placeholder contrast and roles checked by the a11y lens and by the `ui-a11y*` specs in the suite |
 | Every confirmed material finding fixed and retested | 10 of 12 confirmed findings applied (2 were integrator-side: reverting run-written PNGs, confirming the copy-only edits to pass-1 never-edit files); full suite re-run after fixes |
-| Exact final SHA | `__SHA__` |
+| Exact final SHA | `80c26ffcf426306264b71d5a8388d71225dc9f3d` |
 | Changed-file summary | below |
 
 ## What changed in pass 2 (on top of pass 1)
