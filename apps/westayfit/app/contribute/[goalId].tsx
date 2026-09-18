@@ -23,13 +23,18 @@ import {
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import {
+  canAddMore,
   classifyContributeError,
   parseEntry,
+  recordMoreLabel,
   refusalCopy,
+  repeatNotice,
+  resolveRepeatPolicy,
   resultCopy,
   resultVariant,
   stepEntry,
   type RefusalReason,
+  type RepeatPolicy,
 } from '../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
@@ -113,7 +118,18 @@ type ContributeResult = {
 // `activityGuideKey` is the goal's optional per-goal guide override. It rides
 // this authenticated member-only read, NOT wsfGoalPulse: the pulse is the
 // authorized display payload and its nine fields are fixed.
-type MyContribution = { ownCredit: number; unit: string; activityGuideKey?: string };
+//
+// It also carries the goal's repeat policy. That is deliberate: this is the
+// MEMBER-AUTHORIZED goal read this screen already makes, and the public
+// wsfGoalPulse response is left exactly as it was. repeatPolicy is optional
+// here only so a response from a server that predates the field still parses
+// — resolveRepeatPolicy turns anything but 'multiple' into 'once'.
+type MyContribution = {
+  ownCredit: number;
+  unit: string;
+  activityGuideKey?: string;
+  repeatPolicy?: unknown;
+};
 
 type LoadState =
   | { kind: 'loading' }
@@ -200,6 +216,11 @@ export default function ContributeToGoal() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ContributeResult | null>(null);
+  // The goal's repeat policy, from the member-authorized read. 'once' until
+  // the server answers — not the resolved default, because before the answer
+  // arrives the screen knows nothing. Nothing that depends on it renders
+  // before the load completes, so this value is never the one on screen.
+  const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>('once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
@@ -257,6 +278,7 @@ export default function ContributeToGoal() {
     // not an error, not a refusal, and not the previous ready-state totals.
     setPending(null);
     setLastResult(null);
+    setRepeatPolicy('once');
     setLegacyOrphan(null);
     setRefusal(null);
     sharedBeforeRef.current = null;
@@ -337,6 +359,7 @@ export default function ContributeToGoal() {
         setActivityGuideKey(
           typeof mineRes.data.activityGuideKey === 'string' ? mineRes.data.activityGuideKey : null
         );
+        setRepeatPolicy(resolveRepeatPolicy(mineRes.data.repeatPolicy));
         setPulseAt(new Date());
         if (pulse.status !== 'active') {
           setState({ kind: 'closed', pulse, ownCredit });
@@ -610,6 +633,24 @@ export default function ContributeToGoal() {
   }, [state.kind, entry]);
 
   const onEdit = useCallback(() => {
+    setStep('enter');
+  }, []);
+
+  // A real second contribution, offered only under 'multiple'. It returns the
+  // screen to entry with NOTHING carried over from the confirmed one: no
+  // count, no attempt id, no captured "before". The next Record mints a fresh
+  // attemptId, which is what makes it a different attempt rather than a replay
+  // of the one just recorded.
+  const onAddMore = useCallback(() => {
+    attemptRef.current = null;
+    inFlightRef.current = false;
+    sharedBeforeRef.current = null;
+    setLastResult(null);
+    setRefusal(null);
+    setEntry('');
+    setEntryError(null);
+    setReviewCount(null);
+    setSubmitting(false);
     setStep('enter');
   }, []);
 
@@ -1115,20 +1156,43 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish('confirmed')
           ) : (
+            <>
+            {/*
+              REPEAT POLICY. The goal now publishes one, so the result can offer
+              a second contribution where the server will actually accept it —
+              'multiple', goal still active, and a receipt that carried shared
+              state. Under 'once' this is absent and the result ends where it
+              always did.
+
+              It carries Community Home's existing wording, "Record more {unit}",
+              rather than a second name for the same act. The two are never on
+              screen together — they are on different screens — and Community
+              Home now withholds its own offer on a goal this member has already
+              finished, so the product makes the offer once or not at all.
+            */}
+            {canAddMore(repeatPolicy, r) ? (
+              <Pressable
+                onPress={onAddMore}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                testID="wsf-contribute-record-more"
+              >
+                <Text style={styles.primaryButtonText}>
+                  {recordMoreLabel(hasShared ? r.unit : unitKnown)}
+                </Text>
+              </Pressable>
+            ) : null}
             <ButtonLink
               href={hasShared ? backHref : '/'}
-              style={styles.primaryButton}
-              textStyle={styles.primaryButtonText}
+              style={canAddMore(repeatPolicy, r) ? styles.secondaryButton : styles.primaryButton}
+              textStyle={
+                canAddMore(repeatPolicy, r) ? styles.secondaryButtonText : styles.primaryButtonText
+              }
               testID="wsf-contribute-back"
               label={hasShared ? backLabel : 'Back to home'}
             />
+            </>
           )}
-          {/*
-            DESIGN / DATA GAP — REPEAT POLICY: no "Add another contribution"
-            here. The goal schema carries no published repeat rule, so the
-            result does not encourage an immediate second attempt. The
-            community page's goal action remains available.
-          */}
         </View>
         {renderTestNote()}
       </>,
@@ -1432,7 +1496,9 @@ export default function ContributeToGoal() {
           <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
             {`${formatCount(reviewCount)} ${unit}`}
           </Text>
-          <Text style={styles.body}>This will be recorded once toward this goal.</Text>
+          <Text style={styles.body} testID="wsf-contribute-repeat-notice">
+            {repeatNotice(repeatPolicy)}
+          </Text>
           <View style={styles.actions}>
             <Pressable
               onPress={onRecord}

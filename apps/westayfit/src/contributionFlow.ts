@@ -10,6 +10,71 @@ import { formatCount, isReached, totalOfTargetLabel } from './ui/progressFormat'
 
 export const MAX_COUNT = 100_000;
 
+// ---- repeat policy ----------------------------------------------------------
+
+/**
+ * How many times one member may contribute to one goal. Mirrors
+ * GoalRepeatPolicy in functions-westayfit and is enforced there; the screen
+ * only uses it to say what is true before the member acts.
+ *
+ * It arrives on the member-authorized wsfMyContribution read, never on the
+ * public pulse, whose response is unchanged.
+ */
+export type RepeatPolicy = 'once' | 'multiple';
+
+/**
+ * Mirrors goalRepeatPolicy() in functions-westayfit EXACTLY, so the screen
+ * never promises something the server would refuse, and never withholds
+ * something the server would allow:
+ *
+ *   absent / null  -> 'multiple'  (what the server has always done)
+ *   'once'         -> 'once'
+ *   'multiple'     -> 'multiple'
+ *   anything else  -> 'once'      (stricter; an unrecognised value never widens)
+ *
+ * "Not there" and "there but unrecognised" are different facts with different
+ * answers. If this table and the server's ever diverge, the server wins and
+ * the member sees a refusal — which is why they are written the same way.
+ */
+export function resolveRepeatPolicy(value: unknown): RepeatPolicy {
+  if (value === undefined || value === null) return 'multiple';
+  if (value === 'multiple') return 'multiple';
+  return 'once';
+}
+
+/** The review screen's one-line statement of what recording will do. */
+export function repeatNotice(policy: RepeatPolicy): string {
+  return policy === 'multiple'
+    ? 'This will be recorded toward this goal. You can add more later.'
+    : 'This will be recorded once toward this goal.';
+}
+
+/**
+ * Whether a confirmed result may offer another contribution.
+ *
+ * Three conditions, all of them things the SERVER has already said: the goal
+ * takes more than one contribution per member, the goal is still active, and
+ * the receipt carried shared state at all — a receipt without it belongs to
+ * someone this account may no longer contribute as, and inviting them to try
+ * again would be inviting a refusal.
+ */
+export function canAddMore(policy: RepeatPolicy, r: ContributeReceipt): boolean {
+  return policy === 'multiple' && r.status === 'active';
+}
+
+/**
+ * The label on that offer.
+ *
+ * It is deliberately the SAME sentence Community Home already uses for the
+ * same act ("Record more {unit}", app/community/[groupId]/index.tsx). One act,
+ * one name: a member who reaches a second contribution from the community page
+ * and a member who reaches it from their own receipt are doing the same thing,
+ * and the product should not have two words for it.
+ */
+export function recordMoreLabel(unit: string | null): string {
+  return `Record more ${unit ?? ''}`.trim();
+}
+
 // ---- entry ------------------------------------------------------------------
 
 export type ParsedEntry = { ok: true; count: number } | { ok: false; message: string };
@@ -42,6 +107,7 @@ export type RefusalReason =
   | 'closed'
   | 'notStarted'
   | 'windowEnded'
+  | 'alreadyContributed'
   | 'notMember'
   | 'notFound'
   | 'signedOut'
@@ -73,6 +139,12 @@ export function classifyContributeError(e: unknown): ContributeFailure {
       const m = message.toLowerCase();
       if (m.includes('not started')) return { kind: 'refused', reason: 'notStarted' };
       if (m.includes('window')) return { kind: 'refused', reason: 'windowEnded' };
+      // A goal whose repeat policy is 'once', already satisfied by this
+      // member. Distinct from a closed goal: the goal is fine, this member is
+      // simply finished with it.
+      if (m.includes('one contribution')) {
+        return { kind: 'refused', reason: 'alreadyContributed' };
+      }
       return { kind: 'refused', reason: 'closed' };
     }
     case 'functions/permission-denied':
@@ -101,6 +173,11 @@ export function refusalCopy(
       return {
         headline: 'This goal is no longer accepting contributions.',
         body: `Your ${effort} were not recorded. The goal closed before this contribution reached it.`,
+      };
+    case 'alreadyContributed':
+      return {
+        headline: 'This goal takes one contribution from each member.',
+        body: `Your ${effort} were not recorded. Your earlier contribution to this goal still counts.`,
       };
     case 'notStarted':
       return {

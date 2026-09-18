@@ -2115,6 +2115,23 @@ function recentAdditionsRef(goalId: string) {
     .collection(RECENT_ADDITIONS_COLLECTION);
 }
 
+/**
+ * How many times ONE member may contribute to ONE goal.
+ *
+ *   'once'     — a member's contribution to this goal is recorded once. A
+ *                second attempt with a NEW attemptId is refused; replaying a
+ *                KNOWN attemptId still returns its original receipt.
+ *   'multiple' — a member may record further contributions to the same goal.
+ *                Each is idempotent by its own attemptId and each accumulates
+ *                into own credit and the shared total.
+ *
+ * Nothing is backfilled and nothing is migrated: every read goes through
+ * goalRepeatPolicy(), never the field directly. See that function for the
+ * resolution table, including what an ABSENT field means — which is 'multiple',
+ * because that is what this server has always done.
+ */
+type GoalRepeatPolicy = 'once' | 'multiple';
+
 type GoalDoc = {
   ownerUid: string;
   communityGroupId: string;
@@ -2156,7 +2173,7 @@ type GoalDoc = {
    * uid is stored here: the shared display must not be able to name a person.
    */
   reachedAt?: FirebaseFirestore.Timestamp;
-  reachedAttemptId?: string;
+  reachedAttemptId?: string | null;
   reachedSharedTotal?: number;
   /**
    * Optional per-goal counting-guide override. The client keys its counting
@@ -2169,6 +2186,17 @@ type GoalDoc = {
    * this field existed does. Nothing is backfilled.
    */
   activityGuideKey?: string;
+  /**
+   * Set by wsfCreateGoal on every goal created since the crossing event
+   * exists. A goal that carries it may record an UNCREDITED event (reachedAt
+   * and reachedSharedTotal, reachedAttemptId null) when the total is observed
+   * at or beyond the target with no attributable attempt — the only way a
+   * crossing can be missed is several attempts landing in the same instant at
+   * the line. A goal without it (created before this field) never gets an
+   * uncredited event: it may already have been beyond its target for weeks,
+   * and "reached today" would be a false date.
+   */
+  crossingTracked?: boolean;
   /**
    * PACKAGE E. Explicit permission for ONE thing: this goal's approved
    * aggregate progress may be presented through the authorized unauthenticated
@@ -2187,6 +2215,10 @@ type GoalDoc = {
   aggregateDisplayAuthorized?: boolean;
   aggregateDisplayAuthorizedAt?: FirebaseFirestore.Timestamp;
   aggregateDisplayAuthorizedBy?: string;
+  /** See goalRepeatPolicy() for the resolution table. Absent means 'multiple'. */
+  repeatPolicy?: GoalRepeatPolicy;
+  repeatPolicyUpdatedAt?: FirebaseFirestore.Timestamp;
+  repeatPolicyUpdatedBy?: string;
 };
 
 /**
@@ -2198,6 +2230,38 @@ type GoalDoc = {
  */
 function isAggregateDisplayAuthorized(goal: Pick<GoalDoc, 'aggregateDisplayAuthorized'>): boolean {
   return goal.aggregateDisplayAuthorized === true;
+}
+
+/**
+ * The ONLY way this package asks "how often may one member contribute?".
+ *
+ * THE RESOLUTION TABLE — all four cases, and the reason for each:
+ *
+ *   absent / null  -> 'multiple'  Every goal written before this field existed
+ *                                 accepts repeat contributions from the same
+ *                                 member today: wsfContribute's only
+ *                                 uniqueness is (goal, uid, attemptId), and a
+ *                                 second attemptId has always been a second
+ *                                 contribution. Resolving absence to 'once'
+ *                                 would silently take that away from live
+ *                                 goals. Absence therefore means "unchanged".
+ *   'once'         -> 'once'      An explicit, deliberate restriction.
+ *   'multiple'     -> 'multiple'  An explicit, deliberate permission.
+ *   anything else  -> 'once'      A typo, a hand edit, an import, or a literal
+ *                                 a later build introduced. A value this build
+ *                                 does not understand must never widen what a
+ *                                 member may do, so it lands on the stricter
+ *                                 policy — NOT on the absent-field default.
+ *
+ * The distinction in the last two rows is the whole point: "the field is not
+ * there" and "the field says something I don't recognise" are different facts
+ * and get different answers.
+ */
+function goalRepeatPolicy(goal: Pick<GoalDoc, 'repeatPolicy'>): GoalRepeatPolicy {
+  const raw = goal.repeatPolicy as unknown;
+  if (raw === undefined || raw === null) return 'multiple';
+  if (raw === 'multiple') return 'multiple';
+  return 'once';
 }
 
 /**
@@ -2420,6 +2484,14 @@ function normalizeActivityGuideKey(v: unknown): string | null | undefined {
   return trimmed;
 }
 
+// A goal's repeat policy as supplied by a caller. Only the two literals are
+// accepted — an unknown string is an error at the boundary rather than a value
+// that silently resolves to 'once' inside a goal document.
+function normalizeRepeatPolicy(v: unknown): GoalRepeatPolicy | null {
+  if (v === 'once' || v === 'multiple') return v;
+  return null;
+}
+
 function normalizeAttemptId(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
@@ -2525,6 +2597,7 @@ type CreateGoalRequest = {
   endsAt?: unknown; // ISO 8601
   timezone?: unknown; // IANA
   activityGuideKey?: unknown; // optional counting-guide override, 1..40 chars
+  repeatPolicy?: unknown; // 'once' | 'multiple'; absent means 'once'
 };
 
 type CreateGoalResponse = { goalId: string };
@@ -2606,6 +2679,25 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         'activityGuideKey, when provided, must be 1..40 chars; no ASCII control characters.'
       );
     }
+    // Optional in the request, but NEVER absent on a goal this callable
+    // writes: omitting it records an explicit 'once'. A new goal states its
+    // policy rather than inheriting the absent-field default, so
+    // goalRepeatPolicy()'s 'absent means multiple' row only ever applies to
+    // goals written before this field existed. Supplying anything other than
+    // the two literals is refused here rather than written and reinterpreted
+    // later.
+    let repeatPolicy: GoalRepeatPolicy = 'once';
+    const rawRepeatPolicy = request.data?.repeatPolicy;
+    if (rawRepeatPolicy !== undefined && rawRepeatPolicy !== null) {
+      const normalizedRepeatPolicy = normalizeRepeatPolicy(rawRepeatPolicy);
+      if (!normalizedRepeatPolicy) {
+        throw new HttpsError(
+          'invalid-argument',
+          "repeatPolicy must be 'once' or 'multiple'."
+        );
+      }
+      repeatPolicy = normalizedRepeatPolicy;
+    }
 
     const db = getFirestore();
     const goalRef = db.collection('wsfGoals').doc();
@@ -2640,6 +2732,7 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         startsAt: Timestamp.fromDate(startsAtDate),
         endsAt: Timestamp.fromDate(endsAtDate),
         timezone,
+        repeatPolicy,
         createdAt: FieldValue.serverTimestamp(),
       });
     });
@@ -2755,7 +2848,9 @@ export const wsfContribute = onCall<ContributeRequest>(
     const {
       addedCount,
       alreadyRecorded,
-      crossedTarget,
+      crossedTarget: storedCrossedTarget,
+      goalHadNoEvent,
+      goalTracked,
       goalTarget,
       goalUnit,
       goalStatus,
@@ -2816,6 +2911,8 @@ export const wsfContribute = onCall<ContributeRequest>(
             // An attempt recorded before this field existed carries no value
             // and is reported as false — it is not evidence of a crossing.
             crossedTarget: prev.crossedTarget === true,
+            goalHadNoEvent: false,
+            goalTracked: goal.crossingTracked === true,
             goalTarget: goal.target,
             goalUnit: goal.unit,
             goalStatus: goal.status,
@@ -2864,53 +2961,48 @@ export const wsfContribute = onCall<ContributeRequest>(
           );
         }
 
-        //   4. THE TARGET-CROSSING EVENT, decided here and nowhere else.
+        //   4. Repeat policy. Under 'once' a member's contribution to this
+        //      goal is recorded once, and a SECOND attempt is refused even
+        //      though its attemptId is new and well-formed. Minting a fresh
+        //      attemptId is how a client says "this is a different attempt";
+        //      it is never how it earns a second one. The replay branch above
+        //      already returned, so reaching here with a known attemptId is
+        //      impossible and an honest earlier contribution is never refused.
         //
-        // The shared total lives in shards, so "did THIS contribution move us
-        // from below the target to at or beyond it?" can only be answered by
-        // reading the shards inside this transaction — the same read
-        // wsfAdjustGoal already performs. Doing it after the transaction
-        // would be an inference from a total that may already contain someone
-        // else's work, which is exactly the misattribution this replaces.
-        //
-        // The read is skipped entirely once `reachedAt` exists, so the goal
-        // pays the ten-document read (and the contention that comes with it)
-        // only while the crossing is still ahead of it. Afterwards every
-        // contribution keeps the cheap single-shard write it has today.
-        //
-        // CONCURRENCY. Two attempts that together cross both read the shards
-        // in their own transaction and one of them writes a shard the other
-        // read, so Firestore aborts and retries the loser. The retry re-reads
-        // the committed total and the committed `reachedAt`, finds the goal
-        // already crossed, and records `crossedTarget: false`. Exactly one
-        // attempt is ever told it crossed, and it is the one whose
-        // transaction actually committed the crossing.
-        let crossed = false;
-        let crossingSharedTotal = 0;
-        if (goal.reachedAt == null) {
-          const shardSnaps = await Promise.all(
-            Array.from({ length: GOAL_SHARD_COUNT }, (_, i) =>
-              tx.get(goalShardRef(goalId, i))
-            )
+        //      The evidence is the member's own totals document, which was
+        //      already read above — a document read, not a query, so two
+        //      transactions racing two different attemptIds contend on it and
+        //      exactly one commits.
+        const priorMemberTotal = memberTotalSnap.data() as
+          | { total?: number; contributionCount?: number }
+          | undefined;
+        const previousMemberTotal =
+          typeof priorMemberTotal?.total === 'number' ? priorMemberTotal.total : 0;
+        // Rows written before contributionCount existed carry no count. Their
+        // total is not proof either way — wsfAdjustGoal can move a total
+        // without any contribution behind it — so the ledger itself is asked,
+        // and only for those rows. A member with no totals document at all has
+        // nothing recorded: the contribution write below always creates one.
+        let previousContributionCount: number | null =
+          typeof priorMemberTotal?.contributionCount === 'number'
+            ? priorMemberTotal.contributionCount
+            : null;
+        if (previousContributionCount === null && memberTotalSnap.exists) {
+          const priorContributions = await tx.get(
+            db
+              .collection('wsfContributions')
+              .where('goalId', '==', goalId)
+              .where('userId', '==', uid)
+              .limit(1)
           );
-          const previousSharedTotal = shardSnaps.reduce((sum, snap) => {
-            const data = snap.data() as { count?: number } | undefined;
-            return sum + (typeof data?.count === 'number' ? data.count : 0);
-          }, 0);
-          const nextSharedTotal = previousSharedTotal + count;
-          // A crossing is a MOVE across the line: strictly below before, at or
-          // beyond after. A goal already at or beyond its target when this
-          // field was introduced (or after an upward correction) never crossed
-          // while anyone was watching, so no attempt is credited with a moment
-          // that did not happen. A non-positive target has no line to cross.
-          if (
-            goal.target > 0 &&
-            previousSharedTotal < goal.target &&
-            nextSharedTotal >= goal.target
-          ) {
-            crossed = true;
-            crossingSharedTotal = nextSharedTotal;
-          }
+          previousContributionCount = priorContributions.empty ? 0 : 1;
+        }
+        const recordedBefore = (previousContributionCount ?? 0) > 0;
+        if (goalRepeatPolicy(goal) === 'once' && recordedBefore) {
+          throw new HttpsError(
+            'failed-precondition',
+            'This goal takes one contribution from each member, and yours is already recorded.'
+          );
         }
 
         const shardIndex = randomGoalShardIndex();
@@ -2925,35 +3017,28 @@ export const wsfContribute = onCall<ContributeRequest>(
           unit: goal.unit,
           communityGroupId: goal.communityGroupId,
           // Part of the attempt's stored outcome, exactly like `count`: a
-          // replay reports it rather than deciding it again.
-          crossedTarget: crossed,
+          // replay reports it rather than deciding it again. False until the
+          // post-commit claim below credits this attempt.
+          crossedTarget: false,
           createdAt: FieldValue.serverTimestamp(),
         });
-        if (crossed) {
-          // update(), not set(merge) — the goal document must already exist
-          // (it was read above) and the three fields are written together or
-          // not at all. No other field of the goal is touched.
-          tx.update(goalRef, {
-            reachedAt: FieldValue.serverTimestamp(),
-            reachedAttemptId: attemptId,
-            reachedSharedTotal: crossingSharedTotal,
-          });
-        }
         tx.set(
           shard,
           { count: FieldValue.increment(count) },
           { merge: true }
         );
 
-        const previousMemberTotal =
-          (memberTotalSnap.data() as { total?: number } | undefined)?.total ??
-          0;
         tx.set(
           memberTotalRef,
           {
             goalId,
             userId: uid,
             total: previousMemberTotal + count,
+            // How many contributions this member has recorded toward this
+            // goal, as distinct from how many units they are credited with.
+            // The repeat policy is about the former; an authorized correction
+            // moves the latter and must not change it.
+            contributionCount: (previousContributionCount ?? 0) + 1,
             updatedAt: FieldValue.serverTimestamp(),
           },
           { merge: true }
@@ -2990,7 +3075,9 @@ export const wsfContribute = onCall<ContributeRequest>(
         return {
           addedCount: count,
           alreadyRecorded: false as const,
-          crossedTarget: crossed,
+          crossedTarget: false,
+          goalHadNoEvent: goal.reachedAt == null,
+          goalTracked: goal.crossingTracked === true,
           goalTarget: goal.target,
           goalUnit: goal.unit,
           goalStatus: goal.status,
@@ -2999,6 +3086,24 @@ export const wsfContribute = onCall<ContributeRequest>(
           goalCommunityGroupId: goal.communityGroupId,
         };
       });
+
+    // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
+    // document only. See claimTargetCrossing for the rule.
+    let crossedTarget = storedCrossedTarget;
+    let observedSharedTotal: number | null = null;
+    if (!alreadyRecorded && goalHadNoEvent && goalTarget > 0) {
+      observedSharedTotal = await sumGoalShards(goalId);
+      if (observedSharedTotal >= goalTarget) {
+        crossedTarget = await claimTargetCrossing({
+          goalRef,
+          contribRef,
+          attemptId,
+          count,
+          observedSharedTotal,
+          goalTracked,
+        });
+      }
+    }
 
     // May this caller be told the community's CURRENT shared state? Decided by
     // evaluateGoalAggregateAccess — the SAME policy wsfGoalPulse uses — so a
@@ -3034,7 +3139,7 @@ export const wsfContribute = onCall<ContributeRequest>(
       return { addedCount, ownCredit, alreadyRecorded };
     }
 
-    const sharedTotal = await sumGoalShards(goalId);
+    const sharedTotal = observedSharedTotal ?? (await sumGoalShards(goalId));
 
     return {
       addedCount,
@@ -3048,6 +3153,90 @@ export const wsfContribute = onCall<ContributeRequest>(
     };
   }
 );
+
+/**
+ * Claim the one-time target-crossing event for a contribution that has just
+ * committed and then observed the shared total at or beyond the target.
+ *
+ * WHY AFTER THE COMMIT. The shared total lives in ten shards so that
+ * concurrent contributions never touch the same document. Deciding the
+ * crossing inside the contribution transaction meant reading all ten shards
+ * there, which turned every pre-crossing contribution into a conflict with
+ * every other. This claim touches ONLY the goal document (plus the caller's
+ * own attempt), so contention is confined to the handful of attempts that
+ * observe the crossing moment, and to one small transaction each.
+ *
+ * THE RULE.
+ *   • credited  := observedSharedTotal − count < target ≤ observedSharedTotal
+ *                  — without THIS attempt the observed total was below the
+ *                  line; with it, at or beyond. That is the honest meaning of
+ *                  "this one took us past our goal" when the exact order of
+ *                  concurrent shard writes is not recoverable.
+ *   • No event yet and credited: write reachedAt / reachedSharedTotal /
+ *     reachedAttemptId = this attempt, mark the attempt crossedTarget.
+ *   • No event yet, not credited (others' contributions landed between this
+ *     commit and this read, so the line was already behind us): record the
+ *     event UNCREDITED (reachedAttemptId null) — but only on a goal that
+ *     carries crossingTracked, i.e. one created since this feature exists. A
+ *     goal from before could have stood beyond its target for weeks; dating
+ *     that "today" would be false, so it simply never gets an event.
+ *   • Event already recorded but uncredited, and this attempt IS credited,
+ *     within two minutes of the event: attach the credit. Two attempts
+ *     landing in one instant can each observe an attributable total; the
+ *     goal document serializes them, so at most one is ever credited.
+ *   • Otherwise nothing: the event stands exactly as first written.
+ *
+ * A cheap plain read first: once the goal carries an event, the claim
+ * transaction is not even opened, so the post-crossing hot path pays one
+ * document read and nothing else.
+ */
+async function claimTargetCrossing(args: {
+  goalRef: FirebaseFirestore.DocumentReference;
+  contribRef: FirebaseFirestore.DocumentReference;
+  attemptId: string;
+  count: number;
+  observedSharedTotal: number;
+  goalTracked: boolean;
+}): Promise<boolean> {
+  const { goalRef, contribRef, attemptId, count, observedSharedTotal, goalTracked } = args;
+  const db = getFirestore();
+  const peek = (await goalRef.get()).data() as GoalDoc | undefined;
+  if (!peek) return false;
+  const credited =
+    observedSharedTotal - count < peek.target && observedSharedTotal >= peek.target;
+  if (peek.reachedAt != null && (peek.reachedAttemptId != null || !credited)) {
+    return false;
+  }
+  if (peek.reachedAt == null && !credited && !goalTracked) return false;
+
+  return await db.runTransaction(async (tx) => {
+    const snap = await tx.get(goalRef);
+    const goal = snap.data() as GoalDoc | undefined;
+    if (!goal) return false;
+    const target = goal.target;
+    const isCredited = observedSharedTotal - count < target && observedSharedTotal >= target;
+    if (goal.reachedAt == null) {
+      if (!isCredited && goal.crossingTracked !== true) return false;
+      tx.update(goalRef, {
+        reachedAt: FieldValue.serverTimestamp(),
+        reachedSharedTotal: observedSharedTotal,
+        reachedAttemptId: isCredited ? attemptId : null,
+      });
+      if (isCredited) tx.update(contribRef, { crossedTarget: true });
+      return isCredited;
+    }
+    if (
+      goal.reachedAttemptId == null &&
+      isCredited &&
+      Date.now() - goal.reachedAt.toMillis() < 120_000
+    ) {
+      tx.update(goalRef, { reachedAttemptId: attemptId });
+      tx.update(contribRef, { crossedTarget: true });
+      return true;
+    }
+    return false;
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // wsfGoalPulse — the AUTHORIZED unauthenticated aggregate-display read.
@@ -3295,6 +3484,14 @@ type MyContributionResponse = {
   // carries one. It rides this authenticated member-only read rather than
   // wsfGoalPulse, whose nine-field authorized display payload is fixed.
   activityGuideKey?: string;
+  /**
+   * The goal's repeat policy, so the contribution screen can say honestly
+   * whether more may be added later. It is a property of the goal, not of
+   * anyone's identity, and this callable is already gated on active
+   * membership or an own record — the same gate the unit already passes.
+   * The public wsfGoalPulse response is untouched.
+   */
+  repeatPolicy: GoalRepeatPolicy;
 };
 
 export const wsfMyContribution = onCall<MyContributionRequest>(
@@ -3356,6 +3553,7 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
       ownCredit: total,
       unit: goal.unit,
       ...(activityGuideKey === undefined ? {} : { activityGuideKey }),
+      repeatPolicy: goalRepeatPolicy(goal),
     };
   }
 );
@@ -3409,6 +3607,7 @@ type AdjustGoalRequest = {
   delta?: unknown;
   targetUid?: unknown;
   reason?: unknown;
+  repeatPolicy?: unknown; // 'once' | 'multiple'
 };
 
 type AdjustGoalResponse = {
@@ -3417,6 +3616,8 @@ type AdjustGoalResponse = {
   targetUid: string | null;
   sharedTotal: number;
   targetMemberTotal: number | null;
+  /** The goal's repeat policy AFTER this call, changed or not. */
+  repeatPolicy: GoalRepeatPolicy;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3802,8 +4003,36 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
     if (!goalId) {
       throw new HttpsError('invalid-argument', 'goalId is required.');
     }
-    const delta = normalizeAdjustmentDelta(request.data?.delta);
-    if (delta === null) {
+    // The Champion's repeat-policy change rides on this callable rather than
+    // on a new one: it is the same authority, the same goal, and it produces
+    // the same immutable, attributed audit row every other correction does.
+    let repeatPolicy: GoalRepeatPolicy | null = null;
+    const rawRepeatPolicy = request.data?.repeatPolicy;
+    if (rawRepeatPolicy !== undefined && rawRepeatPolicy !== null) {
+      repeatPolicy = normalizeRepeatPolicy(rawRepeatPolicy);
+      if (!repeatPolicy) {
+        throw new HttpsError(
+          'invalid-argument',
+          "repeatPolicy must be 'once' or 'multiple'."
+        );
+      }
+    }
+    // delta stays required for a count correction and stays nonzero. It
+    // becomes optional in exactly one case: a call whose whole business is the
+    // repeat policy, which then records delta 0 and moves no total. A reason
+    // is still required, so a policy change is as traceable as a count change.
+    let delta = 0;
+    const rawDelta = request.data?.delta;
+    if (rawDelta !== undefined && rawDelta !== null) {
+      const normalizedDelta = normalizeAdjustmentDelta(rawDelta);
+      if (normalizedDelta === null) {
+        throw new HttpsError(
+          'invalid-argument',
+          'delta must be a nonzero integer within ±100000000.'
+        );
+      }
+      delta = normalizedDelta;
+    } else if (!repeatPolicy) {
       throw new HttpsError(
         'invalid-argument',
         'delta must be a nonzero integer within ±100000000.'
@@ -3838,7 +4067,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
     }
     const writeShardRef = shardRefs[0]!; // deterministic; corrections aren't hot
 
-    const { newTargetTotal } = await db.runTransaction(async (tx) => {
+    const { newTargetTotal, effectiveRepeatPolicy } = await db.runTransaction(async (tx) => {
       const goalSnap = await tx.get(goalRef);
       if (!goalSnap.exists) {
         throw new HttpsError('not-found', 'Goal not found.');
@@ -3908,14 +4137,19 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         byUid: uid,
         byRole: 'foundingChampion',
         shardIndex: 0,
+        // Present only on a call that changed it, so the ledger reads as
+        // "this is what this correction did".
+        ...(repeatPolicy ? { repeatPolicy } : {}),
         createdAt: FieldValue.serverTimestamp(),
       });
-      tx.set(
-        writeShardRef,
-        { count: FieldValue.increment(delta) },
-        { merge: true }
-      );
-      if (targetMemberTotalRef) {
+      if (delta !== 0) {
+        tx.set(
+          writeShardRef,
+          { count: FieldValue.increment(delta) },
+          { merge: true }
+        );
+      }
+      if (targetMemberTotalRef && delta !== 0) {
         tx.set(
           targetMemberTotalRef,
           {
@@ -3927,8 +4161,25 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
           { merge: true }
         );
       }
+      if (repeatPolicy) {
+        // Merged onto the goal, never rewritten wholesale: nothing else about
+        // the goal moves, and the change carries who made it and when for the
+        // same reason the display authorization does.
+        tx.set(
+          goalRef,
+          {
+            repeatPolicy,
+            repeatPolicyUpdatedAt: FieldValue.serverTimestamp(),
+            repeatPolicyUpdatedBy: uid,
+          },
+          { merge: true }
+        );
+      }
 
-      return { newTargetTotal: projectedTargetTotal };
+      return {
+        newTargetTotal: projectedTargetTotal,
+        effectiveRepeatPolicy: repeatPolicy ?? goalRepeatPolicy(goal),
+      };
     });
 
     const sharedTotal = await sumGoalShards(goalId);
@@ -3938,6 +4189,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       targetUid,
       sharedTotal,
       targetMemberTotal: newTargetTotal,
+      repeatPolicy: effectiveRepeatPolicy,
     };
   }
 );

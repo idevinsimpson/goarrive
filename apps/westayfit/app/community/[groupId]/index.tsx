@@ -15,6 +15,7 @@ import {
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
 import { FormShell } from '../../../src/AuthFormPrimitives';
+import { resolveRepeatPolicy, type RepeatPolicy } from '../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../src/firebase';
 import {
@@ -233,10 +234,17 @@ type PulseTotals = {
  */
 type GoalProgress =
   | { kind: 'loading' }
-  | { kind: 'ok'; pulse: PulseTotals; ownCredit: number | null; at: Date }
+  | {
+      kind: 'ok';
+      pulse: PulseTotals;
+      ownCredit: number | null;
+      /** null when the member-authorized read was not made (a closed goal). */
+      repeatPolicy: RepeatPolicy | null;
+      at: Date;
+    }
   | { kind: 'failed' };
 
-type MyContributionResponse = { ownCredit: number; unit: string };
+type MyContributionResponse = { ownCredit: number; unit: string; repeatPolicy?: unknown };
 
 export default function CommunityPage() {
   const params = useLocalSearchParams<{ groupId: string }>();
@@ -536,6 +544,7 @@ export default function CommunityPage() {
               kind: 'ok',
               pulse: pulseResult.data,
               ownCredit: ownResult ? ownResult.data.ownCredit : null,
+              repeatPolicy: ownResult ? resolveRepeatPolicy(ownResult.data.repeatPolicy) : null,
               at: new Date(),
             },
           }));
@@ -1633,13 +1642,28 @@ export default function CommunityPage() {
                         ? `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`
                         : 'Your first contribution counts here.'}
                     </Text>
-                    <ButtonLink
-                      href={contributeHref(featured.goalId, 'record')}
-                      style={styles.inlineLink}
-                      textStyle={styles.inlineLinkText}
-                      testID={`wsf-community-your-part-link-${featured.goalId}`}
-                      label={p.ownCredit > 0 ? `Record more ${p.pulse.unit}` : `Record ${p.pulse.unit}`}
-                    />
+                    {/*
+                      REPEAT POLICY. "Record more" is an invitation, and an
+                      invitation the server will refuse is worse than no
+                      invitation at all: on a goal that takes one contribution
+                      per member, a member who has already contributed is
+                      finished here, and saying so by saying nothing is more
+                      honest than sending them to a refusal screen. Their own
+                      credit above still tells them what they did.
+
+                      Only an EXPLICIT 'once' withholds it. An absent policy
+                      resolves to 'multiple' — unchanged behaviour — and keeps
+                      the link exactly as it was.
+                    */}
+                    {p.repeatPolicy === 'once' && p.ownCredit > 0 ? null : (
+                      <ButtonLink
+                        href={contributeHref(featured.goalId, 'record')}
+                        style={styles.inlineLink}
+                        textStyle={styles.inlineLinkText}
+                        testID={`wsf-community-your-part-link-${featured.goalId}`}
+                        label={p.ownCredit > 0 ? `Record more ${p.pulse.unit}` : `Record ${p.pulse.unit}`}
+                      />
+                    )}
                   </View>
                 );
               })()
