@@ -2068,6 +2068,53 @@ const GOAL_SHARD_COUNT = 10;
 
 type GoalStatus = 'active' | 'closed';
 
+/**
+ * One stored line of the recent-additions tail, held as its own document at
+ * `wsfGoals/{goalId}/recentAdditions/{attemptId}`.
+ *
+ * A SUBCOLLECTION, NOT A FIELD ON THE GOAL. An array on the goal document
+ * would have made every contribution a write to `wsfGoals/{goalId}`, which
+ * serializes contributions on one document and defeats the counter sharding
+ * that exists precisely so they do not contend. Each addition is now its own
+ * document and contributions stay fanned out.
+ *
+ * THE DOCUMENT ID IS THE ATTEMPT ID, which is what makes the write idempotent
+ * by construction rather than by a check: a retried transaction, or a replay
+ * that somehow reached this line, writes the same id with the same content.
+ *
+ * `amount` is the units added; `at` is an ISO instant ROUNDED DOWN TO THE
+ * MINUTE, so the stored value cannot be used to line an addition up with
+ * anything else that happened at the same second. Deliberately a string, not a
+ * Timestamp: it is published verbatim, its precision is part of what it is,
+ * and an ISO-8601 UTC string sorts lexicographically in chronological order,
+ * which is what the read below orders on.
+ *
+ * These two fields are the whole document. No uid, no attemptId IN the
+ * document, no shard index, no member total, no ordinal.
+ */
+type RecentAddition = { amount: number; at: string };
+
+const RECENT_ADDITIONS_COLLECTION = 'recentAdditions';
+
+/**
+ * Newest ten, applied on READ. The subcollection itself is not pruned — see
+ * the note on wsfGoalRecentAdditions — so this is the bound on what is ever
+ * published, which is the bound that matters.
+ */
+const RECENT_ADDITIONS_LIMIT = 10;
+
+/** ISO instant truncated to the minute — the only precision ever stored. */
+function isoMinute(ms: number): string {
+  return new Date(Math.floor(ms / 60_000) * 60_000).toISOString();
+}
+
+function recentAdditionsRef(goalId: string) {
+  return getFirestore()
+    .collection('wsfGoals')
+    .doc(goalId)
+    .collection(RECENT_ADDITIONS_COLLECTION);
+}
+
 type GoalDoc = {
   ownerUid: string;
   communityGroupId: string;
@@ -2912,6 +2959,32 @@ export const wsfContribute = onCall<ContributeRequest>(
           { merge: true }
         );
 
+        // The recent-additions tail. Written HERE, on the branch that records
+        // a new contribution, and nowhere else: the replay branch above
+        // returns before reaching this line, so an attemptId replayed any
+        // number of times records exactly once.
+        //
+        // ONE SMALL DOCUMENT OF ITS OWN, keyed by the attempt id. Nothing is
+        // read first and nothing is rewritten, so this adds no contention:
+        // the goal document is untouched, and two members contributing at the
+        // same instant write two different documents rather than queueing on
+        // one. Keying by the attempt id makes the write idempotent by
+        // construction — a transaction retry, or any future path that reached
+        // this line twice for one attempt, writes the same id with the same
+        // content and there is still exactly one document.
+        //
+        // `now` is the SERVER time already used to enforce the window, rounded
+        // down to the minute. The amount is the count just recorded. Nothing
+        // that identifies the contributor — uid, attemptId as a FIELD, shard,
+        // member total, position in any sequence — is written; the attempt id
+        // is the document's name, not data inside it, and it is a per-tap
+        // random value that names no one.
+        const addition: RecentAddition = {
+          amount: count,
+          at: isoMinute(now.toMillis()),
+        };
+        tx.set(recentAdditionsRef(goalId).doc(attemptId), addition);
+
         // Reached only after the active-membership gate above, so this caller
         // is an active member by construction.
         return {
@@ -3085,6 +3158,115 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     };
     goalPulseCacheSet(goalId, now, totals);
     return totals;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfGoalRecentAdditions — the bounded, non-identifying tail of contributions.
+//
+// A SEPARATE callable on purpose. wsfGoalPulse publishes exactly nine fields
+// and that shape is settled; widening it would re-open a decision that was
+// already made, and would force every caller entitled to the totals to also
+// receive this list. They are different disclosures, so they are different
+// endpoints and a Champion's authorization reaches both by the SAME rule.
+//
+// WHAT IS PUBLISHED: an amount, the unit it is counted in, and the MINUTE it
+// landed. Newest first, at most RECENT_ADDITIONS_LIMIT of them, and nothing
+// else in the response object — no names, no photos, no ids, no contributor
+// count, no per-member anything, not even how many distinct people the list
+// represents. Ten entries may be one person or ten.
+//
+// THE BOUND IS APPLIED ON READ, by `limit()`. The subcollection itself is not
+// pruned: it keeps one small document per contribution for the life of the
+// goal. That is a deliberate trade for the write path — pruning would mean
+// reading the tail inside the contribution transaction, which is the goal-
+// document contention this subcollection exists to avoid. Nothing beyond the
+// newest ten is ever published, and each retained document is an amount and a
+// minute that names no one.
+//
+// ORDERED BY `at` DESCENDING — a single-field order on a single collection,
+// which Firestore serves from the automatic single-field index. It needs no
+// composite index and no firestore.indexes.json entry. Within one minute the
+// stored values are equal, so Firestore breaks the tie by document name; the
+// display shows minute granularity, so two additions in the same minute are
+// indistinguishable to a viewer either way and no order between them is
+// claimed.
+//
+// WHAT IS NOT LISTED: corrections. wsfAdjustGoal moves a total without being a
+// contribution, so an adjustment appends nothing here and is invisible to this
+// read. A public display that showed a total being walked back would narrate
+// an administrative act to an outside audience, and the correction's size
+// would say something about whoever it corrected.
+//
+// THE GATE is evaluateGoalAggregateAccess — the SAME function and the same
+// call shape wsfGoalPulse uses, not a copy of its reasoning. Active member, or
+// an authorized goal in a real (non-sample) community. Everyone else gets the
+// byte-identical generic not-found an unknown goalId gets, so this cannot
+// become an oracle for which goal ids exist any more than the pulse can.
+//
+// Deliberately NOT cached. The pulse's 2s cache holds one entry per goal for
+// every entitled caller; this list is small, the display asks for it far less
+// often than it polls the pulse, and a second cache would be a second place a
+// revoked goal's data could linger.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type GoalRecentAdditionsRequest = { goalId?: unknown };
+
+/**
+ * The published line. `unit` is the goal's current unit, carried so the
+ * display never has to pair this response with another one to render a line.
+ * It is the same unit wsfGoalPulse publishes.
+ */
+type PublishedRecentAddition = { amount: number; unit: string; at: string };
+
+/**
+ * Exactly one key. An empty `additions` is the honest answer when nothing has
+ * been recorded — never an error, and never a substitute shape that would let
+ * a caller tell "no contributions" apart from "no permission".
+ */
+type GoalRecentAdditionsResponse = { additions: PublishedRecentAddition[] };
+
+export const wsfGoalRecentAdditions = onCall<GoalRecentAdditionsRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<GoalRecentAdditionsResponse> => {
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const db = getFirestore();
+    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+    if (!goalSnap.exists) notFound();
+    const goal = goalSnap.data() as GoalDoc;
+
+    const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
+    if (!access.allowed) notFound();
+
+    // The read happens only after the gate. Newest first, bounded by the query
+    // itself, so an unbounded subcollection cannot turn into an unbounded
+    // response.
+    const snap = await recentAdditionsRef(goalId)
+      .orderBy('at', 'desc')
+      .limit(RECENT_ADDITIONS_LIMIT)
+      .get();
+
+    // Read defensively and republish nothing that is not the two stored
+    // fields. A hand-edited or imported document carrying anything extra — a
+    // uid, a name — is rebuilt from `amount` and `at` alone, so it cannot ride
+    // out through this response. The document's own id is never published
+    // either. A malformed document is dropped rather than guessed at.
+    const unit = typeof goal.unit === 'string' ? goal.unit : '';
+    const additions: PublishedRecentAddition[] = [];
+    for (const doc of snap.docs) {
+      const entry = doc.data() as Partial<RecentAddition> | undefined;
+      const amount = entry?.amount;
+      const at = entry?.at;
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) continue;
+      if (typeof at !== 'string' || at === '') continue;
+      additions.push({ amount, unit, at });
+    }
+
+    return { additions };
   }
 );
 

@@ -31,11 +31,21 @@ import {
  *   2. ALGEBRA. The field tables and the RS codewords are checked against the
  *      DEFINITION — every codeword polynomial must vanish at alpha^0..alpha^(n-1)
  *      — not against the generator-polynomial code path that produced them.
- *   3. AN INDEPENDENT READER. `readQr` below walks a finished matrix back to
- *      the string it encodes: it locates the format bits, undoes the mask,
- *      un-interleaves the blocks, re-checks every block's syndromes and parses
- *      the byte-mode header. It shares no code with the writer beyond the walk
- *      order and the version tables.
+ *   3. A READER. `readQr` below walks a finished matrix back to the string it
+ *      encodes: it locates the format bits, undoes the mask, un-interleaves
+ *      the blocks, re-checks every block's syndromes and parses the byte-mode
+ *      header. It shares no code with the writer beyond the walk order and the
+ *      version tables.
+ *
+ * THE READER IS NOT INDEPENDENT EVIDENCE, and this file once claimed it was.
+ * It was written by the same hand, from the same understanding, and it
+ * inherited that understanding's one real error: the writer placed the 15
+ * format bits least-significant-bit first, the reader read them back the same
+ * way, every round trip passed, and the symbols decoded in no scanner on
+ * earth. What caught it was zxing-cpp. The load-bearing external check now
+ * lives in `qr-reference-vectors.test.ts` — matrices minted by a different
+ * encoder in a different language. Treat what follows as a fast, detailed
+ * check on top of that, not as proof on its own.
  */
 
 // ─── Published vectors ───────────────────────────────────────────────────────
@@ -190,7 +200,10 @@ describe('data codewords', () => {
 
 // ─── An independent reader ───────────────────────────────────────────────────
 
-/** Undo the format-information encoding to recover the mask the writer chose. */
+/**
+ * Undo the format-information encoding to recover the mask the writer chose.
+ * Most significant bit first: position 0 — module (8,0) — carries bit 14.
+ */
 function readMask(code: QrCode): number {
   let bits = 0;
   for (let i = 0; i < 15; i += 1) {
@@ -200,7 +213,7 @@ function readMask(code: QrCode): number {
     else if (i === 7) dark = code.modules[8][8];
     else if (i === 8) dark = code.modules[7][8];
     else dark = code.modules[14 - i][8];
-    if (dark) bits |= 1 << i;
+    if (dark) bits |= 1 << (14 - i);
   }
   const unmasked = bits ^ 0x5412;
   // BCH check on the way back in, so a corrupt format field fails loudly.
@@ -433,7 +446,7 @@ describe('structural checks', () => {
   it('writes both copies of the format information identically', () => {
     const bits = formatInfoBits(code.mask);
     for (let i = 0; i < 15; i += 1) {
-      const dark = ((bits >> i) & 1) === 1;
+      const dark = ((bits >> (14 - i)) & 1) === 1;
       const copy1 =
         i < 6
           ? code.modules[8][i]

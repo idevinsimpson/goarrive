@@ -339,6 +339,62 @@ describe('wsfMemberships', () => {
   });
 });
 
+// ─── wsfGoals and its subcollections ─────────────────────────────────────────
+
+describe('wsfGoals', () => {
+  /**
+   * wsfGoals has no `match` block of its own, so it falls to the closing
+   * `match /{document=**} { allow read, write: if false; }`. That recursive
+   * wildcard covers SUBCOLLECTIONS as well as documents, which is what makes
+   * the recent-additions tail safe to store at
+   * `wsfGoals/{goalId}/recentAdditions/{attemptId}` with no rules change: it
+   * is reachable only through the gated callable, never by a client.
+   *
+   * Asserted rather than assumed, because the whole privacy argument for that
+   * tail rests on it. A future `match /wsfGoals/{goalId}` block that opened
+   * reads would silently open the tail too unless it stopped at the document —
+   * and this test would fail.
+   */
+  test('no client can read a goal, or its recentAdditions tail', async () => {
+    const goalId = 'wsfGoal1';
+    const attemptId = 'wsfAttempt00000001';
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'wsfGoals', goalId), {
+        communityGroupId: GROUP_ID,
+        title: 'Rules fixture goal',
+        aggregateDisplayAuthorized: true,
+      });
+      await setDoc(doc(db, 'wsfGoals', goalId, 'recentAdditions', attemptId), {
+        amount: 20,
+        at: '2026-09-18T13:04:00.000Z',
+      });
+    });
+
+    // An ACTIVE MEMBER of the goal's community — the most-entitled client
+    // there is — still cannot read either one directly.
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(getDoc(doc(alice, 'wsfGoals', goalId)));
+    await assertFails(getDoc(doc(alice, 'wsfGoals', goalId, 'recentAdditions', attemptId)));
+
+    // And an anonymous caller — the public display's own identity — cannot
+    // either. Its access comes from the callable, never from Firestore.
+    const anon = testEnv.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(anon, 'wsfGoals', goalId)));
+    await assertFails(getDoc(doc(anon, 'wsfGoals', goalId, 'recentAdditions', attemptId)));
+  });
+
+  test('no client can write the recentAdditions tail', async () => {
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(
+      setDoc(doc(alice, 'wsfGoals', 'wsfGoal1', 'recentAdditions', 'wsfAttempt00000002'), {
+        amount: 999,
+        at: '2026-09-18T13:04:00.000Z',
+      })
+    );
+  });
+});
+
 // ─── Unauthenticated ──────────────────────────────────────────────────────────
 
 describe('unauthenticated', () => {

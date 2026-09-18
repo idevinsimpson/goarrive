@@ -118,7 +118,7 @@ async function shardSum(goalId: string): Promise<number> {
 async function runBatch(label: string, goalId: string, uids: string[], count: number, attemptPrefix: string) {
   const t0 = Date.now();
   const results = await Promise.all(
-    uids.map((uid, i) => contribute(uid, { goalId, attemptId: `${attemptPrefix}-${i}`, count }))
+    uids.map((uid, i) => contribute(uid, { goalId, attemptId: `stress-${attemptPrefix}-${i}`, count }))
   );
   const elapsed = Date.now() - t0;
   const failed = results.filter((r) => !r.ok) as Array<{ ok: false; code: string; message: string; ms: number }>;
@@ -159,7 +159,7 @@ describe('wsfContribute — contention around the target crossing', () => {
       expect(goal.reachedAt).toBeDefined();
       const winner = pre.ok.find((r) => r.value.crossedTarget === true)!;
       const winnerIndex = pre.ok.indexOf(winner);
-      expect(String(goal.reachedAttemptId)).toMatch(new RegExp(`^a${n}-\\d+$`));
+      expect(String(goal.reachedAttemptId)).toMatch(new RegExp(`^stress-a${n}-\\d+$`));
       expect(typeof goal.reachedSharedTotal).toBe('number');
       expect(goal.reachedSharedTotal as number).toBeGreaterThanOrEqual(target);
       expect(goal.reachedSharedTotal as number).toBeLessThanOrEqual(n * count);
@@ -167,7 +167,7 @@ describe('wsfContribute — contention around the target crossing', () => {
 
       // Every attempt replays to its own stored answer: still exactly one crossing.
       const replays = await Promise.all(
-        uids.map((uid, i) => contribute(uid, { goalId, attemptId: `a${n}-${i}`, count }))
+        uids.map((uid, i) => contribute(uid, { goalId, attemptId: `stress-a${n}-${i}`, count }))
       );
       const replayOk = replays.filter((r) => r.ok) as Array<{ ok: true; value: ContributeValue }>;
       expect(replayOk.length).toBe(n);

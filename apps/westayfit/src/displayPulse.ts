@@ -49,3 +49,17 @@ export function samePulse(a: GoalPulse, b: GoalPulse): boolean {
     a.timezone === b.timezone
   );
 }
+
+/**
+ * One line of wsfGoalRecentAdditions — a DIFFERENT callable from wsfGoalPulse,
+ * deliberately. The pulse's nine published fields are settled and this list is
+ * not one of them; it is a separate disclosure reached by the same per-goal
+ * authorization, so it is a separate request with its own answer.
+ *
+ * Three fields, and the type is closed on purpose: if the server ever grew a
+ * fourth, this client would not carry it onto a screen by accident.
+ */
+export type GoalRecentAddition = { amount: number; unit: string; at: string };
+
+/** The whole response. Exactly one key, and an empty list is a real answer. */
+export type GoalRecentAdditions = { additions: GoalRecentAddition[] };

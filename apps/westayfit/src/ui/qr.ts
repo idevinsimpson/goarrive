@@ -375,7 +375,12 @@ function writeFormatInfo(grid: Grid, mask: number): void {
   const size = grid.size;
   const bits = formatInfoBits(mask);
   for (let i = 0; i < 15; i += 1) {
-    const dark = ((bits >> i) & 1) === 1;
+    // MOST SIGNIFICANT BIT FIRST. Position 0 — module (8,0), and (size-1, 8)
+    // in the second copy — carries bit 14, not bit 0. Writing this field
+    // little-endian produces a symbol that is correct in every other respect
+    // and that no reader will decode: the 15 bits still pass their own BCH
+    // check reversed, so nothing downstream notices.
+    const dark = ((bits >> (14 - i)) & 1) === 1;
     // Copy 1, wrapped around the top-left finder.
     if (i < 6) setFunction(grid, 8, i, dark);
     else if (i === 6) setFunction(grid, 8, 7, dark);
