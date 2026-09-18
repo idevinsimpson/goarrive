@@ -129,12 +129,21 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   // terms/privacy accept. The old wsf-signup-adultCheckbox testID must not
   // exist any more — assert its absence so a re-add regresses this test.
   await expect(page.getByTestId('wsf-signup-adultCheckbox')).toHaveCount(0);
+  // Signup's own chain ends with a router.replace('/verify-email') AFTER its
+  // best-effort wsfSendVerificationEmail round-trip, while the auth listener
+  // has already put the member on /verify-email. A "verified" tap that lands
+  // before that late replace is navigated back to /verify-email (documented in
+  // docs/westayfit/overnight-2026-09-18/01-BASELINE-AND-GATE1.md). A person
+  // cannot verify an address inside that window; the test waits it out so it
+  // cannot either. Registered before the click so the response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   // ---- verify email -------------------------------------------------------
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('wsf-signup-error')).toHaveCount(0);
 
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 

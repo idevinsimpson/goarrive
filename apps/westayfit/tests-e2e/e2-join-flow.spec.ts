@@ -181,12 +181,21 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await page.getByTestId('wsf-signup-password').fill(password);
   // E3.5 A4 (extended to signup): the 18+ checkbox is gone from signup too.
   await expect(page.getByTestId('wsf-signup-adultCheckbox')).toHaveCount(0);
+  // Signup's own chain ends with a router.replace('/verify-email') AFTER its
+  // best-effort wsfSendVerificationEmail round-trip, while the auth listener
+  // has already put the member on /verify-email. A "verified" tap that lands
+  // before that late replace is navigated back to /verify-email (documented in
+  // docs/westayfit/overnight-2026-09-18/01-BASELINE-AND-GATE1.md). A person
+  // cannot verify an address inside that window; the test waits it out so it
+  // cannot either. Registered before the click so the response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   // Signup ships forward to verify-email even when the emulator's mail send
   // returns failed-precondition (no WSF_EMAIL_API_KEY on the emulator, by
   // design). See mu2-flow.spec.ts for the full reasoning.
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
