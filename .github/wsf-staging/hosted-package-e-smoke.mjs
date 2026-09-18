@@ -63,6 +63,11 @@ const diagnostics = [];
  * goal's own and is asserted as such below.
  */
 const CONTEXT_OPTIONS = { locale: 'en-US' };
+// The owner's visual proof is taken at a realistic phone (the member's own
+// surface) and at a wide screen (the authorized public display). Same locale
+// pin; the viewport is the only difference from the assertion contexts.
+const PHONE_CONTEXT = { ...CONTEXT_OPTIONS, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+const WIDE_CONTEXT = { ...CONTEXT_OPTIONS, viewport: { width: 1280, height: 800 } };
 const synthetic = { runTag, groups: [], goals: [], challenges: [], users: [] };
 
 function assert(condition, message) {
@@ -964,6 +969,113 @@ async function caseD1SignupGate(browser) {
   }
 }
 
+/**
+ * Visual proof — what the product looks like on staging, on a phone, with a
+ * labelled synthetic fixture. Every capture is of a state the suite has
+ * already asserted elsewhere; this case asserts only what makes each capture
+ * honest (the screen it claims to show is the screen on it, the contribution
+ * it shows was recorded, the display shows the recorded total), and it owns
+ * the contribution it makes so cleanup removes it.
+ */
+async function caseVisualProof(browser) {
+  const fx = await seedFixture('visual', 1, false);
+  const goalId = fx.goalIds[0];
+  const championCtx = await browser.newContext(PHONE_CONTEXT);
+  const memberCtx = await browser.newContext(PHONE_CONTEXT);
+  const displayPhoneCtx = await browser.newContext(PHONE_CONTEXT);
+  const displayWideCtx = await browser.newContext(WIDE_CONTEXT);
+  try {
+    // The Champion authorizes the display through the product, on a phone.
+    const champion = await championCtx.newPage();
+    await signInPage(champion, fx.champion);
+    await champion.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await openManage(champion);
+    const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`);
+    const state = champion.getByTestId(`wsf-goal-display-auth-state-${goalId}`);
+    await visible(toggle, 30_000);
+    await textEquals(state, 'Public display is not authorized for this goal.');
+    await toggle.click();
+    await textContains(state, 'Public display is authorized for this goal.', 30_000);
+    assert((await readAuthorization(goalId)) === true, 'Visual fixture authorization did not persist');
+    await snap(champion, '10-phone-champion-manage-authorized');
+
+    // A member's Community Home and one whole contribution, on a phone.
+    const member = await memberCtx.newPage();
+    // The attempt id is minted in the browser; read it off the request so the
+    // contribution and the member total are owned by cleanup like every other
+    // synthetic write.
+    let attemptId = null;
+    await member.route('**/wsfContribute', async (route) => {
+      try {
+        const body = JSON.parse(route.request().postData() || '{}');
+        if (typeof body?.data?.attemptId === 'string') attemptId = body.data.attemptId;
+      } catch {
+        // Not JSON — the callable will refuse it; the assertions below fail honestly.
+      }
+      return route.continue();
+    });
+    await signInPage(member, fx.member);
+    await member.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await visible(member.getByTestId(`wsf-community-goal-link-${goalId}`), 30_000);
+    assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'Member unexpectedly has the Champion Manage surface');
+    await snap(member, '11-phone-community-home');
+
+    await member.goto(`${BASE_URL}/contribute/${goalId}`);
+    await visible(member.getByTestId('wsf-contribute-entry-screen'), 30_000);
+    await member.getByTestId('wsf-contribute-entry').fill('25');
+    await snap(member, '12-phone-contribution-entry');
+    await member.getByTestId('wsf-contribute-review').click();
+    await visible(member.getByTestId('wsf-contribute-review-screen'));
+    await snap(member, '13-phone-contribution-review');
+    await member.getByTestId('wsf-contribute-submit').click();
+    await visible(member.getByTestId('wsf-contribute-receipt'), 30_000);
+    await textEquals(member.getByTestId('wsf-contribute-shared-total'), '25 of 5,000 squats', 30_000);
+    await textEquals(member.getByTestId('wsf-contribute-own-credit'), 'Your total on this goal: 25 squats');
+    assert(typeof attemptId === 'string' && attemptId.length > 0, 'The browser contribution never sent an attempt id');
+    trackDoc(`wsfContributions/${goalId}_${fx.member.uid}_${attemptId}`);
+    trackDoc(`wsfGoalMemberTotals/${goalId}_${fx.member.uid}`);
+    await snap(member, '14-phone-contribution-confirmed');
+
+    // The authorized public display, anonymous, phone then wide, showing the
+    // total the member just recorded and none of the member.
+    const displayPhone = await displayPhoneCtx.newPage();
+    await displayPhone.goto(`${BASE_URL}/display/${goalId}`);
+    await visible(displayPhone.getByTestId('wsf-display-screen'), 30_000);
+    await textEquals(displayPhone.getByTestId('wsf-display-shared-total'), '25', 30_000);
+    assert((await displayPhone.getByText(fx.member.uid).count()) === 0, 'Phone display leaked member UID');
+    await snap(displayPhone, '15-phone-public-display');
+
+    const displayWide = await displayWideCtx.newPage();
+    await displayWide.goto(`${BASE_URL}/display/${goalId}`);
+    await visible(displayWide.getByTestId('wsf-display-screen'), 30_000);
+    await textEquals(displayWide.getByTestId('wsf-display-shared-total'), '25', 30_000);
+    assert((await displayWide.getByText(fx.member.uid).count()) === 0, 'Wide display leaked member UID');
+    await snap(displayWide, '16-wide-authorized-display');
+
+    check('visual proof captures', 'PASS', 'phone: Champion Manage, Community Home, entry, review, confirmed; phone and wide authorized display — labelled synthetic fixture, contribution owned by cleanup');
+  } finally {
+    await Promise.all([championCtx, memberCtx, displayPhoneCtx, displayWideCtx].map((ctx) => ctx.close().catch(() => undefined)));
+  }
+  return fx;
+}
+
+/**
+ * A case whose verdict depends on state this workflow does not deploy is
+ * recorded on its own row and never stops the cases after it. D-5 is the one
+ * such case: it asserts the RULESET staging is running, and the workflow
+ * deploys functions and Hosting only. Run 35358182490 showed the cost of
+ * letting it abort the suite — the D-1 gate check never ran.
+ */
+async function isolated(name, run) {
+  try {
+    return await run();
+  } catch (error) {
+    diagnostics.push(sanitize(error?.stack || error?.message || error));
+    check(name, 'FAIL', sanitize(error?.message || error));
+    return null;
+  }
+}
+
 async function verifyHostedBuild() {
   const response = await fetch(`${BASE_URL}/health`, { redirect: 'follow' });
   const text = await response.text();
@@ -997,8 +1109,9 @@ try {
   await caseProtectedReads();
   await caseUncertainAndPerGoal(browser);
   await caseDelayedDisplayResponses(browser);
-  await caseD5MembershipStatusRules();
+  await isolated('membership status rules (D-5)', () => caseD5MembershipStatusRules());
   await caseD1SignupGate(browser);
+  await caseVisualProof(browser);
 } catch (error) {
   mainError = error;
   diagnostics.push(sanitize(error?.stack || error?.message || error));
@@ -1039,6 +1152,8 @@ const receipt = {
     'No private credentials, tokens, passwords, Web API keys, or email-action links are retained.',
     'The D-5 case reads one community document with a synthetic member ID token so firestore.rules is the thing under test; the join code is asserted present and is never read, logged, screenshotted or retained.',
     'The D-1 case blocks wsfSendVerificationEmail in the browser, so staging sends no verification mail; the account it creates is tracked for cleanup by its run-tagged synthetic address.',
+    'The D-5 case is isolated: its failure is its own row and the cases after it still run, because the ruleset it asserts is not deployed by this workflow.',
+    'The visual-proof captures show a run-tagged synthetic community, goal and members only; the one contribution they record is removed by cleanup.',
   ],
   diagnostics,
 };

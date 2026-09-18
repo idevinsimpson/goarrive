@@ -157,7 +157,7 @@ test('both new cases exist and are registered in the suite', () => {
     assert.ok(SMOKE.includes(`async function ${name}(`), `${name} is missing`);
   }
   const main = SMOKE.slice(SMOKE.indexOf('browser = await chromium.launch('));
-  for (const call of ['await caseD5MembershipStatusRules();', 'await caseD1SignupGate(browser);']) {
+  for (const call of ["await isolated('membership status rules (D-5)', () => caseD5MembershipStatusRules());", 'await caseD1SignupGate(browser);']) {
     assert.ok(main.includes(call), `the suite never runs ${call}`);
   }
   for (const name of ['membership status rules (D-5)', 'signup verification gate (D-1)']) {
@@ -254,3 +254,47 @@ test('the untouched cases still carry their acceptance checks', () => {
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);
+
+test('the D-5 verdict is isolated: its failure is its own row and cannot stop the D-1 gate check or the visual proof', () => {
+  const main = SMOKE.slice(SMOKE.indexOf('browser = await chromium.launch('));
+  const d5 = main.indexOf("await isolated('membership status rules (D-5)', () => caseD5MembershipStatusRules());");
+  const d1 = main.indexOf('await caseD1SignupGate(browser);');
+  const visual = main.indexOf('await caseVisualProof(browser);');
+  assert.ok(d5 >= 0, 'D-5 is not run through isolated()');
+  assert.ok(d1 > d5 && visual > d1, 'D-1 and the visual proof must run after the isolated D-5 case');
+  assert.ok(!/\n\s*await caseD5MembershipStatusRules\(\);/.test(main), 'D-5 is still run bare somewhere in the suite');
+  const iso = SMOKE.slice(SMOKE.indexOf('async function isolated('), SMOKE.indexOf('async function verifyHostedBuild('));
+  assert.ok(iso.includes("check(name, 'FAIL'"), 'an isolated failure must still be a FAIL row');
+  assert.ok(iso.includes('diagnostics.push('), 'an isolated failure must keep its diagnostics');
+  // Only D-5 is isolated: every other case still aborts the suite.
+  assert.strictEqual((main.match(/await isolated\(/g) || []).length, 1, 'isolated() must wrap exactly one case');
+});
+
+test('the visual proof captures every owner-required surface on a phone, the display wide, from a synthetic fixture it owns', () => {
+  const body = SMOKE.slice(SMOKE.indexOf('async function caseVisualProof('), SMOKE.indexOf('async function isolated('));
+  assert.ok(body.includes("seedFixture('visual'"), 'the visual proof must use its own run-tagged synthetic fixture');
+  const shots = {
+    champion: ['10-phone-champion-manage-authorized'],
+    member: ['11-phone-community-home', '12-phone-contribution-entry', '13-phone-contribution-review', '14-phone-contribution-confirmed'],
+    displayPhone: ['15-phone-public-display'],
+    displayWide: ['16-wide-authorized-display'],
+  };
+  for (const [page, names] of Object.entries(shots)) {
+    for (const name of names) assert.ok(body.includes(`snap(${page}, '${name}')`), `${name} missing on ${page}`);
+  }
+  assert.ok(SMOKE.includes('viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true'), 'the phone context is not a realistic phone');
+  assert.ok(SMOKE.includes('viewport: { width: 1280, height: 800 }'), 'the wide context is missing');
+  for (const ctx of ['championCtx', 'memberCtx', 'displayPhoneCtx']) assert.ok(body.includes(`const ${ctx} = await browser.newContext(PHONE_CONTEXT);`), `${ctx} is not a phone`);
+  assert.ok(body.includes('const displayWideCtx = await browser.newContext(WIDE_CONTEXT);'), 'the wide display is not wide');
+  // Every capture is of an asserted state, not a hopeful screenshot.
+  assert.ok(body.includes("textEquals(member.getByTestId('wsf-contribute-shared-total'), '25 of 5,000 squats'"), 'the confirmed capture is not asserted');
+  assert.ok(body.includes("textEquals(displayPhone.getByTestId('wsf-display-shared-total'), '25'"), 'the phone display capture is not asserted');
+  assert.ok(body.includes("textEquals(displayWide.getByTestId('wsf-display-shared-total'), '25'"), 'the wide display capture is not asserted');
+  assert.ok(body.includes("assert((await readAuthorization(goalId)) === true"), 'the authorization behind the display captures is not confirmed in stored state');
+  // The one contribution the browser records is owned by cleanup.
+  assert.ok(body.includes("member.route('**/wsfContribute'"), 'the attempt id is not read off the request');
+  assert.ok(body.includes('trackDoc(`wsfContributions/${goalId}_${fx.member.uid}_${attemptId}`)'), 'the contribution is not tracked for cleanup');
+  assert.ok(body.includes('trackDoc(`wsfGoalMemberTotals/${goalId}_${fx.member.uid}`)'), 'the member total is not tracked for cleanup');
+  assert.ok(body.includes("check('visual proof captures', 'PASS'"), 'the visual proof has no PASS row');
+  assert.ok(SMOKE.includes('await caseVisualProof(browser);'), 'the suite never runs the visual proof');
+});
