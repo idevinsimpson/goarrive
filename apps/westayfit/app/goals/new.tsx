@@ -8,6 +8,7 @@ import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions, wsfIsStaging, wsfUsingEmulators } from '../../src/firebase';
+import { type RepeatPolicy } from '../../src/contributionFlow';
 import { wsfTheme } from '../../src/theme';
 
 // The minimum surface needed to make the E4-A1 slice self-testable end to
@@ -71,6 +72,11 @@ export default function NewGoalPage() {
   const [startsAt, setStartsAt] = useState(defaultStart);
   const [endsAt, setEndsAt] = useState(defaultEnd);
   const [timezone, setTimezone] = useState('America/New_York');
+  // The Champion's decision about how often one member may contribute. 'once'
+  // is the default here for the same reason it is the default on the server:
+  // it is the conservative answer, and a goal that takes repeat contributions
+  // should be a choice somebody made.
+  const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>('once');
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -138,6 +144,7 @@ export default function NewGoalPage() {
           startsAt: string;
           endsAt: string;
           timezone: string;
+          repeatPolicy: RepeatPolicy;
         },
         { goalId: string }
       >(getFirebaseFunctions(), 'wsfCreateGoal');
@@ -149,6 +156,7 @@ export default function NewGoalPage() {
         startsAt: startsDate.toISOString(),
         endsAt: endsDate.toISOString(),
         timezone: trimmedTz,
+        repeatPolicy,
       });
       setCreated({
         goalId: result.data.goalId,
@@ -176,6 +184,7 @@ export default function NewGoalPage() {
     startsAt,
     endsAt,
     timezone,
+    repeatPolicy,
     submitting,
   ]);
 
@@ -365,6 +374,48 @@ export default function NewGoalPage() {
           editable={!submitting}
           testID="wsf-new-goal-timezone"
         />
+        <Text style={styles.label}>How often can one member contribute?</Text>
+        <View style={styles.choiceRow}>
+          <Pressable
+            style={[styles.choice, repeatPolicy === 'once' && styles.choiceSelected]}
+            onPress={() => setRepeatPolicy('once')}
+            disabled={submitting}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: repeatPolicy === 'once' }}
+            testID="wsf-new-goal-repeat-once"
+          >
+            <Text
+              style={[
+                styles.choiceText,
+                repeatPolicy === 'once' && styles.choiceTextSelected,
+              ]}
+            >
+              Once
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.choice, repeatPolicy === 'multiple' && styles.choiceSelected]}
+            onPress={() => setRepeatPolicy('multiple')}
+            disabled={submitting}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: repeatPolicy === 'multiple' }}
+            testID="wsf-new-goal-repeat-multiple"
+          >
+            <Text
+              style={[
+                styles.choiceText,
+                repeatPolicy === 'multiple' && styles.choiceTextSelected,
+              ]}
+            >
+              More than once
+            </Text>
+          </Pressable>
+        </View>
+        <Text style={styles.caption} testID="wsf-new-goal-repeat-caption">
+          {repeatPolicy === 'multiple'
+            ? 'Each member can record as many contributions as they like while the goal is open.'
+            : 'Each member records one contribution toward this goal.'}
+        </Text>
         {error ? (
           <Text style={styles.errorText} testID="wsf-new-goal-error">
             {error}
@@ -449,6 +500,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: wsfTheme.colors.text,
     backgroundColor: wsfTheme.colors.background,
+  },
+  choiceRow: {
+    flexDirection: 'row',
+    gap: wsfTheme.spacing.sm,
+  },
+  choice: {
+    flex: 1,
+    // 44 px minimum touch target, as every other control on these screens.
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: wsfTheme.spacing.sm,
+    paddingHorizontal: wsfTheme.spacing.md,
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    borderRadius: wsfTheme.radius.sm,
+    backgroundColor: wsfTheme.colors.background,
+  },
+  choiceSelected: {
+    borderColor: wsfTheme.colors.primary,
+    backgroundColor: wsfTheme.colors.primary,
+  },
+  choiceText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: wsfTheme.colors.text,
+  },
+  choiceTextSelected: {
+    color: wsfTheme.colors.surface,
   },
   primary: {
     backgroundColor: wsfTheme.colors.primary,

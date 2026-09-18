@@ -663,7 +663,7 @@ describe('wsfContribute', () => {
       .set({ status: 'closed', closedAt: new Date() }, { merge: true });
 
     const mine = await wsfMyContribution.run(makeRequest(uid, { goalId }) as any);
-    expect(mine).toEqual({ ownCredit: 20, unit: 'squats' });
+    expect(mine).toEqual({ ownCredit: 20, unit: 'squats', repeatPolicy: 'multiple' });
 
     // New attempts are refused after closure; the recorded one replays.
     const late = await tryRun(uid, { goalId, attemptId: 'attempt-late', count: 1 });

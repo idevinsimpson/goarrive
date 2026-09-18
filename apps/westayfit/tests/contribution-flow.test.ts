@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  canAddMore,
   classifyContributeError,
   parseEntry,
+  recordMoreLabel,
   refusalCopy,
+  repeatNotice,
+  resolveRepeatPolicy,
   resultCopy,
   resultVariant,
   stepEntry,
@@ -251,5 +255,127 @@ describe('the server’s one-time crossing signal, and only it, credits the mome
     const c = resultCopy(ownOnly, 'Smyrna Strong', 'squats');
     expect(c.subline).toBe('It counted once.');
     expect(JSON.stringify(c)).not.toMatch(/took us past|reached/i);
+  });
+});
+
+describe('repeat policy: the screen says what the server will actually accept', () => {
+  // The resolution table, mirrored from goalRepeatPolicy() in
+  // functions-westayfit. "Not there" and "there but unrecognised" are
+  // different facts: absence means what this server has always done
+  // ('multiple'), an unrecognised value means the stricter answer.
+  it.each([
+    [undefined, 'multiple'],
+    [null, 'multiple'],
+    ['multiple', 'multiple'],
+    ['once', 'once'],
+    ['', 'once'],
+    ['MULTIPLE', 'once'],
+    ['many', 'once'],
+    ['weekly', 'once'],
+    [true, 'once'],
+    [3, 'once'],
+    [{ policy: 'multiple' }, 'once'],
+  ])('%j resolves to %s', (value, expected) => {
+    expect(resolveRepeatPolicy(value)).toBe(expected);
+  });
+
+  it('an absent policy reads the multiple copy and offers another contribution', () => {
+    const policy = resolveRepeatPolicy(undefined);
+    expect(repeatNotice(policy)).toBe(
+      'This will be recorded toward this goal. You can add more later.'
+    );
+    expect(
+      canAddMore(policy, {
+        addedCount: 20,
+        ownCredit: 20,
+        alreadyRecorded: false,
+        sharedTotal: 100,
+        target: 5000,
+        unit: 'squats',
+        status: 'active',
+      })
+    ).toBe(true);
+  });
+
+  it('under once, the review line is exactly today’s sentence', () => {
+    expect(repeatNotice('once')).toBe('This will be recorded once toward this goal.');
+  });
+
+  it('under multiple, the review line says plainly that more can be added', () => {
+    expect(repeatNotice('multiple')).toBe(
+      'This will be recorded toward this goal. You can add more later.'
+    );
+  });
+
+  it.each([repeatNotice('once'), repeatNotice('multiple')])(
+    'the review line is plain: no exclamation mark (%s)',
+    (line) => {
+      expect(line).not.toContain('!');
+    }
+  );
+
+  const confirmed = {
+    addedCount: 20,
+    ownCredit: 20,
+    alreadyRecorded: false,
+    sharedTotal: 100,
+    target: 5000,
+    unit: 'squats',
+    status: 'active' as const,
+  };
+
+  it('offers another contribution only under multiple', () => {
+    expect(canAddMore('multiple', confirmed)).toBe(true);
+    expect(canAddMore('once', confirmed)).toBe(false);
+  });
+
+  it('does not offer another contribution once the goal is closed', () => {
+    expect(canAddMore('multiple', { ...confirmed, status: 'closed' })).toBe(false);
+  });
+
+  it('does not offer another contribution on an own-only receipt', () => {
+    // The caller may no longer see the community's state, so they may no
+    // longer contribute to it either. Inviting them would invite a refusal.
+    const ownOnly = {
+      addedCount: 20,
+      ownCredit: 20,
+      alreadyRecorded: true,
+    };
+    expect(canAddMore('multiple', ownOnly)).toBe(false);
+  });
+
+  it('the offer carries Community Home’s existing wording, not a second name for it', () => {
+    // One act, one name. app/community/[groupId]/index.tsx already labels the
+    // same act "Record more {unit}".
+    expect(recordMoreLabel('squats')).toBe('Record more squats');
+    expect(recordMoreLabel(null)).toBe('Record more');
+    expect(recordMoreLabel('squats')).not.toContain('Add more');
+  });
+
+  it('a once-goal refusal is classified from the server’s own sentence', () => {
+    const failure = classifyContributeError({
+      code: 'functions/failed-precondition',
+      message:
+        'This goal takes one contribution from each member, and yours is already recorded.',
+    });
+    expect(failure).toEqual({ kind: 'refused', reason: 'alreadyContributed' });
+  });
+
+  it('a closed goal is still classified as closed, not as a repeat refusal', () => {
+    expect(
+      classifyContributeError({
+        code: 'functions/failed-precondition',
+        message: 'This goal is closed.',
+      })
+    ).toEqual({ kind: 'refused', reason: 'closed' });
+  });
+
+  it('the refusal copy says nothing was recorded and that the earlier one still counts', () => {
+    const copy = refusalCopy('alreadyContributed', 20, 'squats');
+    expect(copy.headline).toBe('This goal takes one contribution from each member.');
+    expect(copy.body).toBe(
+      'Your 20 squats were not recorded. Your earlier contribution to this goal still counts.'
+    );
+    expect(`${copy.headline} ${copy.body}`).not.toContain('!');
   });
 });

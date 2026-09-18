@@ -1,5 +1,6 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
+import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -14,19 +15,41 @@ import {
   View,
 } from 'react-native';
 
+import {
+  guideHeading,
+  selectActivityGuide,
+  SELF_COUNT_NOTE,
+} from '../../src/activityGuides';
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import {
+  canAddMore,
   classifyContributeError,
   parseEntry,
+  recordMoreLabel,
   refusalCopy,
+  repeatNotice,
+  resolveRepeatPolicy,
   resultCopy,
   resultVariant,
   stepEntry,
   type RefusalReason,
+  type RepeatPolicy,
 } from '../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFirestore, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
+import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
+import {
+  KIOSK_TICK_MS,
+  KIOSK_UNRESOLVED_NOTICE,
+  clearKioskReturnGoal,
+  isKioskFlag,
+  kioskCountdownExpired,
+  kioskCountdownLabel,
+  kioskRemainingMs,
+  kioskRemainingSeconds,
+  runKioskFinish,
+  type KioskOutcome,
+} from '../../src/kioskSession';
 import {
   clearPendingIfAttempt,
   isSameContext,
@@ -63,6 +86,9 @@ const POLL_INTERVAL_MS = 2_000;
 // exactly the styles the line already had, so nothing changes on screen.
 // `aria-level` is not in the React Native prop types, hence the cast.
 const HEADING_1 = { accessibilityRole: 'header', 'aria-level': 1 } as Record<string, unknown>;
+// The counting guide is a section INSIDE the entry screen, under that screen's
+// one h1. Same cast, one level down.
+const HEADING_2 = { accessibilityRole: 'header', 'aria-level': 2 } as Record<string, unknown>;
 
 // Response shapes mirror wsfContribute / wsfGoalPulse / wsfMyContribution in
 // functions-westayfit.
@@ -89,7 +115,21 @@ type ContributeResult = {
 
 // Authenticated own credit for the signed-in member. Read from the server on
 // load; never derived client-side.
-type MyContribution = { ownCredit: number; unit: string };
+// `activityGuideKey` is the goal's optional per-goal guide override. It rides
+// this authenticated member-only read, NOT wsfGoalPulse: the pulse is the
+// authorized display payload and its nine fields are fixed.
+//
+// It also carries the goal's repeat policy. That is deliberate: this is the
+// MEMBER-AUTHORIZED goal read this screen already makes, and the public
+// wsfGoalPulse response is left exactly as it was. repeatPolicy is optional
+// here only so a response from a server that predates the field still parses
+// — resolveRepeatPolicy turns anything but 'multiple' into 'once'.
+type MyContribution = {
+  ownCredit: number;
+  unit: string;
+  activityGuideKey?: string;
+  repeatPolicy?: unknown;
+};
 
 type LoadState =
   | { kind: 'loading' }
@@ -140,8 +180,18 @@ function formatElapsed(ms: number): string {
 }
 
 export default function ContributeToGoal() {
-  const params = useLocalSearchParams<{ goalId: string; groupId?: string; mode?: string }>();
+  const params = useLocalSearchParams<{
+    goalId: string;
+    groupId?: string;
+    mode?: string;
+    kiosk?: string;
+  }>();
   const goalId = params.goalId;
+  // KIOSK MODE. The flow below is unchanged — same entry, same review, same
+  // record, same receipt. What the flag adds is an end: a way for one visitor
+  // at a shared device to finish and leave nothing behind. It never changes
+  // what is recorded, who it is credited to, or what the screen claims.
+  const kiosk = isKioskFlag(params.kiosk);
   const groupIdHint = typeof params.groupId === 'string' && params.groupId ? params.groupId : null;
   // Community Home already chose the branch; a cold link without a mode
   // starts at result entry, the most direct path.
@@ -158,8 +208,19 @@ export default function ContributeToGoal() {
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
   const [reviewCount, setReviewCount] = useState<number | null>(null);
+  // The goal's optional guide override, from the authenticated own-credit read.
+  const [activityGuideKey, setActivityGuideKey] = useState<string | null>(null);
+  // The counting guide is collapsed on arrival and remembers nothing: no
+  // storage, no per-account preference. Reset with every context change below,
+  // exactly like the entry itself.
+  const [guideOpen, setGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ContributeResult | null>(null);
+  // The goal's repeat policy, from the member-authorized read. 'once' until
+  // the server answers — not the resolved default, because before the answer
+  // arrives the screen knows nothing. Nothing that depends on it renders
+  // before the load completes, so this value is never the one on screen.
+  const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>('once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
@@ -217,12 +278,15 @@ export default function ContributeToGoal() {
     // not an error, not a refusal, and not the previous ready-state totals.
     setPending(null);
     setLastResult(null);
+    setRepeatPolicy('once');
     setLegacyOrphan(null);
     setRefusal(null);
     sharedBeforeRef.current = null;
     setEntry('');
     setEntryError(null);
     setReviewCount(null);
+    setActivityGuideKey(null);
+    setGuideOpen(false);
     setSubmitting(false);
     setStep(initialStep);
     setContext({ kind: 'none' });
@@ -292,6 +356,10 @@ export default function ContributeToGoal() {
         if (cancelled) return;
         const pulse = pulseRes.data;
         const ownCredit = mineRes.data.ownCredit;
+        setActivityGuideKey(
+          typeof mineRes.data.activityGuideKey === 'string' ? mineRes.data.activityGuideKey : null
+        );
+        setRepeatPolicy(resolveRepeatPolicy(mineRes.data.repeatPolicy));
         setPulseAt(new Date());
         if (pulse.status !== 'active') {
           setState({ kind: 'closed', pulse, ownCredit });
@@ -568,6 +636,24 @@ export default function ContributeToGoal() {
     setStep('enter');
   }, []);
 
+  // A real second contribution, offered only under 'multiple'. It returns the
+  // screen to entry with NOTHING carried over from the confirmed one: no
+  // count, no attempt id, no captured "before". The next Record mints a fresh
+  // attemptId, which is what makes it a different attempt rather than a replay
+  // of the one just recorded.
+  const onAddMore = useCallback(() => {
+    attemptRef.current = null;
+    inFlightRef.current = false;
+    sharedBeforeRef.current = null;
+    setLastResult(null);
+    setRefusal(null);
+    setEntry('');
+    setEntryError(null);
+    setReviewCount(null);
+    setSubmitting(false);
+    setStep('enter');
+  }, []);
+
   // Review → record. The explicit confirmation boundary: the only place a
   // new attempt is created and sent.
   const onRecord = useCallback(async () => {
@@ -717,6 +803,103 @@ export default function ContributeToGoal() {
     setStep('enter');
   }, []);
 
+  // ---- kiosk session: Finish, and the idle countdown that performs it -------
+  //
+  // Everything here is inert unless `?kiosk=1` is on the route. The rules it
+  // obeys — what may be erased, what may not, and what the visitor is told
+  // when nobody knows the outcome — live in src/kioskSession.ts and are
+  // tested there directly.
+  const kioskOutcome: KioskOutcome = lastResult
+    ? 'confirmed'
+    : refusal
+      ? 'refused'
+      : pending
+        ? 'unresolved'
+        : 'none';
+  // A session ends by itself only from a screen it has come to REST on. The
+  // entry, review and movement screens have somebody standing at them
+  // mid-thought; a receipt, a refusal and an unresolved attempt do not.
+  // An attempt still in flight is NOT a rest state: signing out from under a
+  // request that has not answered is how an outcome becomes unknowable.
+  const kioskTerminal =
+    kiosk && (lastResult != null || refusal != null || (pending != null && pending.state === 'unknown'));
+  const [kioskFinishing, setKioskFinishing] = useState(false);
+  const [kioskError, setKioskError] = useState<string | null>(null);
+  // Bumped by "Stay". Restarting the countdown is a new deadline, not a
+  // pause: the next person's session must not inherit a clock someone else
+  // stopped.
+  const [kioskStay, setKioskStay] = useState(0);
+  const [kioskStartedAt, setKioskStartedAt] = useState<number | null>(null);
+  const [kioskNow, setKioskNow] = useState(0);
+  // Ref, not state, for the same reason as `inFlightRef`: a second tap of
+  // Finish delivered in the same task must not start a second sign-out.
+  const kioskFinishRef = useRef(false);
+
+  const onKioskFinish = useCallback(
+    async (outcome: KioskOutcome) => {
+      if (!goalId) return;
+      if (kioskFinishRef.current) return;
+      kioskFinishRef.current = true;
+      setKioskFinishing(true);
+      setKioskError(null);
+      const result = await runKioskFinish(
+        {
+          goalId: goalId as string,
+          outcome,
+          uid,
+          // The attempt this session made. `attemptRef` is cleared the moment
+          // an outcome is known, so an unresolved attempt is found on the
+          // pending row instead — which is the only case where the id matters
+          // at all, and the one case where nothing is cleared.
+          attemptId: pending?.attemptId ?? attemptRef.current,
+        },
+        {
+          signOut: () => signOut(getFirebaseAuth()),
+          clearPendingIfAttempt,
+          clearKioskKeys: clearKioskReturnGoal,
+        }
+      );
+      if (!result.signedOut) {
+        // Returning to the start screen while still signed in would hand the
+        // next visitor this account. Stay put and say so.
+        kioskFinishRef.current = false;
+        setKioskFinishing(false);
+        setKioskError('We couldn’t sign you out. Don’t leave this device signed in — try Finish again.');
+        return;
+      }
+      // Back to the start screen that is (normally) already underneath this
+      // one: dismissTo pops to it, so the device does not accumulate a start
+      // screen per visitor; on a cold load of ?kiosk=1 there is nothing to
+      // pop to and it behaves as a replace.
+      router.dismissTo(result.returnTo as never);
+    },
+    [goalId, uid, pending]
+  );
+
+  // The clock. Wall time, read every second, so a throttled or backgrounded
+  // tab cannot keep a previous visitor's receipt on a kiosk indefinitely.
+  useEffect(() => {
+    if (!kioskTerminal) {
+      setKioskStartedAt(null);
+      return;
+    }
+    const started = Date.now();
+    setKioskStartedAt(started);
+    setKioskNow(started);
+    const timer = setInterval(() => setKioskNow(Date.now()), KIOSK_TICK_MS);
+    return () => clearInterval(timer);
+  }, [kioskTerminal, kioskStay, kioskOutcome]);
+
+  const kioskRemaining =
+    kioskStartedAt == null ? Number.POSITIVE_INFINITY : kioskRemainingMs(kioskStartedAt, kioskNow);
+
+  useEffect(() => {
+    if (!kioskTerminal) return;
+    if (kioskStartedAt == null) return;
+    if (!kioskCountdownExpired(kioskRemaining)) return;
+    void onKioskFinish(kioskOutcome);
+  }, [kioskTerminal, kioskStartedAt, kioskRemaining, kioskOutcome, onKioskFinish]);
+
   // ---- render ---------------------------------------------------------------
 
   const communityName = context.kind === 'verified' ? context.communityName : null;
@@ -728,7 +911,24 @@ export default function ContributeToGoal() {
   const renderChrome = (showBack: boolean) => (
     <View style={styles.chrome}>
       <WsfWordmark variant="navy" height={22} testID="wsf-contribute-wordmark" />
-      {showBack ? (
+      {/*
+        ON A KIOSK THERE IS NO "BACK". The link goes to a community page that
+        belongs to the account currently signed in, and on a shared device
+        that is a door out of the flow and into someone's community for
+        whoever walks up next. The kiosk's one way out is Finish, which ends
+        the session rather than navigating within it.
+      */}
+      {kiosk ? (
+        <Pressable
+          onPress={() => void onKioskFinish(kioskOutcome)}
+          disabled={kioskFinishing}
+          accessibilityRole="button"
+          style={styles.chromeLink}
+          testID="wsf-kiosk-finish-chrome"
+        >
+          <Text style={styles.chromeLinkText}>{kioskFinishing ? 'Finishing…' : 'Finish'}</Text>
+        </Pressable>
+      ) : showBack ? (
         <ButtonLink
           href={backHref}
           style={styles.chromeLink}
@@ -739,6 +939,55 @@ export default function ContributeToGoal() {
       ) : null}
     </View>
   );
+
+  // The prominent end-of-session control, shown on every screen a kiosk
+  // session can come to rest on. It carries the countdown that performs the
+  // same Finish when nobody is standing there, and — when the outcome is
+  // UNKNOWN — the one sentence the visitor needs before they walk away.
+  const renderKioskFinish = (outcome: KioskOutcome) =>
+    kiosk ? (
+      <View style={styles.kioskBar} testID="wsf-kiosk-finish-bar">
+        {outcome === 'unresolved' ? (
+          <Text style={styles.kioskNotice} testID="wsf-kiosk-unresolved-note">
+            {KIOSK_UNRESOLVED_NOTICE}
+          </Text>
+        ) : null}
+        <Pressable
+          onPress={() => void onKioskFinish(outcome)}
+          disabled={kioskFinishing}
+          accessibilityRole="button"
+          style={styles.primaryButton}
+          testID="wsf-kiosk-finish"
+        >
+          <Text style={styles.primaryButtonText}>
+            {kioskFinishing ? 'Finishing…' : 'Finish'}
+          </Text>
+        </Pressable>
+        <Text style={styles.caption} testID="wsf-kiosk-finish-explainer">
+          Finish signs you out and returns this device to its start screen.
+        </Text>
+        <View style={styles.kioskCountdownRow}>
+          {/* D-2. The countdown changes without anybody acting, so it
+              announces itself politely rather than interrupting. */}
+          <Text style={styles.caption} testID="wsf-kiosk-countdown" aria-live="polite">
+            {kioskCountdownLabel(kioskRemainingSeconds(kioskRemaining))}
+          </Text>
+          <Pressable
+            onPress={() => setKioskStay((n) => n + 1)}
+            accessibilityRole="button"
+            style={styles.tertiaryButton}
+            testID="wsf-kiosk-stay"
+          >
+            <Text style={styles.tertiaryButtonText}>Stay</Text>
+          </Pressable>
+        </View>
+        {kioskError ? (
+          <Text style={styles.kioskError} testID="wsf-kiosk-finish-error" aria-live="polite">
+            {kioskError}
+          </Text>
+        ) : null}
+      </View>
+    ) : null;
 
   const renderTestNote = () =>
     wsfUsingEmulators ? (
@@ -800,6 +1049,11 @@ export default function ContributeToGoal() {
             textStyle={styles.primaryButtonText}
             testID="wsf-contribute-signin-link"
             label="Sign in"
+            // On a kiosk this gate is a hand-off, not a page the visitor came
+            // from: the sign-in returns them to /contribute/<goal>?kiosk=1 by
+            // replacing the sign-in screen, so a PUSHED gate would leave a
+            // second contribution screen mounted underneath the one they use.
+            replace={kiosk}
           />
         </View>
       </>
@@ -908,19 +1162,46 @@ export default function ContributeToGoal() {
         {ownCreditLine(r.ownCredit, hasShared ? r.unit : (r.unit ?? unitKnown))}
         {hasShared ? renderContextLabels() : null}
         <View style={styles.actions}>
-          <ButtonLink
-            href={hasShared ? backHref : '/'}
-            style={styles.primaryButton}
-            textStyle={styles.primaryButtonText}
-            testID="wsf-contribute-back"
-            label={hasShared ? backLabel : 'Back to home'}
-          />
-          {/*
-            DESIGN / DATA GAP — REPEAT POLICY: no "Add another contribution"
-            here. The goal schema carries no published repeat rule, so the
-            result does not encourage an immediate second attempt. The
-            community page's goal action remains available.
-          */}
+          {kiosk ? (
+            renderKioskFinish('confirmed')
+          ) : (
+            <>
+            {/*
+              REPEAT POLICY. The goal now publishes one, so the result can offer
+              a second contribution where the server will actually accept it —
+              'multiple', goal still active, and a receipt that carried shared
+              state. Under 'once' this is absent and the result ends where it
+              always did.
+
+              It carries Community Home's existing wording, "Record more {unit}",
+              rather than a second name for the same act. The two are never on
+              screen together — they are on different screens — and Community
+              Home now withholds its own offer on a goal this member has already
+              finished, so the product makes the offer once or not at all.
+            */}
+            {canAddMore(repeatPolicy, r) ? (
+              <Pressable
+                onPress={onAddMore}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                testID="wsf-contribute-record-more"
+              >
+                <Text style={styles.primaryButtonText}>
+                  {recordMoreLabel(hasShared ? r.unit : unitKnown)}
+                </Text>
+              </Pressable>
+            ) : null}
+            <ButtonLink
+              href={hasShared ? backHref : '/'}
+              style={canAddMore(repeatPolicy, r) ? styles.secondaryButton : styles.primaryButton}
+              textStyle={
+                canAddMore(repeatPolicy, r) ? styles.secondaryButtonText : styles.primaryButtonText
+              }
+              testID="wsf-contribute-back"
+              label={hasShared ? backLabel : 'Back to home'}
+            />
+            </>
+          )}
         </View>
         {renderTestNote()}
       </>,
@@ -958,13 +1239,17 @@ export default function ContributeToGoal() {
                 <Text style={styles.primaryButtonText}>Edit the number</Text>
               </Pressable>
             ) : null}
-            <ButtonLink
-              href={refusal.reason === 'signedOut' ? '/signin' : backHref}
-              style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
-              textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
-              testID="wsf-contribute-back"
-              label={refusal.reason === 'signedOut' ? 'Sign in' : backLabel}
-            />
+            {kiosk ? (
+              renderKioskFinish('refused')
+            ) : (
+              <ButtonLink
+                href={refusal.reason === 'signedOut' ? '/signin' : backHref}
+                style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
+                textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
+                testID="wsf-contribute-back"
+                label={refusal.reason === 'signedOut' ? 'Sign in' : backLabel}
+              />
+            )}
           </View>
         </View>
         {renderTestNote()}
@@ -1015,18 +1300,27 @@ export default function ContributeToGoal() {
           <Text style={styles.caption}>
             This sends the same attempt again. If it already reached us, it will not count twice.
           </Text>
-          <Text style={styles.caption}>
-            You can leave this page. The same attempt will be here when you come back.
-          </Text>
+          {/* Not true on a shared device: the visitor is about to be signed
+              out of it. The kiosk says where the attempt actually is instead
+              (KIOSK_UNRESOLVED_NOTICE, on the Finish bar below). */}
+          {kiosk ? null : (
+            <Text style={styles.caption}>
+              You can leave this page. The same attempt will be here when you come back.
+            </Text>
+          )}
         </View>
         <View style={styles.actions}>
-          <ButtonLink
-            href={backHref}
-            style={styles.tertiaryButton}
-            textStyle={styles.tertiaryButtonText}
-            testID="wsf-contribute-back"
-            label={backLabel}
-          />
+          {kiosk ? (
+            renderKioskFinish('unresolved')
+          ) : (
+            <ButtonLink
+              href={backHref}
+              style={styles.tertiaryButton}
+              textStyle={styles.tertiaryButtonText}
+              testID="wsf-contribute-back"
+              label={backLabel}
+            />
+          )}
         </View>
         {renderTestNote()}
       </>,
@@ -1057,6 +1351,55 @@ export default function ContributeToGoal() {
   const pulse = state.pulse;
   const unit = pulse.unit;
   const ownCredit = state.ownCredit;
+
+  // The counting guide for this goal's unit — the per-goal override first, the
+  // unit-derived key otherwise, a generic guide when neither is in the table.
+  // Entry screen only: a receipt and a refusal are about a number already sent,
+  // and nothing about counting applies to them any more.
+  const renderCountingGuide = () => {
+    const guide = selectActivityGuide({ unit, activityGuideKey });
+    return (
+      <View style={styles.guideBox} testID="wsf-contribute-guide">
+        <View {...HEADING_2}>
+          <Pressable
+            onPress={() => setGuideOpen((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: guideOpen }}
+            // Matches LegalAccordion: accessibilityState carries it on native,
+            // the raw attribute for browsers that only read the DOM.
+            {...({ 'aria-expanded': guideOpen } as Record<string, unknown>)}
+            style={styles.guideToggle}
+            testID="wsf-contribute-guide-toggle"
+          >
+            <Text style={styles.guideToggleText}>{guideHeading(unit)}</Text>
+            <Text style={styles.guideToggleMark}>{guideOpen ? '\u25B2' : '\u25BC'}</Text>
+          </Pressable>
+        </View>
+        {guideOpen ? (
+          <View
+            style={styles.guidePanel}
+            testID="wsf-contribute-guide-panel"
+            {...({ role: 'region' } as Record<string, unknown>)}
+          >
+            {guide.rules.map((rule, i) => (
+              <Text key={rule} style={styles.body} testID={`wsf-contribute-guide-rule-${i}`}>
+                {rule}
+              </Text>
+            ))}
+            <Text style={styles.caption} testID="wsf-contribute-guide-counts">
+              {guide.counts}
+            </Text>
+            <Text style={styles.caption} testID="wsf-contribute-guide-does-not-count">
+              {guide.doesNotCount}
+            </Text>
+            <Text style={styles.caption} testID="wsf-contribute-guide-self-count">
+              {SELF_COUNT_NOTE}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
 
   // Compact confirmed context: small navy WE beside the exact numbers.
   const renderCompactProgress = () => (
@@ -1162,7 +1505,9 @@ export default function ContributeToGoal() {
           <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
             {`${formatCount(reviewCount)} ${unit}`}
           </Text>
-          <Text style={styles.body}>This will be recorded once toward this goal.</Text>
+          <Text style={styles.body} testID="wsf-contribute-repeat-notice">
+            {repeatNotice(repeatPolicy)}
+          </Text>
           <View style={styles.actions}>
             <Pressable
               onPress={onRecord}
@@ -1358,6 +1703,7 @@ export default function ContributeToGoal() {
             <Text style={styles.primaryButtonText}>Review my contribution</Text>
           </Pressable>
         </View>
+        {renderCountingGuide()}
       </View>
       {renderTestNote()}
     </>,
@@ -1371,6 +1717,12 @@ const CARD_BORDER = '#E3E7E1';
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 
 const styles = StyleSheet.create({
+  // ---- kiosk -----------------------------------------------------------
+  kioskBar: { gap: 10 },
+  kioskNotice: { color: NAVY, fontSize: 17, lineHeight: 24, fontWeight: '700' },
+  kioskError: { color: '#8A1C1C', fontSize: 15, lineHeight: 21, fontWeight: '700' },
+  kioskCountdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
+
   scroll: { flex: 1, backgroundColor: CREAM },
   container: {
     alignItems: 'center',
@@ -1516,6 +1868,29 @@ const styles = StyleSheet.create({
   },
   quickChipText: { color: NAVY, fontSize: 15, fontWeight: '700' },
   reviewQuantity: { color: wsfTheme.colors.text, fontSize: 44, fontWeight: '800', lineHeight: 52, letterSpacing: -0.5 },
+
+  // counting guide
+  guideBox: {
+    borderTopWidth: 1,
+    borderTopColor: CARD_BORDER,
+    marginTop: 4,
+  },
+  // 44 px minimum target, the same floor the chrome links use.
+  guideToggle: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  guideToggleText: {
+    color: NAVY,
+    fontSize: 16,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  guideToggleMark: { color: NAVY, fontSize: 13 },
+  guidePanel: { gap: 8, paddingBottom: 8 },
 
   // timer
   timerBox: {

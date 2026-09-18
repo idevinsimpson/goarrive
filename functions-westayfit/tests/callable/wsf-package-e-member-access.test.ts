@@ -394,7 +394,7 @@ describe('wsfMyContribution does not tell a stranger that a protected goal exist
       ownCredit: number;
       unit: string;
     };
-    expect(own).toEqual({ ownCredit: 0, unit: 'reps' });
+    expect(own).toEqual({ ownCredit: 0, unit: 'reps', repeatPolicy: 'multiple' });
   });
 
   it('keeps a former member’s history when a correction has zeroed their credit', async () => {
@@ -421,7 +421,7 @@ describe('wsfMyContribution does not tell a stranger that a protected goal exist
       ownCredit: number;
       unit: string;
     };
-    expect(own).toEqual({ ownCredit: 0, unit: 'reps' });
+    expect(own).toEqual({ ownCredit: 0, unit: 'reps', repeatPolicy: 'multiple' });
   });
 });
 

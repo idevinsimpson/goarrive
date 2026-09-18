@@ -339,7 +339,12 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible();
   await expect(page.getByTestId('wsf-contribute-review-quantity')).toHaveText('20 squats');
   await expect(page.getByTestId('wsf-contribute-submit')).toHaveText('Record 20 squats');
-  await expect(page.getByTestId('wsf-contribute-review-screen')).toContainText('This will be recorded once toward this goal.');
+  // This fixture's goal carries NO repeatPolicy field, which resolves to
+  // 'multiple' — the behaviour this server has always had, and the reason the
+  // concurrency step below can record a SECOND contribution from this same
+  // member on this same goal at all. The once sentence is
+  // pinned against an explicitly-'once' goal in ui-contribute-repeat-policy.spec.ts.
+  await expect(page.getByTestId('wsf-contribute-review-screen')).toContainText('This will be recorded toward this goal. You can add more later.');
   await snap(page, '04-review');
   expect(writes, 'review never writes').toBe(0);
   // Edit goes back with the number intact.

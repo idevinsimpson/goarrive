@@ -4,7 +4,12 @@ import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState, type SetStateAction } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { samePulse, type GoalPulse } from '../../src/displayPulse';
+import {
+  samePulse,
+  type GoalPulse,
+  type GoalRecentAddition,
+  type GoalRecentAdditions,
+} from '../../src/displayPulse';
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
@@ -17,6 +22,7 @@ import {
   progressPhase,
   statusLine,
 } from '../../src/ui/progressFormat';
+import { additionLine } from '../../src/ui/relativeTime';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 type DisplayState =
@@ -34,6 +40,23 @@ type DisplayState =
 // so we do not pay a Firestore round-trip on every tick when multiple
 // displays are pointed at the same goal.
 const POLL_INTERVAL_MS = 2_000;
+
+// The recent-additions list is fetched on the FIRST tick and then every fifth
+// tick — once every 10 seconds, not once every 2. It is a second endpoint, so
+// asking on every tick would have doubled this screen's request volume for a
+// list that changes far more slowly than the total does; +20% is what it costs
+// instead.
+//
+// The labels still move every minute without a request: they are computed from
+// the device clock against the minute each addition carries, so the only thing
+// a fetch brings is a NEW addition. A contribution therefore takes up to 10
+// seconds to appear here, while the total it moved appears within 2. That is
+// the intended trade for a list whose whole claim is "recently".
+const RECENT_EVERY_N_TICKS = 5;
+
+// At most five lines are shown of the ten the server keeps. The list is a
+// glance at what is happening now, not a log to read down.
+const RECENT_VISIBLE = 5;
 
 export default function DisplayGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
@@ -54,12 +77,20 @@ export default function DisplayGoal() {
   // recover from a refusal, and it exists so that recovery is an explicit act
   // rather than something an outstanding old response can perform.
   const [pollSession, setPollSession] = useState(0);
+  // Null until an answer lands; the empty array is a real answer meaning
+  // "nothing has happened", and both render nothing.
+  const [recent, setRecent] = useState<GoalRecentAddition[] | null>(null);
+  // The device's current minute. Held in state so the age labels move on their
+  // own between fetches; stored as a MINUTE rather than an instant so an
+  // unchanged minute is a state bail-out rather than a repaint every 2s.
+  const [nowMinute, setNowMinute] = useState(() => Math.floor(Date.now() / 60_000));
 
   // A different goal is a different context. Clear what the previous goal put
   // on screen at once, rather than leaving its total up until the first
   // response for the new one lands.
   useEffect(() => {
     setState({ kind: 'loading' });
+    setRecent(null);
   }, [goalId]);
 
   useEffect(() => {
@@ -133,8 +164,53 @@ export default function DisplayGoal() {
     // the refusal never arrives, and a revoked display keeps showing a total
     // it is no longer entitled to. The contribution screen's poll has no such
     // rule and is guarded; this one is not.
+    // The recent-additions read. It rides the pulse's session guards — a
+    // closed session admits nothing from it either — but it is deliberately
+    // NOT allowed to close that session or to touch `state`. A refusal here
+    // empties the list and leaves the total alone; the pulse is the one read
+    // that decides whether this screen may show anything at all, and a list
+    // that failed for its own reasons must not be able to blank a total the
+    // pulse is still confirming.
+    let recentIssued = 0;
+    let recentApplied = 0;
+    const tickRecent = async () => {
+      const seq = ++recentIssued;
+      try {
+        const fn = httpsCallable<{ goalId: string }, GoalRecentAdditions>(
+          getFirebaseFunctions(),
+          'wsfGoalRecentAdditions'
+        );
+        const result = await fn({ goalId });
+        if (cancelled || sessionClosed) return;
+        if (seq <= recentApplied) return;
+        recentApplied = seq;
+        // Nothing is invented and nothing is merged with what was there
+        // before: the server's list replaces this screen's list whole.
+        setRecent(Array.isArray(result.data?.additions) ? result.data.additions : []);
+      } catch {
+        if (cancelled || sessionClosed) return;
+        if (seq <= recentApplied) return;
+        recentApplied = seq;
+        // Refusal and transient failure are treated the same way ON PURPOSE.
+        // Keeping the last list up would be claiming it is still current, and
+        // this screen has no way to tell a revoked authorization from a
+        // dropped connection without asking the pulse — which is already
+        // asking, every 2 seconds, and will end the session if it is refused.
+        setRecent([]);
+      }
+    };
+
     const tick = async () => {
       const seq = ++issued;
+      // The age labels are a pure function of this minute and the minutes the
+      // server sent, so advancing it here is what makes "2 min ago" become
+      // "3 min ago" with no request at all. An unchanged minute returns the
+      // identical value and React commits nothing.
+      setNowMinute((prev) => {
+        const minute = Math.floor(Date.now() / 60_000);
+        return prev === minute ? prev : minute;
+      });
+      if (seq === 1 || seq % RECENT_EVERY_N_TICKS === 1) void tickRecent();
       try {
         const fn = httpsCallable<{ goalId: string }, GoalPulse>(
           getFirebaseFunctions(),
@@ -180,6 +256,8 @@ export default function DisplayGoal() {
             timer = null;
           }
           setState({ kind: 'notFound' });
+          // Every protected value leaves with the refusal, the list included.
+          setRecent([]);
           return;
         }
         // A transient failure is not evidence that the permission changed. The
@@ -436,6 +514,58 @@ export default function DisplayGoal() {
     </View>
   );
 
+  // RECENT ADDITIONS. Shown only when there is something to show: an empty
+  // list, a list that has not answered yet, and a list whose every line was
+  // unusable all render nothing at all — no empty heading, no "no activity
+  // yet" placeholder standing in for an answer this screen does not have.
+  //
+  // Each line is an amount and how long ago it landed, and that is the whole
+  // of it. The server sends nothing else, so there is nothing else here to
+  // leak: no name, no photo, no ordinal, and in particular no count of how
+  // many people these lines represent — five lines may be five people or one.
+  const recentLines = (recent ?? [])
+    .slice(0, RECENT_VISIBLE)
+    .map((addition) => additionLine(addition, new Date(nowMinute * 60_000)))
+    .filter((line): line is string => line !== null);
+  const recentPanel =
+    recentLines.length > 0 ? (
+      <View
+        style={[styles.recent, wide ? styles.recentWide : null]}
+        testID="wsf-display-recent"
+        // D-2's rule, same reason: lines appear because other people acted,
+        // never because the viewer did anything. Polite — a wall display
+        // announcing each contribution as an alert would interrupt whatever
+        // else a screen reader user is doing.
+        aria-live="polite"
+      >
+        {/*
+          The goal title is this page's level-1 heading, so the list's own
+          label sits under it at level 2. Role and level only; the size is the
+          stylesheet's.
+        */}
+        <Text
+          style={[styles.recentHeading, wide ? styles.recentHeadingWide : null]}
+          testID="wsf-display-recent-heading"
+          accessibilityRole="header"
+          {...({ 'aria-level': 2 } as Record<string, unknown>)}
+        >
+          Recent
+        </Text>
+        {recentLines.map((line, i) => (
+          <Text
+            // The list is positional and its entries carry no id by design, so
+            // the index is the only key available — and it is the right one:
+            // position in the list is exactly what this row is.
+            key={`${i}-${line}`}
+            style={[styles.recentLine, wide ? styles.recentLineWide : null]}
+            testID="wsf-display-recent-line"
+          >
+            {line}
+          </Text>
+        ))}
+      </View>
+    ) : null;
+
   const identity = (
     <View style={[styles.identity, wide ? styles.identityWide : null]}>
       <Text style={[styles.community, wide ? styles.communityWide : null, communityType]} testID="wsf-display-community">
@@ -507,6 +637,7 @@ export default function DisplayGoal() {
           <View style={styles.wideRight}>
             {we}
             {facts}
+            {recentPanel}
           </View>
         </View>
         {testNote}
@@ -532,6 +663,7 @@ export default function DisplayGoal() {
         {facts}
         {freshness}
       </View>
+      {recentPanel}
       {testNote}
     </View>
   );
@@ -642,6 +774,24 @@ const styles = StyleSheet.create({
   // phone; neither is allowed to break mid-phrase.
   freshness: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 4 },
   freshnessText: { color: HERO_MUTED, fontSize: 13, letterSpacing: 0.3, textAlign: 'center' },
+  // Quiet by construction. The list sits UNDER the hero on the phone page
+  // (cream, so navy text) and under the facts column on the wide canvas
+  // (navy, so the muted hero tone). It is smaller than every number above it
+  // and never competes with the total, which is the thing the display is of.
+  recent: { paddingTop: 16, alignItems: 'center', gap: 2 },
+  recentWide: { alignItems: 'flex-start', paddingTop: 24 },
+  recentHeading: {
+    color: NAVY,
+    opacity: 0.7,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    paddingBottom: 4,
+  },
+  recentHeadingWide: { color: HERO_MUTED, opacity: 1, fontSize: 15 },
+  recentLine: { color: NAVY, opacity: 0.75, fontSize: 14, letterSpacing: 0.2 },
+  recentLineWide: { color: HERO_MUTED, opacity: 1, fontSize: 20, lineHeight: 30 },
   freshnessStaleText: {
     color: NAVY,
     backgroundColor: '#F2C94C',

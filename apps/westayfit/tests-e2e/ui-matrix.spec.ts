@@ -408,19 +408,25 @@ test.describe('phone 390×844', () => {
       await expect(page.getByTestId(`wsf-community-goal-total-${goalId}`)).toHaveText(s.totalLine, {
         timeout: 30_000,
       });
-      await expect(page.getByTestId(`wsf-community-goal-status-${goalId}`)).toHaveText(s.statusLine);
+      // Community Home's History row states a closed goal's result as
+      // "Reached" or "Closed at N%". The exact total beside it still carries
+      // the overshoot, so "515 of 500 squats" says how far beyond. An open
+      // goal keeps the full status line.
+      await expect(page.getByTestId(`wsf-community-goal-status-${goalId}`)).toHaveText(
+        closed && s.total >= s.target ? 'Reached' : s.statusLine
+      );
       await expect(page.getByTestId(`wsf-community-goal-we-${goalId}`)).toHaveAttribute(
         'data-fill-ratio',
         s.ratio
       );
       if (closed) {
-        // A past goal states its result once: "Closed at N%" / "N beyond our
-        // goal" IS the percentage, so no "N% complete" line above it.
+        // A past goal states its result once: "Reached" / "Closed at N%" IS
+        // the result, so no "N% complete" line above it.
         await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveCount(0);
         await expect(page.getByTestId(`wsf-community-goal-period-${goalId}`)).toHaveText(
           CLOSED_PERIOD
         );
-        await expect(page.getByTestId('wsf-community-history')).toContainText('Past goal');
+        await expect(page.getByTestId('wsf-community-history')).toContainText('History');
       } else {
         await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveText(
           s.percentText

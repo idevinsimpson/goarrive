@@ -2068,6 +2068,70 @@ const GOAL_SHARD_COUNT = 10;
 
 type GoalStatus = 'active' | 'closed';
 
+/**
+ * One stored line of the recent-additions tail, held as its own document at
+ * `wsfGoals/{goalId}/recentAdditions/{attemptId}`.
+ *
+ * A SUBCOLLECTION, NOT A FIELD ON THE GOAL. An array on the goal document
+ * would have made every contribution a write to `wsfGoals/{goalId}`, which
+ * serializes contributions on one document and defeats the counter sharding
+ * that exists precisely so they do not contend. Each addition is now its own
+ * document and contributions stay fanned out.
+ *
+ * THE DOCUMENT ID IS THE ATTEMPT ID, which is what makes the write idempotent
+ * by construction rather than by a check: a retried transaction, or a replay
+ * that somehow reached this line, writes the same id with the same content.
+ *
+ * `amount` is the units added; `at` is an ISO instant ROUNDED DOWN TO THE
+ * MINUTE, so the stored value cannot be used to line an addition up with
+ * anything else that happened at the same second. Deliberately a string, not a
+ * Timestamp: it is published verbatim, its precision is part of what it is,
+ * and an ISO-8601 UTC string sorts lexicographically in chronological order,
+ * which is what the read below orders on.
+ *
+ * These two fields are the whole document. No uid, no attemptId IN the
+ * document, no shard index, no member total, no ordinal.
+ */
+type RecentAddition = { amount: number; at: string };
+
+const RECENT_ADDITIONS_COLLECTION = 'recentAdditions';
+
+/**
+ * Newest ten, applied on READ. The subcollection itself is not pruned — see
+ * the note on wsfGoalRecentAdditions — so this is the bound on what is ever
+ * published, which is the bound that matters.
+ */
+const RECENT_ADDITIONS_LIMIT = 10;
+
+/** ISO instant truncated to the minute — the only precision ever stored. */
+function isoMinute(ms: number): string {
+  return new Date(Math.floor(ms / 60_000) * 60_000).toISOString();
+}
+
+function recentAdditionsRef(goalId: string) {
+  return getFirestore()
+    .collection('wsfGoals')
+    .doc(goalId)
+    .collection(RECENT_ADDITIONS_COLLECTION);
+}
+
+/**
+ * How many times ONE member may contribute to ONE goal.
+ *
+ *   'once'     — a member's contribution to this goal is recorded once. A
+ *                second attempt with a NEW attemptId is refused; replaying a
+ *                KNOWN attemptId still returns its original receipt.
+ *   'multiple' — a member may record further contributions to the same goal.
+ *                Each is idempotent by its own attemptId and each accumulates
+ *                into own credit and the shared total.
+ *
+ * Nothing is backfilled and nothing is migrated: every read goes through
+ * goalRepeatPolicy(), never the field directly. See that function for the
+ * resolution table, including what an ABSENT field means — which is 'multiple',
+ * because that is what this server has always done.
+ */
+type GoalRepeatPolicy = 'once' | 'multiple';
+
 type GoalDoc = {
   ownerUid: string;
   communityGroupId: string;
@@ -2115,6 +2179,17 @@ type GoalDoc = {
   reachedAttemptId?: string | null;
   reachedSharedTotal?: number;
   /**
+   * Optional per-goal counting-guide override. The client keys its counting
+   * guide off the goal's `unit`; when a Champion wants a different guide than
+   * the unit's own words would pick, this field names it and wins.
+   *
+   * It carries no authority over anything recorded: the contribution count,
+   * the shared total and every permission are untouched by it. Absent means
+   * "derive the guide from the unit", which is what every goal written before
+   * this field existed does. Nothing is backfilled.
+   */
+  activityGuideKey?: string;
+  /**
    * Set by wsfCreateGoal on every goal created since the crossing event
    * exists. A goal that carries it may record an UNCREDITED event (reachedAt
    * and reachedSharedTotal, reachedAttemptId null) when the total is observed
@@ -2143,6 +2218,10 @@ type GoalDoc = {
   aggregateDisplayAuthorized?: boolean;
   aggregateDisplayAuthorizedAt?: FirebaseFirestore.Timestamp;
   aggregateDisplayAuthorizedBy?: string;
+  /** See goalRepeatPolicy() for the resolution table. Absent means 'multiple'. */
+  repeatPolicy?: GoalRepeatPolicy;
+  repeatPolicyUpdatedAt?: FirebaseFirestore.Timestamp;
+  repeatPolicyUpdatedBy?: string;
 };
 
 /**
@@ -2154,6 +2233,38 @@ type GoalDoc = {
  */
 function isAggregateDisplayAuthorized(goal: Pick<GoalDoc, 'aggregateDisplayAuthorized'>): boolean {
   return goal.aggregateDisplayAuthorized === true;
+}
+
+/**
+ * The ONLY way this package asks "how often may one member contribute?".
+ *
+ * THE RESOLUTION TABLE — all four cases, and the reason for each:
+ *
+ *   absent / null  -> 'multiple'  Every goal written before this field existed
+ *                                 accepts repeat contributions from the same
+ *                                 member today: wsfContribute's only
+ *                                 uniqueness is (goal, uid, attemptId), and a
+ *                                 second attemptId has always been a second
+ *                                 contribution. Resolving absence to 'once'
+ *                                 would silently take that away from live
+ *                                 goals. Absence therefore means "unchanged".
+ *   'once'         -> 'once'      An explicit, deliberate restriction.
+ *   'multiple'     -> 'multiple'  An explicit, deliberate permission.
+ *   anything else  -> 'once'      A typo, a hand edit, an import, or a literal
+ *                                 a later build introduced. A value this build
+ *                                 does not understand must never widen what a
+ *                                 member may do, so it lands on the stricter
+ *                                 policy — NOT on the absent-field default.
+ *
+ * The distinction in the last two rows is the whole point: "the field is not
+ * there" and "the field says something I don't recognise" are different facts
+ * and get different answers.
+ */
+function goalRepeatPolicy(goal: Pick<GoalDoc, 'repeatPolicy'>): GoalRepeatPolicy {
+  const raw = goal.repeatPolicy as unknown;
+  if (raw === undefined || raw === null) return 'multiple';
+  if (raw === 'multiple') return 'multiple';
+  return 'once';
 }
 
 /**
@@ -2357,6 +2468,33 @@ function normalizeGoalUnit(v: unknown): string | null {
   return trimmed;
 }
 
+/**
+ * Optional per-goal counting-guide key. Same shape and same 40-char ceiling as
+ * the unit it stands in for — it is a key into the client's guide table, not
+ * prose, so it is stored trimmed and verbatim and the client normalizes it
+ * (lowercase, plural/synonym folding) exactly as it normalizes a unit. An
+ * unknown key is not an error here: the client falls back to the unit.
+ *
+ * Returns undefined when the caller sent nothing, null when they sent
+ * something unusable — the two are different answers to the callable.
+ */
+function normalizeActivityGuideKey(v: unknown): string | null | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 1 || trimmed.length > 40) return null;
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+// A goal's repeat policy as supplied by a caller. Only the two literals are
+// accepted — an unknown string is an error at the boundary rather than a value
+// that silently resolves to 'once' inside a goal document.
+function normalizeRepeatPolicy(v: unknown): GoalRepeatPolicy | null {
+  if (v === 'once' || v === 'multiple') return v;
+  return null;
+}
+
 function normalizeAttemptId(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
@@ -2461,6 +2599,8 @@ type CreateGoalRequest = {
   startsAt?: unknown; // ISO 8601
   endsAt?: unknown; // ISO 8601
   timezone?: unknown; // IANA
+  activityGuideKey?: unknown; // optional counting-guide override, 1..40 chars
+  repeatPolicy?: unknown; // 'once' | 'multiple'; absent means 'once'
 };
 
 type CreateGoalResponse = { goalId: string };
@@ -2532,6 +2672,35 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         'timezone must be a valid IANA identifier.'
       );
     }
+    // Optional. Omitting it is the ordinary case and writes no field at all,
+    // so a goal without an override is byte-identical to one created before
+    // this argument existed.
+    const activityGuideKey = normalizeActivityGuideKey(request.data?.activityGuideKey);
+    if (activityGuideKey === null) {
+      throw new HttpsError(
+        'invalid-argument',
+        'activityGuideKey, when provided, must be 1..40 chars; no ASCII control characters.'
+      );
+    }
+    // Optional in the request, but NEVER absent on a goal this callable
+    // writes: omitting it records an explicit 'once'. A new goal states its
+    // policy rather than inheriting the absent-field default, so
+    // goalRepeatPolicy()'s 'absent means multiple' row only ever applies to
+    // goals written before this field existed. Supplying anything other than
+    // the two literals is refused here rather than written and reinterpreted
+    // later.
+    let repeatPolicy: GoalRepeatPolicy = 'once';
+    const rawRepeatPolicy = request.data?.repeatPolicy;
+    if (rawRepeatPolicy !== undefined && rawRepeatPolicy !== null) {
+      const normalizedRepeatPolicy = normalizeRepeatPolicy(rawRepeatPolicy);
+      if (!normalizedRepeatPolicy) {
+        throw new HttpsError(
+          'invalid-argument',
+          "repeatPolicy must be 'once' or 'multiple'."
+        );
+      }
+      repeatPolicy = normalizedRepeatPolicy;
+    }
 
     const db = getFirestore();
     const goalRef = db.collection('wsfGoals').doc();
@@ -2561,10 +2730,12 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         title,
         target,
         unit,
+        ...(activityGuideKey === undefined ? {} : { activityGuideKey }),
         status: 'active',
         startsAt: Timestamp.fromDate(startsAtDate),
         endsAt: Timestamp.fromDate(endsAtDate),
         timezone,
+        repeatPolicy,
         createdAt: FieldValue.serverTimestamp(),
       });
     });
@@ -2789,14 +2960,50 @@ export const wsfContribute = onCall<ContributeRequest>(
           );
         }
 
-        //   4. THE TARGET-CROSSING EVENT is NOT decided here. Reading all ten
-        // shards inside this transaction made every pre-crossing contribution
-        // conflict with every concurrent one (measured: 20 simultaneous
-        // attempts took 13 s instead of 0.5 s; 48 of 50 aborted). The shards
-        // exist so that contributions never contend, so the crossing is
-        // claimed AFTER this transaction commits, in a small transaction on
-        // the goal document only — see claimTargetCrossing below. The attempt
-        // is stored with crossedTarget false and upgraded by that claim.
+        //   4. Repeat policy. Under 'once' a member's contribution to this
+        //      goal is recorded once, and a SECOND attempt is refused even
+        //      though its attemptId is new and well-formed. Minting a fresh
+        //      attemptId is how a client says "this is a different attempt";
+        //      it is never how it earns a second one. The replay branch above
+        //      already returned, so reaching here with a known attemptId is
+        //      impossible and an honest earlier contribution is never refused.
+        //
+        //      The evidence is the member's own totals document, which was
+        //      already read above — a document read, not a query, so two
+        //      transactions racing two different attemptIds contend on it and
+        //      exactly one commits.
+        const priorMemberTotal = memberTotalSnap.data() as
+          | { total?: number; contributionCount?: number }
+          | undefined;
+        const previousMemberTotal =
+          typeof priorMemberTotal?.total === 'number' ? priorMemberTotal.total : 0;
+        // Rows written before contributionCount existed carry no count. Their
+        // total is not proof either way — wsfAdjustGoal can move a total
+        // without any contribution behind it — so the ledger itself is asked,
+        // and only for those rows. A member with no totals document at all has
+        // nothing recorded: the contribution write below always creates one.
+        let previousContributionCount: number | null =
+          typeof priorMemberTotal?.contributionCount === 'number'
+            ? priorMemberTotal.contributionCount
+            : null;
+        if (previousContributionCount === null && memberTotalSnap.exists) {
+          const priorContributions = await tx.get(
+            db
+              .collection('wsfContributions')
+              .where('goalId', '==', goalId)
+              .where('userId', '==', uid)
+              .limit(1)
+          );
+          previousContributionCount = priorContributions.empty ? 0 : 1;
+        }
+        const recordedBefore = (previousContributionCount ?? 0) > 0;
+        if (goalRepeatPolicy(goal) === 'once' && recordedBefore) {
+          throw new HttpsError(
+            'failed-precondition',
+            'This goal takes one contribution from each member, and yours is already recorded.'
+          );
+        }
+
         const shardIndex = randomGoalShardIndex();
         const shard = goalShardRef(goalId, shardIndex);
 
@@ -2820,19 +3027,47 @@ export const wsfContribute = onCall<ContributeRequest>(
           { merge: true }
         );
 
-        const previousMemberTotal =
-          (memberTotalSnap.data() as { total?: number } | undefined)?.total ??
-          0;
         tx.set(
           memberTotalRef,
           {
             goalId,
             userId: uid,
             total: previousMemberTotal + count,
+            // How many contributions this member has recorded toward this
+            // goal, as distinct from how many units they are credited with.
+            // The repeat policy is about the former; an authorized correction
+            // moves the latter and must not change it.
+            contributionCount: (previousContributionCount ?? 0) + 1,
             updatedAt: FieldValue.serverTimestamp(),
           },
           { merge: true }
         );
+
+        // The recent-additions tail. Written HERE, on the branch that records
+        // a new contribution, and nowhere else: the replay branch above
+        // returns before reaching this line, so an attemptId replayed any
+        // number of times records exactly once.
+        //
+        // ONE SMALL DOCUMENT OF ITS OWN, keyed by the attempt id. Nothing is
+        // read first and nothing is rewritten, so this adds no contention:
+        // the goal document is untouched, and two members contributing at the
+        // same instant write two different documents rather than queueing on
+        // one. Keying by the attempt id makes the write idempotent by
+        // construction — a transaction retry, or any future path that reached
+        // this line twice for one attempt, writes the same id with the same
+        // content and there is still exactly one document.
+        //
+        // `now` is the SERVER time already used to enforce the window, rounded
+        // down to the minute. The amount is the count just recorded. Nothing
+        // that identifies the contributor — uid, attemptId as a FIELD, shard,
+        // member total, position in any sequence — is written; the attempt id
+        // is the document's name, not data inside it, and it is a per-tap
+        // random value that names no one.
+        const addition: RecentAddition = {
+          amount: count,
+          at: isoMinute(now.toMillis()),
+        };
+        tx.set(recentAdditionsRef(goalId).doc(attemptId), addition);
 
         // Reached only after the active-membership gate above, so this caller
         // is an active member by construction.
@@ -3087,6 +3322,115 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// wsfGoalRecentAdditions — the bounded, non-identifying tail of contributions.
+//
+// A SEPARATE callable on purpose. wsfGoalPulse publishes exactly nine fields
+// and that shape is settled; widening it would re-open a decision that was
+// already made, and would force every caller entitled to the totals to also
+// receive this list. They are different disclosures, so they are different
+// endpoints and a Champion's authorization reaches both by the SAME rule.
+//
+// WHAT IS PUBLISHED: an amount, the unit it is counted in, and the MINUTE it
+// landed. Newest first, at most RECENT_ADDITIONS_LIMIT of them, and nothing
+// else in the response object — no names, no photos, no ids, no contributor
+// count, no per-member anything, not even how many distinct people the list
+// represents. Ten entries may be one person or ten.
+//
+// THE BOUND IS APPLIED ON READ, by `limit()`. The subcollection itself is not
+// pruned: it keeps one small document per contribution for the life of the
+// goal. That is a deliberate trade for the write path — pruning would mean
+// reading the tail inside the contribution transaction, which is the goal-
+// document contention this subcollection exists to avoid. Nothing beyond the
+// newest ten is ever published, and each retained document is an amount and a
+// minute that names no one.
+//
+// ORDERED BY `at` DESCENDING — a single-field order on a single collection,
+// which Firestore serves from the automatic single-field index. It needs no
+// composite index and no firestore.indexes.json entry. Within one minute the
+// stored values are equal, so Firestore breaks the tie by document name; the
+// display shows minute granularity, so two additions in the same minute are
+// indistinguishable to a viewer either way and no order between them is
+// claimed.
+//
+// WHAT IS NOT LISTED: corrections. wsfAdjustGoal moves a total without being a
+// contribution, so an adjustment appends nothing here and is invisible to this
+// read. A public display that showed a total being walked back would narrate
+// an administrative act to an outside audience, and the correction's size
+// would say something about whoever it corrected.
+//
+// THE GATE is evaluateGoalAggregateAccess — the SAME function and the same
+// call shape wsfGoalPulse uses, not a copy of its reasoning. Active member, or
+// an authorized goal in a real (non-sample) community. Everyone else gets the
+// byte-identical generic not-found an unknown goalId gets, so this cannot
+// become an oracle for which goal ids exist any more than the pulse can.
+//
+// Deliberately NOT cached. The pulse's 2s cache holds one entry per goal for
+// every entitled caller; this list is small, the display asks for it far less
+// often than it polls the pulse, and a second cache would be a second place a
+// revoked goal's data could linger.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type GoalRecentAdditionsRequest = { goalId?: unknown };
+
+/**
+ * The published line. `unit` is the goal's current unit, carried so the
+ * display never has to pair this response with another one to render a line.
+ * It is the same unit wsfGoalPulse publishes.
+ */
+type PublishedRecentAddition = { amount: number; unit: string; at: string };
+
+/**
+ * Exactly one key. An empty `additions` is the honest answer when nothing has
+ * been recorded — never an error, and never a substitute shape that would let
+ * a caller tell "no contributions" apart from "no permission".
+ */
+type GoalRecentAdditionsResponse = { additions: PublishedRecentAddition[] };
+
+export const wsfGoalRecentAdditions = onCall<GoalRecentAdditionsRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<GoalRecentAdditionsResponse> => {
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const db = getFirestore();
+    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+    if (!goalSnap.exists) notFound();
+    const goal = goalSnap.data() as GoalDoc;
+
+    const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
+    if (!access.allowed) notFound();
+
+    // The read happens only after the gate. Newest first, bounded by the query
+    // itself, so an unbounded subcollection cannot turn into an unbounded
+    // response.
+    const snap = await recentAdditionsRef(goalId)
+      .orderBy('at', 'desc')
+      .limit(RECENT_ADDITIONS_LIMIT)
+      .get();
+
+    // Read defensively and republish nothing that is not the two stored
+    // fields. A hand-edited or imported document carrying anything extra — a
+    // uid, a name — is rebuilt from `amount` and `at` alone, so it cannot ride
+    // out through this response. The document's own id is never published
+    // either. A malformed document is dropped rather than guessed at.
+    const unit = typeof goal.unit === 'string' ? goal.unit : '';
+    const additions: PublishedRecentAddition[] = [];
+    for (const doc of snap.docs) {
+      const entry = doc.data() as Partial<RecentAddition> | undefined;
+      const amount = entry?.amount;
+      const at = entry?.at;
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) continue;
+      if (typeof at !== 'string' || at === '') continue;
+      additions.push({ amount, unit, at });
+    }
+
+    return { additions };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // wsfMyContribution — authenticated own-credit read for a goal (E4-A1-R4).
 //
 // The auth boundary is the explicit `request.auth` check below: anonymous
@@ -3104,7 +3448,22 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
 
 type MyContributionRequest = { goalId?: unknown };
 
-type MyContributionResponse = { ownCredit: number; unit: string };
+type MyContributionResponse = {
+  ownCredit: number;
+  unit: string;
+  // Optional per-goal counting-guide override, present only when the goal
+  // carries one. It rides this authenticated member-only read rather than
+  // wsfGoalPulse, whose nine-field authorized display payload is fixed.
+  activityGuideKey?: string;
+  /**
+   * The goal's repeat policy, so the contribution screen can say honestly
+   * whether more may be added later. It is a property of the goal, not of
+   * anyone's identity, and this callable is already gated on active
+   * membership or an own record — the same gate the unit already passes.
+   * The public wsfGoalPulse response is untouched.
+   */
+  repeatPolicy: GoalRepeatPolicy;
+};
 
 export const wsfMyContribution = onCall<MyContributionRequest>(
   { region: 'us-central1' },
@@ -3155,7 +3514,18 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
 
     const total =
       (memberSnap.data() as { total?: number } | undefined)?.total ?? 0;
-    return { ownCredit: total, unit: goal.unit };
+    // Only ever a non-empty string; a legacy or malformed value is simply not
+    // published and the client derives the guide from the unit.
+    const activityGuideKey =
+      typeof goal.activityGuideKey === 'string' && goal.activityGuideKey.trim() !== ''
+        ? goal.activityGuideKey.trim()
+        : undefined;
+    return {
+      ownCredit: total,
+      unit: goal.unit,
+      ...(activityGuideKey === undefined ? {} : { activityGuideKey }),
+      repeatPolicy: goalRepeatPolicy(goal),
+    };
   }
 );
 
@@ -3208,6 +3578,7 @@ type AdjustGoalRequest = {
   delta?: unknown;
   targetUid?: unknown;
   reason?: unknown;
+  repeatPolicy?: unknown; // 'once' | 'multiple'
 };
 
 type AdjustGoalResponse = {
@@ -3216,6 +3587,8 @@ type AdjustGoalResponse = {
   targetUid: string | null;
   sharedTotal: number;
   targetMemberTotal: number | null;
+  /** The goal's repeat policy AFTER this call, changed or not. */
+  repeatPolicy: GoalRepeatPolicy;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3239,6 +3612,19 @@ type AdjustGoalResponse = {
 // which is a separate surface with its own (currently unresolved) eligibility
 // question. This callable does not widen that.
 //
+// `includeHistory: true` is the ONE documented departure, and it departs only
+// for the caller who asks: the response then also carries every closed goal of
+// the community (bounded to the most recent 50 by endsAt) regardless of
+// display authorization, and each goal gains sharedTotal, timezone and
+// closedAt. Still no member identity, no per-member credit, no contributor
+// list, no counts — a record of what the community did is not a record of who
+// did it. The shared total's eligibility question is not reopened either: the
+// flag is reachable only through the active-membership gate below, which is
+// the same `asMember` route wsfGoalPulse already grants the same caller for
+// the same goals. Absent or false — or any non-boolean value — the response is
+// byte-for-byte what it has always been, so existing clients and the hosted
+// staging harness are untouched.
+//
 // INDEX EXPECTATION, not an unconditional claim: the query filters on
 // `communityGroupId ==` and `status ==` with no range, no inequality and no
 // orderBy, so it is expected to be served by Firestore's automatic
@@ -3248,7 +3634,7 @@ type AdjustGoalResponse = {
 // cannot verify production index readiness — that is a deploy-time check.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ListGoalsRequest = { groupId?: unknown };
+type ListGoalsRequest = { groupId?: unknown; includeHistory?: unknown };
 
 type ListedGoal = {
   goalId: string;
@@ -3274,7 +3660,78 @@ type ListedGoal = {
   reachedAt: string | null;
 };
 
-type ListGoalsResponse = { goals: ListedGoal[] };
+/**
+ * The extra facts a goal carries ONLY when the caller asked for history.
+ *
+ * Written as an intersection rather than as fields on `ListedGoal` so the
+ * default response is provably untouched: every existing caller, and the
+ * hosted staging harness, sees exactly the keys it saw before.
+ *
+ * `sharedTotal` and `timezone` are here because the history list has to STATE
+ * a result — "Reached", or "Closed at 62.4%", over the goal's own window in
+ * the goal's own zone — and a result nobody can compute is not a history.
+ * They disclose nothing new: the caller is an active member of the goal's
+ * community, which is exactly the `asMember` route wsfGoalPulse already grants
+ * for these same goals. This is the same person reading the same numbers in
+ * one round trip instead of one per goal. It is NOT a widening of who may
+ * know: the fields appear only on the member-gated history request, and the
+ * unauthenticated aggregate-display path is untouched.
+ *
+ * `closedAt` is the only lifecycle marker the goal document actually carries —
+ * there is no stored `reachedAt` — and it is passed through as written.
+ * Whether a goal was REACHED is derived from sharedTotal against target by the
+ * shared presentation helpers, so the server states no verdict the totals do
+ * not support.
+ */
+type GoalHistoryFields = {
+  sharedTotal: number;
+  timezone: string;
+  closedAt: string | null;
+};
+
+type ListedGoalWithHistory = ListedGoal & GoalHistoryFields;
+
+type ListGoalsResponse = { goals: Array<ListedGoal | ListedGoalWithHistory> };
+
+/**
+ * The most recent CLOSED goals a history request may carry. Active goals are
+ * not bounded — they are what the community is doing now, and there are few.
+ */
+const GOAL_HISTORY_LIMIT = 50;
+
+/**
+ * Shard totals for several goals in one pass. sumGoalShards issues its own
+ * getAll per goal, which for a 50-goal history would be 50 round trips; this
+ * batches the same reads (ten shards a goal) into chunks the Admin SDK is
+ * comfortable with. The arithmetic is identical — absent or non-numeric shard
+ * counts contribute nothing.
+ */
+async function sumGoalShardsForMany(goalIds: string[]): Promise<Map<string, number>> {
+  const db = getFirestore();
+  const totals = new Map<string, number>();
+  for (const goalId of goalIds) totals.set(goalId, 0);
+
+  const refs: Array<{ goalId: string; ref: FirebaseFirestore.DocumentReference }> = [];
+  for (const goalId of goalIds) {
+    for (let i = 0; i < GOAL_SHARD_COUNT; i++) {
+      refs.push({ goalId, ref: db.doc(`wsfGoalCounters/${goalId}/shards/${i}`) });
+    }
+  }
+
+  const CHUNK = 300;
+  for (let start = 0; start < refs.length; start += CHUNK) {
+    const chunk = refs.slice(start, start + CHUNK);
+    const snaps = await db.getAll(...chunk.map((r) => r.ref));
+    snaps.forEach((snap, i) => {
+      const data = snap.data() as { count?: number } | undefined;
+      if (typeof data?.count === 'number') {
+        const goalId = chunk[i]!.goalId;
+        totals.set(goalId, (totals.get(goalId) ?? 0) + data.count);
+      }
+    });
+  }
+  return totals;
+}
 
 export const wsfListGoals = onCall<ListGoalsRequest>(
   { region: 'us-central1' },
@@ -3303,6 +3760,13 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
       throw new HttpsError('not-found', 'Community not found.');
     }
 
+    // STRICTLY `true`. Absent, false, null, a string, a number — anything that
+    // is not the boolean true — leaves the caller on today's behaviour and
+    // today's exact response, so a coerced or hand-edited value can never
+    // silently change the shape a deployed client is parsing. No new error
+    // path either: an unrecognised value is not a request for history.
+    const includeHistory = request.data?.includeHistory === true;
+
     // Equality-only. A goal that has reached or passed its target is still
     // `active` until it is closed, so it stays in this list — reaching the
     // target is a reason to celebrate on the page, never a reason for the goal
@@ -3315,7 +3779,16 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     // Equality-only on both, so Firestore serves them from single-field
     // indexes and no composite index is introduced. firestore.indexes.json is
     // untouched.
-    const [activeSnap, authorizedSnap] = await Promise.all([
+    //
+    // `includeHistory` adds a THIRD, on the same terms: every closed goal of
+    // this community, whatever its display authorization. That third query is
+    // the whole point of the flag. Community Home's history was built on the
+    // first two, so a goal that closed without ever being authorized — or
+    // whose authorization was revoked — vanished from the community's past,
+    // and a publication decision decided what the members were allowed to
+    // remember. It is equality-only like the others; no composite index and no
+    // change to firestore.indexes.json.
+    const [activeSnap, authorizedSnap, closedSnap] = await Promise.all([
       db
         .collection('wsfGoals')
         .where('communityGroupId', '==', groupId)
@@ -3326,12 +3799,42 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
         .where('communityGroupId', '==', groupId)
         .where('aggregateDisplayAuthorized', '==', true)
         .get(),
+      includeHistory
+        ? db
+            .collection('wsfGoals')
+            .where('communityGroupId', '==', groupId)
+            .where('status', '==', 'closed')
+            .get()
+        : Promise.resolve(null),
     ]);
 
     const byId = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
     for (const d of activeSnap.docs) byId.set(d.id, d);
     for (const d of authorizedSnap.docs) byId.set(d.id, d);
+    if (closedSnap) {
+      // The most recent 50 CLOSED goals by endsAt. Selected on a descending
+      // sort and then added, so the bound keeps the most recent 50 rather than
+      // an arbitrary 50. Goals the first two queries already admitted are never
+      // dropped by it: this only ever adds, so a history request is a strict
+      // superset of the same request without the flag.
+      const recentClosed = closedSnap.docs
+        .slice()
+        .sort((a, b) => {
+          const ae = (a.data() as GoalDoc).endsAt.toMillis();
+          const be = (b.data() as GoalDoc).endsAt.toMillis();
+          return ae === be ? a.id.localeCompare(b.id) : be - ae;
+        })
+        .slice(0, GOAL_HISTORY_LIMIT);
+      for (const d of recentClosed) byId.set(d.id, d);
+    }
     const snap = { docs: [...byId.values()] };
+
+    // One batched shard read for the whole page of goals, only when history
+    // was asked for. Without the flag nothing extra is read and nothing extra
+    // is returned.
+    const totals = includeHistory
+      ? await sumGoalShardsForMany(snap.docs.map((d) => d.id))
+      : null;
 
     // More than one active goal is legitimate and is NOT collapsed: separately
     // created goals stay separate, each with its own title, unit and window.
@@ -3339,9 +3842,9 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     // one for it. Zero goals is an ordinary empty list, not an error — a
     // community with no goal yet is the normal state before a champion starts
     // one.
-    const goals: ListedGoal[] = snap.docs.map((docSnap) => {
+    const goals: Array<ListedGoal | ListedGoalWithHistory> = snap.docs.map((docSnap) => {
       const goal = docSnap.data() as GoalDoc;
-      return {
+      const listed: ListedGoal = {
         goalId: docSnap.id,
         title: goal.title,
         target: goal.target,
@@ -3360,6 +3863,15 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
         // that happens to be at or beyond the target today, because that is
         // not evidence of a moment anyone lived through.
         reachedAt: goal.reachedAt ? goal.reachedAt.toDate().toISOString() : null,
+      };
+      // Without the flag this returns `listed` untouched, so the response is
+      // byte-for-byte what it has always been.
+      if (!includeHistory) return listed;
+      return {
+        ...listed,
+        sharedTotal: totals?.get(docSnap.id) ?? 0,
+        timezone: goal.timezone,
+        closedAt: goal.closedAt ? goal.closedAt.toDate().toISOString() : null,
       };
     });
 
@@ -3462,8 +3974,36 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
     if (!goalId) {
       throw new HttpsError('invalid-argument', 'goalId is required.');
     }
-    const delta = normalizeAdjustmentDelta(request.data?.delta);
-    if (delta === null) {
+    // The Champion's repeat-policy change rides on this callable rather than
+    // on a new one: it is the same authority, the same goal, and it produces
+    // the same immutable, attributed audit row every other correction does.
+    let repeatPolicy: GoalRepeatPolicy | null = null;
+    const rawRepeatPolicy = request.data?.repeatPolicy;
+    if (rawRepeatPolicy !== undefined && rawRepeatPolicy !== null) {
+      repeatPolicy = normalizeRepeatPolicy(rawRepeatPolicy);
+      if (!repeatPolicy) {
+        throw new HttpsError(
+          'invalid-argument',
+          "repeatPolicy must be 'once' or 'multiple'."
+        );
+      }
+    }
+    // delta stays required for a count correction and stays nonzero. It
+    // becomes optional in exactly one case: a call whose whole business is the
+    // repeat policy, which then records delta 0 and moves no total. A reason
+    // is still required, so a policy change is as traceable as a count change.
+    let delta = 0;
+    const rawDelta = request.data?.delta;
+    if (rawDelta !== undefined && rawDelta !== null) {
+      const normalizedDelta = normalizeAdjustmentDelta(rawDelta);
+      if (normalizedDelta === null) {
+        throw new HttpsError(
+          'invalid-argument',
+          'delta must be a nonzero integer within ±100000000.'
+        );
+      }
+      delta = normalizedDelta;
+    } else if (!repeatPolicy) {
       throw new HttpsError(
         'invalid-argument',
         'delta must be a nonzero integer within ±100000000.'
@@ -3498,7 +4038,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
     }
     const writeShardRef = shardRefs[0]!; // deterministic; corrections aren't hot
 
-    const { newTargetTotal } = await db.runTransaction(async (tx) => {
+    const { newTargetTotal, effectiveRepeatPolicy } = await db.runTransaction(async (tx) => {
       const goalSnap = await tx.get(goalRef);
       if (!goalSnap.exists) {
         throw new HttpsError('not-found', 'Goal not found.');
@@ -3568,14 +4108,19 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         byUid: uid,
         byRole: 'foundingChampion',
         shardIndex: 0,
+        // Present only on a call that changed it, so the ledger reads as
+        // "this is what this correction did".
+        ...(repeatPolicy ? { repeatPolicy } : {}),
         createdAt: FieldValue.serverTimestamp(),
       });
-      tx.set(
-        writeShardRef,
-        { count: FieldValue.increment(delta) },
-        { merge: true }
-      );
-      if (targetMemberTotalRef) {
+      if (delta !== 0) {
+        tx.set(
+          writeShardRef,
+          { count: FieldValue.increment(delta) },
+          { merge: true }
+        );
+      }
+      if (targetMemberTotalRef && delta !== 0) {
         tx.set(
           targetMemberTotalRef,
           {
@@ -3587,8 +4132,25 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
           { merge: true }
         );
       }
+      if (repeatPolicy) {
+        // Merged onto the goal, never rewritten wholesale: nothing else about
+        // the goal moves, and the change carries who made it and when for the
+        // same reason the display authorization does.
+        tx.set(
+          goalRef,
+          {
+            repeatPolicy,
+            repeatPolicyUpdatedAt: FieldValue.serverTimestamp(),
+            repeatPolicyUpdatedBy: uid,
+          },
+          { merge: true }
+        );
+      }
 
-      return { newTargetTotal: projectedTargetTotal };
+      return {
+        newTargetTotal: projectedTargetTotal,
+        effectiveRepeatPolicy: repeatPolicy ?? goalRepeatPolicy(goal),
+      };
     });
 
     const sharedTotal = await sumGoalShards(goalId);
@@ -3598,6 +4160,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       targetUid,
       sharedTotal,
       targetMemberTotal: newTargetTotal,
+      repeatPolicy: effectiveRepeatPolicy,
     };
   }
 );
