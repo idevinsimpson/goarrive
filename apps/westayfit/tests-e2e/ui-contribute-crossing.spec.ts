@@ -27,6 +27,7 @@ import { expect, test, type Page, type Route } from '@playwright/test';
  * Run against the integrated head on 2026-09-18 (emulator, 390×844): both
  * cases pass; the crossing is claimed after the contribution commits (see
  * claimTargetCrossing in functions-westayfit/src/index.ts).
+ */
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
