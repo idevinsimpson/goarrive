@@ -182,11 +182,20 @@ type ListChallengeResponse = {
 // Response shape mirrors wsfGoalPulse in functions-westayfit. This page reads
 // it ONCE per goal on load and on return, never on a timer: the community
 // page is a place to see where things stand, not a live display.
+// wsfGoalPulse's complete response: the four aggregate fields and, since the
+// owner's publication decision of 2026-09-18, the goal's window and time zone.
+// Community Home renders goal dates from THIS confirmed window in the goal's
+// own zone; wsfListGoals carries no zone and is not used for dates.
 type PulseTotals = {
   sharedTotal: number;
   target: number;
   unit: string;
   status: 'active' | 'closed';
+  communityDisplayName: string;
+  goalTitle: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
 };
 
 /**
@@ -852,7 +861,7 @@ export default function CommunityPage() {
     p.kind === 'ok' ? (
       <View style={styles.freshnessRow}>
         <Text style={styles.heroFreshness} testID="wsf-community-progress-updated">
-          {`Updated ${formatClock(p.at)}`}
+          {`Confirmed ${formatClock(p.at)}`}
         </Text>
         <Pressable
           onPress={refreshProgress}
@@ -1114,14 +1123,22 @@ export default function CommunityPage() {
           ) : featured ? (
             (() => {
               const p = progress[featured.goalId] ?? { kind: 'loading' as const };
-              const ends = formatEndsAt(featured.endsAt);
+              // The window in the goal's published zone, once the pulse has
+              // confirmed it. Until then, and if the read fails, the line says
+              // only "Open": a viewer-local calendar day could be the wrong day.
+              const ends =
+                p.kind === 'ok'
+                  ? formatEndsAt(p.pulse.endsAt, { timeZone: p.pulse.timezone })
+                  : null;
               return (
                 <View style={styles.hero} testID="wsf-community-goal-hero">
                   <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
                   <Text style={styles.heroTitle} testID={`wsf-community-goal-title-${featured.goalId}`}>
                     {featured.title}
                   </Text>
-                  <Text style={styles.heroMeta}>{ends ? `Open · ${ends}` : 'Open'}</Text>
+                  <Text style={styles.heroMeta} testID={`wsf-community-goal-period-${featured.goalId}`}>
+                    {ends ? `Open · ${ends}` : 'Open'}
+                  </Text>
                   {p.kind === 'ok' ? (
                     <View style={styles.weWrap}>
                       <LivingWeProgress
@@ -1282,7 +1299,10 @@ export default function CommunityPage() {
             <Text style={styles.sectionEyebrow}>{closedGoals.length > 1 ? 'Past goals' : 'Past goal'}</Text>
             {closedGoals.map((goal) => {
               const p = progress[goal.goalId] ?? { kind: 'loading' as const };
-              const period = formatPeriod(goal.startsAt, goal.endsAt);
+              const period =
+                p.kind === 'ok'
+                  ? formatPeriod(p.pulse.startsAt, p.pulse.endsAt, { timeZone: p.pulse.timezone })
+                  : null;
               return (
                 <View
                   key={goal.goalId}
@@ -1304,7 +1324,11 @@ export default function CommunityPage() {
                     <View style={styles.smallGoalText}>
                       <Text style={styles.cardTitle}>{goal.title}</Text>
                       {renderProgressFacts(goal, p, 'closed')}
-                      {period ? <Text style={styles.cardMeta}>{period}</Text> : null}
+                      {period ? (
+                        <Text style={styles.cardMeta} testID={`wsf-community-goal-period-${goal.goalId}`}>
+                          {period}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 </View>

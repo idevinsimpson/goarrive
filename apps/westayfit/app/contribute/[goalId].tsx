@@ -614,7 +614,7 @@ export default function ContributeToGoal() {
 
   const renderChrome = (showBack: boolean) => (
     <View style={styles.chrome}>
-      <WsfWordmark variant="navy" height={20} testID="wsf-contribute-wordmark" />
+      <WsfWordmark variant="navy" height={22} testID="wsf-contribute-wordmark" />
       {showBack ? (
         <ButtonLink
           href={backHref}
@@ -1210,7 +1210,7 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: wsfTheme.colors.surface,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 20,
     gap: 12,
     borderWidth: 1,
@@ -1223,7 +1223,7 @@ const styles = StyleSheet.create({
   },
   pendingCard: {
     backgroundColor: '#FFF8E8',
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 20,
     gap: 12,
     borderWidth: 1,

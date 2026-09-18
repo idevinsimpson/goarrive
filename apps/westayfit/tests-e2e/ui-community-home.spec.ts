@@ -85,6 +85,9 @@ type GoalSeed = {
   total: number;
   status: 'active' | 'closed';
   endsInMs: number;
+  /** Explicit window instants, for fixtures placed on a UTC date boundary. */
+  startsAtIso?: string;
+  endsAtIso?: string;
   displayAuthorized?: boolean;
   ownCredit?: { uid: string; total: number };
 };
@@ -100,8 +103,10 @@ async function seedGoal(groupId: string, ownerUid: string, g: GoalSeed): Promise
     status: { stringValue: g.status },
     // A goal runs for a fortnight before its end, whether that end is ahead
     // (open) or behind (closed).
-    startsAt: tsField(new Date(now.getTime() + g.endsInMs - 14 * 24 * 60 * 60_000)),
-    endsAt: tsField(new Date(now.getTime() + g.endsInMs)),
+    startsAt: g.startsAtIso
+      ? { timestampValue: g.startsAtIso }
+      : tsField(new Date(now.getTime() + g.endsInMs - 14 * 24 * 60 * 60_000)),
+    endsAt: g.endsAtIso ? { timestampValue: g.endsAtIso } : tsField(new Date(now.getTime() + g.endsInMs)),
     timezone: { stringValue: 'America/New_York' },
     createdAt: tsField(now),
     updatedAt: tsField(now),
@@ -276,6 +281,9 @@ test('Community Home at phone size — member view, Champion view, full page', a
     total: 241,
     status: 'active',
     endsInMs: 3 * 24 * 60 * 60_000 + 5 * 60 * 60_000,
+    // UTC boundary: 2026-10-06T03:30Z is Mon Oct 5, 11:30 PM in New York.
+    startsAtIso: '2026-09-15T04:00:00.000Z',
+    endsAtIso: '2026-10-06T03:30:00.000Z',
     ownCredit: { uid: memberUid, total: 60 },
   });
   await seedGoal(groupId, championUid, {
@@ -295,6 +303,9 @@ test('Community Home at phone size — member view, Champion view, full page', a
     total: 312,
     status: 'closed',
     endsInMs: -20 * 24 * 60 * 60_000,
+    // UTC boundary: Aug 2 03:00Z – Aug 16 03:59Z is Aug 1 – 15 in New York.
+    startsAtIso: '2026-08-02T03:00:00.000Z',
+    endsAtIso: '2026-08-16T03:59:00.000Z',
     displayAuthorized: true,
   });
 
@@ -337,6 +348,11 @@ test('Community Home at phone size — member view, Champion view, full page', a
     { timeout: 30_000 }
   );
   await expect(page.getByTestId('wsf-community-history')).toContainText('Past goal');
+  // Goal windows come from the confirmed pulse, in the goal's own zone (the
+  // runner is UTC, where these instants fall on the next calendar day).
+  await expect(page.getByTestId(`wsf-community-goal-period-${featured}`)).toHaveText('Open · Ends Mon, Oct 5');
+  await expect(page.getByTestId(`wsf-community-goal-period-${closed}`)).toHaveText('Aug 1 – 15');
+  await expect(page.getByTestId('wsf-community-progress-updated')).toContainText('Confirmed');
   await expect(page.getByTestId('wsf-community-history')).not.toContainText('public display');
   // No empty challenge card under an active goal, and no invite placeholder
   // for a viewer who has no working link.

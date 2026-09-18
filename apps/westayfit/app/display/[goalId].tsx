@@ -224,7 +224,7 @@ export default function DisplayGoal() {
         {...({ dataSet: { layout: wide ? 'wide' : 'phone' } } as Record<string, unknown>)}
       >
         <View style={styles.genericBlock}>
-          <WsfWordmark variant="white" height={wide ? 40 : 24} testID="wsf-display-wordmark" />
+          <WsfWordmark variant="white" height={wide ? 44 : 22} testID="wsf-display-wordmark" />
           <Text style={[styles.genericHeadline, wide ? styles.genericHeadlineWide : null]}>
             {copy.headline}
           </Text>
