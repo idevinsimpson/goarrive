@@ -6,7 +6,7 @@
 |---|---|
 | PR | [idevinsimpson/goarrive#327](https://github.com/idevinsimpson/goarrive/pull/327) — **open, DRAFT**, not marked ready, not merged |
 | Branch | `claude/wsf-ui-member-experience` |
-| **Final head** | ``96d0380539bfd16667ad0d17a253774458533dc5` (code; the docs commit carrying this receipt is the branch tip after it)` |
+| **Final head** | `96d0380539bfd16667ad0d17a253774458533dc5` (code); the docs-only commits carrying this receipt are the branch tip after it |
 | Base | `claude/wsf-package-e-display-auth` @ `3560936b37900591d41240adf98ea82b1b8f0c72` (unchanged) |
 | Head at overnight handoff | `5af29f48df73745e500f99cfbf26a64e8d0cd085` |
 | Overnight commits | 19 (this receipt's commit included) on top of the handoff head |
@@ -45,7 +45,7 @@ Verified absent from the diff: `apps/goarrive/**`, `functions/**` (non-WSF), `fi
 | Deploy-config suite | 8 passed |
 | `scripts/westayfit/gate1.sh` (unit + types + builds + callable + 7-spec browser step) | **GATE 1 CLEAR** — Vitest 233, callable 238, browser step 31/31 |
 
-First pass of the battery on `bafef52` found one real defect (below, D-31) through the e4-a1 console-error assertion; it was fixed in ``96d0380`` and the browser suite and gate1 were re-run on the final head. The first pass also saw one 30 s timeout in the community goal seam spec under the 33-spec parallel load; it passed in the re-run of the complete suite and in every per-spec run overnight, and is recorded here rather than hidden.
+First pass of the battery on `bafef52` found one real defect (below, D-31) through the e4-a1 console-error assertion; it was fixed in `96d0380` and the browser suite and gate1 were re-run on the final head. The first pass also saw one 30 s timeout in the community goal seam spec under the 33-spec parallel load; it passed in the re-run of the complete suite and in every per-spec run overnight, and is recorded here rather than hidden.
 
 ## 4. Defects discovered overnight (31), by outcome
 
