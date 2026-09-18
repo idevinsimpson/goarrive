@@ -14,7 +14,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 |---|---|---|---|---|
 | 1 | Baseline freeze + Gate 1 investigation | done | `4852371` | [01-BASELINE-AND-GATE1.md](01-BASELINE-AND-GATE1.md) |
 | 2 | Security + privacy adversarial audit | done | `f721350` | [02-SECURITY-PRIVACY-AUDIT.md](02-SECURITY-PRIVACY-AUDIT.md) |
-| 3 | Contribution resilience torture | pending | | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
+| 3 | Contribution resilience torture | done | TASK3_HEAD | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
 | 4 | Display + authorization race torture | pending | | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
 | 5 | Accessibility + responsive QA | pending | | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
 | 6 | Performance + operational quality | pending | | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
@@ -43,6 +43,15 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 - Harness: callable Jest ceiling 30 s (matches the per-test convention already used by the multi-step suites).
 - ChatGPT review instruction: none present (checked at task start and mid-task).
 
+## Task 3 — Contribution resilience torture
+
+- Opus design pass mapped all 18 owner scenarios to existing coverage or deterministic recipes; one Opus implementer (exclusive emulators) fixed the reproducible defects and wrote the P0 tests; a second Opus worker authored the remaining tests as code; Fable integrated, added D-12 and its test, ran the battery.
+- **New tests**: `ui-contribute-torture.spec.ts` (double tap, goal A→B late success, leave during sending, stale before-total), `ui-contribute-torture-2.spec.ts` (leave/return while unknown, no poll while unknown, closure on Review, closure while unknown both branches, wsfAdjustGoal reflected, keyboard through pending and refusal, unresolved attempt after membership loss), a late-SUCCESS A→B→A case in the seam spec, and a concurrent same-attemptId callable case.
+- **Fixed**: D-11 double tap could render a first success as "already recorded" (synchronous in-flight ref); D-12 "Goal not found" hid an unresolved attempt from a removed member returning on a fresh load (render order; unit-less number when the goal has not loaded); D-13 replay passed a frozen before-total that could invert reached/overshoot copy (replay passes null → `reached`); D-14 context check compared the goal with itself (now reads the live context ref; defence in depth).
+- **Gaps recorded**: closure while on Review loses the typed number without a sentence; the reminder's durability sentence is not true when storage is unavailable; D-9 legacy orphan. All copy/product decisions.
+- Receipts: browser 22/22 across four contribution specs, callable 238/238 (18 files), Vitest 205, TS clean.
+- ChatGPT review instruction: none present (checked at task start, mid-task and at close).
+
 ## Defect ledger (running)
 
 | # | Found in | Defect | Class | Status |
@@ -57,3 +66,7 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 | D-8 | Task 2 | contribute poll without ordering guard | frontend | fixed |
 | D-9 | Task 2 | quarantined legacy pending row never surfaced | product copy | gap recorded, not fixed |
 | D-10 | Task 2 | pulse refusal timing differs by one read for existing vs unknown goal | backend, low | accepted, not fixed (no enumerable id space) |
+| D-11 | Task 3 | double tap on Record could render a first success as "already recorded" | frontend truth | fixed + test (R1) |
+| D-12 | Task 3 | "Goal not found" rendered above an unresolved attempt after membership loss on a fresh load; attempt unreachable | frontend, invariant (unknown outcome never discarded) | fixed + test (R15) |
+| D-13 | Task 3 | replay used a frozen before-total; could invert reached vs overshoot copy | frontend truth | fixed + test (R11) |
+| D-14 | Task 3 | context check compared the goal id with itself | frontend, latent | fixed (regression guards R3/R6) |

@@ -115,6 +115,14 @@ async function firestoreWrite(
   }
 }
 
+async function firestoreRead(docPath: string): Promise<Record<string, any> | null> {
+  const url = `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}`;
+  const res = await fetch(url, { headers: { authorization: 'Bearer owner' } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`emulator read ${docPath} failed: ${res.status}`);
+  return ((await res.json()) as { fields?: Record<string, any> }).fields ?? null;
+}
+
 function tsField(d: Date): { timestampValue: string } {
   return { timestampValue: d.toISOString() };
 }
@@ -508,6 +516,152 @@ test.describe('community goal seam', () => {
       );
       expect(stored, 'an old failure must not resurrect a reconciled attempt').toBeNull();
       expect(attemptOneId, 'attempt 1 had its own identity').toMatch(/^\S+$/);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('a delayed contribution SUCCESS cannot double-count or flip a settled receipt', async ({
+    browser,
+  }) => {
+    // The sibling of the test above, with the outcome the member fears more.
+    // The same attempt goes quiet, the member switches accounts on the shared
+    // device and back, reconciles it, then records a second contribution —
+    // and only THEN does the original request reach the server and succeed.
+    // Nothing about it may reopen: not the credit, not the receipt, not the
+    // reminder. The attempt id is what makes that safe, and it is the same id
+    // the reconcile already used, so the server counts it once.
+    const stamp = Date.now().toString(36);
+    const pwA = `Ff1!${randomBytes(6).toString('hex')}`;
+    const pwB = `Gg1!${randomBytes(6).toString('hex')}`;
+    const emailA = `e5sa-${stamp}@example.com`;
+    const emailB = `e5sb-${stamp}@example.com`;
+    const uidA = await seedVerifiedUser(emailA, pwA);
+    const uidB = await seedVerifiedUser(emailB, pwB);
+    const { groupId } = await seedCommunityWithRoles({ championUid: uidA, memberUid: uidB });
+
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    try {
+      await signInVia(page, emailA, pwA);
+      await page.goto(`/community/${groupId}`);
+      await page.getByTestId('wsf-community-start-goal').click();
+      await expect(page.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-new-goal-title').fill('E5 delayed-success goal');
+      await page.getByTestId('wsf-new-goal-target').fill('500');
+      await page.getByTestId('wsf-new-goal-unit').fill('squats');
+      await page.getByTestId('wsf-new-goal-submit').click();
+      await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
+      const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())
+        .replace(/^goalId:\s*/, '')
+        .trim();
+
+      // ---- A starts attempt 1 and its response never resolves ----
+      let landAttemptOne: (() => void) | null = null;
+      const attemptOneHeld = new Promise<void>((resolve) => {
+        landAttemptOne = resolve;
+      });
+      let intercepted = 0;
+      // The paused request's own payload and credentials, kept so the late
+      // success can be delivered for real. Releasing the route is not enough
+      // on its own: the account switch below is a full page load, and the
+      // browser drops the pending request when the document goes away.
+      let heldBody: string | null = null;
+      let heldAuth: string | undefined;
+      await page.route(callableUrl('wsfContribute'), async (route) => {
+        intercepted += 1;
+        if (intercepted === 1) {
+          heldBody = route.request().postData();
+          heldAuth = route.request().headers()['authorization'];
+          await attemptOneHeld;
+          await route.continue().catch(() => undefined);
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.goto(`/contribute/${goalId}`);
+      await page.getByTestId('wsf-contribute-entry').fill('11');
+      await page.getByTestId('wsf-contribute-review').click();
+      await page.getByTestId('wsf-contribute-submit').click();
+      const pendingKeyA = `wsf.pendingContribution.${goalId}.${uidA}`;
+      await expect
+        .poll(async () => page.evaluate((k) => window.localStorage.getItem(k) !== null, pendingKeyA), {
+          timeout: 20_000,
+        })
+        .toBe(true);
+      const attemptOneId = await page.evaluate(
+        (k) => JSON.parse(window.localStorage.getItem(k) as string).attemptId,
+        pendingKeyA
+      );
+
+      // ---- A -> B -> A, with attempt 1 still outstanding ----
+      await signOutVia(page);
+      await signInVia(page, emailB, pwB);
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-contribute-receipt')).toHaveCount(0);
+      await signOutVia(page);
+      await signInVia(page, emailA, pwA);
+      await page.goto(`/contribute/${goalId}`);
+
+      // ---- A reconciles attempt 1, then records attempt 2 ----
+      await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-contribute-reconcile').click();
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your total on this goal: 11 squats',
+        { timeout: 20_000 }
+      );
+
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-contribute-entry').fill('7');
+      await page.getByTestId('wsf-contribute-review').click();
+      await page.getByTestId('wsf-contribute-submit').click();
+      await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText(
+        'You added 7 squats.',
+        { timeout: 20_000 }
+      );
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your total on this goal: 18 squats'
+      );
+
+      // ---- NOW attempt 1's original request finally reaches the server ----
+      (landAttemptOne as unknown as () => void)();
+      expect(heldBody, 'attempt 1 really was captured in flight').not.toBeNull();
+      const late = await fetch(callableUrl('wsfContribute'), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(heldAuth ? { authorization: heldAuth } : {}),
+        },
+        body: heldBody as unknown as string,
+      });
+      expect(late.ok, 'the late request succeeded — this is the success case').toBe(true);
+      const lateResult = ((await late.json()) as { result: Record<string, unknown> }).result;
+      // Same goal, same account, same attempt id: the server replays the
+      // original receipt rather than booking a second contribution.
+      expect(lateResult.alreadyRecorded, 'the late success is a replay, not a new booking').toBe(true);
+      expect(lateResult.addedCount).toBe(11);
+      expect(lateResult.ownCredit).toBe(18);
+      await page.waitForTimeout(1_500);
+
+      // The settled receipt for attempt 2 does not flip to attempt 1's story,
+      // the credit does not move, and no reminder comes back.
+      await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText(
+        'You added 7 squats.'
+      );
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your total on this goal: 18 squats'
+      );
+      await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+      const stored = await page.evaluate((k) => window.localStorage.getItem(k), pendingKeyA);
+      expect(stored, 'a late success must not resurrect a reconciled attempt').toBeNull();
+
+      // The ledger itself: 11 + 7, with attempt 1 counted exactly once.
+      const memberTotal = await firestoreRead(`wsfGoalMemberTotals/${goalId}_${uidA}`);
+      expect(Number(memberTotal?.total?.integerValue)).toBe(18);
+      expect(attemptOneId, 'attempt 1 kept its own identity throughout').toMatch(/^\S+$/);
     } finally {
       await ctx.close();
     }

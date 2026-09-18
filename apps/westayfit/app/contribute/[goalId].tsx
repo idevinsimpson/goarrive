@@ -148,6 +148,13 @@ export default function ContributeToGoal() {
   // re-render (would risk generating a new id mid-submit and defeat
   // idempotency). Cleared on each fresh "Record" tap.
   const attemptRef = useRef<string | null>(null);
+  // Ref, not the `submitting` state: two taps delivered in the SAME task both
+  // read the same rendered `submitting` value (false) and both pass, because
+  // React has not re-rendered between them — and `disabled` on the button is
+  // last render's attribute for the same reason. This flips synchronously, so
+  // the second tap of a double tap is not a second submission at all. The
+  // state and the disabled button stay: they are what the member sees.
+  const inFlightRef = useRef(false);
   // The last confirmed shared total the screen showed before the write. The
   // result reads it to tell "our goal is reached" from "we were already past
   // it"; it never produces a member-specific crossing claim.
@@ -186,6 +193,7 @@ export default function ContributeToGoal() {
     identityRef.current = uid;
     contextRef.current = { uid, goalId };
     attemptRef.current = null;
+    inFlightRef.current = false;
     // Nothing from the previous context stays on screen while the new one
     // loads: not the pending screen, not the receipt, not the typed entry,
     // not an error, not a refusal, and not the previous ready-state totals.
@@ -448,10 +456,19 @@ export default function ContributeToGoal() {
       // that person can still reconcile it when they come back — it is never
       // transferred, never resent as someone else, and a newer attempt is
       // never cleared because an older response arrived.
+      // The "current" side is read from contextRef, the live record of what
+      // the screen is showing NOW. Passing the closure's own `goalId` as the
+      // current goal compared it with itself — always equal — so the goal leg
+      // of the check rested entirely on the generation counter. It reads the
+      // ref instead, and a late response for goal A cannot land on goal B.
       if (
         !isSameContext(
           { generation, uid: owner, goalId: startedGoal },
-          { generation: generationRef.current, uid: identityRef.current, goalId }
+          {
+            generation: generationRef.current,
+            uid: contextRef.current.uid,
+            goalId: contextRef.current.goalId,
+          }
         )
       ) {
         return;
@@ -519,9 +536,13 @@ export default function ContributeToGoal() {
   // Review → record. The explicit confirmation boundary: the only place a
   // new attempt is created and sent.
   const onRecord = useCallback(async () => {
+    // Synchronous first: the second tap of a double tap is refused here,
+    // before it can mint anything or overwrite this attempt's result.
+    if (inFlightRef.current) return;
     if (state.kind !== 'ready') return;
     if (submitting) return;
     if (reviewCount == null) return;
+    inFlightRef.current = true;
     const count = reviewCount;
     setEntryError(null);
     setSubmitting(true);
@@ -549,7 +570,11 @@ export default function ContributeToGoal() {
     const stillCurrent = () =>
       isSameContext(
         { generation, uid: owner, goalId: startedGoal },
-        { generation: generationRef.current, uid: identityRef.current, goalId }
+        {
+          generation: generationRef.current,
+          uid: contextRef.current.uid,
+          goalId: contextRef.current.goalId,
+        }
       );
 
     try {
@@ -577,6 +602,7 @@ export default function ContributeToGoal() {
         setPending(escalated);
       }
     } finally {
+      inFlightRef.current = false;
       // A superseded request's finally must not re-enable the new context's
       // form, which the new context already reset.
       if (stillCurrent()) setSubmitting(false);
@@ -586,20 +612,34 @@ export default function ContributeToGoal() {
   // Replay the SAME attempt. The server keys idempotency on goal, account and
   // attemptId and returns the original receipt if the earlier call landed.
   const onReconcile = useCallback(async () => {
+    // Same synchronous guard as Record: a double tap on "Confirm this
+    // contribution" is one replay, not two.
+    if (inFlightRef.current) return;
     if (!pending) return;
     if (submitting) return;
+    inFlightRef.current = true;
     setSubmitting(true);
     setEntryError(null);
     attemptRef.current = pending.attemptId;
-    sharedBeforeRef.current =
-      state.kind === 'ready' || state.kind === 'closed' ? state.pulse.sharedTotal : null;
+    // A replay has NO trustworthy "before". The total on screen was captured
+    // before the unknown period, polling is off for the whole of it, and the
+    // shared total can have moved either way since — including downwards past
+    // the target, which would read the confirmed result as "we were already
+    // past it" when the community has only just got there. null is the honest
+    // answer, and contributionFlow lets it fall to `reached`, which is true
+    // whenever the confirmed total the server returns is at or beyond target.
+    sharedBeforeRef.current = null;
     const generation = generationRef.current;
     const owner = uid as string;
     const startedGoal = goalId;
     const stillCurrent = () =>
       isSameContext(
         { generation, uid: owner, goalId: startedGoal },
-        { generation: generationRef.current, uid: identityRef.current, goalId }
+        {
+          generation: generationRef.current,
+          uid: contextRef.current.uid,
+          goalId: contextRef.current.goalId,
+        }
       );
 
     // Flip the persisted state to 'sending' during the replay so a further
@@ -626,9 +666,10 @@ export default function ContributeToGoal() {
         setPending(escalated);
       }
     } finally {
+      inFlightRef.current = false;
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [pending, submitting, goalId, uid, sendContribute, state]);
+  }, [pending, submitting, goalId, uid, sendContribute]);
 
   // There is deliberately no control that discards an unresolved attempt's
   // reminder: it is the only recovery context for effort whose outcome is
@@ -729,26 +770,6 @@ export default function ContributeToGoal() {
       </>
     );
   }
-  if (state.kind === 'notFound') {
-    return screen(
-      <>
-        {renderChrome(false)}
-        <View style={styles.card} testID="wsf-contribute-not-found">
-          <Text style={styles.heading}>Goal not found</Text>
-          <Text style={styles.body}>
-            This goal doesn’t exist or isn’t available to this account.
-          </Text>
-          <ButtonLink
-            href="/"
-            style={styles.secondaryButton}
-            textStyle={styles.secondaryButtonText}
-            testID="wsf-contribute-home"
-            label="Back to home"
-          />
-        </View>
-      </>
-    );
-  }
   if (state.kind === 'error') {
     return screen(
       <>
@@ -768,42 +789,29 @@ export default function ContributeToGoal() {
     );
   }
 
-  const pulse = state.pulse;
-  const unit = pulse.unit;
-  const ownCredit = state.ownCredit;
+  // The unit is known once the goal has loaded. It is NOT known when the goal
+  // refused to load but this account still holds an unresolved attempt for it
+  // — a member removed after an attempt whose outcome was never confirmed.
+  // That attempt is still theirs to reconcile (the server honours the replay
+  // regardless of membership drift), so the reminder, the replay's receipt
+  // and a refusal render before "Goal not found" can hide them, with the
+  // number alone when the unit is not on hand.
+  const unitKnown: string | null =
+    state.kind === 'ready' || state.kind === 'closed' ? state.pulse.unit : null;
+  const effortLabel = (count: number, u: string | null) =>
+    u ? `${formatCount(count)} ${u}` : formatCount(count);
 
-  const ownCreditLine = (value: number, u: string) => (
+  const ownCreditLine = (value: number, u: string | null) => (
     <Text style={styles.ownCredit} testID="wsf-contribute-own-credit">
-      {`Your total on this goal: ${formatCount(value)} ${u}`}
+      {`Your total on this goal: ${effortLabel(value, u)}`}
     </Text>
-  );
-
-  // Compact confirmed context: small navy WE beside the exact numbers.
-  const renderCompactProgress = () => (
-    <View style={styles.compactProgress} testID="wsf-contribute-context">
-      <LivingWeProgress
-        completed={pulse.sharedTotal}
-        target={pulse.target}
-        unit={unit}
-        width={contextWeWidth}
-        surface="light"
-        testID="wsf-contribute-context-we"
-      />
-      <View style={styles.compactText}>
-        <Text style={styles.compactTotal} testID="wsf-contribute-shared-total">
-          {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
-        </Text>
-        <Text style={styles.compactPercent}>{`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}</Text>
-        {ownCreditLine(ownCredit, unit)}
-      </View>
-    </View>
   );
 
   // ---- confirmed result: the signature moment -------------------------------
   if (lastResult) {
     const r = lastResult;
     const variant = resultVariant(r, sharedBeforeRef.current);
-    const copy = resultCopy(r, communityName, unit, sharedBeforeRef.current);
+    const copy = resultCopy(r, communityName, unitKnown, sharedBeforeRef.current);
     const hasShared = variant !== 'ownOnly';
     return screen(
       <>
@@ -851,7 +859,7 @@ export default function ContributeToGoal() {
             </>
           ) : null}
         </View>
-        {ownCreditLine(r.ownCredit, hasShared ? r.unit : unit)}
+        {ownCreditLine(r.ownCredit, hasShared ? r.unit : (r.unit ?? unitKnown))}
         {hasShared ? renderContextLabels() : null}
         <View style={styles.actions}>
           <ButtonLink
@@ -876,7 +884,7 @@ export default function ContributeToGoal() {
 
   // ---- definitive refusal ---------------------------------------------------
   if (refusal) {
-    const copy = refusalCopy(refusal.reason, refusal.count, unit);
+    const copy = refusalCopy(refusal.reason, refusal.count, unitKnown ?? '');
     return screen(
       <>
         {renderChrome(false)}
@@ -922,7 +930,7 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-recording">
           <ActivityIndicator color={NAVY} size="large" />
           <Text style={styles.heading}>Recording your contribution…</Text>
-          <Text style={styles.body}>{`${formatCount(pending.count)} ${unit}`}</Text>
+          <Text style={styles.body}>{effortLabel(pending.count, unitKnown)}</Text>
         </View>
         {renderTestNote()}
       </>,
@@ -942,7 +950,7 @@ export default function ContributeToGoal() {
             We don’t know whether this effort was recorded. Don’t record it again.
           </Text>
           <Text style={styles.pendingCount} testID="wsf-contribute-pending-count">
-            {`You entered ${formatCount(pending.count)} ${unit}.`}
+            {`You entered ${effortLabel(pending.count, unitKnown)}.`}
           </Text>
           <Pressable
             onPress={onReconcile}
@@ -974,6 +982,51 @@ export default function ContributeToGoal() {
       'wsf-contribute-screen'
     );
   }
+
+  if (state.kind === 'notFound') {
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.card} testID="wsf-contribute-not-found">
+          <Text style={styles.heading}>Goal not found</Text>
+          <Text style={styles.body}>
+            This goal doesn’t exist or isn’t available to this account.
+          </Text>
+          <ButtonLink
+            href="/"
+            style={styles.secondaryButton}
+            textStyle={styles.secondaryButtonText}
+            testID="wsf-contribute-home"
+            label="Back to home"
+          />
+        </View>
+      </>
+    );
+  }
+  const pulse = state.pulse;
+  const unit = pulse.unit;
+  const ownCredit = state.ownCredit;
+
+  // Compact confirmed context: small navy WE beside the exact numbers.
+  const renderCompactProgress = () => (
+    <View style={styles.compactProgress} testID="wsf-contribute-context">
+      <LivingWeProgress
+        completed={pulse.sharedTotal}
+        target={pulse.target}
+        unit={unit}
+        width={contextWeWidth}
+        surface="light"
+        testID="wsf-contribute-context-we"
+      />
+      <View style={styles.compactText}>
+        <Text style={styles.compactTotal} testID="wsf-contribute-shared-total">
+          {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
+        </Text>
+        <Text style={styles.compactPercent}>{`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}</Text>
+        {ownCreditLine(ownCredit, unit)}
+      </View>
+    </View>
+  );
 
   // ---- closed goal ------------------------------------------------------------
   if (state.kind === 'closed') {

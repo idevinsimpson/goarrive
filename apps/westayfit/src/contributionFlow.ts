@@ -93,7 +93,8 @@ export function refusalCopy(
   count: number,
   unit: string
 ): { headline: string; body: string } {
-  const effort = `${formatCount(count)} ${unit}`;
+  // The unit can be unknown (a replay after the goal refused to load).
+  const effort = `${formatCount(count)} ${unit}`.trim();
   switch (reason) {
     case 'closed':
     case 'windowEnded':
