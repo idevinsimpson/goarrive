@@ -38,3 +38,6 @@ functions-westayfit/lib/
 # WSF detached run receipts (per feedback_detached_marker_for_long_steps.md)
 .*-exit
 .functions-list-*.txt
+
+# The app node_modules is a symlink in some worktrees; the directory rule above does not match a symlink.
+apps/westayfit/node_modules
