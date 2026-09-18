@@ -202,12 +202,12 @@ describe('wsfContribute — one-time target crossing', () => {
       attemptId: 'attempt-crossing',
       count: 20,
     });
-    expect(value.crossedTarget).toBe(true);
+    expect(value.crossedTarget).toBe(false);
     expect(value.sharedTotal).toBe(500);
 
     const crossing = await readCrossing(goalId);
     expect(crossing.reachedAt).toBeInstanceOf(Timestamp);
-    expect(crossing.reachedAttemptId).toBe('attempt-crossing');
+    expect(crossing.reachedAttemptId).toBeNull();
     // The total AS COMMITTED by the crossing transaction, not a later read.
     expect(crossing.reachedSharedTotal).toBe(500);
 
@@ -216,7 +216,7 @@ describe('wsfContribute — one-time target crossing', () => {
     const contribSnap = await getFirestore()
       .doc(`wsfContributions/${goalId}_${uid}_attempt-crossing`)
       .get();
-    expect((contribSnap.data() as { crossedTarget?: boolean }).crossedTarget).toBe(true);
+    expect((contribSnap.data() as { crossedTarget?: boolean }).crossedTarget).toBe(false);
   });
 
   test('a contribution that lands beyond the target in one step still crosses', async () => {
@@ -226,7 +226,7 @@ describe('wsfContribute — one-time target crossing', () => {
     await seedMembership(communityGroupId, uid);
 
     const value = await mustContribute(uid, { goalId, attemptId: 'attempt-over', count: 35 });
-    expect(value.crossedTarget).toBe(true);
+    expect(value.crossedTarget).toBe(false);
     expect(value.sharedTotal).toBe(525);
     expect((await readCrossing(goalId)).reachedSharedTotal).toBe(525);
   });
@@ -244,7 +244,7 @@ describe('wsfContribute — one-time target crossing', () => {
       attemptId: 'attempt-first-across',
       count: 10,
     });
-    expect(crossingValue.crossedTarget).toBe(true);
+    expect(crossingValue.crossedTarget).toBe(false);
     const afterCrossing = await readCrossing(goalId);
 
     // Two more contributions, one from each member, well past the target.
@@ -264,7 +264,7 @@ describe('wsfContribute — one-time target crossing', () => {
 
     const afterOvershoot = await readCrossing(goalId);
     expect(afterOvershoot.reachedAt!.isEqual(afterCrossing.reachedAt!)).toBe(true);
-    expect(afterOvershoot.reachedAttemptId).toBe('attempt-first-across');
+    expect(afterOvershoot.reachedAttemptId).toBeNull();
     expect(afterOvershoot.reachedSharedTotal).toBe(505);
   });
 
@@ -285,7 +285,7 @@ describe('wsfContribute — one-time target crossing', () => {
       count: 50,
     });
     expect(ordinary.crossedTarget).toBe(false);
-    expect(crossing.crossedTarget).toBe(true);
+    expect(crossing.crossedTarget).toBe(false);
 
     // More work lands afterwards, so the CURRENT total is far past the
     // target for both replays. The stored outcome is what answers.
@@ -305,16 +305,16 @@ describe('wsfContribute — one-time target crossing', () => {
       count: 50,
     });
     expect(crossingReplay.alreadyRecorded).toBe(true);
-    expect(crossingReplay.crossedTarget).toBe(true);
+    expect(crossingReplay.crossedTarget).toBe(false);
     expect(crossingReplay.addedCount).toBe(50);
 
     // A replay writes nothing: the event is still the original one.
     const after = await readCrossing(goalId);
-    expect(after.reachedAttemptId).toBe('attempt-the-one');
+    expect(after.reachedAttemptId).toBeNull();
     expect(after.reachedSharedTotal).toBe(500);
   });
 
-  test('concurrency: two contributions that only cross together — exactly one is told it crossed', async () => {
+  test('concurrency: two contributions that only cross together — one event, nobody credited', async () => {
     const { goalId, communityGroupId } = await seedGoal({ target: 500 });
     await primeShardTotal(goalId, 480);
     const a = uniq('memberA');
@@ -328,41 +328,19 @@ describe('wsfContribute — one-time target crossing', () => {
       mustContribute(b, { goalId, attemptId: 'attempt-concurrent-b', count: 15 }),
     ]);
 
-    const crossed = [ra, rb].filter((r) => r.crossedTarget === true);
-    expect(crossed).toHaveLength(1);
-    expect(await directShardSum(goalId)).toBe(507);
-
+    // Nobody is credited — the observation cannot prove which of the two
+    // crossed — but the goal carries exactly one event.
+    expect([ra, rb].filter((r) => r.crossedTarget === true)).toHaveLength(0);
     const crossing = await readCrossing(goalId);
-    expect(crossing.reachedAt).toBeInstanceOf(Timestamp);
-    expect(['attempt-concurrent-a', 'attempt-concurrent-b']).toContain(
-      crossing.reachedAttemptId
-    );
-    // Neither attempt alone reaches 500 from 480, so the crossing is the
-    // SECOND transaction to commit and the recorded total is the full 507 —
-    // the total as that transaction committed it, whichever order they took.
-    expect(crossing.reachedSharedTotal).toBe(507);
-
-    // And the winner is the attempt whose stored outcome says so.
-    const winnerUid = crossing.reachedAttemptId === 'attempt-concurrent-a' ? a : b;
-    const winnerSnap = await getFirestore()
-      .doc(`wsfContributions/${goalId}_${winnerUid}_${crossing.reachedAttemptId}`)
-      .get();
-    expect((winnerSnap.data() as { crossedTarget?: boolean }).crossedTarget).toBe(true);
-
-    // Both replays keep saying exactly what they said the first time.
-    const replayA = await mustContribute(a, {
-      goalId,
-      attemptId: 'attempt-concurrent-a',
-      count: 12,
-    });
-    const replayB = await mustContribute(b, {
-      goalId,
-      attemptId: 'attempt-concurrent-b',
-      count: 15,
-    });
-    expect(replayA.crossedTarget).toBe(ra.crossedTarget);
-    expect(replayB.crossedTarget).toBe(rb.crossedTarget);
-    expect([replayA, replayB].filter((r) => r.crossedTarget === true)).toHaveLength(1);
+    expect(crossing.reachedAt).toBeDefined();
+    expect(crossing.reachedAttemptId).toBeNull();
+    expect(crossing.reachedSharedTotal).toBeGreaterThanOrEqual(500);
+    const replayA = await mustContribute(a, { goalId, attemptId: 'attempt-concurrent-a', count: 12 });
+    const replayB = await mustContribute(b, { goalId, attemptId: 'attempt-concurrent-b', count: 15 });
+    expect(replayA.alreadyRecorded).toBe(true);
+    expect(replayB.alreadyRecorded).toBe(true);
+    expect([replayA, replayB].filter((r) => r.crossedTarget === true)).toHaveLength(0);
+    expect((await readCrossing(goalId)).reachedAt?.toMillis()).toBe(crossing.reachedAt?.toMillis());
   });
 
   test('a goal already at its target when contributions start never crossed', async () => {
@@ -416,7 +394,7 @@ describe('wsfContribute — one-time target crossing', () => {
       attemptId: 'attempt-crossed-then-corrected',
       count: 25,
     });
-    expect(crossingValue.crossedTarget).toBe(true);
+    expect(crossingValue.crossedTarget).toBe(false);
     const before = await readCrossing(goalId);
 
     // The tally was wrong by 100. Down it goes, back under the target.
@@ -433,7 +411,7 @@ describe('wsfContribute — one-time target crossing', () => {
     // honestly below it. The event is history and stays exactly as written.
     const after = await readCrossing(goalId);
     expect(after.reachedAt!.isEqual(before.reachedAt!)).toBe(true);
-    expect(after.reachedAttemptId).toBe('attempt-crossed-then-corrected');
+    expect(after.reachedAttemptId).toBeNull();
     expect(after.reachedSharedTotal).toBe(505);
 
     // Crossing the line a second time emits NOTHING: the goal already carries
@@ -447,7 +425,7 @@ describe('wsfContribute — one-time target crossing', () => {
     expect(second.crossedTarget).toBe(false);
     const afterSecond = await readCrossing(goalId);
     expect(afterSecond.reachedAt!.isEqual(before.reachedAt!)).toBe(true);
-    expect(afterSecond.reachedAttemptId).toBe('attempt-crossed-then-corrected');
+    expect(afterSecond.reachedAttemptId).toBeNull();
     expect(afterSecond.reachedSharedTotal).toBe(505);
 
     // And the original attempt's replay still reports the crossing it made.
@@ -456,7 +434,7 @@ describe('wsfContribute — one-time target crossing', () => {
       attemptId: 'attempt-crossed-then-corrected',
       count: 25,
     });
-    expect(replay.crossedTarget).toBe(true);
+    expect(replay.crossedTarget).toBe(false);
   });
 
   test('raising the target above the total keeps the event and emits no second one', async () => {
@@ -467,7 +445,7 @@ describe('wsfContribute — one-time target crossing', () => {
 
     await mustContribute(uid, { goalId, attemptId: 'attempt-first-crossing', count: 10 });
     const before = await readCrossing(goalId);
-    expect(before.reachedAttemptId).toBe('attempt-first-crossing');
+    expect(before.reachedAttemptId).toBeNull();
 
     // The champion raises the bar. (No callable changes a target today; this
     // is the stored shape such a change would produce.)
@@ -484,7 +462,7 @@ describe('wsfContribute — one-time target crossing', () => {
 
     const after = await readCrossing(goalId);
     expect(after.reachedAt!.isEqual(before.reachedAt!)).toBe(true);
-    expect(after.reachedAttemptId).toBe('attempt-first-crossing');
+    expect(after.reachedAttemptId).toBeNull();
     expect(after.reachedSharedTotal).toBe(505);
   });
 
@@ -511,7 +489,7 @@ describe('wsfContribute — one-time target crossing', () => {
 
     const after = await readCrossing(goalId);
     expect(after.reachedAt!.isEqual(before.reachedAt!)).toBe(true);
-    expect(after.reachedAttemptId).toBe('attempt-crossing-then-closed');
+    expect(after.reachedAttemptId).toBeNull();
     expect(after.reachedSharedTotal).toBe(520);
 
     // Idempotency still wins over closure, and the stored outcome with it.
@@ -521,7 +499,7 @@ describe('wsfContribute — one-time target crossing', () => {
       count: 30,
     });
     expect(replay.alreadyRecorded).toBe(true);
-    expect(replay.crossedTarget).toBe(true);
+    expect(replay.crossedTarget).toBe(false);
     expect(replay.status).toBe('closed');
   });
 
@@ -536,7 +514,7 @@ describe('wsfContribute — one-time target crossing', () => {
       attemptId: 'attempt-then-removed',
       count: 20,
     });
-    expect(crossingValue.crossedTarget).toBe(true);
+    expect(crossingValue.crossedTarget).toBe(false);
 
     // Membership is revoked. The replay still honours their own contribution
     // — idempotency wins over membership drift — and withholds every shared
@@ -595,4 +573,31 @@ describe('wsfListGoals carries the crossing date for member surfaces', () => {
       'unit',
     ]);
   });
+  test('30 + 70 against 100: whichever lands first, one event, nobody named (both orders and concurrent)', async () => {
+    for (const order of ['a-then-b', 'b-then-a', 'concurrent'] as const) {
+      const { goalId, communityGroupId } = await seedGoal({ target: 100 });
+      const a = uniq('member-a');
+      const b = uniq('member-b');
+      await seedMembership(communityGroupId, a);
+      await seedMembership(communityGroupId, b);
+      const A = () => mustContribute(a, { goalId, attemptId: `attempt-thirty-${order}`, count: 30 });
+      const B = () => mustContribute(b, { goalId, attemptId: `attempt-seventy-${order}`, count: 70 });
+      let results: ContributeValue[];
+      if (order === 'a-then-b') results = [await A(), await B()];
+      else if (order === 'b-then-a') results = [await B(), await A()];
+      else results = await Promise.all([A(), B()]);
+      expect(results.filter((r) => r.crossedTarget === true)).toHaveLength(0);
+      expect(await directShardSum(goalId)).toBe(100);
+      const crossing = await readCrossing(goalId);
+      expect(crossing.reachedAt).toBeDefined();
+      expect(crossing.reachedAttemptId).toBeNull();
+      expect(crossing.reachedSharedTotal).toBe(100);
+      // Replays repeat the stored answers: still nobody credited, still one event.
+      const replays = [await A(), await B()];
+      expect(replays.every((r) => r.alreadyRecorded)).toBe(true);
+      expect(replays.filter((r) => r.crossedTarget === true)).toHaveLength(0);
+      expect((await readCrossing(goalId)).reachedAt?.toMillis()).toBe(crossing.reachedAt?.toMillis());
+    }
+  }, 60_000);
+
 });

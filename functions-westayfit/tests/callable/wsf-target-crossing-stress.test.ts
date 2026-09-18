@@ -154,16 +154,12 @@ describe('wsfContribute — contention around the target crossing', () => {
       expect(pre.ok.length).toBe(n);
       const sum = await shardSum(goalId);
       expect(sum).toBe(n * count);
-      // At most one attempt is credited; the event itself is recorded exactly once.
-      expect(pre.crossed).toBeLessThanOrEqual(1);
+      // Nobody is credited (see recordTargetCrossing); the event itself is recorded exactly once.
+      expect(pre.crossed).toBe(0);
 
       const goal = (await getFirestore().doc(`wsfGoals/${goalId}`).get()).data() as Record<string, unknown>;
       expect(goal.reachedAt).toBeDefined();
-      if (pre.crossed === 1) {
-        expect(String(goal.reachedAttemptId)).toMatch(new RegExp(`^stress-a${n}-\\d+$`));
-      } else {
         expect(goal.reachedAttemptId).toBeNull();
-      }
       expect(typeof goal.reachedSharedTotal).toBe('number');
       expect(goal.reachedSharedTotal as number).toBeGreaterThanOrEqual(target);
       expect(goal.reachedSharedTotal as number).toBeLessThanOrEqual(n * count);

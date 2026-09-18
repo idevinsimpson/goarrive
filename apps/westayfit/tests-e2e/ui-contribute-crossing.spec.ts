@@ -8,11 +8,11 @@ import { expect, test, type Page, type Route } from '@playwright/test';
  * THE ONE-TIME TARGET-CROSSING EVENT, THROUGH THE REAL INTERFACE.
  *
  * The server decides, once, which contribution moved the shared total from
- * below the target to at or beyond it (wsfContribute writes reachedAt,
- * reachedAttemptId and reachedSharedTotal on the goal and returns
- * `crossedTarget` on that attempt). This spec proves the member-facing half:
+ * below the target to at or beyond it (wsfContribute records reachedAt and
+ * reachedSharedTotal on the goal once; it names no attempt and never returns
+ * `crossedTarget: true`). This spec proves the member-facing half:
  *
- *   1. the member whose contribution crossed reads the crossing sentence on
+ *   1. the member whose contribution crossed reads the stable reached state on
  *      their own receipt, and nowhere else in the product
  *   2. the next contribution — same member, past the target — does not repeat
  *      it, and reads as the ordinary past-target result
@@ -235,11 +235,12 @@ test('the crossing is the server’s to say: once, to the member who made it', a
   await enterAndRecord(page, '25');
 
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'crossed');
+  // The receipt is the stable, unattributed 'reached' state: the server never
+  // names the attempt that crossed (see recordTargetCrossing), so no member is
+  // told 'this one took us past our goal'.
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'reached');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 25 squats.');
-  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText(
-    'This one took us past our goal.'
-  );
+  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('Our goal is reached.');
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
     'Our goal of 500 squats is reached and still open. Maple Street Movers is now at 505 of 500 squats.'
   );
@@ -250,7 +251,7 @@ test('the crossing is the server’s to say: once, to the member who made it', a
   const crossedText = await page.getByTestId('wsf-contribute-receipt').innerText();
   // Plainly said, and said about US. Not the display's headline, not a
   // scoreboard, not a winner.
-  expect(crossedText).not.toMatch(/WE did it|winning|winner|congratulations|!/i);
+  expect(crossedText).not.toMatch(/WE did it|winning|winner|congratulations|took us past|!/i);
   await snap(page, '01-crossing-receipt');
 
   // The server wrote the event, exactly once, with the total it committed.
@@ -258,7 +259,8 @@ test('the crossing is the server’s to say: once, to the member who made it', a
   expect(goalAfter?.reachedAt?.timestampValue).toBeTruthy();
   expect(Number(goalAfter?.reachedSharedTotal?.integerValue)).toBe(505);
   const reachedIso = goalAfter!.reachedAt.timestampValue as string;
-  const reachedAttemptId = goalAfter!.reachedAttemptId.stringValue as string;
+  // No attempt is named: the observation cannot prove which one crossed.
+  expect(goalAfter?.reachedAttemptId?.stringValue).toBeUndefined();
 
   // ---- 2. the next contribution does not say it again -----------------------
   await page.goto(`/contribute/${goalId}?groupId=${groupId}&mode=record`);
@@ -278,7 +280,7 @@ test('the crossing is the server’s to say: once, to the member who made it', a
   // The event is untouched by the overshoot.
   const goalAfterOvershoot = await firestoreRead(`wsfGoals/${goalId}`);
   expect(goalAfterOvershoot?.reachedAt?.timestampValue).toBe(reachedIso);
-  expect(goalAfterOvershoot?.reachedAttemptId?.stringValue).toBe(reachedAttemptId);
+  expect(goalAfterOvershoot?.reachedAttemptId?.stringValue).toBeUndefined();
   expect(Number(goalAfterOvershoot?.reachedSharedTotal?.integerValue)).toBe(505);
   await snap(page, '02-overshoot-receipt');
 
@@ -347,13 +349,11 @@ test('a replay of the crossing attempt says the same thing, and that it counted 
   mode = 'pass';
   await page.getByTestId('wsf-contribute-reconcile').click();
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'crossed');
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'alreadyRecorded');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText(
     'This contribution was already recorded.'
   );
-  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText(
-    'It counted once, and it took us past our goal.'
-  );
+  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('It counted once.');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('510 of 500 squats');
   await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
     'Your total on this goal: 20 squats'
@@ -365,9 +365,7 @@ test('a replay of the crossing attempt says the same thing, and that it counted 
   expect(goalAfterReplay?.reachedAt?.timestampValue).toBe(
     goalAfterLanding?.reachedAt?.timestampValue
   );
-  expect(goalAfterReplay?.reachedAttemptId?.stringValue).toBe(
-    goalAfterLanding?.reachedAttemptId?.stringValue
-  );
+  expect(goalAfterReplay?.reachedAttemptId?.stringValue).toBeUndefined();
   const memberTotal = await firestoreRead(`wsfGoalMemberTotals/${goalId}_${memberUid}`);
   expect(Number(memberTotal?.total?.integerValue), 'counted exactly once').toBe(20);
 });
