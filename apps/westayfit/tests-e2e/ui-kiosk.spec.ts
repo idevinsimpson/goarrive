@@ -12,7 +12,12 @@ import { expect, test, type Page } from '@playwright/test';
  *           existing contribution flow, Finish — and then the claim that
  *           makes a kiosk a kiosk: after Finish the device is signed out,
  *           carries no text identifying the previous visitor, and holds no
- *           kiosk session key or Firebase auth record.
+ *           kiosk session key or Firebase auth record. Then the claim that
+ *           only a SECOND person can establish: visitor B walks up to the
+ *           same device in the same browser, signs in as themselves, and
+ *           gets their OWN session — zero own-credit, nothing of A's left
+ *           mid-flight — while the shared total keeps A's effort, because
+ *           that belongs to the community and not to A.
  *   CASE 2  a goal that is NOT display-authorized shows the public display's
  *           generic refusal, word for word, and never the goal.
  *   CASE 3  nobody touches the receipt: the countdown runs down and performs
@@ -163,6 +168,12 @@ type Fx = {
   memberEmail: string;
   memberName: string;
   memberUid: string;
+  /** The SECOND walk-up. A separate verified account with its own profile and
+   *  its own active membership — the next person in the queue, not a second
+   *  session of the first one. */
+  visitorEmail: string;
+  visitorName: string;
+  visitorUid: string;
   championUid: string;
   groupId: string;
 };
@@ -172,16 +183,35 @@ async function seedBase(tag: string): Promise<Fx> {
   const password = 'uiK-password';
   const memberEmail = `wsf-uiK-member-${tag}-${stamp}@example.com`;
   const championEmail = `wsf-uiK-champ-${tag}-${stamp}@example.com`;
+  // Deliberately NOT a variation on the first visitor's name: the assertions
+  // below use `not.toContain`, and one name that is a substring of the other
+  // would make B's own screen fail a check about A.
+  const visitorEmail = `wsf-uiK-second-${tag}-${stamp}@example.com`;
   const championUid = await seedVerifiedUser(championEmail, password);
   const memberUid = await seedVerifiedUser(memberEmail, password);
+  const visitorUid = await seedVerifiedUser(visitorEmail, password);
   const memberName = 'Fixture Kiosk Visitor';
+  const visitorName = 'Dana Second Walkup';
   await seedProfile(championUid, 'Fixture Champion');
   await seedProfile(memberUid, memberName);
+  await seedProfile(visitorUid, visitorName);
   const groupId = await seedCommunity(`${tag}-${stamp}`, 'Maple Street Movers', [
     { uid: championUid, role: 'foundingChampion' },
     { uid: memberUid, role: 'member' },
+    { uid: visitorUid, role: 'member' },
   ]);
-  return { stamp, password, memberEmail, memberName, memberUid, championUid, groupId };
+  return {
+    stamp,
+    password,
+    memberEmail,
+    memberName,
+    memberUid,
+    visitorEmail,
+    visitorName,
+    visitorUid,
+    championUid,
+    groupId,
+  };
 }
 
 /** Every browser-storage key the page can see, by area. */
@@ -198,7 +228,8 @@ test.use({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true
 test('a whole walk-up: start → sign in → contribute → Finish → start, with nothing left behind', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  // Two complete walk-ups in one test, each with its own sign-in round trip.
+  test.setTimeout(300_000);
   const fx = await seedBase('walkup');
   const goalId = `uiK-goal-${fx.stamp}`;
   await seedGoal(fx.groupId, fx.championUid, {
@@ -237,6 +268,34 @@ test('a whole walk-up: start → sign in → contribute → Finish → start, wi
   await page.getByTestId('wsf-signin-email').fill(fx.memberEmail);
   await page.getByTestId('wsf-signin-password').fill(fx.password);
   await page.getByTestId('wsf-signin-submit').click();
+
+  // THE HANDOFF KEY HAS TO SURVIVE THE ROUND TRIP. It is the only thing
+  // nextRouteAfterAuth() (src/pendingJoinCode.ts) can read to send this
+  // visitor back to the kiosk's contribution screen instead of home, and the
+  // whole hop is client-side — so the kiosk start screen is still mounted
+  // underneath and anything it does on an auth change happens right here.
+  // Sampled from the submit until the post-auth navigation lands, so a screen
+  // that wipes the key mid-flight fails at the cause rather than twenty
+  // seconds later at a URL that never arrives.
+  const returnKeySamples: string[] = [];
+  await expect
+    .poll(
+      async () => {
+        const held = await page
+          .evaluate(() => window.sessionStorage.getItem('wsf.kioskReturnGoalId'))
+          // No document navigation happens on this hop, so the context should
+          // never go away here; if it ever does, that is not the key going.
+          .catch(() => '<context-unavailable>');
+        returnKeySamples.push(held ?? '<cleared>');
+        return page.url();
+      },
+      { timeout: 20_000, intervals: [50] }
+    )
+    .toMatch(/\/contribute\/.*kiosk=1/);
+  // Never cleared at any point between the submit and the landing, and still
+  // naming THIS goal when the routing read it.
+  expect(returnKeySamples).not.toContain('<cleared>');
+  expect(returnKeySamples[returnKeySamples.length - 1]).toBe(goalId);
 
   // Post-auth routing returns to the kiosk's contribution screen, not home.
   await page.waitForURL(/\/contribute\/.*kiosk=1/, { timeout: 20_000 });
@@ -305,6 +364,92 @@ test('a whole walk-up: start → sign in → contribute → Finish → start, wi
   await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 20_000 });
   const afterReload = await readStorage(page);
   expect(afterReload.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
+
+  // ---- THE SECOND WALK-UP -------------------------------------------------
+  // Everything above is one person's session ending tidily. This is the claim
+  // that needs two people: the next person to touch this device gets their
+  // own session on it, and inherits nothing of the first person's except the
+  // shared total, which was never the first person's to begin with.
+  await page.getByTestId('wsf-kiosk-start').click();
+  await page.waitForURL(/\/contribute\/.*kiosk=1/, { timeout: 20_000 });
+  // B starts where every visitor starts: at the gate, not inside A's session.
+  await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-contribute-signin-link').click();
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-signin-email').fill(fx.visitorEmail);
+  await page.getByTestId('wsf-signin-password').fill(fx.password);
+  await page.getByTestId('wsf-signin-submit').click();
+
+  // The same post-auth return, for the second person in a row.
+  await page.waitForURL(/\/contribute\/.*kiosk=1/, { timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-back')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toBeVisible();
+  await snap(page, '07-second-visitor-entry');
+
+  // NOTHING OF A. Not their address, not their name, not their credit.
+  const bEntryText = await page.getByTestId('wsf-contribute-screen').innerText();
+  expect(bEntryText).not.toContain(fx.memberEmail);
+  expect(bEntryText).not.toContain(fx.memberName);
+  expect(bEntryText).not.toContain('20 squats');
+  expect(bEntryText).not.toMatch(/Recorded|Already recorded/);
+  // B's own credit is B's own: the line renders above the entry card
+  // (app/contribute/[goalId].tsx — renderCompactProgress) and reads zero for
+  // a member who has never contributed to this goal.
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+    'Your total on this goal: 0 squats'
+  );
+  // A's twenty IS in the shared total, and belongs there: it is the
+  // community's progress, not A's identity.
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText(
+    '261 of 500 squats',
+    { timeout: 20_000 }
+  );
+  // And nothing of A's is left mid-flight for B to inherit, resolve or be
+  // asked about.
+  await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveCount(0);
+  const storageForB = await readStorage(page);
+  expect(storageForB.local.some((k) => k.startsWith('wsf.pendingContribution.'))).toBe(false);
+
+  // ---- B's own contribution, counted on top of A's ------------------------
+  await page.getByTestId('wsf-contribute-entry').fill('5');
+  await page.getByTestId('wsf-contribute-review').click();
+  await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible();
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 30_000 });
+  // 241 seeded + A's 20 + B's 5. Both walk-ups are in the community's total.
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('266 of 500 squats');
+  // B is credited with B's five and with none of A's twenty.
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+    'Your total on this goal: 5 squats'
+  );
+  const bReceiptText = await page.getByTestId('wsf-contribute-screen').innerText();
+  expect(bReceiptText).not.toContain(fx.memberEmail);
+  expect(bReceiptText).not.toContain(fx.memberName);
+  expect(bReceiptText).not.toContain('20 squats');
+  await snap(page, '08-second-visitor-receipt');
+
+  // ---- B Finishes, and the device is clean for whoever is third -----------
+  await page.getByTestId('wsf-kiosk-finish').click();
+  await page.waitForURL(new RegExp(`/kiosk/${goalId}$`), { timeout: 20_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 20_000 });
+  const afterB = await readStorage(page);
+  expect(afterB.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
+  expect(afterB.session).not.toContain('wsf.kioskReturnGoalId');
+  expect(afterB.local.some((k) => k.startsWith('wsf.pendingContribution.'))).toBe(false);
+  const startAfterB = await page.getByTestId('wsf-kiosk-screen').innerText();
+  expect(startAfterB).not.toContain(fx.visitorEmail);
+  expect(startAfterB).not.toContain(fx.visitorName);
+  expect(startAfterB).not.toContain(fx.memberEmail);
+  expect(startAfterB).not.toContain(fx.memberName);
+  expect(startAfterB).not.toMatch(/Your total|Recorded|20 squats|5 squats/);
+  // The public hero has moved with the community, and says only that.
+  await expect(page.getByTestId('wsf-kiosk-shared-total')).toHaveText('266', { timeout: 20_000 });
+  await expect(page.getByTestId('wsf-kiosk-total-line')).toHaveText('266 of 500 squats');
+  await snap(page, '09-clean-after-second-visitor');
 });
 
 // ---- CASE 2 ---------------------------------------------------------------
