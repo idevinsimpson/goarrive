@@ -24,8 +24,9 @@ import { expect, test, type Page, type Route } from '@playwright/test';
  *
  * Fixture data throughout: names, totals and credits are seeded for the run.
  *
- * NOT RUN in this workstream (no browser available here); written against the
- * same emulator fixtures and helpers as ui-contribute.spec.ts.
+ * Run against the integrated head on 2026-09-18 (emulator, 390×844): both
+ * cases pass; the crossing is claimed after the contribution commits (see
+ * claimTargetCrossing in functions-westayfit/src/index.ts).
  */
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
