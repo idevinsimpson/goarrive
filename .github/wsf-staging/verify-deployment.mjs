@@ -42,7 +42,6 @@ fs.mkdirSync(RESULT_DIR, { recursive: true, mode: 0o700 });
 const EXPECTED = [
   'wsfadjustgoal', 'wsfchallengepulse', 'wsfcheckin', 'wsfcontribute',
   'wsfcreatecommunity', 'wsfcreategoal', 'wsfdesignatechampion', 'wsfgoalpulse',
-  'wsfgoalrecentadditions',
   'wsfhealth', 'wsfjoincommunity', 'wsfleavecommunity', 'wsflistchallenge',
   'wsflistgoals', 'wsfmycommunities', 'wsfmycontribution', 'wsfpreviewcommunity',
   'wsfreinstatemember', 'wsfremovemember', 'wsfresetjoincode', 'wsfsaveprofile',
@@ -50,13 +49,7 @@ const EXPECTED = [
   'wsfsetgoaldisplayauthorization',
 ].sort();
 const CREATED_BY_PACKAGE_E = 'wsfsetgoaldisplayauthorization';
-// The one callable the approved candidate adds (W2, recent public additions:
-// amount and minute only, gated by the same access policy as the pulse). It is
-// new to staging with this deploy, so it is neither pre-existing (its
-// transport is reported, like Package E's was) nor unexpected.
-const CREATED_BY_CANDIDATE = 'wsfgoalrecentadditions';
-const NEW_SERVICES = [CREATED_BY_PACKAGE_E, CREATED_BY_CANDIDATE];
-const PRE_EXISTING = EXPECTED.filter((n) => !NEW_SERVICES.includes(n));
+const PRE_EXISTING = EXPECTED.filter((n) => n !== CREATED_BY_PACKAGE_E);
 
 const failures = [];
 const notes = [];
@@ -111,7 +104,6 @@ if (missing.length) failures.push(`expected but absent: ${missing.join(', ')}`);
 if (unexpected.length) failures.push(`present but not expected: ${unexpected.join(', ')}`);
 if (lost.length) failures.push(`present before this deploy and now gone: ${lost.join(', ')}`);
 if (!after.includes(CREATED_BY_PACKAGE_E)) failures.push(`${CREATED_BY_PACKAGE_E} absent — Package E did not deploy`);
-if (!after.includes(CREATED_BY_CANDIDATE)) failures.push(`${CREATED_BY_CANDIDATE} absent — the candidate's new callable did not deploy`);
 
 // ---- region and project are part of the claim ---------------------------
 const wrongLocation = (functionsBody.functions || [])
@@ -136,19 +128,15 @@ if (driftedTransport.length) {
   failures.push(`existing WSF transport drifted (invoker IAM check re-enabled): ${driftedTransport.join(', ')}`);
 }
 
-function transportOf(serviceName) {
-  const service = services.get(serviceName);
-  if (!service) return 'service_not_found';
-  if (service.invokerIamDisabled === true) return 'invoker_iam_check_disabled';
-  return 'invoker_iam_check_enabled';
-}
-const newServiceTransport = transportOf(CREATED_BY_PACKAGE_E);
-const candidateServiceTransport = transportOf(CREATED_BY_CANDIDATE);
+const newService = services.get(CREATED_BY_PACKAGE_E);
+let newServiceTransport;
+if (!newService) newServiceTransport = 'service_not_found';
+else if (newService.invokerIamDisabled === true) newServiceTransport = 'invoker_iam_check_disabled';
+else newServiceTransport = 'invoker_iam_check_enabled';
 // Deliberately NOT a failure: whether the new service needs the approved
 // transport change is established by exercising the callable, not by this flag,
 // and the escalation is a separate approval.
 notes.push(`new service transport: ${newServiceTransport}`);
-notes.push(`candidate service transport (${CREATED_BY_CANDIDATE}): ${candidateServiceTransport}`);
 
 // ---- wsfCheckIn minimum instances: three outcomes, not two --------------
 let minInstancesState;
@@ -224,13 +212,10 @@ const receipt = {
     lostThisDeploy: lost,
   },
   createdCallablePresent: after.includes(CREATED_BY_PACKAGE_E),
-  candidateCallablePresent: after.includes(CREATED_BY_CANDIDATE),
   preExistingTransportVerified: PRE_EXISTING.filter((n) => services.get(n)?.invokerIamDisabled === true).length,
   preExistingTransportDrifted: driftedTransport,
   newServiceTransport,
   newServiceTransportRequiresSeparateApproval: newServiceTransport !== 'invoker_iam_check_disabled',
-  candidateServiceTransport,
-  candidateServiceTransportRequiresSeparateApproval: candidateServiceTransport !== 'invoker_iam_check_disabled',
   wsfCheckIn: { state: minInstancesState, value: minInstancesValue },
   hosted,
   hostingChannel: channel
@@ -263,7 +248,6 @@ console.log(`CREATED_THIS_DEPLOY=${receipt.inventory.createdThisDeploy.join(',')
 console.log(`NEW_CALLABLE_PRESENT=${receipt.createdCallablePresent}`);
 console.log(`PREEXISTING_TRANSPORT_VERIFIED=${receipt.preExistingTransportVerified}/${PRE_EXISTING.length}`);
 console.log(`NEW_SERVICE_TRANSPORT=${newServiceTransport}`);
-console.log(`CANDIDATE_SERVICE_TRANSPORT=${candidateServiceTransport}`);
 console.log(`WSF_CHECKIN_MIN_INSTANCES_STATE=${minInstancesState}`);
 console.log(`HOSTED_MARKER_MATCHES=${hosted.markerMatches === true}`);
 
