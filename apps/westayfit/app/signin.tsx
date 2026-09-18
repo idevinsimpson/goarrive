@@ -119,7 +119,6 @@ export default function SignIn() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Sign in"
       intro="Welcome back. Sign in to your community."
       testID="wsf-signin"

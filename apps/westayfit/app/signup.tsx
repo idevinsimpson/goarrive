@@ -115,7 +115,6 @@ export default function SignUp() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Create your account"
       intro="We will send a verification email before you can join a community."
       testID="wsf-signup"

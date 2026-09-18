@@ -1,8 +1,8 @@
-import { Link, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
@@ -19,7 +19,9 @@ import {
   clearPendingJoinCode,
   setPendingJoinCode,
 } from '../../src/pendingJoinCode';
-import { wsfTheme } from '../../src/theme';
+import { ButtonLink } from '../../src/ui/ButtonLink';
+import { kit } from '../../src/ui/kit';
+import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 type Preview = {
   displayName: string;
@@ -124,7 +126,7 @@ export default function JoinPage() {
   if (!joinCode || previewState.kind === 'invalid') {
     return (
       <FormShell heading="This link is not valid" testID="wsf-join-invalid">
-        <Text style={styles.body}>
+        <Text style={kit.body}>
           The link you followed is not valid or is no longer active. Ask the person who shared it
           to send you a new one.
         </Text>
@@ -136,7 +138,7 @@ export default function JoinPage() {
   if (previewState.kind === 'rateLimited') {
     return (
       <FormShell heading="Too many requests" testID="wsf-join-rate-limited">
-        <Text style={styles.body}>
+        <Text style={kit.body}>
           The join preview is rate-limited right now. Wait a moment and try again.
         </Text>
         <SecondaryLink href="/" label="Back to home" />
@@ -181,17 +183,31 @@ export default function JoinPage() {
         : '';
   const metaLine = joiningConditions ? `${typeLabel} · ${joiningConditions}` : typeLabel;
 
+  // The invitation itself: the community's name on the navy hero, with the
+  // eyebrow and the joining conditions around it. Same hero on both sides of
+  // sign-in; only the actions under it differ.
+  const invitation = (
+    <View style={kit.hero}>
+      <Text style={kit.eyebrowOnNavy}>Join a community</Text>
+      <Text style={kit.heroTitle}>{preview.displayName}</Text>
+      <Text style={kit.heroMeta} testID="wsf-join-meta">
+        {metaLine}
+      </Text>
+    </View>
+  );
+
   // Signed out — preview is safe (D4: only shown for link-joinable active
   // groups, i.e. public or inviteOnly; private never previews) so we
   // show it and route to signup/signin. The pending join code sits in
   // sessionStorage; the auth chain reads it and routes back here on success.
   if (!user) {
     return (
-      <View style={styles.container} testID="wsf-join-signed-out">
-        <View style={styles.inner}>
-          <Text style={styles.eyebrow}>Join a community</Text>
-          <Text style={styles.heading}>{preview.displayName}</Text>
-          <Text style={styles.meta} testID="wsf-join-meta">{metaLine}</Text>
+      <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+        <View style={kit.column} testID="wsf-join-signed-out">
+          <View style={kit.chrome}>
+            <WsfWordmark variant="navy" height={22} testID="wsf-join-wordmark" />
+          </View>
+          {invitation}
           <View style={styles.actions}>
             {/*
               `replace`, not push. If these Links pushed, the join screen would
@@ -204,112 +220,59 @@ export default function JoinPage() {
               pending code across, and the return trip lands on a single join
               instance. Back-button behaviour also stays sane — no one lands
               on a stale signed-out join page after signing up.
+
+              ButtonLink, not a bare Link: on web a Link is a text anchor, so
+              the button shape and the 44 px minimum have to live on a
+              Pressable. The testID stays on the anchor the spec clicks.
             */}
-            <Link
+            <ButtonLink
               href="/signup"
               replace
-              style={styles.primaryAction}
+              style={kit.primaryButton}
+              textStyle={kit.primaryButtonText}
               testID="wsf-join-signup"
-            >
-              Sign up to join
-            </Link>
-            <Link
+              label="Sign up to join"
+            />
+            <ButtonLink
               href="/signin"
               replace
-              style={styles.secondaryAction}
+              style={kit.secondaryButton}
+              textStyle={kit.secondaryButtonText}
               testID="wsf-join-signin"
-            >
-              Already have an account? Sign in
-            </Link>
+              label="Already have an account? Sign in"
+            />
           </View>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
   return (
-    <View style={styles.container} testID="wsf-join-signed-in">
-      <View style={styles.inner}>
-        <Text style={styles.eyebrow}>Join a community</Text>
-        <Text style={styles.heading}>{preview.displayName}</Text>
-        <Text style={styles.meta} testID="wsf-join-meta">{metaLine}</Text>
-        {joinState.kind === 'error' ? (
-          <ErrorText testID="wsf-join-submit-error">{joinState.message}</ErrorText>
-        ) : null}
-        <SubmitButton
-          label="Join this community"
-          onPress={onJoin}
-          submitting={joinState.kind === 'joining'}
-          testID="wsf-join-submit"
-        />
-        <SecondaryLink href="/" label="Not now" />
+    <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      <View style={kit.column} testID="wsf-join-signed-in">
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-join-wordmark" />
+        </View>
+        {invitation}
+        <View style={styles.actions}>
+          {joinState.kind === 'error' ? (
+            <ErrorText testID="wsf-join-submit-error">{joinState.message}</ErrorText>
+          ) : null}
+          <SubmitButton
+            label="Join this community"
+            onPress={onJoin}
+            submitting={joinState.kind === 'joining'}
+            testID="wsf-join-submit"
+          />
+          <SecondaryLink href="/" label="Not now" />
+        </View>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
+// Layout only this screen needs: the actions sit a little closer to each
+// other than the page's sections do.
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: wsfTheme.colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: wsfTheme.spacing.xl,
-  },
-  inner: {
-    maxWidth: 640,
-    width: '100%',
-  },
-  eyebrow: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '700',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: wsfTheme.spacing.md,
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.heading.fontSize,
-    fontWeight: wsfTheme.typography.heading.fontWeight,
-    lineHeight: wsfTheme.typography.heading.lineHeight,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  meta: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginBottom: wsfTheme.spacing.xl,
-  },
-  body: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
-  actions: {
-    flexDirection: 'column',
-    gap: wsfTheme.spacing.sm,
-    marginTop: wsfTheme.spacing.md,
-  },
-  primaryAction: {
-    backgroundColor: wsfTheme.colors.primary,
-    color: wsfTheme.colors.surface,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '700',
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    borderRadius: wsfTheme.radius.pill,
-    textAlign: 'center',
-  },
-  secondaryAction: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    borderRadius: wsfTheme.radius.pill,
-    textAlign: 'center',
-  },
+  actions: { gap: 10 },
 });

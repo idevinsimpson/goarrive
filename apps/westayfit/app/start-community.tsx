@@ -10,12 +10,13 @@ import {
   FieldLabel,
   FormShell,
   SecondaryLink,
+  StatusText,
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseFunctions } from '../src/firebase';
-import { wsfTheme } from '../src/theme';
+import { kit } from '../src/ui/kit';
 
 type GroupType = 'familyFriends' | 'custom';
 type JoinPolicy = 'public' | 'inviteOnly' | 'private';
@@ -67,7 +68,7 @@ export default function StartCommunity() {
   if (!ready) {
     return (
       <FormShell heading="Start your community" testID="wsf-start-loading">
-        <Text>Loading…</Text>
+        <StatusText>Loading…</StatusText>
       </FormShell>
     );
   }
@@ -116,9 +117,10 @@ export default function StartCommunity() {
     }
   }
 
+  // The shell shows the wordmark in its chrome row, so the old "We Stay Fit"
+  // text eyebrow is gone: the brand is the image now, not a line of caps.
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Start your community"
       intro="Turn your community into a place that moves."
       testID="wsf-start"
@@ -149,7 +151,7 @@ export default function StartCommunity() {
         onSelect={(v) => setJoinPolicy(v as JoinPolicy)}
         testIDPrefix="wsf-start-joinPolicy"
       />
-      <Text style={choiceStyles.policyDescription} testID="wsf-start-joinPolicy-description">
+      <Text style={kit.caption} testID="wsf-start-joinPolicy-description">
         {JOIN_POLICY_OPTIONS.find((o) => o.value === joinPolicy)?.description ?? ''}
       </Text>
 
@@ -166,6 +168,10 @@ export default function StartCommunity() {
   );
 }
 
+/**
+ * A row of choice pills. Each pill is the kit's 44 px chip; the row wraps so
+ * three labels fit at any width without running off the edge.
+ */
 function ChoiceRow({
   options,
   selected,
@@ -178,19 +184,19 @@ function ChoiceRow({
   testIDPrefix: string;
 }) {
   return (
-    <View style={choiceStyles.row}>
+    <View style={styles.choiceRow}>
       {options.map((o) => {
         const isSelected = o.value === selected;
         return (
           <Pressable
             key={o.value}
             onPress={() => onSelect(o.value)}
-            style={[choiceStyles.pill, isSelected ? choiceStyles.pillSelected : null]}
+            style={[kit.pill, styles.choice, isSelected ? kit.pillSelected : null]}
             testID={`${testIDPrefix}-${o.value}`}
             accessibilityRole="radio"
             accessibilityState={{ selected: isSelected }}
           >
-            <Text style={[choiceStyles.pillText, isSelected ? choiceStyles.pillTextSelected : null]}>
+            <Text style={[kit.pillText, isSelected ? kit.pillTextSelected : null]}>
               {o.label}
             </Text>
           </Pressable>
@@ -200,37 +206,14 @@ function ChoiceRow({
   );
 }
 
-const choiceStyles = StyleSheet.create({
-  row: {
+// Layout only this screen needs: the pills sit in a wrapping row.
+const styles = StyleSheet.create({
+  choiceRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: wsfTheme.spacing.sm,
-    marginBottom: wsfTheme.spacing.sm,
+    gap: 8,
   },
-  pill: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.pill,
-    paddingHorizontal: wsfTheme.spacing.md,
-    paddingVertical: wsfTheme.spacing.sm,
-    backgroundColor: wsfTheme.colors.surface,
-  },
-  pillSelected: {
-    borderColor: wsfTheme.colors.primary,
-    backgroundColor: wsfTheme.colors.primary,
-  },
-  pillText: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-  },
-  pillTextSelected: {
-    color: wsfTheme.colors.surface,
-  },
-  policyDescription: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
+  // A pill wider than the line gives way and wraps its label instead of
+  // running past a 195 px viewport.
+  choice: { flexShrink: 1, minWidth: 0 },
 });

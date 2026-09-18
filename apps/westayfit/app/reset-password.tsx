@@ -53,7 +53,6 @@ export default function ResetPassword() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Reset your password"
       intro="Enter your email and we will send a link to set a new one."
       testID="wsf-reset-screen"

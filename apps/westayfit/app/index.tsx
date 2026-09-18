@@ -2,8 +2,8 @@ import { Link, router } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { wsfAuthEnabled } from '../src/featureFlags';
@@ -15,6 +15,9 @@ import {
   roleLabel,
 } from '../src/labels';
 import { wsfTheme } from '../src/theme';
+import { ButtonLink } from '../src/ui/ButtonLink';
+import { NAVY, kit } from '../src/ui/kit';
+import { WsfWordmark } from '../src/ui/WsfWordmark';
 
 type MyCommunityItem = {
   groupId: string;
@@ -104,21 +107,35 @@ export default function BrandShell() {
   const showSignedIn = wsfAuthEnabled && ready && !!user;
 
   return (
-    <View style={styles.container} testID="wsf-home">
-      <View style={styles.inner}>
-        <Text style={styles.eyebrow}>We Stay Fit</Text>
-        <Text style={styles.heading}>Turn your community into a place that moves.</Text>
-        <Text style={styles.subline}>Shared challenges. More movement. Stronger communities.</Text>
+    <ScrollView
+      style={kit.scroll}
+      contentContainerStyle={kit.page}
+      keyboardShouldPersistTaps="handled"
+      testID="wsf-home"
+    >
+      <View style={kit.column}>
+        {/* Product chrome: the full wordmark, compact. It replaces the old text eyebrow. */}
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-home-wordmark" />
+        </View>
 
         {!wsfAuthEnabled ? (
-          <Text style={styles.body} testID="wsf-home-flag-off">
-            We Stay Fit is coming soon. This shell exists so the app can ship, deploy, and be
-            verified. It intentionally has no content, no signup, and no reads or writes.
-          </Text>
+          <>
+            <HomeHero />
+            <View style={kit.cardQuiet}>
+              <Text style={kit.body} testID="wsf-home-flag-off">
+                We Stay Fit is coming soon. This shell exists so the app can ship, deploy, and be
+                verified. It intentionally has no content, no signup, and no reads or writes.
+              </Text>
+            </View>
+          </>
         ) : !ready ? (
-          <View testID="wsf-home-loading" data-state="loading">
-            <Text style={styles.body}>Loading…</Text>
-          </View>
+          <>
+            <HomeHero />
+            <View testID="wsf-home-loading" data-state="loading">
+              <Text style={kit.statusText}>Loading…</Text>
+            </View>
+          </>
         ) : showSignedIn ? (
           <SignedInHome
             user={user!}
@@ -139,10 +156,30 @@ export default function BrandShell() {
           />
         )}
 
-        <Link href="/health" style={styles.footerLink} testID="wsf-home-build-details">
-          Build details
-        </Link>
+        <View style={kit.footer}>
+          <ButtonLink
+            href="/health"
+            style={FOOTER_LINK}
+            textStyle={kit.tertiaryButtonText}
+            testID="wsf-home-build-details"
+            label="Build details"
+          />
+        </View>
       </View>
+    </ScrollView>
+  );
+}
+
+/**
+ * The navy hero every state of the home opens with: the tagline and the
+ * subline, and (signed out) the two ways in, stacked inside it.
+ */
+function HomeHero({ children }: { children?: ReactNode }) {
+  return (
+    <View style={kit.hero}>
+      <Text style={kit.heroTitle}>Turn your community into a place that moves.</Text>
+      <Text style={kit.heroBody}>Shared challenges. More movement. Stronger communities.</Text>
+      {children}
     </View>
   );
 }
@@ -159,15 +196,29 @@ function SignedOutHome({
   onJoinCodeSubmit: () => void;
 }) {
   return (
-    <View testID="wsf-home-signed-out" {...({ 'data-state': 'signed-out' } as Record<string, unknown>)}>
-      <View style={styles.actions}>
-        <Link href="/signup" style={styles.primaryAction} testID="wsf-home-signup">
-          Create an account
-        </Link>
-        <Link href="/signin" style={styles.secondaryAction} testID="wsf-home-signin">
-          Sign in
-        </Link>
-      </View>
+    <View
+      style={styles.stack}
+      testID="wsf-home-signed-out"
+      {...({ 'data-state': 'signed-out' } as Record<string, unknown>)}
+    >
+      <HomeHero>
+        <View style={styles.heroActions}>
+          <ButtonLink
+            href="/signup"
+            style={kit.primaryButton}
+            textStyle={kit.primaryButtonText}
+            testID="wsf-home-signup"
+            label="Create an account"
+          />
+          <ButtonLink
+            href="/signin"
+            style={kit.secondaryButtonOnNavy}
+            textStyle={kit.secondaryButtonOnNavyText}
+            testID="wsf-home-signin"
+            label="Sign in"
+          />
+        </View>
+      </HomeHero>
       <JoinWithCodeField
         value={joinCodeInput}
         onChange={setJoinCodeInput}
@@ -199,18 +250,28 @@ function SignedInHome({
 }) {
   const identity = user.displayName || user.email || 'Signed in';
   return (
-    <View testID="wsf-home-signed-in" {...({ 'data-state': 'signed-in' } as Record<string, unknown>)}>
-      <Text style={styles.identity} testID="wsf-home-identity">
+    <View
+      style={styles.stack}
+      testID="wsf-home-signed-in"
+      {...({ 'data-state': 'signed-in' } as Record<string, unknown>)}
+    >
+      <HomeHero />
+      <Text style={[kit.statusText, styles.identity]} testID="wsf-home-identity">
         {identity}
       </Text>
-      <Text style={styles.sectionHeading}>Your communities</Text>
-      <MyCommunitiesList state={state} />
 
-      <View style={styles.actions}>
-        <Link href="/start-community" style={styles.primaryAction} testID="wsf-home-start">
-          Start a community
-        </Link>
+      <View style={styles.section}>
+        <Text style={kit.eyebrow}>Your communities</Text>
+        <MyCommunitiesList state={state} />
       </View>
+
+      <ButtonLink
+        href="/start-community"
+        style={kit.primaryButton}
+        textStyle={kit.primaryButtonText}
+        testID="wsf-home-start"
+        label="Start a community"
+      />
 
       <JoinWithCodeField
         value={joinCodeInput}
@@ -222,11 +283,11 @@ function SignedInHome({
       <Pressable
         onPress={onSignOut}
         disabled={signingOut}
-        style={styles.signOutRow}
+        style={[kit.tertiaryButton, signingOut ? kit.primaryButtonDisabled : null]}
         testID="wsf-home-signout"
         accessibilityRole="button"
       >
-        <Text style={styles.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text>
+        <Text style={kit.tertiaryButtonText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text>
       </Pressable>
     </View>
   );
@@ -239,7 +300,7 @@ function MyCommunitiesList({ state }: { state: MyCommunitiesState }) {
         testID="wsf-home-my-loading"
         {...({ 'data-state': 'loading' } as Record<string, unknown>)}
       >
-        <Text style={styles.body}>Loading your communities…</Text>
+        <Text style={kit.statusText}>Loading your communities…</Text>
       </View>
     );
   }
@@ -249,22 +310,24 @@ function MyCommunitiesList({ state }: { state: MyCommunitiesState }) {
         testID="wsf-home-my-error"
         {...({ 'data-state': 'error' } as Record<string, unknown>)}
       >
-        <Text style={styles.error}>{state.message}</Text>
+        <Text style={kit.errorText}>{state.message}</Text>
       </View>
     );
   }
   if (state.items.length === 0) {
     return (
       <View
+        style={kit.cardQuiet}
         testID="wsf-home-my-empty"
         {...({ 'data-state': 'empty' } as Record<string, unknown>)}
       >
-        <Text style={styles.body}>You're not in a community yet.</Text>
+        <Text style={kit.body}>You're not in a community yet.</Text>
       </View>
     );
   }
   return (
     <View
+      style={styles.list}
       testID="wsf-home-my-list"
       {...({ 'data-state': 'ready' } as Record<string, unknown>)}
     >
@@ -272,21 +335,24 @@ function MyCommunitiesList({ state }: { state: MyCommunitiesState }) {
         <Link
           key={item.groupId}
           href={`/community/${item.groupId}` as never}
-          style={styles.communityCard}
+          style={COMMUNITY_CARD}
           testID={`wsf-home-community-${item.groupId}`}
         >
-          <View>
-            <Text style={styles.communityName}>
+          <View style={styles.cardBody}>
+            <Text style={kit.cardTitle}>
               {item.displayName}
               {item.isSample ? (
-                <Text style={styles.sampleBadge}> · Sample</Text>
+                <>
+                  {' · '}
+                  <Text style={kit.badge}>Sample</Text>
+                </>
               ) : null}
             </Text>
-            <Text style={styles.communityMeta}>
+            <Text style={kit.cardMeta}>
               {groupTypeLabel(item.groupType)} · {roleLabel(item.role)} ·{' '}
               {memberCountLabel(item.memberCount)}
             </Text>
-            <Text style={styles.communityChallenge}>
+            <Text style={kit.body}>
               {item.activeChallenge
                 ? `${item.activeChallenge.title} — ${challengeParticipationLabel(item.activeChallenge.participantCount, item.activeChallenge.completedCount)}`
                 : 'No active challenge yet'}
@@ -310,8 +376,8 @@ function JoinWithCodeField({
   error: string | null;
 }) {
   return (
-    <View style={styles.joinField} testID="wsf-home-join-field">
-      <Text style={styles.joinLabel}>Join with a code</Text>
+    <View style={kit.card} testID="wsf-home-join-field">
+      <Text style={kit.cardTitle}>Join with a code</Text>
       <View style={styles.joinRow}>
         <TextInput
           value={value}
@@ -320,22 +386,22 @@ function JoinWithCodeField({
           placeholderTextColor={wsfTheme.colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
-          style={styles.joinInput}
+          style={[kit.input, styles.joinInput]}
           testID="wsf-home-join-input"
           onSubmitEditing={onSubmit}
         />
         <Pressable
           onPress={onSubmit}
           disabled={!value.trim()}
-          style={[styles.joinButton, !value.trim() ? styles.joinButtonDisabled : null]}
+          style={[kit.secondaryButton, !value.trim() ? kit.primaryButtonDisabled : null]}
           testID="wsf-home-join-submit"
           accessibilityRole="button"
         >
-          <Text style={styles.joinButtonText}>Go</Text>
+          <Text style={kit.secondaryButtonText}>Go</Text>
         </Pressable>
       </View>
       {error ? (
-        <Text style={styles.error} testID="wsf-home-join-error">
+        <Text style={kit.errorText} testID="wsf-home-join-error">
           {error}
         </Text>
       ) : null}
@@ -343,174 +409,39 @@ function JoinWithCodeField({
   );
 }
 
+// Layout that only this screen needs; every colour, radius and type size
+// comes from the kit.
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: wsfTheme.colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: wsfTheme.spacing.xl,
-  },
-  inner: {
-    maxWidth: 640,
-    width: '100%',
-  },
-  eyebrow: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '700',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: wsfTheme.spacing.md,
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.heading.fontSize,
-    fontWeight: wsfTheme.typography.heading.fontWeight,
-    lineHeight: wsfTheme.typography.heading.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
-  subline: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize,
-    fontWeight: wsfTheme.typography.subheading.fontWeight,
-    lineHeight: wsfTheme.typography.subheading.lineHeight,
-    marginBottom: wsfTheme.spacing.lg,
-  },
-  body: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
-  identity: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '600',
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  sectionHeading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize,
-    fontWeight: wsfTheme.typography.subheading.fontWeight,
-    lineHeight: wsfTheme.typography.subheading.lineHeight,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: wsfTheme.spacing.sm,
-    marginBottom: wsfTheme.spacing.lg,
-    marginTop: wsfTheme.spacing.md,
-  },
-  primaryAction: {
-    backgroundColor: wsfTheme.colors.primary,
-    color: wsfTheme.colors.surface,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '700',
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    borderRadius: wsfTheme.radius.pill,
-    textAlign: 'center',
-  },
-  secondaryAction: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    borderRadius: wsfTheme.radius.pill,
-    textAlign: 'center',
-  },
-  communityCard: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    backgroundColor: wsfTheme.colors.surface,
-    borderRadius: wsfTheme.radius.md,
-    padding: wsfTheme.spacing.md,
-    marginBottom: wsfTheme.spacing.sm,
-    color: wsfTheme.colors.text,
+  // A state's contents stack with the same rhythm as the page column.
+  stack: { gap: 18 },
+  identity: { fontWeight: '600' },
+  section: { gap: 12 },
+  // Consecutive cards in a list: the same rhythm as the challenge page.
+  list: { gap: 12 },
+  // The two ways in sit inside the hero, under the subline.
+  heroActions: { gap: 10, marginTop: 8 },
+  cardBody: { gap: 4 },
+  // The field and Go share a row; the field gives way first so the row can
+  // never push past a 195 px viewport.
+  joinRow: { flexDirection: 'row', gap: 10 },
+  joinInput: { flex: 1, minWidth: 0 },
+});
+
+// A community card is a Link (a text anchor on web) wearing the card look.
+// `display: 'flex'` makes the anchor the card's own box, so its border wraps
+// the whole card and the anchor measures the card's full height. Flattened
+// once, at module scope, so the Link gets one plain object.
+const COMMUNITY_CARD = StyleSheet.flatten([
+  kit.card,
+  {
+    display: 'flex' as const,
+    // The anchor is a text element, so its flex direction would default to
+    // row and the card body could not shrink below its longest line.
+    // Column makes the body a stretched item that wraps within the card.
+    flexDirection: 'column' as const,
+    color: NAVY,
     textDecorationLine: 'none' as const,
   },
-  communityName: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize,
-    fontWeight: wsfTheme.typography.subheading.fontWeight,
-    marginBottom: 2,
-  },
-  sampleBadge: {
-    color: wsfTheme.colors.accent,
-    fontWeight: '700',
-    fontSize: wsfTheme.typography.caption.fontSize,
-  },
-  communityMeta: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    marginBottom: 2,
-  },
-  communityChallenge: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-  },
-  joinField: {
-    marginTop: wsfTheme.spacing.md,
-    marginBottom: wsfTheme.spacing.lg,
-  },
-  joinLabel: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '600',
-    marginBottom: wsfTheme.spacing.xs,
-  },
-  joinRow: {
-    flexDirection: 'row',
-    gap: wsfTheme.spacing.sm,
-  },
-  joinInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    backgroundColor: wsfTheme.colors.surface,
-    borderRadius: wsfTheme.radius.sm,
-    paddingHorizontal: wsfTheme.spacing.md,
-    paddingVertical: wsfTheme.spacing.sm,
-    fontSize: wsfTheme.typography.body.fontSize,
-    color: wsfTheme.colors.text,
-  },
-  joinButton: {
-    backgroundColor: wsfTheme.colors.primary,
-    borderRadius: wsfTheme.radius.sm,
-    paddingHorizontal: wsfTheme.spacing.lg,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  joinButtonDisabled: {
-    opacity: 0.5,
-  },
-  joinButtonText: {
-    color: wsfTheme.colors.surface,
-    fontWeight: '700',
-  },
-  signOutRow: {
-    paddingVertical: wsfTheme.spacing.md,
-  },
-  signOutText: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  footerLink: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    marginTop: wsfTheme.spacing.xl,
-    textDecorationLine: 'underline',
-  },
-  error: {
-    color: '#B4232C',
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginTop: wsfTheme.spacing.sm,
-  },
-});
+]);
+// The tertiary control sits left by default; the footer centres it.
+const FOOTER_LINK = StyleSheet.flatten([kit.tertiaryButton, { alignSelf: 'center' as const }]);

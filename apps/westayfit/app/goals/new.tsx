@@ -1,15 +1,18 @@
-import { Link, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
+import { SecondaryLink, TextField } from '../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions, wsfIsStaging, wsfUsingEmulators } from '../../src/firebase';
 import { type RepeatPolicy } from '../../src/contributionFlow';
-import { wsfTheme } from '../../src/theme';
+import { ButtonLink } from '../../src/ui/ButtonLink';
+import { kit } from '../../src/ui/kit';
+import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 // The minimum surface needed to make the E4-A1 slice self-testable end to
 // end on the local emulator: seed a synthetic community/goal, then deep-link
@@ -206,22 +209,22 @@ export default function NewGoalPage() {
   // boundary against deliberate ones.
   if (!wsfUsingEmulators && !wsfIsStaging) {
     return (
-      <View style={styles.screen}>
-        <View style={[styles.card, styles.testBanner]}>
-          <Text style={styles.testBannerText} testID="wsf-new-goal-gated-off">
+      <Page>
+        <View style={kit.card}>
+          <Text style={[kit.badge, styles.badge]} testID="wsf-new-goal-gated-off">
             SYNTHETIC TEST ONLY — DISABLED
           </Text>
-          <Text style={styles.body}>
+          <Text style={kit.body}>
             /goals/new is only available in a synthetic test environment: the
             local Firestore emulator on a loopback host, or a staging build
             pointed at a separate staging backend.
           </Text>
-          <Text style={styles.caption}>
+          <Text style={kit.caption}>
             This screen writes SYNTHETIC data only. It is disabled in a
             production build by design.
           </Text>
         </View>
-      </View>
+      </Page>
     );
   }
 
@@ -230,59 +233,61 @@ export default function NewGoalPage() {
   }
   if (!ready) {
     return (
-      <View style={styles.screen}>
-        <Text style={styles.body}>Loading…</Text>
-      </View>
+      <Page>
+        <Text style={kit.body}>Loading…</Text>
+      </Page>
     );
   }
   if (!user) {
     return (
-      <View style={styles.screen}>
+      <Page>
         <TestBanner />
-        <Text style={styles.heading}>Sign in to start a goal</Text>
-        <Link href="/signin" style={styles.link}>
-          Sign in
-        </Link>
-      </View>
+        <Text style={kit.heading}>Sign in to start a goal</Text>
+        <SecondaryLink href="/signin" label="Sign in" />
+      </Page>
     );
   }
 
   if (created) {
+    // String hrefs, as Community Home builds them: the anchor resolves to the
+    // same `/contribute/<goalId>` the object form produced.
+    const contributeHref = `/contribute/${created.goalId}`;
+    const displayHref = `/display/${created.goalId}`;
     return (
-      <View style={styles.screen} testID="wsf-new-goal-created">
+      <Page testID="wsf-new-goal-created">
         <TestBanner />
-        <Text style={styles.heading}>{SYNTHETIC_LABEL} — goal is live</Text>
-        <View style={styles.card}>
-          <Text style={styles.subheading}>{created.title}</Text>
-          <Text style={styles.body}>
+        <Text style={kit.headingCompact}>{SYNTHETIC_LABEL} — goal is live</Text>
+        <View style={kit.card}>
+          <Text style={kit.cardTitle}>{created.title}</Text>
+          <Text style={kit.body}>
             {created.target} {created.unit}
           </Text>
-          <Text style={styles.caption} selectable testID="wsf-new-goal-id">
+          <Text style={kit.caption} selectable testID="wsf-new-goal-id">
             goalId: {created.goalId}
           </Text>
-          <Text style={styles.caption} selectable testID="wsf-new-goal-group-id">
+          <Text style={kit.caption} selectable testID="wsf-new-goal-group-id">
             communityGroupId: {created.communityGroupId}
           </Text>
         </View>
-        <View style={styles.card}>
-          <Text style={styles.subheading}>Share these links</Text>
-          <Link
-            href={{ pathname: '/contribute/[goalId]', params: { goalId: created.goalId } }}
-            style={styles.link}
+        <View style={kit.card}>
+          <Text style={kit.cardTitle}>Share these links</Text>
+          <ButtonLink
+            href={contributeHref}
+            style={kit.tertiaryButton}
+            textStyle={kit.tertiaryButtonText}
             testID="wsf-new-goal-contribute-link"
-          >
-            Contribute (phone)
-          </Link>
-          <Link
-            href={{ pathname: '/display/[goalId]', params: { goalId: created.goalId } }}
-            style={styles.link}
+            label="Contribute (phone)"
+          />
+          <ButtonLink
+            href={displayHref}
+            style={kit.tertiaryButton}
+            textStyle={kit.tertiaryButtonText}
             testID="wsf-new-goal-display-link"
-          >
-            Big-screen display
-          </Link>
+            label="Big-screen display"
+          />
         </View>
         <Pressable
-          style={styles.primary}
+          style={kit.primaryButton}
           onPress={() =>
             router.push({
               pathname: '/contribute/[goalId]',
@@ -291,26 +296,25 @@ export default function NewGoalPage() {
           }
           testID="wsf-new-goal-goto-contribute"
         >
-          <Text style={styles.primaryText}>Open contribute page</Text>
+          <Text style={kit.primaryButtonText}>Open contribute page</Text>
         </Pressable>
-      </View>
+      </Page>
     );
   }
 
   return (
-    <View style={styles.screen} testID="wsf-new-goal-form">
+    <Page testID="wsf-new-goal-form">
       <TestBanner />
-      <Text style={styles.heading}>Start a new goal</Text>
+      <Text style={kit.heading}>Start a new goal</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.subheading}>Step 1 — community</Text>
-        <Text style={styles.caption}>
+      <View style={kit.card}>
+        <Text style={kit.cardTitle}>Step 1 — community</Text>
+        <Text style={kit.caption}>
           Every goal is bound to a community. Arriving from a community page
           fills this in; the field stays editable for local testing.
         </Text>
-        <Text style={styles.label}>communityGroupId</Text>
-        <TextInput
-          style={styles.input}
+        <Text style={[kit.fieldLabel, styles.label]}>communityGroupId</Text>
+        <TextField
           value={communityGroupId}
           onChangeText={setCommunityGroupId}
           placeholder="Filled in when you arrive from your community"
@@ -319,20 +323,18 @@ export default function NewGoalPage() {
         />
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.subheading}>Step 2 — goal</Text>
-        <Text style={styles.label}>Title</Text>
-        <TextInput
-          style={styles.input}
+      <View style={kit.card}>
+        <Text style={kit.cardTitle}>Step 2 — goal</Text>
+        <Text style={[kit.fieldLabel, styles.label]}>Title</Text>
+        <TextField
           value={title}
           onChangeText={setTitle}
           placeholder="e.g. Community squat challenge"
           editable={!submitting}
           testID="wsf-new-goal-title"
         />
-        <Text style={styles.label}>Target</Text>
-        <TextInput
-          style={styles.input}
+        <Text style={[kit.fieldLabel, styles.label]}>Target</Text>
+        <TextField
           value={target}
           onChangeText={setTarget}
           placeholder="e.g. 5000"
@@ -341,43 +343,39 @@ export default function NewGoalPage() {
           editable={!submitting}
           testID="wsf-new-goal-target"
         />
-        <Text style={styles.label}>Unit</Text>
-        <TextInput
-          style={styles.input}
+        <Text style={[kit.fieldLabel, styles.label]}>Unit</Text>
+        <TextField
           value={unit}
           onChangeText={setUnit}
           placeholder="e.g. squats"
           editable={!submitting}
           testID="wsf-new-goal-unit"
         />
-        <Text style={styles.label}>startsAt (local ISO, e.g. 2026-09-12T12:00)</Text>
-        <TextInput
-          style={styles.input}
+        <Text style={[kit.fieldLabel, styles.label]}>startsAt (local ISO, e.g. 2026-09-12T12:00)</Text>
+        <TextField
           value={startsAt}
           onChangeText={setStartsAt}
           editable={!submitting}
           testID="wsf-new-goal-starts-at"
         />
-        <Text style={styles.label}>endsAt (local ISO)</Text>
-        <TextInput
-          style={styles.input}
+        <Text style={[kit.fieldLabel, styles.label]}>endsAt (local ISO)</Text>
+        <TextField
           value={endsAt}
           onChangeText={setEndsAt}
           editable={!submitting}
           testID="wsf-new-goal-ends-at"
         />
-        <Text style={styles.label}>timezone (IANA, e.g. America/New_York)</Text>
-        <TextInput
-          style={styles.input}
+        <Text style={[kit.fieldLabel, styles.label]}>timezone (IANA, e.g. America/New_York)</Text>
+        <TextField
           value={timezone}
           onChangeText={setTimezone}
           editable={!submitting}
           testID="wsf-new-goal-timezone"
         />
-        <Text style={styles.label}>How often can one member contribute?</Text>
+        <Text style={[kit.fieldLabel, styles.label]}>How often can one member contribute?</Text>
         <View style={styles.choiceRow}>
           <Pressable
-            style={[styles.choice, repeatPolicy === 'once' && styles.choiceSelected]}
+            style={[kit.pill, styles.choice, repeatPolicy === 'once' && kit.pillSelected]}
             onPress={() => setRepeatPolicy('once')}
             disabled={submitting}
             accessibilityRole="radio"
@@ -386,15 +384,15 @@ export default function NewGoalPage() {
           >
             <Text
               style={[
-                styles.choiceText,
-                repeatPolicy === 'once' && styles.choiceTextSelected,
+                kit.pillText,
+                repeatPolicy === 'once' && kit.pillTextSelected,
               ]}
             >
               Once
             </Text>
           </Pressable>
           <Pressable
-            style={[styles.choice, repeatPolicy === 'multiple' && styles.choiceSelected]}
+            style={[kit.pill, styles.choice, repeatPolicy === 'multiple' && kit.pillSelected]}
             onPress={() => setRepeatPolicy('multiple')}
             disabled={submitting}
             accessibilityRole="radio"
@@ -403,167 +401,76 @@ export default function NewGoalPage() {
           >
             <Text
               style={[
-                styles.choiceText,
-                repeatPolicy === 'multiple' && styles.choiceTextSelected,
+                kit.pillText,
+                repeatPolicy === 'multiple' && kit.pillTextSelected,
               ]}
             >
               More than once
             </Text>
           </Pressable>
         </View>
-        <Text style={styles.caption} testID="wsf-new-goal-repeat-caption">
+        <Text style={kit.caption} testID="wsf-new-goal-repeat-caption">
           {repeatPolicy === 'multiple'
             ? 'Each member can record as many contributions as they like while the goal is open.'
             : 'Each member records one contribution toward this goal.'}
         </Text>
         {error ? (
-          <Text style={styles.errorText} testID="wsf-new-goal-error">
+          <Text style={kit.errorText} testID="wsf-new-goal-error">
             {error}
           </Text>
         ) : null}
         <Pressable
-          style={[styles.primary, submitting && styles.primaryDisabled]}
+          style={[kit.primaryButton, styles.submit, submitting && kit.primaryButtonDisabled]}
           onPress={onSubmit}
           disabled={submitting}
           testID="wsf-new-goal-submit"
         >
-          <Text style={styles.primaryText}>
+          <Text style={kit.primaryButtonText}>
             {submitting ? 'Creating…' : 'Create synthetic goal'}
           </Text>
         </Pressable>
       </View>
-    </View>
+    </Page>
+  );
+}
+
+/**
+ * The page every state of this screen sits on: the scrolling cream page,
+ * the wordmark chrome, then the state's own content in the column. The
+ * state's testID stays on the column, a visible element, so the specs that
+ * wait for `wsf-new-goal-form` / `wsf-new-goal-created` see what they saw.
+ */
+function Page({ children, testID }: { children: ReactNode; testID?: string }) {
+  return (
+    <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      <View style={kit.column} testID={testID}>
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-new-goal-wordmark" />
+        </View>
+        {children}
+      </View>
+    </ScrollView>
   );
 }
 
 function TestBanner() {
   return (
-    <View style={styles.testBanner} testID="wsf-new-goal-test-banner">
-      <Text style={styles.testBannerText}>{SYNTHETIC_LABEL}</Text>
+    <View testID="wsf-new-goal-test-banner">
+      <Text style={[kit.badge, styles.badge]}>{SYNTHETIC_LABEL}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    padding: wsfTheme.spacing.lg,
-    gap: wsfTheme.spacing.md,
-    backgroundColor: wsfTheme.colors.background,
-  },
-  testBanner: {
-    backgroundColor: '#B0342A',
-    padding: wsfTheme.spacing.sm,
-    borderRadius: wsfTheme.radius.sm,
-    alignItems: 'center',
-  },
-  testBannerText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    letterSpacing: 1,
-    fontSize: 14,
-  },
-  card: {
-    backgroundColor: wsfTheme.colors.surface,
-    padding: wsfTheme.spacing.lg,
-    borderRadius: wsfTheme.radius.md,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    gap: wsfTheme.spacing.sm,
-  },
-  heading: {
-    ...wsfTheme.typography.heading,
-    color: wsfTheme.colors.text,
-  },
-  subheading: {
-    ...wsfTheme.typography.subheading,
-    color: wsfTheme.colors.text,
-  },
-  body: {
-    ...wsfTheme.typography.body,
-    color: wsfTheme.colors.text,
-  },
-  caption: {
-    ...wsfTheme.typography.caption,
-    color: wsfTheme.colors.textMuted,
-  },
-  label: {
-    ...wsfTheme.typography.caption,
-    color: wsfTheme.colors.textMuted,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.sm,
-    paddingVertical: wsfTheme.spacing.sm,
-    paddingHorizontal: wsfTheme.spacing.md,
-    fontSize: 16,
-    color: wsfTheme.colors.text,
-    backgroundColor: wsfTheme.colors.background,
-  },
-  choiceRow: {
-    flexDirection: 'row',
-    gap: wsfTheme.spacing.sm,
-  },
-  choice: {
-    flex: 1,
-    // 44 px minimum touch target, as every other control on these screens.
-    minHeight: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: wsfTheme.spacing.sm,
-    paddingHorizontal: wsfTheme.spacing.md,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.sm,
-    backgroundColor: wsfTheme.colors.background,
-  },
-  choiceSelected: {
-    borderColor: wsfTheme.colors.primary,
-    backgroundColor: wsfTheme.colors.primary,
-  },
-  choiceText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: wsfTheme.colors.text,
-  },
-  choiceTextSelected: {
-    color: wsfTheme.colors.surface,
-  },
-  primary: {
-    backgroundColor: wsfTheme.colors.primary,
-    paddingVertical: wsfTheme.spacing.md,
-    borderRadius: wsfTheme.radius.pill,
-    alignItems: 'center',
-  },
-  secondary: {
-    backgroundColor: wsfTheme.colors.background,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.primary,
-    paddingVertical: wsfTheme.spacing.sm,
-    borderRadius: wsfTheme.radius.pill,
-    alignItems: 'center',
-  },
-  primaryDisabled: {
-    opacity: 0.6,
-  },
-  primaryText: {
-    color: wsfTheme.colors.surface,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryText: {
-    color: wsfTheme.colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  errorText: {
-    ...wsfTheme.typography.caption,
-    color: '#B0342A',
-  },
-  link: {
-    ...wsfTheme.typography.body,
-    color: wsfTheme.colors.primary,
-    textDecorationLine: 'underline',
-  },
+  // The badge is a fixed label, never a stored string; it sits at its own
+  // width on the left and wraps word by word when the column is narrower.
+  badge: { alignSelf: 'flex-start' },
+  // Fields are grouped label-over-input; the label's top margin opens the
+  // gap between one group and the next inside the card.
+  label: { marginTop: 6 },
+  // The two policy pills share a wrapping row; each may shrink so its text
+  // wraps inside the pill rather than pushing past the column.
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  choice: { flexShrink: 1, minWidth: 0 },
+  submit: { marginTop: 8 },
 });

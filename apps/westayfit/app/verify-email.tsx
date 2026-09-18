@@ -127,7 +127,6 @@ export default function VerifyEmail() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Verify your email"
       intro={`We sent a verification link to ${user.email ?? 'your email'}. Confirm it, then tap I have verified.`}
       testID="wsf-verify"
@@ -150,12 +149,14 @@ export default function VerifyEmail() {
         onPress={onResend}
         submitting={resending}
         testID="wsf-verify-resend"
+        variant="secondary"
       />
       <SubmitButton
         label="Sign out"
         onPress={onSignOut}
         submitting={false}
         testID="wsf-verify-signout"
+        variant="tertiary"
       />
     </FormShell>
   );

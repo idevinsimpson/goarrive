@@ -6,7 +6,7 @@ import {
   isInAppBannerDismissed,
   isInAppBrowser,
 } from './inAppBrowser';
-import { wsfTheme } from './theme';
+import { kit, SAMPLE_TINT } from './ui/kit';
 
 export function InAppBrowserBanner() {
   // Detection happens on mount so SSR renders nothing, then the effect kicks
@@ -44,40 +44,36 @@ export function InAppBrowserBanner() {
           dismissInAppBanner();
           setVisible(false);
         }}
-        style={styles.dismissButton}
+        style={kit.tertiaryButton}
         testID="wsf-in-app-banner-dismiss"
         accessibilityRole="button"
       >
-        <Text style={styles.dismissText}>Dismiss</Text>
+        <Text style={kit.tertiaryButtonText}>Dismiss</Text>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // A quiet notice strip in the badge tint: the copy takes the width it can
+  // get and wraps inside itself; the dismiss control drops under it only when
+  // there is no room beside it.
   container: {
-    backgroundColor: wsfTheme.colors.accent,
-    padding: wsfTheme.spacing.md,
+    backgroundColor: SAMPLE_TINT,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: wsfTheme.spacing.sm,
+    gap: 8,
   },
   text: {
+    ...StyleSheet.flatten(kit.body),
     flex: 1,
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
+    flexShrink: 1,
+    minWidth: 0,
   },
   emphasis: {
     fontWeight: '700',
-  },
-  dismissButton: {
-    paddingHorizontal: wsfTheme.spacing.sm,
-    paddingVertical: wsfTheme.spacing.xs,
-  },
-  dismissText: {
-    color: wsfTheme.colors.text,
-    fontWeight: '700',
-    textDecorationLine: 'underline',
   },
 });
