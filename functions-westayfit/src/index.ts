@@ -2130,7 +2130,19 @@ function isAggregateDisplayAuthorized(goal: Pick<GoalDoc, 'aggregateDisplayAutho
  *               may never surface in a total presented as real to an outside
  *               audience.
  */
-type GoalAggregateAccess = { asMember: boolean; asDisplay: boolean; allowed: boolean };
+type GoalAggregateAccess = {
+  asMember: boolean;
+  asDisplay: boolean;
+  allowed: boolean;
+  /**
+   * The owning community's displayName, read from the community document
+   * whenever a route to the aggregate is open. Null when the document is
+   * missing or carries no usable name — a caller may then still be `allowed`
+   * to the totals by membership, but the pulse refuses rather than publish
+   * mismatched context (see wsfGoalPulse).
+   */
+  communityDisplayName: string | null;
+};
 
 async function evaluateGoalAggregateAccess(
   goal: Pick<GoalDoc, 'communityGroupId' | 'aggregateDisplayAuthorized'>,
@@ -2148,30 +2160,60 @@ async function evaluateGoalAggregateAccess(
       (membershipSnap.data() as { membershipStatus?: string }).membershipStatus === 'active';
   }
 
+  // The community document is read only once a route to the aggregate may be
+  // open (an active member, or an explicitly authorized goal). It answers two
+  // questions: sample suppression for the display route, and the one context
+  // field that lives on the community — its display name. Nothing else on
+  // the document is read or returned.
   let asDisplay = false;
-  if (isAggregateDisplayAuthorized(goal)) {
+  let communityDisplayName: string | null = null;
+  if (asMember || isAggregateDisplayAuthorized(goal)) {
     const groupSnap = await db.doc(`wsfCommunityGroups/${goal.communityGroupId}`).get();
-    asDisplay =
-      groupSnap.exists && (groupSnap.data() as { isSample?: boolean }).isSample !== true;
+    const group = groupSnap.exists
+      ? (groupSnap.data() as { isSample?: boolean; displayName?: unknown })
+      : null;
+    if (group && typeof group.displayName === 'string' && group.displayName.trim() !== '') {
+      communityDisplayName = group.displayName;
+    }
+    if (isAggregateDisplayAuthorized(goal)) {
+      asDisplay = group !== null && group.isSample !== true;
+    }
   }
 
-  return { asMember, asDisplay, allowed: asMember || asDisplay };
+  return { asMember, asDisplay, allowed: asMember || asDisplay, communityDisplayName };
 }
 
 /**
- * The anonymous aggregate response. PACKAGE E removed `contributorCount`:
- * it had no approved public-display purpose, and it was being returned by
+ * The aggregate-display response. PACKAGE E removed `contributorCount`: it
+ * had no approved public-display purpose, and it was being returned by
  * inertia rather than by decision. Nothing replaces it — a substitute metric
  * would be the same unapproved disclosure under another name.
  *
- * Member identities, individual contribution records, personal credit and
- * member lists are not here and never were.
+ * CHECKPOINT C (owner publication decision, 2026-09-18): a Champion's
+ * per-goal public-display authorization also permits the display to name
+ * what it is showing. Exactly five context fields join the four aggregate
+ * fields: the owning community's display name, the goal's title, its window
+ * (ISO instants, as wsfListGoals already serializes them) and its stored time
+ * zone. Every allowed caller — member route or display route — receives the
+ * same shape, so one cache entry per goal is complete for everyone entitled
+ * to it.
+ *
+ * Deliberately NOT here, and not authorized by that decision: member names,
+ * photos, member or contributor counts, individual contributions, own-credit
+ * records, contact details, locations, group type, join policy, join code,
+ * Champion or creator identity, organization information, invitation
+ * capabilities. Authorization of one goal publishes nothing about any other.
  */
 type GoalPulseTotals = {
   sharedTotal: number;
   target: number;
   unit: string;
   status: GoalStatus;
+  communityDisplayName: string;
+  goalTitle: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
 };
 
 function randomGoalShardIndex(): number {
@@ -2824,9 +2866,24 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
     if (!access.allowed) notFound();
 
+    // Context is published only complete and only server-authoritative: the
+    // community name from the community document, the title, window and time
+    // zone from the goal document. A missing community document or an
+    // unusable value refuses (the same generic not-found) rather than serving
+    // a display that names half of what it shows. Nothing here is taken from
+    // the request.
+    if (!access.communityDisplayName) notFound();
+    const goalTitle = typeof goal.title === 'string' ? goal.title.trim() : '';
+    const timezone = typeof goal.timezone === 'string' ? goal.timezone.trim() : '';
+    const startsAt = goal.startsAt?.toDate?.();
+    const endsAt = goal.endsAt?.toDate?.();
+    if (!goalTitle || !timezone || !startsAt || !endsAt) notFound();
+
     // The cache is keyed by goalId, so it may only be consulted once the
     // caller is known to be entitled to that goal's aggregate. Both routes
-    // above yield the identical response, so one shared entry is correct.
+    // above yield the identical, complete response, so one shared entry is
+    // correct: a display can never be served a member-shaped entry missing
+    // its context, and an unentitled caller never reaches the lookup.
 
     const cached = goalPulseCacheGet(goalId, now);
     if (cached) return cached;
@@ -2839,6 +2896,11 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
       target: goal.target,
       unit: goal.unit,
       status: goal.status,
+      communityDisplayName: access.communityDisplayName,
+      goalTitle,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      timezone,
     };
     goalPulseCacheSet(goalId, now, totals);
     return totals;

@@ -175,7 +175,9 @@ describe('only explicit per-goal authorization opens the aggregate read', () => 
     const r = await pulse({ goalId });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toEqual({ sharedTotal: 50, target: 5000, unit: 'squats', status: 'active' });
+      expect(r.value).toMatchObject({ sharedTotal: 50, target: 5000, unit: 'squats', status: 'active' });
+      // The approved context rides along; the exact shape is pinned in CASE 12.
+      expect(r.value.communityDisplayName).toBe('Package E pulse community');
     }
   });
 
@@ -290,8 +292,26 @@ describe('CASE 1 — the member route is independent of display authorization', 
   });
 });
 
-describe('the authorized aggregate response discloses only aggregate progress', () => {
-  test('CASE 12: exactly four fields, and no contributorCount', async () => {
+/**
+ * The approved public shape. CHECKPOINT C (owner decision, 2026-09-18): a
+ * Champion's per-goal authorization publishes the four aggregate fields plus
+ * exactly five context fields — the community's display name, the goal's
+ * title, its window as ISO instants, and its time zone. Nothing else.
+ */
+const APPROVED_PUBLIC_FIELDS = [
+  'communityDisplayName',
+  'endsAt',
+  'goalTitle',
+  'sharedTotal',
+  'startsAt',
+  'status',
+  'target',
+  'timezone',
+  'unit',
+];
+
+describe('the authorized aggregate response discloses only the approved context and aggregate', () => {
+  test('CASE 12: exactly the approved fields, and no contributorCount', async () => {
     const groupId = await seedCommunity({ joinPolicy: 'public', championUid: uniq('champ') });
     const memberA = uniq('m');
     const memberB = uniq('m');
@@ -300,25 +320,146 @@ describe('the authorized aggregate response discloses only aggregate progress', 
     const goalId = await seedGoal(groupId, { authorized: true });
     await seedShards(goalId, [30, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     // Real per-member totals exist, so a leak would have something to leak.
+    // Distinctive values: an ISO date legitimately contains "20".
     await getFirestore()
       .doc(`wsfGoalMemberTotals/${goalId}_${memberA}`)
-      .set({ goalId, userId: memberA, total: 20 });
+      .set({ goalId, userId: memberA, total: 7331 });
     await getFirestore()
       .doc(`wsfGoalMemberTotals/${goalId}_${memberB}`)
-      .set({ goalId, userId: memberB, total: 10 });
+      .set({ goalId, userId: memberB, total: 4429 });
 
     const r = await pulse({ goalId });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
 
-    expect(Object.keys(r.value).sort()).toEqual(['sharedTotal', 'status', 'target', 'unit']);
+    expect(Object.keys(r.value).sort()).toEqual(APPROVED_PUBLIC_FIELDS);
     expect(r.value).not.toHaveProperty('contributorCount');
 
-    // No member identity, no individual credit, anywhere in the payload.
+    // No member identity, no individual credit, no community internals,
+    // anywhere in the payload.
     const serialized = JSON.stringify(r.value);
     expect(serialized).not.toContain(memberA);
     expect(serialized).not.toContain(memberB);
-    expect(serialized).not.toContain('20');
+    expect(serialized).not.toContain('7331');
+    expect(serialized).not.toContain('4429');
+    for (const forbidden of [
+      'joinCode',
+      'joinPolicy',
+      'groupType',
+      'createdByUserId',
+      'memberCount',
+      'contributorCount',
+      'ownerUid',
+      'lifecycleStatus',
+      'email',
+      'isSample',
+      'aggregateDisplayAuthorized',
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  test('the context is the server’s own: community name, goal title, ISO window, time zone', async () => {
+    const groupId = await seedCommunity({ joinPolicy: 'private', championUid: uniq('champ') });
+    const db = getFirestore();
+    await db.doc(`wsfCommunityGroups/${groupId}`).set({ displayName: 'Maple Street Movers' }, { merge: true });
+    const goalId = await seedGoal(groupId, { authorized: true, target: 500, unit: 'squats' });
+    const goalDoc = (await db.doc(`wsfGoals/${goalId}`).get()).data() as {
+      startsAt: Timestamp;
+      endsAt: Timestamp;
+    };
+    await db.doc(`wsfGoals/${goalId}`).set({ title: 'Squats together this week' }, { merge: true });
+
+    const r = await pulse({ goalId });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.communityDisplayName).toBe('Maple Street Movers');
+    expect(r.value.goalTitle).toBe('Squats together this week');
+    expect(r.value.startsAt).toBe(goalDoc.startsAt.toDate().toISOString());
+    expect(r.value.endsAt).toBe(goalDoc.endsAt.toDate().toISOString());
+    expect(r.value.timezone).toBe('America/New_York');
+    expect(r.value.target).toBe(500);
+    expect(r.value.unit).toBe('squats');
+    expect(r.value.status).toBe('active');
+  });
+
+  test('an active member on an UNAUTHORIZED goal receives the same complete shape', async () => {
+    const groupId = await seedCommunity({ joinPolicy: 'private', championUid: uniq('champ') });
+    const member = uniq('m');
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId);
+    const value = (await callAs(wsfGoalPulse, member, { goalId })) as Record<string, unknown>;
+    expect(Object.keys(value).sort()).toEqual(APPROVED_PUBLIC_FIELDS);
+    expect(value.communityDisplayName).toBe('Package E pulse community');
+    expect(value.goalTitle).toBe('Package E pulse goal');
+  });
+
+  test('a missing community document refuses rather than publishing half a context', async () => {
+    const groupId = await seedCommunity({ joinPolicy: 'public', championUid: uniq('champ') });
+    const member = uniq('m');
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, { authorized: true });
+    await getFirestore().doc(`wsfCommunityGroups/${groupId}`).delete();
+    // Display route: no community, no display.
+    const anon = await pulse({ goalId });
+    expect(anon.ok).toBe(false);
+    if (!anon.ok) expect(anon.error.code).toBe('not-found');
+    // Member route: still allowed to the totals in principle, but the
+    // response cannot be completed truthfully, so it is refused the same way.
+    await expect(callAs(wsfGoalPulse, member, { goalId })).rejects.toMatchObject({
+      code: 'not-found',
+    });
+  });
+
+  test('a community with no usable display name refuses', async () => {
+    const groupId = await seedCommunity({ joinPolicy: 'public', championUid: uniq('champ') });
+    await getFirestore().doc(`wsfCommunityGroups/${groupId}`).set({ displayName: '   ' }, { merge: true });
+    const goalId = await seedGoal(groupId, { authorized: true });
+    expect((await pulse({ goalId })).ok).toBe(false);
+  });
+
+  test('the cache never serves context past a revocation, and serves the complete shape after re-authorization', async () => {
+    const champion = uniq('champ');
+    const groupId = await seedCommunity({ joinPolicy: 'public', championUid: champion });
+    const goalId = await seedGoal(groupId, { authorized: true });
+    await seedShards(goalId, [12, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+    // Warm the per-goal cache through an authorized read.
+    const first = await pulse({ goalId });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.communityDisplayName).toBe('Package E pulse community');
+
+    // Revoke: the very next read is refused although the entry is still
+    // within its TTL — authorization is decided before the cache is consulted.
+    await callAs(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: false });
+    const revoked = await pulse({ goalId });
+    expect(revoked.ok).toBe(false);
+    if (!revoked.ok) expect(revoked.error.code).toBe('not-found');
+
+    // Re-authorize: the served response (cached or fresh) is complete.
+    await callAs(wsfSetGoalDisplayAuthorization, champion, { goalId, authorized: true });
+    const again = await pulse({ goalId });
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(Object.keys(again.value).sort()).toEqual(APPROVED_PUBLIC_FIELDS);
+    expect(again.value.sharedTotal).toBe(12);
+  });
+
+  test('a member-warmed cache entry is complete for a display that reads next', async () => {
+    const champion = uniq('champ');
+    const groupId = await seedCommunity({ joinPolicy: 'private', championUid: champion });
+    const member = uniq('m');
+    await seedMember(groupId, member);
+    const goalId = await seedGoal(groupId, { authorized: true });
+    await seedShards(goalId, [5, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    // The member reads first (warming the cache), then an anonymous display.
+    const viaMember = (await callAs(wsfGoalPulse, member, { goalId })) as Record<string, unknown>;
+    const viaDisplay = await pulse({ goalId });
+    expect(viaDisplay.ok).toBe(true);
+    if (!viaDisplay.ok) return;
+    expect(Object.keys(viaDisplay.value).sort()).toEqual(APPROVED_PUBLIC_FIELDS);
+    expect(viaDisplay.value).toEqual(viaMember);
   });
 
   test('sample communities are suppressed even when the goal is authorized', async () => {
@@ -330,7 +471,30 @@ describe('the authorized aggregate response discloses only aggregate progress', 
     });
     const goalId = await seedGoal(groupId, { authorized: true });
     await seedShards(goalId, [1000, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    expect((await pulse({ goalId })).ok).toBe(false);
+    const r = await pulse({ goalId });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(JSON.stringify(r.error)).not.toContain('Package E pulse community');
+  });
+
+  test('a refusal carries no context: unknown, unauthorized and revoked goals answer identically', async () => {
+    const champion = uniq('champ');
+    const groupId = await seedCommunity({ joinPolicy: 'public', championUid: champion });
+    const unauthorized = await seedGoal(groupId);
+    const revoked = await seedGoal(groupId, { authorized: true });
+    expect((await pulse({ goalId: revoked })).ok).toBe(true);
+    await callAs(wsfSetGoalDisplayAuthorization, champion, { goalId: revoked, authorized: false });
+    const answers = await Promise.all([
+      pulse({ goalId: 'no-such-goal-' + uniq('x') }),
+      pulse({ goalId: unauthorized }),
+      pulse({ goalId: revoked }),
+    ]);
+    for (const a of answers) {
+      expect(a.ok).toBe(false);
+      if (a.ok) continue;
+      expect(a.error.code).toBe('not-found');
+      expect(a.error.message).toBe(answers[0].ok ? '' : (answers[0] as { error: HttpsError }).error.message);
+      expect(JSON.stringify(a.error)).not.toMatch(/Package E pulse|squats|America\/New_York/);
+    }
   });
 });
 
