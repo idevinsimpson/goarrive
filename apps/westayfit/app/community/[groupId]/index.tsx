@@ -146,9 +146,41 @@ type ListedGoal = {
    * total back honestly changes the state and leaves the history alone.
    */
   reachedAt?: string | null;
+  // Present only on a wsfListGoals call that asked for history. Optional here
+  // because the type also describes the responses that did not.
+  sharedTotal?: number;
+  timezone?: string;
+  closedAt?: string | null;
 };
 
 type ListGoalsResponse = { goals: ListedGoal[] };
+
+/**
+ * The extra facts a goal carries when the screen asks for history, via
+ * wsfListGoals' `includeHistory` flag. An intersection rather than fields on
+ * ListedGoal, matching the server: without the flag the response is exactly
+ * what it has always been, and nothing here is assumed to be present.
+ */
+type GoalHistoryFields = {
+  sharedTotal: number;
+  timezone: string;
+  closedAt: string | null;
+};
+
+type HistoryGoal = ListedGoal & GoalHistoryFields;
+
+/**
+ * A goal is only rendered as a history row once it actually carries the facts
+ * a history row states. A server that did not honour the flag produces rows
+ * with no total and no zone, and "undefined of 500 flights" — or a fabricated
+ * 0 — is worse than not listing the goal.
+ */
+function hasHistoryFields(goal: ListedGoal): goal is HistoryGoal {
+  return (
+    typeof (goal as Partial<HistoryGoal>).sharedTotal === 'number' &&
+    typeof (goal as Partial<HistoryGoal>).timezone === 'string'
+  );
+}
 
 /**
  * Three distinct states, deliberately not two.
@@ -435,11 +467,16 @@ export default function CommunityPage() {
 
     (async () => {
       try {
-        const fn = httpsCallable<{ groupId: string }, ListGoalsResponse>(
-          getFirebaseFunctions(),
-          'wsfListGoals'
-        );
-        const result = await fn({ groupId });
+        const fn = httpsCallable<
+          { groupId: string; includeHistory: boolean },
+          ListGoalsResponse
+        >(getFirebaseFunctions(), 'wsfListGoals');
+        // ONE call and one round trip for both sections. `includeHistory` adds
+        // every closed goal of the community regardless of display
+        // authorization — the community's own record — and the extra facts a
+        // history row needs to state its result. The screen splits active from
+        // closed below; the server does not decide the layout.
+        const result = await fn({ groupId, includeHistory: true });
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
@@ -471,10 +508,14 @@ export default function CommunityPage() {
     }
     let cancelled = false;
     const functions = getFirebaseFunctions();
+    // Open goals only. A closed goal's record now arrives with the goal list
+    // itself — `includeHistory` carries its confirmed shared total — so a
+    // pulse read for one would be a request whose answer nothing renders.
+    const openGoals = goalsState.goals.filter((g) => g.status === 'active');
     setProgress(
-      Object.fromEntries(goalsState.goals.map((g) => [g.goalId, { kind: 'loading' as const }]))
+      Object.fromEntries(openGoals.map((g) => [g.goalId, { kind: 'loading' as const }]))
     );
-    for (const goal of goalsState.goals) {
+    for (const goal of openGoals) {
       (async () => {
         try {
           const pulseFn = httpsCallable<{ goalId: string }, PulseTotals>(functions, 'wsfGoalPulse');
@@ -875,6 +916,18 @@ export default function CommunityPage() {
   const loadedGoals = goalsState.kind === 'loaded' ? goalsState.goals : [];
   const activeGoals = loadedGoals.filter((g) => g.status === 'active');
   const closedGoals = loadedGoals.filter((g) => g.status !== 'active');
+  // The history rows: the closed goals from the same wsfListGoals response,
+  // which now carries all of them and not only the display-authorized subset.
+  // `closedGoals` is that same set and is what the Champion's permission cards
+  // read too — those cards filter it themselves. Open goals belong to the
+  // active section, so nothing is listed twice.
+  //
+  // Most recent first: the server returns one ascending list for both
+  // sections, and a history reads newest-first.
+  const closedHistory = closedGoals
+    .filter(hasHistoryFields)
+    .slice()
+    .sort((a, b) => (a.endsAt === b.endsAt ? a.goalId.localeCompare(b.goalId) : b.endsAt.localeCompare(a.endsAt)));
   const featured = activeGoals[0] ?? null;
   const otherActive = activeGoals.slice(1);
   // D-7. Which goals actually get a permission card this pass — ONE source,
@@ -1057,10 +1110,10 @@ export default function CommunityPage() {
       </View>
     ) : null;
 
-  // `hero` is the navy active-goal surface; `card` is a light card; `closed`
-  // is the compact past-goal record (exact result and period, no "complete"
-  // line: "Closed at 62.4%" already says it).
-  const renderProgressFacts = (goal: ListedGoal, p: GoalProgress, variant: 'hero' | 'card' | 'closed') => {
+  // `hero` is the navy active-goal surface; `card` is a light card. The
+  // compact closed-goal record moved to the History section, which renders
+  // from the goal list's own history facts rather than from a pulse read.
+  const renderProgressFacts = (goal: ListedGoal, p: GoalProgress, variant: 'hero' | 'card') => {
     const onDark = variant === 'hero';
     if (p.kind === 'loading') {
       return (
@@ -1103,23 +1156,6 @@ export default function CommunityPage() {
       goal.reachedAt && (phase === 'reachedOpen' || phase === 'closedReached')
         ? formatReachedOn(goal.reachedAt, { timeZone: p.pulse.timezone })
         : null;
-    if (variant === 'closed') {
-      return (
-        <View style={styles.factsSmall}>
-          <Text style={styles.totalSmall} testID={`wsf-community-goal-total-${goal.goalId}`}>
-            {totalOfTargetLabel(sharedTotal, target, unit)}
-          </Text>
-          <Text style={styles.closedResult} testID={`wsf-community-goal-status-${goal.goalId}`}>
-            {statusLine(sharedTotal, target, status)}
-          </Text>
-          {reachedOn ? (
-            <Text style={styles.statusLine} testID={`wsf-community-goal-reached-${goal.goalId}`}>
-              {reachedOn}
-            </Text>
-          ) : null}
-        </View>
-      );
-    }
     return (
       <View style={onDark ? styles.factsLarge : styles.factsSmall}>
         <Text
@@ -1672,55 +1708,95 @@ export default function CommunityPage() {
         ) : null}
 
         {/*
-          Past goals. wsfListGoals returns a closed goal only while it is still
-          authorized for public display, so this is the AVAILABLE subset of the
-          community's history, not a complete archive — hence "Past goals",
-          never "everything we've done", and omitted rather than "no history"
-          when it is empty. A complete history needs a data source that does
-          not exist yet.
+          History — the community's complete record of its closed goals,
+          reached and unreached, from wsfListGoals({ includeHistory: true }).
+
+          It replaces the old "Past goals" section, which showed only the
+          closed goals that were still authorized for public display. That made
+          a publication decision decide what the community was allowed to
+          remember: a goal closed without authorization, or with its
+          authorization revoked, was simply gone. `includeHistory` closes that;
+          the list is member-only, never public, and does not consult display
+          authorization at all.
+
+          Always rendered, because an absent section cannot say whether the
+          history is empty or failed to load. Each row states its own result
+          with the shared helpers — "Reached", or "Closed at N%" — and the
+          exact total beside it, so a reached goal's overshoot is still
+          visible in "515 of 500 squats". Open goals stay in the active
+          section above; nothing is listed twice.
         */}
-        {closedGoals.length ? (
-          <View style={styles.section} testID="wsf-community-history">
-            <Text style={styles.sectionEyebrow}>{closedGoals.length > 1 ? 'Past goals' : 'Past goal'}</Text>
-            {closedGoals.map((goal) => {
-              const p = progress[goal.goalId] ?? { kind: 'loading' as const };
-              const period =
-                p.kind === 'ok'
-                  ? formatPeriod(p.pulse.startsAt, p.pulse.endsAt, { timeZone: p.pulse.timezone })
-                  : null;
-              return (
-                <View
-                  key={goal.goalId}
-                  style={styles.card}
-                  testID={`wsf-community-goal-closed-${goal.goalId}`}
-                  {...({ 'data-state': 'closed' } as Record<string, unknown>)}
-                >
-                  <View style={styles.smallGoalRow}>
-                    {p.kind === 'ok' ? (
-                      <LivingWeProgress
-                        completed={p.pulse.sharedTotal}
-                        target={p.pulse.target}
-                        unit={p.pulse.unit}
-                        width={smallWeWidth}
-                        surface="light"
-                        testID={`wsf-community-goal-we-${goal.goalId}`}
-                      />
-                    ) : null}
-                    <View style={styles.smallGoalText}>
-                      <Text style={styles.cardTitle}>{goal.title}</Text>
-                      {renderProgressFacts(goal, p, 'closed')}
-                      {period ? (
-                        <Text style={styles.cardMeta} testID={`wsf-community-goal-period-${goal.goalId}`}>
-                          {period}
-                        </Text>
-                      ) : null}
+        <View style={styles.section} testID="wsf-community-history">
+          <Text style={styles.sectionEyebrow} {...HEADING_2}>
+            History
+          </Text>
+          {goalsState.kind === 'loading' ? (
+            <Text style={styles.body} testID="wsf-community-history-loading">
+              Loading history…
+            </Text>
+          ) : null}
+          {goalsState.kind === 'failed' ? (
+            <View testID="wsf-community-history-error">
+              <Text style={styles.body}>Something went wrong</Text>
+              <Pressable
+                onPress={() => setGoalsReloadToken((n) => n + 1)}
+                accessibilityRole="button"
+                style={styles.secondaryButton}
+                testID="wsf-community-history-retry"
+                accessibilityLabel="Try again: community history"
+              >
+                <Text style={styles.secondaryButtonText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {goalsState.kind === 'loaded' && closedHistory.length === 0 ? (
+            <Text style={styles.body} testID="wsf-community-history-empty">
+              No closed goals yet.
+            </Text>
+          ) : null}
+          {closedHistory.map((goal) => {
+            const phase = progressPhase(goal.sharedTotal, goal.target, goal.status);
+            // "Reached" and "Closed at N%" are the two honest results a closed
+            // goal can have, and statusLine already produces the second.
+            const result = phase === 'closedReached' ? 'Reached' : statusLine(goal.sharedTotal, goal.target, goal.status);
+            const period = formatPeriod(goal.startsAt, goal.endsAt, { timeZone: goal.timezone });
+            return (
+              <View
+                key={goal.goalId}
+                style={styles.card}
+                testID={`wsf-community-goal-closed-${goal.goalId}`}
+                {...({ 'data-state': 'closed' } as Record<string, unknown>)}
+              >
+                <View style={styles.smallGoalRow}>
+                  <LivingWeProgress
+                    completed={goal.sharedTotal}
+                    target={goal.target}
+                    unit={goal.unit}
+                    width={smallWeWidth}
+                    surface="light"
+                    testID={`wsf-community-goal-we-${goal.goalId}`}
+                  />
+                  <View style={styles.smallGoalText}>
+                    <Text style={styles.cardTitle}>{goal.title}</Text>
+                    <View style={styles.factsSmall}>
+                      <Text style={styles.totalSmall} testID={`wsf-community-goal-total-${goal.goalId}`}>
+                        {totalOfTargetLabel(goal.sharedTotal, goal.target, goal.unit)}
+                      </Text>
+                      <Text style={styles.closedResult} testID={`wsf-community-goal-status-${goal.goalId}`}>
+                        {result}
+                      </Text>
                     </View>
+                    {period ? (
+                      <Text style={styles.cardMeta} testID={`wsf-community-goal-period-${goal.goalId}`}>
+                        {period}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
-              );
-            })}
-          </View>
-        ) : null}
+              </View>
+            );
+          })}
+        </View>
 
         {/* About the community: the human facts, with the administrative rows folded away. */}
         <View style={styles.section} testID="wsf-community-about">

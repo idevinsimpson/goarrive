@@ -3258,6 +3258,19 @@ type AdjustGoalResponse = {
 // which is a separate surface with its own (currently unresolved) eligibility
 // question. This callable does not widen that.
 //
+// `includeHistory: true` is the ONE documented departure, and it departs only
+// for the caller who asks: the response then also carries every closed goal of
+// the community (bounded to the most recent 50 by endsAt) regardless of
+// display authorization, and each goal gains sharedTotal, timezone and
+// closedAt. Still no member identity, no per-member credit, no contributor
+// list, no counts — a record of what the community did is not a record of who
+// did it. The shared total's eligibility question is not reopened either: the
+// flag is reachable only through the active-membership gate below, which is
+// the same `asMember` route wsfGoalPulse already grants the same caller for
+// the same goals. Absent or false — or any non-boolean value — the response is
+// byte-for-byte what it has always been, so existing clients and the hosted
+// staging harness are untouched.
+//
 // INDEX EXPECTATION, not an unconditional claim: the query filters on
 // `communityGroupId ==` and `status ==` with no range, no inequality and no
 // orderBy, so it is expected to be served by Firestore's automatic
@@ -3267,7 +3280,7 @@ type AdjustGoalResponse = {
 // cannot verify production index readiness — that is a deploy-time check.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ListGoalsRequest = { groupId?: unknown };
+type ListGoalsRequest = { groupId?: unknown; includeHistory?: unknown };
 
 type ListedGoal = {
   goalId: string;
@@ -3293,7 +3306,78 @@ type ListedGoal = {
   reachedAt: string | null;
 };
 
-type ListGoalsResponse = { goals: ListedGoal[] };
+/**
+ * The extra facts a goal carries ONLY when the caller asked for history.
+ *
+ * Written as an intersection rather than as fields on `ListedGoal` so the
+ * default response is provably untouched: every existing caller, and the
+ * hosted staging harness, sees exactly the keys it saw before.
+ *
+ * `sharedTotal` and `timezone` are here because the history list has to STATE
+ * a result — "Reached", or "Closed at 62.4%", over the goal's own window in
+ * the goal's own zone — and a result nobody can compute is not a history.
+ * They disclose nothing new: the caller is an active member of the goal's
+ * community, which is exactly the `asMember` route wsfGoalPulse already grants
+ * for these same goals. This is the same person reading the same numbers in
+ * one round trip instead of one per goal. It is NOT a widening of who may
+ * know: the fields appear only on the member-gated history request, and the
+ * unauthenticated aggregate-display path is untouched.
+ *
+ * `closedAt` is the only lifecycle marker the goal document actually carries —
+ * there is no stored `reachedAt` — and it is passed through as written.
+ * Whether a goal was REACHED is derived from sharedTotal against target by the
+ * shared presentation helpers, so the server states no verdict the totals do
+ * not support.
+ */
+type GoalHistoryFields = {
+  sharedTotal: number;
+  timezone: string;
+  closedAt: string | null;
+};
+
+type ListedGoalWithHistory = ListedGoal & GoalHistoryFields;
+
+type ListGoalsResponse = { goals: Array<ListedGoal | ListedGoalWithHistory> };
+
+/**
+ * The most recent CLOSED goals a history request may carry. Active goals are
+ * not bounded — they are what the community is doing now, and there are few.
+ */
+const GOAL_HISTORY_LIMIT = 50;
+
+/**
+ * Shard totals for several goals in one pass. sumGoalShards issues its own
+ * getAll per goal, which for a 50-goal history would be 50 round trips; this
+ * batches the same reads (ten shards a goal) into chunks the Admin SDK is
+ * comfortable with. The arithmetic is identical — absent or non-numeric shard
+ * counts contribute nothing.
+ */
+async function sumGoalShardsForMany(goalIds: string[]): Promise<Map<string, number>> {
+  const db = getFirestore();
+  const totals = new Map<string, number>();
+  for (const goalId of goalIds) totals.set(goalId, 0);
+
+  const refs: Array<{ goalId: string; ref: FirebaseFirestore.DocumentReference }> = [];
+  for (const goalId of goalIds) {
+    for (let i = 0; i < GOAL_SHARD_COUNT; i++) {
+      refs.push({ goalId, ref: db.doc(`wsfGoalCounters/${goalId}/shards/${i}`) });
+    }
+  }
+
+  const CHUNK = 300;
+  for (let start = 0; start < refs.length; start += CHUNK) {
+    const chunk = refs.slice(start, start + CHUNK);
+    const snaps = await db.getAll(...chunk.map((r) => r.ref));
+    snaps.forEach((snap, i) => {
+      const data = snap.data() as { count?: number } | undefined;
+      if (typeof data?.count === 'number') {
+        const goalId = chunk[i]!.goalId;
+        totals.set(goalId, (totals.get(goalId) ?? 0) + data.count);
+      }
+    });
+  }
+  return totals;
+}
 
 export const wsfListGoals = onCall<ListGoalsRequest>(
   { region: 'us-central1' },
@@ -3322,6 +3406,13 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
       throw new HttpsError('not-found', 'Community not found.');
     }
 
+    // STRICTLY `true`. Absent, false, null, a string, a number — anything that
+    // is not the boolean true — leaves the caller on today's behaviour and
+    // today's exact response, so a coerced or hand-edited value can never
+    // silently change the shape a deployed client is parsing. No new error
+    // path either: an unrecognised value is not a request for history.
+    const includeHistory = request.data?.includeHistory === true;
+
     // Equality-only. A goal that has reached or passed its target is still
     // `active` until it is closed, so it stays in this list — reaching the
     // target is a reason to celebrate on the page, never a reason for the goal
@@ -3334,7 +3425,16 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     // Equality-only on both, so Firestore serves them from single-field
     // indexes and no composite index is introduced. firestore.indexes.json is
     // untouched.
-    const [activeSnap, authorizedSnap] = await Promise.all([
+    //
+    // `includeHistory` adds a THIRD, on the same terms: every closed goal of
+    // this community, whatever its display authorization. That third query is
+    // the whole point of the flag. Community Home's history was built on the
+    // first two, so a goal that closed without ever being authorized — or
+    // whose authorization was revoked — vanished from the community's past,
+    // and a publication decision decided what the members were allowed to
+    // remember. It is equality-only like the others; no composite index and no
+    // change to firestore.indexes.json.
+    const [activeSnap, authorizedSnap, closedSnap] = await Promise.all([
       db
         .collection('wsfGoals')
         .where('communityGroupId', '==', groupId)
@@ -3345,12 +3445,42 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
         .where('communityGroupId', '==', groupId)
         .where('aggregateDisplayAuthorized', '==', true)
         .get(),
+      includeHistory
+        ? db
+            .collection('wsfGoals')
+            .where('communityGroupId', '==', groupId)
+            .where('status', '==', 'closed')
+            .get()
+        : Promise.resolve(null),
     ]);
 
     const byId = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
     for (const d of activeSnap.docs) byId.set(d.id, d);
     for (const d of authorizedSnap.docs) byId.set(d.id, d);
+    if (closedSnap) {
+      // The most recent 50 CLOSED goals by endsAt. Selected on a descending
+      // sort and then added, so the bound keeps the most recent 50 rather than
+      // an arbitrary 50. Goals the first two queries already admitted are never
+      // dropped by it: this only ever adds, so a history request is a strict
+      // superset of the same request without the flag.
+      const recentClosed = closedSnap.docs
+        .slice()
+        .sort((a, b) => {
+          const ae = (a.data() as GoalDoc).endsAt.toMillis();
+          const be = (b.data() as GoalDoc).endsAt.toMillis();
+          return ae === be ? a.id.localeCompare(b.id) : be - ae;
+        })
+        .slice(0, GOAL_HISTORY_LIMIT);
+      for (const d of recentClosed) byId.set(d.id, d);
+    }
     const snap = { docs: [...byId.values()] };
+
+    // One batched shard read for the whole page of goals, only when history
+    // was asked for. Without the flag nothing extra is read and nothing extra
+    // is returned.
+    const totals = includeHistory
+      ? await sumGoalShardsForMany(snap.docs.map((d) => d.id))
+      : null;
 
     // More than one active goal is legitimate and is NOT collapsed: separately
     // created goals stay separate, each with its own title, unit and window.
@@ -3358,9 +3488,9 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     // one for it. Zero goals is an ordinary empty list, not an error — a
     // community with no goal yet is the normal state before a champion starts
     // one.
-    const goals: ListedGoal[] = snap.docs.map((docSnap) => {
+    const goals: Array<ListedGoal | ListedGoalWithHistory> = snap.docs.map((docSnap) => {
       const goal = docSnap.data() as GoalDoc;
-      return {
+      const listed: ListedGoal = {
         goalId: docSnap.id,
         title: goal.title,
         target: goal.target,
@@ -3379,6 +3509,15 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
         // that happens to be at or beyond the target today, because that is
         // not evidence of a moment anyone lived through.
         reachedAt: goal.reachedAt ? goal.reachedAt.toDate().toISOString() : null,
+      };
+      // Without the flag this returns `listed` untouched, so the response is
+      // byte-for-byte what it has always been.
+      if (!includeHistory) return listed;
+      return {
+        ...listed,
+        sharedTotal: totals?.get(docSnap.id) ?? 0,
+        timezone: goal.timezone,
+        closedAt: goal.closedAt ? goal.closedAt.toDate().toISOString() : null,
       };
     });
 

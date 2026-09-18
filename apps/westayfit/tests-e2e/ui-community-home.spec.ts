@@ -273,6 +273,12 @@ test('Community Home at phone size — member view, Champion view, full page', a
   const featured = `uiA-squats-${stamp}`;
   const second = `uiA-walk-${stamp}`;
   const closed = `uiA-closed-${stamp}`;
+  // A goal that closed short of its target and was NEVER authorized for
+  // public display. Under the old "Past goals" section — built on
+  // wsfListGoals, which returns a closed goal only while it is still
+  // display-authorized — this goal did not appear at all. It is the case
+  // History exists for.
+  const missed = `uiA-missed-${stamp}`;
   await seedGoal(groupId, championUid, {
     goalId: featured,
     title: 'Squats together this week',
@@ -309,6 +315,18 @@ test('Community Home at phone size — member view, Champion view, full page', a
     endsAtIso: '2026-08-16T03:59:00.000Z',
     displayAuthorized: true,
   });
+  await seedGoal(groupId, championUid, {
+    goalId: missed,
+    title: 'July stairs',
+    target: 400,
+    unit: 'flights',
+    total: 90,
+    status: 'closed',
+    endsInMs: -50 * 24 * 60 * 60_000,
+    // UTC boundary: Jul 2 03:00Z – Jul 16 03:59Z is Jul 1 – 15 in New York.
+    startsAtIso: '2026-07-02T03:00:00.000Z',
+    endsAtIso: '2026-07-16T03:59:00.000Z',
+  });
 
   // ---- member ---------------------------------------------------------------
   await signInVia(page, memberEmail, password);
@@ -341,14 +359,35 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-goal-percent-${second}`)).toHaveText('0.7% complete', {
     timeout: 30_000,
   });
-  // Closed history is separate from reached, and separate from the open goal.
-  // It is the available subset, labelled "Past goal", not a complete archive.
-  await expect(page.getByTestId(`wsf-community-goal-closed-${closed}`)).toBeVisible();
+  // History is separate from the open goal, and complete: it is sourced from
+  // wsfListGoals({ includeHistory: true }), so a closed goal appears whether or not it is
+  // authorized for public display.
+  await expect(page.getByTestId(`wsf-community-goal-closed-${closed}`)).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(page.getByTestId(`wsf-community-goal-status-${closed}`)).toHaveText(
     'Closed at 62.4%',
     { timeout: 30_000 }
   );
-  await expect(page.getByTestId('wsf-community-history')).toContainText('Past goal');
+  await expect(page.getByTestId('wsf-community-history')).toContainText('History');
+  // The goal the old "Past goals" section could not show: closed short of its
+  // target and never authorized for public display. It is in History, labelled
+  // with its real result, with its exact total beside it.
+  await expect(page.getByTestId(`wsf-community-goal-closed-${missed}`)).toBeVisible();
+  await expect(page.getByTestId(`wsf-community-goal-status-${missed}`)).toHaveText(
+    'Closed at 22.5%'
+  );
+  await expect(page.getByTestId(`wsf-community-goal-total-${missed}`)).toHaveText(
+    '90 of 400 flights'
+  );
+  await expect(page.getByTestId(`wsf-community-goal-period-${missed}`)).toHaveText('Jul 1 – 15');
+  // Most recent first, and the open goal is not repeated in History.
+  await expect(page.getByTestId(`wsf-community-goal-closed-${featured}`)).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-history-empty')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-history-error')).toHaveCount(0);
+  // History is a record of what the community did, never of who did it.
+  await expect(page.getByTestId('wsf-community-history')).not.toContainText('Fixture Member');
+  await expect(page.getByTestId('wsf-community-history')).not.toContainText('Fixture Champion');
   // Goal windows come from the confirmed pulse, in the goal's own zone (the
   // runner is UTC, where these instants fall on the next calendar day).
   await expect(page.getByTestId(`wsf-community-goal-period-${featured}`)).toHaveText('Open · Ends Mon, Oct 5');
