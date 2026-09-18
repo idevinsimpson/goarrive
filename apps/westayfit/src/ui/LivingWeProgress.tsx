@@ -63,7 +63,15 @@ export function LivingWeProgress({
   // really was zero.
   const startPx =
     animateFrom == null ? clipPx : heightFractionForFill(fillRatio(animateFrom, target)) * height;
-  const anim = useRef(new Animated.Value(startPx)).current;
+  // Lazily constructed. `useRef(new Animated.Value(startPx))` evaluates the
+  // constructor on EVERY render and throws the result away on all but the
+  // first — and this mark re-renders on every confirmed poll, on both the
+  // display and Community Home, where several are on screen at once. The null
+  // check keeps the first value and builds nothing after it; the animated
+  // value's identity is unchanged, so nothing about the rendering moves.
+  const animRef = useRef<Animated.Value | null>(null);
+  if (animRef.current === null) animRef.current = new Animated.Value(startPx);
+  const anim = animRef.current;
   const lastTarget = useRef(startPx);
 
   useEffect(() => {

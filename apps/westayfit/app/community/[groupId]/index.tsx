@@ -254,6 +254,19 @@ export default function CommunityPage() {
   });
   const displayAuthRef = useRef<DisplayAuthState>(displayAuth);
   displayAuthRef.current = displayAuth;
+  // The handle of the timer that returns "Copied" to its resting label. It is
+  // held because it has to be CANCELLABLE: two copies a second apart used to
+  // leave two timers running, and the first one — armed by the first tap —
+  // fired 1s into the second tap's two seconds and wiped a "Copied" that had
+  // just been shown. One timer at a time, and none left behind on unmount.
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCopyReset = useCallback(() => {
+    if (copyResetRef.current) {
+      clearTimeout(copyResetRef.current);
+      copyResetRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearCopyReset, [clearCopyReset]);
   useEffect(() => {
     contextRef.current = { groupId, uid: user?.uid ?? null };
     // A new context. Everything the previous one had to say about permissions
@@ -513,14 +526,21 @@ export default function CommunityPage() {
 
   const onCopyInvite = useCallback(async () => {
     if (!inviteUrl || typeof navigator === 'undefined') return;
+    // This tap owns the label from here on. Whatever the previous tap armed
+    // is cancelled first, so it cannot clear a confirmation this tap is about
+    // to show — or a failure, which must not be timed out at all.
+    clearCopyReset();
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopyStatus('copied');
-      setTimeout(() => setCopyStatus('idle'), 2_000);
+      copyResetRef.current = setTimeout(() => {
+        copyResetRef.current = null;
+        setCopyStatus('idle');
+      }, 2_000);
     } catch {
       setCopyStatus('failed');
     }
-  }, [inviteUrl]);
+  }, [inviteUrl, clearCopyReset]);
 
   /**
    * D1: retire the current link. New admissions through the old one stop; no
@@ -605,6 +625,15 @@ export default function CommunityPage() {
       // every goal this Champion can see, closed ones included. `null` means
       // the read itself did not settle anything — it is not `false`, and it
       // must not be rendered as one.
+      //
+      // It reads a list it does not publish, and the caller then reloads the
+      // same list — two wsfListGoals for one failed write. That second call
+      // is NOT redundant: it is the reload whose own failure orphans this
+      // outcome, and tests-e2e/ui-champion-torture.spec.ts ("D-7: a failed
+      // goals reload must not take the read-back warning with it") fails the
+      // second call to prove the warning survives without its card. Publishing
+      // this response and dropping the reload saves one call on an error path
+      // and makes that case unreachable, so it is deliberately not done here.
       try {
         const fn = httpsCallable<{ groupId: string }, ListGoalsResponse>(
           getFirebaseFunctions(),
@@ -1225,7 +1254,7 @@ export default function CommunityPage() {
               the page's one top-level heading. Role and level only — the
               styles, and therefore the rendering, are unchanged.
             */}
-            <Text style={styles.heading} testID="wsf-community-name" {...HEADING_1}>
+            <Text style={[styles.heading, styles.headingName]} testID="wsf-community-name" {...HEADING_1}>
               {group.displayName}
             </Text>
             {isSample ? (
@@ -1743,6 +1772,15 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     letterSpacing: -0.5,
   },
+  // The community name is a stored string of up to 80 characters sitting in a
+  // row beside the Sample badge. A flex child's default minimum size is its
+  // CONTENT, so at 195 CSS px (200 % zoom) the longest storable name refused
+  // to shrink and ran off the right edge — wrapping could not help, because
+  // the row never offered the name less width than it wanted. `minWidth: 0`
+  // withdraws that floor and `flexShrink: 1` lets the row take the space
+  // back; a word too long for the line it is then given breaks inside itself,
+  // which Text already allows (react-native-web sets word-wrap: break-word).
+  headingName: { flexShrink: 1, minWidth: 0 },
   sampleBadge: {
     color: NAVY,
     backgroundColor: '#FBF1D3',

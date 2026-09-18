@@ -365,11 +365,21 @@ export default function ContributeToGoal() {
     // the "before" figure captured at Record is never an inverted one.
     let issued = 0;
     let applied = 0;
+    // One outstanding pulse request at a time. See `tick`.
+    let inFlight = false;
     const fn = httpsCallable<{ goalId: string }, GoalPulse>(
       getFirebaseFunctions(),
       'wsfGoalPulse'
     );
     const tick = async () => {
+      // A tick that fires while the previous request is still outstanding
+      // adds a SECOND request to a connection that has not answered the
+      // first, and a slow server turns this 2s poll into a growing queue of
+      // them. Skipping loses nothing: the outstanding request asks exactly
+      // the same question, and a response that lands out of order is already
+      // inadmissible under `applied`. Only the request is skipped.
+      if (inFlight) return;
+      inFlight = true;
       const seq = ++issued;
       try {
         const result = await fn({ goalId });
@@ -407,6 +417,8 @@ export default function ContributeToGoal() {
         }
         // Anything else is transient — the next tick reconciles automatically.
         // We already have a valid pulse on screen; do not surface as error.
+      } finally {
+        inFlight = false;
       }
     };
     timer = setInterval(tick, POLL_INTERVAL_MS);

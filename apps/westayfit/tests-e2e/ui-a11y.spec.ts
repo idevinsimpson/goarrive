@@ -1236,7 +1236,7 @@ test('R7b every surface has a title, one level-1 heading, a named wordmark, and 
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${goalC}`)).toBeVisible();
     // Two goals await authorization, so a control whose whole name is
     // "Authorize public display" cannot say which goal it would publish.
-    const ambiguous = await page.getByRole('button', { name: 'Authorize public display' }).count();
+    const ambiguous = await page.getByRole('button', { name: 'Authorize public display', exact: true }).count();
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
 

@@ -1,9 +1,10 @@
 import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type SetStateAction } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
@@ -17,23 +18,6 @@ import {
   statusLine,
 } from '../../src/ui/progressFormat';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
-
-// Response shape mirrors wsfGoalPulse in functions-westayfit: the four
-// aggregate fields, and — since the owner's publication decision of
-// 2026-09-18 — the five context fields a Champion's authorization also
-// publishes. Nothing about this screen's context comes from the URL, the
-// query string or browser storage; only the server's answer names anything.
-type GoalPulse = {
-  sharedTotal: number;
-  target: number;
-  unit: string;
-  status: 'active' | 'closed';
-  communityDisplayName: string;
-  goalTitle: string;
-  startsAt: string;
-  endsAt: string;
-  timezone: string;
-};
 
 type DisplayState =
   | { kind: 'loading' }
@@ -116,15 +100,30 @@ export default function DisplayGoal() {
     let applied = 0;
     let sessionClosed = false;
 
-    const apply = (seq: number, next: DisplayState | ((prev: DisplayState) => DisplayState)) => {
+    // `next` may be a value OR an updater. The updater form is what lets an
+    // unchanged tick return the state object already on screen: `applied`
+    // still advances (the response WAS admitted, and an older one must still
+    // be refused after it), but React sees the identical object and commits
+    // nothing.
+    const apply = (seq: number, next: SetStateAction<DisplayState>) => {
       if (cancelled) return false;
       if (sessionClosed) return false;
       if (seq <= applied) return false;
       applied = seq;
-      setState(next as DisplayState);
+      setState(next);
       return true;
     };
 
+    // NOT GUARDED AGAINST OVERLAP, deliberately. Skipping a tick while the
+    // previous request is still outstanding would cost fewer requests behind
+    // a slow server — but overlap is exactly what this screen's admission
+    // rules exist for, and what proves them: a response held open from before
+    // a revocation must be OVERTAKEN by a later poll that gets the refusal
+    // (tests-e2e/e5-display-authorization.spec.ts, CASE 3 and CASE 4). With
+    // one request at a time a held response wedges the poll until it settles,
+    // the refusal never arrives, and a revoked display keeps showing a total
+    // it is no longer entitled to. The contribution screen's poll has no such
+    // rule and is guarded; this one is not.
     const tick = async () => {
       const seq = ++issued;
       try {
@@ -135,7 +134,21 @@ export default function DisplayGoal() {
         const result = await fn({ goalId });
         // Client receipt time. There is no public server timestamp, and this
         // label only has to say when THIS screen last heard a confirmed answer.
-        apply(seq, { kind: 'ready', pulse: result.data, confirmedAt: new Date(), stale: false });
+        const at = new Date();
+        // A wall display looks at an unchanged goal nearly all the time. An
+        // identical answer with the same printed clock minute would render
+        // byte-for-byte the same screen, so keep the state object that is
+        // already there rather than allocate an equal one every 2 seconds.
+        // The moment ANY published field moves — or the minute on the
+        // freshness line turns over — this falls through to the new object.
+        apply(seq, (prev) =>
+          prev.kind === 'ready' &&
+          !prev.stale &&
+          samePulse(prev.pulse, result.data) &&
+          formatClock(prev.confirmedAt) === formatClock(at)
+            ? prev
+            : { kind: 'ready', pulse: result.data, confirmedAt: at, stale: false }
+        );
       } catch (e) {
         if (cancelled) return;
         // A malformed id in the URL can never become a goal, so it is the same
@@ -239,7 +252,17 @@ export default function DisplayGoal() {
       >
         <View style={styles.genericBlock}>
           <WsfWordmark variant="white" height={wide ? 44 : 22} testID="wsf-display-wordmark" />
-          <Text style={[styles.genericHeadline, wide ? styles.genericHeadlineWide : null]}>
+          {/*
+            D-1 / R7b. Loading, unavailable and unreachable are whole surfaces
+            of their own, and this sentence is what each one is. It is their
+            only heading, so it is the level-1 one — role and level only, the
+            size is unchanged.
+          */}
+          <Text
+            style={[styles.genericHeadline, wide ? styles.genericHeadlineWide : null]}
+            accessibilityRole="header"
+            {...({ 'aria-level': 1 } as Record<string, unknown>)}
+          >
             {copy.headline}
           </Text>
           {copy.body ? (

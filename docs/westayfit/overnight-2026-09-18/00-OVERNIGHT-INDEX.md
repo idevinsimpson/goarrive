@@ -17,7 +17,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | 3 | Contribution resilience torture | done | `e531433` | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
 | 4 | Display + authorization race torture | done | `0b0797c` | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
 | 5 | Accessibility + responsive QA | done | `963d0df` (+ index 9669c53) | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
-| 6 | Performance + operational quality | pending | | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
+| 6 | Performance + operational quality | done | TASK6_HEAD | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
 | 7 | Cross-surface product quality audit | pending | | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
 | 8 | Final candidate hardening + evidence pack | pending | | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
 
@@ -69,6 +69,14 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 - Contract first run: 19/22 — two real findings (heading overflow at 195 px with an 80-char name; no h1 on the display's unavailable state) fixed in Task 6's commit.
 - Receipts: `ui-a11y-fixes` 8/8; regression runs `ui-qa` 5, `ui-display` 4, `ui-community-home` 2, `ui-contribute` 7, `e5-display-authorization` 5, `d-admission-controls` 5, `ui-journey` 1, `ui-champion-torture` 5, `mu2-flow` 4; Vitest 219; TS clean.
 - ChatGPT review instruction: none present (checked at task start and mid-task).
+
+## Task 6 — Performance + operational quality
+
+- Numbers: dist 3.1 MB, bundle 1.96 MB raw / 489 KB gzip, no new dependencies, brand PNGs 427 KB all referenced, originals not shipped; display 30 pulses/min (12–13 server reads per miss, lone-poller cache hit rate 0% by TTL/poll alignment); contribute 0 polls while an attempt is unresolved; Community Home never polls; display cold load is one round trip.
+- **Applied (measured, tested)**: P-1 display idle re-renders suppressed (same nine fields + same minute → React bails out; cadence unchanged); P-2 contribute poll in-flight guard (15 → ≤ 6 requests behind a 6 s backend); P-3 copy-link timer held/cleared; P-4 lazy `Animated.Value`; P-5 pulse caches delete-before-set (LRU) and the goal pulse stamps its cache after the access reads. Plus D-27 (h1 wrap at 195 px, display generic h1) and the contract spec's exact-name match.
+- **Reverted after measurement**: display in-flight guard (overlapping polls are what let a refusal overtake a held response — `e5` CASE 3/4 proved it); single `wsfListGoals` per read-back (makes the D-7 covenant test unreachable). Skipped: parallelising Community Home reads (ordering change). Recorded: TTL/poll alignment, asset oversizing, post-hydration image load, orphan keys, background tabs.
+- Receipts: `ui-perf` 3/3; 16 regression specs green; callable 238; Vitest 232; TS + functions build clean.
+- ChatGPT review instruction: none present (checked at task start and at close).
 
 ## Defect ledger (running)
 
