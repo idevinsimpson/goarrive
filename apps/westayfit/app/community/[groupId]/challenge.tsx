@@ -17,10 +17,12 @@ declare module 'react-native' {
 
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../../src/callableErrors';
 import { FormShell, SecondaryLink, TextField } from '../../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseFunctions } from '../../../src/firebase';
 import { CARD_BORDER, CREAM, SURFACE, TEXT_MUTED, kit } from '../../../src/ui/kit';
+import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 // Response shapes mirror wsfListChallenge / wsfCheckIn in functions-westayfit.
@@ -96,7 +98,7 @@ export default function ChallengePage() {
       return;
     }
     if (!groupId) {
-      setState({ kind: 'error', message: 'Missing group id.' });
+      setState({ kind: 'error', message: 'This community could not be found.' });
       return;
     }
 
@@ -133,7 +135,7 @@ export default function ChallengePage() {
         }
         setState({
           kind: 'error',
-          message: e instanceof Error ? e.message : 'Failed to load challenge.',
+          message: describeCallableError(e, 'We couldn’t load this challenge. Try again.'),
         });
       }
     })();
@@ -220,9 +222,7 @@ export default function ChallengePage() {
         const message =
           e instanceof FirebaseError && e.code === 'functions/failed-precondition'
             ? 'Cannot check in right now.'
-            : e instanceof Error
-              ? e.message
-              : 'Check-in failed.';
+            : describeCallableError(e, 'We couldn’t count that check-in. Try again.');
         setMoveErrors((errs) => ({ ...errs, [moveId]: message }));
       } finally {
         setPendingMoveIds((prev) => {
@@ -303,6 +303,13 @@ export default function ChallengePage() {
         {/* Product chrome: the wordmark, compact, same as Community Home. */}
         <View style={kit.chrome}>
           <WsfWordmark variant="navy" height={22} testID="wsf-challenge-wordmark" />
+          <ButtonLink
+            href={`/community/${groupId}`}
+            style={kit.chromeLink}
+            textStyle={kit.chromeLinkText}
+            testID="wsf-challenge-back"
+            label="Back to community"
+          />
         </View>
 
         {/* The hero: what the challenge is and where the shared number stands. */}

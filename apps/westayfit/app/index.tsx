@@ -1,11 +1,11 @@
 import { Link, router } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
+import { describeCallableError } from '../src/callableErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFunctions } from '../src/firebase';
 import {
@@ -69,13 +69,10 @@ export default function BrandShell() {
         setMyCommunities({ kind: 'ready', items: result.data.items });
       } catch (e) {
         if (cancelled) return;
-        const message =
-          e instanceof FirebaseError
-            ? e.message
-            : e instanceof Error
-              ? e.message
-              : 'Could not load your communities.';
-        setMyCommunities({ kind: 'error', message });
+        setMyCommunities({
+          kind: 'error',
+          message: describeCallableError(e, 'Could not load your communities.'),
+        });
       }
     })();
     return () => {

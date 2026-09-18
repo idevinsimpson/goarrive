@@ -190,7 +190,7 @@ test('C3: /reset-password renders the honest not-set-up line when the callable i
 
   await expect(page.getByTestId('wsf-reset-unconfigured')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('wsf-reset-unconfigured')).toContainText(
-    'Password reset email is not set up yet on this build.'
+    "Email isn't switched on for this test build yet, so no reset link was sent."
   );
 });
 

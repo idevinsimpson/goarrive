@@ -192,7 +192,7 @@ export default function KioskGoal() {
 
   const testNote = wsfUsingEmulators ? (
     <Text style={styles.testNote} testID="wsf-kiosk-test-banner">
-      Local synthetic test
+      Sample data
     </Text>
   ) : null;
 

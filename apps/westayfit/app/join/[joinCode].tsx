@@ -6,6 +6,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../src/callableErrors';
 import {
   ErrorText,
   FormShell,
@@ -90,7 +91,7 @@ export default function JoinPage() {
         }
         setPreviewState({
           kind: 'error',
-          message: e instanceof Error ? e.message : 'Failed to load community.',
+          message: describeCallableError(e, 'We couldn’t load this community. Try again.'),
         });
       }
     })();
@@ -114,7 +115,7 @@ export default function JoinPage() {
     } catch (e) {
       setJoinState({
         kind: 'error',
-        message: e instanceof Error ? e.message : 'Join failed.',
+        message: describeCallableError(e, 'We couldn’t join this community. Try again.'),
       });
     }
   }, [joinCode, user]);
@@ -139,7 +140,7 @@ export default function JoinPage() {
     return (
       <FormShell heading="Too many requests" testID="wsf-join-rate-limited">
         <Text style={kit.body}>
-          The join preview is rate-limited right now. Wait a moment and try again.
+          This link is being opened a lot right now. Wait a moment and try again.
         </Text>
         <SecondaryLink href="/" label="Back to home" />
       </FormShell>

@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
+import { describeCallableError } from '../src/callableErrors';
 import {
   ErrorText,
   FieldLabel,
@@ -111,7 +112,7 @@ export default function StartCommunity() {
       const groupId = result.data.groupId;
       router.replace(`/community/${groupId}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Create failed.');
+      setError(describeCallableError(e, 'We couldn’t create your community. Try again.'));
     } finally {
       setSubmitting(false);
     }

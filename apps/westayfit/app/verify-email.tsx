@@ -84,8 +84,8 @@ export default function VerifyEmail() {
       // WSF_EMAIL_* env vars are missing (F13). The old fallback rendered
       // "Send failed. (functions/failed-precondition)" — a string that names
       // an internal code and tells the caller nothing they can act on. Show
-      // the honest state instead, so the person on the screen knows the
-      // build itself is not wired to send and who to ping.
+      // a plain sentence a member can act on instead (the testID keeps the
+      // state distinguishable for the specs).
       if (authErrorCode(e) === 'functions/failed-precondition') {
         setUnconfigured(true);
       } else {
@@ -134,7 +134,7 @@ export default function VerifyEmail() {
       {status ? <StatusText testID="wsf-verify-status">{status}</StatusText> : null}
       {unconfigured ? (
         <ErrorText testID="wsf-verify-unconfigured">
-          Email sending is not set up yet on this build. Ask Devin.
+          Email isn't switched on for this test build yet, so no message was sent.
         </ErrorText>
       ) : null}
       {error ? <ErrorText testID="wsf-verify-error">{error}</ErrorText> : null}

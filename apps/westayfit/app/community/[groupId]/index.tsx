@@ -14,6 +14,7 @@ import {
 
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../../src/callableErrors';
 import { FormShell } from '../../../src/AuthFormPrimitives';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
@@ -61,6 +62,7 @@ import {
   formatPeriod,
   formatReachedOn,
 } from '../../../src/ui/dates';
+import { kit } from '../../../src/ui/kit';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -339,7 +341,7 @@ export default function CommunityPage() {
       return;
     }
     if (!groupId) {
-      setState({ kind: 'error', message: 'Missing group id.' });
+      setState({ kind: 'error', message: 'This community could not be found.' });
       return;
     }
 
@@ -673,11 +675,10 @@ export default function CommunityPage() {
       await fn({ groupId });
       router.replace('/');
     } catch (e) {
-      const message =
-        typeof e === 'object' && e && 'message' in e
-          ? String((e as { message?: unknown }).message)
-          : 'Could not leave this community. Try again.';
-      setLeaveState({ kind: 'failed', message });
+      setLeaveState({
+        kind: 'failed',
+        message: describeCallableError(e, 'Could not leave this community. Try again.'),
+      });
     }
   }, [groupId, router]);
 
@@ -866,7 +867,7 @@ export default function CommunityPage() {
     return (
       <FormShell heading="Your community" testID="wsf-community-loading">
         <View {...({ 'data-state': 'loading' } as Record<string, unknown>)}>
-          <Text style={styles.body}>Loading…</Text>
+          <Text style={kit.statusText}>Loading…</Text>
         </View>
       </FormShell>
     );
@@ -881,8 +882,8 @@ export default function CommunityPage() {
       >
         <ButtonLink
           href="/signin"
-          style={SHELL_LINK}
-          textStyle={styles.tertiaryButtonText}
+          style={kit.tertiaryButton}
+          textStyle={kit.tertiaryButtonText}
           testID="wsf-community-signin"
           label="Sign in"
         />
@@ -899,8 +900,8 @@ export default function CommunityPage() {
       >
         <ButtonLink
           href="/"
-          style={SHELL_LINK}
-          textStyle={styles.tertiaryButtonText}
+          style={kit.tertiaryButton}
+          textStyle={kit.tertiaryButtonText}
           testID="wsf-community-not-member-home"
           label="Back to home"
         />
@@ -915,12 +916,12 @@ export default function CommunityPage() {
           {/* A1. Body copy, like the contribution screen's: this is a state
               of the page, not a validation error the member can correct. The
               red `styles.error` stays for the real validation errors below. */}
-          <Text style={styles.body}>{state.message}</Text>
+          <Text style={kit.body}>{state.message}</Text>
         </View>
         <ButtonLink
           href="/"
-          style={SHELL_LINK}
-          textStyle={styles.tertiaryButtonText}
+          style={kit.tertiaryButton}
+          textStyle={kit.tertiaryButtonText}
           testID="wsf-community-error-home"
           label="Back to home"
         />
@@ -1502,7 +1503,7 @@ export default function CommunityPage() {
               <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
               <Text style={styles.heroTitle} {...HEADING_2}>Goals couldn&apos;t be loaded</Text>
               <Text style={styles.heroBody}>
-                This is a problem loading them, not a community without goals.
+                We couldn&apos;t load this community&apos;s goals just now. Try again in a moment.
               </Text>
               <Pressable
                 onPress={() => setGoalsReloadToken((n) => n + 1)}
@@ -2223,10 +2224,6 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   tertiaryButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
-  // The two places a tertiary link stands in for the old inline anchor: it
-  // keeps that anchor's spacing in a form shell, and its centring in the
-  // page footer.
-  shellLink: { marginTop: wsfTheme.spacing.md },
   footerLink: { alignSelf: 'center' },
   tertiaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
   inlineLink: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
@@ -2315,7 +2312,6 @@ const styles = StyleSheet.create({
 // expo-router's `Link asChild` merges the child's style into the link's by
 // OBJECT SPREAD (@radix-ui/react-slot). An array of styles survives that as
 // { 0: …, 1: … }, which react-native-web then fails to apply — it takes the
-// whole screen down. So the two composed link styles are flattened here,
+// whole screen down. So the composed footer link style is flattened here,
 // once, rather than written as an array at the call site.
-const SHELL_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.shellLink]);
 const FOOTER_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.footerLink]);

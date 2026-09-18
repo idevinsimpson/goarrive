@@ -259,18 +259,22 @@ test.describe('community goal seam', () => {
       await pageA.getByTestId('wsf-community-start-goal').click();
       await pageA.waitForURL(/\/goals\/new/, { timeout: 20_000 });
       await expect(pageA.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
-      // The community page passed the group it already knows.
-      await expect(pageA.getByTestId('wsf-new-goal-group-id-input')).toHaveValue(groupId);
+      // The community page passed the group it already knows. The form carries
+      // it as data-group-id on its container; nothing on the page prints it or
+      // asks for it.
+      expect(await pageA.getByTestId('wsf-new-goal-form').getAttribute('data-group-id')).toBe(
+        groupId
+      );
 
       await pageA.getByTestId('wsf-new-goal-title').fill('E5 created via the interface');
       await pageA.getByTestId('wsf-new-goal-target').fill('500');
       await pageA.getByTestId('wsf-new-goal-unit').fill('squats');
       await pageA.getByTestId('wsf-new-goal-submit').click();
       await expect(pageA.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
-      // Renders as "goalId: <id>".
-      const goalId = (await pageA.getByTestId('wsf-new-goal-id').innerText())
-        .replace(/^goalId:\s*/, '')
-        .trim();
+      // The created screen carries the id as data-goal-id on its container;
+      // nothing on the page prints it.
+      const goalId =
+        (await pageA.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id')) ?? '';
       expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
 
       // ---- B, an ordinary member, DISCOVERS it on the community page ----
@@ -437,9 +441,9 @@ test.describe('community goal seam', () => {
       await page.getByTestId('wsf-new-goal-repeat-multiple').click();
       await page.getByTestId('wsf-new-goal-submit').click();
       await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
-      const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())
-        .replace(/^goalId:\s*/, '')
-        .trim();
+      const goalId =
+        (await page.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id')) ?? '';
+      expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
 
       // ---- A starts attempt 1 and its response never resolves ----
       let failAttemptOne: (() => void) | null = null;
@@ -562,9 +566,9 @@ test.describe('community goal seam', () => {
       await page.getByTestId('wsf-new-goal-repeat-multiple').click();
       await page.getByTestId('wsf-new-goal-submit').click();
       await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
-      const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())
-        .replace(/^goalId:\s*/, '')
-        .trim();
+      const goalId =
+        (await page.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id')) ?? '';
+      expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
 
       // ---- A starts attempt 1 and its response never resolves ----
       let landAttemptOne: (() => void) | null = null;

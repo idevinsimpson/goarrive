@@ -331,7 +331,7 @@ export default function ContributeToGoal() {
       return;
     }
     if (!goalId) {
-      setState({ kind: 'error', message: 'Missing goal id.' });
+      setState({ kind: 'error', message: 'This goal could not be found.' });
       return;
     }
 
@@ -992,7 +992,7 @@ export default function ContributeToGoal() {
   const renderTestNote = () =>
     wsfUsingEmulators ? (
       <Text style={styles.testNote} testID="wsf-contribute-test-banner">
-        Local synthetic test
+        Sample data
       </Text>
     ) : null;
 

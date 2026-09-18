@@ -302,7 +302,7 @@ export default function DisplayGoal() {
 
   const testNote = wsfUsingEmulators ? (
     <Text style={styles.testNote} testID="wsf-display-test-banner">
-      Local synthetic test
+      Sample data
     </Text>
   ) : null;
 

@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
+import { describeCallableError } from '../src/callableErrors';
 import {
   authFormStyles,
   ErrorText,
@@ -67,7 +68,7 @@ export default function ProfileSetup() {
         setProfileLoaded(true);
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : 'Could not load profile.');
+        setError(describeCallableError(e, 'We couldn’t load your profile. Try again.'));
         setExistenceReadFailed(true);
         setProfileLoaded(true);
       }
@@ -147,7 +148,7 @@ export default function ProfileSetup() {
       // pending code falls through to the signed-in home.
       router.replace(nextRouteAfterAuth('/') as never);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed.');
+      setError(describeCallableError(e, 'We couldn’t save your profile. Try again.'));
     } finally {
       setSubmitting(false);
     }

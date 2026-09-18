@@ -21,7 +21,7 @@ export function StagingBanner() {
     <View style={styles.container} testID="wsf-staging-banner">
       <Text style={styles.text} testID="wsf-staging-banner-text">
         STAGING — TEST DATA ONLY. Not the live We Stay Fit service. Accounts,
-        communities and totals here are synthetic and may be deleted at any time.
+        communities and totals here are not real and may be deleted at any time.
       </Text>
       <Text style={styles.build} testID="wsf-staging-banner-build">
         build {WSF_BUILD_STAMP.commitSha}
