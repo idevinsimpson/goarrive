@@ -1,96 +1,22 @@
-import { randomBytes } from 'node:crypto';
-
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 /**
- * E2 end-to-end: a signed-out visitor with only a `/join/<code>` URL reaches
- * `/community/<groupId>`. This spec pins the four criteria in
- * `docs/westayfit/dispatch/E2-JOIN-BY-QR.md §3` that a callable test cannot
- * observe on its own:
+ * D-1 — signup performs ONE navigation to /verify-email.
  *
- *   §3.1 — a second adult, given only the join URL, reaches the community
- *          page without ever being invited, never knowing the groupId.
- *   §3.4 — a cold load of `/join/<code>` returns 200 and renders. If the
- *          Hosting rewrite is missing, this fails; that is exactly the bug
- *          GATE 1 exists to catch.
- *   §3.5 — the signup round-trip: a signed-out visitor who signs up from the
- *          join page lands back on the join page, then in the community.
+ * The signed-in effect in `app/signup.tsx` navigates the moment the account
+ * exists; the submit handler must not navigate again after its best-effort
+ * `wsfSendVerificationEmail` round trip. This spec holds that round trip open,
+ * lets the member verify and move on to profile-setup, releases the hold, and
+ * asserts they are never pulled back. It failed on the unfixed screen (the
+ * late replace returned them to Verify) and passes on the fixed one.
  *
- * The community itself is seeded directly against the Firestore emulator, one
- * step upstream of the app, because that mirrors reality: at the FitLife Expo
- * the single public community is pre-provisioned by hand and its QR is
- * printed before doors open. The visitor never creates it.
- *
- * §3.2 (idempotent join) and §3.3 (oracle test) are covered by callable
- * tests — those properties are cheaper to pin at that layer and would not add
- * signal here.
+ * Only the account-verification helper below talks to the emulator directly.
  */
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
-const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 // E4-A1-R4 lockstep: must match the emulators:exec --project flag in gate1.sh
 // and the id the flagged client selects on a loopback host (selectProjectId).
 const PROJECT_ID = 'demo-wsf-local';
-
-/**
- * Emulator console noise this spec deliberately tolerates. Same list as
- * `mu2-flow.spec.ts` — keep the two in sync so a new gap has to be justified
- * in one place, not two.
- */
-const KNOWN_GAPS = ['/favicon.ico', 'wsfSendVerificationEmail'];
-
-function mintJoinCode(): string {
-  return randomBytes(16).toString('base64url');
-}
-
-/**
- * Seed a public, active `wsfCommunityGroups` document straight against the
- * Firestore emulator. The rule for that collection is `allow create: if false`
- * — server-only writes — so we go around the rules layer via the emulator's
- * documented bypass: the standard Firestore REST path
- * `/v1/projects/{p}/databases/(default)/documents/...` with an
- * `Authorization: Bearer owner` header. That header is what
- * `rules-unit-testing`'s `withSecurityRulesDisabled` sends under the hood; the
- * emulator treats it as admin and skips `firestore.rules` entirely. The
- * lookalike `/emulator/v1/...` prefix is a different endpoint — DELETE-only,
- * for clearing collections — so a PATCH there 404s before rules ever run.
- * This seed is a stand-in for what will happen on Expo morning: a coach on the
- * platform creates the FitLife group by hand (via a callable path we do not
- * have yet) and the code is printed on QR.
- */
-async function seedPublicGroup(opts: {
-  joinCode: string;
-  displayName: string;
-}): Promise<string> {
-  const docId = `e2gate1-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
-  const url =
-    `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}` +
-    `/databases/(default)/documents/wsfCommunityGroups/${docId}`;
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      'content-type': 'application/json',
-      authorization: 'Bearer owner',
-    },
-    body: JSON.stringify({
-      fields: {
-        displayName: { stringValue: opts.displayName },
-        groupType: { stringValue: 'custom' },
-        joinPolicy: { stringValue: 'public' },
-        joinCode: { stringValue: opts.joinCode },
-        createdByUserId: { stringValue: 'e2-seeder' },
-        lifecycleStatus: { stringValue: 'active' },
-        isSample: { booleanValue: false },
-      },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(
-      `Firestore emulator seed failed: ${res.status} ${await res.text()}`
-    );
-  }
-  return docId;
-}
 
 /**
  * Verify an emulator account's email. Mirrors `mu2-flow.spec.ts` — see there
@@ -127,20 +53,6 @@ async function markEmailVerified(email: string): Promise<void> {
   }
 }
 
-function captureConsoleErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() !== 'error') return;
-    const where = msg.location()?.url;
-    errors.push(where ? `${msg.text()} [${where}]` : msg.text());
-  });
-  page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
-  page.on('response', (res) => {
-    if (res.status() >= 400) errors.push(`HTTP ${res.status()} ${res.url()}`);
-  });
-  return errors;
-}
-
 /**
  * D-1 — signup performs ONE navigation to /verify-email.
  *
@@ -155,7 +67,14 @@ test('D-1: a verified member is not pulled back to /verify-email by the late sen
   // Hold the send so the tap lands while it is still outstanding.
   let release = () => {};
   const held = new Promise<void>((r) => { release = r; });
-  await page.route('**/wsfSendVerificationEmail', async (route) => { await held; await route.continue(); });
+  let intercepted = 0;
+  await page.route('**/wsfSendVerificationEmail', async (route) => {
+    intercepted += 1;
+    await held;
+    await route.continue();
+  });
+  // Registered before the click so the released response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
 
   await page.goto('/signup');
   await expect(page.getByTestId('wsf-signup')).toBeVisible({ timeout: 15_000 });
@@ -170,9 +89,14 @@ test('D-1: a verified member is not pulled back to /verify-email by the late sen
   await page.getByTestId('wsf-verify-check').click();
   await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
 
-  // The send finishes late. Profile-setup must survive it.
+  // The send finishes late. Profile-setup must survive it. The window starts
+  // when the released response has actually arrived, so a slow function cold
+  // start cannot push the late navigation past the assertion.
   release();
-  await page.waitForTimeout(4_000);
+  await sendSettled;
+  // The interception must have happened, or the race above was not exercised.
+  expect(intercepted).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(2_000);
   await expect(page.getByTestId('wsf-profile')).toBeVisible();
   await expect(page.getByTestId('wsf-verify')).toHaveCount(0);
 });

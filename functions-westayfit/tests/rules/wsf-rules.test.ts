@@ -101,6 +101,12 @@ beforeEach(async () => {
       role: 'member',
       membershipStatus: 'departed',
     });
+    // A row with no status at all is not membership either.
+    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_nostatus-uid`), {
+      groupId: GROUP_ID,
+      userId: 'nostatus-uid',
+      role: 'member',
+    });
 
     // An orphan group (no members) used for negative read test.
     await setDoc(doc(db, 'wsfCommunityGroups', OTHER_GROUP_ID), {
@@ -212,12 +218,29 @@ describe('wsfCommunityGroups', () => {
 
   test('a REMOVED member cannot read the group (row kept, status changed)', async () => {
     const removed = testEnv.authenticatedContext('removed-uid', verifiedEmail).firestore();
+    // Positive control: the seeded membership row exists and belongs to this
+    // uid (readable under the unchanged wsfMemberships owner rule), so the
+    // denial below is about membershipStatus, not about a missing row.
+    await assertSucceeds(getDoc(doc(removed, 'wsfMemberships', `${GROUP_ID}_removed-uid`)));
     await assertFails(getDoc(doc(removed, 'wsfCommunityGroups', GROUP_ID)));
   });
 
   test('a DEPARTED member cannot read the group', async () => {
     const departed = testEnv.authenticatedContext('departed-uid', verifiedEmail).firestore();
+    await assertSucceeds(getDoc(doc(departed, 'wsfMemberships', `${GROUP_ID}_departed-uid`)));
     await assertFails(getDoc(doc(departed, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('a membership row with no membershipStatus does not grant the group read', async () => {
+    const nostatus = testEnv.authenticatedContext('nostatus-uid', verifiedEmail).firestore();
+    await assertSucceeds(getDoc(doc(nostatus, 'wsfMemberships', `${GROUP_ID}_nostatus-uid`)));
+    await assertFails(getDoc(doc(nostatus, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('membership is scoped to its own group: an active member of one group cannot read another', async () => {
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertSucceeds(getDoc(doc(alice, 'wsfCommunityGroups', GROUP_ID)));
+    await assertFails(getDoc(doc(alice, 'wsfCommunityGroups', OTHER_GROUP_ID)));
   });
 
   test('platform admin can read any group', async () => {
