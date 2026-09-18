@@ -759,7 +759,8 @@ export default function CommunityPage() {
       return null;
     }
   })();
-  const heroWeWidth = Math.max(160, Math.min(280, windowWidth - 2 * 20 - 2 * 20));
+  // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
+  const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
   const smallWeWidth = 104;
 
   const contributeHref = (goalId: string, mode: 'move' | 'record') =>
@@ -957,17 +958,17 @@ export default function CommunityPage() {
     >
       <View style={styles.sheetBackdrop}>
         {/*
-          Tapping outside closes the sheet. The scrim is deliberately not a
-          focusable or announced control: the focus trap would otherwise land
-          on it first and a single key press would dismiss the sheet before
-          any Champion control was reached. The Close button is the
+          Tapping outside closes the sheet. The scrim is a plain view with a
+          click handler, deliberately not a focusable or announced control:
+          a focusable scrim ends up in the sheet's Tab cycle and a single key
+          press would dismiss the sheet. The Close button (and Escape) is the
           accessible way out.
         */}
-        <Pressable
+        <View
           style={styles.sheetScrim}
-          onPress={() => setManageOpen(false)}
+          // `onClick` is a react-native-web prop that the RN typings omit.
+          {...({ onClick: () => setManageOpen(false) } as Record<string, unknown>)}
           accessible={false}
-          tabIndex={-1}
           aria-hidden
           testID="wsf-community-manage-scrim"
         />
@@ -1745,16 +1746,19 @@ const styles = StyleSheet.create({
   manageGoalTitle: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
 
   // ---- about ----
+  // Label and value sit on one line; on a very narrow screen (or at 200%
+  // text zoom) the value wraps under the label instead of overflowing.
   row: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     gap: 12,
     paddingVertical: 6,
   },
-  rowLabel: { color: wsfTheme.colors.textMuted, fontSize: 15 },
-  rowValue: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '600', textAlign: 'right', flexShrink: 1 },
-  rowLabelQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13 },
-  rowValueQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 1 },
+  rowLabel: { color: wsfTheme.colors.textMuted, fontSize: 15, flexShrink: 1, minWidth: 0 },
+  rowValue: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
+  rowLabelQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, flexShrink: 1, minWidth: 0 },
+  rowValueQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
   detailsToggle: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', marginTop: 2 },
   detailsToggleText: { color: NAVY, fontSize: 14, fontWeight: '700', textDecorationLine: 'underline' },
   details: { borderTopWidth: 1, borderTopColor: CARD_BORDER, paddingTop: 4 },

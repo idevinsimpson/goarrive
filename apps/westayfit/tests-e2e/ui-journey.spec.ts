@@ -158,10 +158,12 @@ test('the member journey, one story, one set of numbers', async ({ page, browser
 
   // 6. Back to community: the same truth.
   await page.getByTestId('wsf-contribute-back').click();
-  await expect(page.getByTestId('wsf-community-name')).toHaveText('Maple Street Movers', { timeout: 20_000 });
-  await expect(page.getByTestId(`wsf-community-goal-total-${goalId}`)).toHaveText('261 of 500 squats', { timeout: 30_000 });
-  await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveText('52.2% complete');
-  await expect(page.getByTestId(`wsf-community-your-part-${goalId}`)).toContainText('You’ve added 20 squats');
+  // The stack keeps the earlier Community Home mounted (hidden) beneath the
+  // new one, so the assertions read the visible, most recent instance.
+  await expect(page.getByTestId('wsf-community-name').last()).toHaveText('Maple Street Movers', { timeout: 20_000 });
+  await expect(page.getByTestId(`wsf-community-goal-total-${goalId}`).last()).toHaveText('261 of 500 squats', { timeout: 30_000 });
+  await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`).last()).toHaveText('52.2% complete');
+  await expect(page.getByTestId(`wsf-community-your-part-${goalId}`).last()).toContainText('You’ve added 20 squats');
   await snap(page, '06-community-home-after');
 
   // 7. THE SAME TRUTH ON THE AUTHORIZED SHARED DISPLAY — anonymous browser.

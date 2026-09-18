@@ -86,11 +86,13 @@ async function noOverflow(page: Page, width: number, label: string): Promise<voi
   const o = await page.evaluate(() => {
     const all = Array.from(document.querySelectorAll('body *')) as HTMLElement[];
     const w = document.documentElement.clientWidth;
-    const wide = all.filter((e) => e.getBoundingClientRect().right > w + 1 && getComputedStyle(e).position !== 'fixed').length;
-    return { sw: document.documentElement.scrollWidth, cw: w, wide };
+    const offenders = all
+      .filter((e) => e.getBoundingClientRect().right > w + 1 && getComputedStyle(e).position !== 'fixed')
+      .map((e) => `${e.getAttribute('data-testid') ?? e.tagName}@${Math.round(e.getBoundingClientRect().right)} [${(e.className || '').toString().slice(0, 60)}] "${(e.textContent || '').trim().slice(0, 40)}"`);
+    return { sw: document.documentElement.scrollWidth, cw: w, offenders };
   });
   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
-  expect(o.wide, `${label}: no element past the right edge at ${width}`).toBe(0);
+  expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
 }
 
 for (const width of [390, 360, 195]) {
@@ -143,12 +145,19 @@ test('Manage sheet: focus stays inside, background is blocked, Escape closes', a
     await page.getByTestId('wsf-community-manage').click();
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     // Tab several times: focus never leaves the sheet, and lands on real controls.
-    const inside: boolean[] = [];
+    const seen: string[] = [];
     for (let i = 0; i < 8; i += 1) {
       await page.keyboard.press('Tab');
-      inside.push(await page.evaluate(() => !!document.activeElement?.closest('[data-testid="wsf-community-manage-panel"]')));
+      await page.waitForTimeout(80);
+      seen.push(
+        await page.evaluate(() => {
+          const a = document.activeElement as HTMLElement | null;
+          const inSheet = !!a?.closest('[data-testid="wsf-community-manage-panel"]');
+          return `${inSheet ? 'in' : 'OUT'}:${a?.getAttribute('data-testid') ?? a?.tagName ?? 'none'}`;
+        })
+      );
     }
-    expect(inside.every(Boolean), 'focus stays inside the sheet').toBe(true);
+    expect(seen.every((s) => s.startsWith('in:')), `focus stays inside the sheet; saw ${seen.join(' → ')}`).toBe(true);
     // The page behind is not interactive: the hero's primary action is covered.
     const covered = await page.evaluate(() => {
       const el = document.querySelector(`[data-testid="wsf-community-goal-link-${''}`) as HTMLElement | null;

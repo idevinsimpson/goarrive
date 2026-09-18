@@ -24,7 +24,9 @@ export function WsfWordmark({
   return (
     <Image
       source={asset.source}
-      style={[{ width, height }, style]}
+      // Shrinks with its row when the screen (or a 200% text zoom) is
+      // narrower than the artwork; `contain` keeps the proportions.
+      style={[{ width, height, maxWidth: '100%', flexShrink: 1 }, style]}
       resizeMode="contain"
       accessibilityRole="image"
       accessibilityLabel="We Stay Fit"

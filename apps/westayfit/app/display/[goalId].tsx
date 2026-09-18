@@ -262,7 +262,9 @@ export default function DisplayGoal() {
           : null;
   const together = closed ? `${formatCount(sharedTotal)} ${unit} completed together.` : null;
   const near = phase === 'nearGoal';
-  const weWidth = wide ? Math.min(640, Math.round(windowWidth * 0.42)) : Math.min(320, windowWidth - 2 * 20 - 2 * 22);
+  const weWidth = wide
+    ? Math.min(640, Math.round(windowWidth * 0.42))
+    : Math.max(96, Math.min(320, windowWidth - 2 * 20 - 2 * 22));
 
   const totalLine = (
     <Text

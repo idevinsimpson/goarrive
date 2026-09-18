@@ -293,7 +293,8 @@ test('Community Home at phone size — member view, Champion view, full page', a
     unit: 'minutes',
     total: 35,
     status: 'active',
-    endsInMs: 13 * 24 * 60 * 60_000,
+    // Ends after the featured squats goal (Oct 6), so squats stays featured.
+    endsInMs: 40 * 24 * 60 * 60_000,
   });
   await seedGoal(groupId, championUid, {
     goalId: closed,

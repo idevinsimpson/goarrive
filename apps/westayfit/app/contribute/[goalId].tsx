@@ -609,7 +609,7 @@ export default function ContributeToGoal() {
   const communityName = context.kind === 'verified' ? context.communityName : null;
   const backHref = context.kind === 'verified' ? `/community/${context.groupId}` : '/';
   const backLabel = context.kind === 'verified' ? 'Back to community' : 'Back to home';
-  const heroWeWidth = Math.max(160, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
+  const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
   const contextWeWidth = 88;
 
   const renderChrome = (showBack: boolean) => (
@@ -1098,40 +1098,67 @@ export default function ContributeToGoal() {
       {renderCompactProgress()}
       <View style={styles.card} testID="wsf-contribute-entry-screen">
         <Text style={styles.heading}>{`How many ${unit} did you complete?`}</Text>
-        <View style={styles.entryRow}>
-          <Pressable
-            onPress={() => setEntry((v) => stepEntry(v, -1))}
-            accessibilityRole="button"
-            accessibilityLabel="One fewer"
-            style={styles.stepButton}
-            testID="wsf-contribute-minus"
-          >
-            <Text style={styles.stepButtonText}>−</Text>
-          </Pressable>
-          <TextInput
-            style={styles.entryInput}
-            value={entry}
-            onChangeText={(v) => {
-              setEntry(v);
-              if (entryError) setEntryError(null);
-            }}
-            keyboardType="number-pad"
-            inputMode="numeric"
-            placeholder="0"
-            placeholderTextColor="#9AA6B8"
-            accessibilityLabel={`Number of ${unit} completed`}
-            testID="wsf-contribute-entry"
-          />
-          <Pressable
-            onPress={() => setEntry((v) => stepEntry(v, 1))}
-            accessibilityRole="button"
-            accessibilityLabel="One more"
-            style={styles.stepButton}
-            testID="wsf-contribute-plus"
-          >
-            <Text style={styles.stepButtonText}>+</Text>
-          </Pressable>
-        </View>
+        {(() => {
+          const minus = (
+            <Pressable
+              onPress={() => setEntry((v) => stepEntry(v, -1))}
+              accessibilityRole="button"
+              accessibilityLabel="One fewer"
+              style={styles.stepButton}
+              testID="wsf-contribute-minus"
+            >
+              <Text style={styles.stepButtonText}>−</Text>
+            </Pressable>
+          );
+          const plus = (
+            <Pressable
+              onPress={() => setEntry((v) => stepEntry(v, 1))}
+              accessibilityRole="button"
+              accessibilityLabel="One more"
+              style={styles.stepButton}
+              testID="wsf-contribute-plus"
+            >
+              <Text style={styles.stepButtonText}>+</Text>
+            </Pressable>
+          );
+          const input = (
+            <TextInput
+              style={styles.entryInput}
+              value={entry}
+              onChangeText={(v) => {
+                setEntry(v);
+                if (entryError) setEntryError(null);
+              }}
+              keyboardType="number-pad"
+              inputMode="numeric"
+              placeholder="0"
+              placeholderTextColor="#9AA6B8"
+              accessibilityLabel={`Number of ${unit} completed`}
+              testID="wsf-contribute-entry"
+            />
+          );
+          // On a very narrow screen (or at 200% zoom) the two round buttons
+          // and the input no longer fit on one line: the input takes its own
+          // line and the buttons sit underneath, still full size.
+          if (windowWidth < 320) {
+            return (
+              <View style={styles.entryStack}>
+                {input}
+                <View style={styles.entryStackButtons}>
+                  {minus}
+                  {plus}
+                </View>
+              </View>
+            );
+          }
+          return (
+            <View style={styles.entryRow}>
+              {minus}
+              {input}
+              {plus}
+            </View>
+          );
+        })()}
         <View style={styles.quickRow}>
           {[5, 10, 25].map((n) => (
             <Pressable
@@ -1274,6 +1301,8 @@ const styles = StyleSheet.create({
 
   // entry
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  entryStack: { gap: 10 },
+  entryStackButtons: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
   entryInput: {
     // flex: 1 alone lets a text input keep its intrinsic width and overflow
     // the row on web; minWidth 0 lets it shrink to the space that is there.
