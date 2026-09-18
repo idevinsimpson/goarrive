@@ -2109,8 +2109,19 @@ type GoalDoc = {
    * uid is stored here: the shared display must not be able to name a person.
    */
   reachedAt?: FirebaseFirestore.Timestamp;
-  reachedAttemptId?: string;
+  reachedAttemptId?: string | null;
   reachedSharedTotal?: number;
+  /**
+   * Set by wsfCreateGoal on every goal created since the crossing event
+   * exists. A goal that carries it may record an UNCREDITED event (reachedAt
+   * and reachedSharedTotal, reachedAttemptId null) when the total is observed
+   * at or beyond the target with no attributable attempt — the only way a
+   * crossing can be missed is several attempts landing in the same instant at
+   * the line. A goal without it (created before this field) never gets an
+   * uncredited event: it may already have been beyond its target for weeks,
+   * and "reached today" would be a false date.
+   */
+  crossingTracked?: boolean;
   /**
    * PACKAGE E. Explicit permission for ONE thing: this goal's approved
    * aggregate progress may be presented through the authorized unauthenticated
@@ -2666,7 +2677,9 @@ export const wsfContribute = onCall<ContributeRequest>(
     const {
       addedCount,
       alreadyRecorded,
-      crossedTarget,
+      crossedTarget: storedCrossedTarget,
+      goalHadNoEvent,
+      goalTracked,
       goalTarget,
       goalUnit,
       goalStatus,
@@ -2727,6 +2740,8 @@ export const wsfContribute = onCall<ContributeRequest>(
             // An attempt recorded before this field existed carries no value
             // and is reported as false — it is not evidence of a crossing.
             crossedTarget: prev.crossedTarget === true,
+            goalHadNoEvent: false,
+            goalTracked: goal.crossingTracked === true,
             goalTarget: goal.target,
             goalUnit: goal.unit,
             goalStatus: goal.status,
@@ -2775,55 +2790,14 @@ export const wsfContribute = onCall<ContributeRequest>(
           );
         }
 
-        //   4. THE TARGET-CROSSING EVENT, decided here and nowhere else.
-        //
-        // The shared total lives in shards, so "did THIS contribution move us
-        // from below the target to at or beyond it?" can only be answered by
-        // reading the shards inside this transaction — the same read
-        // wsfAdjustGoal already performs. Doing it after the transaction
-        // would be an inference from a total that may already contain someone
-        // else's work, which is exactly the misattribution this replaces.
-        //
-        // The read is skipped entirely once `reachedAt` exists, so the goal
-        // pays the ten-document read (and the contention that comes with it)
-        // only while the crossing is still ahead of it. Afterwards every
-        // contribution keeps the cheap single-shard write it has today.
-        //
-        // CONCURRENCY. Two attempts that together cross both read the shards
-        // in their own transaction and one of them writes a shard the other
-        // read, so Firestore aborts and retries the loser. The retry re-reads
-        // the committed total and the committed `reachedAt`, finds the goal
-        // already crossed, and records `crossedTarget: false`. Exactly one
-        // attempt is ever told it crossed, and it is the one whose
-        // transaction actually committed the crossing.
-        let crossed = false;
-        let crossingSharedTotal = 0;
-        if (goal.reachedAt == null) {
-          const shardSnaps = await Promise.all(
-            Array.from({ length: GOAL_SHARD_COUNT }, (_, i) =>
-              tx.get(goalShardRef(goalId, i))
-            )
-          );
-          const previousSharedTotal = shardSnaps.reduce((sum, snap) => {
-            const data = snap.data() as { count?: number } | undefined;
-            return sum + (typeof data?.count === 'number' ? data.count : 0);
-          }, 0);
-          const nextSharedTotal = previousSharedTotal + count;
-          // A crossing is a MOVE across the line: strictly below before, at or
-          // beyond after. A goal already at or beyond its target when this
-          // field was introduced (or after an upward correction) never crossed
-          // while anyone was watching, so no attempt is credited with a moment
-          // that did not happen. A non-positive target has no line to cross.
-          if (
-            goal.target > 0 &&
-            previousSharedTotal < goal.target &&
-            nextSharedTotal >= goal.target
-          ) {
-            crossed = true;
-            crossingSharedTotal = nextSharedTotal;
-          }
-        }
-
+        //   4. THE TARGET-CROSSING EVENT is NOT decided here. Reading all ten
+        // shards inside this transaction made every pre-crossing contribution
+        // conflict with every concurrent one (measured: 20 simultaneous
+        // attempts took 13 s instead of 0.5 s; 48 of 50 aborted). The shards
+        // exist so that contributions never contend, so the crossing is
+        // claimed AFTER this transaction commits, in a small transaction on
+        // the goal document only — see claimTargetCrossing below. The attempt
+        // is stored with crossedTarget false and upgraded by that claim.
         const shardIndex = randomGoalShardIndex();
         const shard = goalShardRef(goalId, shardIndex);
 
@@ -2836,20 +2810,11 @@ export const wsfContribute = onCall<ContributeRequest>(
           unit: goal.unit,
           communityGroupId: goal.communityGroupId,
           // Part of the attempt's stored outcome, exactly like `count`: a
-          // replay reports it rather than deciding it again.
-          crossedTarget: crossed,
+          // replay reports it rather than deciding it again. False until the
+          // post-commit claim below credits this attempt.
+          crossedTarget: false,
           createdAt: FieldValue.serverTimestamp(),
         });
-        if (crossed) {
-          // update(), not set(merge) — the goal document must already exist
-          // (it was read above) and the three fields are written together or
-          // not at all. No other field of the goal is touched.
-          tx.update(goalRef, {
-            reachedAt: FieldValue.serverTimestamp(),
-            reachedAttemptId: attemptId,
-            reachedSharedTotal: crossingSharedTotal,
-          });
-        }
         tx.set(
           shard,
           { count: FieldValue.increment(count) },
@@ -2875,7 +2840,9 @@ export const wsfContribute = onCall<ContributeRequest>(
         return {
           addedCount: count,
           alreadyRecorded: false as const,
-          crossedTarget: crossed,
+          crossedTarget: false,
+          goalHadNoEvent: goal.reachedAt == null,
+          goalTracked: goal.crossingTracked === true,
           goalTarget: goal.target,
           goalUnit: goal.unit,
           goalStatus: goal.status,
@@ -2884,6 +2851,24 @@ export const wsfContribute = onCall<ContributeRequest>(
           goalCommunityGroupId: goal.communityGroupId,
         };
       });
+
+    // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
+    // document only. See claimTargetCrossing for the rule.
+    let crossedTarget = storedCrossedTarget;
+    let observedSharedTotal: number | null = null;
+    if (!alreadyRecorded && goalHadNoEvent && goalTarget > 0) {
+      observedSharedTotal = await sumGoalShards(goalId);
+      if (observedSharedTotal >= goalTarget) {
+        crossedTarget = await claimTargetCrossing({
+          goalRef,
+          contribRef,
+          attemptId,
+          count,
+          observedSharedTotal,
+          goalTracked,
+        });
+      }
+    }
 
     // May this caller be told the community's CURRENT shared state? Decided by
     // evaluateGoalAggregateAccess — the SAME policy wsfGoalPulse uses — so a
@@ -2919,7 +2904,7 @@ export const wsfContribute = onCall<ContributeRequest>(
       return { addedCount, ownCredit, alreadyRecorded };
     }
 
-    const sharedTotal = await sumGoalShards(goalId);
+    const sharedTotal = observedSharedTotal ?? (await sumGoalShards(goalId));
 
     return {
       addedCount,
@@ -2933,6 +2918,90 @@ export const wsfContribute = onCall<ContributeRequest>(
     };
   }
 );
+
+/**
+ * Claim the one-time target-crossing event for a contribution that has just
+ * committed and then observed the shared total at or beyond the target.
+ *
+ * WHY AFTER THE COMMIT. The shared total lives in ten shards so that
+ * concurrent contributions never touch the same document. Deciding the
+ * crossing inside the contribution transaction meant reading all ten shards
+ * there, which turned every pre-crossing contribution into a conflict with
+ * every other. This claim touches ONLY the goal document (plus the caller's
+ * own attempt), so contention is confined to the handful of attempts that
+ * observe the crossing moment, and to one small transaction each.
+ *
+ * THE RULE.
+ *   • credited  := observedSharedTotal − count < target ≤ observedSharedTotal
+ *                  — without THIS attempt the observed total was below the
+ *                  line; with it, at or beyond. That is the honest meaning of
+ *                  "this one took us past our goal" when the exact order of
+ *                  concurrent shard writes is not recoverable.
+ *   • No event yet and credited: write reachedAt / reachedSharedTotal /
+ *     reachedAttemptId = this attempt, mark the attempt crossedTarget.
+ *   • No event yet, not credited (others' contributions landed between this
+ *     commit and this read, so the line was already behind us): record the
+ *     event UNCREDITED (reachedAttemptId null) — but only on a goal that
+ *     carries crossingTracked, i.e. one created since this feature exists. A
+ *     goal from before could have stood beyond its target for weeks; dating
+ *     that "today" would be false, so it simply never gets an event.
+ *   • Event already recorded but uncredited, and this attempt IS credited,
+ *     within two minutes of the event: attach the credit. Two attempts
+ *     landing in one instant can each observe an attributable total; the
+ *     goal document serializes them, so at most one is ever credited.
+ *   • Otherwise nothing: the event stands exactly as first written.
+ *
+ * A cheap plain read first: once the goal carries an event, the claim
+ * transaction is not even opened, so the post-crossing hot path pays one
+ * document read and nothing else.
+ */
+async function claimTargetCrossing(args: {
+  goalRef: FirebaseFirestore.DocumentReference;
+  contribRef: FirebaseFirestore.DocumentReference;
+  attemptId: string;
+  count: number;
+  observedSharedTotal: number;
+  goalTracked: boolean;
+}): Promise<boolean> {
+  const { goalRef, contribRef, attemptId, count, observedSharedTotal, goalTracked } = args;
+  const db = getFirestore();
+  const peek = (await goalRef.get()).data() as GoalDoc | undefined;
+  if (!peek) return false;
+  const credited =
+    observedSharedTotal - count < peek.target && observedSharedTotal >= peek.target;
+  if (peek.reachedAt != null && (peek.reachedAttemptId != null || !credited)) {
+    return false;
+  }
+  if (peek.reachedAt == null && !credited && !goalTracked) return false;
+
+  return await db.runTransaction(async (tx) => {
+    const snap = await tx.get(goalRef);
+    const goal = snap.data() as GoalDoc | undefined;
+    if (!goal) return false;
+    const target = goal.target;
+    const isCredited = observedSharedTotal - count < target && observedSharedTotal >= target;
+    if (goal.reachedAt == null) {
+      if (!isCredited && goal.crossingTracked !== true) return false;
+      tx.update(goalRef, {
+        reachedAt: FieldValue.serverTimestamp(),
+        reachedSharedTotal: observedSharedTotal,
+        reachedAttemptId: isCredited ? attemptId : null,
+      });
+      if (isCredited) tx.update(contribRef, { crossedTarget: true });
+      return isCredited;
+    }
+    if (
+      goal.reachedAttemptId == null &&
+      isCredited &&
+      Date.now() - goal.reachedAt.toMillis() < 120_000
+    ) {
+      tx.update(goalRef, { reachedAttemptId: attemptId });
+      tx.update(contribRef, { crossedTarget: true });
+      return true;
+    }
+    return false;
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // wsfGoalPulse — the AUTHORIZED unauthenticated aggregate-display read.
