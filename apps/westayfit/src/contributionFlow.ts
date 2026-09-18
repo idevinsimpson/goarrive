@@ -6,7 +6,7 @@
  * talks to the network or to storage.
  */
 
-import { formatCount, isReached, percentLabel, totalOfTargetLabel } from './ui/progressFormat';
+import { formatCount, isReached, totalOfTargetLabel } from './ui/progressFormat';
 
 export const MAX_COUNT = 100_000;
 
@@ -141,37 +141,51 @@ export type ContributeReceipt = {
   status?: 'active' | 'closed';
 };
 
-export type ResultVariant = 'alreadyRecorded' | 'crossed' | 'postTarget' | 'ordinary' | 'ownOnly';
+export type ResultVariant = 'alreadyRecorded' | 'reached' | 'postTarget' | 'ordinary' | 'ownOnly';
 
 /**
  * Which story the confirmed result tells.
  *
- * `crossed` is claimed only when the confirmed shared total is at or beyond
- * the target AND the total without this member's own confirmed addition is
- * below it. Under concurrency the server's total may include contributions
- * that landed after this one, so this rule can UNDER-claim a crossing (it
- * falls to `postTarget`); it never assigns someone else's crossing to this
- * member. The callable supplies no isolated before/after pair, so nothing
- * here computes or shows one.
+ * The callable returns this member's exact addition and the community's
+ * current confirmed total. It carries NO isolated before/after pair and no
+ * one-time crossing event, and under concurrency the current total can
+ * include work that landed after this member's own, so the client never
+ * infers that THIS member crossed the target — not from
+ * `sharedTotal - addedCount`, not from anything else.
+ *
+ * What it can say truthfully:
+ *   - below the target: ordinary
+ *   - at or beyond the target: `reached` ("Our goal is reached."), which
+ *     attributes nothing to anyone; when the confirmed total this member
+ *     saw BEFORE recording was already at or beyond the target, the goal
+ *     was reached before they acted and the result reads as `postTarget`
+ *     ("We're now at X together."). `sharedBefore` is the last confirmed
+ *     total the screen showed; null when unknown (a replay after a reload)
+ *     falls to `reached`, which is still true.
+ *
+ * DESIGN / DATA GAP — AUTHORITATIVE TARGET-CROSSING EVENT: a one-time
+ * collective "WE did it" moment needs an authoritative crossing signal or
+ * achievement state from the server that cannot be misattributed or
+ * replayed. This package ships none.
  */
-export function resultVariant(r: ContributeReceipt): ResultVariant {
+export function resultVariant(r: ContributeReceipt, sharedBefore: number | null = null): ResultVariant {
   if (r.sharedTotal == null || r.target == null || r.unit == null || r.status == null) {
     return 'ownOnly';
   }
   if (r.alreadyRecorded) return 'alreadyRecorded';
-  const reached = isReached(r.sharedTotal, r.target);
-  if (!reached) return 'ordinary';
-  const withoutThis = r.sharedTotal - r.addedCount;
-  return withoutThis < r.target ? 'crossed' : 'postTarget';
+  if (!isReached(r.sharedTotal, r.target)) return 'ordinary';
+  if (sharedBefore != null && isReached(sharedBefore, r.target)) return 'postTarget';
+  return 'reached';
 }
 
 export function resultCopy(
   r: ContributeReceipt,
   communityName: string | null,
   /** The goal's unit as already loaded on the screen, for a receipt that carries none. */
-  unitHint: string | null = null
+  unitHint: string | null = null,
+  sharedBefore: number | null = null
 ): { headline: string; subline: string; standing: string | null } {
-  const variant = resultVariant(r);
+  const variant = resultVariant(r, sharedBefore);
   const unit = r.unit ?? unitHint ?? '';
   const added = `${formatCount(r.addedCount)} ${unit}`.trim();
   const who = communityName ?? 'We';
@@ -191,29 +205,29 @@ export function resultCopy(
     case 'alreadyRecorded':
       return {
         headline: 'This contribution was already recorded.',
-        subline: `It counted once. Your confirmed total on this goal is ${formatCount(r.ownCredit)} ${unit}.`,
+        subline: 'It counted once.',
         standing: `${who} ${isAre} at ${total}.`,
       };
-    case 'crossed':
+    case 'reached':
       return {
         headline: `You added ${added}.`,
-        subline: 'WE did it.',
-        standing: `Our ${formatCount(r.target!)}-${unit} goal is reached${
+        subline: 'Our goal is reached.',
+        standing: `Our goal of ${formatCount(r.target!)} ${unit} is reached${
           r.status === 'active' ? ' and still open' : ''
-        }. ${who} ${isAre} at ${total}.`,
+        }. ${who} ${isAre} now at ${total}.`,
       };
     case 'postTarget':
       return {
         headline: `You added ${added}.`,
         subline: `We’re now at ${total} together.`,
-        standing: r.status === 'active' ? 'The goal is reached and still open.' : 'The goal is reached.',
+        standing: null,
       };
     case 'ordinary':
     default:
       return {
         headline: `You added ${added}.`,
         subline: 'You moved us closer.',
-        standing: `${who} ${isAre} now at ${total} · ${percentLabel(r.sharedTotal!, r.target!)}.`,
+        standing: `${who} ${isAre} now at ${total}.`,
       };
   }
 }

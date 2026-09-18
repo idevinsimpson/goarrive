@@ -279,9 +279,9 @@ test.describe('community goal seam', () => {
       await pageB.getByTestId('wsf-contribute-entry').fill('30');
       await pageB.getByTestId('wsf-contribute-review').click();
       await pageB.getByTestId('wsf-contribute-submit').click();
-      // Exact: "Your confirmed total: 30 squats" — not a substring that 130 would satisfy.
+      // Exact: "Your total on this goal: 30 squats" — not a substring that 130 would satisfy.
       await expect(pageB.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed total: 30 squats',
+        'Your total on this goal: 30 squats',
         { timeout: 20_000 }
       );
 
@@ -291,7 +291,7 @@ test.describe('community goal seam', () => {
       await pageA.getByTestId('wsf-contribute-review').click();
       await pageA.getByTestId('wsf-contribute-submit').click();
       await expect(pageA.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed total: 20 squats',
+        'Your total on this goal: 20 squats',
         { timeout: 20_000 }
       );
       await expect(pageA.getByTestId('wsf-contribute-shared-total')).toHaveText(
@@ -300,7 +300,7 @@ test.describe('community goal seam', () => {
       );
       await pageB.reload();
       await expect(pageB.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed total: 30 squats',
+        'Your total on this goal: 30 squats',
         { timeout: 20_000 }
       );
       await expect(pageB.getByTestId('wsf-contribute-shared-total')).toHaveText(
@@ -477,17 +477,18 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible({ timeout: 20_000 });
       await page.getByTestId('wsf-contribute-reconcile').click();
       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed total: 11 squats',
+        'Your total on this goal: 11 squats',
         { timeout: 20_000 }
       );
 
-      // A fresh attempt from the result screen: new entry, review, record.
-      await page.getByTestId('wsf-contribute-another').click();
+      // A fresh attempt through the route: new entry, review, record.
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
       await page.getByTestId('wsf-contribute-entry').fill('7');
       await page.getByTestId('wsf-contribute-review').click();
       await page.getByTestId('wsf-contribute-submit').click();
       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed total: 18 squats',
+        'Your total on this goal: 18 squats',
         { timeout: 20_000 }
       );
 
@@ -498,7 +499,7 @@ test.describe('community goal seam', () => {
       // Attempt 2's work stands. Attempt 1 is not resurrected over it, and the
       // confirmed credit does not move.
       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed total: 18 squats'
+        'Your total on this goal: 18 squats'
       );
       await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
       const stored = await page.evaluate(

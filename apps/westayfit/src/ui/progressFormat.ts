@@ -144,10 +144,10 @@ export function statusLine(completed: number, target: number, status: GoalStatus
       return `Only ${formatCount(left)} to go`;
     case 'reachedOpen':
       return over > 0
-        ? `Goal reached · ${formatCount(over)} beyond it · still open`
+        ? `${formatCount(over)} beyond our goal · still open`
         : 'Goal reached · still open';
     case 'closedReached':
-      return over > 0 ? `Goal reached · ${formatCount(over)} beyond it` : 'Goal reached';
+      return over > 0 ? `${formatCount(over)} beyond our goal` : 'Goal reached';
     case 'closedUnreached':
       return `Closed at ${percentLabel(completed, target)}`;
   }

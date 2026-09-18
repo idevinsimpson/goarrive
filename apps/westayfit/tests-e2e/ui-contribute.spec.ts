@@ -293,7 +293,7 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   await expect(page.getByTestId('wsf-contribute-community')).toHaveText('Maple Street Movers', { timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-goal-title')).toHaveText('Squats together this week');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('241 of 500 squats');
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 0 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 0 squats');
   await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to community');
   await page.waitForTimeout(400);
   await snap(page, '01-start-moving');
@@ -369,9 +369,12 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   await expect(page.getByTestId('wsf-contribute-percent')).toHaveText('52.2% complete');
   await expect(page.getByTestId('wsf-contribute-status')).toHaveText('239 to go');
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
-    'Maple Street Movers is now at 261 of 500 squats · 52.2%.'
+    'Maple Street Movers is now at 261 of 500 squats.'
   );
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 20 squats');
+  // No immediate repeat prompt: the goal schema carries no repeat rule.
+  await expect(page.getByTestId('wsf-contribute-another')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to community');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 20 squats');
   await expect(page.getByTestId('wsf-contribute-we')).toHaveAttribute('data-fill-ratio', '0.5220');
   expect(writes, 'exactly one write for one Record').toBe(1);
   expect(await page.evaluate((k) => window.localStorage.getItem(k), key)).toBeNull();
@@ -380,8 +383,8 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   await snapFull(page, '06-confirmed-ordinary-full');
 
   // ---- concurrency: a peer's 15 lands before this member's next 5 -------------------
-  await page.getByTestId('wsf-contribute-another').click();
-  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible();
+  await page.goto(`/contribute/${goalId}?groupId=${fx.groupId}&mode=record`);
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('wsf-contribute-entry').fill('5');
   await page.getByTestId('wsf-contribute-review').click();
   await addToShard(goalId, 15);
@@ -389,9 +392,12 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 5 squats.');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('281 of 500 squats');
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 25 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 25 squats');
+  await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
+    'Maple Street Movers is now at 281 of 500 squats.'
+  );
   const receiptText = await page.getByTestId('wsf-contribute-receipt').innerText();
-  expect(receiptText, 'no before/after pair, no arrow, no crediting of the peer').not.toMatch(/→|261 to 281|added 20/);
+  expect(receiptText, 'no before/after pair, no arrow, no crediting of the peer').not.toMatch(/→|261 to 281|added 20|added 15/);
   expect(writes).toBe(2);
   await snap(page, '06b-confirmed-after-concurrent-peer');
 
@@ -415,7 +421,7 @@ test('mode=record starts at entry; a cold link without groupId stays generic', a
   await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-move-screen')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-community')).toHaveText('Maple Street Movers', { timeout: 20_000 });
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 60 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 60 squats');
   await page.waitForTimeout(400);
   await snap(page, '03b-mode-record-entry');
 
@@ -481,8 +487,17 @@ test('unknown outcome keeps the same attempt; replaying a landed attempt is "alr
   await page.getByTestId('wsf-contribute-review').click();
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('wsf-contribute-pending')).toContainText('We’re checking your contribution.');
-  await expect(page.getByTestId('wsf-contribute-pending')).toContainText('Don’t record this effort again.');
+  await expect(page.getByTestId('wsf-contribute-pending')).toContainText('We couldn’t confirm your contribution yet.');
+  await expect(page.getByTestId('wsf-contribute-pending')).toContainText(
+    'We don’t know whether this effort was recorded. Don’t record it again.'
+  );
+  await expect(page.getByTestId('wsf-contribute-pending')).toContainText(
+    'This sends the same attempt again. If it already reached us, it will not count twice.'
+  );
+  // No control that discards the only recovery context for an unresolved attempt.
+  await expect(page.getByTestId('wsf-contribute-discard-pending')).toHaveCount(0);
+  const pendingText = await page.getByTestId('wsf-contribute-pending').innerText();
+  expect(pendingText).not.toMatch(/remove this reminder|discard|check status|try again/i);
   await expect(page.getByTestId('wsf-contribute-pending-count')).toHaveText('You entered 20 squats.');
   await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveText('Confirm this contribution');
   await expect(page.getByTestId('wsf-contribute-receipt')).toHaveCount(0);
@@ -503,14 +518,15 @@ test('unknown outcome keeps the same attempt; replaying a landed attempt is "alr
   await page.getByTestId('wsf-contribute-reconcile').click();
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'ordinary');
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 20 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 20 squats');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('261 of 500 squats');
   expect(seen[0]).toBe(stored.attemptId);
   expect(seen[1]).toBe(stored.attemptId);
   expect(await page.evaluate((k) => window.localStorage.getItem(k), key)).toBeNull();
 
   // ---- 10. a landed attempt whose response was lost: replay is "already recorded" ---
-  await page.getByTestId('wsf-contribute-another').click();
+  await page.goto(`/contribute/${goalId}?groupId=${fx.groupId}&mode=record`);
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('wsf-contribute-entry').fill('7');
   await page.getByTestId('wsf-contribute-review').click();
   mode = 'landButDrop';
@@ -522,8 +538,9 @@ test('unknown outcome keeps the same attempt; replaying a landed attempt is "alr
   await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'alreadyRecorded');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('This contribution was already recorded.');
   await expect(page.getByTestId('wsf-contribute-result-subline')).toContainText('It counted once.');
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 27 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 27 squats');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('268 of 500 squats');
+  await expect(page.getByTestId('wsf-contribute-another')).toHaveCount(0);
   const text = await page.getByTestId('wsf-contribute-receipt').innerText();
   expect(text).not.toMatch(/WE did it|closer/);
   // The server counted it exactly once.
@@ -536,7 +553,8 @@ test('unknown outcome keeps the same attempt; replaying a landed attempt is "alr
   // The attempt landed, the response was lost, and the Champion removed the
   // member before they replayed it. The server answers about THEIR effort only:
   // it counted once, here is their total — and nothing about the community.
-  await page.getByTestId('wsf-contribute-another').click();
+  await page.goto(`/contribute/${goalId}?groupId=${fx.groupId}&mode=record`);
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('wsf-contribute-entry').fill('3');
   await page.getByTestId('wsf-contribute-review').click();
   mode = 'landButDrop';
@@ -548,7 +566,7 @@ test('unknown outcome keeps the same attempt; replaying a landed attempt is "alr
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'ownOnly');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('This contribution was already recorded.');
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 30 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 30 squats');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-we')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-another')).toHaveCount(0);
@@ -624,7 +642,7 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
     endsInMs: -20 * 24 * 60 * 60_000, displayAuthorized: true, ownCredit: { uid: fx.memberUid, total: 40 },
   });
   await seedGoal(fx.groupId, fx.championUid, {
-    goalId: crossId, title: 'Squats together this week', target: 500, unit: 'squats', total: 490, status: 'active',
+    goalId: crossId, title: 'Squats together this week', target: 500, unit: 'squats', total: 470, status: 'active',
     endsInMs: 3 * 24 * 60 * 60_000,
   });
   await signInVia(page, fx.memberEmail, fx.password);
@@ -636,7 +654,7 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('312 of 500 push-ups');
   await expect(page.getByTestId('wsf-contribute-percent')).toHaveText('62.4% complete');
   await expect(page.getByTestId('wsf-contribute-status')).toHaveText('Closed at 62.4%');
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 40 push-ups');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 40 push-ups');
   await expect(page.getByTestId('wsf-contribute-entry')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-submit')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-community')).toHaveText('Maple Street Movers', { timeout: 20_000 });
@@ -646,29 +664,39 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await page.waitForTimeout(400);
   await snap(page, '09-closed-goal');
 
-  // ---- 11. crossing the target --------------------------------------------------------------
+  // ---- 11. the goal is reached, with a peer's 20 landing between review and record ------------
+  // The member saw 470, entered 20, and a peer's 20 landed first. The server
+  // returns 510. Nothing may say THIS member crossed the target.
   await page.goto(`/contribute/${crossId}?groupId=${fx.groupId}&mode=record`);
   await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('470 of 500 squats');
   await page.getByTestId('wsf-contribute-entry').fill('20');
   await page.getByTestId('wsf-contribute-review').click();
+  await addToShard(crossId, 20);
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'crossed');
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'reached');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 20 squats.');
-  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('WE did it.');
+  await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('Our goal is reached.');
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
-    'Our 500-squats goal is reached and still open. Maple Street Movers is at 510 of 500 squats.'
+    'Our goal of 500 squats is reached and still open. Maple Street Movers is now at 510 of 500 squats.'
   );
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('510 of 500 squats');
   await expect(page.getByTestId('wsf-contribute-percent')).toHaveText('100% complete');
-  await expect(page.getByTestId('wsf-contribute-status')).toHaveText('Goal reached · 10 beyond it · still open');
+  await expect(page.getByTestId('wsf-contribute-status')).toHaveText('10 beyond our goal · still open');
   await expect(page.getByTestId('wsf-contribute-we')).toHaveAttribute('data-fill-ratio', '1.0000');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 20 squats');
+  const reached = await page.getByTestId('wsf-contribute-receipt').innerText();
+  expect(reached).not.toMatch(/WE did it|you crossed|winning|final rep|closer|completed the goal|→/i);
+  await expect(page.getByTestId('wsf-contribute-another')).toHaveCount(0);
   await page.waitForTimeout(400);
   await snap(page, '11-goal-reached');
   await snapFull(page, '11-goal-reached-full');
 
   // ---- 12. past the target while still open ----------------------------------------------------
-  await page.getByTestId('wsf-contribute-another').click();
+  await page.goto(`/contribute/${crossId}?groupId=${fx.groupId}&mode=record`);
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('510 of 500 squats');
   await page.getByTestId('wsf-contribute-entry').fill('5');
   await page.getByTestId('wsf-contribute-review').click();
   await page.getByTestId('wsf-contribute-submit').click();
@@ -676,9 +704,11 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'postTarget');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 5 squats.');
   await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('We’re now at 515 of 500 squats together.');
+  await expect(page.getByTestId('wsf-contribute-status')).toHaveText('15 beyond our goal · still open');
+  await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveCount(0);
   const post = await page.getByTestId('wsf-contribute-receipt').innerText();
   expect(post).not.toMatch(/closer|WE did it/);
-  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your confirmed total: 25 squats');
+  await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 25 squats');
   await page.waitForTimeout(300);
   await snap(page, '12-post-target');
 });

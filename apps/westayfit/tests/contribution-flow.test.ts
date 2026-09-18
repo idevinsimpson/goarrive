@@ -84,51 +84,74 @@ describe('the confirmed result never credits someone else’s work to this membe
 
   it('is ordinary below the target', () => {
     const r = { ...base, addedCount: 20, sharedTotal: 261, target: 500 };
-    expect(resultVariant(r)).toBe('ordinary');
-    const c = resultCopy(r, 'Smyrna Strong');
+    expect(resultVariant(r, 241)).toBe('ordinary');
+    const c = resultCopy(r, 'Smyrna Strong', null, 241);
     expect(c.headline).toBe('You added 20 squats.');
     expect(c.subline).toBe('You moved us closer.');
-    expect(c.standing).toBe('Smyrna Strong is now at 261 of 500 squats · 52.2%.');
+    expect(c.standing).toBe('Smyrna Strong is now at 261 of 500 squats.');
   });
 
   it('under concurrency reports the current total without assigning the difference', () => {
     // Someone else's 15 landed too. The member added 20; the total is 276.
     const r = { ...base, addedCount: 20, sharedTotal: 276, target: 500 };
-    const c = resultCopy(r, 'Smyrna Strong');
+    const c = resultCopy(r, 'Smyrna Strong', null, 241);
     expect(c.headline).toBe('You added 20 squats.');
-    expect(c.standing).toBe('Smyrna Strong is now at 276 of 500 squats · 55.2%.');
+    expect(c.standing).toBe('Smyrna Strong is now at 276 of 500 squats.');
     expect(JSON.stringify(c)).not.toMatch(/241|→|35 /);
   });
 
-  it('claims a crossing only when the total without this addition was below the target', () => {
-    expect(resultVariant({ ...base, addedCount: 20, sharedTotal: 510, target: 500 })).toBe('crossed');
-    expect(resultVariant({ ...base, addedCount: 20, sharedTotal: 500, target: 500 })).toBe('crossed');
-    // The total already passed the target before this addition (someone else crossed).
-    expect(resultVariant({ ...base, addedCount: 20, sharedTotal: 525, target: 500 })).toBe('postTarget');
-    expect(resultVariant({ ...base, addedCount: 5, sharedTotal: 515, target: 500 })).toBe('postTarget');
+  it('never claims a crossing from sharedTotal - addedCount', () => {
+    // target 500, member added 20, current total 510. Before this member the
+    // confirmed total they saw was 470; another member's 20 may have landed
+    // in between, so nothing may say THIS member crossed the target.
+    const r = { ...base, addedCount: 20, sharedTotal: 510, target: 500 };
+    for (const before of [470, 490, null]) {
+      const variant = resultVariant(r, before);
+      expect(variant).not.toBe('crossed');
+      expect(variant).toBe('reached');
+      const c = resultCopy(r, 'Maple Street Movers', null, before);
+      const text = JSON.stringify(c);
+      expect(text).not.toMatch(/WE did it|you crossed|your contribution (reached|completed)|winning|final rep|closer/i);
+      expect(c.headline).toBe('You added 20 squats.');
+      expect(c.subline).toBe('Our goal is reached.');
+      expect(c.standing).toBe(
+        'Our goal of 500 squats is reached and still open. Maple Street Movers is now at 510 of 500 squats.'
+      );
+    }
   });
 
-  it('writes the collective crossing copy with the true total and overshoot', () => {
-    const c = resultCopy({ ...base, addedCount: 20, sharedTotal: 510, target: 500 }, 'Smyrna Strong');
-    expect(c.headline).toBe('You added 20 squats.');
-    expect(c.subline).toBe('WE did it.');
-    expect(c.standing).toBe('Our 500-squats goal is reached and still open. Smyrna Strong is at 510 of 500 squats.');
-  });
-
-  it('never says "closer" once the goal is reached', () => {
-    const c = resultCopy({ ...base, addedCount: 5, sharedTotal: 515, target: 500 }, null);
+  it('reads as post-target when the goal was already reached before this member acted', () => {
+    const r = { ...base, addedCount: 5, sharedTotal: 515, target: 500 };
+    expect(resultVariant(r, 510)).toBe('postTarget');
+    expect(resultVariant(r, 500)).toBe('postTarget');
+    const c = resultCopy(r, 'Maple Street Movers', null, 510);
     expect(c.headline).toBe('You added 5 squats.');
     expect(c.subline).toBe('We’re now at 515 of 500 squats together.');
-    expect(JSON.stringify(c)).not.toMatch(/closer/);
+    expect(c.standing).toBeNull();
+    expect(JSON.stringify(c)).not.toMatch(/closer|WE did it/);
+  });
+
+  it('exactly at the target reads reached, with the closed wording when closed', () => {
+    expect(resultCopy({ ...base, addedCount: 20, sharedTotal: 500, target: 500 }, null, null, 480).standing).toBe(
+      'Our goal of 500 squats is reached and still open. We are now at 500 of 500 squats.'
+    );
+    expect(
+      resultCopy({ ...base, addedCount: 20, sharedTotal: 500, target: 500, status: 'closed' }, null, null, 480).standing
+    ).toBe('Our goal of 500 squats is reached. We are now at 500 of 500 squats.');
+  });
+
+  it('does not invent pluralisation for arbitrary unit strings', () => {
+    const c = resultCopy({ ...base, unit: 'minutes of walking', addedCount: 30, sharedTotal: 5010, target: 5000 }, null, null, 4980);
+    expect(c.standing).toBe('Our goal of 5,000 minutes of walking is reached and still open. We are now at 5,010 of 5,000 minutes of walking.');
   });
 
   it('does not celebrate an already-recorded replay', () => {
     const r = { ...base, addedCount: 20, sharedTotal: 261, target: 500, alreadyRecorded: true };
-    expect(resultVariant(r)).toBe('alreadyRecorded');
-    const c = resultCopy(r, 'Smyrna Strong');
+    expect(resultVariant(r, 241)).toBe('alreadyRecorded');
+    const c = resultCopy(r, 'Smyrna Strong', null, 241);
     expect(c.headline).toBe('This contribution was already recorded.');
-    expect(c.subline).toContain('counted once');
-    expect(c.subline).toContain('20 squats');
+    expect(c.subline).toBe('It counted once.');
+    expect(c.standing).toBe('Smyrna Strong is at 261 of 500 squats.');
     expect(JSON.stringify(c)).not.toMatch(/WE did it|closer/);
   });
 
@@ -138,7 +161,6 @@ describe('the confirmed result never credits someone else’s work to this membe
     const c = resultCopy(r, null);
     expect(c.headline).toBe('You added 20.');
     expect(c.standing).toBeNull();
-    // With the unit the screen already knows, and for a replay:
     const replay = resultCopy({ addedCount: 20, ownCredit: 34, alreadyRecorded: true }, 'Smyrna Strong', 'squats');
     expect(replay.headline).toBe('This contribution was already recorded.');
     expect(replay.subline).toBe('It counted once.');
@@ -147,7 +169,7 @@ describe('the confirmed result never credits someone else’s work to this membe
   });
 
   it('uses a generic subject when the community context is not verified', () => {
-    const c = resultCopy({ ...base, addedCount: 20, sharedTotal: 261, target: 500 }, null);
-    expect(c.standing).toBe('We are now at 261 of 500 squats · 52.2%.');
+    const c = resultCopy({ ...base, addedCount: 20, sharedTotal: 261, target: 500 }, null, null, 241);
+    expect(c.standing).toBe('We are now at 261 of 500 squats.');
   });
 });

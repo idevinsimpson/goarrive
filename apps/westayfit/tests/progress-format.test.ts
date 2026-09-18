@@ -139,9 +139,9 @@ describe('the exact total is retained beyond the goal', () => {
     expect(statusLine(241, 500, 'active')).toBe('259 to go');
     expect(statusLine(450, 500, 'active')).toBe('Only 50 to go');
     expect(statusLine(500, 500, 'active')).toBe('Goal reached · still open');
-    expect(statusLine(620, 500, 'active')).toBe('Goal reached · 120 beyond it · still open');
+    expect(statusLine(620, 500, 'active')).toBe('120 beyond our goal · still open');
     expect(statusLine(500, 500, 'closed')).toBe('Goal reached');
-    expect(statusLine(620, 500, 'closed')).toBe('Goal reached · 120 beyond it');
+    expect(statusLine(620, 500, 'closed')).toBe('120 beyond our goal');
     expect(statusLine(312, 500, 'closed')).toBe('Closed at 62.4%');
   });
 });

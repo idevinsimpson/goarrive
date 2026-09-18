@@ -28,7 +28,6 @@ import {
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import {
-  clearPending,
   clearPendingIfAttempt,
   isSameContext,
   loadPending,
@@ -149,6 +148,10 @@ export default function ContributeToGoal() {
   // re-render (would risk generating a new id mid-submit and defeat
   // idempotency). Cleared on each fresh "Record" tap.
   const attemptRef = useRef<string | null>(null);
+  // The last confirmed shared total the screen showed before the write. The
+  // result reads it to tell "our goal is reached" from "we were already past
+  // it"; it never produces a member-specific crossing claim.
+  const sharedBeforeRef = useRef<number | null>(null);
 
   // Optional timer on the movement screen. It measures nothing the app
   // records; it is a stopwatch for the member's own reference.
@@ -190,6 +193,7 @@ export default function ContributeToGoal() {
     setLastResult(null);
     setLegacyOrphan(null);
     setRefusal(null);
+    sharedBeforeRef.current = null;
     setEntry('');
     setEntryError(null);
     setReviewCount(null);
@@ -484,6 +488,7 @@ export default function ContributeToGoal() {
     const count = reviewCount;
     setEntryError(null);
     setSubmitting(true);
+    sharedBeforeRef.current = state.pulse.sharedTotal;
 
     if (!attemptRef.current) attemptRef.current = mintAttemptId();
     const attemptId = attemptRef.current;
@@ -539,7 +544,7 @@ export default function ContributeToGoal() {
       // form, which the new context already reset.
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [state.kind, submitting, reviewCount, goalId, uid, sendContribute]);
+  }, [state, submitting, reviewCount, goalId, uid, sendContribute]);
 
   // Replay the SAME attempt. The server keys idempotency on goal, account and
   // attemptId and returns the original receipt if the earlier call landed.
@@ -549,6 +554,8 @@ export default function ContributeToGoal() {
     setSubmitting(true);
     setEntryError(null);
     attemptRef.current = pending.attemptId;
+    sharedBeforeRef.current =
+      state.kind === 'ready' || state.kind === 'closed' ? state.pulse.sharedTotal : null;
     const generation = generationRef.current;
     const owner = uid as string;
     const startedGoal = goalId;
@@ -584,33 +591,13 @@ export default function ContributeToGoal() {
     } finally {
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [pending, submitting, goalId, uid, sendContribute]);
+  }, [pending, submitting, goalId, uid, sendContribute, state]);
 
-  const onDiscardPending = useCallback(() => {
-    if (submitting || !pending) return;
-    // Discarding does NOT retract the server-side record if it landed —
-    // this only removes the local reminder. No shared-total mutation happens.
-    // The member has said they are sure; they return to a clean entry, and
-    // anything they record next is a genuinely new attempt.
-    clearPending(pending.goalId, uid as string);
-    setPending(null);
-    setEntryError(null);
-    setEntry('');
-    setReviewCount(null);
-    attemptRef.current = null;
-    setStep('enter');
-  }, [pending, submitting, uid]);
-
-  const onAnother = useCallback(() => {
-    // A genuinely new attempt: a fresh id is minted on the next Record.
-    setLastResult(null);
-    setRefusal(null);
-    setEntry('');
-    setEntryError(null);
-    setReviewCount(null);
-    attemptRef.current = null;
-    setStep('enter');
-  }, []);
+  // There is deliberately no control that discards an unresolved attempt's
+  // reminder: it is the only recovery context for effort whose outcome is
+  // unknown. The supported path is to leave and come back, restore the same
+  // attempt, and confirm it. (Storage cleanup on account/goal transitions
+  // lives in src/pendingContribution.ts.)
 
   const onRefusalEdit = useCallback(() => {
     setRefusal(null);
@@ -750,7 +737,7 @@ export default function ContributeToGoal() {
 
   const ownCreditLine = (value: number, u: string) => (
     <Text style={styles.ownCredit} testID="wsf-contribute-own-credit">
-      {`Your confirmed total: ${formatCount(value)} ${u}`}
+      {`Your total on this goal: ${formatCount(value)} ${u}`}
     </Text>
   );
 
@@ -778,8 +765,8 @@ export default function ContributeToGoal() {
   // ---- confirmed result: the signature moment -------------------------------
   if (lastResult) {
     const r = lastResult;
-    const variant = resultVariant(r);
-    const copy = resultCopy(r, communityName, unit);
+    const variant = resultVariant(r, sharedBeforeRef.current);
+    const copy = resultCopy(r, communityName, unit, sharedBeforeRef.current);
     const hasShared = variant !== 'ownOnly';
     return screen(
       <>
@@ -793,10 +780,7 @@ export default function ContributeToGoal() {
           <Text style={styles.heroHeadline} testID="wsf-contribute-result-headline">
             {copy.headline}
           </Text>
-          <Text
-            style={[styles.heroSubline, variant === 'crossed' ? styles.heroSublineBig : null]}
-            testID="wsf-contribute-result-subline"
-          >
+          <Text style={styles.heroSubline} testID="wsf-contribute-result-subline">
             {copy.subline}
           </Text>
           {hasShared ? (
@@ -840,16 +824,12 @@ export default function ContributeToGoal() {
             testID="wsf-contribute-back"
             label={hasShared ? backLabel : 'Back to home'}
           />
-          {hasShared && r.status === 'active' ? (
-            <Pressable
-              onPress={onAnother}
-              accessibilityRole="button"
-              style={styles.secondaryButton}
-              testID="wsf-contribute-another"
-            >
-              <Text style={styles.secondaryButtonText}>Add another contribution</Text>
-            </Pressable>
-          ) : null}
+          {/*
+            DESIGN / DATA GAP — REPEAT POLICY: no "Add another contribution"
+            here. The goal schema carries no published repeat rule, so the
+            result does not encourage an immediate second attempt. The
+            community page's goal action remains available.
+          */}
         </View>
         {renderTestNote()}
       </>,
@@ -920,9 +900,9 @@ export default function ContributeToGoal() {
         {renderChrome(false)}
         <View style={styles.pendingCard} testID="wsf-contribute-pending">
           <Text style={styles.eyebrowMuted}>Not confirmed yet</Text>
-          <Text style={styles.heading}>We’re checking your contribution.</Text>
+          <Text style={styles.heading}>We couldn’t confirm your contribution yet.</Text>
           <Text style={styles.body}>
-            We don’t have confirmation yet. Don’t record this effort again.
+            We don’t know whether this effort was recorded. Don’t record it again.
           </Text>
           <Text style={styles.pendingCount} testID="wsf-contribute-pending-count">
             {`You entered ${formatCount(pending.count)} ${unit}.`}
@@ -939,21 +919,9 @@ export default function ContributeToGoal() {
           <Text style={styles.caption}>
             This sends the same attempt again. If it already reached us, it will not count twice.
           </Text>
-          <View style={styles.pendingSecondary}>
-            <Pressable
-              onPress={onDiscardPending}
-              disabled={submitting}
-              accessibilityRole="button"
-              style={styles.tertiaryButton}
-              testID="wsf-contribute-discard-pending"
-            >
-              <Text style={styles.tertiaryButtonText}>Remove this reminder</Text>
-            </Pressable>
-            <Text style={styles.caption}>
-              Only removes the reminder on this device. It does not record or undo anything, and
-              it will not tell you whether the effort counted.
-            </Text>
-          </View>
+          <Text style={styles.caption}>
+            You can leave this page. The same attempt will be here when you come back.
+          </Text>
         </View>
         <View style={styles.actions}>
           <ButtonLink
@@ -1262,7 +1230,6 @@ const styles = StyleSheet.create({
     borderColor: '#EAD9A6',
   },
   pendingCount: { color: wsfTheme.colors.text, fontSize: 18, fontWeight: '800' },
-  pendingSecondary: { gap: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EAD9A6' },
   eyebrowMuted: {
     color: wsfTheme.colors.textMuted,
     fontSize: 12,
@@ -1298,7 +1265,6 @@ const styles = StyleSheet.create({
   },
   heroHeadline: { color: CREAM, fontSize: 28, fontWeight: '800', lineHeight: 34, letterSpacing: -0.3 },
   heroSubline: { color: PROGRESS_GREEN, fontSize: 18, fontWeight: '700', lineHeight: 24 },
-  heroSublineBig: { fontSize: 30, lineHeight: 36, letterSpacing: -0.3 },
   weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
   heroFacts: { alignItems: 'center', gap: 2 },
   heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
