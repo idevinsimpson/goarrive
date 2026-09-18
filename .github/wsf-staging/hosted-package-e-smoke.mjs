@@ -1263,7 +1263,7 @@ async function caseW4W7W8Browser(browser) {
     await champion.getByTestId('wsf-community-qr-toggle').click();
     await visible(champion.getByTestId('wsf-community-qr-symbol'));
     const qrUrl = await champion.getByTestId('wsf-community-qr-symbol').getAttribute('data-qr-url');
-    assert(qrUrl === `${BASE_URL.replace(/\/+$/, '')}/join/${fx.joinCode}`, `The QR symbol does not encode the fixture join link: ${sanitize(qrUrl)}`);
+    assert(qrUrl === `${BASE_URL}/join/${fx.joinCode}`, `The QR symbol does not encode the fixture join link: ${sanitize(qrUrl)}`);
     await snap(champion, '19-phone-champion-join-qr-w8');
     check('guided rules, share + momentum, join QR (W4/W7/W8)', 'PASS', 'guide panel (non-medical) on entry; momentum + share control for the member, no QR/Manage on an inviteOnly community; Champion QR inside Manage encodes the fixture join link');
   } finally {
