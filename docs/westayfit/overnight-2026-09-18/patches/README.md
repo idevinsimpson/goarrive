@@ -20,6 +20,37 @@ rules by a separate owner-run step. No IAM/WIF broadening is proposed or needed 
 this; whether the existing WIF principal already holds rules-deploy permission was not
 tested and is not claimed.
 
+## D-1 fails-before evidence (2026-09-18 ~12:30 UTC, head e910142 build, spec only)
+
+The regression spec from the D-1 patch was run alone against the unpatched build (the
+`signup.tsx` change NOT applied; only the spec file placed in the working tree, then removed):
+
+```
+✘ d1-signup-single-navigation.spec.ts:153 › D-1: a verified member is not pulled back to
+  /verify-email by the late send round trip (12.2s)
+  expect(locator).toBeVisible() failed at line 176  — wsf-profile: element(s) not found
+  1 failed
+```
+
+Reading: the member reached profile setup (the earlier `wsf-profile` expectation passed),
+the held `wsfSendVerificationEmail` response was released, and 4 s later profile setup was
+gone. That is exactly the late duplicate `router.replace('/verify-email')`. The passes-after
+run needs the product change applied to the branch build, which waits for the owner's
+explicit authorization.
+
+## D-5 rules coverage against the 08:08 ET audit's six cases
+
+| Audit case | Test | Where |
+|---|---|---|
+| active member can read its community | `member can read own group` | existing suite (`wsf-rules.test.ts`) |
+| removed member cannot | `a REMOVED member cannot read the group (row kept, status changed)` | **new** in the D-5 patch |
+| departed member cannot | `a DEPARTED member cannot read the group` | **new** in the D-5 patch |
+| unrelated member cannot | `non-member cannot read group` | existing suite |
+| platform-admin behaviour unchanged | `platform admin can read any group`, `platform admin cannot write groups either` | existing suite |
+| no client writes become allowed | `client cannot create a group directly`, `client cannot update or delete a group`, membership write denials | existing suite |
+
+All eight pass together with the patch applied (24/24). No other rule or index changes.
+
 ## How to apply (when authorized)
 
 ```
