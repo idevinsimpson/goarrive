@@ -53,6 +53,16 @@ function trackDoc(docPath) {
 }
 const results = [];
 const diagnostics = [];
+/**
+ * Every browser context this suite opens.
+ *
+ * The product formats counts, percentages and goal windows with Intl and no
+ * explicit locale, so the strings it renders are the RUNNER's locale. Pinning
+ * en-US makes "137 of 5,000 squats" and "Ends today at 4:35 PM EDT" the same
+ * strings on every runner; it pins nothing about time zone, which is the
+ * goal's own and is asserted as such below.
+ */
+const CONTEXT_OPTIONS = { locale: 'en-US' };
 const synthetic = { runTag, groups: [], goals: [], challenges: [], users: [] };
 
 function assert(condition, message) {
@@ -67,11 +77,22 @@ function sanitize(value) {
     .replaceAll(API_KEY, '[REDACTED_API_KEY]')
     .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
     .replace(/[A-Za-z0-9._%+-]+@example\.com/gi, '[SYNTHETIC_EMAIL]')
+    // A community join code is a credential: it admits its holder to a private
+    // community. The D-5 case reads a community document with a real end-user
+    // identity, so a failure there could otherwise carry the code into the
+    // receipt. Both the Firestore REST shape and a bare string are redacted.
+    .replace(/("joinCode"\s*:\s*)(\{[^{}]*\}|"[^"]*")/gi, '$1"[REDACTED_JOIN_CODE]"')
     .slice(0, 1000);
 }
-async function jsonRequest(url, { method = 'GET', oauth = false, body, allow = [] } = {}) {
+async function jsonRequest(url, { method = 'GET', oauth = false, bearer = null, body, allow = [] } = {}) {
   const headers = { 'content-type': 'application/json' };
+  // `oauth` is the privileged fixture identity; `bearer` is a synthetic member's
+  // own Firebase ID token, which is what makes a request subject to
+  // firestore.rules. Conflating the two would let a rules assertion pass on
+  // admin privilege, so one request is never both.
+  if (oauth && bearer) throw new Error('A request is either admin-scoped or end-user-scoped, never both');
   if (oauth) headers.authorization = `Bearer ${OAUTH}`;
+  if (bearer) headers.authorization = `Bearer ${bearer}`;
   const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await response.text();
   let parsed = {};
@@ -113,6 +134,13 @@ async function readAuthorization(goalId) {
   const response = await getDoc(`wsfGoals/${goalId}`);
   return response.body?.fields?.aggregateDisplayAuthorized?.booleanValue === true;
 }
+// The exact values the product writes — functions-westayfit/src/index.ts:57-59
+// (MEMBERSHIP_ACTIVE / MEMBERSHIP_REMOVED / MEMBERSHIP_DEPARTED) and the
+// statuses wsfRemoveMember and wsfLeaveCommunity store.
+const MEMBERSHIP_ACTIVE = 'active';
+const MEMBERSHIP_REMOVED = 'removed';
+const MEMBERSHIP_DEPARTED = 'departed';
+
 async function setMembershipStatus(groupId, uid, status) {
   await putDoc(`wsfMemberships/${groupId}_${uid}`, { membershipStatus: status, updatedAt: new Date() }, ['membershipStatus', 'updatedAt']);
 }
@@ -250,7 +278,22 @@ async function seedFixture(label, goals = 1, includeChallenge = false) {
   }
 
   synthetic.groups.push(groupId);
-  return { groupId, goalIds, challengeId, champion, member, outsider };
+  // The fixture's own window instants and label travel with it. The display
+  // renders the period in the GOAL's zone (America/New_York, seeded above),
+  // so pinning that label needs the instants the harness actually wrote, and
+  // the no-leak checks need the community display name it actually wrote.
+  return {
+    label,
+    groupId,
+    goalIds,
+    challengeId,
+    champion,
+    member,
+    outsider,
+    communityDisplayName: `Package E ${label}`,
+    startsAtIso: started.toISOString(),
+    endsAtIso: ends.toISOString(),
+  };
 }
 
 async function signInPage(page, user) {
@@ -326,12 +369,112 @@ async function staysAbsent(locator, durationMs = 6_000) {
   }
 }
 
+/**
+ * The Champion's per-goal display controls are in the Manage sheet.
+ *
+ * Community Home carries one quiet "Manage" control; every
+ * `wsf-goal-display-auth-*` element is inside the sheet it opens. Opening it
+ * is the real interaction a Champion performs, so every Champion visit here
+ * goes through it. Nothing about the assertions on those controls changes.
+ */
+async function openManage(page) {
+  await visible(page.getByTestId('wsf-community-manage'));
+  await page.getByTestId('wsf-community-manage').click();
+  await visible(page.getByTestId('wsf-community-manage-panel'));
+}
+
+/**
+ * The goal's published time zone, and the labels the display renders in it.
+ *
+ * seedFixture writes `timezone: 'America/New_York'` on every fixture goal, and
+ * the display derives its window label in the GOAL's zone rather than the
+ * reader's. The runner is UTC, so asserting the New York rendering exactly is
+ * itself the proof that the zone came from the goal. These two functions are
+ * faithful ports of the product's own rules (apps/westayfit/src/ui/dates.ts):
+ * an open window reads "Open · Ends …", and the end is written as a clock time
+ * when it falls on today's date IN THAT ZONE, otherwise as a weekday date.
+ */
+const GOAL_ZONE = 'America/New_York';
+const LABEL_LOCALE = 'en-US';
+function zoneYmd(date) {
+  const parts = new Intl.DateTimeFormat(LABEL_LOCALE, {
+    timeZone: GOAL_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+/** "Open · Ends today at 4:35 PM EDT" / "Open · Ends Sat, Sep 19". */
+function expectedActiveWindowLabel(endsIso, now = new Date()) {
+  const ends = new Date(endsIso);
+  const ended = ends.getTime() < now.getTime();
+  const verb = ended ? 'Ended' : 'Ends';
+  const label =
+    zoneYmd(ends) === zoneYmd(now)
+      ? `${verb} today at ${new Intl.DateTimeFormat(LABEL_LOCALE, {
+          timeZone: GOAL_ZONE,
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        }).format(ends)}`
+      : `${verb} ${new Intl.DateTimeFormat(LABEL_LOCALE, {
+          timeZone: GOAL_ZONE,
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        }).format(ends)}`;
+  return ended ? label : `Open · ${label}`;
+}
+/** "Sep 18 – 18" / "Sep 30 – Oct 1" — a closed goal's period, in the goal's zone. */
+function expectedPeriodLabel(startIso, endIso, now = new Date()) {
+  const a = new Date(startIso);
+  const b = new Date(endIso);
+  const [ay, am] = zoneYmd(a).split('-');
+  const [by, bm] = zoneYmd(b).split('-');
+  const [ny] = zoneYmd(now).split('-');
+  const thisYear = ay === by && ay === ny;
+  const md = new Intl.DateTimeFormat(LABEL_LOCALE, { timeZone: GOAL_ZONE, month: 'short', day: 'numeric' });
+  const mdy = new Intl.DateTimeFormat(LABEL_LOCALE, { timeZone: GOAL_ZONE, month: 'short', day: 'numeric', year: 'numeric' });
+  const dayOnly = new Intl.DateTimeFormat(LABEL_LOCALE, { timeZone: GOAL_ZONE, day: 'numeric' });
+  if (!thisYear) return `${mdy.format(a)} \u2013 ${mdy.format(b)}`;
+  if (am === bm) return `${md.format(a)} \u2013 ${dayOnly.format(b)}`;
+  return `${md.format(a)} \u2013 ${md.format(b)}`;
+}
+/**
+ * The expectation is RECOMPUTED on every poll, not captured once: the product
+ * derives "today" from the clock at render time, so a value captured before
+ * the poll began would be the stale side of a midnight boundary.
+ */
+async function textEqualsLive(locator, compute, describe, timeout = 20_000) {
+  await pollText(locator, (text) => text.trim() === compute(), describe, timeout);
+}
+
+/**
+ * A refused display must not name what it is refusing to show.
+ *
+ * The context fields (community name, goal title, period) are published only
+ * to an authorized display; once the permission is gone the page must be the
+ * same generic refusal an unknown goal id produces.
+ */
+async function assertNoContextLeak(page, fx, where) {
+  assert(
+    (await page.getByText(fx.communityDisplayName).count()) === 0,
+    `Refused display leaked the community name (${where})`
+  );
+  assert(
+    (await page.getByText(`Package E ${fx.label} goal 1`).count()) === 0,
+    `Refused display leaked the goal title (${where})`
+  );
+}
+
 async function caseRoundTrip(browser) {
   const fx = await seedFixture('roundtrip', 1, true);
   const goalId = fx.goalIds[0];
-  const championCtx = await browser.newContext();
-  const memberCtx = await browser.newContext();
-  const displayCtx = await browser.newContext();
+  const championCtx = await browser.newContext(CONTEXT_OPTIONS);
+  const memberCtx = await browser.newContext(CONTEXT_OPTIONS);
+  const displayCtx = await browser.newContext(CONTEXT_OPTIONS);
   try {
     const champion = await championCtx.newPage();
     const member = await memberCtx.newPage();
@@ -340,6 +483,7 @@ async function caseRoundTrip(browser) {
     await signInPage(member, fx.member);
 
     await champion.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await openManage(champion);
     const control = champion.getByTestId(`wsf-goal-display-auth-${goalId}`);
     const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`);
     const state = champion.getByTestId(`wsf-goal-display-auth-state-${goalId}`);
@@ -349,11 +493,15 @@ async function caseRoundTrip(browser) {
 
     await display.goto(`${BASE_URL}/display/${goalId}`);
     await visible(display.getByTestId('wsf-display-not-available'));
+    await assertNoContextLeak(display, fx, 'never authorized');
     await snap(display, '01-default-off-display-refused');
 
     await member.goto(`${BASE_URL}/community/${fx.groupId}`);
     await visible(member.getByTestId(`wsf-community-goal-link-${goalId}`));
     assert((await member.getByTestId(`wsf-goal-display-auth-${goalId}`).count()) === 0, 'Member unexpectedly has display authorization control');
+    // The controls moved into the Champion-only Manage sheet, so the absence
+    // of that surface is now part of the same boundary.
+    assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'Member unexpectedly has the Champion Manage surface');
 
     await toggle.click();
     await textContains(state, 'Public display is authorized for this goal.');
@@ -363,9 +511,48 @@ async function caseRoundTrip(browser) {
     assert((await display.getByTestId('wsf-display-shared-total').count()) === 1, 'Authorized display omitted shared total');
     assert((await display.getByText(fx.member.uid).count()) === 0, 'Display leaked member UID');
     assert((await display.getByText(fx.champion.uid).count()) === 0, 'Display leaked Champion UID');
+    // An authorized display names what it is showing — and only that. The
+    // context is the approved set, so it is asserted exactly.
+    await textEquals(display.getByTestId('wsf-display-community'), fx.communityDisplayName);
+    await textEquals(display.getByTestId('wsf-display-goal-title'), `Package E ${fx.label} goal 1`);
+    // The window, in the GOAL's zone rather than this runner's.
+    await textEqualsLive(
+      display.getByTestId('wsf-display-period'),
+      () => expectedActiveWindowLabel(fx.endsAtIso),
+      `Expected the open window label in ${GOAL_ZONE}`,
+      30_000
+    );
     const publicPulse = await callFunction('wsfGoalPulse', { goalId });
     const publicPulseData = callableData(publicPulse);
     assert(publicPulse.ok && publicPulseData && !('contributorCount' in publicPulseData), 'Public goal pulse exposed contributorCount');
+    // THE APPROVED PUBLIC CONTRACT, PINNED EXACTLY (owner decision 2026-09-18).
+    // Four aggregate fields and five context fields, and nothing else: an
+    // added key is a disclosure nobody approved, so the assertion is on the
+    // whole key set rather than on a list of things that must be absent.
+    const APPROVED_PULSE_KEYS = [
+      'communityDisplayName',
+      'endsAt',
+      'goalTitle',
+      'sharedTotal',
+      'startsAt',
+      'status',
+      'target',
+      'timezone',
+      'unit',
+    ];
+    const pulseKeys = Object.keys(publicPulseData).sort();
+    assert(
+      JSON.stringify(pulseKeys) === JSON.stringify(APPROVED_PULSE_KEYS),
+      `Public goal pulse shape drifted: ${pulseKeys.join(',')}`
+    );
+    assert(publicPulseData.communityDisplayName === fx.communityDisplayName, 'Public pulse community name mismatch');
+    assert(publicPulseData.goalTitle === `Package E ${fx.label} goal 1`, 'Public pulse goal title mismatch');
+    assert(publicPulseData.timezone === GOAL_ZONE, 'Public pulse did not publish the goal\u2019s stored zone');
+    // Named individually as well, so a regression reads as the specific thing
+    // that leaked rather than only as a shape mismatch.
+    for (const field of ['joinCode', 'joinPolicy', 'groupType', 'createdByUserId', 'memberCount', 'contributorCount']) {
+      assert(!(field in publicPulseData), `Public pulse leaked ${field}`);
+    }
     await snap(champion, '02-champion-authorized-control');
     await snap(display, '03-authorized-display');
 
@@ -378,12 +565,15 @@ async function caseRoundTrip(browser) {
     assert(contribution.ok && contributionData?.ownCredit === 137 && contributionData?.sharedTotal === 137, 'Member contribution did not produce 137 personal/shared total');
     await member.goto(`${BASE_URL}/contribute/${goalId}`);
     await visible(member.getByTestId('wsf-contribute-screen'));
-    await textEquals(member.getByTestId('wsf-contribute-own-credit'), 'Your confirmed credit: 137 squats');
-    await textEquals(member.getByTestId('wsf-contribute-shared-total'), '137 squats');
+    await textEquals(member.getByTestId('wsf-contribute-own-credit'), 'Your total on this goal: 137 squats');
+    // The shared line carries the target it is measured against; the fixture
+    // target is 5,000 and counts are thousands-grouped.
+    await textEquals(member.getByTestId('wsf-contribute-shared-total'), '137 of 5,000 squats');
 
     await toggle.click();
     await textEquals(state, 'Public display is not authorized for this goal.');
     await visible(display.getByTestId('wsf-display-not-available'), 30_000);
+    await assertNoContextLeak(display, fx, 'after revocation stopped a running display');
     await visible(member.getByTestId('wsf-contribute-screen'));
     await snap(display, '04-running-display-stopped');
 
@@ -391,20 +581,31 @@ async function caseRoundTrip(browser) {
     await textContains(state, 'Public display is authorized for this goal.');
     await new Promise((resolve) => setTimeout(resolve, 6_000));
     await visible(display.getByTestId('wsf-display-not-available'));
+    await assertNoContextLeak(display, fx, 'reauthorized session before Check again');
     await display.getByTestId('wsf-display-recheck').click();
     await textContains(display.getByTestId('wsf-display-shared-total'), '137', 30_000);
     await snap(display, '05-fresh-session-recovered');
 
     await closeGoal(goalId);
     await champion.reload();
+    await openManage(champion);
     await visible(champion.getByTestId(`wsf-community-goal-closed-${goalId}`));
     await visible(champion.getByTestId(`wsf-goal-display-auth-${goalId}`));
     await display.reload();
     await visible(display.getByTestId('wsf-display-closed'));
+    // A closed goal states its whole window rather than an end, still in the
+    // goal's zone.
+    await textEqualsLive(
+      display.getByTestId('wsf-display-period'),
+      () => expectedPeriodLabel(fx.startsAtIso, fx.endsAtIso),
+      `Expected the closed window label in ${GOAL_ZONE}`,
+      30_000
+    );
     await champion.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`).click();
     await textContains(champion.getByTestId('wsf-goal-display-auth-confirmed-absent'), 'Public display has been removed');
     await display.reload();
     await visible(display.getByTestId('wsf-display-not-available'));
+    await assertNoContextLeak(display, fx, 'revoked on a closed goal');
     await snap(display, '06-closed-goal-revoked');
 
     const anonymousChallenge = await callFunction('wsfChallengePulse', { challengeId: fx.challengeId });
@@ -456,11 +657,12 @@ async function caseProtectedReads() {
 async function caseUncertainAndPerGoal(browser) {
   const fx = await seedFixture('uncertain', 2, false);
   const [goalA, goalB] = fx.goalIds;
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext(CONTEXT_OPTIONS);
   try {
     const champion = await ctx.newPage();
     await signInPage(champion, fx.champion);
     await champion.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await openManage(champion);
     const toggleA = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalA}`);
     const toggleB = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalB}`);
     const stateA = champion.getByTestId(`wsf-goal-display-auth-state-${goalA}`);
@@ -530,15 +732,16 @@ async function caseUncertainAndPerGoal(browser) {
 async function caseDelayedDisplayResponses(browser) {
   const fx = await seedFixture('race', 1, false);
   const goalId = fx.goalIds[0];
-  const championCtx = await browser.newContext();
-  const memberCtx = await browser.newContext();
-  const displayCtx = await browser.newContext();
+  const championCtx = await browser.newContext(CONTEXT_OPTIONS);
+  const memberCtx = await browser.newContext(CONTEXT_OPTIONS);
+  const displayCtx = await browser.newContext(CONTEXT_OPTIONS);
   try {
     const champion = await championCtx.newPage();
     const member = await memberCtx.newPage();
     const display = await displayCtx.newPage();
     await signInPage(champion, fx.champion);
     await champion.goto(`${BASE_URL}/community/${fx.groupId}`);
+    await openManage(champion);
     const toggle = champion.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`);
     const state = champion.getByTestId(`wsf-goal-display-auth-state-${goalId}`);
     await visible(toggle);
@@ -585,14 +788,19 @@ async function caseDelayedDisplayResponses(browser) {
     await textEquals(state, 'Public display is not authorized for this goal.');
     await request1.continue();
     await visible(display.getByTestId('wsf-display-not-available'), 30_000);
+    await assertNoContextLeak(display, fx, 'refusal reached the display first');
     await held2.route.fulfill({ status: held2.status, headers: held2.headers, body: held2.body });
     await new Promise((resolve) => setTimeout(resolve, 6_000));
     await visible(display.getByTestId('wsf-display-not-available'));
     assert((await display.getByText('241').count()) === 0, 'Held stale success repainted protected total');
+    // The held success carried the context fields too, so "not repainted"
+    // has to cover the name as well as the number.
+    await assertNoContextLeak(display, fx, 'held stale success released after refusal');
 
     await toggle.click();
     await textContains(state, 'Public display is authorized for this goal.');
     await visible(display.getByTestId('wsf-display-not-available'));
+    await assertNoContextLeak(display, fx, 'reauthorized session before Check again');
     phase = 'pass';
     await display.getByTestId('wsf-display-recheck').click();
     await textContains(display.getByTestId('wsf-display-shared-total'), '241', 30_000);
@@ -604,6 +812,156 @@ async function caseDelayedDisplayResponses(browser) {
     await Promise.allSettled([championCtx.close(), memberCtx.close(), displayCtx.close()]);
   }
   return fx;
+}
+
+/**
+ * One community-document read, made as the synthetic member themself.
+ *
+ * Every other read in this suite goes through a callable (which enforces its
+ * own membership checks) or through the privileged fixture identity (which
+ * bypasses rules entirely). Neither exercises firestore.rules. This one is a
+ * DIRECT client read carrying a Firebase ID token, which is the only way the
+ * deployed ruleset is the thing under test.
+ */
+async function clientReadGroup(idToken, groupId) {
+  return jsonRequest(firestoreUrl(`wsfCommunityGroups/${groupId}`), {
+    bearer: idToken,
+    // 401 is allowed only so an ID token the API would not accept fails as
+    // that, with a message saying so, rather than as a rules verdict.
+    allow: [401, 403, 404],
+  });
+}
+
+/**
+ * D-5 — membership STATUS, not membership existence, is what admits a reader.
+ *
+ * A membership row survives removal and departure with its status changed, so
+ * a ruleset that checks only for the row's existence keeps a removed member
+ * reading the community document — including its join code, which would let
+ * them re-enter a community they were removed from. The rule under test is
+ * wsfIsGroupMember in firestore.rules, which requires membershipStatus ==
+ * 'active'.
+ *
+ * THE JOIN CODE IS NEVER READ. The 200 case asserts the field is PRESENT and
+ * stops there: the value is not bound to a variable, not compared, not logged,
+ * not screenshotted, and sanitize() redacts it from any diagnostic that might
+ * otherwise carry it. Nothing here is restored — the whole fixture is deleted
+ * by the run's own cleanup, which already owns every document putDoc touched.
+ */
+async function caseD5MembershipStatusRules() {
+  const fx = await seedFixture('d5', 1, false);
+  const memberToken = await signInToken(fx.member);
+  const outsiderToken = await signInToken(fx.outsider);
+
+  const asActive = await clientReadGroup(memberToken, fx.groupId);
+  assert(asActive.status !== 401, 'Firestore REST did not accept the synthetic member ID token (401), so no rules verdict was obtained');
+  assert(asActive.status === 200, `An ${MEMBERSHIP_ACTIVE} member could not read their own community document: HTTP ${asActive.status}`);
+  assert(
+    typeof asActive.body?.name === 'string' && asActive.body.name.endsWith(`/wsfCommunityGroups/${fx.groupId}`),
+    'The client read did not return the community document it asked for'
+  );
+  assert(asActive.body?.fields?.joinCode !== undefined, 'The community document served to an active member is missing its join code field');
+
+  // The two ways a membership ends. Both keep the row and change the status,
+  // which is exactly the case an existence-only rule gets wrong.
+  for (const status of [MEMBERSHIP_REMOVED, MEMBERSHIP_DEPARTED]) {
+    await setMembershipStatus(fx.groupId, fx.member.uid, status);
+    const after = await clientReadGroup(memberToken, fx.groupId);
+    assert(
+      after.status !== 200,
+      `staging ruleset is not status-aware (D-5 rules not deployed to ${PROJECT_ID}): a '${status}' membership still read wsfCommunityGroups`
+    );
+    assert(
+      after.status === 403 && after.body?.error?.status === 'PERMISSION_DENIED',
+      `A '${status}' membership was refused with HTTP ${after.status} rather than 403 PERMISSION_DENIED`
+    );
+  }
+
+  // No membership row at all — the same refusal, from the other direction.
+  const asOutsider = await clientReadGroup(outsiderToken, fx.groupId);
+  assert(
+    asOutsider.status === 403 && asOutsider.body?.error?.status === 'PERMISSION_DENIED',
+    `An unrelated signed-in account was not refused with 403 PERMISSION_DENIED: HTTP ${asOutsider.status}`
+  );
+
+  check('membership status rules (D-5)', 'PASS', `active member read allowed; '${MEMBERSHIP_REMOVED}', '${MEMBERSHIP_DEPARTED}' and an unrelated account each refused PERMISSION_DENIED`);
+  return fx;
+}
+
+/**
+ * D-1 — a brand-new account is held at the verification gate.
+ *
+ * The signup screen does not navigate on success; the auth listener moves the
+ * member to /verify-email the moment the account exists, and the best-effort
+ * verification send happens AFTER that. The property is that the gate holds:
+ * a slow or failing send must not bounce the new member back to the form they
+ * just completed, which is what a navigation tied to the send would do.
+ *
+ * NO MAIL LEAVES STAGING. wsfSendVerificationEmail is blocked in the browser,
+ * so the request never reaches the function and nothing is delivered to the
+ * synthetic address. That also makes the send's failure the exact condition
+ * the gate has to survive.
+ */
+async function caseD1SignupGate(browser) {
+  const ctx = await browser.newContext(CONTEXT_OPTIONS);
+  try {
+    const page = await ctx.newPage();
+    let sendAttempts = 0;
+    await page.route('**/wsfSendVerificationEmail', async (route) => {
+      sendAttempts += 1;
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { status: 'UNAVAILABLE', message: 'Blocked by the hosted smoke: staging sends no verification mail.' },
+        }),
+      });
+    });
+
+    // The address is minted in the same wsf-<runTag>-…@example.com shape
+    // createVerifiedUser uses, because cleanup-synthetic.mjs re-derives an Auth
+    // account's provenance from its address before it will delete it. An
+    // address the UI chose could not be cleaned up.
+    const suffix = `${runTag}-d1signup-${crypto.randomBytes(2).toString('hex')}`;
+    const email = `wsf-${suffix}@example.com`;
+    const password = `Wsf!${crypto.randomBytes(18).toString('base64url')}`;
+
+    await page.goto(`${BASE_URL}/signup`, { waitUntil: 'domcontentloaded' });
+    await visible(page.getByTestId('wsf-signup'));
+    await page.getByTestId('wsf-signup-displayName').fill('WSF d1 signup');
+    await page.getByTestId('wsf-signup-email').fill(email);
+    await page.getByTestId('wsf-signup-password').fill(password);
+    await page.getByTestId('wsf-signup-submit').click();
+
+    try {
+      await visible(page.getByTestId('wsf-verify'), 30_000);
+      // The gate has to HOLD, not merely appear: a single read here would pass
+      // against a screen that flips back to the form on the next tick.
+      await staysAbsent(page.getByTestId('wsf-signup'), 6_000);
+      await visible(page.getByTestId('wsf-verify'), 5_000);
+      assert(page.url().includes('/verify-email'), 'The verification gate did not hold the route');
+      assert(sendAttempts >= 1, 'The signup screen never attempted the verification send, so the gate was not tested against a failing send');
+    } finally {
+      // Own the account whichever way the assertions went: a failed assertion
+      // must not leave a synthetic Auth user behind. The uid is not knowable
+      // in advance because the browser created the account.
+      const lookup = await jsonRequest(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:lookup`, {
+        method: 'POST',
+        oauth: true,
+        body: { email: [email] },
+        allow: [400],
+      });
+      const uid = lookup.body?.users?.[0]?.localId;
+      if (typeof uid === 'string' && uid.length > 0) {
+        trackUser(uid);
+        synthetic.users.push(uid);
+      }
+    }
+
+    check('signup verification gate (D-1)', 'PASS', 'gate held 6s with no return to the signup form; verification send blocked in the browser');
+  } finally {
+    await ctx.close();
+  }
 }
 
 async function verifyHostedBuild() {
@@ -639,6 +997,8 @@ try {
   await caseProtectedReads();
   await caseUncertainAndPerGoal(browser);
   await caseDelayedDisplayResponses(browser);
+  await caseD5MembershipStatusRules();
+  await caseD1SignupGate(browser);
 } catch (error) {
   mainError = error;
   diagnostics.push(sanitize(error?.stack || error?.message || error));
@@ -677,6 +1037,8 @@ const receipt = {
     'This hosted harness does not treat local emulator evidence as hosted evidence.',
     'The close-goal transition is fixture-seeded because the product has no close-goal control.',
     'No private credentials, tokens, passwords, Web API keys, or email-action links are retained.',
+    'The D-5 case reads one community document with a synthetic member ID token so firestore.rules is the thing under test; the join code is asserted present and is never read, logged, screenshotted or retained.',
+    'The D-1 case blocks wsfSendVerificationEmail in the browser, so staging sends no verification mail; the account it creates is tracked for cleanup by its run-tagged synthetic address.',
   ],
   diagnostics,
 };
