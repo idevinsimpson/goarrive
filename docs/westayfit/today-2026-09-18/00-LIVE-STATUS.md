@@ -4,15 +4,15 @@ Recovery point. If the session stops: read this file, then the newest PR #327 co
 
 | Field | Value |
 |---|---|
-| Updated (ET) | 12:55 ET (16:55 UTC) |
-| Current task | **RUN 6 DISPATCHED 12:54 ET from `main` @ `294b646` (candidate `65d258d`, harness-only delta): #336 fixed the W4/W7/W8 row (fixture seeded ONE goal; the momentum line exists only across two or more open goals — product correct, harness wrong).** W2 still needs Devin/Manus: `gcloud run services update wsfgoalrecentadditions --region=us-central1 --project=westayfit-staging --no-invoker-iam-check` before run 6's hosted-verify (~1:00 PM). Receipt (BLOCKED, 19/21) posted 12:46 |
+| Updated (ET) | 13:05 ET (17:05 UTC) |
+| Current task | **RUN 6 (35370740710) done: candidate still `65d258d`, hosted 19/21, cleanup 285/285. W4/W7/W8 row now fails only at the Champion QR: fixture community is `private`, product shows QR only for `public`/`inviteOnly` (harness, not product). W2 403 unchanged. STOPPED and handed back per owner instruction.** Receipt addendum saved |
 | Branch / head | `claude/wsf-ui-member-experience` @ `65d258d` (+ docs commits); `main` = #331 + #333 (approval `65d258d`, harness with candidate B rows); #332 standby unmerged |
 | Latest ChatGPT review read | `[CHATGPT HOURLY REVIEW 12:15]` (BLOCKED-on-credentials verdict; six actions now in progress) + `[MANUS GOOGLE-SIDE RECEIPT]` 12:26 ET (IAM granted — rules deployed) |
 | What changed | D-5: `wsfIsGroupMember` now requires `membershipStatus == 'active'` (one helper, one call site: `wsfCommunityGroups` read); two rules tests added. D-1: trailing `router.replace('/verify-email')` removed from `signup.tsx` `onSubmit`; slow-send regression spec added |
 | Tests completed | On `5a3fbde` (D-5+D-1): rules 24/24; focused browser 32/32; app tsc; Vitest 233; functions build; callable 238; deploy-config 8; complete browser suite 123/123; gate1 CLEAR (31/31). Adversarial review (18 Opus agents): 0 product regressions; test-quality findings all fixed. After hardening: rules **26/26** (positive controls, missing-status row, cross-group scope), D-1 spec 1/1 with a deterministic post-release window and interception assertion, e2-join-flow 2/2 |
-| Tests running | staging run 6 (dispatched 16:54 UTC) |
-| Blocker | W2 transport alignment (owner command, not yet confirmed); temporary IAM removal pending Devin |
-| Exact next action | read run 6 jobs; post rows; final receipt line (21/21 or exact rows); then IAM removal confirmation from Devin |
+| Tests running | none |
+| Blocker | owner: W2 transport alignment decision; temporary IAM removal + before/after scope; authorization for the one-line W8 fixture fix + one more run |
+| Exact next action | wait for Devin; on authorization: set the W4/W7/W8 fixture community to inviteOnly before the Champion visit, assert the QR symbol carries the /join/ link, ops suite, PR, merge, ONE dispatch; report 21 rows |
 | Uncommitted | none |
 
 ## Authorized today (Devin, 08:2x ET session prompt)

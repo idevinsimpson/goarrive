@@ -22,3 +22,13 @@ and the W4/W7/W8 browser row timed out on `wsf-community-momentum`. No productio
 
 Runs today: 1 (35358182490, A, 12/13) · 2 (35360097324, A, 14/15) · 3 (35362036618, B, deploy failed on invoker policy) ·
 4 (35368478133, B, preflight refused 24 vs 23) · 5 (35369383808, B, deploy ✓, hosted 19/21).
+
+## Addendum — run 6 (posted 1:04 PM ET)
+
+Run 6 `35370740710` (`main` @ `294b646`, harness fix #336 for the momentum fixture; candidate unchanged, health marker `65d258d`):
+deploy ✓ (`VERIFY=pass`) · hosted **19/21** · cleanup COMPLETE 285/285 · evidence artifact 10557633813 (22 files).
+Failing rows: W2 (HTTP 403, transport unchanged — owner decision pending) and W4/W7/W8, which now passes momentum,
+share, no-QR-for-member and the W4 guide (screenshots 17–18) and fails at `wsf-community-qr` because the fixture
+community is `joinPolicy: 'private'` and the product shows the QR only for `public`/`inviteOnly` (harness fixture
+error; fix proposed, not applied). VERDICT unchanged: **BLOCKED** — remaining: W2 transport (owner), temporary IAM
+removal proof (owner), W8 fixture fix + one run for 21/21 (authorization pending).
