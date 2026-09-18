@@ -253,7 +253,6 @@ test('the untouched cases still carry their acceptance checks', () => {
   }
 });
 
-console.log(`\nhosted-smoke-contract: ${passed} passed`);
 
 test('the D-5 verdict is isolated: its failure is its own row and cannot stop the D-1 gate check or the visual proof', () => {
   const main = SMOKE.slice(SMOKE.indexOf('browser = await chromium.launch('));
@@ -298,3 +297,5 @@ test('the visual proof captures every owner-required surface on a phone, the dis
   assert.ok(body.includes("check('visual proof captures', 'PASS'"), 'the visual proof has no PASS row');
   assert.ok(SMOKE.includes('await caseVisualProof(browser);'), 'the suite never runs the visual proof');
 });
+
+console.log(`\nhosted-smoke-contract: ${passed} passed`);
