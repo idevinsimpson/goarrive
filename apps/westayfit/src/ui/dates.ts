@@ -51,8 +51,16 @@ function ymd(d: Date, locale: string | undefined, timeZone: string | undefined):
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
-/** "Ends today at 5:00 PM EDT" / "Ends Mon, Sep 21" — in the goal's zone when given. */
-export function formatEndsAt(iso: string, opts?: DateOptions & { now?: Date }): string | null {
+/**
+ * The end-of-window label, in one of two tenses. The DATE FORMATTING is
+ * identical either way — only the verb differs — so "Ends Mon, Sep 14" and
+ * "Ended Mon, Sep 14" can never disagree about which day they name.
+ */
+function endsLabel(
+  verb: 'Ends' | 'Ended',
+  iso: string,
+  opts?: DateOptions & { now?: Date }
+): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   const zone = resolveZone(opts);
@@ -68,14 +76,60 @@ export function formatEndsAt(iso: string, opts?: DateOptions & { now?: Date }): 
       // zone; the reader's own zone needs no designation.
       ...(zone.timeZone ? { timeZoneName: 'short' as const } : {}),
     }).format(d);
-    return `Ends today at ${time}`;
+    return `${verb} today at ${time}`;
   }
-  return `Ends ${new Intl.DateTimeFormat(opts?.locale, {
+  return `${verb} ${new Intl.DateTimeFormat(opts?.locale, {
     timeZone: zone.timeZone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
   }).format(d)}`;
+}
+
+/** "Ends today at 5:00 PM EDT" / "Ends Mon, Sep 21" — in the goal's zone when given. */
+export function formatEndsAt(iso: string, opts?: DateOptions & { now?: Date }): string | null {
+  return endsLabel('Ends', iso, opts);
+}
+
+/**
+ * Has the published window's end instant passed?
+ *
+ * An INSTANT comparison, deliberately: the window ends at one moment, and
+ * that moment is the same moment everywhere. The zone decides how the end is
+ * WRITTEN (see endsLabel), never whether it has happened.
+ */
+export function hasWindowEnded(endsIso: string, opts?: { now?: Date }): boolean {
+  const d = new Date(endsIso);
+  if (Number.isNaN(d.getTime())) return false;
+  return d.getTime() < (opts?.now ?? new Date()).getTime();
+}
+
+/**
+ * The period line for a goal the SERVER still calls active — the public
+ * display and Community Home render the same string from this one helper.
+ *
+ * Nothing closes a goal automatically, so a goal can be `active` with its end
+ * instant already behind it. "Open · Ends Mon, Sep 14" on a Tuesday is simply
+ * untrue, so once the instant has passed the label states the fact — "Ended
+ * Mon, Sep 14" — and drops the "Open ·" claim.
+ *
+ * SCOPE, on purpose: this changes the LABEL only. The contribution routes stay
+ * offered and wsfContribute stays the authority on whether a contribution is
+ * accepted (it refuses with 'Goal window has ended.', which the contribution
+ * screen already presents as a windowEnded refusal). Hiding or disabling those
+ * routes off a client-side clock is a product decision that has not been taken
+ * and is out of scope here.
+ */
+export function formatActiveWindowLabel(
+  endsIso: string,
+  opts?: DateOptions & { now?: Date }
+): string {
+  const ended = hasWindowEnded(endsIso, opts);
+  const label = endsLabel(ended ? 'Ended' : 'Ends', endsIso, opts);
+  // No usable label (unparsable instant, or a zone we will not substitute for):
+  // say only what is still supportable without naming a calendar day.
+  if (!label) return ended ? 'Ended' : 'Open';
+  return ended ? label : `Open · ${label}`;
 }
 
 /** "Jun 1 – 14" or "Jun 1 – Jul 14" or "Dec 20, 2025 – Jan 3, 2026" — in the goal's zone when given. */

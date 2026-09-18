@@ -7,7 +7,7 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-na
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
-import { formatClock, formatEndsAt, formatPeriod } from '../../src/ui/dates';
+import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -183,7 +183,14 @@ export default function DisplayGoal() {
 
   const recheck = (
     <Pressable
-      onPress={() => setPollSession((n) => n + 1)}
+      onPress={() => {
+        // Back to `loading` in the same act that starts the new session.
+        // Bumping the session alone left the refusal on screen for a whole
+        // round trip, so the press looked like it had done nothing and a
+        // second press restarted the session that was already running.
+        setState({ kind: 'loading' });
+        setPollSession((n) => n + 1);
+      }}
       style={styles.recheckButton}
       testID="wsf-display-recheck"
       accessibilityRole="button"
@@ -255,10 +262,15 @@ export default function DisplayGoal() {
   // phone or wide, in any local zone — shows the same period and the same
   // "ends" meaning. An unusable zone withholds the date rather than claiming
   // a calendar day from the wrong zone; the status stays "Open" / "Closed".
+  //
+  // An open goal whose end instant has already passed says so: nothing closes
+  // a goal automatically, so `active` outlives the window and "Open · Ends
+  // Mon, Sep 14" would be a claim the clock contradicts. The label is the only
+  // thing that changes — the status line below still speaks for the server,
+  // which still calls this goal active.
   const zone = { timeZone: pulse.timezone };
-  const ends = formatEndsAt(pulse.endsAt, zone);
   const period = formatPeriod(pulse.startsAt, pulse.endsAt, zone);
-  const periodText = closed ? period : ends ? `Open · ${ends}` : 'Open';
+  const periodText = closed ? period : formatActiveWindowLabel(pulse.endsAt, zone);
   const headline =
     phase === 'reachedOpen'
       ? 'WE did it.'

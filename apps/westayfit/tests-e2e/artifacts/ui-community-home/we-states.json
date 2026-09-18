@@ -1,0 +1,75 @@
+{
+  "note": "Synthetic emulator fixture.",
+  "states": [
+    {
+      "key": "0-of-500",
+      "total": 0,
+      "target": 500,
+      "percent": "0%",
+      "status": "500 to go",
+      "ratio": "0.0000",
+      "goalId": "uiA-we-0-of-500-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-0-of-500-mu6jwlcz-2d74eb"
+    },
+    {
+      "key": "241-of-500",
+      "total": 241,
+      "target": 500,
+      "percent": "48.2%",
+      "status": "259 to go",
+      "ratio": "0.4820",
+      "goalId": "uiA-we-241-of-500-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-241-of-500-mu6jwlcz-2d74eb"
+    },
+    {
+      "key": "261-of-500",
+      "total": 261,
+      "target": 500,
+      "percent": "52.2%",
+      "status": "239 to go",
+      "ratio": "0.5220",
+      "goalId": "uiA-we-261-of-500-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-261-of-500-mu6jwlcz-2d74eb"
+    },
+    {
+      "key": "450-of-500",
+      "total": 450,
+      "target": 500,
+      "percent": "90%",
+      "status": "Only 50 to go",
+      "ratio": "0.9000",
+      "goalId": "uiA-we-450-of-500-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-450-of-500-mu6jwlcz-2d74eb"
+    },
+    {
+      "key": "4999-of-5000",
+      "total": 4999,
+      "target": 5000,
+      "percent": "99.9%",
+      "status": "Only 1 to go",
+      "ratio": "0.9998",
+      "goalId": "uiA-we-4999-of-5000-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-4999-of-5000-mu6jwlcz-2d74eb"
+    },
+    {
+      "key": "500-of-500",
+      "total": 500,
+      "target": 500,
+      "percent": "100%",
+      "status": "Goal reached · still open",
+      "ratio": "1.0000",
+      "goalId": "uiA-we-500-of-500-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-500-of-500-mu6jwlcz-2d74eb"
+    },
+    {
+      "key": "29999-of-30000",
+      "total": 29999,
+      "target": 30000,
+      "percent": "99.9%",
+      "status": "Only 1 to go",
+      "ratio": "0.9999",
+      "goalId": "uiA-we-29999-of-30000-mu6jwlcz-2d74eb",
+      "groupId": "uiA-we-29999-of-30000-mu6jwlcz-2d74eb"
+    }
+  ]
+}

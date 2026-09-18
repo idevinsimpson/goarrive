@@ -44,7 +44,12 @@ import {
 } from '../../../src/labels';
 import { wsfTheme } from '../../../src/theme';
 import { PROGRESS_GREEN } from '../../../src/ui/brandAssets';
-import { formatClock, formatEndsAt, formatMonthYear, formatPeriod } from '../../../src/ui/dates';
+import {
+  formatActiveWindowLabel,
+  formatClock,
+  formatMonthYear,
+  formatPeriod,
+} from '../../../src/ui/dates';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -607,7 +612,14 @@ export default function CommunityPage() {
         );
         const result = await fn({ groupId });
         const found = (result.data.goals ?? []).find((g) => g.goalId === targetGoalId);
-        if (!found) return null;
+        // ABSENT IS AN ANSWER. wsfListGoals returns the goals that are active
+        // OR display-authorized, so a CLOSED goal whose revoke actually landed
+        // is absent BY CONSTRUCTION — its authorization was the only thing
+        // keeping it listed. Reading that as "the read settled nothing" made
+        // the one case the read-back exists for (a lost response on a
+        // successful revoke) report "We could not confirm…", when the absence
+        // is the confirmation. Only a thrown read is unknown.
+        if (!found) return false;
         return found.aggregateDisplayAuthorized === true;
       } catch {
         return null;
@@ -757,6 +769,17 @@ export default function CommunityPage() {
   const closedGoals = loadedGoals.filter((g) => g.status !== 'active');
   const featured = activeGoals[0] ?? null;
   const otherActive = activeGoals.slice(1);
+  // D-7. Which goals actually get a permission card this pass — ONE source,
+  // consulted by the card renderer and by the orphan block in the Manage
+  // sheet, so every outcome is reported exactly once: never twice, and never
+  // (as it was) not at all because the list around it failed to reload.
+  const hasDisplayAuthCard = (goal: ListedGoal) =>
+    isChampion && (goal.status === 'active' || goal.aggregateDisplayAuthorized);
+  const cardedGoalIds = new Set(
+    goalsState.kind === 'loaded' && loadedGoals.length
+      ? [...activeGoals, ...closedGoals].filter(hasDisplayAuthCard).map((g) => g.goalId)
+      : []
+  );
   const createdLabel = (() => {
     const raw = group.createdAt;
     if (!raw || typeof raw !== 'object' || typeof raw.toDate !== 'function') return null;
@@ -774,7 +797,6 @@ export default function CommunityPage() {
     `/contribute/${goalId}?groupId=${encodeURIComponent(groupId)}&mode=${mode}`;
 
   const renderDisplayAuthControl = (goal: ListedGoal) => {
-    const goalIsOpen = goal.status === 'active';
     const outcome = outcomeFor(displayAuth, goal.goalId);
     const saving = outcome?.kind === 'saving';
     // Unsettled covers the two cases where the last request left something
@@ -786,8 +808,7 @@ export default function CommunityPage() {
     // granted while it ran is still in force: closing a goal does not revoke
     // it. So the Champion keeps the revoke control on a closed goal that is
     // still authorized, and that is the only control a closed goal carries.
-    const showDisplayControl = isChampion && (goalIsOpen || goal.aggregateDisplayAuthorized);
-    if (!showDisplayControl) return null;
+    if (!hasDisplayAuthCard(goal)) return null;
     return (
       // PACKAGE E. Champion-only, and secondary to the goal itself: the goal
       // is the thing, this is a permission about it. The copy describes the
@@ -801,6 +822,19 @@ export default function CommunityPage() {
             ? 'Public display is authorized for this goal. It can show the community name, goal, period, and shared progress — never individual contributions or member names.'
             : 'Public display is not authorized for this goal.'}
         </Text>
+        {/*
+          The permission is real, and on a SAMPLE community it still shows
+          nothing: wsfGoalPulse refuses the display route for a sample group
+          whatever this goal says. The control does not consult that, so the
+          state text above would otherwise promise a display that cannot exist.
+          A qualifier, not a rewrite of the state text — the stored permission
+          really is what it says it is.
+        */}
+        {isSample ? (
+          <Text style={styles.body} testID={`wsf-goal-display-auth-sample-note-${goal.goalId}`}>
+            This community is sample data, so no public display will show it.
+          </Text>
+        ) : null}
         {/*
           The publication decision, stated BEFORE it is made. Authorizing a
           goal publishes its context as well as its progress (owner decision,
@@ -1031,6 +1065,82 @@ export default function CommunityPage() {
                   </Text>
                 ))
               : null}
+            {/*
+              D-7 / D-7b. OUTCOMES WHOSE CARD IS NOT ON SCREEN THIS PASS.
+              Every one of these operations bumps the goals reload token, and
+              a reload takes the list to `loading` and possibly to `failed` —
+              so the card that carries the warning, its retry and its Dismiss
+              is gone exactly when there is something to say. A failed reload
+              used to swallow the read-back warning with it, and a SUCCESSFUL
+              authorize whose reload failed said nothing at all about a public
+              display having just been switched on.
+
+              Same copy and same testIDs as the card, because it is the same
+              outcome; the set above guarantees only one of the two renders.
+            */}
+            {Object.entries(displayAuth.byGoal)
+              .filter(([goalId]) => !cardedGoalIds.has(goalId))
+              .map(([goalId, outcome]) => {
+                if (outcome.kind === 'unconfirmed' || outcome.kind === 'failed') {
+                  return (
+                    <View key={goalId} style={styles.manageGoal}>
+                      <Text style={styles.manageGoalTitle}>{outcome.title}</Text>
+                      <Text style={styles.error} testID={`wsf-goal-display-auth-unsettled-${goalId}`}>
+                        {outcome.kind === 'unconfirmed'
+                          ? 'We could not confirm this goal’s current display permission. What is shown above may be out of date until this succeeds.'
+                          : outcome.intended
+                            ? 'That change did not take effect. Public display is still not authorized for this goal.'
+                            : 'That change did not take effect. Public display is still authorized for this goal.'}
+                      </Text>
+                      {/* The retry sends the value that was ASKED FOR, exactly as the card's does. */}
+                      <Pressable
+                        onPress={() =>
+                          onSetDisplayAuth(
+                            goalId,
+                            displayAuthValueToSend(outcome, outcome.intended),
+                            outcome.title
+                          )
+                        }
+                        style={styles.secondaryButton}
+                        testID={`wsf-goal-display-auth-toggle-${goalId}`}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.secondaryButtonText}>
+                          {outcome.intended
+                            ? 'Try again: authorize public display'
+                            : 'Try again: remove public display'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => onDismissDisplayAuth(goalId)}
+                        style={styles.secondaryButton}
+                        testID={`wsf-goal-display-auth-dismiss-${goalId}`}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.secondaryButtonText}>Dismiss this notice</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+                // A confirmed change with no card and no list to say it is
+                // absent from. The goal may well still be listed once the
+                // reload succeeds, so this says only what was established —
+                // never that the goal has closed or gone.
+                if (outcome.kind === 'confirmed' && goalsState.kind !== 'loaded') {
+                  return (
+                    <Text
+                      key={goalId}
+                      style={styles.body}
+                      testID={`wsf-goal-display-auth-confirmed-orphan-${goalId}`}
+                    >
+                      {outcome.intended
+                        ? `Public display is now authorized for “${outcome.title}”.`
+                        : `Public display has been removed for “${outcome.title}”.`}
+                    </Text>
+                  );
+                }
+                return null;
+              })}
             {goalsState.kind === 'loaded' && activeGoals.length ? (
               <ButtonLink
                 href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
@@ -1134,10 +1244,14 @@ export default function CommunityPage() {
               // The window in the goal's published zone, once the pulse has
               // confirmed it. Until then, and if the read fails, the line says
               // only "Open": a viewer-local calendar day could be the wrong day.
-              const ends =
+              // And an `active` goal whose end instant has passed says
+              // "Ended …" rather than "Open · Ends …": nothing closes a goal
+              // automatically, so the status outlives the window. Same helper
+              // as the public display, so the two never disagree.
+              const windowLabel =
                 p.kind === 'ok'
-                  ? formatEndsAt(p.pulse.endsAt, { timeZone: p.pulse.timezone })
-                  : null;
+                  ? formatActiveWindowLabel(p.pulse.endsAt, { timeZone: p.pulse.timezone })
+                  : 'Open';
               return (
                 <View style={styles.hero} testID="wsf-community-goal-hero">
                   <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
@@ -1145,7 +1259,7 @@ export default function CommunityPage() {
                     {featured.title}
                   </Text>
                   <Text style={styles.heroMeta} testID={`wsf-community-goal-period-${featured.goalId}`}>
-                    {ends ? `Open · ${ends}` : 'Open'}
+                    {windowLabel}
                   </Text>
                   {p.kind === 'ok' ? (
                     <View style={styles.weWrap}>

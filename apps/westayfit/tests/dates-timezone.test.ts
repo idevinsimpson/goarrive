@@ -4,7 +4,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { formatEndsAt, formatPeriod, isValidTimeZone } from '../src/ui/dates';
+import {
+  formatActiveWindowLabel,
+  formatEndsAt,
+  formatPeriod,
+  hasWindowEnded,
+  isValidTimeZone,
+} from '../src/ui/dates';
 
 const NY = 'America/New_York';
 const en = { locale: 'en-US' };
@@ -87,5 +93,67 @@ describe('goal window labels are derived in the goal time zone', () => {
   it('rejects unparsable instants', () => {
     expect(formatEndsAt('not-a-date', { ...en, timeZone: NY })).toBeNull();
     expect(formatPeriod('x', '2026-08-16T03:59:00.000Z', { ...en, timeZone: NY })).toBeNull();
+  });
+});
+
+describe('an active goal whose window has already ended', () => {
+  // Nothing closes a goal automatically, so `status: "active"` outlives the
+  // published window. The end is ONE instant; only the wording of the date is
+  // a matter of zone.
+  const endsAt = '2026-10-06T03:30:00.000Z'; // Mon Oct 5, 11:30 PM EDT
+
+  it('hasWindowEnded is an instant comparison, on the boundary and either side', () => {
+    expect(hasWindowEnded(endsAt, { now: new Date('2026-10-06T03:29:59.999Z') })).toBe(false);
+    // The end instant itself has not passed.
+    expect(hasWindowEnded(endsAt, { now: new Date(endsAt) })).toBe(false);
+    expect(hasWindowEnded(endsAt, { now: new Date('2026-10-06T03:30:00.001Z') })).toBe(true);
+    // Unparsable is not "ended": a label is withheld, never invented.
+    expect(hasWindowEnded('not-a-date', { now: new Date(endsAt) })).toBe(false);
+  });
+
+  it('is decided on the instant, not on the reader’s calendar day', () => {
+    // 2026-10-06T02:00Z is Oct 6 in UTC but still Oct 5 (10 PM EDT) in New
+    // York, and in BOTH zones the window is still open: the instant decides.
+    const beforeEnd = new Date('2026-10-06T02:00:00.000Z');
+    expect(hasWindowEnded(endsAt, { now: beforeEnd })).toBe(false);
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: NY, now: beforeEnd })).toBe(
+      'Open · Ends today at 11:30 PM EDT'
+    );
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: 'UTC', now: beforeEnd })).toBe(
+      'Open · Ends today at 3:30 AM UTC'
+    );
+  });
+
+  it('drops "Open · " and states the end once the instant has passed', () => {
+    const open = new Date('2026-09-18T12:00:00.000Z');
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: NY, now: open })).toBe(
+      'Open · Ends Mon, Oct 5'
+    );
+    // Fifteen minutes after the end, still Oct 5 in New York: the "today"
+    // wording is kept and only the verb changes.
+    const justAfter = new Date('2026-10-06T03:45:00.000Z');
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: NY, now: justAfter })).toBe(
+      'Ended today at 11:30 PM EDT'
+    );
+    // A week later the date is named, in the goal's zone, with no "Open · ".
+    const later = new Date('2026-10-13T12:00:00.000Z');
+    const label = formatActiveWindowLabel(endsAt, { ...en, timeZone: NY, now: later });
+    expect(label).toBe('Ended Mon, Oct 5');
+    expect(label.startsWith('Open')).toBe(false);
+    // The same instant in UTC names the NEXT calendar day — and is just as
+    // ended. Zone changes the words, never the fact.
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: 'UTC', now: later })).toBe(
+      'Ended Tue, Oct 6'
+    );
+    // The date formatting is the "Ends" formatting, verb apart.
+    expect(label.replace('Ended', 'Ends')).toBe(
+      formatEndsAt(endsAt, { ...en, timeZone: NY, now: later })
+    );
+  });
+
+  it('withholds the date rather than substituting a zone, in both tenses', () => {
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: 'Not/AZone', now: new Date('2026-09-18T12:00:00.000Z') })).toBe('Open');
+    expect(formatActiveWindowLabel(endsAt, { ...en, timeZone: 'Not/AZone', now: new Date('2026-10-13T12:00:00.000Z') })).toBe('Ended');
+    expect(formatActiveWindowLabel('not-a-date', { ...en, timeZone: NY })).toBe('Open');
   });
 });
