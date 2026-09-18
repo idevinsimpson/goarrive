@@ -1,0 +1,200 @@
+diff --git a/apps/westayfit/app/signup.tsx b/apps/westayfit/app/signup.tsx
+index 6a6588b..bedced5 100644
+--- a/apps/westayfit/app/signup.tsx
++++ b/apps/westayfit/app/signup.tsx
+@@ -101,7 +101,10 @@ export default function SignUp() {
+       } catch (sendError) {
+         console.warn('[signup] verification email not sent', sendError);
+       }
+-      router.replace('/verify-email');
++      // No navigation here. The signed-in effect above already moved the
++      // member to /verify-email the moment the account existed (before this
++      // send round trip). A second replace at this point would pull a member
++      // who has since tapped "I have verified" back off profile-setup.
+     } catch (e) {
+       setError(authErrorMessage(e, 'Sign-up failed.'));
+       setOfferSignIn(isEmailAlreadyInUse(e));
+diff --git a/apps/westayfit/tests-e2e/d1-signup-single-navigation.spec.ts b/apps/westayfit/tests-e2e/d1-signup-single-navigation.spec.ts
+new file mode 100644
+index 0000000..16a89bb
+--- /dev/null
++++ b/apps/westayfit/tests-e2e/d1-signup-single-navigation.spec.ts
+@@ -0,0 +1,178 @@
++import { randomBytes } from 'node:crypto';
++
++import { expect, test, type Page } from '@playwright/test';
++
++/**
++ * E2 end-to-end: a signed-out visitor with only a `/join/<code>` URL reaches
++ * `/community/<groupId>`. This spec pins the four criteria in
++ * `docs/westayfit/dispatch/E2-JOIN-BY-QR.md §3` that a callable test cannot
++ * observe on its own:
++ *
++ *   §3.1 — a second adult, given only the join URL, reaches the community
++ *          page without ever being invited, never knowing the groupId.
++ *   §3.4 — a cold load of `/join/<code>` returns 200 and renders. If the
++ *          Hosting rewrite is missing, this fails; that is exactly the bug
++ *          GATE 1 exists to catch.
++ *   §3.5 — the signup round-trip: a signed-out visitor who signs up from the
++ *          join page lands back on the join page, then in the community.
++ *
++ * The community itself is seeded directly against the Firestore emulator, one
++ * step upstream of the app, because that mirrors reality: at the FitLife Expo
++ * the single public community is pre-provisioned by hand and its QR is
++ * printed before doors open. The visitor never creates it.
++ *
++ * §3.2 (idempotent join) and §3.3 (oracle test) are covered by callable
++ * tests — those properties are cheaper to pin at that layer and would not add
++ * signal here.
++ */
++
++const AUTH_EMULATOR = 'http://127.0.0.1:9099';
++const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
++// E4-A1-R4 lockstep: must match the emulators:exec --project flag in gate1.sh
++// and the id the flagged client selects on a loopback host (selectProjectId).
++const PROJECT_ID = 'demo-wsf-local';
++
++/**
++ * Emulator console noise this spec deliberately tolerates. Same list as
++ * `mu2-flow.spec.ts` — keep the two in sync so a new gap has to be justified
++ * in one place, not two.
++ */
++const KNOWN_GAPS = ['/favicon.ico', 'wsfSendVerificationEmail'];
++
++function mintJoinCode(): string {
++  return randomBytes(16).toString('base64url');
++}
++
++/**
++ * Seed a public, active `wsfCommunityGroups` document straight against the
++ * Firestore emulator. The rule for that collection is `allow create: if false`
++ * — server-only writes — so we go around the rules layer via the emulator's
++ * documented bypass: the standard Firestore REST path
++ * `/v1/projects/{p}/databases/(default)/documents/...` with an
++ * `Authorization: Bearer owner` header. That header is what
++ * `rules-unit-testing`'s `withSecurityRulesDisabled` sends under the hood; the
++ * emulator treats it as admin and skips `firestore.rules` entirely. The
++ * lookalike `/emulator/v1/...` prefix is a different endpoint — DELETE-only,
++ * for clearing collections — so a PATCH there 404s before rules ever run.
++ * This seed is a stand-in for what will happen on Expo morning: a coach on the
++ * platform creates the FitLife group by hand (via a callable path we do not
++ * have yet) and the code is printed on QR.
++ */
++async function seedPublicGroup(opts: {
++  joinCode: string;
++  displayName: string;
++}): Promise<string> {
++  const docId = `e2gate1-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
++  const url =
++    `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}` +
++    `/databases/(default)/documents/wsfCommunityGroups/${docId}`;
++  const res = await fetch(url, {
++    method: 'PATCH',
++    headers: {
++      'content-type': 'application/json',
++      authorization: 'Bearer owner',
++    },
++    body: JSON.stringify({
++      fields: {
++        displayName: { stringValue: opts.displayName },
++        groupType: { stringValue: 'custom' },
++        joinPolicy: { stringValue: 'public' },
++        joinCode: { stringValue: opts.joinCode },
++        createdByUserId: { stringValue: 'e2-seeder' },
++        lifecycleStatus: { stringValue: 'active' },
++        isSample: { booleanValue: false },
++      },
++    }),
++  });
++  if (!res.ok) {
++    throw new Error(
++      `Firestore emulator seed failed: ${res.status} ${await res.text()}`
++    );
++  }
++  return docId;
++}
++
++/**
++ * Verify an emulator account's email. Mirrors `mu2-flow.spec.ts` — see there
++ * for the reasoning about staying decoupled from how the app actually sends
++ * mail.
++ */
++async function markEmailVerified(email: string): Promise<void> {
++  const headers = { authorization: 'Bearer owner', 'content-type': 'application/json' };
++  const base = `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1`;
++
++  const lookup = await fetch(`${base}/projects/${PROJECT_ID}/accounts:query`, {
++    method: 'POST',
++    headers,
++    body: JSON.stringify({ expression: [] }),
++  });
++  if (!lookup.ok) {
++    throw new Error(`emulator account query failed: ${lookup.status} ${await lookup.text()}`);
++  }
++  const { userInfo = [] } = (await lookup.json()) as {
++    userInfo?: { localId: string; email?: string }[];
++  };
++  const user = userInfo.find((u) => u.email === email);
++  if (!user) {
++    throw new Error(`no emulator account for ${email} — signup did not create one`);
++  }
++
++  const update = await fetch(`${base}/accounts:update`, {
++    method: 'POST',
++    headers,
++    body: JSON.stringify({ localId: user.localId, emailVerified: true }),
++  });
++  if (!update.ok) {
++    throw new Error(`emulator verify failed: ${update.status} ${await update.text()}`);
++  }
++}
++
++function captureConsoleErrors(page: Page): string[] {
++  const errors: string[] = [];
++  page.on('console', (msg) => {
++    if (msg.type() !== 'error') return;
++    const where = msg.location()?.url;
++    errors.push(where ? `${msg.text()} [${where}]` : msg.text());
++  });
++  page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
++  page.on('response', (res) => {
++    if (res.status() >= 400) errors.push(`HTTP ${res.status()} ${res.url()}`);
++  });
++  return errors;
++}
++
++/**
++ * D-1 — signup performs ONE navigation to /verify-email.
++ *
++ * The signed-in effect navigates as soon as the account exists; the submit
++ * handler must not navigate again after its best-effort verification-email
++ * round trip. A member who verifies and taps "I have verified" while that
++ * round trip is still in flight must land on profile-setup and STAY there.
++ * Fails on the unfixed screen (the late replace returns them to Verify).
++ */
++test('D-1: a verified member is not pulled back to /verify-email by the late send round trip', async ({ page }) => {
++  test.setTimeout(120_000);
++  // Hold the send so the tap lands while it is still outstanding.
++  let release = () => {};
++  const held = new Promise<void>((r) => { release = r; });
++  await page.route('**/wsfSendVerificationEmail', async (route) => { await held; await route.continue(); });
++
++  await page.goto('/signup');
++  await expect(page.getByTestId('wsf-signup')).toBeVisible({ timeout: 15_000 });
++  const email = `d1-signup-${Date.now()}@example.com`;
++  await page.getByTestId('wsf-signup-displayName').fill('Single Navigation');
++  await page.getByTestId('wsf-signup-email').fill(email);
++  await page.getByTestId('wsf-signup-password').fill('d1-password');
++  await page.getByTestId('wsf-signup-submit').click();
++  await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
++
++  await markEmailVerified(email);
++  await page.getByTestId('wsf-verify-check').click();
++  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
++
++  // The send finishes late. Profile-setup must survive it.
++  release();
++  await page.waitForTimeout(4_000);
++  await expect(page.getByTestId('wsf-profile')).toBeVisible();
++  await expect(page.getByTestId('wsf-verify')).toHaveCount(0);
++});
