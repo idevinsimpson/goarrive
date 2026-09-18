@@ -96,6 +96,17 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three
 - ChatGPT review instruction: none appeared during the entire run (checked at the start and close of every task).
 - **PR #327 remains a DRAFT. Nothing merged or deployed.**
 
+## Post-overnight follow-up (morning of 2026-09-18, after the ChatGPT audits)
+
+Standing scope unchanged: nothing merged, deployed, or changed on `main`, rules, `approved-candidate.json`, IAM/WIF or production; PR still a draft. Work done in response to the `[CHATGPT MORNING AUDIT]` (08:08 / 08:10 ET) and `[CHATGPT HOURLY REVIEW 8:15]` comments:
+
+| Item | State | Where |
+|---|---|---|
+| D-5 status-aware `wsfIsGroupMember` + two rules tests | patch prepared, verified 24/24 in a scratch copy, **not applied** (owner boundary) | `patches/d5-firestore-rules-status-aware.patch`, `patches/README.md` |
+| D-5 delivery path | **release blocker recorded**: the keyless staging workflow deploys `functions:westayfit` + hosting only, never Firestore rules | `patches/README.md` |
+| D-1 single signup navigation + regression spec | patch prepared, typechecked; **fails-before proven** on the unpatched head build (spec alone: 1 failed at the post-release assertion); product change **not applied** pending the owner's session prompt | `patches/d1-signup-single-navigation.patch`, `patches/README.md` |
+| Hosted-harness compatibility for `main`'s `hosted-package-e-smoke.mjs` | see the entry below once filed | `patches/` |
+
 ## Defect ledger (running)
 
 | # | Found in | Defect | Class | Status |

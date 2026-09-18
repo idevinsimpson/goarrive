@@ -87,6 +87,21 @@ beforeEach(async () => {
     // Alice's completed profile.
     await setDoc(doc(db, 'wsfMemberProfiles', ALICE_UID), validProfile);
 
+    // Former members keep their rows with a non-active status (the server
+    // never deletes a membership document); they must not read the group.
+    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_removed-uid`), {
+      groupId: GROUP_ID,
+      userId: 'removed-uid',
+      role: 'member',
+      membershipStatus: 'removed',
+    });
+    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_departed-uid`), {
+      groupId: GROUP_ID,
+      userId: 'departed-uid',
+      role: 'member',
+      membershipStatus: 'departed',
+    });
+
     // An orphan group (no members) used for negative read test.
     await setDoc(doc(db, 'wsfCommunityGroups', OTHER_GROUP_ID), {
       displayName: 'Bob Private',
@@ -193,6 +208,16 @@ describe('wsfCommunityGroups', () => {
   test('non-member cannot read group', async () => {
     const bob = testEnv.authenticatedContext(BOB_UID, verifiedEmail).firestore();
     await assertFails(getDoc(doc(bob, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('a REMOVED member cannot read the group (row kept, status changed)', async () => {
+    const removed = testEnv.authenticatedContext('removed-uid', verifiedEmail).firestore();
+    await assertFails(getDoc(doc(removed, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('a DEPARTED member cannot read the group', async () => {
+    const departed = testEnv.authenticatedContext('departed-uid', verifiedEmail).firestore();
+    await assertFails(getDoc(doc(departed, 'wsfCommunityGroups', GROUP_ID)));
   });
 
   test('platform admin can read any group', async () => {

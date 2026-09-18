@@ -101,7 +101,10 @@ export default function SignUp() {
       } catch (sendError) {
         console.warn('[signup] verification email not sent', sendError);
       }
-      router.replace('/verify-email');
+      // No navigation here. The signed-in effect above already moved the
+      // member to /verify-email the moment the account existed (before this
+      // send round trip). A second replace at this point would pull a member
+      // who has since tapped "I have verified" back off profile-setup.
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-up failed.'));
       setOfferSignIn(isEmailAlreadyInUse(e));
