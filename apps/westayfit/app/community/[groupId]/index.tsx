@@ -255,6 +255,13 @@ export default function CommunityPage() {
     // goes with it, and the generation advances so nothing still outstanding
     // from the old one can write here again.
     setDisplayAuth((prev) => beginContext(prev));
+    // The same rule for the invite link: a join code minted by "Reset link"
+    // belongs to the community it was minted for. It must never be rendered
+    // as another community's link when the screen is reused for a different
+    // community or account.
+    setResetJoinCode(null);
+    setResetOutcome('idle');
+    setCopyStatus('idle');
   }, [groupId, user?.uid]);
 
   const [leaveState, setLeaveState] = useState<

@@ -735,4 +735,49 @@ test('sign-in and not-found states are in the same visual system and do not enum
   expect(nf).toContain('Goal not found');
   expect(nf).not.toMatch(/member|group|permission|exists but/i);
   await snap(page, '14-not-found');
+
+  // A malformed id (the server answers invalid-argument) is the same screen,
+  // with no server message and no retry control.
+  await page.goto(`/contribute/not%20a%20goal%21?groupId=${fx.groupId}`);
+  await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 20_000 });
+  expect(await page.getByTestId('wsf-contribute-not-found').innerText()).toBe(nf);
+  await expect(page.getByText(/goalId is required|invalid/i)).toHaveCount(0);
+});
+
+test('membership lost while on the entry screen: the poll ends and the goal is not found', async ({ page }) => {
+  test.setTimeout(120_000);
+  const fx = await seedBase('lost');
+  const goalId = `uiB-goal-${fx.stamp}`;
+  await seedGoal(fx.groupId, fx.championUid, {
+    goalId, title: 'Squats together this week', target: 500, unit: 'squats', total: 241, status: 'active', endsInMs: 3 * 24 * 60 * 60_000,
+  });
+  let pulses = 0;
+  let writes = 0;
+  await page.route(callableUrl('wsfGoalPulse'), async (route) => {
+    pulses += 1;
+    await route.continue();
+  });
+  await page.route(callableUrl('wsfContribute'), async (route) => {
+    writes += 1;
+    await route.continue();
+  });
+  await signInVia(page, fx.memberEmail, fx.password);
+  await page.goto(`/contribute/${goalId}?groupId=${fx.groupId}&mode=record`);
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('241 of 500 squats');
+
+  // The Champion removes this member while the entry screen is open.
+  await firestoreWrite(`wsfMemberships/${fx.groupId}_${fx.memberUid}`, { membershipStatus: { stringValue: 'removed' } }, ['membershipStatus']);
+  await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveCount(0);
+  await expect(page.getByText('241')).toHaveCount(0);
+  await expect(page.getByText('Maple Street Movers')).toHaveCount(0);
+
+  // The poll stopped with the refusal, nothing was written, nothing is pending.
+  const settled = pulses;
+  await page.waitForTimeout(5_000);
+  expect(pulses).toBe(settled);
+  expect(writes).toBe(0);
+  expect(await page.evaluate((k) => window.localStorage.getItem(k), pendingKey(goalId, fx.memberUid))).toBeNull();
 });

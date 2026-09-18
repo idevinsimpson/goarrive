@@ -137,7 +137,13 @@ export default function DisplayGoal() {
         apply(seq, { kind: 'ready', pulse: result.data, confirmedAt: new Date(), stale: false });
       } catch (e) {
         if (cancelled) return;
-        if (e instanceof FirebaseError && e.code === 'functions/not-found') {
+        // A malformed id in the URL can never become a goal, so it is the same
+        // terminal refusal as an unknown one — not a connection problem to be
+        // polled for ever.
+        if (
+          e instanceof FirebaseError &&
+          (e.code === 'functions/not-found' || e.code === 'functions/invalid-argument')
+        ) {
           // Terminal for this session, and applied without consulting the
           // ordering guard: a refusal is not competing with the successes, it
           // is ending the session they belong to. Marking `sessionClosed`

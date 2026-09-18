@@ -13,7 +13,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | # | Task | Status | Head after task | Doc |
 |---|---|---|---|---|
 | 1 | Baseline freeze + Gate 1 investigation | done | `4852371` | [01-BASELINE-AND-GATE1.md](01-BASELINE-AND-GATE1.md) |
-| 2 | Security + privacy adversarial audit | pending | | [02-SECURITY-PRIVACY-AUDIT.md](02-SECURITY-PRIVACY-AUDIT.md) |
+| 2 | Security + privacy adversarial audit | done | TASK2_HEAD | [02-SECURITY-PRIVACY-AUDIT.md](02-SECURITY-PRIVACY-AUDIT.md) |
 | 3 | Contribution resilience torture | pending | | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
 | 4 | Display + authorization race torture | pending | | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
 | 5 | Accessibility + responsive QA | pending | | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
@@ -32,8 +32,28 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 - **Product fix deliberately not made** (authentication screen outside this PR's scope); one-file plan recorded in the task doc.
 - ChatGPT review instruction: none present at task start.
 
+## Task 2 — Security + privacy adversarial audit
+
+- **Operating model from this task on:** Fable is the integrator; Opus workers (explicit `opus` model selection is available here) do isolated analysis and adversarial review; every worker result is verified and integrated by Fable; workers never push.
+- **New adversarial callable suite** (33 cases): malformed ids, request-field trust, non-active membership statuses, cross-community rows, cache isolation across goals and decisions, sample suppression through a member-warmed cache, membership loss inside the TTL, unusable community references, the Champion control as oracle, role escalation, unapproved document fields. All green.
+- **Independent Opus review**: 3 attack lenses, every finding verified by a refuter; 6 confirmed, 5 refuted.
+- **Fixed** (narrow, no contract change): D-2 empty community reference returned `internal` → generic not-found; D-3 malformed display URL polled for ever → terminal refusal; D-4 malformed contribution link showed the server message → not-found card; D-6 contribute poll kept painting after membership loss → terminal not-found; D-8 contribute poll ordering guard. Plus `unauthenticated` on the contribution load → sign-in screen.
+- **Owner boundary, not applied:** D-5 Firestore rule `wsfIsGroupMember` is existence-only (removed members can read the community document incl. join code directly). Proposed fix and rules test in the task doc.
+- **Deferred:** D-7 (Champion notice hidden when the goals reload fails) → Task 4. **Gap recorded:** D-9 legacy orphan never surfaced (product copy decision). **Accepted:** D-10 timing side channel (no enumerable id space).
+- Harness: callable Jest ceiling 30 s (matches the per-test convention already used by the multi-step suites).
+- ChatGPT review instruction: none present (checked at task start and mid-task).
+
 ## Defect ledger (running)
 
 | # | Found in | Defect | Class | Status |
 |---|---|---|---|---|
 | D-1 | Task 1 | `signup.tsx` double `router.replace('/verify-email')`; late replace after slow send callable pulls a member back from profile-setup | product, pre-existing, out of PR scope | documented, not fixed; harness made deterministic |
+| D-2 | Task 2 | empty `communityGroupId` on an authorized goal answered `internal` instead of the generic not-found | backend, corrupt-document edge | fixed + test |
+| D-3 | Task 2 | malformed display URL treated as transient; polled for ever | frontend honesty / ops | fixed + test |
+| D-4 | Task 2 | malformed contribution link showed the server's argument message | frontend honesty | fixed + test |
+| D-5 | Task 2 | Firestore rule `wsfIsGroupMember` existence-only; removed members read the community doc incl. join code via SDK | rules, pre-existing | **owner boundary — not applied**; proposed fix + rules test documented |
+| D-6 | Task 2 | contribute poll swallowed `not-found`; screen kept the total after membership loss | frontend honesty | fixed + test |
+| D-7 | Task 2 | Champion display-auth outcome notice unreachable when the goals reload fails | frontend | deferred to Task 4 |
+| D-8 | Task 2 | contribute poll without ordering guard | frontend | fixed |
+| D-9 | Task 2 | quarantined legacy pending row never surfaced | product copy | gap recorded, not fixed |
+| D-10 | Task 2 | pulse refusal timing differs by one read for existing vs unknown goal | backend, low | accepted, not fixed (no enumerable id space) |

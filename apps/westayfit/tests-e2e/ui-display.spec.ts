@@ -268,6 +268,21 @@ test.describe('phone 390×844', () => {
     await page.waitForTimeout(300);
     await snap(page, '08-unavailable');
 
+    // A malformed id is the same generic screen, and it ends the session: no
+    // further pulse requests once the refusal is on screen.
+    let pulseCalls = 0;
+    const count = (r: { url(): string }) => {
+      if (r.url().includes('wsfGoalPulse')) pulseCalls += 1;
+    };
+    page.on('request', count);
+    await page.goto('/display/not%20a%20goal%21');
+    await expect(page.getByTestId('wsf-display-not-available')).toBeVisible({ timeout: 20_000 });
+    expect(await page.getByTestId('wsf-display-not-available').innerText()).toBe(unknownText);
+    const settled = pulseCalls;
+    await page.waitForTimeout(5_000);
+    expect(pulseCalls).toBe(settled);
+    page.off('request', count);
+
     // ---- authorized → ready, then revoked ---------------------------------------------
     await page.goto(`/display/${authorized}`);
     await expectState(page, 'building', false);

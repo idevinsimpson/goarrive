@@ -273,8 +273,21 @@ export default function ContributeToGoal() {
         setState({ kind: 'ready', pulse, ownCredit });
       } catch (e) {
         if (cancelled) return;
-        if (e instanceof FirebaseError && e.code === 'functions/not-found') {
+        // A malformed id in the link is "not found" to the member, not a
+        // retryable error carrying the server's argument message.
+        if (
+          e instanceof FirebaseError &&
+          (e.code === 'functions/not-found' || e.code === 'functions/invalid-argument')
+        ) {
           setState({ kind: 'notFound' });
+          return;
+        }
+        // The session is no longer valid server-side (revoked, disabled,
+        // password changed elsewhere) even though the client still holds a
+        // user: that is the sign-in screen, not "Something went wrong" with
+        // the server's sentence under it.
+        if (e instanceof FirebaseError && e.code === 'functions/unauthenticated') {
+          setState({ kind: 'notSignedIn' });
           return;
         }
         setState({
@@ -329,14 +342,24 @@ export default function ContributeToGoal() {
     if (!shouldPoll) return;
 
     let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    // Responses are not guaranteed to land in the order they were issued.
+    // Same admission guard as the display: a response older than one already
+    // applied is dropped, so the total on screen never counts backwards and
+    // the "before" figure captured at Record is never an inverted one.
+    let issued = 0;
+    let applied = 0;
     const fn = httpsCallable<{ goalId: string }, GoalPulse>(
       getFirebaseFunctions(),
       'wsfGoalPulse'
     );
     const tick = async () => {
+      const seq = ++issued;
       try {
         const result = await fn({ goalId });
         if (cancelled) return;
+        if (seq <= applied) return;
+        applied = seq;
         const pulse = result.data;
         setState((prev) => {
           if (prev.kind === 'ready') {
@@ -351,15 +374,29 @@ export default function ContributeToGoal() {
           // drop the poll result rather than clobber the terminal state.
           return prev;
         });
-      } catch {
-        // Transient poll error — the next tick reconciles automatically.
+      } catch (e) {
+        if (cancelled) return;
+        // A refusal is not transient: the server has decided this member no
+        // longer has a route to the goal (membership lost, goal gone). The
+        // screen must not keep painting a total it is no longer entitled to,
+        // nor invite a contribution the write would refuse. Same generic
+        // not-found as a cold load, and the poll ends with it.
+        if (e instanceof FirebaseError && e.code === 'functions/not-found') {
+          if (timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+          setState((prev) => (prev.kind === 'ready' || prev.kind === 'closed' ? { kind: 'notFound' } : prev));
+          return;
+        }
+        // Anything else is transient — the next tick reconciles automatically.
         // We already have a valid pulse on screen; do not surface as error.
       }
     };
-    const timer = setInterval(tick, POLL_INTERVAL_MS);
+    timer = setInterval(tick, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
     };
   }, [ready, user, goalId, shouldPoll]);
 

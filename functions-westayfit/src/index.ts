@@ -2150,10 +2150,19 @@ async function evaluateGoalAggregateAccess(
 ): Promise<GoalAggregateAccess> {
   const db = getFirestore();
 
+  // A goal whose community reference is not a usable id (a corrupt or
+  // hand-edited document) opens no route at all. Without this, an empty
+  // reference makes the path builder below throw, and that surfaces to the
+  // caller as `internal` — a distinguishable answer for a goal that exists.
+  const groupId = normalizeStringId(goal.communityGroupId);
+  if (!groupId) {
+    return { asMember: false, asDisplay: false, allowed: false, communityDisplayName: null };
+  }
+
   let asMember = false;
   if (callerUid) {
     const membershipSnap = await db
-      .doc(`wsfMemberships/${goal.communityGroupId}_${callerUid}`)
+      .doc(`wsfMemberships/${groupId}_${callerUid}`)
       .get();
     asMember =
       membershipSnap.exists &&
@@ -2168,7 +2177,7 @@ async function evaluateGoalAggregateAccess(
   let asDisplay = false;
   let communityDisplayName: string | null = null;
   if (asMember || isAggregateDisplayAuthorized(goal)) {
-    const groupSnap = await db.doc(`wsfCommunityGroups/${goal.communityGroupId}`).get();
+    const groupSnap = await db.doc(`wsfCommunityGroups/${groupId}`).get();
     const group = groupSnap.exists
       ? (groupSnap.data() as { isSample?: boolean; displayName?: unknown })
       : null;
