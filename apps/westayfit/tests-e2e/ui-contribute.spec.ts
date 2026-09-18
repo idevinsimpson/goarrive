@@ -694,10 +694,10 @@ test('closed goal, goal crossing, and contributing past the target', async ({ pa
   await addToShard(crossId, 20);
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'crossed');
+  await expect(page.getByTestId('wsf-contribute-receipt')).toHaveAttribute('data-variant', 'reached');
   await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText('You added 20 squats.');
   await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText(
-    'This one took us past our goal.'
+    'Our goal is reached.'
   );
   await expect(page.getByTestId('wsf-contribute-result-standing')).toHaveText(
     'Our goal of 500 squats is reached and still open. Maple Street Movers is now at 510 of 500 squats.'

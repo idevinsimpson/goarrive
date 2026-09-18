@@ -351,9 +351,22 @@ export default function CommunityPage() {
         const functions = getFirebaseFunctions();
 
         const membershipRef = doc(db, 'wsfMemberships', `${groupId}_${user.uid}`);
-        const membershipSnap = await getDoc(membershipRef);
+        // A NEVER-MEMBER'S READ IS REFUSED, NOT EMPTY. firestore.rules gates
+        // this document on `resource.data.userId == request.auth.uid`, and a
+        // document that does not exist has no `resource` to satisfy it: the
+        // get comes back `permission-denied` rather than as a missing snapshot.
+        // Every not-a-member case exercised until now (removed, departed) left
+        // the document in place, so this screen only ever saw the `exists()`
+        // half and sent a signed-in stranger to the generic load error.
+        // Denied here is the same fact as absent — this account holds no
+        // membership of this community — and lands on the same state. Any
+        // other failure is still a failure and falls through to the catch.
+        const membershipSnap = await getDoc(membershipRef).catch((e: unknown) => {
+          if ((e as { code?: string } | null)?.code === 'permission-denied') return null;
+          throw e;
+        });
         if (cancelled) return;
-        if (!membershipSnap.exists()) {
+        if (!membershipSnap || !membershipSnap.exists()) {
           setState({ kind: 'notMember' });
           return;
         }
@@ -1269,7 +1282,18 @@ export default function CommunityPage() {
             {goalsState.kind === 'loaded'
               ? confirmedButAbsent(
                   displayAuth,
-                  goalsState.goals.map((g) => g.goalId)
+                  // ABSENT FROM WHAT. Not "absent from this response" — since
+                  // W6 the response carries `includeHistory`, so every closed
+                  // goal of the community is in it whatever its display
+                  // permission says, and a revoke on a closed goal would never
+                  // read as absent again. The set that means something here is
+                  // the one the permission cards are drawn from and the one the
+                  // unflagged wsfListGoals returns: active OR display-
+                  // authorized. A closed goal drops out of it exactly when the
+                  // revoke lands, which is the confirmation.
+                  goalsState.goals
+                    .filter((g) => g.status === 'active' || g.aggregateDisplayAuthorized)
+                    .map((g) => g.goalId)
                 ).map((done) => (
                   <Text
                     key={done.goalId}

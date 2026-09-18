@@ -430,6 +430,11 @@ test.describe('community goal seam', () => {
       await page.getByTestId('wsf-new-goal-title').fill('E5 delayed-response goal');
       await page.getByTestId('wsf-new-goal-target').fill('500');
       await page.getByTestId('wsf-new-goal-unit').fill('squats');
+      // This seam records TWICE from the same member, so the goal has to take
+      // more than one contribution from each. The new-goal form defaults to
+      // 'once' (app/goals/new.tsx), and wsfContribute refuses the second one
+      // under that policy, so the choice is made explicitly here.
+      await page.getByTestId('wsf-new-goal-repeat-multiple').click();
       await page.getByTestId('wsf-new-goal-submit').click();
       await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
       const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())
@@ -550,6 +555,11 @@ test.describe('community goal seam', () => {
       await page.getByTestId('wsf-new-goal-title').fill('E5 delayed-success goal');
       await page.getByTestId('wsf-new-goal-target').fill('500');
       await page.getByTestId('wsf-new-goal-unit').fill('squats');
+      // This seam records TWICE from the same member, so the goal has to take
+      // more than one contribution from each. The new-goal form defaults to
+      // 'once' (app/goals/new.tsx), and wsfContribute refuses the second one
+      // under that policy, so the choice is made explicitly here.
+      await page.getByTestId('wsf-new-goal-repeat-multiple').click();
       await page.getByTestId('wsf-new-goal-submit').click();
       await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
       const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())

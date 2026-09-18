@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
@@ -84,15 +84,27 @@ export default function KioskGoal() {
   //
   // Only the kiosk's own storage key is removed. An unresolved attempt
   // belongs to the account that made it and stays reconcilable.
-  useEffect(() => {
-    clearKioskReturnGoal();
-    if (!user) return;
-    void signOut(getFirebaseAuth()).catch(() => {
-      // Nothing useful to do here and nothing to claim: the start screen
-      // shows no identity either way, and the next Contribute press lands on
-      // the sign-in gate.
-    });
-  }, [user]);
+  //
+  // ONLY WHILE THIS SCREEN IS THE ONE IN FRONT OF SOMEBODY. As a plain
+  // useEffect keyed on `user` this fired at the worst possible moment: the
+  // handoff below is a client-side push, so the start screen stays mounted
+  // underneath /contribute and /signin, and the instant the visitor's
+  // sign-in succeeded this effect re-ran on a screen nobody was looking at —
+  // wiping the return goal before nextRouteAfterAuth() could read it, and
+  // signing the visitor out of the account they had just signed in to.
+  // useFocusEffect ties the reset to the fact it is about: this device has
+  // come to rest on its start screen.
+  useFocusEffect(
+    useCallback(() => {
+      clearKioskReturnGoal();
+      if (!user) return;
+      void signOut(getFirebaseAuth()).catch(() => {
+        // Nothing useful to do here and nothing to claim: the start screen
+        // shows no identity either way, and the next Contribute press lands on
+        // the sign-in gate.
+      });
+    }, [user])
+  );
 
   useEffect(() => {
     setState({ kind: 'loading' });

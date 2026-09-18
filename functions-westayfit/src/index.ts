@@ -2167,10 +2167,13 @@ type GoalDoc = {
    *     below target and crosses again reports the FIRST crossing, which is
    *     the one that happened; claiming a second "first time" would be false.
    *
-   * `reachedAttemptId` is the attemptId of the crossing attempt — enough to
-   * identify the attempt for the member replaying it (the contribution key is
-   * goal + uid + attemptId, and only that member can present that uid). No
-   * uid is stored here: the shared display must not be able to name a person.
+   * `reachedAttemptId` is ALWAYS null today. The crossing is learned from a
+   * post-commit observation of the shard total, and that observation cannot
+   * prove which of several concurrent contributions moved the total across
+   * the line (A +30 and B +70 against 100: both may observe 100). Naming an
+   * attempt from it would sometimes name the wrong member, so no attempt is
+   * named. The field stays so a future mechanism that CAN prove the order
+   * (e.g. replaying contribution commit timestamps) has a place to write.
    */
   reachedAt?: FirebaseFirestore.Timestamp;
   reachedAttemptId?: string | null;
@@ -2787,18 +2790,14 @@ type ContributeResponse = {
   unit?: string;
   status?: GoalStatus;
   /**
-   * TRUE on exactly one attempt per goal: the one whose transaction moved the
-   * shared total from below the target to at or beyond it. Stored on that
-   * attempt's contribution document, so a replay of the SAME attemptId
-   * returns the same answer forever and no other attempt can ever be told it
-   * crossed — not an overshoot, not a concurrent attempt that lost the race,
-   * not a contribution after a correction dropped the total back down.
-   *
-   * It sits with the current-shared-state fields, not with the caller's own
-   * three, because "the community's total reached its target" is a fact about
-   * the community. A caller who may not be told where the community stands is
-   * not told this either; their own receipt (addedCount, ownCredit,
-   * alreadyRecorded) is unchanged and still true.
+   * Per-attempt credit for the crossing. ALWAYS false today, and stored as
+   * false on every attempt: the crossing is learned from a post-commit
+   * observation of the sharded total, which cannot prove which concurrent
+   * contribution crossed the line, so no member is told "this one took us
+   * past our goal". The goal-level event (GoalDoc.reachedAt) is still
+   * recorded once; Community Home and the display celebrate WE reaching it.
+   * The field stays in the contract so a mechanism that can prove the order
+   * can light it without a shape change; until then it is never true.
    */
   crossedTarget?: boolean;
 };
@@ -3089,19 +3088,13 @@ export const wsfContribute = onCall<ContributeRequest>(
 
     // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
     // document only. See claimTargetCrossing for the rule.
-    let crossedTarget = storedCrossedTarget;
+    // `crossedTarget` is never raised here: see ContributeResponse.
+    const crossedTarget = storedCrossedTarget === true;
     let observedSharedTotal: number | null = null;
     if (!alreadyRecorded && goalHadNoEvent && goalTarget > 0) {
       observedSharedTotal = await sumGoalShards(goalId);
       if (observedSharedTotal >= goalTarget) {
-        crossedTarget = await claimTargetCrossing({
-          goalRef,
-          contribRef,
-          attemptId,
-          count,
-          observedSharedTotal,
-          goalTracked,
-        });
+        await recordTargetCrossing({ goalRef, count, observedSharedTotal, goalTracked });
       }
     }
 
@@ -3155,86 +3148,64 @@ export const wsfContribute = onCall<ContributeRequest>(
 );
 
 /**
- * Claim the one-time target-crossing event for a contribution that has just
- * committed and then observed the shared total at or beyond the target.
+ * Record the one-time target-crossing event for a goal whose shard total was
+ * just observed at or beyond the target by a contribution that has committed.
  *
  * WHY AFTER THE COMMIT. The shared total lives in ten shards so that
  * concurrent contributions never touch the same document. Deciding the
  * crossing inside the contribution transaction meant reading all ten shards
  * there, which turned every pre-crossing contribution into a conflict with
- * every other. This claim touches ONLY the goal document (plus the caller's
- * own attempt), so contention is confined to the handful of attempts that
- * observe the crossing moment, and to one small transaction each.
+ * every other (measured: 20 simultaneous attempts took 13 s and 48 of 50
+ * aborted). This record touches ONLY the goal document, once.
  *
- * THE RULE.
- *   • credited  := observedSharedTotal − count < target ≤ observedSharedTotal
- *                  — without THIS attempt the observed total was below the
- *                  line; with it, at or beyond. That is the honest meaning of
- *                  "this one took us past our goal" when the exact order of
- *                  concurrent shard writes is not recoverable.
- *   • No event yet and credited: write reachedAt / reachedSharedTotal /
- *     reachedAttemptId = this attempt, mark the attempt crossedTarget.
- *   • No event yet, not credited (others' contributions landed between this
- *     commit and this read, so the line was already behind us): record the
- *     event UNCREDITED (reachedAttemptId null) — but only on a goal that
- *     carries crossingTracked, i.e. one created since this feature exists. A
- *     goal from before could have stood beyond its target for weeks; dating
- *     that "today" would be false, so it simply never gets an event.
- *   • Event already recorded but uncredited, and this attempt IS credited,
- *     within two minutes of the event: attach the credit. Two attempts
- *     landing in one instant can each observe an attributable total; the
- *     goal document serializes them, so at most one is ever credited.
- *   • Otherwise nothing: the event stands exactly as first written.
+ * WHAT IS RECORDED, AND WHAT IS NOT. The event is a fact about the goal:
+ * reachedAt and reachedSharedTotal. No attempt is named (reachedAttemptId is
+ * written null) because a post-commit observation cannot prove which of
+ * several concurrent contributions crossed the line — A +30 and B +70 against
+ * a target of 100 may both observe 100 whichever landed first. A goal-level
+ * "WE reached it" is true either way; "this one took us past" might not be.
  *
- * A cheap plain read first: once the goal carries an event, the claim
- * transaction is not even opened, so the post-crossing hot path pays one
- * document read and nothing else.
+ * WHEN. Exactly once, the first time an observer sees the total at or beyond
+ * the target with no event on the goal:
+ *   • when the observer's own count spans the line
+ *     (observed − count < target ≤ observed) — the crossing happened in this
+ *     batch, so the date is honest — on any goal; or
+ *   • on a goal created since this field exists (`crossingTracked`), whenever
+ *     observed ≥ target — the only way a crossing is otherwise missed is
+ *     several attempts landing in one instant, and the moment must not be
+ *     lost. A goal from before could have stood beyond its target for weeks,
+ *     so it never gets a dated event it cannot honestly carry.
+ * A plain read first: once the goal carries an event the transaction is not
+ * opened, so the post-crossing hot path pays one document read and nothing
+ * else. Returns whether this call recorded the event.
  */
-async function claimTargetCrossing(args: {
+async function recordTargetCrossing(args: {
   goalRef: FirebaseFirestore.DocumentReference;
-  contribRef: FirebaseFirestore.DocumentReference;
-  attemptId: string;
   count: number;
   observedSharedTotal: number;
   goalTracked: boolean;
 }): Promise<boolean> {
-  const { goalRef, contribRef, attemptId, count, observedSharedTotal, goalTracked } = args;
+  const { goalRef, count, observedSharedTotal, goalTracked } = args;
   const db = getFirestore();
   const peek = (await goalRef.get()).data() as GoalDoc | undefined;
-  if (!peek) return false;
-  const credited =
+  if (!peek || peek.reachedAt != null) return false;
+  const spansLine =
     observedSharedTotal - count < peek.target && observedSharedTotal >= peek.target;
-  if (peek.reachedAt != null && (peek.reachedAttemptId != null || !credited)) {
-    return false;
-  }
-  if (peek.reachedAt == null && !credited && !goalTracked) return false;
+  if (!spansLine && !goalTracked) return false;
 
   return await db.runTransaction(async (tx) => {
     const snap = await tx.get(goalRef);
     const goal = snap.data() as GoalDoc | undefined;
-    if (!goal) return false;
-    const target = goal.target;
-    const isCredited = observedSharedTotal - count < target && observedSharedTotal >= target;
-    if (goal.reachedAt == null) {
-      if (!isCredited && goal.crossingTracked !== true) return false;
-      tx.update(goalRef, {
-        reachedAt: FieldValue.serverTimestamp(),
-        reachedSharedTotal: observedSharedTotal,
-        reachedAttemptId: isCredited ? attemptId : null,
-      });
-      if (isCredited) tx.update(contribRef, { crossedTarget: true });
-      return isCredited;
-    }
-    if (
-      goal.reachedAttemptId == null &&
-      isCredited &&
-      Date.now() - goal.reachedAt.toMillis() < 120_000
-    ) {
-      tx.update(goalRef, { reachedAttemptId: attemptId });
-      tx.update(contribRef, { crossedTarget: true });
-      return true;
-    }
-    return false;
+    if (!goal || goal.reachedAt != null) return false;
+    const spans = observedSharedTotal - count < goal.target && observedSharedTotal >= goal.target;
+    if (!spans && goal.crossingTracked !== true) return false;
+    if (observedSharedTotal < goal.target) return false;
+    tx.update(goalRef, {
+      reachedAt: FieldValue.serverTimestamp(),
+      reachedSharedTotal: observedSharedTotal,
+      reachedAttemptId: null,
+    });
+    return true;
   });
 }
 
