@@ -1192,9 +1192,14 @@ async function caseW6History() {
 
 // W4 / W7 / W8 / W9 — member-facing flows, on a phone, mirroring the local specs.
 async function caseW4W7W8Browser(browser) {
-  const fx = await seedFixture('w478', 1, false);
-  const goalId = fx.goalIds[0];
+  // TWO open goals: the product's momentum line exists only across two or more
+  // open goals (src/communityMomentum.ts: fewer than two -> no line at all).
+  // Run 5 seeded one goal and waited for a line the product correctly never
+  // renders — a fixture error in this harness, not a product defect.
+  const fx = await seedFixture('w478', 2, false);
+  const [goalId, secondGoal] = fx.goalIds;
   await authorizeDisplay(fx, goalId);
+  await authorizeDisplay(fx, secondGoal);
   await putDoc(`wsfGoals/${goalId}`, { activityGuideKey: 'squats', updatedAt: new Date() }, ['activityGuideKey', 'updatedAt']);
   const memberCtx = await browser.newContext(PHONE_CONTEXT);
   const championCtx = await browser.newContext(PHONE_CONTEXT);
@@ -1203,11 +1208,14 @@ async function caseW4W7W8Browser(browser) {
     await signInPage(member, fx.member);
     await member.goto(`${BASE_URL}/community/${fx.groupId}`);
     await visible(member.getByTestId(`wsf-community-goal-link-${goalId}`), 30_000);
-    // W7: honest momentum roll-up and the share control for an authorized goal; no QR for a member.
-    await visible(member.getByTestId('wsf-community-momentum'));
+    // W7: honest momentum roll-up across the two open goals (both confirmed by
+    // their pulses on a cold staging load, so allow 30 s), and the share
+    // control for the featured authorized goal; no QR for a member.
+    await visible(member.getByTestId('wsf-community-momentum'), 30_000);
     const momentum = await member.getByTestId('wsf-community-momentum').innerText();
+    assert(/^\d+ of 2 open goals reached together\.$/.test(momentum.trim()), `Momentum line is not the two-goal roll-up: ${sanitize(momentum)}`);
     assert(!momentum.includes(fx.member.uid) && !momentum.includes(fx.champion.uid), 'Momentum copy leaked a uid');
-    await visible(member.getByTestId(`wsf-community-goal-share-${goalId}`));
+    await visible(member.locator('[data-testid^="wsf-community-goal-share-"]').first());
     assert((await member.getByTestId('wsf-community-qr-section').count()) === 0, 'A member can see the Champion join QR section');
     assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'A member has the Manage surface');
     await snap(member, '17-phone-community-home-w7-share-momentum');
