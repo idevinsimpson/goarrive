@@ -15,6 +15,7 @@ export function ButtonLink({
   testID,
   label,
   onPress,
+  replace = false,
 }: {
   href: string;
   style: StyleProp<ViewStyle>;
@@ -23,9 +24,15 @@ export function ButtonLink({
   label: string;
   /** Runs before the navigation (Link calls the child's onPress first). */
   onPress?: () => void;
+  /**
+   * Replace the current route instead of pushing over it. A gate screen that
+   * exists only to send the visitor somewhere (the kiosk's sign-in card) must
+   * not stay in the stack underneath its own destination.
+   */
+  replace?: boolean;
 }) {
   return (
-    <Link href={href as never} asChild>
+    <Link href={href as never} asChild replace={replace}>
       {/*
         Flattened on purpose: Link asChild merges the child's style by object
         spread, so an ARRAY style would become {0: …, 1: …} and blank the route.

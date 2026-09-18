@@ -1045,6 +1045,11 @@ export default function ContributeToGoal() {
             textStyle={styles.primaryButtonText}
             testID="wsf-contribute-signin-link"
             label="Sign in"
+            // On a kiosk this gate is a hand-off, not a page the visitor came
+            // from: the sign-in returns them to /contribute/<goal>?kiosk=1 by
+            // replacing the sign-in screen, so a PUSHED gate would leave a
+            // second contribution screen mounted underneath the one they use.
+            replace={kiosk}
           />
         </View>
       </>
