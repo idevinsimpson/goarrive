@@ -214,6 +214,40 @@ async function seedBase(tag: string): Promise<Fx> {
   };
 }
 
+/**
+ * The keys Firebase Auth has persisted for this origin. The web SDK's default
+ * persistence is IndexedDB (`firebaseLocalStorageDb` / `firebaseLocalStorage`),
+ * with localStorage only as a fallback, so a signed-in account shows up here
+ * and NOT among localStorage keys. Opening the database creates it if absent;
+ * an empty store reads as "nobody signed in", which is the assertion's point.
+ */
+async function readAuthRecords(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () =>
+      new Promise<string[]>((resolve) => {
+        const req = indexedDB.open('firebaseLocalStorageDb');
+        req.onerror = () => resolve([]);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('firebaseLocalStorage')) {
+            db.close();
+            resolve([]);
+            return;
+          }
+          const all = db.transaction('firebaseLocalStorage', 'readonly').objectStore('firebaseLocalStorage').getAllKeys();
+          all.onsuccess = () => {
+            db.close();
+            resolve((all.result as unknown[]).map(String));
+          };
+          all.onerror = () => {
+            db.close();
+            resolve([]);
+          };
+        };
+      })
+  );
+}
+
 /** Every browser-storage key the page can see, by area. */
 async function readStorage(page: Page): Promise<{ local: string[]; session: string[] }> {
   return page.evaluate(() => ({
@@ -333,7 +367,7 @@ test('a whole walk-up: start → sign in → contribute → Finish → start, wi
   // The account IS signed in at this moment — that is what makes the next
   // assertion mean something.
   const before = await readStorage(page);
-  expect(before.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(true);
+  expect((await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:'))).toBe(true);
 
   // ---- Finish --------------------------------------------------------------
   await page.getByTestId('wsf-kiosk-finish').click();
@@ -343,7 +377,7 @@ test('a whole walk-up: start → sign in → contribute → Finish → start, wi
 
   // 1. Signed out.
   const after = await readStorage(page);
-  expect(after.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
+  expect((await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
   // 2. The kiosk's own session key is gone.
   expect(after.session).not.toContain('wsf.kioskReturnGoalId');
   // 3. A confirmed contribution leaves no pending record for anyone.
@@ -363,7 +397,7 @@ test('a whole walk-up: start → sign in → contribute → Finish → start, wi
   await page.goto(`/kiosk/${goalId}`);
   await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 20_000 });
   const afterReload = await readStorage(page);
-  expect(afterReload.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
+  expect((await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
 
   // ---- THE SECOND WALK-UP -------------------------------------------------
   // Everything above is one person's session ending tidily. This is the claim
@@ -437,7 +471,7 @@ test('a whole walk-up: start → sign in → contribute → Finish → start, wi
   await page.waitForURL(new RegExp(`/kiosk/${goalId}$`), { timeout: 20_000 });
   await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 20_000 });
   const afterB = await readStorage(page);
-  expect(afterB.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
+  expect((await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
   expect(afterB.session).not.toContain('wsf.kioskReturnGoalId');
   expect(afterB.local.some((k) => k.startsWith('wsf.pendingContribution.'))).toBe(false);
   const startAfterB = await page.getByTestId('wsf-kiosk-screen').innerText();
@@ -546,7 +580,7 @@ test('nobody touches it: the countdown finishes the session, and Stay puts it ba
   await page.waitForURL(new RegExp(`/kiosk/${goalId}$`), { timeout: IDLE_MS + 30_000 });
   await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 20_000 });
   const after = await readStorage(page);
-  expect(after.local.some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
+  expect((await readAuthRecords(page)).some((k) => k.startsWith('firebase:authUser:'))).toBe(false);
   expect(after.session).not.toContain('wsf.kioskReturnGoalId');
   const startAgain = await page.getByTestId('wsf-kiosk-screen').innerText();
   expect(startAgain).not.toContain(fx.memberEmail);

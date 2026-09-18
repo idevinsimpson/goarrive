@@ -867,7 +867,11 @@ export default function ContributeToGoal() {
         setKioskError('We couldn’t sign you out. Don’t leave this device signed in — try Finish again.');
         return;
       }
-      router.replace(result.returnTo as never);
+      // Back to the start screen that is (normally) already underneath this
+      // one: dismissTo pops to it, so the device does not accumulate a start
+      // screen per visitor; on a cold load of ?kiosk=1 there is nothing to
+      // pop to and it behaves as a replace.
+      router.dismissTo(result.returnTo as never);
     },
     [goalId, uid, pending]
   );
