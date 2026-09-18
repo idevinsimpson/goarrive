@@ -4,15 +4,15 @@ Recovery point. If the session stops: read this file, then the newest PR #327 co
 
 | Field | Value |
 |---|---|
-| Updated (ET) | 12:12 ET (16:12 UTC) |
-| Current task | **OWNER AUTHORIZED FORWARD TO B (11:58 ET).** Waiting on Devin for the two credentialed steps this session cannot do: (1) temporary staging-only IAM grant to the deployer (custom role with run.services.getIamPolicy + run.services.setIamPolicy; exact commands in the 12:02 comment), (2) hand deploy of `firestore.rules` from `65d258d` (`firebase deploy --only firestore:rules --project westayfit-staging --config firebase.westayfit.emulators.json`). Workflow rules-step commit blocked by sandbox policy a third time. Harness rows for W2/W3/W5/W6/W4-W7-W8/W9 written, ops suite green, PR #333 merged to main. Staging still MIXED/UNVERIFIED (Hosting A, functions B, orphan service without invoker) |
+| Updated (ET) | 12:28 ET (16:28 UTC) |
+| Current task | **RUN 4 DISPATCHED (12:27 ET) from `main` @ `4f4320a`, candidate B `65d258d`, after the Google-side receipt (temporary custom role `wsfStagingRunInvokerPolicy` bound to the deployer; candidate `firestore.rules` released as ruleset `abf890ba…`).** Monitoring gate/config/build/deploy/hosted-verify (21 rows)/cleanup/evidence. Temporary grant still present by design until verification ends |
 | Branch / head | `claude/wsf-ui-member-experience` @ `65d258d` (+ docs commits); `main` = #331 + #333 (approval `65d258d`, harness with candidate B rows); #332 standby unmerged |
-| Latest ChatGPT review read | `[CHATGPT MANUAL REVIEW 11:55]` (recommended forward-to-B; acknowledged 11:57) + `[OWNER AUTHORIZATION 11:58]`. No 12:15 review yet |
+| Latest ChatGPT review read | `[CHATGPT HOURLY REVIEW 12:15]` (BLOCKED-on-credentials verdict; six actions now in progress) + `[MANUS GOOGLE-SIDE RECEIPT]` 12:26 ET (IAM granted — rules deployed) |
 | What changed | D-5: `wsfIsGroupMember` now requires `membershipStatus == 'active'` (one helper, one call site: `wsfCommunityGroups` read); two rules tests added. D-1: trailing `router.replace('/verify-email')` removed from `signup.tsx` `onSubmit`; slow-send regression spec added |
 | Tests completed | On `5a3fbde` (D-5+D-1): rules 24/24; focused browser 32/32; app tsc; Vitest 233; functions build; callable 238; deploy-config 8; complete browser suite 123/123; gate1 CLEAR (31/31). Adversarial review (18 Opus agents): 0 product regressions; test-quality findings all fixed. After hardening: rules **26/26** (positive controls, missing-status row, cross-group scope), D-1 spec 1/1 with a deterministic post-release window and interception assertion, e2-join-flow 2/2 |
-| Tests running | none |
-| Blocker | Devin: IAM grant + rules hand deploy (no Google credentials in this session). Then: ONE fresh dispatch from main; if the deploy still fails on invoker policy after the grant → stop, report verbatim (org policy) |
-| Exact next action | on Devin's "IAM granted" → dispatch run 4 from main; read every job; post result; if hosted green → remind Devin to remove the temporary grant and record before/after scope in the receipt; 12:46 reminder → readiness receipt (BLOCKED unless a run verified) |
+| Tests running | staging run 4 (see PR #327 12:27 comment for the run id) |
+| Blocker | none pending the run; if the invoker-policy error repeats → STOP, quote it (org policy), no wider IAM |
+| Exact next action | read every job of run 4; post result; on hosted green → ask Devin to remove the temporary role + binding and record before/after scope; on failure → classify (PRODUCT / HARNESS / GOOGLE-SIDE), no retry; 12:46 → readiness receipt |
 | Uncommitted | none |
 
 ## Authorized today (Devin, 08:2x ET session prompt)
