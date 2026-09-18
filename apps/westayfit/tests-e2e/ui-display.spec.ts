@@ -220,7 +220,7 @@ test.describe('phone 390×844', () => {
         await expect(page.getByTestId('wsf-display-screen')).toHaveAttribute('data-phase', 'nearGoal');
       }
       if (key === 'reached') await expect(page.getByTestId('wsf-display-we')).toHaveAttribute('data-fill-ratio', '1.0000');
-      if (key === 'closedshort') await expect(page.getByTestId('wsf-display-period')).toMatch(/Aug|Sep|–/);
+      if (key === 'closedshort') expect(await page.getByTestId('wsf-display-period').innerText()).toMatch(/–/);
       await page.waitForTimeout(400);
       await snap(page, name);
     }

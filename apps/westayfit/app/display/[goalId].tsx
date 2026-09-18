@@ -192,6 +192,10 @@ export default function DisplayGoal() {
     </Text>
   ) : null;
 
+  // Root elements are keyed per layout and state. The statically exported
+  // page hydrates the loading root, and React does not repair attribute
+  // mismatches on hydration; a keyed root remounts, so its data-* attributes
+  // are always the ones this render computed.
   // Every non-ready state is generic on purpose. No goal, no authorization
   // and a revoked authorization all look the same here: telling them apart
   // would make this display an oracle for which goal ids exist.
@@ -214,6 +218,7 @@ export default function DisplayGoal() {
             };
     return (
       <View
+        key={`generic-${wide ? 'wide' : 'phone'}`}
         style={[styles.canvas, wide ? styles.canvasWide : styles.canvasPhone]}
         testID={copy.testID}
         {...({ dataSet: { layout: wide ? 'wide' : 'phone' } } as Record<string, unknown>)}
@@ -358,6 +363,7 @@ export default function DisplayGoal() {
     // exact result on the right, sized to read from across a room.
     return (
       <View
+        key="ready-wide"
         style={[styles.canvas, styles.canvasWide]}
         testID="wsf-display-screen"
         {...({ dataSet: { layout: 'wide', phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
@@ -382,6 +388,7 @@ export default function DisplayGoal() {
   // hero carrying the WE and the result, identity above it.
   return (
     <View
+      key="ready-phone"
       style={[styles.canvas, styles.canvasPhonePage]}
       testID="wsf-display-screen"
       {...({ dataSet: { layout: 'phone', phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
