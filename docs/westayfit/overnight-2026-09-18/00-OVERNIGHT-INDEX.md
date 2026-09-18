@@ -16,7 +16,7 @@ Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY RE
 | 2 | Security + privacy adversarial audit | done | `f721350` | [02-SECURITY-PRIVACY-AUDIT.md](02-SECURITY-PRIVACY-AUDIT.md) |
 | 3 | Contribution resilience torture | done | `e531433` | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
 | 4 | Display + authorization race torture | done | `0b0797c` | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
-| 5 | Accessibility + responsive QA | pending | | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
+| 5 | Accessibility + responsive QA | done | TASK5_HEAD | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
 | 6 | Performance + operational quality | pending | | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
 | 7 | Cross-surface product quality audit | pending | | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
 | 8 | Final candidate hardening + evidence pack | pending | | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
@@ -61,6 +61,15 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 - Receipts: browser 18/18 in one run + 12 across the implementer's per-spec runs; Vitest 209; TS clean.
 - ChatGPT review instruction: none present (checked at task start and mid-task).
 
+## Task 5 — Accessibility + responsive QA
+
+- Opus audit (coverage checklist, computed contrast for every pair in use, target inventory, screen-reader reading order), Opus implementer with fails-before/passes-after proof for 8 groups, Opus-authored standing contract spec (`ui-a11y`, 22 cases: widths 390/360/320/195 with server-maximum names, display containment, 44 px targets, Tab + focus rings, dialog contract, reduced motion, axe WCAG A/AA, alert/input contracts, greyscale artifacts).
+- **Fixed**: D-19 programmatic headings; D-20 status messages announced (alert + polite live regions); D-21 dialog name "Champion tools"; D-22 six targets under 44 px incl. the inline footer link; D-23 placeholder contrast 2.26 → 4.97:1; D-24 display clipping at long names (length-tiered type scale, approved sizes unchanged); D-25 enterKeyHint; D-26 duplicate accessible names. Plus ButtonLink array-style hardening.
+- **Skipped/recorded**: per-route page title (expo-router disables document titles on web; needs a new dependency — owner decision); Living WE fill 1.90:1 on navy (approved colourway, text carries meaning); manual checks listed in the doc.
+- Contract first run: 19/22 — two real findings (heading overflow at 195 px with an 80-char name; no h1 on the display's unavailable state) fixed in Task 6's commit.
+- Receipts: `ui-a11y-fixes` 8/8; regression runs `ui-qa` 5, `ui-display` 4, `ui-community-home` 2, `ui-contribute` 7, `e5-display-authorization` 5, `d-admission-controls` 5, `ui-journey` 1, `ui-champion-torture` 5, `mu2-flow` 4; Vitest 219; TS clean.
+- ChatGPT review instruction: none present (checked at task start and mid-task).
+
 ## Defect ledger (running)
 
 | # | Found in | Defect | Class | Status |
@@ -84,3 +93,12 @@ Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (produced in Task 7).
 | D-16 | Task 4 | sample-community Champion card claimed a publication the server refuses | frontend truth | fixed (qualifier) + test |
 | D-17 | Task 4 | active goal past its end labelled "Open · Ends <past date>" on both surfaces | frontend truth | fixed (label only) + unit + browser tests |
 | D-18 | Task 4 | Check again gave no feedback for a full round trip | frontend | fixed + test |
+| D-19 | Task 5 | no programmatic headings on any surface | a11y (1.3.1) | fixed + test |
+| D-20 | Task 5 | status messages not announced (validation error, receipt, pending, refusal, stale pill) | a11y (4.1.3) | fixed + test |
+| D-21 | Task 5 | Manage sheet dialog unnamed | a11y (4.1.2) | fixed + test |
+| D-22 | Task 5 | six touch targets under 44 px | a11y / phone | fixed + test |
+| D-23 | Task 5 | entry placeholder contrast 2.26:1 | a11y (1.4.3) | fixed + test |
+| D-24 | Task 5 | display clipped at server-maximum names (wide and phone) | responsive | fixed (type scale) + tests |
+| D-25 | Task 5 | no enterKeyHint on the entry field | a11y / phone | fixed + test |
+| D-26 | Task 5 | duplicate accessible names for per-goal controls | a11y (2.4.6) | fixed + test |
+| D-27 | Task 5 | h1 overflows at 195 px with an 80-char community name; display unavailable state has no h1 | a11y / responsive | fixed in Task 6 commit |

@@ -52,4 +52,4 @@ Real-browser 200% text-only zoom (expected inert), focus-ring visibility against
 | Implementer's regression runs: `ui-qa` 5, `ui-display` 4, `ui-community-home` 2, `ui-contribute` 7, `e5-display-authorization` 5, `d-admission-controls` 5, `ui-journey` 1, `ui-champion-torture` 5, `mu2-flow` 4 | all passed |
 | Vitest | 219 passed / 15 files (10 new type-scale tests) |
 | App TypeScript | clean |
-| `ui-a11y` standing contract (21 tests) | UI_A11Y_RESULT |
+| `ui-a11y` standing contract (22 cases incl. the width loop) | 19 passed, 3 failed on the first run — two real findings the contract caught, both fixed in the Task 6 commit: at 195 px an 80-character community name pushed the level-1 heading past the right edge (heading now shrinks/wraps in its row), and the display's generic "unavailable" state had no level-1 heading (added). Re-run result recorded in the Task 6 receipt. |
