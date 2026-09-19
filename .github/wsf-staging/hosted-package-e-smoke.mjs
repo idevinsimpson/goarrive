@@ -1841,10 +1841,47 @@ async function caseTurnContract() {
     'the screen recorded a second time what the phone had already recorded'
   );
 
+  // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
+  //
+  // THIS READ COMES FIRST, BEFORE THE ARITHMETIC. IT IS A TEN-SECOND WINDOW.
+  //
+  // Run 31 failed here with "no result at all", and the row was at fault.
+  // `lastResult.atMillis` is stamped by the LAST completion call, and
+  // wsfStationState serves a result only while `now - atMillis <
+  // TURN_RESULT_VISIBLE_MS` (index.ts). The row used to spend three more
+  // round-trips — two goal pulses and the combined pulse, the last of them
+  // very likely a cold start — inside that window before reading it. A row
+  // that consumes the window it is measuring cannot test the window; it
+  // tests how fast staging happened to be. So the ten-second read now
+  // happens immediately after the last completion, and the arithmetic, which
+  // has no deadline, happens after it.
+  const recordedAtMs = Date.now();
+  const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  const elapsedMs = Date.now() - recordedAtMs;
+  assert(!afterRecord?.assigned, 'the screen is still showing somebody after recording');
+  // The elapsed reading is in the message so a future failure separates "the
+  // window closed before we looked" from "no result was ever written".
+  assert(
+    afterRecord?.result,
+    `the screen shows no result at all in the ten seconds after recording (read ${elapsedMs}ms after the last completion returned, window ${TURN_RESULT_MS}ms)`
+  );
+  assert(afterRecord.result.code === rejoined.code, 'the ten-second result names a different turn');
+  assert(afterRecord.result.amount === TURN_COUNT, `the ten-second result shows ${afterRecord.result.amount}`);
+  assert(!JSON.stringify(afterRecord.result).includes('A.L.'), 'the ten-second result shows a name');
+  // The product reports what is left of the window. A result served with no
+  // time left would be a result that is already stale on the screen.
+  assert(
+    typeof afterRecord.result.secondsLeft === 'number' && afterRecord.result.secondsLeft > 0,
+    `the ten-second result reports ${afterRecord.result.secondsLeft} seconds left`
+  );
+
   // ── THE ARITHMETIC: ONE CHILD, ONE PARENT, THE OTHER CHILD UNTOUCHED ──────
   // Read as the member. These goals are not display-authorized, so an
   // anonymous read would be refused for a reason that has nothing to do with
-  // the arithmetic this row is checking.
+  // the arithmetic this row is checking. No deadline applies here, which is
+  // exactly why it runs after the ten-second read rather than before it.
   const chosen = await turnCall('chosen activity pulse', 'wsfGoalPulse', { goalId: activityA }, memberToken);
   const untouched = await turnCall('unchosen activity pulse', 'wsfGoalPulse', { goalId: activityB }, memberToken);
   // THE PARENT'S FIELD IS combinedTotal, NOT sharedTotal.
@@ -1862,16 +1899,6 @@ async function caseTurnContract() {
     parent?.combinedTotal === TURN_COUNT,
     `the combined parent holds ${parent?.combinedTotal}, expected ${TURN_COUNT}`
   );
-
-  // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
-  const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
-    stationId: stationOne.stationId, secret: stationOne.secret,
-  });
-  assert(!afterRecord?.assigned, 'the screen is still showing somebody after recording');
-  assert(afterRecord?.result, 'the screen shows no result at all in the ten seconds after recording');
-  assert(afterRecord.result.code === rejoined.code, 'the ten-second result names a different turn');
-  assert(afterRecord.result.amount === TURN_COUNT, `the ten-second result shows ${afterRecord.result.amount}`);
-  assert(!JSON.stringify(afterRecord.result).includes('A.L.'), 'the ten-second result shows a name');
 
   // TEN SECONDS, PROVEN BY WAITING PAST THEM. A result that never expired
   // would leave a code on a public screen for the rest of the event.

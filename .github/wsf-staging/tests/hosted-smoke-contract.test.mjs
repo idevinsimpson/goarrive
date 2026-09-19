@@ -687,6 +687,35 @@ test('the hosted turn-service row drives the real journey with real identities, 
     'combinedTotal is the parent field; reading it off a child yields undefined'
   );
 
+  // THE TEN-SECOND READ MUST COME BEFORE THE ARITHMETIC.
+  //
+  // Run 31 failed with "no result at all" because the row spent three more
+  // round-trips — two goal pulses and the combined pulse — inside the very
+  // ten-second window it was about to measure. The product stamps
+  // lastResult.atMillis at the last completion and serves the result only
+  // while now - atMillis < TURN_RESULT_VISIBLE_MS, so a row that reads the
+  // pulses first is timing staging, not testing the window.
+  const stationRead = body.indexOf("'station state after recording'");
+  const firstPulse = body.indexOf("'chosen activity pulse'");
+  const combinedPulse = body.indexOf("'combined pulse'");
+  assert.notEqual(stationRead, -1, 'the row no longer reads the station state after recording');
+  assert.notEqual(firstPulse, -1, 'the row no longer reads the chosen activity pulse');
+  assert.notEqual(combinedPulse, -1, 'the row no longer reads the combined pulse');
+  assert.ok(
+    stationRead < firstPulse && stationRead < combinedPulse,
+    'the ten-second station result must be read BEFORE the pulses, or the row spends the window it is measuring'
+  );
+  // And the failure must say how long it waited, so "the window closed before
+  // we looked" can never again be mistaken for "no result was written".
+  assert.ok(
+    /ms after the last completion returned/.test(body),
+    'the ten-second failure does not report the elapsed time, so it cannot separate an expired window from a missing result'
+  );
+  assert.ok(
+    /secondsLeft === 'number' && afterRecord\.result\.secondsLeft > 0/.test(body),
+    'the row does not check that the result is served with time left on it'
+  );
+
   // Privacy: a count, never a list, and no identifier of a real person.
   assert.ok(body.includes('waitingCount'), 'the row does not check the waiting count');
   assert.ok(body.includes("the hall disclosed a participant's email"), 'the row does not check for identity disclosure');
