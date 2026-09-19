@@ -1873,7 +1873,11 @@ async function cleanupAll() {
   for (const challengeId of synthetic.challenges) {
     for (let shard = 0; shard < 10; shard += 1) trackDoc(`wsfChallengeCounters/${challengeId}/shards/${shard}`);
   }
-  const ordered = [...cleanup.docs].sort((a, b) => b.split('/').length - a.split('/').length);
+  // BOTH registers, or the run deletes its own fixtures and leaves the
+  // server-named ones behind — and the always-run recovery cleanup then has
+  // to do it, which is not what the PASS row below claims.
+  const ordered = [...cleanup.docs, ...cleanup.linked.keys()]
+    .sort((a, b) => b.split('/').length - a.split('/').length);
   for (const docPath of ordered) {
     try { await deleteDoc(docPath); } catch (error) { errors.push(`${docPath}: ${sanitize(error.message)}`); }
   }

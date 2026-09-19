@@ -562,7 +562,10 @@ async function runTurn({ tagged, fields, linkedDocs, base }, tweak = {}) {
   const present = new Set([...manifest.docs, ...fields.keys()]);
   for (const p of tweak.absent ?? []) present.delete(p);
   const fake = await startFake({
-    accounts: new Map([...base.emails]),
+    // The smoke deletes the Auth accounts itself, so by the time the
+    // always-run recovery cleanup validates the manifest they are usually
+    // GONE. `noAccounts` is that ordinary case, not an exotic one.
+    accounts: tweak.noAccounts ? new Map() : new Map([...base.emails]),
     docs: present,
     docFields: tweak.fields ?? fields,
   });
@@ -610,14 +613,14 @@ await test('a linked document whose stored record does not reference its declare
   assert.ok(r.receipt.unsafeDetails.some((d) => /does not reference/.test(d)));
 });
 
-await test('a linked owner that is neither run-tagged nor an email-verified uid is refused', async () => {
+await test('a linked owner that is neither run-tagged nor a uid this run owns is refused', async () => {
   const shape = turnShape();
   const linkedDocs = shape.linkedDocs.map((l, i) => (i === 0 ? { path: l.path, via: 'wsfCombinedGoals' } : l));
   const { r, fake } = await runTurn(shape, { linkedDocs });
   assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
   assert.equal(mutations(fake.calls).length, 0);
-  assert.ok(r.receipt.unsafeDetails.some((d) => /neither .*-tagged nor an email-verified uid/.test(d)));
-  // A uid that IS in the manifest but failed its email check must not qualify either.
+  assert.ok(r.receipt.unsafeDetails.some((d) => /neither .*-tagged nor a uid this run owns/.test(d)));
+  // A uid with no run-tagged membership behind it must not qualify either.
   const stranger = firebaseUid();
   const withStranger = shape.linkedDocs.map((l, i) => (i === 0 ? { path: l.path, via: stranger } : l));
   const bad = await runTurn(shape, { linkedDocs: withStranger });
@@ -657,6 +660,53 @@ await test('a path already claimed as a tagged doc may not ALSO be declared link
   assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
   assert.equal(mutations(fake.calls).length, 0);
   assert.ok(r.receipt.unsafeDetails.some((d) => /already claimed as a tagged path/.test(d)));
+});
+
+/**
+ * The uid-linked document AFTER the smoke has deleted its account.
+ *
+ * This is the normal path, not an edge: the smoke's own cleanupAll() deletes
+ * the synthetic users, and cleanup-synthetic.mjs then always runs. A uid is
+ * only email-verifiable while the account still exists, so a link that leans
+ * on it alone would reject every successful run — turning a clean run into
+ * MANIFEST_UNUSABLE. The manifest ties the uid to this run independently,
+ * through its own run-tagged membership path, exactly as it does for a
+ * member profile.
+ */
+await test('a uid-linked document still validates once the synthetic account is gone', async () => {
+  const shape = turnShape();
+  const { r, fake } = await runTurn(shape, { noAccounts: true });
+  assert.equal(r.receipt.status, 'COMPLETE', r.receipt.reason || '');
+  assert.equal(r.receipt.usersAlreadyAbsent, 3);
+  assert.equal(r.receipt.usersVerifiedByEmail, 0, 'no account remains to verify by email');
+  assert.equal(r.receipt.linkedDocumentsVerified, 9);
+  const memberDoc = `wsfTurnMembers/${shape.lineId}__${shape.member}`;
+  assert.ok(fake.calls.some((c) => c.kind === 'deleteDoc' && c.path === memberDoc), 'the uid-linked document was never deleted');
+});
+
+await test('the same case with the uid-linked document already absent is still COMPLETE', async () => {
+  const shape = turnShape();
+  const memberDoc = `wsfTurnMembers/${shape.lineId}__${shape.member}`;
+  const { r } = await runTurn(shape, { noAccounts: true, absent: [memberDoc] });
+  assert.equal(r.receipt.status, 'COMPLETE', r.receipt.reason || '');
+  // The uid-linked document is proven by its own path, so an absent record
+  // is admitted without a read rather than counted as already gone.
+  assert.equal(r.receipt.linkedDocumentsVerified, 9);
+  assert.equal(r.receipt.linkedDocumentsAlreadyAbsent, 0);
+});
+
+await test('a departed uid with no run-tagged membership behind it is still refused', async () => {
+  // The membership path is what ties the uid to this run. Without it an
+  // absent account proves nothing, and the link must not be admitted.
+  const shape = turnShape();
+  const stranger = firebaseUid();
+  const linkedDocs = shape.linkedDocs.map((l) =>
+    l.via === shape.member ? { path: l.path.replace(shape.member, stranger), via: stranger } : l
+  );
+  const { r, fake } = await runTurn(shape, { noAccounts: true, linkedDocs });
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0);
+  assert.ok(r.receipt.unsafeDetails.some((d) => /neither .*-tagged nor .*uid/.test(d)));
 });
 
 console.log(`\ncleanup-synthetic: ${passed} passed`);

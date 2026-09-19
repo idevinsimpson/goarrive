@@ -755,6 +755,26 @@ test('every document the turn journey creates is tracked, by the route its id al
   assert.match(SMOKE, /linkedDocs: \[\.\.\.cleanup\.linked\]\.map\(\(\[docPath, via\]\) => \(\{ path: docPath, via \}\)\)/);
 });
 
+test('the in-smoke cleanup deletes BOTH registers, not just the tagged one', () => {
+  // cleanup.linked is a second register. A cleanupAll() that walked only
+  // cleanup.docs would delete the run's own fixtures, leave every
+  // server-named document behind, and still print its PASS row — while the
+  // always-run recovery cleanup silently did the rest.
+  const fn = SMOKE.slice(SMOKE.indexOf('async function cleanupAll('), SMOKE.indexOf('\nlet browser;'));
+  assert.ok(fn, 'there is no cleanupAll');
+  assert.ok(
+    /\[\.\.\.cleanup\.docs, \.\.\.cleanup\.linked\.keys\(\)\]/.test(fn),
+    'cleanupAll does not iterate the linked documents, so it cannot have removed them'
+  );
+  // Deepest first, so a subcollection document goes before its parent.
+  assert.match(fn, /\.sort\(\(a, b\) => b\.split\('\/'\)\.length - a\.split\('\/'\)\.length\)/);
+  assert.ok(fn.includes('await deleteUsers()'), 'cleanupAll no longer deletes the synthetic accounts');
+  // The accounts go AFTER the documents: a uid-linked document is proven by
+  // the manifest, not by a live account, but deleting the records first
+  // keeps the in-smoke pass honest about what it removed.
+  assert.ok(fn.indexOf('await deleteDoc(docPath)') < fn.indexOf('await deleteUsers()'));
+});
+
 test('the row and the receipt no longer claim to be end to end', () => {
   assert.equal(/turn contract end to end/.test(SMOKE), false, 'the old end-to-end row name survives');
   assert.ok(SMOKE.includes("check('hosted turn-service contract', 'PASS'"), 'the renamed row has no PASS row');

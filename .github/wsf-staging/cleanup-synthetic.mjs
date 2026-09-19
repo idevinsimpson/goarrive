@@ -223,8 +223,14 @@ for (const entry of linked) {
   const via = typeof entry?.via === 'string' ? entry.via : '';
   if (!docPath || !via) { unsafe.push('linked document: entry is missing a path or a via'); continue; }
   if (docs.includes(docPath)) { unsafe.push(`linked document ${docPath}: already claimed as a tagged path`); continue; }
-  if (!via.includes(runTag) && !verifiedUids.has(via)) {
-    unsafe.push(`linked document ${docPath}: via is neither ${runTag}-tagged nor an email-verified uid`);
+  // A uid is email-verifiable only while its account still EXISTS, and the
+  // smoke deletes the accounts before this script runs — so leaning on the
+  // email check alone would reject every successful run. The manifest ties
+  // the uid to this run independently, through its own run-tagged membership
+  // path, which is the same linkage a member profile is admitted on.
+  const uidOfThisRun = verifiedUids.has(via) || membershipUids.has(via);
+  if (!via.includes(runTag) && !uidOfThisRun) {
+    unsafe.push(`linked document ${docPath}: via is neither ${runTag}-tagged nor a uid this run owns`);
     continue;
   }
   if (docPath.includes(via)) {
