@@ -219,8 +219,15 @@ test('Q-1: a Champion sees the QR and the URL it encodes, and it is the invite l
   expect(encodedUrl).toBe(copied.trim());
   expect(encodedUrl).toContain(`/join/${fx.joinCode}`);
 
-  // The URL is printed under the symbol, not only encoded into it.
-  await expect(champion.getByTestId('wsf-community-qr-url')).toHaveText(encodedUrl);
+  // Clause 5: the link is CARRIED by the symbol, never PRINTED as body copy —
+  // on the Champion's Manage sheet as much as on the member-facing card. The
+  // hosted W8 row reads data-qr-url, so nothing depends on the text being
+  // there, and a Champion reading a token aloud off a projector is exactly
+  // what the contract is trying to prevent.
+  await expect(champion.getByTestId('wsf-community-qr-url')).toHaveCount(0);
+  await expect(champion.getByTestId('wsf-community-manage-panel')).not.toContainText(
+    `/join/${fx.joinCode}`
+  );
 
   // A real image, drawn client-side — an inline SVG data URI, no network fetch.
   // react-native-web renders an Image as a View carrying the testID, a child

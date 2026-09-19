@@ -66,7 +66,7 @@ export function JoinQrCode({
   url,
   testIDPrefix = 'wsf-community-qr',
   caveat = JOIN_QR_COPY.caveat,
-  showUrl = true,
+  showUrl = false,
 }: {
   /** The join URL, or null when this community admits no one by link. */
   url: string | null;
@@ -86,6 +86,13 @@ export function JoinQrCode({
    * moves. `data-qr-url` on the symbol is unaffected either way, so a test
    * can still assert WHICH URL the symbol carries. The Champion's Manage
    * sheet, where the link is the administered object, keeps it printed.
+   */
+  /**
+   * Print the link as selectable text under the symbol. Off by default:
+   * clause 5 says the product shows Copy invite, Share invite and the QR, not
+   * a raw URL as body copy, and no spec or hosted row reads the printed text
+   * (they read `data-qr-url`). Left as a prop so a future surface that truly
+   * needs a readable link can ask for one deliberately.
    */
   showUrl?: boolean;
 }) {

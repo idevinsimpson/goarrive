@@ -173,6 +173,17 @@ def resolve_origin(env: dict[str, str]) -> str:
     if explicit:
         return _validated_origin(explicit, "EXPO_PUBLIC_WSF_PUBLIC_ORIGIN")
 
+    # The channel this artifact is actually served from. A Hosting preview
+    # channel is NOT reachable at the Auth domain: authDomain identifies the
+    # Firebase Auth handler, and deriving the site origin from it advertised
+    # https://<project>.firebaseapp.com while the build was served from
+    # https://<site>--<channel>-<hash>.web.app, so every og:image and canonical
+    # pointed at a 404. The deploy workflow already exports the real channel
+    # URL, so read it rather than inferring a host.
+    channel = _clean(env.get("WSF_PUBLIC_CHANNEL_ORIGIN")) or _clean(env.get("STAGING_URL"))
+    if channel:
+        return _validated_origin(channel, "STAGING_URL (the deployed channel origin)")
+
     if is_staging_build(env):
         auth_domain = _clean(env.get("EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN"))
         project_id = _clean(env.get("EXPO_PUBLIC_WSF_STAGING_PROJECT_ID"))
@@ -195,6 +206,8 @@ def resolve_origin(env: dict[str, str]) -> str:
                 f"EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN is {auth_domain!r}, which names the\n"
                 f"  PRODUCTION project. A staging build may not advertise production's origin."
             )
+        # Last resort for a staging build that carries no channel origin: the
+        # project's default Hosting site, which does serve at this host.
         return _validated_origin(f"https://{auth_domain}", "EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN")
 
     declared = _declared_hosting_origin()

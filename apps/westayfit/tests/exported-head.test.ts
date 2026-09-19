@@ -17,7 +17,7 @@
 //   - robots stays noindex,nofollow, which the browser suite also asserts.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -319,6 +319,48 @@ describe('exported head — the origin is never guessed', () => {
     expect(link(html, 'canonical')).toBe(`${declaredOrigin}/`);
     // A fallback origin never turns a plain build into a staging one.
     expect(html.toLowerCase()).not.toContain('staging');
+  });
+
+  // The defect this guards: a staging build advertised https://<project>.firebaseapp.com
+  // (the Firebase Auth handler) while it was actually served from the Hosting
+  // preview channel, so every og:image and canonical URL pointed at a 404.
+  // authDomain does not identify the channel, and must never stand in for it.
+  it('a staging build advertises the deployed CHANNEL origin, not the Auth domain', () => {
+    const CHANNEL = 'https://westayfit-staging--staging-4a616y5m.web.app';
+    const AUTH_HOST = 'westayfit-staging.firebaseapp.com';
+    const html = runInjector({
+      EXPO_PUBLIC_WSF_ENV: 'staging',
+      EXPO_PUBLIC_WSF_AUTH_ENABLED: '1',
+      EXPO_PUBLIC_WSF_STAGING_PROJECT_ID: STAGING_PROJECT,
+      EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN: `${STAGING_PROJECT}.firebaseapp.com`,
+      STAGING_URL: CHANNEL,
+    }).pages.home;
+    expect(meta(html, 'og:image')).toBe(`${CHANNEL}/og/wsf-share.png`);
+    expect(meta(html, 'twitter:image')).toBe(`${CHANNEL}/og/wsf-share.png`);
+    expect(meta(html, 'og:url')).toBe(`${CHANNEL}/`);
+    expect(link(html, 'canonical')).toBe(`${CHANNEL}/`);
+    // The Auth host must appear nowhere in the head, even though this build
+    // knows it: the two values are deliberately different in this fixture.
+    expect(html).not.toContain(AUTH_HOST);
+    // A staging build is still designated as one.
+    expect(html.toLowerCase()).toContain('staging');
+  });
+
+  it('the advertised share image is a file this build actually ships', () => {
+    const CHANNEL = 'https://westayfit-staging--staging-4a616y5m.web.app';
+    const html = runInjector({
+      EXPO_PUBLIC_WSF_ENV: 'staging',
+      EXPO_PUBLIC_WSF_AUTH_ENABLED: '1',
+      EXPO_PUBLIC_WSF_STAGING_PROJECT_ID: STAGING_PROJECT,
+      EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN: `${STAGING_PROJECT}.firebaseapp.com`,
+      STAGING_URL: CHANNEL,
+    }).pages.home;
+    const advertised = meta(html, 'og:image')!;
+    expect(advertised.startsWith(`${CHANNEL}/`)).toBe(true);
+    // Whatever path the head advertises must exist under public/, which is
+    // copied to the site root; otherwise the URL 404s wherever it is served.
+    const servedPath = advertised.slice(CHANNEL.length + 1);
+    expect(existsSync(path.resolve(__dirname, '../public', servedPath))).toBe(true);
   });
 
   it('an explicit origin still wins over the declared Hosting site', () => {

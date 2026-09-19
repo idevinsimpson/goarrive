@@ -2,8 +2,15 @@
 
 Candidate D is an experience redesign, not a reskin. It answers the owner's real-device reviews of
 18 September and the UX Director's Candidate D authorisation (clauses 1–12) and goal-flow hardening
-(items 1–10). Candidate C stays frozen at `fcb83f7338c62a92a4605cf38b94be2b0fc15e87` and is **not**
-staging-ready; nothing here is deployed.
+(items 1–10). Candidate C stays frozen at `fcb83f7338c62a92a4605cf38b94be2b0fc15e87` and was never deployed.
+
+**Deployment state, as of 2026-09-19 01:32 UTC.** Candidate D `a3496eb` IS deployed to the isolated
+`westayfit-staging` project, under the owner's standing staging authority of 2026-09-18. Run
+35412514702 served it and the harness read the health marker back as `a3496eb`. Hosted verification
+**FAILED at 20 of 21 rows**: the one failure is `recent public additions (W2)`, refused at the
+transport layer with HTTP 403 because `wsfGoalRecentAdditions` runs with the Cloud Run invoker IAM
+check enabled. That is Google-side and unchanged by this candidate. This is a usable staging
+iteration, not completed hosted acceptance.
 
 ## What is NOT in this change
 
@@ -31,7 +38,7 @@ Route and state → role → the one job → primary action → secondary → de
 | Community Home, no goal | Champion | start the story | Start a goal | Invite people | Manage |
 | Community Home, no goal | member | know where things stand | honest no-goal state | Invite people where allowed; Back to home | Membership options → Leave |
 | Start a goal | Champion | define it | Start this goal | Back to community | — |
-| Goal created | Champion | put it to work | Open the contribute page | Contribute on a phone; Show on a big screen; Back to community | — |
+| Goal created | Champion | put it to work | Open the contribute page | Show on a big screen; Back to community | — |
 | Contribute entry | member | add my count | Record | Back | — |
 | Manage sheet | Champion | administer | per section | — | new invite link (confirm), leave (confirm, sole-Champion refusal) |
 | Kiosk | visitor | start a contribution | Start | Finish | — |
@@ -51,6 +58,24 @@ lenses each.
 | 4 | "Yes, create a new link" overflowed a 195 px viewport by 30 px | visual | button wraps within the confirmation card | capture overflow check at 195 px |
 | 5 | The raw join URL was printed as body copy under the opened QR (clause 5) | visual (tests: should) | member-facing card passes `showUrl={false}`; the value rides on `data-qr-url` / `data-invite-url` | QR and admission specs read the attribute and assert the text is absent |
 
+### Confirmed material "should" findings, and what was done with each
+
+| Finding | Fix | Regression |
+|---|---|---|
+| A community card's underlined action label read as a second link to a different place | the underline is gone; the label is weight-700 navy text inside the one card link | Home specs drive the card as a single link |
+| Signed-in Home listed communities in the server's order, so the one with an open goal could sit mid-list | `orderByUserValue` sorts communities with a confirmed open goal first, soonest-ending first, keeping the server's order within each group | Home spec asserts the ordering |
+| The "Check it over" card read back an invalid window as what the community would see | a derived `windowInvalid` makes the Ends row say it must be after the start instead of confirming it | goal-form spec asserts the refused window is shown as refused |
+| The goal-created screen offered two differently-labelled controls for the same route | "Contribute on a phone" is removed; "Open the contribute page" carries that link itself | goal-form spec asserts one control and its href |
+| Single-action states were an underlined link alone in an otherwise empty card | sign-in, back-to-home and the start-community unverified action became real buttons | community and start specs assert the controls |
+| Every option row emitted `aria-selected` on `role="radio"`, which ARIA does not permit | `accessibilityState` is now `{ checked, disabled }` and the raw attribute is `aria-checked` | option-row unit test and the specs assert `aria-checked` |
+| A private community's Invite card named a setting that does not exist | the copy now states plainly that such a community has no invite link or QR to share | admission spec asserts no invite affordance |
+| The raw invite URL was still printed under the Champion's Manage QR | `showUrl` now defaults to off, so no surface prints it; the value rides on `data-qr-url` | QR spec asserts the Manage panel does not contain the join path |
+| The capture of Home caught every card mid-read on "Checking for an open goal…" | the capture harness waits for the per-community goal reads to settle | capture harness only; not a product change |
+
+Two findings were deliberately **not** fixed and are recorded as owner decisions rather than defects:
+the "Public" option stating the same consequence as "Anyone with the link", and the reduction in what
+a member is shown. Both appear under the open decisions below.
+
 ## The overflow reader, and a false green I reported
 
 At 7:46 PM and 8:47 PM ET I reported "0 overflow offenders across all 51 states". That was wrong.
@@ -65,6 +90,9 @@ failures, never silent passes. It prints the denominator it inspected and exits 
 problem. Its self-test has 10 cases, all passing, including a document whose only defect is a nested
 failing width result, asserted to fail — the exact shape that fooled the old check.
 
+The checker is committed at `scripts/westayfit/check-overflow.py`; run `--self-test` for the 10
+regressions, or pass an `overflow.json` with `--expect-states N` for a run's real numbers.
+
 ## Verification
 
 Filled from the final committed tree; see the completion comment on PR #327 for the run logs.
@@ -73,11 +101,13 @@ Filled from the final committed tree; see the completion comment on PR #327 for 
 |---|---|
 | Type check | `tsc --noEmit` clean |
 | Unit suite | Vitest, all green |
-| Browser suite | full Playwright suite green **twice** on the final build |
+| Browser suite, run 1 on the committed tree | **158 / 158 passed** (7.5m) |
+| Browser suite, run 2 on the committed tree | **PENDING** — not yet complete; this row will name its log and counts when it is. It is not claimed as passing |
 | Weakened assertions | none: no `skip`, no `fixme`, no relaxed timeouts; several assertions strengthened |
 | Mobile acceptance | `ui-mobile-acceptance.spec.ts`, three phone contexts, real touch and wheel scrolling |
-| Vertical reachability | goal-screen scroll proof, 7 of 7 — **mechanical reachability baseline, not UX acceptance** |
-| Captures | phone and wide for every owner-listed state; overflow re-measured with the repaired reader |
+| Vertical reachability | goal-screen scroll proof, 7 of 7 across four viewports — **mechanical reachability baseline, not UX acceptance** |
+| Captures | 102 frames over 51 route/state pairs, phone and wide. **Taken from the pre-commit working tree, not from `a3496eb`**; SHA-matched captures and the book are PENDING |
+| Narrow-width overflow | `scripts/westayfit/check-overflow.py`, committed here: 51 states, **102 width checks, 0 failed**, on the capture run of 2026-09-19 01:01 UTC |
 | Backend boundary | empty diff against functions, rules, indexes, workflows, Firebase configs |
 
 ## Decisions that are the owner's, and remain open
