@@ -656,6 +656,19 @@ test('the hosted turn-service row drives the real journey with real identities, 
   // The arithmetic, including the activity nobody chose.
   assert.ok(body.includes('the activity nobody chose moved to'), 'the unchosen child is not asserted unchanged');
   assert.ok(body.includes('the combined parent holds'), 'the combined parent is not asserted');
+  // Run 30 read the CHILD's field name off the PARENT and got undefined.
+  // wsfGoalPulse returns sharedTotal; wsfCombinedGoalPulse returns
+  // combinedTotal — the setup's own shards since activation, which is a
+  // different quantity, not a synonym.
+  assert.ok(
+    /parent\?\.combinedTotal === TURN_COUNT/.test(body),
+    'the combined parent must be read as combinedTotal, not sharedTotal'
+  );
+  assert.equal(
+    /parent\?\.sharedTotal/.test(body),
+    false,
+    'sharedTotal is the child pulse field; reading it off the parent yields undefined'
+  );
 
   // Privacy: a count, never a list, and no identifier of a real person.
   assert.ok(body.includes('waitingCount'), 'the row does not check the waiting count');

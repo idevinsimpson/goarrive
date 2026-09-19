@@ -1847,10 +1847,21 @@ async function caseTurnContract() {
   // the arithmetic this row is checking.
   const chosen = await turnCall('chosen activity pulse', 'wsfGoalPulse', { goalId: activityA }, memberToken);
   const untouched = await turnCall('unchosen activity pulse', 'wsfGoalPulse', { goalId: activityB }, memberToken);
+  // THE PARENT'S FIELD IS combinedTotal, NOT sharedTotal.
+  //
+  // Run 30 failed here reading `sharedTotal` off the combined pulse and
+  // getting undefined. wsfGoalPulse returns `sharedTotal`; wsfCombinedGoalPulse
+  // returns `combinedTotal` (index.ts CombinedGoalPulse), and deliberately so:
+  // it is the sum of the SETUP's own shards since activation, never a sum of
+  // the children's lifetime counters. Two different quantities, two names. I
+  // read the child's name off the parent.
   const parent = await turnCall('combined pulse', 'wsfCombinedGoalPulse', { setupId }, memberToken);
   assert(chosen?.sharedTotal === TURN_COUNT, `the chosen activity holds ${chosen?.sharedTotal}, expected ${TURN_COUNT}`);
   assert(untouched?.sharedTotal === 0, `the activity nobody chose moved to ${untouched?.sharedTotal}`);
-  assert(parent?.sharedTotal === TURN_COUNT, `the combined parent holds ${parent?.sharedTotal}, expected ${TURN_COUNT}`);
+  assert(
+    parent?.combinedTotal === TURN_COUNT,
+    `the combined parent holds ${parent?.combinedTotal}, expected ${TURN_COUNT}`
+  );
 
   // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
   const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
