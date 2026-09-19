@@ -56,21 +56,51 @@ const EXPECTED = [
   'wsfstationrequestpairing', 'wsfstationpairingstatus', 'wsfapprovestation',
   'wsfstationclaimpairing', 'wsfstationstate', 'wsfliststations',
   'wsfrevokestation',
+  // The event-scoped turn contract and the combined goal — the fifteen
+  // callables this candidate adds, taking the project from 31 to 46. They
+  // were CREATED by run 35440110564; that run then failed to set an invoker
+  // policy on any of them, which is why they are present and shut.
+  'wsfeventcontext', 'wsfjointurnline', 'wsfturnstate', 'wsfstartturn',
+  'wsfturnready', 'wsfmyturn', 'wsfcompleteturn', 'wsfcompletemyturn',
+  'wsfcancelturn', 'wsfleaveturnline', 'wsfcallnext',
+  'wsfcreatecombinedgoal', 'wsfclosecombinedgoal', 'wsfrepaircombinedgoal',
+  'wsfcombinedgoalpulse',
 ].sort();
 const CREATED_BY_PACKAGE_E = 'wsfsetgoaldisplayauthorization';
 /**
  * The callables THIS candidate adds. New to staging with this deploy, so each
  * is neither pre-existing (its transport is reported, like Package E's was)
  * nor unexpected.
+ *
+ * WHY THIS LIST MOVED. The verifier was still describing the previous
+ * candidate. After run 35440110564 the project holds 46 services, not 31, and
+ * the fifteen below were flagged as UNEXPECTED — a verifier reporting a
+ * reviewed, approved deploy as a surprise. That is drift in the check, not a
+ * finding about the deploy, and it is corrected here.
+ *
+ * WHAT IS DELIBERATELY NOT CORRECTED: every one of these fifteen is shut.
+ * firebase-tools created the services and could not set their invoker policy,
+ * because the deploy service account has no run.services.setIamPolicy. Their
+ * transport is REPORTED here, per service, and the release stays red through
+ * the hosted station-transport row. Nothing in this change asserts they are
+ * open, and nothing here can make them open.
  */
 const CREATED_BY_CANDIDATE = [
-  'wsfstationrequestpairing',
-  'wsfstationpairingstatus',
-  'wsfapprovestation',
-  'wsfstationclaimpairing',
-  'wsfstationstate',
-  'wsfliststations',
-  'wsfrevokestation',
+  'wsfeventcontext',
+  'wsfjointurnline',
+  'wsfturnstate',
+  'wsfstartturn',
+  'wsfturnready',
+  'wsfmyturn',
+  'wsfcompleteturn',
+  'wsfcompletemyturn',
+  'wsfcancelturn',
+  'wsfleaveturnline',
+  'wsfcallnext',
+  'wsfcreatecombinedgoal',
+  'wsfclosecombinedgoal',
+  'wsfrepaircombinedgoal',
+  'wsfcombinedgoalpulse',
 ];
 /**
  * wsfGoalRecentAdditions came in with the PREVIOUS candidate, so by the letter
@@ -80,7 +110,26 @@ const CREATED_BY_CANDIDATE = [
  * guess would fail a deploy for a fact nobody checked. Its transport stays
  * reported until a run's notes show what it actually is, and then it moves.
  */
-const RECENTLY_CREATED = ['wsfgoalrecentadditions'];
+const RECENTLY_CREATED = [
+  'wsfgoalrecentadditions',
+  // THE SEVEN STATION SERVICES, and they are here for the opposite reason to
+  // wsfGoalRecentAdditions. Its transport was never established; theirs was,
+  // and it is BAD — run 35421156377's receipt has all seven as
+  // invoker_iam_check_enabled. They are no longer created by the current
+  // candidate, but they must not join PRE_EXISTING either: that set is
+  // asserted to carry invokerIamDisabled, and asserting it of a service known
+  // to be shut would be asserting something false. So their transport is
+  // reported per service, exactly as it is, until the staging-only
+  // remediation in docs/westayfit/staging-station-transport.md is applied by
+  // an operator holding run.services.setIamPolicy — and then they move.
+  'wsfstationrequestpairing',
+  'wsfstationpairingstatus',
+  'wsfapprovestation',
+  'wsfstationclaimpairing',
+  'wsfstationstate',
+  'wsfliststations',
+  'wsfrevokestation',
+];
 const NEW_SERVICES = [CREATED_BY_PACKAGE_E, ...RECENTLY_CREATED, ...CREATED_BY_CANDIDATE];
 const PRE_EXISTING = EXPECTED.filter((n) => !NEW_SERVICES.includes(n));
 

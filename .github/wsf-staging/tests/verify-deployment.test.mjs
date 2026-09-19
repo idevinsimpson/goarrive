@@ -22,13 +22,26 @@ const NAMES = [
   'wsfpreviewcommunity','wsfreinstatemember','wsfremovemember','wsfresetjoincode','wsfsaveprofile',
   'wsfsendpasswordresetemail','wsfsendverificationemail',
 ];
-// The seven this candidate adds. Named here rather than imported so the
-// fixture and the script have to be changed deliberately, together.
+// The seven station callables, added by the PREVIOUS candidate and live on
+// staging since. Named here rather than imported so the fixture and the
+// script have to be changed deliberately, together.
 const STATION = [
   'wsfstationrequestpairing','wsfstationpairingstatus','wsfapprovestation',
   'wsfstationclaimpairing','wsfstationstate','wsfliststations','wsfrevokestation',
 ];
-const ALL = [...NAMES, 'wsfsetgoaldisplayauthorization', 'wsfgoalrecentadditions', ...STATION];
+// The fifteen THIS candidate adds: the event-scoped turn contract and the
+// combined goal. Same rule — written out, not imported, so a change to the
+// script and a change to the fixture are two deliberate acts.
+const TURN = [
+  'wsfeventcontext','wsfjointurnline','wsfturnstate','wsfstartturn','wsfturnready',
+  'wsfmyturn','wsfcompleteturn','wsfcompletemyturn','wsfcancelturn','wsfleaveturnline',
+  'wsfcallnext','wsfcreatecombinedgoal','wsfclosecombinedgoal','wsfrepaircombinedgoal',
+  'wsfcombinedgoalpulse',
+];
+const ALL = [
+  ...NAMES, 'wsfsetgoaldisplayauthorization', 'wsfgoalrecentadditions',
+  ...STATION, ...TURN,
+];
 
 function fn(n) { return { name: `projects/westayfit-staging/locations/us-central1/functions/${n}` }; }
 function svc(n, extra = {}) {
@@ -77,21 +90,24 @@ await test('a complete deploy passes and records the created function', async ()
   assert.match(r.out, /VERIFY=pass/);
   assert.deepEqual(
     r.receipt.inventory.createdThisDeploy,
-    ['wsfgoalrecentadditions', 'wsfsetgoaldisplayauthorization', ...STATION].sort()
+    ['wsfgoalrecentadditions', 'wsfsetgoaldisplayauthorization', ...STATION, ...TURN].sort()
   );
   assert.equal(r.receipt.candidateCallablePresent, true);
-  for (const n of STATION) assert.equal(r.receipt.candidateCallablesPresent[n], true, n);
+  for (const n of TURN) assert.equal(r.receipt.candidateCallablesPresent[n], true, n);
 });
 
 await test("the candidate's new callable being absent fails, with its own message", async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
-  // One of the seven missing is enough to fail, and it is named.
-  const without = ALL.filter((n) => n !== 'wsfstationstate');
+  // One of the fifteen missing is enough to fail, and it is named. It has to
+  // be one THIS candidate creates: wsfstationstate is now a previous
+  // candidate's service, and a missing one of those is reported as an
+  // ordinary absence rather than a failed create.
+  const without = ALL.filter((n) => n !== 'wsfturnstate');
   const { server, base } = await startMock({ functions: without, services: without.map((n) => svc(n)) });
   const r = await run(base, beforeFile(d), d);
   server.close();
   assert.equal(r.code, 1);
-  assert.match(r.err, /wsfstationstate absent — the candidate's new callable did not deploy/);
+  assert.match(r.err, /wsfturnstate absent — the candidate's new callable did not deploy/);
 });
 
 await test('a MISSING before-inventory is an error, not an empty project', async () => {
