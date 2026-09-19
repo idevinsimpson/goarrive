@@ -252,3 +252,45 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+
+
+### CI Verification Checks Must Fail Honestly (PR #319)
+The westayfit staging deployment CI workflow had four gaps where a verification step could complete with a "pass" status without having actually run the check — a vacuous green that provided no signal. The root causes were that check shell commands were not set to propagate exit codes, so a setup error was silently swallowed, and the privilege boundary was too broad so a single failing step did not block the job. PR #319 closed these gaps and split the privilege boundary so checks that cannot run report failure to the pipeline.
+
+Lesson: any CI gate must be written so that a skipped or errored check propagates failure. A check that can vacuously pass is worse than no check — it creates false confidence while adding process overhead. When adding a new CI verification step, explicitly test the failure path: break the thing being verified and confirm the job turns red. The same principle applies to any "verification" script in application code: if the script exits 0 on error, the caller cannot distinguish success from invisible failure.
+
+### CI Cleanup Must Record Provenance for Real Resources (PR #324)
+When a CI or test harness deletes real Firebase Auth UIDs or Firestore documents as part of uncertain-state cleanup, the cleanup log must include a traceable link between each removed document and the Auth UID that owned it. Without this, a post-run audit cannot verify completeness — you only know "N things were deleted" but cannot confirm they were the right N things.
+
+The specific failure mode: the hosted smoke harness ran cleanup when a run ended in uncertain state, removed Firestore documents, but the receipt carried no reference to the Auth UIDs. A reader of the receipt could not tell whether the cleanup covered all data for those users or only part of it.
+
+Lesson: any cleanup job that touches real user data must emit a provenance record — at minimum, a mapping of (UID → [doc paths removed]) — before deleting. Write this to an artifact or a receipt file before the delete step, not after, so a partial run still preserves evidence. The same principle applies to application code: any bulk-delete callable should write an audit doc before executing deletes, not as a post-step that may be skipped.
+
+### One-Time Recovery Modes Must Be Scoped, Gated, and Self-Removing (PRs #325, #326)
+When a CI workflow needs a temporary recovery capability (e.g. to clean up from a specific failed run), the pattern that worked here was: (a) gate the recovery path on a named `mode` input so it cannot fire accidentally, (b) pin every artifact SHA it consumes, (c) give it its own test suite verifying the recovery contract, and (d) remove it in a follow-up PR the same session the recovery completes. PRs #325 and #326 were merged the same afternoon: #325 added the recovery, the recovery run executed, #326 removed it — leaving the workflow byte-identical to before. The test suite for the removed mode was also deleted in #326.
+
+Lesson: temporary capabilities left in CI workflows become dead branches that future agents will incorrectly treat as active. If a one-time recovery is needed, make it a PR, use it, and delete it before closing the work sequence — not "sometime later." The cost of a follow-up PR is negligible compared to the confusion of a conditional branch that exists in the workflow but was never meant to survive past a single run.
+
+
+### CI Harness Verdict Rows Must Be Isolated (PR #330)
+When a CI or staging harness tests multiple claims — ruleset verdicts, deployment states, different workstreams — each distinct verdict should occupy its own isolated row or test case. If multiple claims share a single row and an earlier assertion fails, later assertions in the same row are skipped, making it impossible to tell whether the skipped checks would have passed or failed. A vacuous-green harness row that silently covers multiple verdicts is the same failure mode documented in the PR #319 entry — but at the row-composition level rather than the exit-code level.
+
+PR #330 isolated the D-5 ruleset verdict into its own dedicated row after finding that it shared a row with adjacent workstream checks. Each row now independently tracks its own contributed documents, member totals, and timestamps for cleanup; a harness mistake in the W2 or W3 row cannot affect the D-5 or D-1 verdict row.
+
+Lesson: when adding a new claim to a CI harness, resist the temptation to append it to an existing row. Give it its own row with its own setup and teardown. The cost is one extra test case; the benefit is that a failure in one claim does not silently suppress the signal from every claim that follows it in the same row. Apply the same principle when reading harness results — a combined row that ended early is not evidence that the skipped claims would have passed.
+
+
+### CI Harness Fixtures Must Match the Product's Minimum-Data Contract (PR #336)
+When a CI or staging harness row seeds test data and then asserts on a rendered product feature, the seed must satisfy every minimum-data requirement the product enforces — not just the structural fields that make a document valid.
+
+The concrete failure: the W4/W7/W8 hosted row seeded a community with one open goal and then waited for `wsf-community-momentum`. `src/communityMomentum.ts` correctly renders no momentum line for fewer than two goals. The product was right; the fixture was wrong. The harness reported a timeout rather than a meaningful assertion failure, which looked like an environment problem rather than a data problem.
+
+Lesson: before writing an assertion against a rendered product aggregate (a roll-up, a count, a computed line), read the source for the minimum input count that produces any output at all and seed at least that many items. A harness that seeds the structural minimum but misses the logical minimum will produce spurious timeouts indistinguishable from environment failures. When a harness row times out on a feature you believe works, check the seed data against the product's rendering logic before debugging the environment.
+
+
+### CI Harness Fixtures Must Also Match Product Semantic Community Types (PR #338)
+When a product feature enforces a semantic community type — such as inviteOnly vs open — the harness fixture must seed the correct type, not just the structural minimum. An open community and an inviteOnly community look structurally identical in Firestore but produce different product behaviours: invite-only communities restrict membership actions and generate distinct link types. The W8 hosted row was seeding an open community; the Champion QR code assertion expected the invite URL, which the product only generates for inviteOnly communities. The row timed out waiting for a link the community type made impossible — indistinguishable from an environment failure.
+
+Additionally, when asserting on a URL-valued field (QR code, booking link, share link), pin the comparison to the full origin constant with no trailing slash. `BASE_URL` is a constant with no trailing slash by convention; a comparison written with a trailing slash produces a silent wrong-path match that is harder to diagnose than an explicit mismatch.
+
+Lesson: when a harness row asserts on a community-type-gated feature, verify the community type in the seed as an explicit precondition — structural validity is not sufficient. And when testing derived URL artifacts, pin the full origin with its exact trailing-slash convention so partial-prefix matches cannot silently pass.
