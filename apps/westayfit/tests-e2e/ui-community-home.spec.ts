@@ -352,7 +352,14 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
     'Record more squats'
   );
-  await expect(page.getByTestId('wsf-community-human-line')).toHaveText('Moving together.');
+  // SLICE 1. The generic line above the hero is GONE while a goal is running:
+  // the hero says what is happening in the goal's own words, and the line was
+  // costing a row at the most expensive point on a phone. It survives only in
+  // the empty state, where nothing else tells the member what this community
+  // is for. The surviving branch is asserted on the no-goal community in
+  // ui-mobile-acceptance.spec.ts, so the line keeps coverage on both sides:
+  // present when it carries information, absent when the hero does.
+  await expect(page.getByTestId('wsf-community-human-line')).toHaveCount(0);
   await expect(page.getByTestId(`wsf-community-goal-link-${featured}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
   // The second open goal prints its own honest number: 35 of 5,000 is 0.7%.

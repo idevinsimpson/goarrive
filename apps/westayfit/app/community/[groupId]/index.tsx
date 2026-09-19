@@ -1498,15 +1498,20 @@ export default function CommunityPage() {
   // The hero's progress area reserves the room the We mark, its three facts
   // and the freshness line will take, so a pulse that lands does not move
   // the title above it or the actions below it.
-  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 118;
+  // SLICE 1. 118 -> 74: the freshness row (44px) moved below the actions, so
+  // the space reserved for it inside the progress area moves with it.
+  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 74;
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
   const showInviteCard = isChampion || (linkJoinable && inviteUrl != null);
   // One human line under the name, and only once the goal list has answered:
   // a claim about what the community is doing waits for the facts.
-  const humanLine =
-    goalsState.kind === 'loaded' ? (featured ? 'Moving together.' : 'Ready to get moving.') : null;
+  // SLICE 1. When a goal IS running the hero says so in its own words, and a
+  // generic line above it was costing a row at the most expensive point on the
+  // screen. It survives where it still carries information: the empty state,
+  // where nothing else tells the member what this community is for.
+  const humanLine = goalsState.kind === 'loaded' && !featured ? 'Ready to get moving.' : null;
   /**
    * The one line under the community's name in the Champion sheet. It says
    * what is actually running and, when the count is known, how many people
@@ -3103,7 +3108,6 @@ export default function CommunityPage() {
                       </View>
                     ) : null}
                     {renderProgressFacts(featured, p, 'hero')}
-                    {renderFreshness(p)}
                   </View>
                   <View style={styles.actions}>
                     <ButtonLink
@@ -3121,6 +3125,12 @@ export default function CommunityPage() {
                       label={`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
                     />
                   </View>
+                  {/*
+                    SLICE 1. Below the actions, not between the figures and the
+                    primary control. It is maintenance metadata, and in the old
+                    order it was the last thing a 390x640 phone could show.
+                  */}
+                  {renderFreshness(p)}
                   {/*
                     W7. Sharing, and only what is already published. The control
                     exists only when this goal's aggregate is authorized for
@@ -3558,11 +3568,15 @@ const styles = StyleSheet.create({
   identity: { gap: 4 },
   headingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   heading: {
+    // SLICE 1. Was 32/38/800 — larger than the goal title it sat above, so the
+    // community's own name was the loudest thing on a screen whose job is the
+    // goal. Demoted to context. At this size the two-line names that were
+    // costing 76px of a 640px phone fit on one line.
     color: wsfTheme.colors.text,
-    fontSize: 32,
-    fontWeight: '800',
-    lineHeight: 38,
-    letterSpacing: -0.5,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 26,
+    letterSpacing: -0.2,
   },
   // The community name is a stored string of up to 80 characters sitting in a
   // row beside the Sample badge. A flex child's default minimum size is its
@@ -3649,10 +3663,12 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: NAVY, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   heroOutlineButtonWide: {
-    borderWidth: 1.5,
-    borderColor: HERO_RULE,
+    // SLICE 1. Was a full-width 1.5px-bordered button identical in weight to
+    // the primary, which made two obvious actions instead of one. Now a quiet
+    // control: no border, same 44px minimum target.
+    borderWidth: 0,
     borderRadius: 14,
-    minHeight: 48,
+    minHeight: 44,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',

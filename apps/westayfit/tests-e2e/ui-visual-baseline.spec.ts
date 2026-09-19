@@ -23,7 +23,7 @@ import {
  * synthetic. It exists so the visual pass has something inspectable to argue
  * from at the widths the owner named.
  */
-const OUT = path.resolve(__dirname, '../../../docs/westayfit/visual-baseline-2026-09-19');
+const OUT = path.resolve(__dirname, '../../../docs/westayfit/visual-baseline-2026-09-19' + (process.env.WSF_CAPTURE_SUBDIR ? '/' + process.env.WSF_CAPTURE_SUBDIR : ''));
 
 const WIDTHS = [
   { key: '360', width: 360, height: 800, mobile: true },
