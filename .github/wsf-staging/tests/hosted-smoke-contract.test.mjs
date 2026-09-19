@@ -687,33 +687,65 @@ test('the hosted turn-service row drives the real journey with real identities, 
     'combinedTotal is the parent field; reading it off a child yields undefined'
   );
 
-  // THE TEN-SECOND READ MUST COME BEFORE THE ARITHMETIC.
+  // THE RESULT IS TAKEN OFF THE COMPLETION'S OWN RESPONSE, BEFORE THE PULSES.
   //
   // Run 31 failed with "no result at all" because the row spent three more
   // round-trips — two goal pulses and the combined pulse — inside the very
-  // ten-second window it was about to measure. The product stamps
-  // lastResult.atMillis at the last completion and serves the result only
-  // while now - atMillis < TURN_RESULT_VISIBLE_MS, so a row that reads the
-  // pulses first is timing staging, not testing the window.
-  const stationRead = body.indexOf("'station state after recording'");
+  // ten-second window it was about to measure, and only then asked a separate
+  // wsfStationState. The product stamps lastResult.atMillis at the last
+  // completion and serves the result only while now - atMillis <
+  // TURN_RESULT_VISIBLE_MS, so any row that measures the window across a
+  // network call is timing staging rather than testing the product.
+  //
+  // wsfCompleteTurn returns { ...readTurnState(...), recorded, anyoneWaiting },
+  // so the result is in the completion's own response with no interval at all.
+  assert.ok(
+    /assert\(atStation\.result,/.test(body),
+    'the immediate result must be asserted from the wsfCompleteTurn response'
+  );
+  assert.ok(
+    /atStation\.result\.code === rejoined\.code/.test(body),
+    'the immediate result is not checked against the turn it belongs to'
+  );
+  assert.ok(
+    /atStation\.result\.amount === TURN_COUNT/.test(body),
+    'the immediate result amount is not checked'
+  );
+  assert.ok(
+    /JSON\.stringify\(atStation\.result\)\.includes\('A\.L\.'\)/.test(body),
+    'the immediate result is not checked for a name'
+  );
+  assert.ok(
+    /atStation\.result\.secondsLeft > 0/.test(body),
+    'the row does not check the result is served with time left on it'
+  );
+  const immediateResult = body.indexOf('assert(atStation.result,');
   const firstPulse = body.indexOf("'chosen activity pulse'");
   const combinedPulse = body.indexOf("'combined pulse'");
-  assert.notEqual(stationRead, -1, 'the row no longer reads the station state after recording');
   assert.notEqual(firstPulse, -1, 'the row no longer reads the chosen activity pulse');
   assert.notEqual(combinedPulse, -1, 'the row no longer reads the combined pulse');
   assert.ok(
-    stationRead < firstPulse && stationRead < combinedPulse,
-    'the ten-second station result must be read BEFORE the pulses, or the row spends the window it is measuring'
+    immediateResult < firstPulse && immediateResult < combinedPulse,
+    'the immediate result must be asserted BEFORE the pulses, or the row spends the window it is measuring'
   );
-  // And the failure must say how long it waited, so "the window closed before
-  // we looked" can never again be mistaken for "no result was written".
-  assert.ok(
-    /ms after the last completion returned/.test(body),
-    'the ten-second failure does not report the elapsed time, so it cannot separate an expired window from a missing result'
+  // And it must not come back to a DELAYED state read for the same claim.
+  //
+  // Counted from the COMPLETION, not from the assertion: a delayed read
+  // inserted just above the assertion would otherwise slip past the count,
+  // which is exactly what a mutation of this check did on the first attempt.
+  // The only wsfStationState after the completion is the post-window expiry
+  // read.
+  const stationRetry = body.indexOf("'retry at the screen'");
+  assert.notEqual(stationRetry, -1, 'the row no longer retries at the screen');
+  const stateCallsAfter = (body.slice(stationRetry).match(/'wsfStationState'/g) ?? []).length;
+  assert.equal(
+    stateCallsAfter,
+    1,
+    'after the completion there must be exactly one wsfStationState call — the post-window expiry read'
   );
   assert.ok(
-    /secondsLeft === 'number' && afterRecord\.result\.secondsLeft > 0/.test(body),
-    'the row does not check that the result is served with time left on it'
+    body.indexOf('the ten-second result is still on the screen after the window closed') > combinedPulse,
+    'the expiry read must come after the arithmetic, once the window has been waited out'
   );
 
   // Privacy: a count, never a list, and no identifier of a real person.

@@ -1843,38 +1843,31 @@ async function caseTurnContract() {
 
   // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
   //
-  // THIS READ COMES FIRST, BEFORE THE ARITHMETIC. IT IS A TEN-SECOND WINDOW.
+  // THE RESULT IS READ OFF THE COMPLETION'S OWN RESPONSE. NO SECOND CALL.
   //
   // Run 31 failed here with "no result at all", and the row was at fault.
-  // `lastResult.atMillis` is stamped by the LAST completion call, and
-  // wsfStationState serves a result only while `now - atMillis <
-  // TURN_RESULT_VISIBLE_MS` (index.ts). The row used to spend three more
-  // round-trips — two goal pulses and the combined pulse, the last of them
-  // very likely a cold start — inside that window before reading it. A row
-  // that consumes the window it is measuring cannot test the window; it
-  // tests how fast staging happened to be. So the ten-second read now
-  // happens immediately after the last completion, and the arithmetic, which
-  // has no deadline, happens after it.
-  const recordedAtMs = Date.now();
-  const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
-    stationId: stationOne.stationId, secret: stationOne.secret,
-  });
-  const elapsedMs = Date.now() - recordedAtMs;
-  assert(!afterRecord?.assigned, 'the screen is still showing somebody after recording');
-  // The elapsed reading is in the message so a future failure separates "the
-  // window closed before we looked" from "no result was ever written".
+  // `lastResult.atMillis` is stamped by the LAST completion, and the product
+  // serves a result only while `now - atMillis < TURN_RESULT_VISIBLE_MS`
+  // (index.ts). The row used to spend three more round-trips — two goal
+  // pulses and the combined pulse, the last very likely a cold start — inside
+  // that window and then ask a SEPARATE wsfStationState whether the result
+  // was still there. A row that consumes the window it is measuring is not
+  // testing the window, it is timing staging.
+  //
+  // wsfCompleteTurn returns `{ ...readTurnState(...), recorded, anyoneWaiting }`
+  // — the same projection wsfStationState serves, computed immediately after
+  // the transaction that wrote lastResult. Reading it off this response takes
+  // the network out of the measurement entirely: there is no interval in
+  // which the window could close.
+  assert(!atStation.assigned, 'the screen is still showing somebody after recording');
+  assert(atStation.result, 'the completion response carries no result for the screen to show');
+  assert(atStation.result.code === rejoined.code, 'the result names a different turn');
+  assert(atStation.result.amount === TURN_COUNT, `the result shows ${atStation.result.amount}`);
+  assert(!JSON.stringify(atStation.result).includes('A.L.'), 'the result shows a name');
+  // A result served with no time left on it is already stale on the screen.
   assert(
-    afterRecord?.result,
-    `the screen shows no result at all in the ten seconds after recording (read ${elapsedMs}ms after the last completion returned, window ${TURN_RESULT_MS}ms)`
-  );
-  assert(afterRecord.result.code === rejoined.code, 'the ten-second result names a different turn');
-  assert(afterRecord.result.amount === TURN_COUNT, `the ten-second result shows ${afterRecord.result.amount}`);
-  assert(!JSON.stringify(afterRecord.result).includes('A.L.'), 'the ten-second result shows a name');
-  // The product reports what is left of the window. A result served with no
-  // time left would be a result that is already stale on the screen.
-  assert(
-    typeof afterRecord.result.secondsLeft === 'number' && afterRecord.result.secondsLeft > 0,
-    `the ten-second result reports ${afterRecord.result.secondsLeft} seconds left`
+    typeof atStation.result.secondsLeft === 'number' && atStation.result.secondsLeft > 0,
+    `the result reports ${atStation.result.secondsLeft} seconds left`
   );
 
   // ── THE ARITHMETIC: ONE CHILD, ONE PARENT, THE OTHER CHILD UNTOUCHED ──────

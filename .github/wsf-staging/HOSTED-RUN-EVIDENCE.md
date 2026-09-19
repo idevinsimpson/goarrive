@@ -115,8 +115,15 @@ only the thing it asserts, on the run it asserted it.
   A row that consumes the window it is measuring is not testing the window; it is timing
   staging. By elimination in source, an expired window is the only cause consistent with
   the code — but the run carried no elapsed reading, so this run cannot prove it
-  outright. The fix removes the dependency and adds the instrumentation that would have
-  settled it.
+  outright.
+
+  **The fix removes the measurement interval entirely rather than shortening it.**
+  `wsfCompleteTurn` returns `{ ...readTurnState(...), recorded, anyoneWaiting }` — the
+  same projection `wsfStationState` serves, computed immediately after the transaction
+  that wrote `lastResult`. The row now asserts the result off that response (code,
+  amount, no name, `secondsLeft > 0`), so there is no interval in which the window could
+  close, and the only `wsfStationState` after the completion is the one that proves the
+  result expired.
 - Cleanup `COMPLETE`, 349/349, `EVIDENCE_SCAN=clean`, 23 files.
   `LINKED_DOCUMENTS_VERIFIED=2`, `ALREADY_ABSENT=9`, 11 linked documents — **the same
   composition as run 30**: the two uid-in-path documents admitted by path with no read,
