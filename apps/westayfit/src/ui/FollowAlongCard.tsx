@@ -35,6 +35,7 @@ export function FollowAlongCard({
   wide = false,
   inRow = false,
   tone = 'light',
+  compact = false,
 }: {
   session: FollowAlongSession;
   /** `wsf-move` on the route; each turn host uses its own. */
@@ -66,6 +67,17 @@ export function FollowAlongCard({
    * and the ground change, because the surface changed.
    */
   tone?: 'light' | 'venue';
+  /**
+   * A PHONE RUNNING A TURN, where the screen is already carrying a hero with
+   * the person's name, code and station above this card.
+   *
+   * At full size the figure and the clock stacked pushed Start past the bottom
+   * of a 390x844 viewport, so the primary action on the screen was something
+   * you had to go looking for under a very tall drawing. Compact puts the
+   * figure and the clock side by side and takes the drawing down, which is
+   * what brings the controls back above the fold.
+   */
+  compact?: boolean;
   /** What the host offers once the round is over. The only way to record. */
   finishedAction: React.ReactNode;
   /** An optional control the host offers before a round has begun. */
@@ -95,6 +107,9 @@ export function FollowAlongCard({
   } = session;
   const id = (suffix: string) => `${testIDPrefix}-${suffix}`;
   const venue = tone === 'venue';
+  // Side by side whenever height is the scarce dimension — a hall canvas that
+  // cannot scroll, or a phone that must show Start without one.
+  const stageIsRow = venue || compact;
   // One place decides the ink, so no element can be left on the wrong ground.
   const t = {
     card: venue ? styles.venueCard : kit.card,
@@ -103,13 +118,25 @@ export function FollowAlongCard({
     meta: venue ? styles.venueMeta : kit.cardMeta,
     status: venue ? styles.venueStatus : kit.statusText,
     caption: venue ? styles.venueCaption : kit.caption,
-    timer: venue ? styles.venueTimer : wide ? styles.timerWide : styles.timer,
+    timer: venue
+      ? styles.venueTimer
+      : compact
+        ? styles.timerCompact
+        : wide
+          ? styles.timerWide
+          : styles.timer,
   };
   // A VENUE FIGURE IS SIZED BY THE ROOM'S SCREEN, NOT BY ITS WIDTH. The hall
   // canvas does not scroll, so everything a running turn needs — the person's
   // name, the movement, the clock, the controls and the count box — has to fit
   // inside it. `figureWide` is for /move at a desk, where the page scrolls.
-  const figureStyle = venue ? styles.figureVenue : wide ? styles.figureWide : styles.figure;
+  const figureStyle = venue
+    ? styles.figureVenue
+    : compact
+      ? styles.figureCompact
+      : wide
+        ? styles.figureWide
+        : styles.figure;
 
   return (
     <View style={inRow ? styles.playerColumnRow : styles.playerColumn}>
@@ -134,7 +161,7 @@ export function FollowAlongCard({
           itself. On a phone they stack, because there is no width to
           stand in.
         */}
-        <View style={venue ? styles.venueStage : styles.stageStack} testID={id('stage')}>
+        <View style={stageIsRow ? styles.venueStage : styles.stageStack} testID={id('stage')}>
           <View style={styles.figureRow} testID={id('figure')}>
             {media.posterUri ? (
               <Image
@@ -363,7 +390,10 @@ const styles = StyleSheet.create({
   // fallback rather than something to follow.
   figure: { width: 200, height: 240 },
   figureWide: { width: 320, height: 384 },
-  figureVenue: { width: 132, height: 158 },
+  // THE VENUE FIGURE, sized to the room now that the movement owns the width
+  // the attract columns used to take.
+  figureVenue: { width: 260, height: 312 },
+  figureCompact: { width: 128, height: 154 },
   control: { minHeight: 56 },
   // THE VENUE GROUND. No white rectangle: the hall screen IS the card, so the
   // container only spaces its children and the ink is cream on navy.
@@ -382,10 +412,17 @@ const styles = StyleSheet.create({
   venueMeta: { color: 'rgba(247,245,240,0.7)', fontSize: 15, lineHeight: 21, textAlign: 'center' },
   venueStatus: { color: 'rgba(247,245,240,0.78)', fontSize: 17, lineHeight: 23, textAlign: 'center' },
   venueCaption: { color: 'rgba(247,245,240,0.66)', fontSize: 14, lineHeight: 19, textAlign: 'center' },
+  timerCompact: {
+    color: wsfTheme.colors.text,
+    fontSize: 64,
+    lineHeight: 70,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
   venueTimer: {
     color: '#F7F5F0',
-    fontSize: 84,
-    lineHeight: 90,
+    fontSize: 112,
+    lineHeight: 118,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
     textAlign: 'center',

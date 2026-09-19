@@ -972,91 +972,110 @@ export default function StationScreen() {
               here and recording it on their own phone are one write under one
               key — whichever lands first is the one that counts, and the other
               adds nothing. */}
-          {action === 'complete' ? (
-            <View testID="wsf-station-player">
-              <FollowAlongCard
-                session={session}
-                wide={wide}
-                tone="venue"
-                testIDPrefix="wsf-station-move"
-                finishedAction={
-                  <Text style={kit.body} testID="wsf-station-move-handoff">
-                    Enter what they counted below.
-                  </Text>
-                }
-              />
-            </View>
-          ) : null}
+          {/*
+            THE MOVEMENT AND THE CONTROLS STAND SIDE BY SIDE on a venue
+            screen, and stacked everywhere else.
 
-          {action === 'complete' ? (
-            <View style={styles.turnRecord} testID="wsf-station-turn-record">
-              <Text style={styles.queueEyebrow}>How many did they do?</Text>
-              <TextInput
-                value={turnCount}
-                onChangeText={(next) => {
-                  setTurnCount(next);
-                  setQueueError(null);
-                }}
-                style={styles.turnInput}
-                testID="wsf-station-turn-count"
-                placeholder="30"
-                placeholderTextColor={wsfTheme.colors.textMuted}
-                keyboardType="number-pad"
-                inputMode="numeric"
-                maxLength={6}
-                accessibilityLabel="How many did they do?"
-              />
-            </View>
-          ) : null}
-
-          <View style={styles.queueActions}>
-            <Pressable
-              onPress={
-                action === 'complete'
-                  ? onCompleteTurn
-                  : action === 'start'
-                    ? onStartTurn
-                    : onCallNext
-              }
-              disabled={
-                queueBusy ||
-                action === 'awaitReady' ||
-                (action === 'complete' && !isUsableTurnCount(turnCount))
-              }
-              style={[
-                styles.secondaryButton,
-                queueBusy ||
-                action === 'awaitReady' ||
-                (action === 'complete' && !isUsableTurnCount(turnCount))
-                  ? styles.buttonDisabled
-                  : null,
-              ]}
-              testID={action === 'callNext' ? 'wsf-station-call-next' : 'wsf-station-turn-action'}
-              accessibilityRole="button"
-              accessibilityState={{
-                disabled:
-                  queueBusy ||
-                  action === 'awaitReady' ||
-                  (action === 'complete' && !isUsableTurnCount(turnCount)),
-              }}
-            >
-              <Text style={styles.secondaryButtonText}>{stationActionLabel(action)}</Text>
-            </Pressable>
-            {/* ENDING A TURN WITHOUT A RESULT IS A DECISION SOMEBODY TAKES,
-                and it is this control — never a side effect of calling the
-                next person. */}
-            {assigned ? (
-              <Pressable
-                onPress={onCancelTurn}
-                disabled={queueBusy}
-                style={[styles.outlineButton, queueBusy ? styles.buttonDisabled : null]}
-                testID="wsf-station-turn-cancel"
-                accessibilityRole="button"
-                accessibilityState={{ disabled: queueBusy }}
-              >
-                <Text style={styles.outlineButtonText}>Let them go</Text>
-              </Pressable>
+            Stacked at 1280x720 this column was a narrow strip of content
+            down the middle with the width unused on either side, and it was
+            still too TALL — the count box and "Record this turn" sat below
+            the bottom edge of a canvas that does not scroll. Turning it into
+            two columns spends the width that was going spare and halves the
+            height at the same time, which is the only way both fit.
+          */}
+          <View style={turnRunningWide ? styles.turnColumns : null}>
+            {action === 'complete' ? (
+              <View testID="wsf-station-player">
+                <FollowAlongCard
+                  session={session}
+                  wide={wide}
+                  tone="venue"
+                  testIDPrefix="wsf-station-move"
+                  finishedAction={
+                    <Text style={kit.body} testID="wsf-station-move-handoff">
+                      Enter what they counted below.
+                    </Text>
+                  }
+                />
+              </View>
             ) : null}
+            {/* The count box and the two decisions are ONE group, so they
+                are one column. Left as siblings of the player they became
+                a third column of their own, with the number to type in one
+                place and the button that sends it in another. */}
+            <View style={turnRunningWide ? styles.turnControls : null}>
+
+              {action === 'complete' ? (
+                <View style={styles.turnRecord} testID="wsf-station-turn-record">
+                  <Text style={styles.queueEyebrow}>How many did they do?</Text>
+                  <TextInput
+                    value={turnCount}
+                    onChangeText={(next) => {
+                      setTurnCount(next);
+                      setQueueError(null);
+                    }}
+                    style={styles.turnInput}
+                    testID="wsf-station-turn-count"
+                    placeholder="30"
+                    placeholderTextColor={wsfTheme.colors.textMuted}
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    maxLength={6}
+                    accessibilityLabel="How many did they do?"
+                  />
+                </View>
+              ) : null}
+
+              <View style={styles.queueActions}>
+                <Pressable
+                  onPress={
+                    action === 'complete'
+                      ? onCompleteTurn
+                      : action === 'start'
+                        ? onStartTurn
+                        : onCallNext
+                  }
+                  disabled={
+                    queueBusy ||
+                    action === 'awaitReady' ||
+                    (action === 'complete' && !isUsableTurnCount(turnCount))
+                  }
+                  style={[
+                    styles.secondaryButton,
+                    queueBusy ||
+                    action === 'awaitReady' ||
+                    (action === 'complete' && !isUsableTurnCount(turnCount))
+                      ? styles.buttonDisabled
+                      : null,
+                  ]}
+                  testID={action === 'callNext' ? 'wsf-station-call-next' : 'wsf-station-turn-action'}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled:
+                      queueBusy ||
+                      action === 'awaitReady' ||
+                      (action === 'complete' && !isUsableTurnCount(turnCount)),
+                  }}
+                >
+                  <Text style={styles.secondaryButtonText}>{stationActionLabel(action)}</Text>
+                </Pressable>
+                {/* ENDING A TURN WITHOUT A RESULT IS A DECISION SOMEBODY TAKES,
+                    and it is this control — never a side effect of calling the
+                    next person. */}
+                {assigned ? (
+                  <Pressable
+                    onPress={onCancelTurn}
+                    disabled={queueBusy}
+                    style={[styles.outlineButton, queueBusy ? styles.buttonDisabled : null]}
+                    testID="wsf-station-turn-cancel"
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: queueBusy }}
+                  >
+                    <Text style={styles.outlineButtonText}>Let them go</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
           </View>
           {queueError ? (
             <Text style={styles.queueError} testID="wsf-station-queue-error" aria-live="polite">
@@ -1071,50 +1090,63 @@ export default function StationScreen() {
           authority: scanning one cannot enrol a screen, cannot make anyone a
           Champion, and cannot record anything.
         */}
-        {turnRunningWide ? null : (
-          <View style={styles.qrRow} testID="wsf-station-qr">
-            {joinQr && joinUrl ? (
-              <View style={styles.qrBlock} testID="wsf-station-qr-join" dataSet={{ qrUrl: joinUrl }}>
-                <Text style={styles.qrHeading}>New here?</Text>
-                <Image
-                  source={{ uri: joinQr }}
-                  style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                  resizeMode="contain"
-                  accessibilityLabel="QR code that opens the page to join this community"
-                  testID="wsf-station-qr-join-image"
-                />
-                <Text style={styles.qrCaption}>Scan to join, then add your part.</Text>
-              </View>
-            ) : (
-              <View style={styles.qrBlock} testID="wsf-station-qr-join-unavailable">
-                <Text style={styles.qrHeading}>New here?</Text>
-                {/*
-                  No symbol rather than a symbol that leads nowhere. This
-                  community admits nobody by link, the server therefore handed
-                  this screen no code, and the screen says so instead of
-                  inventing a way in — admission policy is not this feature's to
-                  change.
-                */}
-                <Text style={styles.qrCaption}>
-                  This community isn’t joined from a link. Ask a Champion to add you.
-                </Text>
-              </View>
-            )}
-            {eventQr && eventUrl ? (
-              <View style={styles.qrBlock} testID="wsf-station-qr-member" dataSet={{ qrUrl: eventUrl }}>
-                <Text style={styles.qrHeading}>Already a member?</Text>
-                <Image
-                  source={{ uri: eventQr }}
-                  style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                  resizeMode="contain"
-                  accessibilityLabel="QR code that opens this event on your own phone"
-                  testID="wsf-station-qr-member-image"
-                />
-                <Text style={styles.qrCaption}>Scan to add your part on your own phone.</Text>
-              </View>
-            ) : null}
-          </View>
-        )}
+        {/*
+          ONE CODE STAYS UP WHILE SOMEBODY IS MOVING.
+
+          Hiding the whole row during a turn was too blunt. Somebody who
+          walks up mid-round and wants in has nothing to scan, and a reserved
+          panel during movement is part of the agreed contract. So during a
+          turn this becomes a narrow right rail carrying the JOIN code only —
+          a public URL, the same one the attract screen prints, with no
+          station credential anywhere near it. The second (“already a
+          member”) code stands down, because a rail is not a place for two.
+        */}
+        <View
+          style={[styles.qrRow, turnRunningWide ? styles.qrRail : null]}
+          testID="wsf-station-qr"
+        >
+          {joinQr && joinUrl ? (
+            <View style={styles.qrBlock} testID="wsf-station-qr-join" dataSet={{ qrUrl: joinUrl }}>
+              <Text style={styles.qrHeading}>New here?</Text>
+              <Image
+                source={{ uri: joinQr }}
+                style={[styles.qrImage, { width: qrSize, height: qrSize }]}
+                resizeMode="contain"
+                accessibilityLabel="QR code that opens the page to join this community"
+                testID="wsf-station-qr-join-image"
+              />
+              <Text style={styles.qrCaption}>Scan to join, then add your part.</Text>
+            </View>
+          ) : (
+            <View style={styles.qrBlock} testID="wsf-station-qr-join-unavailable">
+              <Text style={styles.qrHeading}>New here?</Text>
+              {/*
+                No symbol rather than a symbol that leads nowhere. This
+                community admits nobody by link, the server therefore handed
+                this screen no code, and the screen says so instead of
+                inventing a way in — admission policy is not this feature's to
+                change.
+              */}
+              <Text style={styles.qrCaption}>
+                This community isn’t joined from a link. Ask a Champion to add you.
+              </Text>
+            </View>
+          )}
+          {/* The rail holds one code. This is the one that stands down. */}
+          {turnRunningWide ? null : eventQr && eventUrl ? (
+            <View style={styles.qrBlock} testID="wsf-station-qr-member" dataSet={{ qrUrl: eventUrl }}>
+              <Text style={styles.qrHeading}>Already a member?</Text>
+              <Image
+                source={{ uri: eventQr }}
+                style={[styles.qrImage, { width: qrSize, height: qrSize }]}
+                resizeMode="contain"
+                accessibilityLabel="QR code that opens this event on your own phone"
+                testID="wsf-station-qr-member-image"
+              />
+              <Text style={styles.qrCaption}>Scan to add your part on your own phone.</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       {/* It explains the join codes, so it goes when they do. */}
@@ -1254,6 +1286,19 @@ const styles = StyleSheet.create({
   // a block in the body column. Neither may be given a width of its own.
   queueWide: { flex: 1 },
   queueRunning: { flex: 2.6 },
+  // The reserved panel: it keeps its own width rather than being squeezed by
+  // the movement beside it, and stacks its one code vertically.
+  turnColumns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 40,
+    alignSelf: 'stretch',
+    minWidth: 0,
+    paddingHorizontal: 24,
+  },
+  turnControls: { alignItems: 'center', gap: 14, minWidth: 0, flexShrink: 1 },
+  qrRail: { flexDirection: 'column', flexGrow: 0, flexShrink: 0, width: 250, gap: 10 },
   servingNameRunning: { fontSize: 44, lineHeight: 50 },
   queuePhone: { alignSelf: 'stretch' },
   queueEyebrow: {

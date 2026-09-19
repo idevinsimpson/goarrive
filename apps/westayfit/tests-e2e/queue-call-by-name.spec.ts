@@ -29,7 +29,8 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-import { mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync } from 'node:fs';
 import * as nodePath from 'node:path';
 
 /**
@@ -39,12 +40,64 @@ import * as nodePath from 'node:path';
  * images; they exist to be looked at.
  */
 const TURN_ARTIFACTS = nodePath.join(__dirname, 'artifacts', 'queue-call-by-name');
+
+/**
+ * THE PHONE SIZES THIS WILL ACTUALLY BE MET ON, plus the short one.
+ *
+ * 390 is the default this spec runs at. 360 is the narrow end of the phones
+ * people bring to an expo, 430 the wide end, and 390x640 is the one that finds
+ * what a tall viewport hides — a control below the fold is a control nobody
+ * uses, and the tall phone never shows you that.
+ *
+ * No assertion is made about any of these images. They exist so the states can
+ * be looked at at the widths they will be read at, which is the only way some
+ * of these defects are visible at all.
+ */
+const PHONE_WIDTHS: { label: string; width: number; height: number }[] = [
+  { label: '360', width: 360, height: 844 },
+  { label: '430', width: 430, height: 932 },
+  { label: 'short-390x640', width: 390, height: 640 },
+];
+
+async function shotWidths(page: Page, name: string): Promise<void> {
+  const restore = page.viewportSize() ?? { width: 390, height: 844 };
+  for (const size of PHONE_WIDTHS) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await shot(page, `${name}-${size.label}`);
+  }
+  await page.setViewportSize(restore);
+}
+/**
+ * EVERY CAPTURE MUST BE A DIFFERENT PICTURE, and this is enforced rather than
+ * hoped for.
+ *
+ * Three of the first thirteen captures published from this spec were
+ * byte-identical to another one: the lease shot was the assigned shot, the
+ * receipt shot was the active-player shot, and the "cleared" shot was the
+ * result shot. Each had been taken BEFORE the state it was named for had
+ * arrived on the page, so the file recorded the previous state under the new
+ * state's name — evidence that quietly claimed something untrue, which is
+ * worse than no evidence at all.
+ *
+ * A hash comparison catches that in a millisecond, so it runs on every shot.
+ * If this fails, the fix is to wait for the state, never to rename the file.
+ */
+const shotHashes = new Map<string, string>();
+
 async function shot(
   target: { screenshot: (o: { path: string; fullPage: boolean }) => Promise<unknown> },
   name: string
 ): Promise<void> {
   mkdirSync(TURN_ARTIFACTS, { recursive: true });
-  await target.screenshot({ path: nodePath.join(TURN_ARTIFACTS, `${name}.png`), fullPage: false });
+  const file = nodePath.join(TURN_ARTIFACTS, `${name}.png`);
+  await target.screenshot({ path: file, fullPage: false });
+  const hash = createHash('sha256').update(readFileSync(file)).digest('hex');
+  const clash = shotHashes.get(hash);
+  expect(
+    clash ?? null,
+    `capture "${name}" is byte-identical to "${clash}" — one of them is not the state it is named for`
+  ).toBeNull();
+  shotHashes.set(hash, name);
 }
 
 
@@ -283,6 +336,7 @@ test('a member chooses initials, the screen calls them by those initials and a c
     expect(await station.page.content()).not.toContain(memberUid);
 
     await shot(memberPage, '00-phone-waiting');
+    await shotWidths(memberPage, '00-phone-waiting');
     await shot(station.page, '00-station-waiting');
 
     // ---- 3. CALL NEXT, printed AND announced ------------------------------
@@ -324,14 +378,21 @@ test('a member chooses initials, the screen calls them by those initials and a c
     await expectNoMotion(station.page, 'the screen in the hall');
     await expectNoMotion(memberPage, 'the member’s own phone');
     await shot(station.page, '01-station-assigned');
-    await shot(memberPage, '02-phone-assigned');
+    // BEING CALLED AND THE LEASE RUNNING ARE ONE STATE, not two.
+    // They were captured as two files and the byte guard caught them as the
+    // same picture, which they are: the 45 seconds are part of being called,
+    // not a moment that follows it. So this is the assigned state WITH its
+    // lease, asserted before it is photographed and named for what it is.
+    await expect(memberPage.getByTestId('wsf-queue-lease')).toBeVisible({ timeout: 20_000 });
+    await expect(memberPage.getByTestId('wsf-queue-lease')).toContainText('to say you’re coming');
+    await shot(memberPage, '02-phone-assigned-with-lease');
+    await shotWidths(memberPage, '02-phone-assigned-with-lease');
 
     // ---- 5. READY, START, RECORD ------------------------------------------
     //
     // A CALL IS AN OFFER. The station cannot start anybody who has not said
     // they are coming, so its one control is disabled until the phone taps.
     await expect(station.page.getByTestId('wsf-station-turn-action')).toBeDisabled();
-    await shot(memberPage, '03-phone-lease-running');
     await memberPage.getByTestId('wsf-queue-ready').click();
     await expect(station.page.getByTestId('wsf-station-turn-action')).toBeEnabled({
       timeout: 20_000,
@@ -371,6 +432,7 @@ test('a member chooses initials, the screen calls them by those initials and a c
     );
     await shot(station.page, '04-station-active-player');
     await shot(memberPage, '05-phone-active-player');
+    await shotWidths(memberPage, '05-phone-active-player');
 
     // AND IT STILL CANNOT RECORD ANYTHING. Running a round changes no number
     // anywhere; the count box below is the only thing that can.
@@ -396,8 +458,15 @@ test('a member chooses initials, the screen calls them by those initials and a c
     await expect(station.page.getByTestId('wsf-station-queue-result')).toContainText(
       '30 squats recorded.'
     );
+    // THE TOTAL AND THE RESULT MUST AGREE. A screen that says "30 squats
+    // recorded" beside "0 of 5,000" is telling a room two different things.
+    // The pulse cache is invalidated when a contribution commits, so this is
+    // now provable rather than hoped for.
+    await expect(station.page.getByTestId('wsf-station-total-line')).toContainText(
+      '30 of 5,000',
+      { timeout: 20_000 }
+    );
     await shot(station.page, '07-station-result');
-    await shot(memberPage, '08-phone-receipt');
 
     // THE PLAYER GOES WHEN THE TURN DOES. A finished turn leaves a code and a
     // number for ten seconds and nothing else — not a movement still running
@@ -407,6 +476,12 @@ test('a member chooses initials, the screen calls them by those initials and a c
       'Nobody is waiting.',
       { timeout: 20_000 }
     );
+    // THE TEN SECONDS, WAITED OUT. "Cleared" means the result is gone from the
+    // screen, so the capture waits for it to go rather than being taken while
+    // it is still up — which is what made this file a copy of the result one.
+    await expect(station.page.getByTestId('wsf-station-queue-result')).toHaveCount(0, {
+      timeout: 30_000,
+    });
     await shot(station.page, '09-station-cleared');
     const hallAfter = await station.page.evaluate(() => document.body.innerText);
     for (const secret of ['Ada', 'Lovelace', 'A.L.', memberUid]) {
@@ -421,6 +496,10 @@ test('a member chooses initials, the screen calls them by those initials and a c
       '30 squats recorded.',
       { timeout: 25_000 }
     );
+    // NOW there is a receipt to photograph. The file that used to carry this
+    // name was taken here-minus-thirty-seconds and was simply the player again.
+    await shot(memberPage, '08-phone-receipt');
+    await shotWidths(memberPage, '08-phone-receipt');
   } finally {
     await memberContext.close();
     await station.context.close();

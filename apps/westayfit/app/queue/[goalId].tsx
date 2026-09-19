@@ -606,6 +606,7 @@ export default function QueueScreen() {
         <View testID="wsf-queue-player">
           <FollowAlongCard
             session={session}
+            compact
             testIDPrefix="wsf-queue-move"
             finishedAction={
               <Text style={kit.body} testID="wsf-queue-move-handoff">
