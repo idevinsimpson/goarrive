@@ -391,7 +391,13 @@ test('once: today’s copy is unchanged, no second contribution is offered, and 
   await expect(page.getByTestId(`wsf-community-your-part-${goalId}`)).toContainText(
     'You’ve added 20 squats to this goal.'
   );
+  // SLICE 1. The Your-part duplicate is gone from every goal now, so asserting
+  // its absence here would pass for the wrong reason and prove nothing about
+  // the repeat policy. The property this test exists for — Community Home does
+  // not invite what the goal will refuse — now lives on the hero's own quiet
+  // route, so that is what is asserted.
   await expect(page.getByTestId(`wsf-community-your-part-link-${goalId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-record-${goalId}`)).toHaveCount(0);
   await snap(page, '08-community-home-no-invitation');
   const totals = await firestoreRead(`wsfGoalMemberTotals/${goalId}_${fx.memberUid}`);
   expect(Number(totals?.total?.integerValue)).toBe(20);

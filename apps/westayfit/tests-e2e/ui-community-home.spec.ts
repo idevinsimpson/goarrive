@@ -348,10 +348,13 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
     'You’ve added 60 squats'
   );
-  // The control is a contribution action, named as one — not an activity history.
-  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
-    'Record more squats'
-  );
+  // SLICE 1. The control is GONE from Your part. It was the third route to the
+  // contribution flow on one screen, after the hero's primary action and the
+  // quiet "I already moved" directly above it. Your part reports what the
+  // member has done; it does not re-ask. The action lives in the hero, once.
+  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveCount(0);
+  // And the one that remains is still there, so the route is demoted, not lost.
+  await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
   // SLICE 1. The generic line above the hero is GONE while a goal is running:
   // the hero says what is happening in the goal's own words, and the line was
   // costing a row at the most expensive point on a phone. It survives only in
@@ -460,9 +463,9 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
     'Your first contribution counts here.'
   );
-  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
-    'Record squats'
-  );
+  // SLICE 1. Gone from Your part for the Champion too; the route is the hero's.
+  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
   await scrollTo(page, 0);
   await snapViewport(page, 'champion-01-top-manage-closed');
   const heroBoxBefore = await page.getByTestId('wsf-community-goal-hero').boundingBox();

@@ -1988,10 +1988,14 @@ export default function CommunityPage() {
     </Fragment>
   );
 
+  // SLICE 1. OUTSIDE the navy panel, on the page's own surface. It is utility
+  // — when the number was last confirmed and how to ask again — and it was
+  // sitting inside the emotional payoff. Its colours move with it: on cream it
+  // needs the page's muted text, not the hero's light-on-dark muted.
   const renderFreshness = (p: GoalProgress) =>
     p.kind === 'ok' ? (
-      <View style={styles.freshnessRow}>
-        <Text style={styles.heroFreshness} testID="wsf-community-progress-updated">
+      <View style={styles.freshnessUtilityRow}>
+        <Text style={styles.freshnessUtilityText} testID="wsf-community-progress-updated">
           {`Confirmed ${formatClock(p.at)}`}
         </Text>
         <Pressable
@@ -2001,7 +2005,7 @@ export default function CommunityPage() {
           style={styles.freshnessButton}
           accessibilityLabel="Refresh confirmed progress"
         >
-          <Text style={styles.heroFreshnessLink}>Refresh</Text>
+          <Text style={styles.freshnessUtilityLink}>Refresh</Text>
         </Pressable>
       </View>
     ) : null;
@@ -3080,6 +3084,7 @@ export default function CommunityPage() {
                   ? formatActiveWindowLabel(p.pulse.endsAt, { timeZone: p.pulse.timezone })
                   : 'Open';
               return (
+                <Fragment>
                 <View style={styles.hero} testID="wsf-community-goal-hero">
                   {/*
                     A3. The one place this surface can say the target is met
@@ -3138,6 +3143,18 @@ export default function CommunityPage() {
                       testID={`wsf-community-goal-link-${featured.goalId}`}
                       label="Start moving"
                     />
+                    {/*
+                      SLICE 1. THE POLICY MOVED WITH THE CONTROL.
+                      "Your part" used to carry the only repeat-policy-aware
+                      route: it hid itself on a `once` goal the member had
+                      already contributed to, so Community Home never invited
+                      what the server would refuse. Removing that duplicate
+                      would have left ONLY this control, which never checked
+                      the policy — so the screen would have started inviting a
+                      second contribution it cannot accept. The check comes
+                      here with it.
+                    */}
+                    {p.kind === 'ok' && p.repeatPolicy === 'once' && (p.ownCredit ?? 0) > 0 ? null : (
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
                       style={styles.heroSecondaryAction}
@@ -3149,13 +3166,13 @@ export default function CommunityPage() {
                       // unit; this only has to name the situation.
                       label="I already moved"
                     />
+                    )}
                   </View>
                   {/*
                     SLICE 1. Below the actions, not between the figures and the
                     primary control. It is maintenance metadata, and in the old
                     order it was the last thing a 390x640 phone could show.
                   */}
-                  {renderFreshness(p)}
                   {/*
                     W7. Sharing, and only what is already published. The control
                     exists only when this goal's aggregate is authorized for
@@ -3187,6 +3204,8 @@ export default function CommunityPage() {
                     </View>
                   ) : null}
                 </View>
+                {renderFreshness(p)}
+                </Fragment>
               );
             })()
           ) : (
@@ -3257,15 +3276,13 @@ export default function CommunityPage() {
                       resolves to 'multiple' — unchanged behaviour — and keeps
                       the link exactly as it was.
                     */}
-                    {p.repeatPolicy === 'once' && p.ownCredit > 0 ? null : (
-                      <ButtonLink
-                        href={contributeHref(featured.goalId, 'record')}
-                        style={styles.inlineLink}
-                        textStyle={styles.inlineLinkText}
-                        testID={`wsf-community-your-part-link-${featured.goalId}`}
-                        label={p.ownCredit > 0 ? `Record more ${p.pulse.unit}` : `Record ${p.pulse.unit}`}
-                      />
-                    )}
+                    {/*
+                      SLICE 1. REMOVED. This was the THIRD route to the
+                      contribution flow on one screen, after the hero's primary
+                      action and "I already moved" directly above it. "Your
+                      part" reports what the member has done; it does not
+                      re-ask. The action lives in the hero, once.
+                    */}
                   </View>
                 );
               })()
@@ -3674,10 +3691,28 @@ const styles = StyleSheet.create({
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  freshnessUtilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 10,
+  },
+  freshnessUtilityText: { color: wsfTheme.colors.textMuted, fontSize: 13 },
+  freshnessUtilityLink: {
+    color: wsfTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   heroFreshness: { color: HERO_MUTED, fontSize: 13 },
   freshnessButton: { minHeight: 44, justifyContent: 'center' },
   heroFreshnessLink: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
-  actions: { gap: 10, marginTop: 8 },
+  // SLICE 1. marginTop 8 -> 14. Removing the freshness row took the hero's
+  // breathing room with it and the button sat too close to "to go". 20 read
+  // better still, but it cost the worst-case long name its clearance on a
+  // 390x640 phone (15px left); 14 keeps the air and returns the margin.
+  actions: { gap: 10, marginTop: 14 },
   // SLICE 1. The already-moved route is DEMOTED, not duplicated and not
   // stripped. Bare centred text (the first attempt) read as a caption and
   // lost every signal that it could be tapped. This is a quiet chip: hairline
