@@ -1494,6 +1494,21 @@ export default function CommunityPage() {
   })();
   // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
   const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
+  /**
+   * THE GOAL TITLE SHRINKS BEFORE IT BREAKS A WORD.
+   *
+   * At 200% text zoom the hero is ~163px of usable width, and "Challenge" set
+   * at 27px is wider than that — so the browser broke INSIDE the word and the
+   * capture read "Challen / ge". A word split down the middle is not a reflow,
+   * it is a defect. The type scales at the two narrow steps so long words keep
+   * their shape; nothing changes at 360 and above.
+   */
+  const heroTitleType =
+    windowWidth < 240
+      ? { fontSize: 20, lineHeight: 25 }
+      : windowWidth < 300
+        ? { fontSize: 23, lineHeight: 29 }
+        : null;
   const smallWeWidth = 104;
   // The hero's progress area reserves the room the We mark, its three facts
   // and the freshness line will take, so a pulse that lands does not move
@@ -3104,7 +3119,7 @@ export default function CommunityPage() {
                     </Text>
                   ) : null}
                   <Text
-                    style={styles.heroTitle}
+                    style={[styles.heroTitle, heroTitleType]}
                     testID={`wsf-community-goal-title-${featured.goalId}`}
                     {...HEADING_2}
                   >

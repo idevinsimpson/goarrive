@@ -36,6 +36,38 @@ const WIDTHS = [
   { key: 'wide-1280', width: 1280, height: 800, mobile: false },
 ];
 
+/**
+ * NO WORD IS BROKEN DOWN THE MIDDLE.
+ *
+ * At 200% text zoom the hero title broke "Challenge" into "Challen / ge".
+ * Reflow is fine; splitting a word is not. This measures each word of the
+ * element in the element's OWN computed font and fails when one cannot fit
+ * the line it has to live on.
+ */
+async function expectNoMidWordBreak(page: import('@playwright/test').Page, testId: string, where: string) {
+  const worst = await page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    const probe = document.createElement('span');
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font};letter-spacing:${cs.letterSpacing};`;
+    document.body.appendChild(probe);
+    let widest = { word: '', width: 0 };
+    for (const word of (el.textContent || '').split(/\s+/).filter(Boolean)) {
+      probe.textContent = word;
+      const w = probe.getBoundingClientRect().width;
+      if (w > widest.width) widest = { word, width: w };
+    }
+    probe.remove();
+    return { word: widest.word, wordWidth: Math.ceil(widest.width), available: Math.floor(el.clientWidth) };
+  }, testId);
+  expect(worst, `${where}: ${testId} not found`).not.toBeNull();
+  expect(
+    worst!.wordWidth,
+    `${where}: "${worst!.word}" needs ${worst!.wordWidth}px but the line offers ${worst!.available}px, so it breaks mid-word`
+  ).toBeLessThanOrEqual(worst!.available);
+}
+
 /** No horizontal clipping, asserted rather than eyeballed. */
 async function expectNoHorizontalOverflow(page: import('@playwright/test').Page, where: string) {
   const report = await page.evaluate(() => {
@@ -70,6 +102,7 @@ async function shoot(browser: Browser, w: typeof WIDTHS[number], email: string, 
   // Let the progress settle so the capture is of a resolved state, not a spinner.
   await page.waitForTimeout(1500);
   await expectNoHorizontalOverflow(page, `Community Home at ${w.key}`);
+  await expectNoMidWordBreak(page, `wsf-community-goal-title-${name}`, `Community Home at ${w.key}`);
   await page.screenshot({ path: path.join(OUT, `home-${w.key}-viewport.png`) });
   // fullPage is USELESS here: the app is a React Native Web ScrollView, so the
   // document never grows and `fullPage: true` returns a byte-identical copy of
@@ -191,10 +224,24 @@ test('a long community name does not push the primary action off a short phone',
   await page.waitForTimeout(1200);
   await expectNoHorizontalOverflow(page, 'long name at 390x640');
 
-  const box = await page.getByTestId(`wsf-community-goal-link-${goalId}`).boundingBox();
-  expect(box, 'the primary action has no box').not.toBeNull();
-  console.log(`LONG-NAME start-moving top=${Math.round(box!.y)} bottom=${Math.round(box!.y + box!.height)} viewport=640`);
-  expect(box!.y + box!.height, 'the long-name case pushes the primary action off a 390x640 phone').toBeLessThanOrEqual(640);
+  // THE MEASUREMENT IS TAKEN FROM AN UNTOUCHED INITIAL VIEWPORT.
+  //
+  // The app is a React Native Web ScrollView, so a measurement that let the
+  // scroller move would prove nothing about what a member sees on arrival.
+  // The container's scrollTop is asserted at zero FIRST, and the rect comes
+  // from a DOM read rather than a locator call, so no Playwright action can
+  // scroll it between the two.
+  const measured = await page.evaluate((id) => {
+    const scroller = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 4);
+    const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { scrollTop: scroller ? (scroller as HTMLElement).scrollTop : 0, top: Math.round(r.top), bottom: Math.round(r.bottom) };
+  }, `wsf-community-goal-link-${goalId}`);
+  expect(measured, 'the primary action was not found').not.toBeNull();
+  expect(measured!.scrollTop, 'the scroller moved before the measurement, so it proves nothing').toBe(0);
+  console.log(`LONG-NAME start-moving top=${measured!.top} bottom=${measured!.bottom} scrollTop=${measured!.scrollTop} viewport=640`);
+  expect(measured!.bottom, 'the long-name case pushes the primary action off a 390x640 phone').toBeLessThanOrEqual(640);
   await page.screenshot({ path: path.join(OUT, 'home-390x640-long-name.png') });
   await context.close();
 });
