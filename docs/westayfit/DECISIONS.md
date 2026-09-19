@@ -437,3 +437,31 @@ The wiring was written but still uncommitted when the client mutation harness ra
 clean tree and verify restoration. The division of evidence is: helper mutations prove the
 helper's behaviour, and a browser case proves the control uses it. An equivalent browser
 mutant proves neither, and is not counted as coverage.
+
+**A control belongs to the job it serves, not to the data it happens to sit beside.** The
+kiosk address for a goal lived inside that goal's public-display permission card, because the
+two are related: a kiosk shows what the permission allows. Related is not the same as *the
+same job*. A Champion opening the Champion sheet at an event is there to put a goal on a
+screen, and had to find that control inside a permission they were not looking for. The
+address and the station enrolment moved into a **Your event** section of their own; the
+permission stayed where it belongs, under **Goals**, unchanged. Nothing was removed, renamed
+or re-gated — the same testIDs, strings and `data-*` attributes render in a different place.
+
+**Station enrolment is a sibling of the kiosk mode, never part of it.** The first cut of that
+move put enrolment inside the "One goal" branch, which silently took screens away from a
+combined event. `ui-combined-goal.spec.ts` failed within one run and its own comment had
+already said why. A test that states the rule it is protecting is worth more than the
+assertion alone.
+
+**Present is not shown, and a capture is a claim about what is shown.** A sheet keeps its
+scroll offset across a viewport change, so waiting for an element to be *visible* and then
+photographing the viewport produced a capture named for the success state that was a picture
+of a different panel. Visibility is a property of the element; being in frame is a property
+of the camera. Every capture now scrolls its anchor into frame first, on top of the
+byte-identical hash guard — which catches two captures being the same image, but cannot catch
+one image being the wrong one.
+
+**No horizontal clipping is a number, not an impression.** Captures are for a reviewer;
+whether anything is wider than the sheet that holds it, and whether the document scrolls
+sideways, are assertions that run at every width. Written, then mutation-tested by forcing an
+element to 3000 px, because a guard that cannot fail is decoration.

@@ -1,7 +1,7 @@
 import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -1453,6 +1453,32 @@ export default function CommunityPage() {
   // a claim about what the community is doing waits for the facts.
   const humanLine =
     goalsState.kind === 'loaded' ? (featured ? 'Moving together.' : 'Ready to get moving.') : null;
+  /**
+   * The one line under the community's name in the Champion sheet. It says
+   * what is actually running and, when the count is known, how many people
+   * are here — and it says the truth about NOT knowing just as plainly.
+   *
+   * It never asserts a goal, a total or a member count that has not come back
+   * from the server: every branch below is a state of `goalsState`, and the
+   * member half is omitted entirely while `memberCount` is null rather than
+   * rendered as a zero.
+   */
+  const manageStoryLine = (() => {
+    const goalPart =
+      goalsState.kind === 'loading'
+        ? 'Checking what is running…'
+        : goalsState.kind === 'failed'
+          ? 'Goals could not be loaded'
+          : activeGoals.length === 0
+            ? 'No goal running yet'
+            : activeGoals.length === 1
+              ? `\u201C${activeGoals[0].title}\u201D is running`
+              : `${activeGoals.length} goals running`;
+    return memberCount != null
+      ? `${goalPart} \u00B7 ${memberCountLabel(memberCount)}`
+      : goalPart;
+  })();
+
   const footerLine = [
     memberCount != null ? memberCountLabel(memberCount) : null,
     createdLabel ? `since ${createdLabel}` : null,
@@ -1571,285 +1597,6 @@ export default function CommunityPage() {
                   : 'Authorize public display'}
           </Text>
         </Pressable>
-        {/*
-          SET UP KIOSK. A kiosk is a screen standing at an event with this
-          goal open on it, so the Champion needs the address of that screen —
-          not an instruction to assemble one by hand. The link is built from
-          the origin this build is actually served from, so it is correct on
-          staging and in production without being edited.
-
-          It sits with the display permission because the two are the same
-          decision in practice: a kiosk shows the goal's shared progress, and
-          that is exactly what authorizing a public display allows. When the
-          permission is off the link still resolves, and the screen says the
-          goal is not available — so the state text below says so first.
-        */}
-        {/*
-          ONE GOAL, or the combined panel further down the sheet. These
-          controls are what "One goal" means, and they are exactly what they
-          have always been: same testIDs, same copy, same address, same
-          dataSet. The chooser lives in its own section below so that choosing
-          the other mode never edits this one.
-        */}
-        {kioskMode === 'one' ? (
-          <View style={styles.manageGoal} testID={`wsf-kiosk-setup-${goal.goalId}`}>
-            <Text style={styles.manageGoalTitle}>Set up kiosk</Text>
-            <Text style={styles.manageIntro} testID={`wsf-kiosk-setup-intro-${goal.goalId}`}>
-              {goal.aggregateDisplayAuthorized
-                ? 'Open this on the screen at your event.'
-                : 'Authorize public display above, or that screen will say the goal is not available.'}
-            </Text>
-            {kioskUrlFor(goal.goalId) ? (
-              /*
-                ONE ACTION, THEN THE UTILITY. Opening the kiosk is the thing a
-                Champion came here to do, so it carries the one green primary
-                on this goal; copying the address is the way to do the same
-                thing on another device, so it is a quiet text control under
-                it. The weight is carried by shape, size and fill together —
-                never by colour alone.
-              */
-              <View
-                style={styles.actionStack}
-                // The address the controls beside it act on, readable by a test
-                // without being printed for a person.
-                dataSet={{ kioskUrl: kioskUrlFor(goal.goalId) ?? '' }}
-              >
-                <ButtonLink
-                  href={`/kiosk/${goal.goalId}`}
-                  label="Open kiosk"
-                  style={styles.primaryButton}
-                  textStyle={styles.primaryButtonText}
-                  testID={`wsf-kiosk-setup-open-${goal.goalId}`}
-                />
-                <Pressable
-                  onPress={() => onCopyKiosk(goal.goalId)}
-                  style={styles.tertiaryButton}
-                  testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${goal.title}: copy the kiosk link`}
-                >
-                  <Text style={styles.tertiaryButtonText}>
-                    {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
-                      ? 'Copied'
-                      : 'Copy kiosk link'}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Text style={styles.body} testID={`wsf-kiosk-setup-unavailable-${goal.goalId}`}>
-                The kiosk link isn’t ready yet. Reload the page to try again.
-              </Text>
-            )}
-            {/*
-              A copy can fail for reasons this app does not control — a browser
-              that refuses the clipboard without a gesture it recognises, or a
-              context with no clipboard at all. When it does, the address itself
-              is shown so the Champion can still get the screen open. This is the
-              one place a URL is deliberately readable: it is the Champion's own
-              admin sheet, the link carries no participant token and no
-              authority, and the alternative is a dead end at an event.
-            */}
-            {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'failed' ? (
-              <Text style={styles.body} testID={`wsf-kiosk-setup-copy-failed-${goal.goalId}`}>
-                Copy didn’t work on this device. Open the kiosk here, or type this address on the
-                screen: {kioskUrlFor(goal.goalId)}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-        {/*
-          SCREENS AT THIS EVENT — station enrolment.
-
-          A SIBLING of Set up kiosk, not a change to it. Setting up a kiosk is
-          "here is the address of the screen"; this is "and this screen, the
-          one showing that code right now, is Station 1".
-
-          WHY A CODE AND NOT A LINK. The screen cannot be signed in as anybody
-          — the kiosk deliberately signs itself out — so its identity is a
-          secret the server mints at the moment of approval and hands only to
-          the screen that asked. Nothing enrolling rides in a URL or a QR: a
-          copied station link opens a screen that still has to ask, and an
-          attendee scanning either code on that screen gets a page on their own
-          phone and no authority of any kind.
-
-          WHAT IT CAN AND CANNOT DO. A station shows this goal's shared
-          progress — exactly what authorizing public display already allows,
-          through the same server read.
-
-          IT DOES RECORD, and this comment used to say it did not. That stopped
-          being true when the turn contract landed: a station calls the person
-          whose turn it is and completes THE SAME canonical attempt their own
-          phone would have, under the same key. What it still cannot do is know
-          who is standing at it on its own — it records against the account the
-          server assigned to that turn, never against an identity the screen
-          worked out for itself.
-        */}
-        <View style={styles.manageGoal} testID={`wsf-kiosk-stations-${goal.goalId}`}>
-          <Text style={styles.manageGoalTitle}>Screens at this event</Text>
-          <Text style={styles.manageIntro} testID={`wsf-kiosk-stations-intro-${goal.goalId}`}>
-            Open this address on each screen, then type the code it shows and choose which station
-            it is. You can revoke a screen from here at any time.
-          </Text>
-          {stationUrlFor(goal.goalId) ? (
-            /*
-              UTILITIES, NOT THE POINT. Getting the address onto a screen is a
-              step on the way; the action on this card is approving the screen
-              that is standing there showing a code. So these two are quiet
-              text controls and the card keeps no second button weight.
-            */
-            <View
-              style={styles.utilityRow}
-              dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
-            >
-              <ButtonLink
-                href={`/station/${goal.goalId}`}
-                label="Open station screen"
-                style={UTILITY_LINK}
-                textStyle={UTILITY_LINK_TEXT}
-                testID={`wsf-kiosk-stations-open-${goal.goalId}`}
-              />
-              <Pressable
-                onPress={() => onCopyStation(goal.goalId)}
-                style={[styles.tertiaryButton, styles.rowButton]}
-                testID={`wsf-kiosk-stations-copy-${goal.goalId}`}
-                accessibilityRole="button"
-                accessibilityLabel={`${goal.title}: copy the station link`}
-              >
-                <Text style={[styles.tertiaryButtonText, styles.rowButtonText]}>
-                  {stationCopy.goalId === goal.goalId && stationCopy.state === 'copied'
-                    ? 'Copied'
-                    : 'Copy station link'}
-                </Text>
-              </Pressable>
-            </View>
-          ) : (
-            <Text style={styles.body} testID={`wsf-kiosk-stations-unavailable-${goal.goalId}`}>
-              The station link isn’t ready yet. Reload the page to try again.
-            </Text>
-          )}
-          {stationCopy.goalId === goal.goalId && stationCopy.state === 'failed' ? (
-            <Text style={styles.body} testID={`wsf-kiosk-stations-copy-failed-${goal.goalId}`}>
-              Copy didn’t work on this device. Open the station screen here, or type this address on
-              it: {stationUrlFor(goal.goalId)}
-            </Text>
-          ) : null}
-
-          <Text style={styles.manageIntro}>Approve a screen</Text>
-          <TextInput
-            value={stationCode[goal.goalId] ?? ''}
-            onChangeText={(raw) =>
-              setStationCode((prev) => ({ ...prev, [goal.goalId]: pairingCodeInputValue(raw) }))
-            }
-            placeholder="Code on the screen"
-            autoCapitalize="characters"
-            autoCorrect={false}
-            maxLength={STATION_PAIRING_CODE_LENGTH}
-            style={styles.stationCodeInput}
-            testID={`wsf-kiosk-stations-code-${goal.goalId}`}
-            accessibilityLabel={`${goal.title}: the code showing on that screen`}
-          />
-          <View style={styles.rowWrap}>
-            {STATION_SLOTS.map((slot) => {
-              const chosen = (stationSlot[goal.goalId] ?? 1) === slot;
-              return (
-                <Pressable
-                  key={slot}
-                  onPress={() => setStationSlot((prev) => ({ ...prev, [goal.goalId]: slot }))}
-                  style={[styles.secondaryButton, chosen ? styles.stationSlotChosen : null]}
-                  testID={`wsf-kiosk-stations-slot-${slot}-${goal.goalId}`}
-                  accessibilityRole="button"
-                  aria-pressed={chosen}
-                  accessibilityLabel={`${goal.title}: approve as Station ${slot}`}
-                >
-                  <Text
-                    style={[
-                      styles.secondaryButtonText,
-                      chosen ? styles.stationSlotChosenText : null,
-                    ]}
-                  >
-                    {`Station ${slot}`}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            <Pressable
-              onPress={() => onApproveStation(goal.goalId)}
-              disabled={stationBusy === `approve-${goal.goalId}`}
-              style={styles.secondaryButton}
-              testID={`wsf-kiosk-stations-approve-${goal.goalId}`}
-              accessibilityRole="button"
-              accessibilityLabel={`${goal.title}: approve this screen`}
-            >
-              <Text style={styles.secondaryButtonText}>
-                {stationBusy === `approve-${goal.goalId}` ? 'Approving…' : 'Approve'}
-              </Text>
-            </Pressable>
-          </View>
-          {stationNotice[goal.goalId] ? (
-            <Text
-              style={stationNotice[goal.goalId]!.kind === 'ok' ? styles.body : styles.error}
-              testID={`wsf-kiosk-stations-notice-${goal.goalId}`}
-            >
-              {stationNotice[goal.goalId]!.message}
-            </Text>
-          ) : null}
-
-          <View testID={`wsf-kiosk-stations-list-${goal.goalId}`} style={styles.stationList}>
-            {(() => {
-              const cell = stations[goal.goalId];
-              if (!cell || cell.kind === 'loading') {
-                return (
-                  <Text style={styles.body} testID={`wsf-kiosk-stations-loading-${goal.goalId}`}>
-                    Loading screens…
-                  </Text>
-                );
-              }
-              if (cell.kind === 'failed') {
-                return (
-                  <Text style={styles.error} testID={`wsf-kiosk-stations-error-${goal.goalId}`}>
-                    {cell.message}
-                  </Text>
-                );
-              }
-              const live = cell.rows.filter((row) => row.status !== 'revoked');
-              if (!live.length) {
-                return (
-                  <Text style={styles.body} testID={`wsf-kiosk-stations-empty-${goal.goalId}`}>
-                    No screens are enrolled on this goal yet.
-                  </Text>
-                );
-              }
-              return live.map((row) => (
-                <View
-                  key={row.stationId}
-                  style={styles.rowWrap}
-                  testID={`wsf-kiosk-stations-row-${row.stationId}`}
-                >
-                  <Text style={styles.body}>
-                    {/*
-                      The label the SERVER derived from the slot, and the one
-                      fact about the screen's state. Nothing about where it is,
-                      what it is, or who set it up.
-                    */}
-                    {`${row.label} — ${row.status === 'active' ? 'enrolled' : 'waiting to finish setting up'}`}
-                  </Text>
-                  <Pressable
-                    onPress={() => onRevokeStation(goal.goalId, row.stationId, row.label)}
-                    disabled={stationBusy === `revoke-${row.stationId}`}
-                    style={styles.secondaryButton}
-                    testID={`wsf-kiosk-stations-revoke-${row.stationId}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${goal.title}: revoke ${row.label}`}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {stationBusy === `revoke-${row.stationId}` ? 'Revoking…' : 'Revoke'}
-                    </Text>
-                  </Pressable>
-                </View>
-              ));
-            })()}
-          </View>
-        </View>
         {unsettled ? (
           <View>
             <Text style={styles.error} testID={`wsf-goal-display-auth-unsettled-${goal.goalId}`}>
@@ -1876,6 +1623,311 @@ export default function CommunityPage() {
       </View>
     );
   };
+
+  /**
+   * SET UP KIOSK, for one goal. Lifted out of the display-permission card
+   * and into the event section, because a Champion who came to put a goal
+   * on a screen should not have to find that control inside a permission
+   * they were not looking for. Same testIDs, same copy, same address, same
+   * dataSet — only its place in the sheet changed.
+   */
+  const renderKioskSetup = (goal: ListedGoal) => (
+    <Fragment key={`kiosk-${goal.goalId}`}>
+      {/*
+        SET UP KIOSK. A kiosk is a screen standing at an event with this
+        goal open on it, so the Champion needs the address of that screen —
+        not an instruction to assemble one by hand. The link is built from
+        the origin this build is actually served from, so it is correct on
+        staging and in production without being edited.
+
+        It sits with the display permission because the two are the same
+        decision in practice: a kiosk shows the goal's shared progress, and
+        that is exactly what authorizing a public display allows. When the
+        permission is off the link still resolves, and the screen says the
+        goal is not available — so the state text below says so first.
+      */}
+      {/*
+        ONE GOAL, or the combined panel further down the sheet. These
+        controls are what "One goal" means, and they are exactly what they
+        have always been: same testIDs, same copy, same address, same
+        dataSet. The chooser lives in its own section below so that choosing
+        the other mode never edits this one.
+      */}
+      {kioskMode === 'one' ? (
+        <View style={styles.manageGoal} testID={`wsf-kiosk-setup-${goal.goalId}`}>
+          {/*
+            No second "Set up kiosk" heading. The card above is the one that
+            says it, and the goal's own name heads this block — repeating the
+            card's title on every goal was the pile this section came out of.
+          */}
+          <Text style={styles.manageIntro} testID={`wsf-kiosk-setup-intro-${goal.goalId}`}>
+            {goal.aggregateDisplayAuthorized
+              ? 'Open this on the screen at your event.'
+              : 'Authorize public display under Goals below, or that screen will say the goal is not available.'}
+          </Text>
+          {kioskUrlFor(goal.goalId) ? (
+            /*
+              ONE ACTION, THEN THE UTILITY. Opening the kiosk is the thing a
+              Champion came here to do, so it carries the one green primary
+              on this goal; copying the address is the way to do the same
+              thing on another device, so it is a quiet text control under
+              it. The weight is carried by shape, size and fill together —
+              never by colour alone.
+            */
+            <View
+              style={styles.actionStack}
+              // The address the controls beside it act on, readable by a test
+              // without being printed for a person.
+              dataSet={{ kioskUrl: kioskUrlFor(goal.goalId) ?? '' }}
+            >
+              <ButtonLink
+                href={`/kiosk/${goal.goalId}`}
+                label="Open kiosk"
+                style={styles.primaryButton}
+                textStyle={styles.primaryButtonText}
+                testID={`wsf-kiosk-setup-open-${goal.goalId}`}
+              />
+              <Pressable
+                onPress={() => onCopyKiosk(goal.goalId)}
+                style={styles.tertiaryButton}
+                testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${goal.title}: copy the kiosk link`}
+              >
+                <Text style={styles.tertiaryButtonText}>
+                  {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
+                    ? 'Copied'
+                    : 'Copy kiosk link'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.body} testID={`wsf-kiosk-setup-unavailable-${goal.goalId}`}>
+              The kiosk link isn’t ready yet. Reload the page to try again.
+            </Text>
+          )}
+          {/*
+            A copy can fail for reasons this app does not control — a browser
+            that refuses the clipboard without a gesture it recognises, or a
+            context with no clipboard at all. When it does, the address itself
+            is shown so the Champion can still get the screen open. This is the
+            one place a URL is deliberately readable: it is the Champion's own
+            admin sheet, the link carries no participant token and no
+            authority, and the alternative is a dead end at an event.
+          */}
+          {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'failed' ? (
+            <Text style={styles.body} testID={`wsf-kiosk-setup-copy-failed-${goal.goalId}`}>
+              Copy didn’t work on this device. Open the kiosk here, or type this address on the
+              screen: {kioskUrlFor(goal.goalId)}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </Fragment>
+  );
+
+  /**
+   * SCREENS AT THIS EVENT — station enrolment. Moved with its sibling, for
+   * the same reason and with the same guarantee: every testID, every control
+   * and every state is the one that was here before.
+   */
+  const renderStationEnrolment = (goal: ListedGoal) => (
+    <Fragment key={`stations-${goal.goalId}`}>
+      {/*
+        SCREENS AT THIS EVENT — station enrolment.
+
+        A SIBLING of Set up kiosk, not a change to it. Setting up a kiosk is
+        "here is the address of the screen"; this is "and this screen, the
+        one showing that code right now, is Station 1".
+
+        WHY A CODE AND NOT A LINK. The screen cannot be signed in as anybody
+        — the kiosk deliberately signs itself out — so its identity is a
+        secret the server mints at the moment of approval and hands only to
+        the screen that asked. Nothing enrolling rides in a URL or a QR: a
+        copied station link opens a screen that still has to ask, and an
+        attendee scanning either code on that screen gets a page on their own
+        phone and no authority of any kind.
+
+        WHAT IT CAN AND CANNOT DO. A station shows this goal's shared
+        progress — exactly what authorizing public display already allows,
+        through the same server read.
+
+        IT DOES RECORD, and this comment used to say it did not. That stopped
+        being true when the turn contract landed: a station calls the person
+        whose turn it is and completes THE SAME canonical attempt their own
+        phone would have, under the same key. What it still cannot do is know
+        who is standing at it on its own — it records against the account the
+        server assigned to that turn, never against an identity the screen
+        worked out for itself.
+      */}
+      <View style={styles.manageGoal} testID={`wsf-kiosk-stations-${goal.goalId}`}>
+        <Text style={styles.manageGoalTitle}>Screens at this event</Text>
+        <Text style={styles.manageIntro} testID={`wsf-kiosk-stations-intro-${goal.goalId}`}>
+          Open this address on each screen, then type the code it shows and choose which station
+          it is. You can revoke a screen from here at any time.
+        </Text>
+        {stationUrlFor(goal.goalId) ? (
+          /*
+            UTILITIES, NOT THE POINT. Getting the address onto a screen is a
+            step on the way; the action on this card is approving the screen
+            that is standing there showing a code. So these two are quiet
+            text controls and the card keeps no second button weight.
+          */
+          <View
+            style={styles.utilityRow}
+            dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
+          >
+            <ButtonLink
+              href={`/station/${goal.goalId}`}
+              label="Open station screen"
+              style={UTILITY_LINK}
+              textStyle={UTILITY_LINK_TEXT}
+              testID={`wsf-kiosk-stations-open-${goal.goalId}`}
+            />
+            <Pressable
+              onPress={() => onCopyStation(goal.goalId)}
+              style={[styles.tertiaryButton, styles.rowButton]}
+              testID={`wsf-kiosk-stations-copy-${goal.goalId}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${goal.title}: copy the station link`}
+            >
+              <Text style={[styles.tertiaryButtonText, styles.rowButtonText]}>
+                {stationCopy.goalId === goal.goalId && stationCopy.state === 'copied'
+                  ? 'Copied'
+                  : 'Copy station link'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Text style={styles.body} testID={`wsf-kiosk-stations-unavailable-${goal.goalId}`}>
+            The station link isn’t ready yet. Reload the page to try again.
+          </Text>
+        )}
+        {stationCopy.goalId === goal.goalId && stationCopy.state === 'failed' ? (
+          <Text style={styles.body} testID={`wsf-kiosk-stations-copy-failed-${goal.goalId}`}>
+            Copy didn’t work on this device. Open the station screen here, or type this address on
+            it: {stationUrlFor(goal.goalId)}
+          </Text>
+        ) : null}
+
+        <Text style={styles.manageIntro}>Approve a screen</Text>
+        <TextInput
+          value={stationCode[goal.goalId] ?? ''}
+          onChangeText={(raw) =>
+            setStationCode((prev) => ({ ...prev, [goal.goalId]: pairingCodeInputValue(raw) }))
+          }
+          placeholder="Code on the screen"
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={STATION_PAIRING_CODE_LENGTH}
+          style={styles.stationCodeInput}
+          testID={`wsf-kiosk-stations-code-${goal.goalId}`}
+          accessibilityLabel={`${goal.title}: the code showing on that screen`}
+        />
+        <View style={styles.rowWrap}>
+          {STATION_SLOTS.map((slot) => {
+            const chosen = (stationSlot[goal.goalId] ?? 1) === slot;
+            return (
+              <Pressable
+                key={slot}
+                onPress={() => setStationSlot((prev) => ({ ...prev, [goal.goalId]: slot }))}
+                style={[styles.secondaryButton, chosen ? styles.stationSlotChosen : null]}
+                testID={`wsf-kiosk-stations-slot-${slot}-${goal.goalId}`}
+                accessibilityRole="button"
+                aria-pressed={chosen}
+                accessibilityLabel={`${goal.title}: approve as Station ${slot}`}
+              >
+                <Text
+                  style={[
+                    styles.secondaryButtonText,
+                    chosen ? styles.stationSlotChosenText : null,
+                  ]}
+                >
+                  {`Station ${slot}`}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <Pressable
+            onPress={() => onApproveStation(goal.goalId)}
+            disabled={stationBusy === `approve-${goal.goalId}`}
+            style={styles.secondaryButton}
+            testID={`wsf-kiosk-stations-approve-${goal.goalId}`}
+            accessibilityRole="button"
+            accessibilityLabel={`${goal.title}: approve this screen`}
+          >
+            <Text style={styles.secondaryButtonText}>
+              {stationBusy === `approve-${goal.goalId}` ? 'Approving…' : 'Approve'}
+            </Text>
+          </Pressable>
+        </View>
+        {stationNotice[goal.goalId] ? (
+          <Text
+            style={stationNotice[goal.goalId]!.kind === 'ok' ? styles.body : styles.error}
+            testID={`wsf-kiosk-stations-notice-${goal.goalId}`}
+          >
+            {stationNotice[goal.goalId]!.message}
+          </Text>
+        ) : null}
+
+        <View testID={`wsf-kiosk-stations-list-${goal.goalId}`} style={styles.stationList}>
+          {(() => {
+            const cell = stations[goal.goalId];
+            if (!cell || cell.kind === 'loading') {
+              return (
+                <Text style={styles.body} testID={`wsf-kiosk-stations-loading-${goal.goalId}`}>
+                  Loading screens…
+                </Text>
+              );
+            }
+            if (cell.kind === 'failed') {
+              return (
+                <Text style={styles.error} testID={`wsf-kiosk-stations-error-${goal.goalId}`}>
+                  {cell.message}
+                </Text>
+              );
+            }
+            const live = cell.rows.filter((row) => row.status !== 'revoked');
+            if (!live.length) {
+              return (
+                <Text style={styles.body} testID={`wsf-kiosk-stations-empty-${goal.goalId}`}>
+                  No screens are enrolled on this goal yet.
+                </Text>
+              );
+            }
+            return live.map((row) => (
+              <View
+                key={row.stationId}
+                style={styles.rowWrap}
+                testID={`wsf-kiosk-stations-row-${row.stationId}`}
+              >
+                <Text style={styles.body}>
+                  {/*
+                    The label the SERVER derived from the slot, and the one
+                    fact about the screen's state. Nothing about where it is,
+                    what it is, or who set it up.
+                  */}
+                  {`${row.label} — ${row.status === 'active' ? 'enrolled' : 'waiting to finish setting up'}`}
+                </Text>
+                <Pressable
+                  onPress={() => onRevokeStation(goal.goalId, row.stationId, row.label)}
+                  disabled={stationBusy === `revoke-${row.stationId}`}
+                  style={styles.secondaryButton}
+                  testID={`wsf-kiosk-stations-revoke-${row.stationId}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${goal.title}: revoke ${row.label}`}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {stationBusy === `revoke-${row.stationId}` ? 'Revoking…' : 'Revoke'}
+                  </Text>
+                </Pressable>
+              </View>
+            ));
+          })()}
+        </View>
+      </View>
+    </Fragment>
+  );
 
   const renderFreshness = (p: GoalProgress) =>
     p.kind === 'ok' ? (
@@ -2121,7 +2173,19 @@ export default function CommunityPage() {
         <View style={[styles.sheet, { maxHeight: Math.min(windowHeight * 0.88, 760) }]} testID="wsf-community-manage-panel">
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle} {...HEADING_2}>Champion tools</Text>
+            {/*
+              IDENTITY FIRST. The sheet used to open on the words "Champion
+              tools" — a drawer named after its own mechanism. The community is
+              what a Champion is managing, so the community is the title, and
+              "Champion tools" stays as the quiet eyebrow that says whose view
+              this is and keeps the dialog's accessible name honest.
+            */}
+            <View style={styles.sheetHeading}>
+              <Text style={styles.sheetEyebrow}>Champion tools</Text>
+              <Text style={styles.sheetTitle} {...HEADING_2} testID="wsf-manage-title">
+                {group.displayName}
+              </Text>
+            </View>
             <Pressable
               onPress={() => setManageOpen(false)}
               accessibilityRole="button"
@@ -2131,13 +2195,31 @@ export default function CommunityPage() {
               <Text style={styles.sheetCloseText}>Close</Text>
             </Pressable>
           </View>
+          {/*
+            THE STORY, AND ONLY WHAT IS KNOWN. Built in `manageStoryLine` from
+            the goal list's own state — so while it is loading it says it is
+            loading, when it failed it says it failed, and it never invents a
+            running goal, a total or a member count.
+          */}
+          <Text style={styles.sheetStory} testID="wsf-manage-story">
+            {manageStoryLine}
+          </Text>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+            {/*
+              YOUR EVENT — the reason a Champion opens this sheet, and now the
+              first and loudest thing in it. Setting up the screen at an event
+              is the one primary action here; permissions, invites and
+              membership are work about the community, and they wait below
+              under their own labels.
+            */}
+            <View style={styles.sheetSection} testID="wsf-manage-event">
+              <Text style={styles.sheetSectionTitle}>Your event</Text>
             {/*
               SET UP KIOSK. One card, one question, one answer — not a stack of
               sections a Champion has to assemble in their head. The question
-              governs what the goal cards below offer, so it is asked first;
-              "One goal" is the default and is what those per-goal controls
-              already do, and "Combined movement goal" answers itself here.
+              governs what the card shows next, so it is asked first; "One
+              goal" is the default, and "Combined movement goal" answers itself
+              here.
 
               Every testID, every control and every state is the one that was
               here before; what changed is where they sit and how loud they are.
@@ -2161,9 +2243,51 @@ export default function CommunityPage() {
                 />
               </OptionGroup>
               {kioskMode === 'one' ? (
-                <Text style={styles.manageIntro} testID="wsf-kiosk-mode-one-hint">
-                  Each goal below has its own Open kiosk button.
-                </Text>
+                /*
+                  ONE GOAL. This used to be a sentence pointing at controls
+                  somewhere else on the sheet; the controls are here now. Each
+                  running goal gets its address and its screens, in the section
+                  a Champion opened to find them.
+
+                  Every state is the goal list's own, said plainly: loading
+                  says loading, a failed load says so and offers nothing it
+                  cannot back up, and a community with no running goal is told
+                  that rather than shown an empty frame.
+                */
+                <View style={styles.setupBody} testID="wsf-kiosk-mode-one-panel">
+                  <Text style={styles.manageIntro} testID="wsf-kiosk-mode-one-hint">
+                    One screen, one goal, one address. Each running goal has its own.
+                  </Text>
+                  {goalsState.kind === 'loading' ? (
+                    <Text style={styles.body} testID="wsf-kiosk-setup-loading">
+                      Loading this community&apos;s goals…
+                    </Text>
+                  ) : goalsState.kind === 'failed' ? (
+                    <Text style={styles.body} testID="wsf-kiosk-setup-failed">
+                      This community&apos;s goals could not be loaded, so there is no kiosk address
+                      to give you. Close this and open it again.
+                    </Text>
+                  ) : activeGoals.length === 0 ? (
+                    <Text style={styles.body} testID="wsf-kiosk-setup-empty">
+                      No goal is running, so there is nothing to put on a screen yet. Close this
+                      and start a goal from the community page, and its kiosk will be here.
+                    </Text>
+                  ) : (
+                    activeGoals.map((goal) => (
+                      <View key={goal.goalId} style={styles.eventGoal}>
+                        <Text style={styles.manageGoalTitle}>{goal.title}</Text>
+                        {/*
+                          PLAIN SELECTION TRUTH. What this screen will count,
+                          in the goal's own unit, read from the goal itself.
+                        */}
+                        <Text style={styles.manageIntro} testID={`wsf-kiosk-goal-unit-${goal.goalId}`}>
+                          Counted in {goal.unit} · {formatCount(goal.target)} {goal.unit} together
+                        </Text>
+                        {renderKioskSetup(goal)}
+                      </View>
+                    ))
+                  )}
+                </View>
               ) : (
                 <View style={styles.setupBody} testID="wsf-combined-setup">
                   <Text style={styles.manageIntro} testID="wsf-combined-setup-intro">
@@ -2438,9 +2562,44 @@ export default function CommunityPage() {
                 </View>
               )}
             </View>
+            {/*
+              SCREENS AT THIS EVENT — a SIBLING of the kiosk mode, never part
+              of it. A combined event enrols its screens exactly as a
+              single-goal event does, so this list does not move, empty or
+              change when the mode above changes. Each goal's block carries its
+              own heading, its own code field and its own slots, unchanged.
+            */}
+            {goalsState.kind === 'loaded' && activeGoals.length ? (
+              <View style={styles.sheetSubsection} testID="wsf-manage-screens">
+                {activeGoals.map((goal) => (
+                  <View key={goal.goalId} style={styles.eventGoal}>
+                    {/*
+                      Which goal's screens these are. With one running goal the
+                      heading inside the block already says everything; with
+                      several, the name is the only thing that tells two
+                      identical-looking blocks apart.
+                    */}
+                    {activeGoals.length > 1 ? (
+                      <Text style={styles.manageIntro}>{goal.title}</Text>
+                    ) : null}
+                    {renderStationEnrolment(goal)}
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            </View>
+            {/*
+              GOALS. Routine work about the goals themselves — the public
+              display permission, and starting another one. Deliberately NOT
+              filed under anything administrative or destructive: a Champion
+              does this on an ordinary day, and it must not sit behind a
+              danger label to be reached.
+            */}
+            <View style={styles.sheetSection} testID="wsf-manage-goals">
+              <Text style={styles.sheetSectionTitle}>Goals</Text>
             {goalsState.kind === 'loaded' && loadedGoals.length ? (
-              <View style={styles.sheetSection}>
-                <Text style={styles.sheetSectionTitle}>Public display</Text>
+              <View style={styles.sheetSubsection}>
+                <Text style={styles.sheetSubsectionTitle}>Public display</Text>
                 <Text style={styles.manageIntro}>A permission you grant per goal.</Text>
                 {[...activeGoals, ...closedGoals].map((goal) => renderDisplayAuthControl(goal))}
               </View>
@@ -2564,14 +2723,34 @@ export default function CommunityPage() {
                 return null;
               })}
 
+            {goalsState.kind === 'loaded' && activeGoals.length ? (
+              <ButtonLink
+                href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
+                style={styles.secondaryButton}
+                textStyle={styles.secondaryButtonText}
+                testID="wsf-community-start-goal"
+                label="Start another goal"
+                onPress={() => setManageOpen(false)}
+              />
+            ) : null}
+            </View>
+            {/*
+              MEMBERS & INVITES. Everything about who is in this community and
+              how they get in — the administrative facts, the invite QR and the
+              link, including retiring it. One label, so a Champion looking for
+              the join code knows where to look and a Champion looking for the
+              event never has to read past it.
+            */}
+            <View style={styles.sheetSection} testID="wsf-manage-members">
+              <Text style={styles.sheetSectionTitle}>Members and invites</Text>
             {/*
               Community details: the administrative facts about this community,
               here for the person who administers it rather than in every
               member's journey. The type/joining/status/role rows stay behind
               their own disclosure with the same testIDs they have always had.
             */}
-            <View style={styles.sheetSection}>
-              <Text style={styles.sheetSectionTitle}>Community details</Text>
+            <View style={styles.sheetSubsection}>
+              <Text style={styles.sheetSubsectionTitle}>Community details</Text>
               {memberCount != null ? (
                 <Row label="Members" value={memberCountLabel(memberCount)} testID="wsf-community-members-row" />
               ) : null}
@@ -2613,8 +2792,8 @@ export default function CommunityPage() {
               (wsf-community-qr, -toggle, -symbol); the Invite card's own
               instance uses its own prefix so each id resolves to one element.
             */}
-            <View style={styles.sheetSection} testID="wsf-community-qr-section">
-              <Text style={styles.sheetSectionTitle}>Invite QR</Text>
+            <View style={styles.sheetSubsection} testID="wsf-community-qr-section">
+              <Text style={styles.sheetSubsectionTitle}>Invite QR</Text>
               {linkJoinable ? (
                 inviteUrl ? (
                   <JoinQrCode url={inviteUrl} caveat={MANAGE_QR_CAVEAT} />
@@ -2636,8 +2815,8 @@ export default function CommunityPage() {
               are unchanged; only the ask-first step is new.
             */}
             {linkJoinable ? (
-              <View style={styles.sheetSection} testID="wsf-community-invite-link">
-                <Text style={styles.sheetSectionTitle}>Invite link</Text>
+              <View style={styles.sheetSubsection} testID="wsf-community-invite-link">
+                <Text style={styles.sheetSubsectionTitle}>Invite link</Text>
                 <Text style={styles.manageIntro} testID="wsf-community-invite-caveat">
                   {/*
                     Clause 9. Both sentences state what the join callable and
@@ -2711,21 +2890,19 @@ export default function CommunityPage() {
               </View>
             ) : null}
 
-            {goalsState.kind === 'loaded' && activeGoals.length ? (
-              <ButtonLink
-                href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
-                style={styles.secondaryButton}
-                textStyle={styles.secondaryButtonText}
-                testID="wsf-community-start-goal"
-                label="Start another goal"
-                onPress={() => setManageOpen(false)}
-              />
-            ) : null}
-
-            {/* Destructive, and last: leaving, with the sole-Champion refusal surfaced verbatim. */}
-            <View style={styles.sheetSection} testID="wsf-community-membership">
-              <Text style={styles.sheetSectionTitle}>Membership</Text>
-              {renderLeaveControls()}
+            </View>
+            {/*
+              ADVANCED. Destructive, last, and labelled as what it is, so
+              nothing routine has to be read past it — and so nothing here is
+              reached by accident. Leaving carries the sole-Champion refusal
+              verbatim, exactly as before.
+            */}
+            <View style={styles.sheetSection} testID="wsf-manage-advanced">
+              <Text style={styles.sheetSectionTitleDanger}>Advanced</Text>
+              <View style={styles.sheetSubsection} testID="wsf-community-membership">
+                <Text style={styles.sheetSubsectionTitle}>Membership</Text>
+                {renderLeaveControls()}
+              </View>
             </View>
           </ScrollView>
         </View>
@@ -3518,6 +3695,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     paddingHorizontal: 20,
     paddingBottom: 24,
+    // A phone sheet is the whole width because the phone is. A laptop is not:
+    // left unbounded, a label and its value sat at opposite ends of 1280 px
+    // and the sheet read as a table of settings rather than a card.
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
   },
   sheetHandle: {
     alignSelf: 'center',
@@ -3534,13 +3717,40 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 44,
   },
+  // The heading column takes the width the Close control does not, so a long
+  // community name wraps inside the sheet instead of pushing Close off it.
+  sheetHeading: { flex: 1, gap: 2, paddingRight: 12 },
+  sheetEyebrow: {
+    color: NAVY,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
   sheetTitle: { color: wsfTheme.colors.text, fontSize: 20, fontWeight: '800' },
+  sheetStory: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20, marginBottom: 2 },
   sheetClose: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'flex-end' },
   sheetCloseText: { color: NAVY, fontSize: 16, fontWeight: '700', textDecorationLine: 'underline' },
   sheetScroll: { flexGrow: 0 },
   sheetContent: { gap: 12, paddingBottom: 8 },
   sheetSection: { gap: 10 },
-  sheetSectionTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
+  // A section label is the loudest thing between cards, so it is the navy
+  // green-adjacent voice of the sheet; a subsection sits under it, quieter,
+  // and never competes with the section it belongs to.
+  sheetSectionTitle: { color: NAVY, fontSize: 17, fontWeight: '800' },
+  // Same size and weight, warned colour. The word "Advanced" carries the
+  // meaning; the colour only agrees with it, so it is never colour alone.
+  sheetSectionTitleDanger: { color: '#8A2F2F', fontSize: 17, fontWeight: '800' },
+  sheetSubsection: { gap: 8 },
+  sheetSubsectionTitle: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '700' },
+  // One running goal's whole event block: its address and its screens, kept
+  // visibly together and separated from the next goal's.
+  eventGoal: {
+    gap: 4,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#D5DCE5',
+  },
   manageIntro: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
   manageGoal: { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#D5DCE5' },
   // Two controls side by side that drop to one column when the sheet is

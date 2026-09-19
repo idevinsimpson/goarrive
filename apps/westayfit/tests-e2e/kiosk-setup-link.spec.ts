@@ -92,7 +92,10 @@ test('a Champion can open and copy a kiosk link, and the copied link opens in a 
 
   const setup = page.getByTestId(`wsf-kiosk-setup-${goalId}`);
   await expect(setup).toBeVisible();
-  await expect(setup).toContainText('Set up kiosk');
+  // The block's heading is now the goal's own name, one level up: "Set up
+  // kiosk" is the card that holds every goal's address, and repeating it on
+  // each goal said nothing. What must be IN this block is the action.
+  await expect(setup).toContainText('Open kiosk');
 
   // Before the display permission is granted the control still works, and
   // says what the screen will actually show.

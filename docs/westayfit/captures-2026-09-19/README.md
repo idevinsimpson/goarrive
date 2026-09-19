@@ -17,6 +17,7 @@ whole browser battery — all 46 specs, 184 tests — passed with zero failures.
 | `station-enrollment/` | the station pairing state, the enrolled venue screen with its QR panel, the Champion's screens card, the refusal state | `tests-e2e/station-enrollment.spec.ts` |
 | `ui-device-choice/` | the safety question, the standing shared answer, the signed-out event signpost | `tests-e2e/ui-device-choice.spec.ts` |
 | `ui-combined-goal/` | the Manage sheet after the creative pass, both halves of the Set up kiosk card | `tests-e2e/ui-combined-goal.spec.ts` |
+| `ui-manage-event-first/` | the Manage sheet rebuilt event-first: empty community, two goals running, both halves of the chooser, and the combined flow's pending / ineligible / error / review / success states — each at 360, 390, 430, short 390×640, the 195 px large-text reflow and wide 1280 | `tests-e2e/ui-manage-event-first.spec.ts` |
 | `ui-event-activity-choice/` | the activity step and the phone-or-queue choice | `tests-e2e/ui-event-activity-choice.spec.ts` |
 | `queue-call-by-name/` | **the turn, end to end, on both surfaces at once** — see below | `tests-e2e/queue-call-by-name.spec.ts` |
 
@@ -161,3 +162,23 @@ for the turn they had in fact just done. Only an ASSIGNED turn can lapse: the
 45-second lease exists in that state and nowhere else, which is what the
 server's own recovery reclaims. The page now says so, and a test asserts the
 word "timed out" does not appear after a completed turn.
+
+---
+
+## `ui-manage-event-first/`, added 10:5x ET
+
+40 files, 40 distinct hashes. Produced by `tests-e2e/ui-manage-event-first.spec.ts` in a run
+where the **complete browser suite — 190 tests — passed**.
+
+Three guards stand behind these, and two of them exist because this very spec caught itself
+lying:
+
+- **byte-identical** captures fail the test (the guard added last night);
+- every capture **scrolls its anchor into frame** first — visibility alone left
+  `combined-success-short-390x640` showing the station panel, because the sheet keeps its
+  scroll offset across a viewport change;
+- **no horizontal clipping is asserted**, not photographed: at each of the six presentations,
+  nothing inside the sheet is wider than the sheet and the document does not scroll sideways.
+  36 checks, 0 offenders, mutation-tested.
+
+Still nothing in any spec asserts on an image.
