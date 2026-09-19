@@ -48,14 +48,40 @@ const EXPECTED = [
   'wsfreinstatemember', 'wsfremovemember', 'wsfresetjoincode', 'wsfsaveprofile',
   'wsfsendpasswordresetemail', 'wsfsendverificationemail',
   'wsfsetgoaldisplayauthorization',
+  // Station enrolment — the seven callables the approved candidate adds so a
+  // second screen at an event can be let in by a Champion and show the same
+  // totals the public display shows. Four of them are unauthenticated by
+  // design (a screen is not signed in as anybody); the other three are
+  // Champion-only.
+  'wsfstationrequestpairing', 'wsfstationpairingstatus', 'wsfapprovestation',
+  'wsfstationclaimpairing', 'wsfstationstate', 'wsfliststations',
+  'wsfrevokestation',
 ].sort();
 const CREATED_BY_PACKAGE_E = 'wsfsetgoaldisplayauthorization';
-// The one callable the approved candidate adds (W2, recent public additions:
-// amount and minute only, gated by the same access policy as the pulse). It is
-// new to staging with this deploy, so it is neither pre-existing (its
-// transport is reported, like Package E's was) nor unexpected.
-const CREATED_BY_CANDIDATE = 'wsfgoalrecentadditions';
-const NEW_SERVICES = [CREATED_BY_PACKAGE_E, CREATED_BY_CANDIDATE];
+/**
+ * The callables THIS candidate adds. New to staging with this deploy, so each
+ * is neither pre-existing (its transport is reported, like Package E's was)
+ * nor unexpected.
+ */
+const CREATED_BY_CANDIDATE = [
+  'wsfstationrequestpairing',
+  'wsfstationpairingstatus',
+  'wsfapprovestation',
+  'wsfstationclaimpairing',
+  'wsfstationstate',
+  'wsfliststations',
+  'wsfrevokestation',
+];
+/**
+ * wsfGoalRecentAdditions came in with the PREVIOUS candidate, so by the letter
+ * of this file it is now pre-existing. It is deliberately NOT moved into the
+ * pre-existing set yet: that set is asserted to carry invokerIamDisabled, and
+ * nothing here has established that this service does. Asserting it on a
+ * guess would fail a deploy for a fact nobody checked. Its transport stays
+ * reported until a run's notes show what it actually is, and then it moves.
+ */
+const RECENTLY_CREATED = ['wsfgoalrecentadditions'];
+const NEW_SERVICES = [CREATED_BY_PACKAGE_E, ...RECENTLY_CREATED, ...CREATED_BY_CANDIDATE];
 const PRE_EXISTING = EXPECTED.filter((n) => !NEW_SERVICES.includes(n));
 
 const failures = [];
@@ -111,7 +137,11 @@ if (missing.length) failures.push(`expected but absent: ${missing.join(', ')}`);
 if (unexpected.length) failures.push(`present but not expected: ${unexpected.join(', ')}`);
 if (lost.length) failures.push(`present before this deploy and now gone: ${lost.join(', ')}`);
 if (!after.includes(CREATED_BY_PACKAGE_E)) failures.push(`${CREATED_BY_PACKAGE_E} absent — Package E did not deploy`);
-if (!after.includes(CREATED_BY_CANDIDATE)) failures.push(`${CREATED_BY_CANDIDATE} absent — the candidate's new callable did not deploy`);
+for (const name of CREATED_BY_CANDIDATE) {
+  if (!after.includes(name)) {
+    failures.push(`${name} absent — the candidate's new callable did not deploy`);
+  }
+}
 
 // ---- region and project are part of the claim ---------------------------
 const wrongLocation = (functionsBody.functions || [])
@@ -143,12 +173,19 @@ function transportOf(serviceName) {
   return 'invoker_iam_check_enabled';
 }
 const newServiceTransport = transportOf(CREATED_BY_PACKAGE_E);
-const candidateServiceTransport = transportOf(CREATED_BY_CANDIDATE);
-// Deliberately NOT a failure: whether the new service needs the approved
+const candidateServiceTransports = Object.fromEntries(
+  [...CREATED_BY_CANDIDATE, ...RECENTLY_CREATED].map((n) => [n, transportOf(n)])
+);
+const candidateTransportNeedingApproval = Object.entries(candidateServiceTransports)
+  .filter(([, t]) => t !== 'invoker_iam_check_disabled')
+  .map(([n]) => n);
+// Deliberately NOT a failure: whether a new service needs the approved
 // transport change is established by exercising the callable, not by this flag,
 // and the escalation is a separate approval.
 notes.push(`new service transport: ${newServiceTransport}`);
-notes.push(`candidate service transport (${CREATED_BY_CANDIDATE}): ${candidateServiceTransport}`);
+for (const [name, transport] of Object.entries(candidateServiceTransports)) {
+  notes.push(`candidate service transport (${name}): ${transport}`);
+}
 
 // ---- wsfCheckIn minimum instances: three outcomes, not two --------------
 let minInstancesState;
@@ -224,13 +261,17 @@ const receipt = {
     lostThisDeploy: lost,
   },
   createdCallablePresent: after.includes(CREATED_BY_PACKAGE_E),
-  candidateCallablePresent: after.includes(CREATED_BY_CANDIDATE),
+  candidateCallablePresent: CREATED_BY_CANDIDATE.every((n) => after.includes(n)),
+  candidateCallablesPresent: Object.fromEntries(
+    CREATED_BY_CANDIDATE.map((n) => [n, after.includes(n)])
+  ),
   preExistingTransportVerified: PRE_EXISTING.filter((n) => services.get(n)?.invokerIamDisabled === true).length,
   preExistingTransportDrifted: driftedTransport,
   newServiceTransport,
   newServiceTransportRequiresSeparateApproval: newServiceTransport !== 'invoker_iam_check_disabled',
-  candidateServiceTransport,
-  candidateServiceTransportRequiresSeparateApproval: candidateServiceTransport !== 'invoker_iam_check_disabled',
+  candidateServiceTransports,
+  candidateServiceTransportRequiresSeparateApproval: candidateTransportNeedingApproval.length > 0,
+  candidateServiceTransportNeedingApproval: candidateTransportNeedingApproval,
   wsfCheckIn: { state: minInstancesState, value: minInstancesValue },
   hosted,
   hostingChannel: channel
@@ -263,7 +304,11 @@ console.log(`CREATED_THIS_DEPLOY=${receipt.inventory.createdThisDeploy.join(',')
 console.log(`NEW_CALLABLE_PRESENT=${receipt.createdCallablePresent}`);
 console.log(`PREEXISTING_TRANSPORT_VERIFIED=${receipt.preExistingTransportVerified}/${PRE_EXISTING.length}`);
 console.log(`NEW_SERVICE_TRANSPORT=${newServiceTransport}`);
-console.log(`CANDIDATE_SERVICE_TRANSPORT=${candidateServiceTransport}`);
+console.log(
+  `CANDIDATE_SERVICE_TRANSPORT=${Object.entries(candidateServiceTransports)
+    .map(([n, t]) => `${n}:${t}`)
+    .join(' ')}`
+);
 console.log(`WSF_CHECKIN_MIN_INSTANCES_STATE=${minInstancesState}`);
 console.log(`HOSTED_MARKER_MATCHES=${hosted.markerMatches === true}`);
 
