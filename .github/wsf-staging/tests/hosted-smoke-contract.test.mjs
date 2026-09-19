@@ -755,6 +755,33 @@ test('every document the turn journey creates is tracked, by the route its id al
   assert.match(SMOKE, /linkedDocs: \[\.\.\.cleanup\.linked\]\.map\(\(\[docPath, via\]\) => \(\{ path: docPath, via \}\)\)/);
 });
 
+test('the combined parent is created on the FIXTURE window, never a fresh clock reading', () => {
+  // Run 28's only red row. The server enforces child.startsAt >=
+  // combined.startsAt; seedFixture stamps the children at ITS now minus 60s,
+  // so reading the clock again here put the parent AFTER its own children by
+  // however long the seeding took, and the refusal was deterministic. The
+  // instants the fixture actually wrote are the only ones that cannot drift.
+  const body = caseSource('caseTurnContract');
+  const call = body.slice(
+    body.indexOf("'create combined goal'"),
+    body.indexOf('}, championToken);')
+  );
+  assert.ok(call, 'the create-combined-goal call is gone');
+  assert.ok(call.includes('startsAt: fx.startsAtIso'), 'the parent start is not the fixture\u2019s own instant');
+  assert.ok(call.includes('endsAt: fx.endsAtIso'), 'the parent end is not the fixture\u2019s own instant');
+  // The clock must not be read for this window at all — not as Date.now(),
+  // not as a bare `new Date()`, and not through a variable computed from one.
+  assert.equal(/Date\.now\(\)|new Date\(/.test(call), false, 'the parent window is computed from a clock reading');
+  assert.equal(
+    /const now = Date\.now\(\);/.test(body),
+    false,
+    'the case still reads the clock; the fixture window is the only safe source'
+  );
+  // And the fixture must still be the thing that carries those instants.
+  assert.match(SMOKE, /startsAtIso: started\.toISOString\(\),/);
+  assert.match(SMOKE, /endsAtIso: ends\.toISOString\(\),/);
+});
+
 test('the in-smoke cleanup deletes BOTH registers, not just the tagged one', () => {
   // cleanup.linked is a second register. A cleanupAll() that walked only
   // cleanup.docs would delete the run's own fixtures, leave every
