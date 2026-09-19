@@ -1841,10 +1841,40 @@ async function caseTurnContract() {
     'the screen recorded a second time what the phone had already recorded'
   );
 
+  // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
+  //
+  // THE RESULT IS READ OFF THE COMPLETION'S OWN RESPONSE. NO SECOND CALL.
+  //
+  // Run 31 failed here with "no result at all", and the row was at fault.
+  // `lastResult.atMillis` is stamped by the LAST completion, and the product
+  // serves a result only while `now - atMillis < TURN_RESULT_VISIBLE_MS`
+  // (index.ts). The row used to spend three more round-trips — two goal
+  // pulses and the combined pulse, the last very likely a cold start — inside
+  // that window and then ask a SEPARATE wsfStationState whether the result
+  // was still there. A row that consumes the window it is measuring is not
+  // testing the window, it is timing staging.
+  //
+  // wsfCompleteTurn returns `{ ...readTurnState(...), recorded, anyoneWaiting }`
+  // — the same projection wsfStationState serves, computed immediately after
+  // the transaction that wrote lastResult. Reading it off this response takes
+  // the network out of the measurement entirely: there is no interval in
+  // which the window could close.
+  assert(!atStation.assigned, 'the screen is still showing somebody after recording');
+  assert(atStation.result, 'the completion response carries no result for the screen to show');
+  assert(atStation.result.code === rejoined.code, 'the result names a different turn');
+  assert(atStation.result.amount === TURN_COUNT, `the result shows ${atStation.result.amount}`);
+  assert(!JSON.stringify(atStation.result).includes('A.L.'), 'the result shows a name');
+  // A result served with no time left on it is already stale on the screen.
+  assert(
+    typeof atStation.result.secondsLeft === 'number' && atStation.result.secondsLeft > 0,
+    `the result reports ${atStation.result.secondsLeft} seconds left`
+  );
+
   // ── THE ARITHMETIC: ONE CHILD, ONE PARENT, THE OTHER CHILD UNTOUCHED ──────
   // Read as the member. These goals are not display-authorized, so an
   // anonymous read would be refused for a reason that has nothing to do with
-  // the arithmetic this row is checking.
+  // the arithmetic this row is checking. No deadline applies here, which is
+  // exactly why it runs after the ten-second read rather than before it.
   const chosen = await turnCall('chosen activity pulse', 'wsfGoalPulse', { goalId: activityA }, memberToken);
   const untouched = await turnCall('unchosen activity pulse', 'wsfGoalPulse', { goalId: activityB }, memberToken);
   // THE PARENT'S FIELD IS combinedTotal, NOT sharedTotal.
@@ -1862,16 +1892,6 @@ async function caseTurnContract() {
     parent?.combinedTotal === TURN_COUNT,
     `the combined parent holds ${parent?.combinedTotal}, expected ${TURN_COUNT}`
   );
-
-  // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
-  const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
-    stationId: stationOne.stationId, secret: stationOne.secret,
-  });
-  assert(!afterRecord?.assigned, 'the screen is still showing somebody after recording');
-  assert(afterRecord?.result, 'the screen shows no result at all in the ten seconds after recording');
-  assert(afterRecord.result.code === rejoined.code, 'the ten-second result names a different turn');
-  assert(afterRecord.result.amount === TURN_COUNT, `the ten-second result shows ${afterRecord.result.amount}`);
-  assert(!JSON.stringify(afterRecord.result).includes('A.L.'), 'the ten-second result shows a name');
 
   // TEN SECONDS, PROVEN BY WAITING PAST THEM. A result that never expired
   // would leave a code on a public screen for the rest of the event.

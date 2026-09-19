@@ -87,6 +87,49 @@ only the thing it asserts, on the run it asserted it.
   was itself badly specified: "non-zero `VERIFIED`" cannot distinguish the two branches,
   which is how I came to claim the wrong one.
 
+## Run 31 — `35472452869`, main `5ab03cd`, app `42dd32a`
+
+- **23 PASS, 1 FAIL** (`FAILURES=1`). Served SHA `42dd32a` confirmed by the health marker;
+  `app_sha` input checked against `approved-candidate.json` before dispatch. Station
+  callable transport row PASS (4/4 reached their handler anonymously). Public dynamic
+  route reload PASS — fourth consecutive run.
+- **The combined-parent fix is proven on staging.** The row cleared
+  `parent.combinedTotal === TURN_COUNT` — run 30's failure point — along with both child
+  pulses, and then went further than any previous run.
+- **Turn row — FAIL**, at the ten-second station result:
+  `the screen shows no result at all in the ten seconds after recording`.
+  **The ROW was wrong for the fifth time running; the product is not implicated.**
+
+  Diagnosed in `index.ts` at the served candidate, not assumed:
+  - `completeTurnEntry` writes `lastResult: { stationId, code, amount, unit, atMillis }`
+    with `stationId = entry.attemptStationId` — the station that STARTED the turn. The
+    row started at `stationOne` and read `stationOne`, so this is not a station mismatch.
+  - `atMillis` is re-stamped on **every** completion call, including the two idempotent
+    retries, so the window starts at the last retry, not at the first recording.
+  - `wsfStationState` serves a result only while `now - last.atMillis <
+    TURN_RESULT_VISIBLE_MS` (10 000 ms).
+  - The row then spent **three more round-trips inside that window** — two `wsfGoalPulse`
+    calls and `wsfCombinedGoalPulse`, the last of them very likely a cold start — before
+    reading the station state.
+
+  A row that consumes the window it is measuring is not testing the window; it is timing
+  staging. By elimination in source, an expired window is the only cause consistent with
+  the code — but the run carried no elapsed reading, so this run cannot prove it
+  outright.
+
+  **The fix removes the measurement interval entirely rather than shortening it.**
+  `wsfCompleteTurn` returns `{ ...readTurnState(...), recorded, anyoneWaiting }` — the
+  same projection `wsfStationState` serves, computed immediately after the transaction
+  that wrote `lastResult`. The row now asserts the result off that response (code,
+  amount, no name, `secondsLeft > 0`), so there is no interval in which the window could
+  close, and the only `wsfStationState` after the completion is the one that proves the
+  result expired.
+- Cleanup `COMPLETE`, 349/349, `EVIDENCE_SCAN=clean`, 23 files.
+  `LINKED_DOCUMENTS_VERIFIED=2`, `ALREADY_ABSENT=9`, 11 linked documents — **the same
+  composition as run 30**: the two uid-in-path documents admitted by path with no read,
+  and all nine read-branch documents already gone. **The live-content branch again ran
+  zero times.** Stated this way from the start, rather than corrected afterwards.
+
 ---
 
 ## Still not established by any run
@@ -95,8 +138,9 @@ only the thing it asserts, on the run it asserted it.
   Scan, explicit activity selection, the shared follow-along player, rep review, the hall
   clearing and the station session ending are **not covered**, and a green turn-service
   row does not cover them. That gate is separate and open.
-- **The turn row has never fully passed.** Runs 28, 29 and 30 each failed later than the
-  last; none reached its PASS row.
+- **The turn row has never fully passed.** Runs 28, 29, 30 and 31 each failed later than
+  the last; none reached its PASS row. Run 31 got through the whole journey and the
+  arithmetic and died on the ten-second result read.
 - **The live-document-content verification branch** — reading a stored document and
   confirming it references its declared owner before admitting it — has **not** run on
   hosted staging. On runs 28 and 29 nothing reached it; on run 30 all nine read-branch
