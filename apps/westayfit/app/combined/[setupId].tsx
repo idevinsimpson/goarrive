@@ -7,17 +7,23 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { COMBINED_REFUSAL_BODY, COMBINED_REFUSAL_HEADLINE } from '../../src/combinedSetup';
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { CREAM, kit } from '../../src/ui/kit';
-import { formatActiveWindowLabel, formatPeriod } from '../../src/ui/dates';
+import {
+  formatActiveWindowLabel,
+  formatCountingSince,
+  formatPeriod,
+} from '../../src/ui/dates';
 import { formatCount, percentLabel, statusLine } from '../../src/ui/progressFormat';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 /**
  * COMBINED MOVEMENT GOAL — one screen, several activities, one shared total.
  *
- * THE TOTAL ON THIS SCREEN IS NOT STORED ANYWHERE. The server derives it at
- * read time by summing the children's own counters, so it cannot drift from
- * the activities it is made of, and an activity's own goal, contribute page
- * and display are completely unaffected by appearing here.
+ * WHAT THE BIG NUMBER IS, exactly. It is what has been recorded on these
+ * activities SINCE this combined goal was activated — never what they had
+ * before. Each activity also shows its own lifetime total, because its own
+ * goal, contribute page and display are completely unaffected by appearing
+ * here. The two numbers differ whenever an activity was already under way, and
+ * this screen shows both rather than letting one stand in for the other.
  *
  * WHAT THIS URL IS. A document name, and nothing else. It carries no
  * participant token and no administrative authority: opening it signs nobody
@@ -45,7 +51,15 @@ type CombinedActivity = {
   title: string;
   unit: string;
   target: number;
+  /** The ACTIVITY's own total, its whole life. Its own goal is unchanged. */
   total: number;
+  /**
+   * What this activity has contributed to THIS combined goal: only what was
+   * recorded after the combined goal was activated. The two numbers differ
+   * whenever an activity was already under way, and the screen shows both
+   * rather than quietly presenting one as the other.
+   */
+  combinedContribution: number;
   countsAs: 'repetition';
   status: string;
 };
@@ -60,9 +74,12 @@ type CombinedPulse = {
   combinedTotal: number;
   startsAt: string;
   endsAt: string;
+  /** When this combined goal began counting. What the total is SINCE. */
+  activatedAt: string;
   timezone: string;
   contributionRule: string;
   contributionRuleVersion: number;
+  version: number;
   activities: CombinedActivity[];
 };
 
@@ -252,6 +269,8 @@ export default function CombinedGoalScreen() {
   // a combined goal automatically, so "ends" would be a claim the clock
   // contradicts. Same rule, same helper, as the public display.
   const periodText = closed ? period : formatActiveWindowLabel(pulse.endsAt, zone);
+  // The boundary the total is measured from, stated rather than assumed.
+  const countingSince = formatCountingSince(pulse.activatedAt, zone);
 
   return (
     <ScrollView style={kit.scroll} contentContainerStyle={kit.page}>
@@ -275,10 +294,11 @@ export default function CombinedGoalScreen() {
             </Text>
           ) : null}
           {/*
-            The one number this screen exists for. It is the exact sum of the
-            activities listed below — the server derived it from their own
-            counters in the same response, so the total and the parts can never
-            disagree with each other.
+            The one number this screen exists for. It is the exact sum of what
+            each activity has contributed TO THIS COMBINED GOAL — the "counted
+            here" line under each activity below — and it counts only what was
+            recorded after this combined goal began. An activity that was
+            already under way brings its future repetitions, not its past ones.
           */}
           <Text style={styles.total} testID="wsf-combined-shared-total">
             {formatCount(pulse.combinedTotal)} of {formatCount(pulse.target)} {pulse.unit}
@@ -287,6 +307,16 @@ export default function CombinedGoalScreen() {
             {statusLine(pulse.combinedTotal, pulse.target, pulse.status)} ·{' '}
             {percentLabel(pulse.combinedTotal, pulse.target)} complete
           </Text>
+          {/*
+            WHAT THE NUMBER IS SINCE. Every activity keeps whatever it had
+            before; this combined goal counts what has been recorded since it
+            began, and says so on the same line of sight as the total.
+          */}
+          {countingSince ? (
+            <Text style={kit.heroMeta} testID="wsf-combined-counting-since">
+              {countingSince}
+            </Text>
+          ) : null}
           {closed ? (
             <Text style={kit.heroMeta} testID="wsf-combined-closed">
               This combined goal has closed.
@@ -299,6 +329,13 @@ export default function CombinedGoalScreen() {
           Each activity keeps its OWN goal. The target beside it is that
           activity's own target, not a share of the combined one, and its total
           is its own — appearing here changed neither.
+
+          The second line is the one this screen must not blur: what this
+          activity has counted TOWARD the combined goal, which is only what was
+          recorded since the combined goal began. When an activity was already
+          under way the two lines differ, and saying so is the honest answer —
+          the alternative is to present a number nobody earned here as though
+          they had.
         */}
         {pulse.activities.map((activity) => (
           <View
@@ -309,6 +346,9 @@ export default function CombinedGoalScreen() {
             <Text style={kit.cardTitle}>{activity.title}</Text>
             <Text style={kit.cardMeta} testID={`wsf-combined-activity-total-${activity.goalId}`}>
               {formatCount(activity.total)} of {formatCount(activity.target)} {activity.unit}
+            </Text>
+            <Text style={kit.cardMeta} testID={`wsf-combined-activity-counted-${activity.goalId}`}>
+              {formatCount(activity.combinedContribution)} counted toward {pulse.title}
             </Text>
             {activity.status === 'closed' ? (
               <Text style={kit.cardMeta} testID={`wsf-combined-activity-closed-${activity.goalId}`}>

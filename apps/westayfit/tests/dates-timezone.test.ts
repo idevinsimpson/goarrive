@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   formatActiveWindowLabel,
+  formatCountingSince,
   formatEndsAt,
   formatPeriod,
   formatReachedOn,
@@ -235,5 +236,33 @@ describe('the day we reached it is written in the goal’s zone', () => {
   it('withholds the label rather than naming a day it cannot place', () => {
     expect(formatReachedOn('not-a-date', { ...en, timeZone: NY })).toBeNull();
     expect(formatReachedOn('2026-09-18T16:00:00.000Z', { ...en, timeZone: 'Not/AZone' })).toBeNull();
+  });
+});
+
+describe('a combined goal says what its total is counting SINCE', () => {
+  // The boundary is the whole correction: a combined total with no stated
+  // start is how the first build came to show repetitions nobody performed
+  // for it. The label is written in the SETUP's zone, on exactly the rule the
+  // crossing label uses, so two dates on one screen cannot disagree.
+  it('an instant on Sep 19 UTC is still Sep 18 in New York', () => {
+    expect(formatCountingSince('2026-09-19T01:30:00.000Z', { ...en, timeZone: NY })).toBe(
+      'Counting since Sep 18'
+    );
+    expect(
+      formatCountingSince('2026-09-19T01:30:00.000Z', { ...en, timeZone: 'Australia/Sydney' })
+    ).toBe('Counting since Sep 19');
+  });
+
+  it('carries the year once the activation is not in the reader’s current year', () => {
+    expect(formatCountingSince('2025-12-31T18:00:00.000Z', { ...en, timeZone: NY })).toBe(
+      'Counting since Dec 31, 2025'
+    );
+  });
+
+  it('withholds the label rather than naming a day it cannot place', () => {
+    expect(formatCountingSince('not-a-date', { ...en, timeZone: NY })).toBeNull();
+    expect(
+      formatCountingSince('2026-09-18T16:00:00.000Z', { ...en, timeZone: 'Not/AZone' })
+    ).toBeNull();
   });
 });

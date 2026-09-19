@@ -2744,6 +2744,312 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
   }
 );
 
+// ═════════════════════════════════════════════════════════════════════════════
+// COMBINED MOVEMENT GOAL — THE CLAIM, THE ACTIVATION BOUNDARY, AND THE PARENT
+// COUNTER.
+//
+// This block sits HERE, above wsfContribute, on purpose: the contribution
+// transaction is the ONLY place a parent credit is ever created, and whoever
+// reads that transaction must be able to see the whole rule without scrolling
+// to the combined-goal section far below.
+//
+// WHAT THE FIRST IMPLEMENTATION GOT WRONG, written down so it is not
+// re-proposed. The parent's total was derived from the SUM OF EACH CHILD'S
+// LIFETIME SHARDS. Two defects followed, and both were real:
+//
+//   1. SILENT BACKFILL. A setup activated after a child had already taken
+//      repetitions showed those old repetitions immediately. Nobody did them
+//      for this combined goal; they appeared in it anyway.
+//   2. A child could feed TWO active parents at once, deliberately permitted.
+//
+// "The parent has no counter" is not a substitute for the guarantees that were
+// actually required: NEW eligible repetitions after activation only, canonical
+// child AND parent credit exactly once each, and one active parent association
+// per child for this release. So the parent now HAS a counter — and the whole
+// point is that it starts EMPTY.
+//
+// THE THREE COLLECTIONS, all new, all Admin-SDK-only:
+//
+//   * wsfCombinedGoalClaims/{goalId} — at most ONE active claim per child.
+//     THE DOCUMENT ID IS THE CHILD GOAL ID, so uniqueness is the document's own
+//     name and Firestore enforces it, rather than a query the freeze could
+//     race. The claim is taken inside the SAME transaction that creates the
+//     setup, so two Champions activating at the same instant cannot both win a
+//     child: one transaction commits and the other is refused.
+//     It also carries the FROZEN BOUNDARY the contribution path reads —
+//     activatedAt, the window, the rule version and the setup version — so the
+//     hot path needs one document read and never has to open the setup.
+//
+//   * wsfCombinedCounters/{setupId}/shards/{goalId}_{i}, i in 0..9 — the
+//     parent's OWN sharded counter, ten shards per child. Ten because that is
+//     the fan-out the child counters already use and the contention it exists
+//     to avoid is the same contention. Per child because the parent's total and
+//     each child's contribution TO THE PARENT are then both derivable by
+//     document path: no query, no composite index, no second definition of
+//     "counted". Absent at activation, which is exactly why the parent's
+//     opening total is zero — not zero by subtraction, zero because nothing has
+//     been written.
+//
+//   * wsfCombinedCredits/{creditId} — the durable linkage. One row per credit,
+//     naming the setup, the setup version, the child, the member and the
+//     attempt (or the adjustment) that caused it. It is what makes a credit
+//     reconstructible after the fact and what a recovery compares the parent
+//     shards against.
+//
+// THE COLLISION HAZARD THIS DELIBERATELY DOES NOT REPEAT. wsfContribute
+// already writes wsfGoals/{goalId}/recentAdditions/{attemptId} — a document
+// named by an attempt id with NO uid in its path, which two members who mint
+// the same attemptId collide on. Every id minted here carries the uid (or the
+// server-minted adjustment id), so this adds no second document of that kind.
+//
+// NO RULES CHANGE AND NO INDEX ENTRY. None of the three appears in
+// firestore.rules, so all three fall to the catch-all `allow read, write: if
+// false` at the bottom of the WSF section — the same position wsfGoals,
+// wsfGoalCounters and wsfKioskStations already hold. Every access below is a
+// document path or a single-field equality.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * THE FROZEN RULE, version 1, written down rather than implied.
+ *
+ *   An activity goal is eligible for a combined setup only if its own window
+ *   sits entirely inside the combined window:
+ *     child.startsAt >= combined.startsAt AND child.endsAt <= combined.endsAt
+ *
+ * It is checked at freeze time and re-checked on every read, so a hand-edited
+ * child window cannot quietly widen what a setup claims to count.
+ *
+ * It is NO LONGER what decides a credit. The rule bounds which activities may
+ * be combined; the CLAIM decides which repetitions count, and it does so with
+ * an explicit instant (`activatedAt`) and the frozen window, both read on the
+ * contribution path. That separation is the fix: containment made the old
+ * derivation "exact" only in the sense that it summed everything a child had
+ * ever taken, which is the backfill.
+ */
+type CombinedContributionRule = 'childWindowWithin';
+const COMBINED_CONTRIBUTION_RULE: CombinedContributionRule = 'childWindowWithin';
+
+/**
+ * Version 1's whole conversion model: ONE REPETITION OF ANY ELIGIBLE ACTIVITY
+ * COUNTS AS ONE UNIT OF THE COMBINED GOAL. No factor, no weighting, no
+ * conversion table.
+ *
+ * There is deliberately no `repetitionFactor: 1` field — an unapplied stored
+ * field is a trap for the next reader. If weighting is ever wanted it arrives
+ * as contributionRuleVersion 2 with its own field, and every version-1 setup
+ * keeps meaning exactly what it meant.
+ *
+ * A claim carrying any other value credits NOTHING: a build that does not
+ * understand the rule a setup was frozen under must not guess at it.
+ */
+const COMBINED_CONTRIBUTION_RULE_VERSION = 1;
+
+/**
+ * The version of the frozen ACTIVATION — target, window, rule version, child
+ * selection and repetition metadata, all frozen together at one instant.
+ *
+ * Every claim and every credit records it. A later change to any of those
+ * facts is a NEW version with its own activation instant and its own claims,
+ * never a silent reinterpretation of an old one: credits already written keep
+ * naming the version that was in force when they were earned.
+ */
+const COMBINED_SETUP_VERSION = 1;
+
+/** Ten, for the same reason the goal counters are ten. */
+const COMBINED_SHARD_COUNT = GOAL_SHARD_COUNT;
+
+type CombinedClaimStatus = 'active' | 'released';
+
+/**
+ * The claim: one child goal, one active combined parent, and the frozen
+ * boundary that parent counts under. Everything the contribution path needs to
+ * decide a credit is HERE, in one document, read by its own name.
+ */
+type CombinedGoalClaimDoc = {
+  goalId: string;
+  setupId: string;
+  setupVersion: number;
+  communityGroupId: string;
+  status: CombinedClaimStatus;
+  contributionRuleVersion: number;
+  /** THE ACTIVATION BOUNDARY. Nothing before this instant ever credits. */
+  activatedAt: FirebaseFirestore.Timestamp;
+  /** The FROZEN parent window, start inclusive, end exclusive. */
+  windowStartsAt: FirebaseFirestore.Timestamp;
+  windowEndsAt: FirebaseFirestore.Timestamp;
+  claimedAt?: FirebaseFirestore.Timestamp;
+  releasedAt?: FirebaseFirestore.Timestamp | null;
+};
+
+function combinedClaimRef(goalId: string) {
+  return getFirestore().doc(`wsfCombinedGoalClaims/${goalId}`);
+}
+
+function combinedShardRef(setupId: string, goalId: string, index: number) {
+  return getFirestore().doc(
+    `wsfCombinedCounters/${setupId}/shards/${goalId}_${index}`
+  );
+}
+
+function randomCombinedShardIndex(): number {
+  return Math.floor(Math.random() * COMBINED_SHARD_COUNT);
+}
+
+function combinedCreditRef(creditId: string) {
+  return getFirestore().doc(`wsfCombinedCredits/${creditId}`);
+}
+
+/**
+ * The linkage id for a CONTRIBUTION credit. It carries the uid, so it is not a
+ * second wsfGoals/{goalId}/recentAdditions/{attemptId}: two members minting
+ * the same attemptId produce two different rows, as they must.
+ *
+ * It is also derived entirely from facts the contribution transaction already
+ * has, which is what makes the write idempotent by construction: a transaction
+ * retry writes the same id, and a replayed attemptId never reaches it at all.
+ */
+function combinedContributionCreditId(args: {
+  setupId: string;
+  goalId: string;
+  uid: string;
+  attemptId: string;
+}): string {
+  return `${args.setupId}_${args.goalId}_${args.uid}_${args.attemptId}`;
+}
+
+/**
+ * The linkage id for a CORRECTION credit. The adjustment id is minted by the
+ * server once per call, before the transaction opens, so it is stable across
+ * transaction retries and a correction can move the parent exactly once.
+ */
+function combinedAdjustmentCreditId(setupId: string, adjustmentId: string): string {
+  return `${setupId}_adj_${adjustmentId}`;
+}
+
+/** A stored Timestamp, or null when the field is missing or unreadable. */
+function timestampMillis(v: unknown): number | null {
+  const ts = v as FirebaseFirestore.Timestamp | undefined | null;
+  if (!ts || typeof ts.toMillis !== 'function') return null;
+  const ms = ts.toMillis();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+type CombinedCredit = { setupId: string; setupVersion: number };
+
+/**
+ * THE ONE PLACE A PARENT CREDIT IS DECIDED. Pure, total, and called from both
+ * write paths — the contribution and the correction — so the two cannot drift
+ * into two different answers.
+ *
+ * It returns the setup to credit, or null. Null is the ordinary case: most
+ * goals are in no combined setup at all, and for those this function is
+ * reached with `claim: null` and returns immediately, which is what makes the
+ * uncombined contribution path unchanged.
+ *
+ * EVERY condition, and why each one is here:
+ *   • a claim exists                — the child feeds a parent at all;
+ *   • status 'active'               — a closed setup released its claims, and a
+ *                                     released claim credits nothing further;
+ *   • the claim names THIS child    — a hand-edited claim cannot redirect
+ *                                     another goal's repetitions;
+ *   • the claim names this child's  — a goal moved between communities stops
+ *     community                       crediting rather than crediting a
+ *                                     community it is no longer in;
+ *   • the rule version is the one   — a setup frozen under a rule this build
+ *     this build applies              does not know is not guessed at;
+ *   • the setup version is a real   — a credit must be attributable to the
+ *     version                         exact frozen activation that earned it;
+ *   • at >= activatedAt             — THE ACTIVATION BOUNDARY. This is the
+ *                                     defect being fixed: repetitions taken
+ *                                     before the Champion activated the
+ *                                     combined goal are not its repetitions;
+ *   • activatedAt <= at < windowEnds— THE FROZEN WINDOW, start inclusive and
+ *     and at >= windowStarts          end exclusive, exactly as wsfContribute
+ *                                     treats a goal's own window. A child
+ *                                     whose own window was widened after the
+ *                                     freeze can still take contributions;
+ *                                     they do not reach the parent.
+ */
+function combinedCreditDecision(args: {
+  claim: CombinedGoalClaimDoc | null;
+  goalId: string;
+  communityGroupId: unknown;
+  atMillis: number;
+}): CombinedCredit | null {
+  const { claim, goalId, atMillis } = args;
+  if (!claim) return null;
+  if (claim.status !== 'active') return null;
+  if (normalizeStringId(claim.goalId) !== goalId) return null;
+
+  const setupId = normalizeStringId(claim.setupId);
+  if (!setupId) return null;
+
+  const groupId = normalizeStringId(args.communityGroupId);
+  if (!groupId) return null;
+  if (normalizeStringId(claim.communityGroupId) !== groupId) return null;
+
+  if (claim.contributionRuleVersion !== COMBINED_CONTRIBUTION_RULE_VERSION) return null;
+
+  const setupVersion = claim.setupVersion;
+  if (
+    typeof setupVersion !== 'number' ||
+    !Number.isInteger(setupVersion) ||
+    setupVersion < 1
+  ) {
+    return null;
+  }
+
+  const activatedAt = timestampMillis(claim.activatedAt);
+  const windowFrom = timestampMillis(claim.windowStartsAt);
+  const windowTo = timestampMillis(claim.windowEndsAt);
+  if (activatedAt === null || windowFrom === null || windowTo === null) return null;
+
+  // THE ACTIVATION BOUNDARY, and then the frozen window.
+  if (atMillis < activatedAt) return null;
+  if (atMillis < windowFrom) return null;
+  if (atMillis >= windowTo) return null;
+
+  return { setupId, setupVersion };
+}
+
+/**
+ * The parent's credit per child, by document path. Ten shard reads per child,
+ * batched exactly the way sumGoalShardsForMany batches the child counters, and
+ * with the identical arithmetic: an absent or non-numeric shard contributes
+ * nothing, which is why a setup that has never been credited reads as zero
+ * rather than as an error.
+ */
+async function sumCombinedShardsForChildren(
+  setupId: string,
+  goalIds: string[]
+): Promise<Map<string, number>> {
+  const db = getFirestore();
+  const totals = new Map<string, number>();
+  for (const goalId of goalIds) totals.set(goalId, 0);
+  if (goalIds.length === 0) return totals;
+
+  const refs: Array<{ goalId: string; ref: FirebaseFirestore.DocumentReference }> = [];
+  for (const goalId of goalIds) {
+    for (let i = 0; i < COMBINED_SHARD_COUNT; i++) {
+      refs.push({ goalId, ref: combinedShardRef(setupId, goalId, i) });
+    }
+  }
+
+  const CHUNK = 300;
+  for (let start = 0; start < refs.length; start += CHUNK) {
+    const chunk = refs.slice(start, start + CHUNK);
+    const snaps = await db.getAll(...chunk.map((r) => r.ref));
+    snaps.forEach((snap, i) => {
+      const data = snap.data() as { count?: number } | undefined;
+      if (typeof data?.count === 'number') {
+        const goalId = chunk[i]!.goalId;
+        totals.set(goalId, (totals.get(goalId) ?? 0) + data.count);
+      }
+    });
+  }
+  return totals;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // wsfContribute — add `count` units to `goalId` under attempt `attemptId`.
 //
@@ -2756,6 +3062,20 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
 // contribution + shard delta + updated member total atomically. Idempotent
 // replay returns the ORIGINAL count so the caller sees the same body they
 // would have seen on the first tap — matching E3's §5.3 discipline.
+//
+// WHAT THE COMBINED MOVEMENT GOAL ADDED HERE, and what it did not.
+// ADDED: one document read (the child's combined claim, joined to the existing
+// read batch) and, on the NEW-contribution branch only and only when that
+// claim says so, two writes — one increment of the parent's own shard for this
+// child, and one durable linkage row. They commit in THIS transaction, so the
+// child and the parent are credited canonically, together, exactly once each.
+// NOT CHANGED: the (goal, uid, attemptId) identity and its replay branch, the
+// ten-shard child fan-out, the gate order and every refusal string, the
+// ContributeResponse shape, and the post-commit target-crossing claim. A goal
+// with no claim document takes the same path it always did and writes the same
+// rows: see the block marked THE COMBINED PARENT CREDIT below, which is the
+// only addition inside the transaction and is skipped entirely when the claim
+// is absent.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ContributeRequest = {
@@ -2838,6 +3158,11 @@ export const wsfContribute = onCall<ContributeRequest>(
       `wsfContributions/${goalId}_${uid}_${attemptId}`
     );
     const memberTotalRef = db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`);
+    // The combined-goal claim for this child, if it has one. Named by the goal
+    // id, so this is a document read and never a query. For the overwhelming
+    // majority of goals the document does not exist, the read returns a
+    // missing snapshot, and nothing below it runs.
+    const claimRef = combinedClaimRef(goalId);
 
     // Two-phase read inside the transaction: goal first (need communityGroupId
     // to derive the membership path), then contribution + memberTotal +
@@ -2867,11 +3192,17 @@ export const wsfContribute = onCall<ContributeRequest>(
           `wsfMemberships/${goal.communityGroupId}_${uid}`
         );
 
-        const [contribSnap, memberTotalSnap, membershipSnap] =
+        // The claim joins this existing batch rather than adding a round trip.
+        // It is read BEFORE any write, as the transaction requires, and being
+        // read inside the transaction is what makes the boundary hold: a claim
+        // taken or released concurrently aborts this contribution rather than
+        // letting it credit a parent that no longer owns this child.
+        const [contribSnap, memberTotalSnap, membershipSnap, claimSnap] =
           await Promise.all([
             tx.get(contribRef),
             tx.get(memberTotalRef),
             tx.get(membershipRef),
+            tx.get(claimRef),
           ]);
 
         // Idempotency wins over closure, window end, AND membership drift.
@@ -3068,6 +3399,80 @@ export const wsfContribute = onCall<ContributeRequest>(
           at: isoMinute(now.toMillis()),
         };
         tx.set(recentAdditionsRef(goalId).doc(attemptId), addition);
+
+        // ── THE COMBINED PARENT CREDIT ───────────────────────────────────
+        //
+        // CANONICAL CHILD AND PARENT CREDIT, IN ONE TRANSACTION. The child's
+        // shard, the member total, the contribution row, the parent's shard
+        // and the parent's linkage row all commit together or not at all.
+        // There is no second transaction to fail halfway and no reconciler to
+        // forget.
+        //
+        // ON THIS BRANCH ONLY. The replay branch returned long before this
+        // line, so a retried attemptId credits the parent no more than it
+        // credits the child: exactly zero more times.
+        //
+        // NEW REPETITIONS AFTER ACTIVATION ONLY. `now` is the SERVER time
+        // already used to enforce the child's own window, and
+        // combinedCreditDecision refuses anything at or before the claim's
+        // activation instant or outside the frozen parent window. A repetition
+        // recorded before the Champion activated the combined goal never
+        // reaches this code at all — it was recorded by an earlier call, which
+        // committed and is finished — and that is why activating a setup over
+        // a child with a long history opens the parent at zero.
+        //
+        // AND FOR EVERY OTHER GOAL: `claimSnap` does not exist,
+        // combinedCreditDecision returns null on its first line, and this
+        // block writes nothing. The contribution's writes, its receipt and its
+        // refusals are exactly what they were.
+        const credit = combinedCreditDecision({
+          claim: claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null,
+          goalId,
+          communityGroupId: goal.communityGroupId,
+          atMillis: now.toMillis(),
+        });
+        if (credit) {
+          // One of the parent's ten shards FOR THIS CHILD, chosen at random,
+          // for the same reason the child's own counter is sharded: two
+          // members contributing in the same instant must not queue on one
+          // document.
+          const parentShardIndex = randomCombinedShardIndex();
+          tx.set(
+            combinedShardRef(credit.setupId, goalId, parentShardIndex),
+            { count: FieldValue.increment(count) },
+            { merge: true }
+          );
+          // THE DURABLE LINKAGE. `create`, not `set`: the id is derived from
+          // (setup, child, member, attempt), so the only way it can already
+          // exist is that this attempt has already been credited — in which
+          // case the shard is about to be incremented twice and refusing the
+          // whole contribution is the correct answer, not overwriting the
+          // evidence. A transaction RETRY cannot trip it: the earlier attempt
+          // never committed.
+          tx.create(
+            combinedCreditRef(
+              combinedContributionCreditId({
+                setupId: credit.setupId,
+                goalId,
+                uid,
+                attemptId,
+              })
+            ),
+            {
+              setupId: credit.setupId,
+              setupVersion: credit.setupVersion,
+              contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+              goalId,
+              userId: uid,
+              attemptId,
+              source: 'contribution',
+              amount: count,
+              shardIndex: parentShardIndex,
+              communityGroupId: goal.communityGroupId,
+              createdAt: FieldValue.serverTimestamp(),
+            }
+          );
+        }
 
         // Reached only after the active-membership gate above, so this caller
         // is an active member by construction.
@@ -4066,6 +4471,10 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       shardRefs.push(db.doc(`wsfGoalCounters/${goalId}/shards/${i}`));
     }
     const writeShardRef = shardRefs[0]!; // deterministic; corrections aren't hot
+    // The child's combined claim, read by name. A correction is a cold path,
+    // so it can afford to read the parent's ten shards for this child as well
+    // and clamp honestly rather than guess.
+    const claimRef = combinedClaimRef(goalId);
 
     const { newTargetTotal, effectiveRepeatPolicy } = await db.runTransaction(async (tx) => {
       const goalSnap = await tx.get(goalRef);
@@ -4094,12 +4503,52 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         ? db.doc(`wsfGoalMemberTotals/${goalId}_${targetUid}`)
         : null;
 
-      const [shardSnaps, targetTotalSnap] = await Promise.all([
+      const [shardSnaps, targetTotalSnap, claimSnap] = await Promise.all([
         Promise.all(shardRefs.map((r) => tx.get(r))),
         targetMemberTotalRef
           ? tx.get(targetMemberTotalRef)
           : Promise.resolve(null),
+        tx.get(claimRef),
       ]);
+
+      // ── DOES THIS CORRECTION REACH A COMBINED PARENT? ──────────────────
+      //
+      // The SAME decision function the contribution path uses, so a
+      // correction can never apply a rule the credit did not. `Timestamp.now()`
+      // is the server's clock, exactly as in wsfContribute: a correction made
+      // after the frozen window closed, or on a released claim, moves the
+      // child and leaves the parent alone — the parent's total is what was
+      // earned inside its own window, and a later correction cannot smuggle
+      // units into a window that has ended.
+      const parentCredit =
+        delta === 0
+          ? null
+          : combinedCreditDecision({
+              claim: claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null,
+              goalId,
+              communityGroupId: goal.communityGroupId,
+              atMillis: Timestamp.now().toMillis(),
+            });
+
+      // Read the parent's credit FOR THIS CHILD so a downward correction
+      // cannot drive it below zero. This matters because the child's own total
+      // may include repetitions taken BEFORE activation, which the parent
+      // never counted: a −100 on a child that gave the parent 20 must take the
+      // parent to 0, not to −80. The applied amount is recorded, so the ledger
+      // says what actually moved rather than what was asked for.
+      let appliedCombinedDelta = 0;
+      if (parentCredit) {
+        const parentShardRefs: FirebaseFirestore.DocumentReference[] = [];
+        for (let i = 0; i < COMBINED_SHARD_COUNT; i++) {
+          parentShardRefs.push(combinedShardRef(parentCredit.setupId, goalId, i));
+        }
+        const parentSnaps = await Promise.all(parentShardRefs.map((r) => tx.get(r)));
+        const parentChildTotal = parentSnaps.reduce((sum, snap) => {
+          const data = snap.data() as { count?: number } | undefined;
+          return sum + (typeof data?.count === 'number' ? data.count : 0);
+        }, 0);
+        appliedCombinedDelta = delta < 0 ? Math.max(delta, -parentChildTotal) : delta;
+      }
 
       const currentSharedTotal = shardSnaps.reduce((sum, snap) => {
         const data = snap.data() as { count?: number } | undefined;
@@ -4140,8 +4589,53 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         // Present only on a call that changed it, so the ledger reads as
         // "this is what this correction did".
         ...(repeatPolicy ? { repeatPolicy } : {}),
+        // Present ONLY when this correction also moved a combined parent, and
+        // carrying the amount that actually moved. A goal in no combined setup
+        // writes the same audit row it always did, field for field.
+        ...(parentCredit && appliedCombinedDelta !== 0
+          ? {
+              combinedSetupId: parentCredit.setupId,
+              combinedSetupVersion: parentCredit.setupVersion,
+              combinedDelta: appliedCombinedDelta,
+            }
+          : {}),
         createdAt: FieldValue.serverTimestamp(),
       });
+      if (parentCredit && appliedCombinedDelta !== 0) {
+        // The parent moves by the same correction, in the same transaction,
+        // exactly once. Shard 0 deterministically, for the same reason the
+        // child's correction uses shard 0: corrections are not a hot path.
+        tx.set(
+          combinedShardRef(parentCredit.setupId, goalId, 0),
+          { count: FieldValue.increment(appliedCombinedDelta) },
+          { merge: true }
+        );
+        // The linkage, named by the adjustment id, which the server minted
+        // once before this transaction opened. A transaction retry writes the
+        // same id; a second correction is a second adjustment id and a second
+        // row. `create` for the same reason the contribution's linkage uses
+        // it: if the id already existed the parent would be moved twice, and
+        // refusing is the correct answer.
+        tx.create(
+          combinedCreditRef(
+            combinedAdjustmentCreditId(parentCredit.setupId, adjustmentRef.id)
+          ),
+          {
+            setupId: parentCredit.setupId,
+            setupVersion: parentCredit.setupVersion,
+            contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+            goalId,
+            userId: targetUid,
+            adjustmentId: adjustmentRef.id,
+            source: 'adjustment',
+            amount: appliedCombinedDelta,
+            requestedAmount: delta,
+            shardIndex: 0,
+            communityGroupId: goal.communityGroupId,
+            createdAt: FieldValue.serverTimestamp(),
+          }
+        );
+      }
       if (delta !== 0) {
         tx.set(
           writeShardRef,
@@ -5091,40 +5585,52 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
 // ═════════════════════════════════════════════════════════════════════════════
 // COMBINED MOVEMENT GOAL — several activity goals, one shared total.
 //
-// THE ONE IDEA THE WHOLE FEATURE RESTS ON: **the parent has no counter.** A
-// combined goal's total is a pure function of its children's existing sharded
-// counters, computed at read time. Nothing here writes to wsfGoalCounters,
-// nothing here runs on the contribution path, and wsfContribute, wsfAdjustGoal,
-// wsfGoalPulse, wsfListGoals and wsfCreateGoal are untouched by this feature.
+// THE GUARANTEES THIS FEATURE OWES, in the order they were demanded:
+//   1. NEW ELIGIBLE REPETITIONS AFTER ACTIVATION ONLY. A setup activated over
+//      a child that already has a history opens at ZERO. Not zero by
+//      subtraction — zero because its counter has never been written to.
+//   2. CANONICAL CHILD AND PARENT CREDIT. One transaction credits both,
+//      exactly once each, with a durable linkage row naming the attempt that
+//      caused it. Retry, correction and recovery all rest on that row.
+//   3. ONE ACTIVE PARENT PER CHILD, for this release, enforced by a claim
+//      document whose NAME is the child goal id and which is taken in the same
+//      transaction that creates the setup.
+//   4. THE PARENT IS NEVER A CONTRIBUTION TARGET. There is no callable that
+//      takes a setupId and a count. The only way a number reaches a combined
+//      goal is by being recorded against one of its activities, through the
+//      ordinary contribute page, under the ordinary membership, window and
+//      repeat-policy gates. Nothing below accepts a contribution.
 //
-// Everything below follows from that:
-//   * "atomic canonical child-and-parent credit" is satisfied by there being
-//     exactly ONE write — the existing wsfContribute transaction. The instant
-//     it commits, the parent's derived total includes it. There is no second
-//     write to fail, to retry, or to apply twice.
-//   * the existing (goal, uid, attemptId) idempotency cannot break, because no
-//     code here runs when a contribution is recorded or replayed.
-//   * a correction reaches the parent with NO new mechanism: wsfAdjustGoal
-//     moves a child's shard total by `delta`, and the parent is the sum of
-//     child shard totals, so the parent moves by exactly `delta`, once.
-//   * the parent cannot drift from the children, because there is only one
-//     number. Drift is not mitigated here; it is impossible.
+// The claim, the activation boundary, the parent's sharded counter and the
+// credit linkage are declared ABOVE wsfContribute — see the block headed
+// "THE CLAIM, THE ACTIVATION BOUNDARY, AND THE PARENT COUNTER" — because the
+// contribution transaction is where a credit is made and that is where the
+// rule belongs. This section holds the three callables: freeze, read, close.
 //
-// WHAT WAS REJECTED, and why, so nobody re-proposes it: a
-// wsfCombinedCounters/{setupId}/shards/{i} mirror incremented inside the
-// wsfContribute transaction would need, on the hot path, "which setups does
-// this goal belong to" — an extra read per contribution, or a denormalized
-// field on wsfGoals that has to be kept true — and wsfAdjustGoal would need a
-// parallel fan-out a future correction path could forget. Two numbers, two
-// places to forget. It would also re-introduce exactly the document contention
-// the ten-shard fan-out and the post-commit crossing claim exist to avoid.
+// WHAT WAS TRIED FIRST AND REFUSED, recorded so it is not re-proposed. The
+// parent had NO counter: its total was the sum of its children's LIFETIME
+// shards, derived at read time. It was elegant, it could not drift, and it was
+// wrong twice over — a setup activated after a child had taken repetitions
+// showed those repetitions immediately (silent backfill), and nothing stopped
+// one child feeding two active parents. "No parent counter" was never one of
+// the guarantees; it was a means, and it could not deliver them.
 //
-// New Admin-SDK-only collection (no firestore.rules change; the catch-all
-// deny at the bottom of the WSF section covers it — same position as
+// THE COST THAT WAS ACCEPTED, honestly. The parent now has a counter, so there
+// are two numbers where there was one, and they could in principle disagree.
+// What keeps them from disagreeing is that neither is ever written without the
+// other: the same transaction writes the child's shard, the parent's shard and
+// the linkage row, and the linkage row is what a recovery would rebuild the
+// parent from. The old design avoided drift by refusing to count correctly.
+//
+// New Admin-SDK-only collections (no firestore.rules change; the catch-all
+// deny at the bottom of the WSF section covers them — same position as
 // wsfGoals, wsfGoalCounters and wsfKioskStations):
 //   * wsfCombinedGoals/{setupId}
+//   * wsfCombinedGoalClaims/{goalId}
+//   * wsfCombinedCounters/{setupId}/shards/{goalId}_{i}
+//   * wsfCombinedCredits/{creditId}
 //
-// Every query below is a document read or an equality on a single field, so
+// Every access below is a document read or an equality on a single field, so
 // firestore.indexes.json is untouched too.
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -5138,42 +5644,10 @@ const MIN_COMBINED_CHILDREN = 2;
  */
 const MAX_COMBINED_CHILDREN = 6;
 
-/**
- * THE FROZEN RULE, version 1, written down rather than implied.
- *
- *   An activity goal is eligible for a combined setup only if its own window
- *   sits entirely inside the combined window:
- *     child.startsAt >= combined.startsAt AND child.endsAt <= combined.endsAt
- *
- * This is what makes the derivation exact. wsfContribute enforces the child's
- * own window on the server ("Goal has not started yet." / "Goal window has
- * ended."), so EVERY contribution that can ever exist on an eligible child
- * necessarily lands inside the combined window. A child's lifetime shard total
- * therefore IS its in-window contribution to the parent, and the parent needs
- * no timestamp filter, no range query and no composite index.
- *
- * The alternative — a combined window narrower than a child's — would force
- * counting from wsfContributions with a createdAt range: a composite index, a
- * query on the hot read path, and a second definition of "counted" that could
- * disagree with the shards. Rejected.
- *
- * The rule is checked at freeze time AND re-checked on every read, so a
- * hand-edited document cannot quietly widen what is counted.
- */
-type CombinedContributionRule = 'childWindowWithin';
-const COMBINED_CONTRIBUTION_RULE: CombinedContributionRule = 'childWindowWithin';
-
-/**
- * Version 1's whole conversion model: ONE REPETITION OF ANY ELIGIBLE ACTIVITY
- * COUNTS AS ONE UNIT OF THE COMBINED GOAL. No factor, no weighting, no
- * conversion table.
- *
- * There is deliberately no `repetitionFactor: 1` field — an unapplied stored
- * field is a trap for the next reader. If weighting is ever wanted it arrives
- * as contributionRuleVersion 2 with its own field, and every version-1 setup
- * keeps meaning exactly what it meant.
- */
-const COMBINED_CONTRIBUTION_RULE_VERSION = 1;
+// THE FROZEN RULE (COMBINED_CONTRIBUTION_RULE), its version, the setup
+// version and the claim machinery are all declared ABOVE wsfContribute, with
+// the rest of the credit rule. They are not repeated here: a second copy of a
+// constant that decides what counts is the first step to two answers.
 
 /**
  * The explicit eligible-repetition metadata, frozen at creation.
@@ -5202,12 +5676,16 @@ type FrozenChild = {
 };
 
 /**
- * The persisted setup. NO `sharedTotal`, NO `combinedTotal`, no counter
- * subcollection, no `reachedAt` — deliberately. Any stored total would be a
- * second number that can drift from the children.
+ * The persisted setup.
  *
- * `reachedAt` in particular is absent because a crossing cannot be claimed
- * honestly from a derived sum: it would need the same post-commit claim
+ * It still carries NO total of its own. The parent's number lives where every
+ * other total in this package lives — in sharded counter documents
+ * (wsfCombinedCounters/{setupId}/shards/{goalId}_{i}), written by the same
+ * transaction that writes the child's — so there is no field here for a
+ * background job to update, to forget, or to let drift.
+ *
+ * `reachedAt` is absent because a crossing cannot be claimed honestly from a
+ * total read outside a write: it would need the same post-commit claim
  * machinery recordTargetCrossing uses, on a read path with no write. "Reached
  * right now" is derived from combinedTotal >= target on the screen, which is
  * what every other surface already does.
@@ -5225,11 +5703,17 @@ type CombinedGoalDoc = {
   status: GoalStatus;
   contributionRule: CombinedContributionRule;
   contributionRuleVersion: number;
+  /** Which freeze this is. Every claim and every credit records it. */
+  version: number;
+  /** THE ACTIVATION BOUNDARY. Nothing earned before it ever counts here. */
+  activatedAt: FirebaseFirestore.Timestamp;
   children: FrozenChild[];
   /** The same ids, flat, so a later equality query needs no composite index. */
   childGoalIds: string[];
   frozenAt?: FirebaseFirestore.Timestamp;
   createdAt?: FirebaseFirestore.Timestamp;
+  closedAt?: FirebaseFirestore.Timestamp;
+  closedBy?: string;
 };
 
 /**
@@ -5245,6 +5729,14 @@ const COMBINED_CHILDREN_MESSAGE =
 const COMBINED_DUPLICATE_MESSAGE = 'Each activity may be listed once.';
 const COMBINED_WINDOW_MESSAGE =
   "Every activity's own period must sit inside the combined period.";
+/**
+ * ONE ACTIVE PARENT PER CHILD, for this release. The message says what to do
+ * about it without naming which activity: the Champion is looking at their own
+ * list and can see it, and a per-goal message would be a second string to keep
+ * true. Closing the other combined goal releases its activities.
+ */
+const COMBINED_CLAIMED_MESSAGE =
+  'One of these activities already feeds another combined goal. Close that one first.';
 
 function normalizeCombinedChildIds(v: unknown): string[] | null {
   if (!Array.isArray(v)) return null;
@@ -5368,6 +5860,15 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
     const setupRef = db.collection('wsfCombinedGoals').doc();
     const startsAt = Timestamp.fromDate(startsAtDate);
     const endsAt = Timestamp.fromDate(endsAtDate);
+    // THE ACTIVATION BOUNDARY, taken ONCE, before the transaction, so a
+    // transaction retry cannot move it. It is a concrete Timestamp rather
+    // than a server sentinel precisely because the contribution path has to
+    // COMPARE against it, and a sentinel cannot be compared.
+    //
+    // It is the server's own clock — the same clock wsfContribute reads with
+    // Timestamp.now() to enforce a window — so the two cannot disagree about
+    // which side of activation a repetition fell on.
+    const activatedAt = Timestamp.now();
 
     await db.runTransaction(async (tx) => {
       const membership = await readActiveMembership(tx, communityGroupId, uid);
@@ -5384,9 +5885,15 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
         );
       }
 
-      const snaps = await Promise.all(
-        childGoalIds.map((id) => tx.get(db.doc(`wsfGoals/${id}`)))
-      );
+      // The child goals and their claims, read together and BEFORE any write.
+      // Reading a claim inside this transaction is what makes the claim
+      // atomic: if another Champion's activation takes one of these children
+      // between this read and this commit, Firestore aborts one of the two
+      // transactions. Neither can win a child the other already won.
+      const [snaps, claimSnaps] = await Promise.all([
+        Promise.all(childGoalIds.map((id) => tx.get(db.doc(`wsfGoals/${id}`)))),
+        Promise.all(childGoalIds.map((id) => tx.get(combinedClaimRef(id)))),
+      ]);
 
       const children: FrozenChild[] = [];
       for (let i = 0; i < snaps.length; i++) {
@@ -5416,6 +5923,22 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
           throw new HttpsError('failed-precondition', COMBINED_WINDOW_MESSAGE);
         }
 
+        // ONE ACTIVE PARENT PER CHILD, for this release. Checked AFTER the
+        // community check above, so this can never answer a question about a
+        // goal in a community the caller is not a Champion of: such a goal has
+        // already left with the generic not-found.
+        //
+        // A RELEASED claim is not an obstacle — a closed setup gives its
+        // children back — and is overwritten below rather than left as a
+        // headstone.
+        const claimSnap = claimSnaps[i]!;
+        if (claimSnap.exists) {
+          const existing = claimSnap.data() as CombinedGoalClaimDoc;
+          if (existing.status === 'active') {
+            throw new HttpsError('failed-precondition', COMBINED_CLAIMED_MESSAGE);
+          }
+        }
+
         children.push({
           goalId,
           title: typeof goal.title === 'string' ? goal.title : '',
@@ -5441,6 +5964,15 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
         status: 'active' satisfies GoalStatus,
         contributionRule: COMBINED_CONTRIBUTION_RULE,
         contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+        // THE FROZEN ACTIVATION. `version` names this freeze; `activatedAt` is
+        // the instant it took effect, and is the boundary every credit is
+        // measured against. Target, window, rule version, child selection and
+        // the per-child repetition metadata above were all frozen at this same
+        // instant and under this same version, so a credit can always be read
+        // back against exactly what was agreed. Changing any of them is a new
+        // version with a new activation, never a reinterpretation of this one.
+        version: COMBINED_SETUP_VERSION,
+        activatedAt,
         children,
         childGoalIds,
         // When the rule and the window were frozen. Separate from createdAt
@@ -5449,9 +5981,143 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
         frozenAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
       });
+
+      // THE CLAIMS, in the SAME transaction as the setup. The setup and its
+      // claims exist together or not at all: there is no instant at which a
+      // setup is active over a child it has not claimed, and none at which a
+      // child is claimed by a setup that does not exist.
+      //
+      // Each claim carries the frozen boundary itself, not a pointer to it, so
+      // the contribution path decides a credit from ONE document read and can
+      // never be handed a setup that changed underneath it.
+      for (let i = 0; i < childGoalIds.length; i++) {
+        const childGoalId = childGoalIds[i]!;
+        const claim: CombinedGoalClaimDoc = {
+          goalId: childGoalId,
+          setupId: setupRef.id,
+          setupVersion: COMBINED_SETUP_VERSION,
+          communityGroupId,
+          status: 'active',
+          contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+          activatedAt,
+          windowStartsAt: startsAt,
+          windowEndsAt: endsAt,
+        };
+        const claimSnap = claimSnaps[i]!;
+        if (claimSnap.exists) {
+          // A released claim, taken over. `set` without merge so no field of
+          // the previous setup's claim survives into this one.
+          tx.set(combinedClaimRef(childGoalId), {
+            ...claim,
+            claimedAt: FieldValue.serverTimestamp(),
+            releasedAt: null,
+          });
+        } else {
+          // `create` so that a claim appearing between the read above and this
+          // commit fails the whole activation rather than overwriting someone
+          // else's. Belt as well as braces: the transactional read is already
+          // the brace.
+          tx.create(combinedClaimRef(childGoalId), {
+            ...claim,
+            claimedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
     });
 
     return { setupId: setupRef.id };
+  }
+);
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCloseCombinedGoal — end a setup and GIVE THE ACTIVITIES BACK.
+//
+// THIS SHIPS WITH THE CLAIM OR THE CLAIM IS A TRAP. A claim with no way to
+// release it would strand a Champion mid-event: one mistaken combined goal and
+// those activities could never be combined again, by anyone, ever. The claim
+// and its release are one feature.
+//
+// WHAT IT DOES NOT DO. It does not delete the setup, it does not delete a
+// claim, it does not touch a child goal, and above all it does not touch the
+// parent's counters or its credit rows. What was earned inside the window
+// stays earned and stays readable: closing a combined goal ends it, it does
+// not erase it. A released claim is left in place, marked released, so the
+// record of which setup held a child and when is still there to read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CloseCombinedGoalRequest = { setupId?: unknown };
+type CloseCombinedGoalResponse = { setupId: string; status: GoalStatus };
+
+export const wsfCloseCombinedGoal = onCall<CloseCombinedGoalRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<CloseCombinedGoalResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const setupId = normalizeStringId(request.data?.setupId);
+    if (!setupId) {
+      throw new HttpsError('invalid-argument', 'setupId is required.');
+    }
+
+    const db = getFirestore();
+    const setupRef = db.doc(`wsfCombinedGoals/${setupId}`);
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(setupRef);
+      // A setup that does not exist and one the caller has no authority over
+      // are the same answer, matching wsfAdjustGoal and wsfListGoals.
+      if (!snap.exists) notFound();
+      const setup = snap.data() as CombinedGoalDoc;
+      const communityGroupId = normalizeStringId(setup.communityGroupId);
+      if (!communityGroupId) notFound();
+
+      const membership = await readActiveMembership(tx, communityGroupId, uid);
+      if (!membership) notFound();
+      if (membership.role !== 'foundingChampion') notFound();
+
+      const rawIds = Array.isArray(setup.childGoalIds) ? setup.childGoalIds : [];
+      const childIds: string[] = [];
+      for (const raw of rawIds) {
+        const id = normalizeStringId(raw);
+        if (id && !childIds.includes(id)) childIds.push(id);
+      }
+
+      // Read every claim before writing anything, as the transaction requires.
+      const claimSnaps = await Promise.all(
+        childIds.map((id) => tx.get(combinedClaimRef(id)))
+      );
+
+      tx.set(
+        setupRef,
+        {
+          status: 'closed' satisfies GoalStatus,
+          closedAt: FieldValue.serverTimestamp(),
+          closedBy: uid,
+        },
+        { merge: true }
+      );
+
+      for (let i = 0; i < childIds.length; i++) {
+        const claimSnap = claimSnaps[i]!;
+        if (!claimSnap.exists) continue;
+        const claim = claimSnap.data() as CombinedGoalClaimDoc;
+        // ONLY THIS SETUP'S OWN CLAIMS. A child that has since been claimed by
+        // a different setup is not released by closing this one — that would
+        // let a stale close steal a live combined goal's child.
+        if (normalizeStringId(claim.setupId) !== setupId) continue;
+        if (claim.status !== 'active') continue;
+        tx.set(
+          combinedClaimRef(childIds[i]!),
+          { status: 'released' satisfies CombinedClaimStatus, releasedAt: FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+      }
+    });
+
+    return { setupId, status: 'closed' };
   }
 );
 
@@ -5482,8 +6148,23 @@ type CombinedActivity = {
   title: string;
   unit: string;
   target: number;
-  /** The child's summed shards. */
+  /**
+   * The ACTIVITY'S OWN total: its summed shards, its whole life, exactly the
+   * number wsfGoalPulse reports for it. Enrolling in a combined goal changed
+   * nothing about the activity, and this is the field that says so.
+   */
   total: number;
+  /**
+   * What this activity has contributed TO THIS COMBINED GOAL: post-activation
+   * credit only, read from the parent's own shards for this child.
+   *
+   * These two numbers are DIFFERENT on purpose, and the difference is the
+   * whole fix. An activity that had taken 500 repetitions before the Champion
+   * activated the combined goal reports total 500 and combinedContribution 0,
+   * and the screen says both. The old build reported 500 in the combined
+   * total, which was a backfill nobody performed.
+   */
+  combinedContribution: number;
   countsAs: 'repetition';
   status: GoalStatus;
 };
@@ -5495,14 +6176,23 @@ type CombinedGoalPulse = {
   title: string;
   unit: string;
   target: number;
-  /** Derived: the sum of the children's shard totals. Never stored. */
+  /**
+   * POST-ACTIVATION CREDIT ONLY: the sum of this setup's OWN shards, which
+   * hold exactly the repetitions that were credited to it by the contribution
+   * transaction after activation. It is never a sum of the children's lifetime
+   * counters, and it is zero the instant a setup is activated because nothing
+   * has been written to those shards yet.
+   */
   combinedTotal: number;
   /** ISO, as wsfListGoals already serializes a window. */
   startsAt: string;
   endsAt: string;
+  /** The instant this setup began counting. What `combinedTotal` is since. */
+  activatedAt: string;
   timezone: string;
   contributionRule: CombinedContributionRule;
   contributionRuleVersion: number;
+  version: number;
   activities: CombinedActivity[];
 };
 
@@ -5638,6 +6328,19 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
     const setupStartsAt = setup.startsAt;
     const setupEndsAt = setup.endsAt;
     if (!setupStartsAt?.toMillis || !setupEndsAt?.toMillis) notFound();
+    // A setup with no readable activation instant cannot say what its total is
+    // SINCE, and a total with no boundary is the defect this fixes. Refused
+    // with the same generic answer, rather than rendered without it.
+    const activatedAtMs = timestampMillis(setup.activatedAt);
+    if (activatedAtMs === null) notFound();
+    const setupVersion = setup.version;
+    if (
+      typeof setupVersion !== 'number' ||
+      !Number.isInteger(setupVersion) ||
+      setupVersion < 1
+    ) {
+      notFound();
+    }
     const timezone = normalizeIanaTimezone(setup.timezone) ?? '';
     const title = typeof setup.title === 'string' ? setup.title.trim() : '';
     const unit = typeof setup.unit === 'string' ? setup.unit.trim() : '';
@@ -5692,23 +6395,39 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
     const cached = combinedPulseCacheGet(setupId, now);
     if (cached) return cached;
 
-    // THE DERIVATION. Ten shard reads per child, batched in one pass by the
-    // helper wsfListGoals already uses. This is the only place a combined
-    // total exists, and it exists for the length of this response.
-    const totals = await sumGoalShardsForMany(childIds);
+    // TWO DERIVATIONS, and the difference between them is the fix.
+    //
+    //   `totals`        — each ACTIVITY's own lifetime shard total, the number
+    //                     wsfGoalPulse reports for it. The activity keeps its
+    //                     own goal, so the combined screen reports its own
+    //                     number for it.
+    //   `parentCredits` — what each activity has contributed TO THIS SETUP,
+    //                     from the setup's OWN shards. This, and only this, is
+    //                     what combinedTotal is made of. A child's lifetime
+    //                     total is never summed into the parent.
+    //
+    // Ten shard reads per child on each side, batched in one pass each, so at
+    // the six-child cap this is at most 120 shard reads — collapsed to one
+    // real read per setup per 2 s per instance by the cache above.
+    const [totals, parentCredits] = await Promise.all([
+      sumGoalShardsForMany(childIds),
+      sumCombinedShardsForChildren(setupId, childIds),
+    ]);
     const activities: CombinedActivity[] = [];
     let combinedTotal = 0;
     for (let i = 0; i < childIds.length; i++) {
       const goalId = childIds[i]!;
       const goal = children[i]!;
       const total = totals.get(goalId) ?? 0;
-      combinedTotal += total;
+      const combinedContribution = parentCredits.get(goalId) ?? 0;
+      combinedTotal += combinedContribution;
       activities.push({
         goalId,
         title: typeof goal.title === 'string' ? goal.title : '',
         unit: typeof goal.unit === 'string' ? goal.unit : '',
         target: typeof goal.target === 'number' ? goal.target : 0,
         total,
+        combinedContribution,
         countsAs: 'repetition',
         status: goal.status === 'closed' ? 'closed' : 'active',
       });
@@ -5724,9 +6443,11 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
       combinedTotal,
       startsAt: setupStartsAt.toDate().toISOString(),
       endsAt: setupEndsAt.toDate().toISOString(),
+      activatedAt: new Date(activatedAtMs).toISOString(),
       timezone,
       contributionRule: COMBINED_CONTRIBUTION_RULE,
       contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+      version: setupVersion,
       activities,
     };
     combinedPulseCacheSet(setupId, now, pulse);

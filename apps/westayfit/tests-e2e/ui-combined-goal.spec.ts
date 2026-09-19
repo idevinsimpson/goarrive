@@ -11,10 +11,17 @@
  *     fit inside the chosen period, names the ones that do not and why, reads
  *     the choice back before the one action, and produces a real address built
  *     from the origin this build is actually served from.
- *  3. THE STABLE URL. That exact address opens in a BRAND-NEW browser context
- *     with no session, no storage and no history, shows the shared total, and
- *     survives a reload — which is what proves the static export alias and the
- *     Hosting rewrite together.
+ *  3. THE STABLE URL, AND THE ACTIVATION BOUNDARY. That exact address opens in
+ *     a BRAND-NEW browser context with no session, no storage and no history.
+ *     It opens at ZERO, because nothing has been recorded since the combined
+ *     goal began; 20 and 15 are then recorded and it reaches 35 on its own
+ *     poll; and it survives a reload — which is what proves the static export
+ *     alias and the Hosting rewrite together.
+ *
+ *     THE ORDER HERE IS THE POINT. This spec used to record 20 and 15 BEFORE
+ *     activating and then expect 35 immediately. That was the silent backfill
+ *     the Director refused, written into a browser test as though it were the
+ *     requirement. A combined goal counts what is recorded after it begins.
  *  4. NO AUTHORITY ON THE URL. In that same fresh context there is no Manage
  *     entry, no display-authorization toggle, no setup form, no contribute
  *     action, and no uid anywhere in the page.
@@ -184,9 +191,12 @@ test('a Champion combines two activities, and the address opens cold, reloads, a
   await authorizeDisplay(page, goalB);
   await page.getByTestId('wsf-community-manage-close').click();
 
-  // 20 on one activity, 15 on the other. 35 together.
-  await recordOn(page, groupId, goalA, '20');
-  await recordOn(page, groupId, goalB, '15');
+  // DELIBERATELY NOTHING IS RECORDED YET. The combined goal is activated over
+  // two activities that are at zero, then the repetitions are recorded, then
+  // the screen is checked. The old version of this spec recorded 20 and 15
+  // BEFORE activating and expected 35 to appear on the spot — which was the
+  // silent backfill, written into a test as though it were the requirement.
+  // See the "OPENS AT ZERO" block below for the assertion that replaced it.
 
   await page.goto(`/community/${groupId}`);
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
@@ -260,8 +270,28 @@ test('a Champion combines two activities, and the address opens cold, reloads, a
   await expect(screen.getByTestId('wsf-combined-screen')).toBeVisible({ timeout: 25_000 });
   await expect(screen.getByTestId('wsf-combined-community')).toContainText('Expo Hall Movers');
   await expect(screen.getByTestId('wsf-combined-title-text')).toHaveText('Move together');
+
+  // ── IT OPENS AT ZERO ─────────────────────────────────────────────────────
+  // Nothing has been recorded since this combined goal began, so it says zero
+  // and says what it is counting since.
   await expect(screen.getByTestId('wsf-combined-shared-total')).toHaveText(
-    '35 of 2,000 movements'
+    '0 of 2,000 movements'
+  );
+  await expect(screen.getByTestId('wsf-combined-counting-since')).toContainText(
+    'Counting since'
+  );
+  await expect(screen.getByTestId(`wsf-combined-activity-counted-${goalA}`)).toHaveText(
+    '0 counted toward Move together'
+  );
+
+  // ── NOW RECORD 20 AND 15, AFTER ACTIVATION ───────────────────────────────
+  await recordOn(page, groupId, goalA, '20');
+  await recordOn(page, groupId, goalB, '15');
+
+  // The screen polls, so it arrives on its own. 35 together.
+  await expect(screen.getByTestId('wsf-combined-shared-total')).toHaveText(
+    '35 of 2,000 movements',
+    { timeout: 25_000 }
   );
   // Each activity keeps its OWN goal, and says so on the same screen.
   await expect(screen.getByTestId(`wsf-combined-activity-total-${goalA}`)).toHaveText(
@@ -270,11 +300,21 @@ test('a Champion combines two activities, and the address opens cold, reloads, a
   await expect(screen.getByTestId(`wsf-combined-activity-total-${goalB}`)).toHaveText(
     '15 of 1,000 push-ups'
   );
+  // And says separately what it counted toward the combined goal. Here the two
+  // numbers agree because both activities started at zero; they are different
+  // facts, and the callable suite pins the case where they differ.
+  await expect(screen.getByTestId(`wsf-combined-activity-counted-${goalA}`)).toHaveText(
+    '20 counted toward Move together'
+  );
+  await expect(screen.getByTestId(`wsf-combined-activity-counted-${goalB}`)).toHaveText(
+    '15 counted toward Move together'
+  );
 
   await screen.reload();
   await expect(screen.getByTestId('wsf-combined-screen')).toBeVisible({ timeout: 25_000 });
   await expect(screen.getByTestId('wsf-combined-shared-total')).toHaveText(
-    '35 of 2,000 movements'
+    '35 of 2,000 movements',
+    { timeout: 25_000 }
   );
 
   // ── 4. NO AUTHORITY ON THE URL ───────────────────────────────────────────

@@ -48,11 +48,17 @@ export type CandidateChild = {
 };
 
 /**
- * WHY THIS ONE RULE. `wsfContribute` enforces each goal's own window on the
- * server, so every contribution that can ever exist on an eligible child
- * necessarily lands inside the combined window. A child's lifetime total is
- * therefore exactly its contribution to the parent, and the parent needs no
- * timestamp filter and no second definition of "counted".
+ * WHY THIS ONE RULE. An activity whose own period runs outside the combined
+ * period could take repetitions the combined goal was never meant to count, so
+ * it may not be combined at all. The rule bounds WHICH activities can be
+ * chosen; it is not what decides which repetitions count.
+ *
+ * WHAT DECIDES A COUNT, so nobody reads this rule as if it did: the server
+ * claims each chosen activity for this combined goal at one instant, and only
+ * repetitions recorded AFTER that instant, inside the frozen period, are ever
+ * credited. An activity that already had a total keeps it — none of it moves
+ * into the combined goal. Nothing here is the authority for that either; it
+ * is `wsfContribute`'s own transaction.
  *
  * Bounds are INCLUSIVE at both ends: an activity whose window is exactly the
  * combined window is eligible.

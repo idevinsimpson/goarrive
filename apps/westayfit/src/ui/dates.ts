@@ -202,6 +202,35 @@ export function formatReachedOn(iso: string, opts?: DateOptions & { now?: Date }
   return `Reached ${label}`;
 }
 
+/**
+ * "Counting since Sep 19" — the instant a combined goal began counting, in its
+ * own zone, on exactly the rule formatReachedOn uses for the year.
+ *
+ * It exists because a combined goal's total is what has been recorded SINCE
+ * its activation, and a number with no stated boundary is how the first
+ * implementation came to show repetitions nobody performed for it. An
+ * unparsable instant or an unusable zone withholds the label (null) rather
+ * than naming a day in the wrong calendar.
+ */
+export function formatCountingSince(
+  iso: string,
+  opts?: DateOptions & { now?: Date }
+): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const zone = resolveZone(opts);
+  if (!zone.ok) return null;
+  const [dy] = ymd(d, opts?.locale, zone.timeZone).split('-');
+  const [ny] = ymd(opts?.now ?? new Date(), opts?.locale, zone.timeZone).split('-');
+  const label = new Intl.DateTimeFormat(opts?.locale, {
+    timeZone: zone.timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(dy === ny ? {} : { year: 'numeric' as const }),
+  }).format(d);
+  return `Counting since ${label}`;
+}
+
 /** "September 2026" */
 export function formatMonthYear(d: Date): string | null {
   if (Number.isNaN(d.getTime())) return null;
