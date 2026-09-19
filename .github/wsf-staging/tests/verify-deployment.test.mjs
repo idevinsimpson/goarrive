@@ -22,7 +22,13 @@ const NAMES = [
   'wsfpreviewcommunity','wsfreinstatemember','wsfremovemember','wsfresetjoincode','wsfsaveprofile',
   'wsfsendpasswordresetemail','wsfsendverificationemail',
 ];
-const ALL = [...NAMES, 'wsfsetgoaldisplayauthorization', 'wsfgoalrecentadditions'];
+// The seven this candidate adds. Named here rather than imported so the
+// fixture and the script have to be changed deliberately, together.
+const STATION = [
+  'wsfstationrequestpairing','wsfstationpairingstatus','wsfapprovestation',
+  'wsfstationclaimpairing','wsfstationstate','wsfliststations','wsfrevokestation',
+];
+const ALL = [...NAMES, 'wsfsetgoaldisplayauthorization', 'wsfgoalrecentadditions', ...STATION];
 
 function fn(n) { return { name: `projects/westayfit-staging/locations/us-central1/functions/${n}` }; }
 function svc(n, extra = {}) {
@@ -69,18 +75,23 @@ await test('a complete deploy passes and records the created function', async ()
   server.close();
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /VERIFY=pass/);
-  assert.deepEqual(r.receipt.inventory.createdThisDeploy, ['wsfgoalrecentadditions', 'wsfsetgoaldisplayauthorization']);
+  assert.deepEqual(
+    r.receipt.inventory.createdThisDeploy,
+    ['wsfgoalrecentadditions', 'wsfsetgoaldisplayauthorization', ...STATION].sort()
+  );
   assert.equal(r.receipt.candidateCallablePresent, true);
+  for (const n of STATION) assert.equal(r.receipt.candidateCallablesPresent[n], true, n);
 });
 
 await test("the candidate's new callable being absent fails, with its own message", async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
-  const without = ALL.filter((n) => n !== 'wsfgoalrecentadditions');
+  // One of the seven missing is enough to fail, and it is named.
+  const without = ALL.filter((n) => n !== 'wsfstationstate');
   const { server, base } = await startMock({ functions: without, services: without.map((n) => svc(n)) });
   const r = await run(base, beforeFile(d), d);
   server.close();
   assert.equal(r.code, 1);
-  assert.match(r.err, /wsfgoalrecentadditions absent — the candidate's new callable did not deploy/);
+  assert.match(r.err, /wsfstationstate absent — the candidate's new callable did not deploy/);
 });
 
 await test('a MISSING before-inventory is an error, not an empty project', async () => {
@@ -194,15 +205,20 @@ await test('the new service transport is reported, not treated as a failure', as
 
 await test("the candidate's new service transport is reported the same way, and never counted as pre-existing drift", async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
-  const services = ALL.map((n) => (n === 'wsfgoalrecentadditions' ? svc(n, { invokerIamDisabled: false }) : svc(n)));
+  const services = ALL.map((n) =>
+    n === 'wsfstationstate' ? svc(n, { invokerIamDisabled: false }) : svc(n)
+  );
   const { server, base } = await startMock({ services });
   const r = await run(base, beforeFile(d), d);
   server.close();
   assert.equal(r.code, 0, 'the candidate service transport state alone must not fail the deploy verification');
-  assert.equal(r.receipt.candidateServiceTransport, 'invoker_iam_check_enabled');
+  assert.equal(r.receipt.candidateServiceTransports.wsfstationstate, 'invoker_iam_check_enabled');
   assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true);
+  assert.deepEqual(r.receipt.candidateServiceTransportNeedingApproval, ['wsfstationstate']);
+  // The one that needs looking at is named; the rest are reported as fine.
+  assert.equal(r.receipt.candidateServiceTransports.wsfliststations, 'invoker_iam_check_disabled');
   assert.deepEqual(r.receipt.preExistingTransportDrifted, []);
-  assert.match(r.out, /CANDIDATE_SERVICE_TRANSPORT=invoker_iam_check_enabled/);
+  assert.match(r.out, /CANDIDATE_SERVICE_TRANSPORT=.*wsfstationstate:invoker_iam_check_enabled/);
 });
 
 console.log(`\nverify-deployment: ${passed} passed`);
