@@ -7422,6 +7422,11 @@ type TurnEntryDoc = {
    * would be a read per station per second. It names a movement, never a
    * person. */
   activityUnit: string;
+  /** What the activity is CALLED ("Expo Push-ups"), from the same frozen list.
+   * A unit alone does not tell somebody at a multi-activity event which of the
+   * three things on offer this turn is for. Also a name of an activity, never
+   * of a person. */
+  activityTitle: string;
   communityGroupId: string;
   /** Who is in the line. Never published — see hallAssignment. */
   uid: string;
@@ -7754,6 +7759,9 @@ type TurnHallAssignment = {
    * address. This names an activity, not a person, and says nothing about
    * anyone still waiting. */
   activityUnit: string;
+  /** And what it is CALLED, so the room can read which of the event's
+   * activities this turn is. */
+  activityTitle: string;
 };
 
 /** The ten-second result. A CODE and a number — never a name. */
@@ -7812,6 +7820,7 @@ function hallAssignment(entry: TurnEntryDoc, now: number): TurnHallAssignment | 
     state: status,
     readySecondsLeft,
     activityUnit: typeof entry.activityUnit === 'string' ? entry.activityUnit : '',
+    activityTitle: typeof entry.activityTitle === 'string' ? entry.activityTitle : '',
   };
 }
 
@@ -8096,6 +8105,7 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
         setupId: event.setupId,
         goalId,
         activityUnit: event.activities.find((a) => a.goalId === goalId)?.unit ?? '',
+        activityTitle: event.activities.find((a) => a.goalId === goalId)?.title ?? '',
         communityGroupId: event.communityGroupId,
         uid,
         calledName,
@@ -8173,6 +8183,8 @@ type MyTurnResponse = {
     /** What it counts, so their phone runs the same follow-along the screen
      * runs. */
     activityUnit: string;
+    /** And what it is called, so they can see which activity they are up for. */
+    activityTitle: string;
     /** How many are in front of them. A count, never a list. */
     ahead: number;
     /** Which screen to walk to, by its visible label. Null until assigned. */
@@ -8256,6 +8268,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
         status,
         goalId: entry.goalId,
         activityUnit: typeof entry.activityUnit === 'string' ? entry.activityUnit : '',
+        activityTitle: typeof entry.activityTitle === 'string' ? entry.activityTitle : '',
         ahead,
         stationLabel: entry.assignedStationLabel ?? null,
         readySecondsLeft,

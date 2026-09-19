@@ -35,7 +35,11 @@ import { expect, test, type Page } from '@playwright/test';
 // Re-laying the Manage sheet out at four viewports is real work on top of a
 // full sign-up, two goals and a community, and the default 30 s budget is not
 // enough for it.
-test.describe.configure({ timeout: 180_000 });
+// 300s, not 180s. The combined seam reads both ledgers before the turn,
+// drives two browser contexts through it, and reads both again from cold to
+// prove nothing was credited twice. It is a long test because it is checking
+// arithmetic across two documents and a reload, not because it is idle.
+test.describe.configure({ timeout: 300_000 });
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
@@ -585,6 +589,18 @@ test('a combined event: the station is on one activity, the person picks the oth
     await page.getByTestId(`wsf-kiosk-stations-approve-${goalA}`).click();
     await expect(stationPage.getByTestId('wsf-station-screen')).toBeVisible({ timeout: 30_000 });
 
+    // ---- BASELINES, BEFORE ANYBODY HAS MOVED -----------------------------
+    // Absolute numbers after the fact only prove the arithmetic if the start
+    // is known. It is read, not assumed.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/community/${groupId}`);
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalA}`)).toContainText('0 of');
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalB}`)).toContainText('0 of');
+    await page.goto(`/combined/${setupId}`);
+    await expect(page.getByTestId('wsf-combined-screen')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-combined-screen')).toContainText('0 of 2,000 movements');
+
     // ---- THE PERSON PICKS THE OTHER ACTIVITY -----------------------------
     // A phone, because everything from here is a phone screen. The Champion
     // tools above were driven at this spec's default width; a capture named
@@ -629,6 +645,35 @@ test('a combined event: the station is on one activity, the person picks the oth
     // assertion that passes for squats too would prove nothing. The claim is
     // settled below, by what actually gets recorded.
     await expect(stationPage.getByTestId('wsf-station-player')).toBeVisible({ timeout: 20_000 });
+
+    // AND IT SAYS SO, BEFORE ANYTHING IS RECORDED. The screen is enrolled on
+    // SQUATS; the turn is Expo Push-ups, and the screen names it — a room with
+    // three activities running at once cannot be asked to infer which one a
+    // stick figure is doing.
+    await expect(stationPage.getByTestId('wsf-station-turn-activity')).toHaveText(
+      'Expo Push-ups'
+    );
+    await expect(stationPage.getByTestId('wsf-station-turn-activity-unit')).toHaveText(
+      'Counted in push-ups'
+    );
+    await expect(stationPage.getByTestId('wsf-station-turn-record')).toContainText(
+      'How many push-ups did they do?'
+    );
+    // The same on the phone of the person whose turn it is.
+    await expect(page.getByTestId('wsf-queue-turn-activity')).toHaveText('Expo Push-ups');
+    await expect(page.getByTestId('wsf-queue-turn-activity-unit')).toHaveText(
+      'Counted in push-ups'
+    );
+
+    // AND IT IS RUNNING PUSH-UPS, SAID IN WORDS. At the ready step the
+    // player's copy is the same for every movement, so the round is started:
+    // the count-in names the activity, and on this screen — enrolled on
+    // SQUATS — it says push-ups.
+    await stationPage.getByTestId('wsf-station-move-start').click();
+    await expect(stationPage.getByTestId('wsf-station-move-step-rule')).toContainText('push-ups', {
+      timeout: 20_000,
+    });
+    await expect(stationPage.getByTestId('wsf-station-move-step-rule')).not.toContainText('squats');
     await snap(stationPage, 'combined-1280-station-running-the-chosen-activity');
 
     await stationPage.getByTestId('wsf-station-turn-count').fill('12');
@@ -655,6 +700,12 @@ test('a combined event: the station is on one activity, the person picks the oth
     await expect(page.getByTestId('wsf-queue-not-in-line')).not.toContainText('timed out');
     await snap(page, 'combined-390-receipt-for-the-chosen-activity');
 
+    // THE HALL PRINTS NO NAME once the turn is done. The ten-second clear
+    // itself is proved in queue-call-by-name, which waits it out in full; this
+    // spec is about the combined ledger and does not repeat that wait.
+    const hallAfter = await stationPage.evaluate(() => document.body.innerText);
+    expect(hallAfter, 'the hall still shows the name').not.toContain('Rune');
+
     // ---- BOTH TOTALS ROSE, AND EACH ROSE ONCE ----------------------------
     // THE SEAM THIS WHOLE TEST EXISTS FOR. One recording at a station has to
     // credit the CHILD the person chose and the PARENT the event is counting,
@@ -680,6 +731,19 @@ test('a combined event: the station is on one activity, the person picks the oth
     });
     await expect(page.getByTestId('wsf-combined-screen')).toContainText('movements');
     await snap(page, 'combined-390-parent-total-rose-once');
+
+    // ---- AND ONCE IS ONCE -------------------------------------------------
+    // One canonical attempt, one credit. Read again from cold — a second
+    // credit for the same attempt would show here as 24, on either ledger.
+    await page.reload();
+    await expect(page.getByTestId('wsf-combined-screen')).toContainText('12', { timeout: 25_000 });
+    await expect(page.getByTestId('wsf-combined-screen')).not.toContainText('24');
+    await page.goto(`/community/${groupId}`);
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalB}`)).toContainText('12 of', {
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalB}`)).not.toContainText('24');
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalA}`)).toContainText('0 of');
   } finally {
     await stationContext.close();
   }

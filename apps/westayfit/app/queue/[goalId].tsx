@@ -81,6 +81,7 @@ type MyTurn = {
   status: TurnStatus;
   goalId: string;
   activityUnit: string;
+  activityTitle: string;
   ahead: number;
   stationLabel: string | null;
   readySecondsLeft: number | null;
@@ -642,6 +643,21 @@ export default function QueueScreen() {
       */}
       {turn.status === 'active' ? (
         <View testID="wsf-queue-player">
+          {/*
+            WHICH ACTIVITY, on the phone too. They chose it several screens
+            ago; at an event with three of them running at once, the screen
+            they are following along on should say which one it is.
+          */}
+          {turn.activityTitle ? (
+            <Text style={kit.cardTitle} testID="wsf-queue-turn-activity" {...SUBHEADING}>
+              {turn.activityTitle}
+            </Text>
+          ) : null}
+          {turn.activityUnit ? (
+            <Text style={kit.caption} testID="wsf-queue-turn-activity-unit">
+              {`Counted in ${turn.activityUnit}`}
+            </Text>
+          ) : null}
           <FollowAlongCard
             session={session}
             compact
@@ -663,7 +679,7 @@ export default function QueueScreen() {
       {turn.status === 'active' ? (
         <View style={kit.card} testID="wsf-queue-record-panel">
           <Text style={kit.cardTitle} {...SUBHEADING}>
-            How many did you do?
+            {turn.activityUnit ? `How many ${turn.activityUnit} did you do?` : 'How many did you do?'}
           </Text>
           <Text style={kit.body}>
             You can finish here or at the screen — it is the same turn either way, and it is
@@ -683,7 +699,9 @@ export default function QueueScreen() {
             keyboardType="number-pad"
             inputMode="numeric"
             maxLength={6}
-            accessibilityLabel="How many"
+            accessibilityLabel={
+              turn.activityUnit ? `How many ${turn.activityUnit}` : 'How many'
+            }
           />
           <Pressable
             onPress={() => void onRecord()}

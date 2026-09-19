@@ -986,6 +986,23 @@ export default function StationScreen() {
           <View style={turnRunningWide ? styles.turnColumns : null}>
             {action === 'complete' ? (
               <View testID="wsf-station-player">
+              {/*
+                WHICH ACTIVITY THIS TURN IS FOR, said before the movement.
+                At a multi-activity event "Ready when you are" above a stick
+                figure does not tell the person in front of the screen — or the
+                room — which of the three things on offer they are up for. The
+                server assigned it; the screen names it.
+              */}
+              {queue?.assigned?.activityTitle ? (
+                <Text style={styles.turnActivityTitle} testID="wsf-station-turn-activity">
+                  {queue.assigned.activityTitle}
+                </Text>
+              ) : null}
+              {assignedUnit ? (
+                <Text style={styles.turnActivityUnit} testID="wsf-station-turn-activity-unit">
+                  {`Counted in ${assignedUnit}`}
+                </Text>
+              ) : null}
                 <FollowAlongCard
                   session={session}
                   wide={wide}
@@ -1007,7 +1024,9 @@ export default function StationScreen() {
 
               {action === 'complete' ? (
                 <View style={styles.turnRecord} testID="wsf-station-turn-record">
-                  <Text style={styles.queueEyebrow}>How many did they do?</Text>
+                  <Text style={styles.queueEyebrow}>
+                {assignedUnit ? `How many ${assignedUnit} did they do?` : 'How many did they do?'}
+              </Text>
                   <TextInput
                     value={turnCount}
                     onChangeText={(next) => {
@@ -1021,7 +1040,9 @@ export default function StationScreen() {
                     keyboardType="number-pad"
                     inputMode="numeric"
                     maxLength={6}
-                    accessibilityLabel="How many did they do?"
+                    accessibilityLabel={
+                  assignedUnit ? `How many ${assignedUnit} did they do?` : 'How many did they do?'
+                }
                   />
                 </View>
               ) : null}
@@ -1305,6 +1326,21 @@ const styles = StyleSheet.create({
   turnControls: { alignItems: 'center', gap: 14, minWidth: 0, flexShrink: 1 },
   qrRail: { flexDirection: 'column', flexGrow: 0, flexShrink: 0, width: 250, gap: 10 },
   servingNameRunning: { fontSize: 44, lineHeight: 50 },
+  turnActivityTitle: {
+    color: '#F7F5F0',
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  turnActivityUnit: {
+    color: PROGRESS_GREEN,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+  },
   queuePhone: { alignSelf: 'stretch' },
   queueEyebrow: {
     color: PROGRESS_GREEN,

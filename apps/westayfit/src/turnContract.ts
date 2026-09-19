@@ -76,6 +76,9 @@ export type HallAssignment = {
    * station cannot infer it from its own address. Names an activity, never a
    * person. */
   activityUnit: string;
+  /** And what it is CALLED, so a room full of people doing three different
+   * things can read which one this turn is. */
+  activityTitle: string;
 };
 
 /** The ten-second result. A code and a number — never a name. */

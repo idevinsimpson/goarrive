@@ -50,7 +50,7 @@ function hall(overrides: Partial<HallState> = {}): HallState {
 describe('what a screen in a room may show', () => {
   test('a hall state carries exactly five keys, and none of them is a list', () => {
     const state = hall({
-      assigned: { code: 'K7P', calledName: 'Sam', state: 'assigned', readySecondsLeft: 40, activityUnit: 'squats' },
+      assigned: { code: 'K7P', calledName: 'Sam', state: 'assigned', readySecondsLeft: 40, activityUnit: 'squats', activityTitle: 'Expo Squats' },
       result: null,
       waitingCount: 12,
     });
@@ -72,6 +72,7 @@ describe('what a screen in a room may show', () => {
     // people who chose different activities and the screen has to know which
     // movement to run. It names an activity, not a person.
     expect(Object.keys(state.assigned!).sort()).toEqual([
+      'activityTitle',
       'activityUnit',
       'calledName',
       'code',
@@ -84,14 +85,14 @@ describe('what a screen in a room may show', () => {
     expect(hallVisibleNames(hall())).toEqual([]);
     expect(
       hallVisibleNames(
-        hall({ assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats' } })
+        hall({ assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats', activityTitle: 'Expo Squats' } })
       )
     ).toEqual(['Sam']);
     // A state hand-built with a waiting list bolted onto it still prints one
     // name: there is no path from a list to the screen.
     const smuggled = {
       ...hall({
-        assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats' },
+        assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats', activityTitle: 'Expo Squats' },
       }),
       waiting: [
         { calledName: 'Ada', code: 'B2C' },
@@ -116,7 +117,7 @@ describe('what a screen in a room may show', () => {
     expect(
       announceHallTurn(
         hall({
-          assigned: { code: 'K7P', calledName: 'Sam', state: 'assigned', readySecondsLeft: 44, activityUnit: 'squats' },
+          assigned: { code: 'K7P', calledName: 'Sam', state: 'assigned', readySecondsLeft: 44, activityUnit: 'squats', activityTitle: 'Expo Squats' },
         })
       )
     ).toBe('Sam · K7P — it’s your turn at Station 1.');
@@ -124,14 +125,14 @@ describe('what a screen in a room may show', () => {
       announceHallTurn(
         hall({
           stationLabel: '',
-          assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats' },
+          assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats', activityTitle: 'Expo Squats' },
         })
       )
     ).toBe('Sam · K7P — ready.');
     expect(
       announceHallTurn(
         hall({
-          assigned: { code: 'K7P', calledName: 'Sam', state: 'active', readySecondsLeft: null, activityUnit: 'squats' },
+          assigned: { code: 'K7P', calledName: 'Sam', state: 'active', readySecondsLeft: null, activityUnit: 'squats', activityTitle: 'Expo Squats' },
         })
       )
     ).toBe('Sam · K7P — running now at Station 1.');
@@ -168,19 +169,19 @@ describe('the state machine', () => {
     expect(
       stationAction(
         hall({
-          assigned: { code: 'K7P', calledName: 'Sam', state: 'assigned', readySecondsLeft: 12, activityUnit: 'squats' },
+          assigned: { code: 'K7P', calledName: 'Sam', state: 'assigned', readySecondsLeft: 12, activityUnit: 'squats', activityTitle: 'Expo Squats' },
         })
       )
     ).toBe('awaitReady');
     expect(
       stationAction(
-        hall({ assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats' } })
+        hall({ assigned: { code: 'K7P', calledName: 'Sam', state: 'ready', readySecondsLeft: null, activityUnit: 'squats', activityTitle: 'Expo Squats' } })
       )
     ).toBe('start');
     expect(
       stationAction(
         hall({
-          assigned: { code: 'K7P', calledName: 'Sam', state: 'active', readySecondsLeft: null, activityUnit: 'squats' },
+          assigned: { code: 'K7P', calledName: 'Sam', state: 'active', readySecondsLeft: null, activityUnit: 'squats', activityTitle: 'Expo Squats' },
         })
       )
     ).toBe('complete');

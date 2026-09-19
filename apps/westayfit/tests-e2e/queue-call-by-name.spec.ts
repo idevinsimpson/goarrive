@@ -109,7 +109,12 @@ async function shot(
 // test itself declares, so it expires mid-journey and reports whichever
 // assertion it happened to be on rather than a real failure. Raising the
 // budget changes no assertion.
-test.describe.configure({ timeout: 180_000 });
+// 300s, not 180s. These journeys drive TWO browser contexts through a whole
+// turn and then photograph four phone states at three widths each. Nothing
+// here waits on a guess — the 10-second hall clear is waited out in full,
+// because "cleared" is a claim about what is gone — and the budget is raised
+// to fit the work rather than the work trimmed to fit the budget.
+test.describe.configure({ timeout: 300_000 });
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
 const PASSWORD = 'queue-secret-1';

@@ -392,7 +392,11 @@ const styles = StyleSheet.create({
   figureWide: { width: 320, height: 384 },
   // THE VENUE FIGURE, sized to the room now that the movement owns the width
   // the attract columns used to take.
-  figureVenue: { width: 210, height: 252 },
+  // 160, not 210. The venue now also carries the turn's activity title and
+  // its counting cue above the movement — which is what a person at a
+  // multi-activity event needs — and the canvas still does not scroll. The
+  // stage gives the height back; the controls keep their floor.
+  figureVenue: { width: 160, height: 192 },
   figureCompact: { width: 128, height: 154 },
   control: { minHeight: 56 },
   // THE VENUE GROUND. No white rectangle: the hall screen IS the card, so the
@@ -421,8 +425,8 @@ const styles = StyleSheet.create({
   },
   venueTimer: {
     color: '#F7F5F0',
-    fontSize: 96,
-    lineHeight: 102,
+    fontSize: 80,
+    lineHeight: 86,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
     textAlign: 'center',
