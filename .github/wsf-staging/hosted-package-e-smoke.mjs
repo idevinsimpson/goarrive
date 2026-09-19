@@ -1492,6 +1492,209 @@ async function caseDynamicRouteReload() {
   return null;
 }
 
+/**
+ * THE TURN CONTRACT, HOSTED.
+ *
+ * Until this row existed the hosted suite had NOTHING for the turn journey —
+ * not one reference to wsfEventContext, wsfJoinTurnLine, wsfTurnReady,
+ * wsfMyTurn, wsfCallNext, wsfStartTurn, wsfCompleteTurn or wsfApproveStation.
+ * Every claim about the queue rested on emulator evidence, which this harness
+ * does not accept as hosted evidence, so "the queue works on staging" could
+ * not be said truthfully either way.
+ *
+ * WHAT IT PROVES, in the order a room meets it: a Champion enrols TWO screens
+ * on one event; a participant on an INDEPENDENT identity gets the event's
+ * activities, is NOT in the line merely for having looked, joins explicitly,
+ * is called, is the only one who may say ready, runs the turn on the screen,
+ * and is recorded exactly once against the activity they chose and once
+ * against the combined parent — with the activity they did NOT choose left
+ * alone. Then the screen clears.
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO. It never asserts a service is reachable by
+ * probing it with an invalid payload; every call here is a real one with a
+ * real identity. A transport failure and an application refusal are different
+ * things and this row reports which it hit.
+ *
+ * WHILE THE TWELVE PARTICIPANT/CHAMPION CALLABLES ARE TRANSPORT-BLOCKED THIS
+ * ROW FAILS, and that is the point: it turns "the queue is blocked" from a
+ * sentence somebody has to remember into a row the board prints. It is
+ * isolated, so its failure is its own row and every other case still runs.
+ */
+const TURN_COUNT = 12;
+
+/** Names what a call hit, so a closed door is never read as a refusal. */
+function turnCallFailure(step, response) {
+  if (response.ok) return null;
+  const error = response.body?.error;
+  const status = typeof error?.status === 'string' ? error.status : `HTTP ${response.status}`;
+  const answeredByHandler = !!error && typeof error === 'object' && typeof error.status === 'string';
+  const kind = answeredByHandler ? 'application' : 'TRANSPORT';
+  return `${step}: ${kind} refusal (${status})`;
+}
+
+async function turnCall(step, name, data, idToken = null) {
+  const response = await callFunction(name, data, idToken);
+  const failure = turnCallFailure(step, response);
+  if (failure) throw new Error(failure);
+  return callableData(response);
+}
+
+async function caseTurnContract() {
+  // Two activities, because the combined parent needs two children and the
+  // whole point of one assertion below is that the UNCHOSEN one stays still.
+  const fx = await seedFixture('turn', 2);
+  const [activityA, activityB] = fx.goalIds;
+  const championToken = await signInToken(fx.champion);
+  const memberToken = await signInToken(fx.member);
+  const outsiderToken = await signInToken(fx.outsider);
+
+  // ── THE COMBINED EVENT ────────────────────────────────────────────────────
+  const now = Date.now();
+  const combined = await turnCall('create combined goal', 'wsfCreateCombinedGoal', {
+    communityGroupId: fx.groupId,
+    title: `Hosted turn ${runTag}`,
+    unit: 'movements',
+    target: 2000,
+    startsAt: new Date(now - 60_000).toISOString(),
+    endsAt: new Date(now + 3_600_000).toISOString(),
+    timezone: 'UTC',
+    childGoalIds: [activityA, activityB],
+  }, championToken);
+  assert(typeof combined?.setupId === 'string' && combined.setupId, 'combined setup id missing');
+  trackDoc(`wsfCombinedGoals/${combined.setupId}`);
+
+  // ── TWO SCREENS, ENROLLED THE WAY A CHAMPION ENROLS THEM ──────────────────
+  const stations = [];
+  for (const slot of [1, 2]) {
+    const pairing = await turnCall(`station ${slot} pairing`, 'wsfStationRequestPairing', { goalId: activityA });
+    assert(typeof pairing?.code === 'string', `station ${slot} pairing returned no code`);
+    trackDoc(`wsfKioskPairings/${pairing.pairingId}`);
+    // The Champion approves. This is wsfApproveStation — one of the twelve.
+    const approved = await turnCall(`station ${slot} approval`, 'wsfApproveStation', {
+      goalId: activityA, code: pairing.code, slot,
+    }, championToken);
+    assert(approved?.slot === slot, `station ${slot} approved into the wrong slot`);
+    trackDoc(`wsfKioskStations/${approved.stationId}`);
+    // Only the screen that asked may claim, and only it receives the secret.
+    const claimed = await turnCall(`station ${slot} claim`, 'wsfStationClaimPairing', {
+      pairingId: pairing.pairingId,
+    });
+    assert(typeof claimed?.secret === 'string' && claimed.secret, `station ${slot} got no secret`);
+    assert(claimed.stationId === approved.stationId, `station ${slot} claimed a different station`);
+    stations.push({ slot, stationId: claimed.stationId, secret: claimed.secret });
+  }
+  const [stationOne, stationTwo] = stations;
+
+  // The enrolled screen knows its event without being told who is waiting.
+  const enrolled = await turnCall('station state', 'wsfStationState', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(enrolled?.goalId === activityA, 'the enrolled station is on the wrong goal');
+
+  // ── THE PARTICIPANT, ON AN IDENTITY OF THEIR OWN ──────────────────────────
+  const context = await turnCall('event context', 'wsfEventContext', { goalId: activityA }, memberToken);
+  const offered = (context?.activities || []).map((a) => a.goalId).sort();
+  assert(offered.length === 2, `a combined event must offer both activities; it offered ${offered.length}`);
+  assert(offered.includes(activityA) && offered.includes(activityB), 'the event did not offer both activities');
+
+  // LOOKING IS NOT JOINING. Reading the event must leave the line untouched.
+  const beforeJoin = await turnCall('my turn before joining', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(!beforeJoin?.turn, 'reading the event put somebody in the line; a scan must never enqueue');
+
+  const joined = await turnCall('join the line', 'wsfJoinTurnLine', {
+    goalId: activityA, calledName: 'A.L.',
+  }, memberToken);
+  assert(typeof joined?.entryId === 'string' && joined.entryId, 'joining returned no entry');
+  assert(joined.alreadyInLine === false, 'the first join reported an existing place');
+  trackDoc(`wsfTurnEntries/${joined.entryId}`);
+
+  const afterJoin = await turnCall('my turn after joining', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(afterJoin?.turn?.entryId === joined.entryId, 'the phone cannot see the place it just took');
+
+  // ── THE CALL, AND WHO MAY ANSWER IT ───────────────────────────────────────
+  const called = await turnCall('call next', 'wsfCallNext', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(called?.called === true, 'the station called next and nobody was assigned');
+  assert(called.assigned?.code === joined.code, 'the screen is showing a different code');
+
+  // PRIVACY. A number of people waiting, never a list, at any depth.
+  assert(typeof called.waitingCount === 'number', 'the hall did not report a waiting count');
+  const hallJson = JSON.stringify(called);
+  assert(!hallJson.includes(fx.member.email), "the hall disclosed a participant's email");
+  assert(!hallJson.includes(fx.member.uid), "the hall disclosed a participant's uid");
+
+  // TWO STATIONS CANNOT CLAIM THE SAME TURN. The second screen calls into the
+  // same event and must not be handed the person already assigned.
+  const second = await turnCall('second station calls next', 'wsfCallNext', {
+    stationId: stationTwo.stationId, secret: stationTwo.secret,
+  });
+  assert(
+    second?.assigned?.code !== joined.code,
+    'two stations were handed the same turn'
+  );
+  assert(
+    second?.called === false,
+    'the second screen reported calling somebody when the only participant was already assigned'
+  );
+
+  // ONLY THE ASSIGNED PARTICIPANT MAY SAY READY.
+  const outsiderReady = await callFunction('wsfTurnReady', { entryId: joined.entryId }, outsiderToken);
+  const outsiderTransport = turnCallFailure('outsider ready', outsiderReady);
+  assert(
+    outsiderTransport === null ? false : outsiderTransport.includes('application'),
+    outsiderTransport === null
+      ? 'somebody who is not the assigned participant was allowed to say ready'
+      : outsiderTransport
+  );
+
+  const ready = await turnCall('ready', 'wsfTurnReady', { entryId: joined.entryId }, memberToken);
+  assert(ready?.status === 'ready', `ready left the turn in ${ready?.status}`);
+
+  // ── THE TURN ITSELF ───────────────────────────────────────────────────────
+  const started = await turnCall('start the turn', 'wsfStartTurn', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(started?.started === true, 'the station could not start the ready turn');
+  assert(started.activity?.goalId === activityA, 'the screen started the wrong activity');
+
+  const recorded = await turnCall('record the turn', 'wsfCompleteTurn', {
+    stationId: stationOne.stationId, secret: stationOne.secret, count: TURN_COUNT,
+  });
+  assert(recorded?.recorded?.amount === TURN_COUNT, `recorded ${recorded?.recorded?.amount}, expected ${TURN_COUNT}`);
+  assert(recorded.recorded.alreadyRecorded === false, 'the first record claimed it had already happened');
+
+  // IDEMPOTENT. The same attempt retried at the screen adds nothing.
+  const retried = await turnCall('retry the record', 'wsfCompleteTurn', {
+    stationId: stationOne.stationId, secret: stationOne.secret, count: TURN_COUNT,
+  });
+  assert(retried?.recorded?.alreadyRecorded === true, 'a retry recorded a second time');
+
+  // ── THE ARITHMETIC: ONE CHILD, ONE PARENT, THE OTHER CHILD UNTOUCHED ──────
+  // Read as the member. These goals are not display-authorized, so an
+  // anonymous read would be refused for a reason that has nothing to do with
+  // the arithmetic this row is checking.
+  const chosen = await turnCall('chosen activity pulse', 'wsfGoalPulse', { goalId: activityA }, memberToken);
+  const untouched = await turnCall('unchosen activity pulse', 'wsfGoalPulse', { goalId: activityB }, memberToken);
+  const parent = await turnCall('combined pulse', 'wsfCombinedGoalPulse', { setupId: combined.setupId }, memberToken);
+  assert(chosen?.sharedTotal === TURN_COUNT, `the chosen activity holds ${chosen?.sharedTotal}, expected ${TURN_COUNT}`);
+  assert(untouched?.sharedTotal === 0, `the activity nobody chose moved to ${untouched?.sharedTotal}`);
+  assert(parent?.sharedTotal === TURN_COUNT, `the combined parent holds ${parent?.sharedTotal}, expected ${TURN_COUNT}`);
+
+  // ── THE SCREEN CLEARS ─────────────────────────────────────────────────────
+  const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(!afterRecord?.assigned, 'the screen is still showing somebody after recording');
+  if (afterRecord?.result) {
+    assert(afterRecord.result.code === joined.code, 'the ten-second result names a different turn');
+    assert(!JSON.stringify(afterRecord.result).includes('A.L.'), 'the ten-second result shows a name');
+  }
+
+  check('turn contract end to end', 'PASS', `two stations enrolled and approved; an independent participant read the event without joining, joined explicitly, was called, readied, ran the turn and was recorded ${TURN_COUNT} once against the chosen activity and once against the combined parent; the unchosen activity stayed at 0; a retry added nothing; the screen cleared`);
+  return null;
+}
+
 async function isolated(name, run) {
   try {
     return await run();
@@ -1540,6 +1743,11 @@ try {
   // Same reasons as the row above: no browser, no fixture, and a failure
   // that must still be reported when a later case aborts the suite.
   await isolated('public dynamic route reload', () => caseDynamicRouteReload());
+  // Isolated for the same reason, and for one more: while the twelve
+  // participant/Champion callables are transport-blocked this row FAILS, and
+  // that failure is the measurement. It must not take the rest of the suite
+  // down with it.
+  await isolated('turn contract end to end', () => caseTurnContract());
   await caseRoundTrip(browser);
   await caseProtectedReads();
   await caseUncertainAndPerGoal(browser);
@@ -1596,6 +1804,7 @@ const receipt = {
     'The D-5 case is isolated: its failure is its own row and the cases after it still run, because the ruleset it asserts is not deployed by this workflow.',
     'The visual-proof captures show a run-tagged synthetic community, goal and members only; the one contribution they record is removed by cleanup.',
     'The candidate B cases (W2, W3, W5, W6, W4/W7/W8, W9) each run on an isolated row; every contribution they record (and its recent-additions entry) is removed by cleanup.',
+    'The turn contract row drives the real product with real identities: a Champion token, an independent participant token, an outsider token and two station secrets. It records one genuine contribution, which cleanup removes with everything else it creates. It reports whether a refusal came from Cloud Run transport or from the application, because those are different failures and only one of them is a product defect.',
     'The public dynamic route reload row proves only that Hosting resolves /combined/** and /station/** to their own exported documents on a direct GET. It asserts nothing about the ids in those addresses, which are deliberately absent, and nothing about whether the screens behind them work.',
     "The station transport row proves only that the four callables declared invoker:'public' (wsfStationRequestPairing, wsfStationPairingStatus, wsfStationClaimPairing, wsfStationState) are reachable anonymously. It asserts nothing about their application-level answers, and it exercises no station end to end.",
     'The three Champion-only station callables (wsfApproveStation, wsfListStations, wsfRevokeStation) are NOT probed: they are not declared invoker:\'public\', so a transport denial and the refusal an anonymous caller is supposed to get are the same 403 from outside, and a check that passes either way could not fail for the right reason. Their transport remains unverified by this suite.',
@@ -1604,7 +1813,7 @@ const receipt = {
   diagnostics,
 };
 fs.writeFileSync(path.join(RESULT_DIR, 'wsf-package-e-hosted-result.json'), JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
-// A fully green run emits 23 rows — one per check(..., 'PASS') site in this
+// A fully green run emits 24 rows — one per check(..., 'PASS') site in this
 // file. hosted-smoke-contract.test.mjs pins that number and the row names, so
 // a row added or removed here has to be accounted for there in the same change.
 console.log(`RESULTS=${results.length}`);

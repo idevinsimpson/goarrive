@@ -330,10 +330,11 @@ test('the D-5 verdict is isolated: its failure is its own row and cannot stop th
   assert.deepStrictEqual(isolatedNames, [
     'station callable transport',
     'public dynamic route reload',
+    'turn contract end to end',
     'membership status rules (D-5)',
     'recent public additions (W2)', 'repeat policy (W3)', 'target-crossing event (W5)', 'durable history (W6)',
     'guided rules, share + momentum, join QR (W4/W7/W8)', 'kiosk mode (W9)',
-  ], 'only the station transport row, the route-reload row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
+  ], 'only the station transport row, the route-reload row, the turn-contract row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
   assert.ok(main.indexOf("isolated('recent public additions (W2)'") > main.indexOf('await caseVisualProof(browser);'), 'the candidate B rows run after the Package E, D-5, D-1 and visual rows');
 });
 
@@ -477,11 +478,23 @@ test('the station verdict names the service and status, and the only 403 it forg
   assert.ok(body.indexOf('assert(refused.length === 0') < body.indexOf("check('station callable transport', 'PASS'"), 'the PASS row must come after the assertion');
 });
 
+/**
+ * One case's source, and only that case's.
+ *
+ * Slicing to a fixed later function (`isolated`) made each case's assertions
+ * depend on nothing being inserted between the two — so adding a case made a
+ * DIFFERENT case's test fail, on an assertion about code that was not its own.
+ * Ending at the next top-level async function keeps each slice to its subject.
+ */
+function caseSource(name) {
+  const start = SMOKE.indexOf(`async function ${name}(`);
+  if (start < 0) return '';
+  const next = SMOKE.indexOf('\nasync function ', start + 1);
+  return next < 0 ? SMOKE.slice(start) : SMOKE.slice(start, next);
+}
+
 test('the public dynamic route reload proves the ROUTE resolved, on absent ids, without writing anything', () => {
-  const body = SMOKE.slice(
-    SMOKE.indexOf('async function caseDynamicRouteReload('),
-    SMOKE.indexOf('async function isolated(')
-  );
+  const body = caseSource('caseDynamicRouteReload');
   assert.ok(body, 'there is no caseDynamicRouteReload');
 
   // The two routes nothing else in this suite loads. Named, so quietly
@@ -528,13 +541,82 @@ test('the public dynamic route reload proves the ROUTE resolved, on absent ids, 
   );
 });
 
+test('the turn-contract row drives the real journey with real identities, and separates transport from refusal', () => {
+  const body = caseSource('caseTurnContract');
+  assert.ok(body, 'there is no caseTurnContract');
+
+  // Every callable the journey needs. Named individually, because a row that
+  // quietly stopped exercising one of these would still look like a pass.
+  for (const name of [
+    'wsfCreateCombinedGoal', 'wsfStationRequestPairing', 'wsfApproveStation',
+    'wsfStationClaimPairing', 'wsfStationState', 'wsfEventContext',
+    'wsfMyTurn', 'wsfJoinTurnLine', 'wsfCallNext', 'wsfTurnReady',
+    'wsfStartTurn', 'wsfCompleteTurn', 'wsfCombinedGoalPulse',
+  ]) {
+    assert.ok(body.includes(`'${name}'`), `the turn row never calls ${name}`);
+  }
+
+  // TWO stations, and an approval step between asking and claiming.
+  assert.ok(/for \(const slot of \[1, 2\]\)/.test(body), 'the row does not enrol two stations');
+  assert.ok(body.includes('two stations were handed the same turn'), 'the row does not test claim exclusion');
+
+  // The participant is a DIFFERENT identity from the Champion, and a third
+  // identity proves the ready gate. Three tokens, three people.
+  assert.ok(body.includes('championToken'), 'no Champion identity');
+  assert.ok(body.includes('memberToken'), 'no participant identity');
+  // Not merely that the token EXISTS — mutation-testing caught that: deleting
+  // the call that uses it left the declaration behind and this passed. What
+  // must be true is that the outsider is actually pointed at the ready gate.
+  assert.ok(
+    /wsfTurnReady'[^;]*outsiderToken/.test(body),
+    'the ready gate is never exercised with an identity that is not the assigned participant'
+  );
+  assert.ok(
+    body.includes('was allowed to say ready'),
+    'the row does not state what a passing ready gate means'
+  );
+
+  // LOOKING IS NOT JOINING, asserted before the join rather than after.
+  assert.ok(
+    body.indexOf('a scan must never enqueue') < body.indexOf("'join the line'"),
+    'the row must prove the line is empty BEFORE it joins, or it proves nothing'
+  );
+
+  // The arithmetic, including the activity nobody chose.
+  assert.ok(body.includes('the activity nobody chose moved to'), 'the unchosen child is not asserted unchanged');
+  assert.ok(body.includes('the combined parent holds'), 'the combined parent is not asserted');
+  assert.ok(body.includes('a retry recorded a second time'), 'idempotency is not asserted');
+
+  // Privacy: a count, never a list, and no identifier of a real person.
+  assert.ok(body.includes('waitingCount'), 'the row does not check the waiting count');
+  assert.ok(body.includes("the hall disclosed a participant's email"), 'the row does not check for identity disclosure');
+
+  // A closed door and an application refusal are different failures, and the
+  // row must say which it hit — otherwise a transport block reads as a bug in
+  // the product, which is the exact confusion this suite exists to prevent.
+  const verdict = SMOKE.slice(SMOKE.indexOf('function turnCallFailure('), SMOKE.indexOf('async function turnCall('));
+  assert.ok(verdict.includes('TRANSPORT'), 'the row cannot name a transport refusal');
+  assert.ok(verdict.includes('application'), 'the row cannot name an application refusal');
+
+  // Everything it creates is tracked for cleanup.
+  for (const tracked of ['wsfCombinedGoals/', 'wsfKioskPairings/', 'wsfKioskStations/', 'wsfTurnEntries/']) {
+    assert.ok(body.includes(`trackDoc(\`${tracked}`), `${tracked} is created but never tracked for cleanup`);
+  }
+
+  // And the PASS row comes last, after every assertion.
+  assert.ok(
+    body.lastIndexOf('assert(') < body.indexOf("check('turn contract end to end', 'PASS'"),
+    'the PASS row must come after every assertion'
+  );
+});
+
 test('the green-run row count is pinned, and every row name is distinct', () => {
   const rows = [...SMOKE.matchAll(/check\('([^']+)', 'PASS'/g)].map((m) => m[1]);
-  assert.equal(rows.length, 23, `a fully green run emits one row per PASS site; expected 23, found ${rows.length}`);
+  assert.equal(rows.length, 24, `a fully green run emits one row per PASS site; expected 24, found ${rows.length}`);
   assert.equal(new Set(rows).size, rows.length, 'two rows share a name, so RESULTS could not be read back per row');
   assert.ok(rows.includes('station callable transport'), 'the station transport row is not among the green rows');
   assert.match(SMOKE, /console\.log\(`RESULTS=\$\{results\.length\}`\);/);
-  assert.match(SMOKE, /A fully green run emits 23 rows/, 'the script must pin the same count the harness does');
+  assert.match(SMOKE, /A fully green run emits 24 rows/, 'the script must pin the same count the harness does');
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);
