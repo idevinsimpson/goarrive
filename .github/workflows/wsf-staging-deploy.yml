@@ -172,22 +172,32 @@ jobs:
         with:
           name: wsf-staging-env
 
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       # Third-party lifecycle scripts run here, where there is nothing to steal.
       - name: Install dependencies
         run: |
           set -euo pipefail
           npm --prefix apps/goarrive ci
+          npm --prefix functions ci
           npm --prefix functions-westayfit ci
           npm --prefix apps/westayfit ci
+          npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
 
-      # Both-app regression runs from the exact candidate before credentials.
-      # GoArrive hosted staging currently lacks /build and /coach-discovery, so
-      # its stale hosted assertions cannot represent this WSF-only diff.
+      # The shared-rule risk is the reason a WSF-only deploy needs a GoArrive
+      # regression. Check GoArrive's compiler and its complete Firestore rules
+      # suite against the exact candidate before credentials or deployment.
       - name: Run the shared GoArrive regression
         run: |
           set -euo pipefail
           npm --prefix apps/goarrive run ts:check
-          npm --prefix apps/goarrive run test:vitest -- --run
+          ./node_modules/.bin/firebase emulators:exec \
+            --only firestore \
+            --project demo-goarrive \
+            "npm --prefix functions run test:rules"
 
       - name: Build functions
         run: npm --prefix functions-westayfit run build
