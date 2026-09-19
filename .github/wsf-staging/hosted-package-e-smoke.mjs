@@ -1424,6 +1424,74 @@ async function caseStationTransport() {
   return null;
 }
 
+/**
+ * PUBLIC DYNAMIC ROUTES, RELOADED COLD.
+ *
+ * `/combined/<setupId>` and `/station/<goalId>` are the two public routes this
+ * suite never loaded. Everything else it drives — community, display,
+ * contribute, kiosk — it reaches by navigating; these two it did not reach at
+ * all, so nothing here proved that Hosting serves them on a DIRECT hit.
+ *
+ * That gap matters because of how the app is built. Expo's static export emits
+ * one document per route and a `firebase.json` rewrite maps `/combined/**` and
+ * `/station/**` onto it. A pasted address at an event is a direct GET, not a
+ * navigation, so the rewrite is the only thing standing between a screen and a
+ * 404 — and a rewrite that is missing or misspelt fails exactly here and
+ * nowhere else. Local evidence cannot settle it: the emulator has its own
+ * rewrite handling, and this harness does not treat emulator evidence as
+ * hosted evidence.
+ *
+ * WHY THE TITLE AND NOT THE STATUS. Firebase Hosting answers an unmatched path
+ * with its own document, and a check that accepted any 200 would pass on that
+ * too. Each route's exported document carries its own `<title>`, so the title
+ * is what distinguishes "Hosting resolved THIS route" from "Hosting served
+ * something". A neighbouring route's document fails this check as loudly as a
+ * 404 does, which is the point.
+ *
+ * READ-ONLY BY CONSTRUCTION. Two GETs for an HTML document. The ids are
+ * run-tagged and deliberately absent, so no lookup can match one; nothing is
+ * created, nothing is read back, and nothing needs cleaning up. It asserts
+ * only that the route resolves — never that the id exists, never that the
+ * screen behind it works, and never anything about callable transport.
+ */
+const DYNAMIC_ROUTE_PROBES = [
+  { route: '/combined', title: 'Combined goal' },
+  { route: '/station', title: 'Station' },
+];
+
+async function caseDynamicRouteReload() {
+  // Absent on purpose, and run-tagged so it cannot collide with real data.
+  const absentId = `wsfsmoke-absent-${runTag}`;
+  const refused = [];
+  for (const probe of DYNAMIC_ROUTE_PROBES) {
+    const url = `${BASE_URL}${probe.route}/${absentId}`;
+    let status;
+    let body;
+    try {
+      const response = await fetch(url, { redirect: 'follow' });
+      status = response.status;
+      body = await response.text();
+    } catch (error) {
+      // Every probe runs: one unreachable route must not hide the other.
+      refused.push(`${probe.route}/** did not answer a cold reload: ${sanitize(error?.message || error)}`);
+      continue;
+    }
+    if (status !== 200) {
+      refused.push(`${probe.route}/** did not answer a cold reload: HTTP ${status}`);
+      continue;
+    }
+    const title = (/<title>([^<]*)<\/title>/.exec(body) || [, ''])[1];
+    if (!title.includes(probe.title)) {
+      refused.push(
+        `${probe.route}/** resolved to a document titled "${title}", not the ${probe.title} route`
+      );
+    }
+  }
+  assert(refused.length === 0, refused.join('; '));
+  check('public dynamic route reload', 'PASS', `${DYNAMIC_ROUTE_PROBES.map((p) => `${p.route}/**`).join(' and ')} each answered a direct cold GET with their own exported document; absent run-tagged ids, nothing created or read`);
+  return null;
+}
+
 async function isolated(name, run) {
   try {
     return await run();
@@ -1469,6 +1537,9 @@ try {
   // reason this row exists. Isolated is not advisory: the row is a FAIL row
   // and the run still exits non-zero.
   await isolated('station callable transport', () => caseStationTransport());
+  // Same reasons as the row above: no browser, no fixture, and a failure
+  // that must still be reported when a later case aborts the suite.
+  await isolated('public dynamic route reload', () => caseDynamicRouteReload());
   await caseRoundTrip(browser);
   await caseProtectedReads();
   await caseUncertainAndPerGoal(browser);
@@ -1525,6 +1596,7 @@ const receipt = {
     'The D-5 case is isolated: its failure is its own row and the cases after it still run, because the ruleset it asserts is not deployed by this workflow.',
     'The visual-proof captures show a run-tagged synthetic community, goal and members only; the one contribution they record is removed by cleanup.',
     'The candidate B cases (W2, W3, W5, W6, W4/W7/W8, W9) each run on an isolated row; every contribution they record (and its recent-additions entry) is removed by cleanup.',
+    'The public dynamic route reload row proves only that Hosting resolves /combined/** and /station/** to their own exported documents on a direct GET. It asserts nothing about the ids in those addresses, which are deliberately absent, and nothing about whether the screens behind them work.',
     "The station transport row proves only that the four callables declared invoker:'public' (wsfStationRequestPairing, wsfStationPairingStatus, wsfStationClaimPairing, wsfStationState) are reachable anonymously. It asserts nothing about their application-level answers, and it exercises no station end to end.",
     'The three Champion-only station callables (wsfApproveStation, wsfListStations, wsfRevokeStation) are NOT probed: they are not declared invoker:\'public\', so a transport denial and the refusal an anonymous caller is supposed to get are the same 403 from outside, and a check that passes either way could not fail for the right reason. Their transport remains unverified by this suite.',
     'The station probes create no pairing, station or fixture document: each is refused before it writes or reads nothing. They do cause the callables\' own per-IP rate-limit counter (wsfStationRateLimits/<salted daily IP hash>) to be written, which is the function\'s own bookkeeping, is not run-scoped, and cannot be addressed by this script.',
@@ -1532,7 +1604,7 @@ const receipt = {
   diagnostics,
 };
 fs.writeFileSync(path.join(RESULT_DIR, 'wsf-package-e-hosted-result.json'), JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
-// A fully green run emits 22 rows — one per check(..., 'PASS') site in this
+// A fully green run emits 23 rows — one per check(..., 'PASS') site in this
 // file. hosted-smoke-contract.test.mjs pins that number and the row names, so
 // a row added or removed here has to be accounted for there in the same change.
 console.log(`RESULTS=${results.length}`);
