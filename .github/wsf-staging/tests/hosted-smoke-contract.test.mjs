@@ -216,6 +216,66 @@ test('the join code is asserted by existence only and never emitted', () => {
   assert.ok(seen > 0, 'the join code assertions disappeared');
   assert.match(SMOKE, /fields\?\.joinCode !== undefined/, 'the 200 case must assert presence, not value');
   assert.match(SMOKE, /REDACTED_JOIN_CODE/, 'sanitize must redact a join code out of any diagnostic');
+  // W8 reads the URL the QR encodes, whose tail IS the code. It is held only
+  // to compare, never printed raw: the one place it reaches a message is
+  // through sanitize(), which redacts the /join/<code> shape as well.
+  const qrLines = lines.filter((line) => /qrUrl/.test(line));
+  assert.ok(qrLines.length > 0, 'the W8 QR URL read disappeared');
+  for (const line of qrLines) {
+    assert.equal(/console\.|diagnostics\.push|results\.push|check\(|snap\(|writeFileSync/.test(line), false, `a QR URL line carries the join link into output: ${line.trim()}`);
+    if (/\$\{[^}]*qrUrl/.test(line)) assert.match(line, /\$\{sanitize\(qrUrl\)\}/, 'the QR URL may only enter a message through sanitize()');
+  }
+  assert.ok(SMOKE.includes("'/join/[REDACTED_JOIN_CODE]'"), 'sanitize must redact the /join/<code> tail of a join link');
+});
+
+test('W8 seeds a link-joinable community and proves WHICH link the QR encodes, with the member still seeing neither QR nor Manage', () => {
+  const w478 = fnBody('caseW4W7W8Browser');
+  // The product draws the join QR only for a link-joinable policy
+  // (apps/westayfit/src/ui/joinLink.ts LINK_JOINABLE_POLICIES = public |
+  // inviteOnly); run 35370740710 waited on a QR the product correctly never
+  // renders for the private fixture default. Only this row opts in.
+  assert.match(SMOKE, /async function seedFixture\(label, goals = 1, includeChallenge = false, \{ joinPolicy = 'private' \} = \{\}\)/, 'seedFixture must default to private and take the policy as an option');
+  assert.ok(w478.includes("seedFixture('w478', 2, false, { joinPolicy: 'inviteOnly' })"), 'the W4/W7/W8 fixture must be seeded inviteOnly');
+  assert.equal(SMOKE.split("joinPolicy: 'inviteOnly'").length - 1, 1, 'only the W4/W7/W8 row seeds a link-joinable community');
+  assert.equal(/joinPolicy: 'public'/.test(SMOKE), false, 'no fixture is seeded public');
+  // A code the server would admit: normalizeJoinCode (functions-westayfit)
+  // requires 16–128 base64url characters; 16 random bytes encode to 22.
+  assert.ok(SMOKE.includes("joinCode: crypto.randomBytes(16).toString('base64url')"), 'the fixture join code must have the shape normalizeJoinCode accepts');
+  // The member assertions are unchanged and run against the SAME inviteOnly
+  // fixture, so "no QR / no Manage" is proven on a community that has a link.
+  const seed = w478.indexOf("seedFixture('w478'");
+  for (const kept of [
+    "assert((await member.getByTestId('wsf-community-qr-section').count()) === 0, 'A member can see the Champion join QR section');",
+    "assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'A member has the Manage surface');",
+  ]) {
+    assert.ok(w478.includes(kept), `member assertion lost: ${kept}`);
+    assert.ok(w478.indexOf(kept) > seed, 'the member assertions must run against the inviteOnly fixture');
+  }
+  // Section -> block -> toggle -> symbol -> the URL it encodes, in that order,
+  // compared exactly against the link the product builds for the staging
+  // origin from the fixture's own code (src/ui/joinLink.ts buildJoinUrl).
+  const steps = [
+    "await openManage(champion);",
+    "await visible(champion.getByTestId('wsf-community-qr-section'));",
+    "await visible(champion.getByTestId('wsf-community-qr'));",
+    "await champion.getByTestId('wsf-community-qr-toggle').click();",
+    "await visible(champion.getByTestId('wsf-community-qr-symbol'));",
+    "const qrUrl = await champion.getByTestId('wsf-community-qr-symbol').getAttribute('data-qr-url');",
+    "assert(qrUrl === `${BASE_URL}/join/${fx.joinCode}`,",
+    "await snap(champion, '19-phone-champion-join-qr-w8');",
+  ];
+  let last = -1;
+  for (const step of steps) {
+    const at = w478.indexOf(step);
+    assert.ok(at !== -1, `W8 step missing: ${step}`);
+    assert.ok(at > last, `W8 step out of order: ${step}`);
+    last = at;
+  }
+  // No swallowed assertion and no faked visibility: the only catch in the
+  // row is the context close in finally, and nothing pokes the DOM.
+  const w478Code = w478.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.equal(/catch\s*\([^)]*\)\s*\{/.test(w478Code), false, 'the W8 assertions must not sit inside a catch block');
+  assert.equal(/\.evaluate\(|force:\s*true|style\.display|addStyleTag|-unavailable/.test(w478Code), false, 'the QR must be seen as the product renders it');
 });
 
 test('the signup gate case sends no mail and owns the account it creates', () => {

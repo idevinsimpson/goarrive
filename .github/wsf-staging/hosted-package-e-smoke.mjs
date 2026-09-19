@@ -87,6 +87,9 @@ function sanitize(value) {
     // identity, so a failure there could otherwise carry the code into the
     // receipt. Both the Firestore REST shape and a bare string are redacted.
     .replace(/("joinCode"\s*:\s*)(\{[^{}]*\}|"[^"]*")/gi, '$1"[REDACTED_JOIN_CODE]"')
+    // The same credential as the tail of a join link — the string the W8 QR
+    // encodes (data-qr-url) and a mismatch there would otherwise print.
+    .replace(/\/join\/[A-Za-z0-9_-]+/g, '/join/[REDACTED_JOIN_CODE]')
     .slice(0, 1000);
 }
 async function jsonRequest(url, { method = 'GET', oauth = false, bearer = null, body, allow = [] } = {}) {
@@ -210,7 +213,7 @@ function isNotFound(response) {
   return response.status === 404 && (status === 'NOT_FOUND' || status === 'not-found');
 }
 
-async function seedFixture(label, goals = 1, includeChallenge = false) {
+async function seedFixture(label, goals = 1, includeChallenge = false, { joinPolicy = 'private' } = {}) {
   const champion = await createVerifiedUser(`${label}-champion`);
   const member = await createVerifiedUser(`${label}-member`);
   const outsider = await createVerifiedUser(`${label}-outsider`);
@@ -220,17 +223,25 @@ async function seedFixture(label, goals = 1, includeChallenge = false) {
   const started = new Date(now.getTime() - 60_000);
   const ends = new Date(now.getTime() + 3_600_000);
 
-  await putDoc(`wsfCommunityGroups/${groupId}`, {
+  // private by default: a fixture nobody can walk into by link. A row that
+  // needs the product's link-joinable surfaces (W8's QR) opts into
+  // 'inviteOnly'. The product mints a join code for every policy, private
+  // included (src/ui/joinLink.ts), and the server admits by code only when it
+  // has the shape normalizeJoinCode accepts — 16–128 base64url characters
+  // (functions-westayfit/src/index.ts). 16 random bytes encode to 22, so the
+  // code seeded here is one the product would actually honour, not a stub.
+  const community = {
     displayName: `Package E ${label}`,
     groupType: 'custom',
-    joinPolicy: 'private',
-    joinCode: crypto.randomBytes(8).toString('base64url'),
+    joinPolicy,
+    joinCode: crypto.randomBytes(16).toString('base64url'),
     createdByUserId: champion.uid,
     lifecycleStatus: 'active',
     isSample: false,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  await putDoc(`wsfCommunityGroups/${groupId}`, community);
   for (const [user, role] of [[champion, 'foundingChampion'], [member, 'member']]) {
     await putDoc(`wsfMemberships/${groupId}_${user.uid}`, {
       groupId,
@@ -296,6 +307,9 @@ async function seedFixture(label, goals = 1, includeChallenge = false) {
     member,
     outsider,
     communityDisplayName: `Package E ${label}`,
+    // On the fixture, never in a diagnostic: sanitize() redacts it, and the
+    // only reader is the W8 assertion of WHICH link the QR encodes.
+    joinCode: community.joinCode,
     startsAtIso: started.toISOString(),
     endsAtIso: ends.toISOString(),
   };
@@ -1196,7 +1210,12 @@ async function caseW4W7W8Browser(browser) {
   // open goals (src/communityMomentum.ts: fewer than two -> no line at all).
   // Run 5 seeded one goal and waited for a line the product correctly never
   // renders — a fixture error in this harness, not a product defect.
-  const fx = await seedFixture('w478', 2, false);
+  // inviteOnly, not the private default: the product draws the join QR only
+  // under a link-joinable policy (src/ui/joinLink.ts LINK_JOINABLE_POLICIES =
+  // public | inviteOnly) and renders wsf-community-qr-unavailable for a
+  // private community — which is what run 6 waited on. Same class of fixture
+  // error as the one-goal momentum: the product was right both times.
+  const fx = await seedFixture('w478', 2, false, { joinPolicy: 'inviteOnly' });
   const [goalId, secondGoal] = fx.goalIds;
   await authorizeDisplay(fx, goalId);
   await authorizeDisplay(fx, secondGoal);
@@ -1235,8 +1254,18 @@ async function caseW4W7W8Browser(browser) {
     await openManage(champion);
     await visible(champion.getByTestId('wsf-community-qr-section'));
     await visible(champion.getByTestId('wsf-community-qr'));
+    // The symbol is drawn on demand, after hydration, and carries the string
+    // it encodes as data-qr-url (src/ui/JoinQrCode.tsx) — so the proof is
+    // WHICH link the QR is, not that a picture appeared: the same
+    // `${origin}/join/${joinCode}` the Copy link control puts on the clipboard
+    // (src/ui/joinLink.ts buildJoinUrl), from the fixture's own code at the
+    // origin the page was opened on.
+    await champion.getByTestId('wsf-community-qr-toggle').click();
+    await visible(champion.getByTestId('wsf-community-qr-symbol'));
+    const qrUrl = await champion.getByTestId('wsf-community-qr-symbol').getAttribute('data-qr-url');
+    assert(qrUrl === `${BASE_URL}/join/${fx.joinCode}`, `The QR symbol does not encode the fixture join link: ${sanitize(qrUrl)}`);
     await snap(champion, '19-phone-champion-join-qr-w8');
-    check('guided rules, share + momentum, join QR (W4/W7/W8)', 'PASS', 'guide panel (non-medical) on entry; momentum + share control for the member, no QR/Manage; Champion QR inside Manage');
+    check('guided rules, share + momentum, join QR (W4/W7/W8)', 'PASS', 'guide panel (non-medical) on entry; momentum + share control for the member, no QR/Manage on an inviteOnly community; Champion QR inside Manage encodes the fixture join link');
   } finally {
     await Promise.all([memberCtx, championCtx].map((ctx) => ctx.close().catch(() => undefined)));
   }
