@@ -3150,6 +3150,37 @@ export default function CommunityPage() {
                     ) : null}
                     {renderProgressFacts(featured, p, 'hero')}
                   </View>
+                  {/*
+                    SLICE 1f. BOTH ROUTES ARE GATED, NOT ONE.
+
+                    Slice 1 moved the repeat-policy check onto the quiet route
+                    when the "Your part" duplicate was removed, and stopped
+                    there. That left the green primary still inviting a
+                    contribution the server refuses with "This goal takes one
+                    contribution from each member" — the loudest control on the
+                    screen offering a journey that ends in a refusal. Hiding
+                    the quiet route and keeping the loud one is worse than
+                    hiding neither, because it reads as deliberate.
+
+                    On a `once` goal this member has already contributed to,
+                    neither route is offered and the screen says plainly what
+                    it recorded and why there is nothing more to do. It states
+                    what was RECORDED — the system confirms a recorded
+                    contribution, never that a person exercised.
+                  */}
+                  {p.kind === 'ok' && p.repeatPolicy === 'once' && (p.ownCredit ?? 0) > 0 ? (
+                    <View
+                      style={styles.heroDone}
+                      testID={`wsf-community-goal-complete-${featured.goalId}`}
+                    >
+                      <Text style={styles.heroDoneLead}>
+                        {`You’ve recorded ${formatCount(p.ownCredit ?? 0)} ${p.pulse.unit}.`}
+                      </Text>
+                      <Text style={styles.heroDoneNote}>
+                        This goal takes one contribution from each member.
+                      </Text>
+                    </View>
+                  ) : (
                   <View style={styles.actions}>
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'move')}
@@ -3158,18 +3189,6 @@ export default function CommunityPage() {
                       testID={`wsf-community-goal-link-${featured.goalId}`}
                       label="Start moving"
                     />
-                    {/*
-                      SLICE 1. THE POLICY MOVED WITH THE CONTROL.
-                      "Your part" used to carry the only repeat-policy-aware
-                      route: it hid itself on a `once` goal the member had
-                      already contributed to, so Community Home never invited
-                      what the server would refuse. Removing that duplicate
-                      would have left ONLY this control, which never checked
-                      the policy — so the screen would have started inviting a
-                      second contribution it cannot accept. The check comes
-                      here with it.
-                    */}
-                    {p.kind === 'ok' && p.repeatPolicy === 'once' && (p.ownCredit ?? 0) > 0 ? null : (
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
                       style={styles.heroSecondaryAction}
@@ -3181,8 +3200,8 @@ export default function CommunityPage() {
                       // unit; this only has to name the situation.
                       label="I already moved"
                     />
-                    )}
                   </View>
+                  )}
                   {/*
                     SLICE 1. Below the actions, not between the figures and the
                     primary control. It is maintenance metadata, and in the old
@@ -3728,6 +3747,12 @@ const styles = StyleSheet.create({
   // better still, but it cost the worst-case long name its clearance on a
   // 390x640 phone (15px left); 14 keeps the air and returns the margin.
   actions: { gap: 10, marginTop: 14 },
+  // SLICE 1f. THE COMPLETED STATE SITS WHERE THE BUTTONS WERE, and is quiet.
+  // It replaces two controls, so it must not read as a third: no fill, no
+  // border, no tap affordance — a statement, in the hero's own type.
+  heroDone: { marginTop: 14, gap: 4 },
+  heroDoneLead: { color: '#FFFFFF', fontSize: 17, lineHeight: 23, fontWeight: '700' },
+  heroDoneNote: { color: '#C7D2E0', fontSize: 14, lineHeight: 20 },
   // SLICE 1. The already-moved route is DEMOTED, not duplicated and not
   // stripped. Bare centred text (the first attempt) read as a caption and
   // lost every signal that it could be tapped. This is a quiet chip: hairline
