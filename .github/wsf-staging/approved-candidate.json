@@ -13,9 +13,9 @@
     "Future acceptances are a one-line edit here, reviewed like any other."
   ],
   "project": "westayfit-staging",
-  "approvedAppSha": "bd4bfeccb260691c1f6b583ae6b9a3303547be5b",
-  "packageLabel": "Expo package: kiosk link control, truthful email verification state, and station enrolment. REVERTED from 3ca7f9e on the Director's 02:18 ET instruction not to stage 120f032; 3ca7f9e is its descendant and carries the same three contract gaps.",
+  "approvedAppSha": "15afae974302d2624524a9ddbfdb7952c4180d4a",
+  "packageLabel": "Expo package: polished kiosk setup and stable links; fixed multi-activity parent moves; public QR and account-preserving phone choice; private event FIFO with ready lease and two-station claim safety; shared 3-second/60-second follow-along player; canonical child and parent recording, correction, recovery and receipt.",
   "sourceAcceptedOn": "2026-09-19",
   "expectedPriorFunctions": 31,
-  "_expectedPriorFunctionsNote": "31, established by run 35420931701 reading the live project. This pin was moved to 3ca7f9e and is moved BACK. The Director ruled at 02:18 ET that the package is not integration-ready: the queue publishes a whole named waiting list where the contract allows only the currently assigned name plus a short code, and has no ready state, no lease and no station-side attempt; the queue is keyed per goal rather than per event; and parent corrections are decided from the current claim and clock rather than from the immutable credited attempt. Run 35426167905 was cancelled mid-flight and deployed nothing. /move/** is removed again with this revert, and that removal MATTERS: bd4bfec carries the OLD 35-second player the Director refused, so routing it would stage exactly the thing that was rejected. bd4bfec is what staging already serves, so the channel does not change."
+  "_expectedPriorFunctionsNote": "31, established by run 35420931701 and unchanged on the currently served bd4bfec staging build. The accepted candidate adds the reviewed WSF event, station, queue, combined-goal and canonical-attempt services. Deployment remains WSF-only; hosted verification must confirm the exact resulting inventory and the seven station transports. Public-invoker remediation, if still required, is staging-only and must be verified and reversible."
 }
