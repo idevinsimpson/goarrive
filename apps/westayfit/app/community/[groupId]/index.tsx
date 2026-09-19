@@ -55,6 +55,7 @@ import { PROGRESS_GREEN } from '../../../src/ui/brandAssets';
 import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { JoinQrCode } from '../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../src/ui/joinLink';
+import { buildKioskUrl, currentOrigin } from '../../../src/ui/kioskLink';
 import {
   formatActiveWindowLabel,
   formatClock,
@@ -310,6 +311,21 @@ export default function CommunityPage() {
     }
   }, []);
   useEffect(() => clearCopyReset, [clearCopyReset]);
+  // The kiosk link keeps its own state, its own timer, and the goal it belongs
+  // to. A sheet can hold several goals, and copying one goal's kiosk link must
+  // never light up the confirmation under another.
+  const [kioskCopy, setKioskCopy] = useState<{
+    goalId: string | null;
+    state: 'idle' | 'copied' | 'failed';
+  }>({ goalId: null, state: 'idle' });
+  const kioskCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearKioskCopyReset = useCallback(() => {
+    if (kioskCopyResetRef.current) {
+      clearTimeout(kioskCopyResetRef.current);
+      kioskCopyResetRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearKioskCopyReset, [clearKioskCopyReset]);
   // The same one-timer-at-a-time rule for the display-link control.
   const shareResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearShareReset = useCallback(() => {
@@ -616,6 +632,37 @@ export default function CommunityPage() {
           joinPolicy: state.group.joinPolicy,
         })
       : null;
+
+  /**
+   * The address of the screen a Champion stands at an event, per goal. Built
+   * from the origin this build is served from, so it is right on staging and
+   * in production without anyone editing it.
+   */
+  const kioskUrlFor = useCallback(
+    (goalId: string) => buildKioskUrl({ origin: currentOrigin(), goalId }),
+    []
+  );
+
+  const onCopyKiosk = useCallback(
+    async (goalId: string) => {
+      const url = buildKioskUrl({ origin: currentOrigin(), goalId });
+      if (!url || typeof navigator === 'undefined') return;
+      clearKioskCopyReset();
+      try {
+        await navigator.clipboard.writeText(url);
+        setKioskCopy({ goalId, state: 'copied' });
+        kioskCopyResetRef.current = setTimeout(() => {
+          kioskCopyResetRef.current = null;
+          setKioskCopy({ goalId: null, state: 'idle' });
+        }, 2_000);
+      } catch {
+        // Not timed out: a failure has to stay on screen, because the address
+        // shown beside it is the Champion's way forward.
+        setKioskCopy({ goalId, state: 'failed' });
+      }
+    },
+    [clearKioskCopyReset]
+  );
 
   const onCopyInvite = useCallback(async () => {
     if (!inviteUrl || typeof navigator === 'undefined') return;
@@ -1126,6 +1173,75 @@ export default function CommunityPage() {
                   : 'Authorize public display'}
           </Text>
         </Pressable>
+        {/*
+          SET UP KIOSK. A kiosk is a screen standing at an event with this
+          goal open on it, so the Champion needs the address of that screen —
+          not an instruction to assemble one by hand. The link is built from
+          the origin this build is actually served from, so it is correct on
+          staging and in production without being edited.
+
+          It sits with the display permission because the two are the same
+          decision in practice: a kiosk shows the goal's shared progress, and
+          that is exactly what authorizing a public display allows. When the
+          permission is off the link still resolves, and the screen says the
+          goal is not available — so the state text below says so first.
+        */}
+        <View style={styles.manageGoal} testID={`wsf-kiosk-setup-${goal.goalId}`}>
+          <Text style={styles.manageGoalTitle}>Set up kiosk</Text>
+          <Text style={styles.manageIntro} testID={`wsf-kiosk-setup-intro-${goal.goalId}`}>
+            {goal.aggregateDisplayAuthorized
+              ? 'Open this on the screen at your event, or copy the link and open it there.'
+              : 'Open this on the screen at your event. Until you authorize public display above, that screen will say the goal is not available.'}
+          </Text>
+          {kioskUrlFor(goal.goalId) ? (
+            <View
+              style={styles.rowWrap}
+              // The address the controls beside it act on, readable by a test
+              // without being printed for a person.
+              dataSet={{ kioskUrl: kioskUrlFor(goal.goalId) ?? '' }}
+            >
+              <ButtonLink
+                href={`/kiosk/${goal.goalId}`}
+                label="Open kiosk"
+                style={styles.secondaryButton}
+                textStyle={styles.secondaryButtonText}
+                testID={`wsf-kiosk-setup-open-${goal.goalId}`}
+              />
+              <Pressable
+                onPress={() => onCopyKiosk(goal.goalId)}
+                style={styles.secondaryButton}
+                testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${goal.title}: copy the kiosk link`}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
+                    ? 'Copied'
+                    : 'Copy kiosk link'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.body} testID={`wsf-kiosk-setup-unavailable-${goal.goalId}`}>
+              The kiosk link isn’t ready yet. Reload the page to try again.
+            </Text>
+          )}
+          {/*
+            A copy can fail for reasons this app does not control — a browser
+            that refuses the clipboard without a gesture it recognises, or a
+            context with no clipboard at all. When it does, the address itself
+            is shown so the Champion can still get the screen open. This is the
+            one place a URL is deliberately readable: it is the Champion's own
+            admin sheet, the link carries no participant token and no
+            authority, and the alternative is a dead end at an event.
+          */}
+          {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'failed' ? (
+            <Text style={styles.body} testID={`wsf-kiosk-setup-copy-failed-${goal.goalId}`}>
+              Copy didn’t work on this device. Open the kiosk here, or type this address on the
+              screen: {kioskUrlFor(goal.goalId)}
+            </Text>
+          ) : null}
+        </View>
         {unsettled ? (
           <View>
             <Text style={styles.error} testID={`wsf-goal-display-auth-unsettled-${goal.goalId}`}>
@@ -2475,6 +2591,10 @@ const styles = StyleSheet.create({
   sheetSectionTitle: { color: NAVY, fontSize: 15, fontWeight: '700' },
   manageIntro: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
   manageGoal: { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#D5DCE5' },
+  // Two controls side by side that drop to one column when the sheet is
+  // narrow, rather than a fixed row that would push a label off a 195 px
+  // screen.
+  rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   manageGoalTitle: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
 
   // ---- about ----
