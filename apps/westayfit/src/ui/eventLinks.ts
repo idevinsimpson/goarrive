@@ -16,10 +16,29 @@
  * screen or confers a Champion's powers.
  */
 
+import { EVENT_ACTIVITY_PARAM, readActivityLabel } from '../eventActivity';
 import { buildJoinUrl } from './joinLink';
 
 function trimOrigin(origin: string): string {
   return origin.replace(/\/+$/, '');
+}
+
+/**
+ * `?activity=<label>` or '' — the ONE place an activity is appended to an
+ * address in this file.
+ *
+ * It is a LABEL and never an id: the event's own word for what it counts,
+ * which `wsfGoalPulse` already publishes to an unauthenticated screen. It
+ * grants nothing, identifies nobody, and is dropped — rather than truncated or
+ * repaired — when it is not a label this app will carry. Every caller below
+ * takes it as OPTIONAL and omits the parameter entirely when it is absent, so
+ * an address built without one is byte-for-byte the address that was built
+ * before this parameter existed.
+ */
+function activitySuffix(activity: string | null | undefined, separator: '?' | '&'): string {
+  const label = readActivityLabel(activity);
+  if (!label) return '';
+  return `${separator}${EVENT_ACTIVITY_PARAM}=${encodeURIComponent(label)}`;
 }
 
 /** `/station/<goalId>` — the screen at the event, before and after enrolment. */
@@ -27,9 +46,15 @@ export function stationRoute(goalId: string): string {
   return `/station/${encodeURIComponent(goalId)}`;
 }
 
-/** `/event/<goalId>` — where an attendee's own phone lands. */
-export function eventRoute(goalId: string): string {
-  return `/event/${encodeURIComponent(goalId)}`;
+/**
+ * `/event/<goalId>` — where an attendee's own phone lands, and with an
+ * activity `/event/<goalId>?activity=<label>`.
+ *
+ * The path is built from the goal id alone in both cases: an activity is a
+ * query value and can never steer where anybody lands.
+ */
+export function eventRoute(goalId: string, activity?: string | null): string {
+  return `/event/${encodeURIComponent(goalId)}${activitySuffix(activity, '?')}`;
 }
 
 /**
@@ -55,11 +80,13 @@ export function buildStationUrl(opts: {
 export function buildEventUrl(opts: {
   origin: string | null | undefined;
   goalId: string | null | undefined;
+  /** Optional, and omitted from the address entirely when absent. */
+  activity?: string | null;
 }): string | null {
   const id = opts.goalId?.trim();
   if (!opts.origin) return null;
   if (!id) return null;
-  return `${trimOrigin(opts.origin)}${eventRoute(id)}`;
+  return `${trimOrigin(opts.origin)}${eventRoute(id, opts.activity)}`;
 }
 
 /**
@@ -81,13 +108,22 @@ export function buildEventJoinUrlFromScreenedCode(opts: {
   origin: string | null | undefined;
   joinCode: string | null | undefined;
   goalId: string | null | undefined;
+  /**
+   * The activity that screen is running, so a newcomer's phone can still name
+   * it after four routes and a mail round trip. Optional: without it this
+   * builds the same string it built before the parameter existed.
+   */
+  activity?: string | null;
 }): string | null {
   const { origin, joinCode } = opts;
   const id = opts.goalId?.trim();
   if (!origin) return null;
   if (!joinCode) return null;
   if (!id) return null;
-  return `${trimOrigin(origin)}/join/${joinCode}?event=${encodeURIComponent(id)}`;
+  return (
+    `${trimOrigin(origin)}/join/${joinCode}?event=${encodeURIComponent(id)}` +
+    activitySuffix(opts.activity, '&')
+  );
 }
 
 /**
@@ -106,6 +142,7 @@ export function buildJoinEventUrl(opts: {
   joinCode: string | null | undefined;
   joinPolicy: string | null | undefined;
   goalId: string | null | undefined;
+  activity?: string | null;
 }): string | null {
   // The policy gate, and only then the one derivation of the string.
   const base = buildJoinUrl({
@@ -118,6 +155,7 @@ export function buildJoinEventUrl(opts: {
     origin: opts.origin,
     joinCode: opts.joinCode,
     goalId: opts.goalId,
+    activity: opts.activity,
   });
 }
 

@@ -664,9 +664,27 @@ export default function StationScreen() {
   // THE MEMBER LINK STAYS BARE, deliberately: a member is already signed in,
   // makes no round trip, and is asked which activity they are here to do on
   // the page itself. There is nothing for it to carry.
-  const joinUrl = buildEventJoinUrlFromScreenedCode({ origin, joinCode, goalId, activity: unit });
+  //
+  // THE ACTIVITY IS A PREFERENCE, NOT A REQUIREMENT. `encodeQr` refuses a
+  // payload past version 10 rather than truncating it — a truncated symbol
+  // scans cleanly and takes the scanner somewhere wrong — and a Champion is
+  // free to type a 40-character unit that, percent-encoded onto a long origin,
+  // does not fit. So the longer address is TRIED first and the address that
+  // existed before this parameter is the fallback, and the symbol and the
+  // `qrUrl` the room is shown are always the same string. A newcomer who
+  // scans the fallback still reaches the join; they are simply asked which
+  // activity on the event page, which is where they are asked anyway.
+  const joinWithActivity = buildEventJoinUrlFromScreenedCode({
+    origin,
+    joinCode,
+    goalId,
+    activity: unit,
+  });
+  const joinBare = buildEventJoinUrlFromScreenedCode({ origin, joinCode, goalId });
+  const joinPreferredQr = qrUri(joinWithActivity);
+  const joinUrl = joinPreferredQr ? joinWithActivity : joinBare;
+  const joinQr = joinPreferredQr ?? qrUri(joinBare);
   const eventUrl = buildEventUrl({ origin, goalId });
-  const joinQr = qrUri(joinUrl);
   const eventQr = qrUri(eventUrl);
 
   return (

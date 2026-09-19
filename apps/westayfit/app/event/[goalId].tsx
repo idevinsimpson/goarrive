@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
@@ -16,12 +16,29 @@ import {
   type DeviceMode,
 } from '../../src/deviceMode';
 import type { GoalPulse } from '../../src/displayPulse';
+import {
+  activityLabelFor,
+  eventActivities,
+  initialSelection,
+  readActivityLabel,
+  EVENT_ACTIVITY_HEADING,
+  EVENT_ACTIVITY_INTRO,
+  EVENT_ACTIVITY_SCANNED_NOTE,
+  EVENT_CHOICE_HEADING,
+  EVENT_CHOICE_INTRO,
+  EVENT_CHOICE_NOTE,
+  EVENT_CHOICE_PHONE_DESCRIPTION,
+  EVENT_CHOICE_PHONE_LABEL,
+  EVENT_CHOICE_QUEUE_DESCRIPTION,
+  EVENT_CHOICE_QUEUE_LABEL,
+} from '../../src/eventActivity';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
 import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
 import { kit } from '../../src/ui/kit';
+import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { wsfTheme } from '../../src/theme';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -57,8 +74,34 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *     this feature's to change. Only the Champion's own surfaces carry an
  *     invite link, exactly as before.
  *
- * AND ONE MORE WAY ON, FOR A MEMBER: "Get in line". It opens the name choice —
- * and the name choice is the whole point of it, not a formality on the way to a
+ * THE MEMBER'S PAGE IS TWO DECISIONS, IN ORDER, AND NEVER ONE.
+ *
+ *   FIRST, WHAT. "What are you here to do?" — the activity, chosen from what
+ *   this event offers. A phone that arrived from a scan is carrying the
+ *   activity the screen it scanned was running (`?activity=<label>`, put there
+ *   by the station's newcomer code and carried across signup, verification,
+ *   the profile and the join in sessionStorage — src/stationSession.ts). It is
+ *   SHOWN that activity and asked to confirm it, because a scan is how
+ *   somebody got to this page, not a decision they made. An event with one
+ *   activity opened WITHOUT a scan has nothing to choose and stands answered.
+ *   The whole of that rule is `initialSelection` in src/eventActivity.ts.
+ *
+ *   THEN, WHERE. And only then: "Use my phone" or "Join the kiosk queue".
+ *   Neither control exists on the page until an activity is selected, so
+ *   nothing offers a queue to somebody who has not yet said what they are
+ *   doing — and a scan on its own reaches neither.
+ *
+ * NOTHING ON THIS PAGE PUTS ANYBODY IN A LINE. Not the scan, not the activity,
+ * not opening the choice, not opening the name control. The one call that
+ * creates a place in the line is `wsfJoinQueue`, in `onJoinQueue` below, and
+ * it runs on exactly one tap: the confirmation inside the name control. There
+ * is no other queue write on this screen and no second join path anywhere.
+ *
+ * "USE MY PHONE" IS THE CONTRIBUTION FLOW THAT ALREADY EXISTS, at the address
+ * it already had (`/contribute/<goalId>`), with nothing added to it.
+ *
+ * "JOIN THE KIOSK QUEUE" OPENS THE NAME CHOICE — and the name choice is the
+ * whole point of it, not a formality on the way to a
  * queue. A queue puts a person's name on a screen in a room full of strangers,
  * so what that screen will say is decided HERE, by them, before they are in it:
  * their profile's first name is offered pre-filled, initials are one tap away,
@@ -76,13 +119,36 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
 type EventState =
   | { kind: 'loading' }
   | { kind: 'signedOut' }
-  | { kind: 'member'; goalTitle: string | null; communityDisplayName: string | null }
+  | {
+      kind: 'member';
+      goalTitle: string | null;
+      communityDisplayName: string | null;
+      /** The event's own word for what it counts, from the SERVER's answer to
+       * the membership call — never from the URL. */
+      unit: string | null;
+    }
   | { kind: 'notMember' }
   | { kind: 'error'; message: string };
 
 export default function EventScreen() {
-  const params = useLocalSearchParams<{ goalId: string }>();
+  const params = useLocalSearchParams<{ goalId: string; activity?: string }>();
   const goalId = typeof params.goalId === 'string' ? params.goalId.trim() : '';
+  /**
+   * WHAT THE JOURNEY ARRIVED CARRYING. `?activity=<label>` is written by the
+   * station's newcomer code and re-attached to this address by
+   * `routeAfterJoin` at the end of a join, so a phone that left for signup,
+   * verification, a profile and a join comes back still naming what the room
+   * was doing.
+   *
+   * It is READ ONLY — it never becomes part of a path, it is never sent to a
+   * server, and it never reaches a first paint: this screen's exported shell
+   * is a loading state (see `entry === null` below), and everything derived
+   * from this value renders only in the member branch, which mounts after
+   * hydration. That is the rule the display screen writes down and the one
+   * that cost a debugging session (#418): a param-derived attribute in an
+   * exported shell freezes at the server's value for the life of the page.
+   */
+  const carriedActivity = readActivityLabel(params.activity);
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<EventState>({ kind: 'loading' });
 
@@ -94,6 +160,34 @@ export default function EventScreen() {
   const [joining, setJoining] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const suggestions = callNameSuggestions(user?.displayName ?? null);
+
+  /**
+   * THE ACTIVITY DECISION.
+   *
+   * `pickedKey` is what the person has TAPPED, and `picked` says whether they
+   * have tapped at all. The selection is derived rather than seeded by an
+   * effect, so there is no window in which the page has rendered with one
+   * answer and is about to have another — the first render already shows the
+   * final state, and `initialSelection` is the single statement of the rule.
+   */
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  const [picked, setPicked] = useState(false);
+  const memberUnit = state.kind === 'member' ? state.unit : null;
+  const activities = useMemo(
+    () => eventActivities({ unit: memberUnit, carried: carriedActivity }),
+    [memberUnit, carriedActivity]
+  );
+  const selectedActivityKey = picked ? pickedKey : initialSelection(activities, carriedActivity);
+  const selectedActivity = activityLabelFor(activities, selectedActivityKey);
+
+  const onChooseActivity = useCallback((key: string) => {
+    setPicked(true);
+    setPickedKey(key);
+    // A different activity is a different decision; anything half-typed into
+    // the name control belonged to the old one.
+    setCallName(null);
+    setQueueError(null);
+  }, []);
 
   /**
    * `undefined` until this browser's storage has actually been read.
@@ -155,6 +249,12 @@ export default function EventScreen() {
 
   const onJoinQueue = useCallback(async () => {
     if (joining) return;
+    // THE ORDER IS PART OF THE PROMISE, not just part of the layout. The name
+    // control is only reachable from the choice, and the choice only exists
+    // once an activity is selected — but the one call that creates a place in
+    // the line restates the condition rather than trusting the render to have
+    // kept it.
+    if (!selectedActivityKey) return;
     const chosen = (callName ?? '').trim();
     if (!isUsableCallName(chosen)) {
       setQueueError(
@@ -178,7 +278,7 @@ export default function EventScreen() {
     } finally {
       setJoining(false);
     }
-  }, [callName, goalId, joining]);
+  }, [callName, goalId, joining, selectedActivityKey]);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -204,8 +304,15 @@ export default function EventScreen() {
         );
         // The membership decision. Its refusal is the whole answer for the
         // not-a-member branch, so it is awaited on its own.
-        await mineFn({ goalId });
+        //
+        // Its `unit` is also the event's own activity, and this is the read it
+        // comes from: a member always gets an answer here, whereas the pulse
+        // below is a best-effort extra that a closed or unauthorized display
+        // can legitimately refuse. The activity a person is asked to confirm
+        // must not depend on that.
+        const mine = await mineFn({ goalId });
         if (cancelled) return;
+        const unit = typeof mine.data?.unit === 'string' ? mine.data.unit : null;
 
         // Context, and only context. A member is entitled to it, and a failure
         // here changes nothing about what this page offers — it just says
@@ -224,7 +331,7 @@ export default function EventScreen() {
           // depend on the goal's name.
         }
         if (cancelled) return;
-        setState({ kind: 'member', goalTitle, communityDisplayName });
+        setState({ kind: 'member', goalTitle, communityDisplayName, unit });
       } catch (e) {
         if (cancelled) return;
         if (e instanceof FirebaseError && e.code === 'functions/not-found') {
@@ -389,30 +496,108 @@ export default function EventScreen() {
           {state.goalTitle ?? 'Add your part'}
         </Text>
         <Text style={kit.heroMeta}>
-          Enter the number you counted yourself. Nothing is counted for you.
+          Two things, in order: what you’re here to do, then where you’ll do it. Whatever you add,
+          you count yourself — nothing is counted for you.
         </Text>
       </View>
-      <View style={styles.actions}>
-        {/* The ONE way on, to the contribution screen that already exists. */}
-        <ButtonLink
-          href={`/contribute/${goalId}`}
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
-          testID="wsf-event-add"
-          label="Add your part"
-        />
-        {callName === null ? (
-          <Pressable
-            onPress={onOpenNameChoice}
-            style={kit.secondaryButton}
-            testID="wsf-event-queue-start"
-            accessibilityRole="button"
+      {/*
+        DECISION ONE: WHAT. Always on the page, always above the ways on, and
+        the ways on do not exist until it has an answer.
+      */}
+      <View style={kit.card} testID="wsf-event-activity">
+        <Text
+          style={kit.cardTitle}
+          accessibilityRole="header"
+          {...({ 'aria-level': 2 } as Record<string, unknown>)}
+        >
+          {EVENT_ACTIVITY_HEADING}
+        </Text>
+        <Text style={kit.body}>{EVENT_ACTIVITY_INTRO}</Text>
+        {activities.length > 0 ? (
+          <OptionGroup
+            accessibilityLabel={EVENT_ACTIVITY_HEADING}
+            testID="wsf-event-activity-options"
           >
-            <Text style={kit.secondaryButtonText}>Get in line</Text>
-          </Pressable>
-        ) : null}
-        <SecondaryLink href="/" label="Back to home" />
+            {activities.map((activity) => (
+              <OptionRow
+                key={activity.key}
+                label={activity.label}
+                // The scanned activity says, in words, that scanning decided
+                // nothing. The event's own activity needs no such sentence.
+                description={activity.carried ? EVENT_ACTIVITY_SCANNED_NOTE : undefined}
+                selected={selectedActivityKey === activity.key}
+                onPress={() => onChooseActivity(activity.key)}
+                testID={`wsf-event-activity-${activity.key}`}
+              />
+            ))}
+          </OptionGroup>
+        ) : (
+          // The server told us nothing this event counts and the journey
+          // carried nothing either. Say so rather than invent an activity to
+          // be chosen; there is nothing to choose and so nothing is offered.
+          <Text style={kit.caption} testID="wsf-event-activity-none">
+            We couldn’t load what this event is counting. Reload the page and try again.
+          </Text>
+        )}
       </View>
+
+      {/*
+        DECISION TWO: WHERE. Rendered ONLY once an activity is selected — not
+        disabled, not greyed, not present. A scan reaches neither control, and
+        neither control is a queue write in any case: "Use my phone" is a link
+        to the contribution screen that already exists, and "Join the kiosk
+        queue" opens the name control below. The one call that creates a place
+        in the line is inside that control.
+      */}
+      {selectedActivity ? (
+        <View style={styles.choice} testID="wsf-event-choice">
+          <Text
+            style={kit.cardTitle}
+            accessibilityRole="header"
+            {...({ 'aria-level': 2 } as Record<string, unknown>)}
+          >
+            {EVENT_CHOICE_HEADING}
+          </Text>
+          {/* What they just chose, said back to them: the heading below says
+              "it", and a person should never have to scroll up to find out
+              what "it" is. */}
+          <Text style={kit.cardMeta} testID="wsf-event-choice-activity">
+            {selectedActivity}
+          </Text>
+          <Text style={kit.body}>{EVENT_CHOICE_INTRO}</Text>
+          <View style={styles.actions}>
+            <ButtonLink
+              href={`/contribute/${goalId}`}
+              style={kit.primaryButton}
+              textStyle={kit.primaryButtonText}
+              testID="wsf-event-add"
+              label={EVENT_CHOICE_PHONE_LABEL}
+            />
+            <Text style={kit.caption} testID="wsf-event-add-description">
+              {EVENT_CHOICE_PHONE_DESCRIPTION}
+            </Text>
+            {callName === null ? (
+              <>
+                <Pressable
+                  onPress={onOpenNameChoice}
+                  style={kit.secondaryButton}
+                  testID="wsf-event-queue-start"
+                  accessibilityRole="button"
+                  accessibilityLabel={`${EVENT_CHOICE_QUEUE_LABEL}. ${EVENT_CHOICE_QUEUE_DESCRIPTION}`}
+                >
+                  <Text style={kit.secondaryButtonText}>{EVENT_CHOICE_QUEUE_LABEL}</Text>
+                </Pressable>
+                <Text style={kit.caption} testID="wsf-event-queue-start-description">
+                  {EVENT_CHOICE_QUEUE_DESCRIPTION}
+                </Text>
+              </>
+            ) : null}
+          </View>
+          <Text style={kit.caption} testID="wsf-event-choice-note">
+            {EVENT_CHOICE_NOTE}
+          </Text>
+        </View>
+      ) : null}
 
       {/*
         THE NAME CHOICE. Not a formality on the way to a queue: it IS the
@@ -527,12 +712,21 @@ export default function EventScreen() {
           </Pressable>
         </View>
       ) : null}
+
+      {/* The way off the page, last, under whatever the person is in the
+          middle of rather than between them and it. */}
+      <View style={styles.actions}>
+        <SecondaryLink href="/" label="Back to home" />
+      </View>
     </>
   );
 }
 
 const styles = StyleSheet.create({
   actions: { gap: 10 },
+  // The second decision, as one block: its heading, its sentence, its two ways
+  // on and the line that says neither of them is a queue yet.
+  choice: { gap: 10, width: '100%' },
   // Wraps rather than squeezes: a chosen name and an initials label are both
   // variable-length strings, and neither may push the other off a 195 px page.
   namePills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

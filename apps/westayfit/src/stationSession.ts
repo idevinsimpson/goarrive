@@ -25,6 +25,8 @@
  * authority.
  */
 
+import { EVENT_ACTIVITY_PARAM, readActivityLabel } from './eventActivity';
+
 /** The one browser-storage key this feature owns. */
 const STATION_CREDENTIAL_KEY = 'wsf.stationCredential';
 
@@ -37,7 +39,22 @@ const STATION_CREDENTIAL_KEY = 'wsf.stationCredential';
  */
 const PENDING_EVENT_KEY = 'wsf.pendingEventGoalId';
 
-export const STATION_STORAGE_KEYS = [STATION_CREDENTIAL_KEY, PENDING_EVENT_KEY] as const;
+/**
+ * The ACTIVITY that event was running, beside the event and by the same
+ * mechanism: sessionStorage, same lifetime, written at the same moment, read
+ * at the same moment, cleared at the same moment. It holds a label — the
+ * event's own word for what it counts, which `wsfGoalPulse` already publishes
+ * to an unauthenticated screen — and nothing else. It is a selection carried
+ * with a journey, never a fact about the person carrying it, and it leaves
+ * when the journey ends.
+ */
+const PENDING_EVENT_ACTIVITY_KEY = 'wsf.pendingEventActivity';
+
+export const STATION_STORAGE_KEYS = [
+  STATION_CREDENTIAL_KEY,
+  PENDING_EVENT_KEY,
+  PENDING_EVENT_ACTIVITY_KEY,
+] as const;
 
 /**
  * The pairing-code alphabet, 32 characters with I, O, 0 and 1 removed so a
@@ -233,15 +250,72 @@ export function clearPendingEventGoal(): void {
 }
 
 /**
+ * Remember which ACTIVITY that event was running, so the join can finish at
+ * the thing the person actually walked up to rather than at a page that has
+ * forgotten what the room was doing.
+ *
+ * Shape-checked by `readActivityLabel`, which refuses control characters and
+ * anything past the cap outright. A value that does not survive that check is
+ * simply not stored: the journey then finishes without an activity, which is
+ * an arrival with less context, not a broken or a guessed one.
+ */
+export function setPendingEventActivity(activity: string): void {
+  try {
+    const label = readActivityLabel(activity);
+    if (!label) return;
+    sessionStore()?.setItem(PENDING_EVENT_ACTIVITY_KEY, label);
+  } catch {
+    // Same as the event goal above: a worse arrival, not a leaky one.
+  }
+}
+
+export function readPendingEventActivity(): string | null {
+  try {
+    const raw = sessionStore()?.getItem(PENDING_EVENT_ACTIVITY_KEY);
+    if (raw == null) return null;
+    // Re-checked on the way out as well as in: a hand-edited entry must not
+    // become something this app will render or route with.
+    return readActivityLabel(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingEventActivity(): void {
+  try {
+    sessionStore()?.removeItem(PENDING_EVENT_ACTIVITY_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
  * Where a completed join goes: the event screen when the visitor came from an
  * event QR, and otherwise exactly where it went before — the community.
  *
  * A goal id that is not of a usable shape is ignored rather than routed to: an
  * unusable value must never build a path.
+ *
+ * THE ACTIVITY RIDES THE LAST HOP IN THE ADDRESS, not in storage. The session
+ * entry is what carried it across signup, verification, the profile and the
+ * join — four routes that each replace the page — and this is where that
+ * carrying ENDS: the value is handed to the event's address, the session entry
+ * is cleared by the caller in the same breath, and from that moment the only
+ * copy left is the one in the address bar, which a reload keeps and a closed
+ * tab takes with it. An activity is never routed to; it is only ever a query
+ * value on a path built from the goal id, so it cannot steer where anyone
+ * lands. It is dropped entirely when there is no event to attach it to.
  */
-export function routeAfterJoin(groupId: string, eventGoalId: string | null): string {
+export function routeAfterJoin(
+  groupId: string,
+  eventGoalId: string | null,
+  eventActivity?: string | null
+): string {
   if (eventGoalId && isIdShape(eventGoalId)) {
-    return `/event/${encodeURIComponent(eventGoalId)}`;
+    const base = `/event/${encodeURIComponent(eventGoalId)}`;
+    const activity = readActivityLabel(eventActivity);
+    if (!activity) return base;
+    return `${base}?${EVENT_ACTIVITY_PARAM}=${encodeURIComponent(activity)}`;
   }
   return `/community/${encodeURIComponent(groupId)}`;
 }

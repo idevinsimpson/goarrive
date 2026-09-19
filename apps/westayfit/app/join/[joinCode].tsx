@@ -28,10 +28,14 @@ import {
   clearPendingJoinCode,
   setPendingJoinCode,
 } from '../../src/pendingJoinCode';
+import { readActivityLabel } from '../../src/eventActivity';
 import {
+  clearPendingEventActivity,
   clearPendingEventGoal,
+  readPendingEventActivity,
   readPendingEventGoal,
   routeAfterJoin,
+  setPendingEventActivity,
   setPendingEventGoal,
 } from '../../src/stationSession';
 import { readEventParam } from '../../src/ui/eventLinks';
@@ -59,7 +63,7 @@ type JoinState =
   | { kind: 'error'; message: string };
 
 export default function JoinPage() {
-  const params = useLocalSearchParams<{ joinCode: string; event?: string }>();
+  const params = useLocalSearchParams<{ joinCode: string; event?: string; activity?: string }>();
   const joinCode = typeof params.joinCode === 'string' ? params.joinCode.trim() : '';
   /**
    * `?event=<goalId>` — set only by the QR on the screen at an event. It names
@@ -70,6 +74,14 @@ export default function JoinPage() {
    * dropped somewhere they have to navigate out of.
    */
   const eventGoalId = readEventParam(params.event);
+  /**
+   * `?activity=<label>` — the second half of the same context, set by the same
+   * QR. It names what that screen was running, in the event's own published
+   * word for it. It is not a token, not an id, not routed to and not a fact
+   * about anybody; it is the selection this journey is carrying, and it is let
+   * go the moment the journey ends.
+   */
+  const eventActivity = readActivityLabel(params.activity);
   const { ready, user } = useWsfAuth();
 
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: 'loading' });
@@ -88,6 +100,13 @@ export default function JoinPage() {
   useEffect(() => {
     if (eventGoalId) setPendingEventGoal(eventGoalId);
   }, [eventGoalId]);
+
+  // THE ACTIVITY RIDES WITH IT, by the same mechanism and for the same reason.
+  // It is stored only alongside a usable event: an activity with no event to
+  // finish at names nothing and would be a value kept for its own sake.
+  useEffect(() => {
+    if (eventGoalId && eventActivity) setPendingEventActivity(eventActivity);
+  }, [eventGoalId, eventActivity]);
 
   /**
    * WHOSE SCREEN IS THIS — asked on THIS page only when the visitor arrived
@@ -189,8 +208,18 @@ export default function JoinPage() {
       // Where a finished join lands: the event this visitor scanned into, or —
       // for every join that did not come from an event — exactly where it
       // landed before.
-      const destination = routeAfterJoin(result.data.groupId, readPendingEventGoal());
+      //
+      // And the END of the carrying: the event and
+      // the activity are read out of session storage, handed to the address,
+      // and both entries are dropped in the same breath. Read BEFORE either is
+      // cleared, so the two cannot get out of step.
+      const destination = routeAfterJoin(
+        result.data.groupId,
+        readPendingEventGoal(),
+        readPendingEventActivity()
+      );
       clearPendingEventGoal();
+      clearPendingEventActivity();
       router.replace(destination as never);
     } catch (e) {
       setJoinState({
