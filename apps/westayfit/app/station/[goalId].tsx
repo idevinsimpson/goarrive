@@ -28,6 +28,7 @@ import {
   type HallState,
 } from '../../src/turnContract';
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
+import { useFollowAlongSession } from '../../src/followAlongSession';
 import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE } from '../../src/kioskSession';
 import {
   clearStationCredential,
@@ -41,6 +42,8 @@ import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
 import { buildEventJoinUrlFromScreenedCode, buildEventUrl } from '../../src/ui/eventLinks';
+import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
+import { kit } from '../../src/ui/kit';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { formatCount, percentLabel, statusLine } from '../../src/ui/progressFormat';
 import { encodeQr, qrSvgDataUriRaw } from '../../src/ui/qr';
@@ -210,6 +213,36 @@ export default function StationScreen() {
    * a box at a public screen is the next person's number by accident.
    */
   const [turnCount, setTurnCount] = useState('');
+
+  /**
+   * THE FOLLOW-ALONG THIS SCREEN RUNS, and it is the same one the phone runs:
+   * `useFollowAlongSession` + `<FollowAlongCard>`, the pair `/move` is built
+   * from. A station is a host for that player, not a second implementation of
+   * it.
+   *
+   * WHICH MOVEMENT, and why it cannot be read off this screen's address. A
+   * combined event has ONE line across every station, and the people in it
+   * chose different child activities — so the movement to demonstrate belongs
+   * to the turn, not to the station. It arrives on the assignment as
+   * `activityUnit`, which names an activity and never a person.
+   *
+   * The round id is the assigned turn's code, which is stable for as long as
+   * that turn is. This screen mints nothing: the canonical attempt was minted
+   * server-side by wsfStartTurn, and this player has no way to send a number
+   * regardless — the record panel below is the only thing that can.
+   */
+  const assignedUnit = queue?.assigned?.activityUnit ?? '';
+  const playerRoundId = queue?.assigned?.state === 'active' ? (queue.assigned.code ?? null) : null;
+  const keepRound = useCallback(() => undefined, []);
+  const session = useFollowAlongSession({
+    unit: assignedUnit,
+    roundId: playerRoundId,
+    onRoundStart: keepRound,
+    onRoundReset: keepRound,
+    // ONE 60-SECOND ROUND PER TURN. The throughput contract for a line, not a
+    // preference — so the two-minute chip is not offered here at all.
+    fixedLength: 'short',
+  });
 
   const [pairing, setPairing] = useState<PairingPhase>({ kind: 'requesting' });
   const [enrolled, setEnrolled] = useState<EnrolledPhase>({ kind: 'loading' });
@@ -709,6 +742,8 @@ export default function StationScreen() {
   const assigned: HallAssignment | null = queue?.assigned ?? null;
   const turnResult: HallResult | null = queue?.result ?? null;
   const action = stationAction(queue);
+  /** A turn is actually running, on a venue screen. See the body below. */
+  const turnRunningWide = wide && action === 'complete';
   const callSentence = announceHallTurn(queue, label);
   const resultSentence = describeHallResult(turnResult);
 
@@ -771,46 +806,61 @@ export default function StationScreen() {
       </View>
 
       <View style={wide ? styles.bodyWide : styles.bodyPhone}>
-        <View style={styles.hero} testID="wsf-station-hero">
-          <Text
-            style={[styles.community, wide ? styles.communityWide : null]}
-            testID="wsf-station-community"
-          >
-            {pulse.communityDisplayName}
-          </Text>
-          <Text
-            style={[styles.goalTitle, wide ? styles.goalTitleWide : null]}
-            testID="wsf-station-goal-title"
-            {...HEADING}
-          >
-            {pulse.goalTitle}
-          </Text>
-          {period ? (
-            <Text style={styles.period} testID="wsf-station-period">
-              {period}
+        {/*
+          WHILE A TURN IS RUNNING, THE MOVEMENT IS THE SCREEN.
+
+          The attract layout is three columns — the goal's progress, the line,
+          and the two attendee codes — and that is right for a screen nobody is
+          standing at. It is wrong the moment somebody is: the venue canvas is
+          a FIXED height that does not scroll, so a follow-along added beside
+          the other two overflowed it, and the spill landed as text printed
+          over other text and controls dropped onto the page's white ground.
+
+          Nobody needs the join codes or the running total while they are
+          mid-squat. Both come back the instant the turn ends.
+        */}
+        {turnRunningWide ? null : (
+          <View style={styles.hero} testID="wsf-station-hero">
+            <Text
+              style={[styles.community, wide ? styles.communityWide : null]}
+              testID="wsf-station-community"
+            >
+              {pulse.communityDisplayName}
             </Text>
-          ) : null}
-          <View style={styles.weWrap}>
-            <LivingWeProgress
-              completed={sharedTotal}
-              target={target}
-              unit={unit}
-              width={weWidth}
-              surface="dark"
-              testID="wsf-station-we"
-            />
+            <Text
+              style={[styles.goalTitle, wide ? styles.goalTitleWide : null]}
+              testID="wsf-station-goal-title"
+              {...HEADING}
+            >
+              {pulse.goalTitle}
+            </Text>
+            {period ? (
+              <Text style={styles.period} testID="wsf-station-period">
+                {period}
+              </Text>
+            ) : null}
+            <View style={styles.weWrap}>
+              <LivingWeProgress
+                completed={sharedTotal}
+                target={target}
+                unit={unit}
+                width={weWidth}
+                surface="dark"
+                testID="wsf-station-we"
+              />
+            </View>
+            <Text style={[styles.total, wide ? styles.totalWide : null]} testID="wsf-station-total-line">
+              <Text testID="wsf-station-shared-total">{formatCount(sharedTotal)}</Text>
+              {` of ${formatCount(target)} ${unit}`}
+            </Text>
+            <Text style={styles.percent} testID="wsf-station-percent">
+              {`${percentLabel(sharedTotal, target)} complete`}
+            </Text>
+            <Text style={styles.status} testID="wsf-station-status">
+              {statusLine(sharedTotal, target, status)}
+            </Text>
           </View>
-          <Text style={[styles.total, wide ? styles.totalWide : null]} testID="wsf-station-total-line">
-            <Text testID="wsf-station-shared-total">{formatCount(sharedTotal)}</Text>
-            {` of ${formatCount(target)} ${unit}`}
-          </Text>
-          <Text style={styles.percent} testID="wsf-station-percent">
-            {`${percentLabel(sharedTotal, target)} complete`}
-          </Text>
-          <Text style={styles.status} testID="wsf-station-status">
-            {statusLine(sharedTotal, target, status)}
-          </Text>
-        </View>
+        )}
 
         {/*
           THE CALLING HALF — AND IT SHOWS ONE PERSON.
@@ -845,7 +895,16 @@ export default function StationScreen() {
           off.
         */}
         <View
-          style={[styles.queue, wide ? styles.queueWide : styles.queuePhone]}
+          style={[
+            styles.queue,
+            wide ? styles.queueWide : styles.queuePhone,
+            // WHILE SOMEBODY IS ACTUALLY MOVING, THE MOVEMENT TAKES THE ROOM.
+            // This column is one of three equal ones on the attract screen,
+            // which is right until a turn starts — then the follow-along is
+            // what the person in front of the screen is there for, and a third
+            // of the width is what squeezed it.
+            wide && action === 'complete' ? styles.queueRunning : null,
+          ]}
           testID="wsf-station-queue"
         >
           <Text style={styles.queueEyebrow}>Now serving</Text>
@@ -858,7 +917,17 @@ export default function StationScreen() {
             {assigned ? (
               <>
                 <Text
-                  style={[styles.servingName, wide ? styles.servingNameWide : null]}
+                  // WHILE THEY ARE MOVING, THE MOVEMENT IS THE BIGGEST THING.
+                  // The called name is the biggest thing on an attract screen
+                  // because being called is what matters then. Once the turn is
+                  // running they already know it is theirs, and a name at that
+                  // size pushed the clock and the count box off a canvas that
+                  // cannot scroll.
+                  style={[
+                    styles.servingName,
+                    wide ? styles.servingNameWide : null,
+                    turnRunningWide ? styles.servingNameRunning : null,
+                  ]}
                   testID="wsf-station-queue-serving"
                   {...({ 'aria-hidden': 'true' } as Record<string, unknown>)}
                 >
@@ -903,6 +972,22 @@ export default function StationScreen() {
               here and recording it on their own phone are one write under one
               key — whichever lands first is the one that counts, and the other
               adds nothing. */}
+          {action === 'complete' ? (
+            <View testID="wsf-station-player">
+              <FollowAlongCard
+                session={session}
+                wide={wide}
+                tone="venue"
+                testIDPrefix="wsf-station-move"
+                finishedAction={
+                  <Text style={kit.body} testID="wsf-station-move-handoff">
+                    Enter what they counted below.
+                  </Text>
+                }
+              />
+            </View>
+          ) : null}
+
           {action === 'complete' ? (
             <View style={styles.turnRecord} testID="wsf-station-turn-record">
               <Text style={styles.queueEyebrow}>How many did they do?</Text>
@@ -986,54 +1071,59 @@ export default function StationScreen() {
           authority: scanning one cannot enrol a screen, cannot make anyone a
           Champion, and cannot record anything.
         */}
-        <View style={styles.qrRow} testID="wsf-station-qr">
-          {joinQr && joinUrl ? (
-            <View style={styles.qrBlock} testID="wsf-station-qr-join" dataSet={{ qrUrl: joinUrl }}>
-              <Text style={styles.qrHeading}>New here?</Text>
-              <Image
-                source={{ uri: joinQr }}
-                style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                resizeMode="contain"
-                accessibilityLabel="QR code that opens the page to join this community"
-                testID="wsf-station-qr-join-image"
-              />
-              <Text style={styles.qrCaption}>Scan to join, then add your part.</Text>
-            </View>
-          ) : (
-            <View style={styles.qrBlock} testID="wsf-station-qr-join-unavailable">
-              <Text style={styles.qrHeading}>New here?</Text>
-              {/*
-                No symbol rather than a symbol that leads nowhere. This
-                community admits nobody by link, the server therefore handed
-                this screen no code, and the screen says so instead of
-                inventing a way in — admission policy is not this feature's to
-                change.
-              */}
-              <Text style={styles.qrCaption}>
-                This community isn’t joined from a link. Ask a Champion to add you.
-              </Text>
-            </View>
-          )}
-          {eventQr && eventUrl ? (
-            <View style={styles.qrBlock} testID="wsf-station-qr-member" dataSet={{ qrUrl: eventUrl }}>
-              <Text style={styles.qrHeading}>Already a member?</Text>
-              <Image
-                source={{ uri: eventQr }}
-                style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                resizeMode="contain"
-                accessibilityLabel="QR code that opens this event on your own phone"
-                testID="wsf-station-qr-member-image"
-              />
-              <Text style={styles.qrCaption}>Scan to add your part on your own phone.</Text>
-            </View>
-          ) : null}
-        </View>
+        {turnRunningWide ? null : (
+          <View style={styles.qrRow} testID="wsf-station-qr">
+            {joinQr && joinUrl ? (
+              <View style={styles.qrBlock} testID="wsf-station-qr-join" dataSet={{ qrUrl: joinUrl }}>
+                <Text style={styles.qrHeading}>New here?</Text>
+                <Image
+                  source={{ uri: joinQr }}
+                  style={[styles.qrImage, { width: qrSize, height: qrSize }]}
+                  resizeMode="contain"
+                  accessibilityLabel="QR code that opens the page to join this community"
+                  testID="wsf-station-qr-join-image"
+                />
+                <Text style={styles.qrCaption}>Scan to join, then add your part.</Text>
+              </View>
+            ) : (
+              <View style={styles.qrBlock} testID="wsf-station-qr-join-unavailable">
+                <Text style={styles.qrHeading}>New here?</Text>
+                {/*
+                  No symbol rather than a symbol that leads nowhere. This
+                  community admits nobody by link, the server therefore handed
+                  this screen no code, and the screen says so instead of
+                  inventing a way in — admission policy is not this feature's to
+                  change.
+                */}
+                <Text style={styles.qrCaption}>
+                  This community isn’t joined from a link. Ask a Champion to add you.
+                </Text>
+              </View>
+            )}
+            {eventQr && eventUrl ? (
+              <View style={styles.qrBlock} testID="wsf-station-qr-member" dataSet={{ qrUrl: eventUrl }}>
+                <Text style={styles.qrHeading}>Already a member?</Text>
+                <Image
+                  source={{ uri: eventQr }}
+                  style={[styles.qrImage, { width: qrSize, height: qrSize }]}
+                  resizeMode="contain"
+                  accessibilityLabel="QR code that opens this event on your own phone"
+                  testID="wsf-station-qr-member-image"
+                />
+                <Text style={styles.qrCaption}>Scan to add your part on your own phone.</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
       </View>
 
-      <Text style={styles.caption} testID="wsf-station-qr-note">
-        These codes open a page on your own phone. You sign in as yourself and enter the number you
-        counted yourself. This screen records nothing and knows nobody.
-      </Text>
+      {/* It explains the join codes, so it goes when they do. */}
+      {turnRunningWide ? null : (
+        <Text style={styles.caption} testID="wsf-station-qr-note">
+          These codes open the event on your own phone. This screen shows only the person whose
+          turn it is, and their repetitions are entered after the round.
+        </Text>
+      )}
       {testNote}
     </StationSurface>
   );
@@ -1163,6 +1253,8 @@ const styles = StyleSheet.create({
   // In the wide layout the line is a column of the body row; on a phone it is
   // a block in the body column. Neither may be given a width of its own.
   queueWide: { flex: 1 },
+  queueRunning: { flex: 2.6 },
+  servingNameRunning: { fontSize: 44, lineHeight: 50 },
   queuePhone: { alignSelf: 'stretch' },
   queueEyebrow: {
     color: PROGRESS_GREEN,

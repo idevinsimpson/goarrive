@@ -71,6 +71,11 @@ export type HallAssignment = {
   calledName: string;
   state: 'assigned' | 'ready' | 'active';
   readySecondsLeft: number | null;
+  /** What this turn is for, so the screen runs that movement's follow-along.
+   * A combined event's line holds people who chose different activities, so a
+   * station cannot infer it from its own address. Names an activity, never a
+   * person. */
+  activityUnit: string;
 };
 
 /** The ten-second result. A code and a number — never a name. */

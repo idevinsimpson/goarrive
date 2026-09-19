@@ -6,7 +6,7 @@
  *
  *  1. THE DEFAULT STATE IS HONEST. There is no movement video catalog in this
  *     repository. With no poster supplied, the screen draws its own figure and
- *     labels it "Illustrated fallback" on screen; nothing anywhere on it
+ *     labels it "Movement guide" on screen; nothing anywhere on it
  *     implies a video was delivered, is loading, or failed.
  *  2. READY → 3-SECOND COUNTDOWN → 60-SECOND ROUND, explicitly, in that order.
  *  3. STOPPING EARLY AND RUNNING TO THE END BOTH LEAD TO "Enter my reps",
@@ -137,8 +137,21 @@ test('ready, then a 3-second count in, then a 60-second round', async ({ page })
   expect(await readSeconds(page)).toBe(60);
 
   // THE HONEST DEFAULT STATE. A drawing this app makes, named as exactly that.
-  await expect(page.getByTestId('wsf-move-media-label')).toHaveText('Illustrated fallback');
-  await expect(page.getByTestId('wsf-move-media-note')).toContainText('No movement video exists');
+  // The treatment is a MOVEMENT GUIDE, and its line says what the person must
+  // do rather than what this repository is missing. The rule underneath it is
+  // unchanged and is asserted right here: no word on it names a video.
+  await expect(page.getByTestId('wsf-move-media-label')).toHaveText('Movement guide');
+  await expect(page.getByTestId('wsf-move-media-note')).toContainText(
+    'Demonstration only — count your own reps.'
+  );
+  const guideText = (
+    (await page.getByTestId('wsf-move-media-label').textContent()) +
+    ' ' +
+    (await page.getByTestId('wsf-move-media-note').textContent())
+  ).toLowerCase();
+  for (const forbidden of ['video', 'loading', 'failed', 'unavailable', 'missing']) {
+    expect(guideText, `the guide says "${forbidden}"`).not.toContain(forbidden);
+  }
   const figure = page.locator('[data-testid="wsf-move-figure-image"] img').first();
   await expect(figure).toHaveCount(1, { timeout: 15_000 });
   expect((await figure.getAttribute('src')) ?? '').toContain('data:image/svg+xml');

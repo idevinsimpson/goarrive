@@ -92,6 +92,17 @@ export type EventActivity = {
    * where the address IS the answer and nothing about it changed.
    */
   goalId?: string;
+  /**
+   * THE GOAL'S OWN NAME, when the server has resolved the event.
+   *
+   * `label` is what the activity COUNTS ("squats"), and it stays the value
+   * this option is keyed and carried by, because that is what the rest of the
+   * journey is addressed with. `title` is what the Champion CALLED it, and it
+   * is what a person should be reading when they pick between three of them —
+   * a list of bare units reads as a form to complete rather than a choice
+   * between things. Absent on the legacy one-goal path.
+   */
+  title?: string;
 };
 
 /** What the server says this event actually is: a combined setup's frozen
@@ -168,22 +179,23 @@ export function eventActivitiesFrom(opts: {
   const carried = readActivityLabel(opts.carried);
   const out: EventActivity[] = [];
   const seen = new Set<string>();
-  const push = (label: string, isCarried: boolean, goalId: string) => {
+  const push = (label: string, isCarried: boolean, goalId: string, title: string) => {
     const fold = label.toLowerCase();
     if (seen.has(fold)) return;
     seen.add(fold);
-    out.push({ key: '', label, carried: isCarried, goalId });
+    const named = title.trim();
+    out.push({ key: '', label, carried: isCarried, goalId, ...(named ? { title: named } : {}) });
   };
   if (carried) {
     const match = opts.resolved.find(
       (a) => readActivityLabel(a.unit)?.toLowerCase() === carried.toLowerCase()
     );
-    if (match) push(carried, true, match.goalId);
+    if (match) push(carried, true, match.goalId, match.title ?? '');
   }
   for (const activity of opts.resolved) {
     const label = readActivityLabel(activity.unit);
     if (!label || !activity.goalId) continue;
-    push(label, false, activity.goalId);
+    push(label, false, activity.goalId, activity.title ?? '');
   }
 
   // Keys last, so a collision between two different labels is resolved here

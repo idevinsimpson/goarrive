@@ -29,6 +29,25 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
+import { mkdirSync } from 'node:fs';
+import * as nodePath from 'node:path';
+
+/**
+ * THE STATES A ROOM ACTUALLY SEES — the screen in the hall and the phone in a
+ * hand, captured at the same moment so the pair can be read against each
+ * other rather than one at a time. No assertion is made about any of these
+ * images; they exist to be looked at.
+ */
+const TURN_ARTIFACTS = nodePath.join(__dirname, 'artifacts', 'queue-call-by-name');
+async function shot(
+  target: { screenshot: (o: { path: string; fullPage: boolean }) => Promise<unknown> },
+  name: string
+): Promise<void> {
+  mkdirSync(TURN_ARTIFACTS, { recursive: true });
+  await target.screenshot({ path: nodePath.join(TURN_ARTIFACTS, `${name}.png`), fullPage: false });
+}
+
+
 
 // These two journeys are long by nature — two real accounts, a community, a
 // goal, a display authorization and a station enrolment before the queue is
@@ -208,7 +227,10 @@ test('a member chooses initials, the screen calls them by those initials and a c
   const joinCode = new URL(joinUrl).pathname.split('/').filter(Boolean).pop()!;
 
   // ---- an ordinary member, on their own phone -----------------------------
-  const memberContext = await browser.newContext();
+  // A PHONE IS A PHONE. This context was the default 1280-wide desktop, so
+  // every "phone" capture was a lie about the viewport it was taken at. The
+  // station keeps 1280x720, because that IS how a venue screen is met.
+  const memberContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const memberPage = await memberContext.newPage();
   try {
     const memberUid = await signUp(memberPage, 'Ada Lovelace', 'queue-member');
@@ -260,6 +282,9 @@ test('a member chooses initials, the screen calls them by those initials and a c
     }
     expect(await station.page.content()).not.toContain(memberUid);
 
+    await shot(memberPage, '00-phone-waiting');
+    await shot(station.page, '00-station-waiting');
+
     // ---- 3. CALL NEXT, printed AND announced ------------------------------
     await station.page.getByTestId('wsf-station-call-next').click();
     await expect(station.page.getByTestId('wsf-station-queue-serving')).toHaveText('A.L.', {
@@ -298,12 +323,15 @@ test('a member chooses initials, the screen calls them by those initials and a c
     // ---- 6. AND NOTHING MOVED ---------------------------------------------
     await expectNoMotion(station.page, 'the screen in the hall');
     await expectNoMotion(memberPage, 'the member’s own phone');
+    await shot(station.page, '01-station-assigned');
+    await shot(memberPage, '02-phone-assigned');
 
     // ---- 5. READY, START, RECORD ------------------------------------------
     //
     // A CALL IS AN OFFER. The station cannot start anybody who has not said
     // they are coming, so its one control is disabled until the phone taps.
     await expect(station.page.getByTestId('wsf-station-turn-action')).toBeDisabled();
+    await shot(memberPage, '03-phone-lease-running');
     await memberPage.getByTestId('wsf-queue-ready').click();
     await expect(station.page.getByTestId('wsf-station-turn-action')).toBeEnabled({
       timeout: 20_000,
@@ -311,12 +339,48 @@ test('a member chooses initials, the screen calls them by those initials and a c
     await expect(station.page.getByTestId('wsf-station-turn-action')).toHaveText(
       'Start their turn'
     );
+    await shot(station.page, '03b-station-ready');
+    await shot(memberPage, '03c-phone-ready');
     await station.page.getByTestId('wsf-station-turn-action').click();
 
     // The turn is running, and the screen asks for the one thing it needs.
     await expect(station.page.getByTestId('wsf-station-turn-record')).toBeVisible({
       timeout: 20_000,
     });
+
+    // ---- THE SAME PLAYER, ON BOTH SURFACES, AT THE SAME MOMENT -----------
+    // The follow-along runs where the turn runs. Same component, same session,
+    // and the movement THIS person chose — which on a combined event is not
+    // the station's own goal.
+    await expect(station.page.getByTestId('wsf-station-player')).toBeVisible({ timeout: 20_000 });
+    await expect(memberPage.getByTestId('wsf-queue-player')).toBeVisible({ timeout: 20_000 });
+    // The phone prints the status sentence. The HALL screen does not: there
+    // the title, the clock and the round note already say it, and a fourth
+    // copy pushed the count box off a canvas that cannot scroll. So the hall
+    // is asked what it actually shows — the step it is on.
+    await expect(memberPage.getByTestId('wsf-queue-move-status')).toContainText('Not started');
+    await expect(station.page.getByTestId('wsf-station-move-step-title')).toContainText('Ready');
+    await expect(station.page.getByTestId('wsf-station-move-timer')).toHaveText('60s');
+
+    // ONE 60-SECOND ROUND PER TURN. The two-minute chip is not on a turn host
+    // at all — not present, not disabled.
+    await expect(station.page.getByTestId('wsf-station-move-length-full')).toHaveCount(0);
+    await expect(memberPage.getByTestId('wsf-queue-move-length-full')).toHaveCount(0);
+    await expect(station.page.getByTestId('wsf-station-move-length-fixed')).toContainText(
+      'One 60-second round.'
+    );
+    await shot(station.page, '04-station-active-player');
+    await shot(memberPage, '05-phone-active-player');
+
+    // AND IT STILL CANNOT RECORD ANYTHING. Running a round changes no number
+    // anywhere; the count box below is the only thing that can.
+    await station.page.getByTestId('wsf-station-move-start').click();
+    await expect(station.page.getByTestId('wsf-station-move-step-title')).not.toContainText(
+      'Ready',
+      { timeout: 20_000 }
+    );
+    await expect(station.page.getByTestId('wsf-station-turn-count')).toHaveValue('');
+    await shot(station.page, '06-station-round-running');
     await station.page.getByTestId('wsf-station-turn-count').fill('30');
     await expect(station.page.getByTestId('wsf-station-turn-action')).toHaveText(
       'Record this turn'
@@ -332,10 +396,18 @@ test('a member chooses initials, the screen calls them by those initials and a c
     await expect(station.page.getByTestId('wsf-station-queue-result')).toContainText(
       '30 squats recorded.'
     );
+    await shot(station.page, '07-station-result');
+    await shot(memberPage, '08-phone-receipt');
+
+    // THE PLAYER GOES WHEN THE TURN DOES. A finished turn leaves a code and a
+    // number for ten seconds and nothing else — not a movement still running
+    // at a screen nobody is standing at.
+    await expect(station.page.getByTestId('wsf-station-player')).toHaveCount(0);
     await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
       'Nobody is waiting.',
       { timeout: 20_000 }
     );
+    await shot(station.page, '09-station-cleared');
     const hallAfter = await station.page.evaluate(() => document.body.innerText);
     for (const secret of ['Ada', 'Lovelace', 'A.L.', memberUid]) {
       expect(hallAfter, `the hall must not read "${secret}"`).not.toContain(secret);
@@ -417,6 +489,81 @@ test('a person can take their own name off the screen, immediately and without a
     );
     const hall = await station.page.evaluate(() => document.body.innerText);
     expect(hall).not.toContain('Quillon');
+  } finally {
+    await station.context.close();
+  }
+});
+
+/**
+ * SWITCHING TO YOUR OWN PHONE, which is a different thing from giving up.
+ *
+ * Somebody in a line who decides they would rather just do it where they are
+ * standing should not have to work out that "take my name off" is the way to
+ * do that, and then find their own way back to the activity. It is one action:
+ * the event place is freed and the contribution journey for the activity THEY
+ * chose opens.
+ *
+ * The place is freed FIRST, so nobody is ever standing in a line they have
+ * already left — and the hall stops counting them without being told twice.
+ */
+test('a person waiting can switch to their own phone, which frees the place and opens their activity', async ({
+  page,
+  browser,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const { goalId } = await championWithGoal(page);
+
+  await page.getByTestId('wsf-community-manage').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`).click();
+  await expect(page.getByTestId(`wsf-goal-display-auth-state-${goalId}`)).toContainText(
+    'Public display is authorized',
+    { timeout: 20_000 }
+  );
+  await page.getByTestId(`wsf-kiosk-stations-copy-${goalId}`).click();
+  const stationUrl = (await page.evaluate(() => navigator.clipboard.readText())).trim();
+
+  const station = await openStationScreen(browser, stationUrl);
+  await expect(station.page.getByTestId('wsf-station-pairing')).toBeVisible({ timeout: 25_000 });
+  const code = (await station.page.getByTestId('wsf-station-pairing-code').innerText()).replace(
+    /\s+/g,
+    ''
+  );
+  await page.getByTestId(`wsf-kiosk-stations-code-${goalId}`).fill(code);
+  await page.getByTestId(`wsf-kiosk-stations-slot-2-${goalId}`).click();
+  await page.getByTestId(`wsf-kiosk-stations-approve-${goalId}`).click();
+  await expect(station.page.getByTestId('wsf-station-screen')).toBeVisible({ timeout: 30_000 });
+
+  try {
+    await page.goto(`/event/${goalId}`);
+    await expect(page.getByTestId('wsf-event-device-choice')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-device-choice-personal').click();
+    await expect(page.getByTestId('wsf-event-member')).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId('wsf-event-queue-start').click();
+    await page.getByTestId('wsf-event-queue-name').fill('Thessaly');
+    await page.getByTestId('wsf-event-queue-join').click();
+    await expect(page.getByTestId('wsf-queue-screen')).toBeVisible({ timeout: 25_000 });
+    await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
+      '1 person waiting.',
+      { timeout: 20_000 }
+    );
+
+    // ONE ACTION. It lands on the contribution screen for the activity this
+    // person chose — not the event page, not the community, not a dead end.
+    await page.getByTestId('wsf-queue-switch-to-phone').click();
+    await page.waitForURL(new RegExp(`/contribute/${goalId}`), { timeout: 25_000 });
+    await expect(page.getByTestId('wsf-contribute-screen')).toBeVisible({ timeout: 25_000 });
+
+    // AND THE PLACE IS GONE. The hall stops counting them on its next read,
+    // and never printed the name in the first place.
+    await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
+      'Nobody is waiting.',
+      { timeout: 20_000 }
+    );
+    const hall = await station.page.evaluate(() => document.body.innerText);
+    expect(hall, 'the hall must never have printed a waiting name').not.toContain('Thessaly');
+    station.assertNoCrash();
   } finally {
     await station.context.close();
   }

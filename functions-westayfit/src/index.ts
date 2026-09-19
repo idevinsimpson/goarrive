@@ -2429,6 +2429,11 @@ function goalPulseCacheGet(goalId: string, now: number): GoalPulseTotals | null 
   return hit.value;
 }
 
+/** Drop a goal's entry, so the next read recomputes. Safe when absent. */
+function goalPulseCacheInvalidate(goalId: string): void {
+  goalPulseCache.delete(goalId);
+}
+
 function goalPulseCacheSet(
   goalId: string,
   now: number,
@@ -3674,6 +3679,23 @@ async function performContribution(args: {
         goalCommunityGroupId: goal.communityGroupId,
       };
     });
+
+  // THE 2-SECOND PULSE CACHE IS NOW WRONG FOR THIS GOAL, so it is dropped
+  // the moment a contribution commits.
+  //
+  // WHY IT MATTERED, because 2 seconds sounds harmless. A screen that polls
+  // rides out a stale entry on its next poll. A screen that reads ONCE does
+  // not: Community Home fetches each goal's pulse when it mounts and then
+  // shows what it got until somebody taps Refresh. So a member who records at
+  // an event and goes straight back — well inside two seconds — pinned a
+  // pre-contribution total on their screen, and the goal they had just pushed
+  // over its target still read "Only 20 to go". The crossing spec caught this
+  // under a parallel battery; it is not a test-only race.
+  //
+  // Invalidate rather than overwrite: the fresh total is a shard sum this
+  // path may never need, and a wrong entry removed is always safe where a
+  // guessed entry written is not.
+  if (!alreadyRecorded) goalPulseCacheInvalidate(goalId);
 
   // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
   // document only. See claimTargetCrossing for the rule.
@@ -7394,6 +7416,12 @@ type TurnEntryDoc = {
   /** THE CHILD ACTIVITY THIS PERSON CHOSE, carried on the entry. It is the
    * goal the attempt is bound to and the goal the contribution lands on. */
   goalId: string;
+  /** What that activity COUNTS ("squats", "miles"), copied from the event's
+   * frozen activity list at join. Stored rather than re-read because the
+   * screen running this turn needs it on every poll and a per-poll goal read
+   * would be a read per station per second. It names a movement, never a
+   * person. */
+  activityUnit: string;
   communityGroupId: string;
   /** Who is in the line. Never published — see hallAssignment. */
   uid: string;
@@ -7720,6 +7748,12 @@ type TurnHallAssignment = {
   state: 'assigned' | 'ready' | 'active';
   /** Whole seconds of the ready lease left, or null once it no longer runs. */
   readySecondsLeft: number | null;
+  /** WHAT THIS TURN IS FOR, so the screen can run that movement's follow-along
+   * rather than a generic one. A combined event's line carries people who
+   * chose different activities, so the station cannot infer it from its own
+   * address. This names an activity, not a person, and says nothing about
+   * anyone still waiting. */
+  activityUnit: string;
 };
 
 /** The ten-second result. A CODE and a number — never a name. */
@@ -7777,6 +7811,7 @@ function hallAssignment(entry: TurnEntryDoc, now: number): TurnHallAssignment | 
     calledName: typeof entry.calledName === 'string' ? entry.calledName : '',
     state: status,
     readySecondsLeft,
+    activityUnit: typeof entry.activityUnit === 'string' ? entry.activityUnit : '',
   };
 }
 
@@ -8060,6 +8095,7 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
         eventScope: event.scope,
         setupId: event.setupId,
         goalId,
+        activityUnit: event.activities.find((a) => a.goalId === goalId)?.unit ?? '',
         communityGroupId: event.communityGroupId,
         uid,
         calledName,
@@ -8134,6 +8170,9 @@ type MyTurnResponse = {
     status: TurnStatus;
     /** The activity THEY chose, carried on their entry. */
     goalId: string;
+    /** What it counts, so their phone runs the same follow-along the screen
+     * runs. */
+    activityUnit: string;
     /** How many are in front of them. A count, never a list. */
     ahead: number;
     /** Which screen to walk to, by its visible label. Null until assigned. */
@@ -8216,6 +8255,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
         calledName: entry.calledName,
         status,
         goalId: entry.goalId,
+        activityUnit: typeof entry.activityUnit === 'string' ? entry.activityUnit : '',
         ahead,
         stationLabel: entry.assignedStationLabel ?? null,
         readySecondsLeft,

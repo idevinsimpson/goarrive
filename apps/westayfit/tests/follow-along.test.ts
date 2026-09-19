@@ -130,16 +130,31 @@ describe('buildFollowAlongPlan', () => {
 });
 
 // THE HONEST DEFAULT STATE. There is no movement video catalog here. The
-// screen may show a poster when a goal supplies one; with none, it must call
-// its own drawing an illustrated fallback and must not name a video at all.
+// screen calls what it shows a MOVEMENT GUIDE, and its one line tells the
+// person the only thing that changes what they do — that nothing on the screen
+// is counting. What it must never do is name a video, in either case.
 describe('mediaPresentation', () => {
-  it('labels the drawing an illustrated fallback when no media exists', () => {
+  it('calls the drawing a movement guide when no media exists', () => {
     const m = mediaPresentation({ kind: 'none' });
     expect(m.kind).toBe('fallback');
     expect(m.label).toBe(ILLUSTRATED_FALLBACK_LABEL);
-    expect(m.label).toBe('Illustrated fallback');
+    expect(m.label).toBe('Movement guide');
+    expect(m.note).toBe('Demonstration only — count your own reps.');
     expect(m.posterUri).toBeNull();
     expect(m.clipUri).toBeNull();
+  });
+
+  // The words on the screen got shorter; the rule they live under did not.
+  // Neither case may imply a recording was delivered, is loading, or failed.
+  it('names no video in either case, however short the line got', () => {
+    for (const m of [
+      mediaPresentation({ kind: 'none' }),
+      mediaPresentation({ kind: 'poster', posterUri: 'https://example/p.png' }),
+    ]) {
+      for (const word of ['video', 'loading', 'failed', 'unavailable', 'missing']) {
+        expect(`${m.label} ${m.note}`.toLowerCase()).not.toContain(word);
+      }
+    }
   });
 
   it('shows a supplied poster, and a clip only when one is given', () => {
@@ -162,13 +177,40 @@ describe('mediaPresentation', () => {
 
   // The fallback wording may never suggest that a video exists, arrived, is
   // arriving, or failed. It states the asset gap and stops.
+  /**
+   * WHAT CHANGED HERE, AND WHAT DID NOT.
+   *
+   * This used to require the fallback note to SAY "no movement video exists" —
+   * the asset gap stated in words, on the screen, every time. The 03:12 ET
+   * creative review replaced that paragraph with one short line, because at an
+   * event it was the largest thing next to the movement and it explained the
+   * repository's problem to somebody trying to do squats.
+   *
+   * So the positive requirement is gone and is not being quietly preserved
+   * somewhere else: a sighted person at a screen is no longer told, in words,
+   * that no video exists. What remains is the rule that actually protects
+   * them — nothing may imply a recording was delivered, is loading, or failed
+   * — plus the figure's own "Diagram:" accessibility label and the honest
+   * `kind: 'fallback'`. That is a real reduction in what the screen discloses,
+   * made deliberately and on instruction, not an oversight.
+   */
   it('never implies a video was delivered', () => {
     const fallback = mediaPresentation({ kind: 'none' });
     const text = `${fallback.label} ${fallback.note}`.toLowerCase();
-    expect(text).toContain('no movement video exists');
-    for (const forbidden of ['loading', 'buffering', 'playing', 'could not load', 'unavailable']) {
+    expect(text).not.toContain('video');
+    for (const forbidden of [
+      'loading',
+      'buffering',
+      'playing',
+      'could not load',
+      'unavailable',
+      'failed',
+      'missing',
+    ]) {
       expect(text.includes(forbidden), `fallback note says "${forbidden}"`).toBe(false);
     }
+    // And it still tells the person the one thing that changes what they do.
+    expect(fallback.note.toLowerCase()).toContain('count your own reps');
   });
 });
 

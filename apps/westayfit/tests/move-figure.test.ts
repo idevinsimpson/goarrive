@@ -154,9 +154,27 @@ describe('the screens that draw a figure', () => {
     expect(re.test(good)).toBe(false);
   });
 
-  it('and the move screen is in fact wired to the raw variant', () => {
-    const screen = readFileSync(join(root, 'app', 'move', '[goalId].tsx'), 'utf8');
-    expect(screen).toContain('moveFigureSvgDataUriRaw({ kind, pose })');
+  it('and the player itself is in fact wired to the raw variant', () => {
+    const card = readFileSync(join(root, 'src', 'ui', 'FollowAlongCard.tsx'), 'utf8');
+    // The invariant is the RAW variant, not one particular argument list: the
+    // venue screen also passes `accent`, because navy ink on a navy wall is no
+    // ink. What must never appear is the pre-encoded function.
+    expect(card).toContain('moveFigureSvgDataUriRaw({ kind, pose');
+    expect(card).not.toMatch(/source=\{\{\s*uri:\s*moveFigureSvgDataUri\s*\(/);
+  });
+
+  // The figure is drawn in ONE place now, because the player runs in three:
+  // the /move route, a station running somebody's turn, and the phone of the
+  // person whose turn it is. A second copy of the drawing is a second place
+  // for the double-encoding bug to come back, so there must not be one.
+  it('draws the figure in exactly one component', () => {
+    const definition = join(root, 'src', 'ui', 'moveFigure.ts');
+    const drawing = sources.filter(
+      (file) => file !== definition && readFileSync(file, 'utf8').includes('moveFigureSvgDataUriRaw(')
+    );
+    expect(drawing.map((f) => f.slice(root.length + 1))).toEqual([
+      join('src', 'ui', 'FollowAlongCard.tsx'),
+    ]);
   });
 });
 

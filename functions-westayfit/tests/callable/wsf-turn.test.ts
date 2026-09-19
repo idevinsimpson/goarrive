@@ -342,6 +342,7 @@ describe('what a screen in a room is allowed to know', () => {
     ]);
     expect(hasArrayAnywhere(after)).toBe(false);
     expect(Object.keys(after.assigned!).sort()).toEqual([
+      'activityUnit',
       'calledName',
       'code',
       'readySecondsLeft',

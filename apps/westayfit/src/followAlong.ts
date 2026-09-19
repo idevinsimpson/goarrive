@@ -133,13 +133,18 @@ export function roundSecondsFor(length: FollowAlongLength | undefined): number {
 // rather than paper over it. Nothing here may be phrased so that it implies a
 // video was delivered, was loading, or failed.
 
-export const ILLUSTRATED_FALLBACK_LABEL = 'Illustrated fallback';
-export const ILLUSTRATED_FALLBACK_NOTE =
-  'No movement video exists for this activity, so this app draws the two positions itself. It is a diagram, not a recording of a person.';
+// The on-screen treatment is called a MOVEMENT GUIDE, and its one line says
+// what it is for rather than what this repository is missing. The asset gap is
+// still real and still stated — in the module comment above, in the figure's
+// own accessibility label ("Diagram: ..."), and in `kind: 'fallback'` — but a
+// person standing at a screen mid-round is not the audience for it. What they
+// need is the one fact that changes what they do: nothing here is counting.
+export const ILLUSTRATED_FALLBACK_LABEL = 'Movement guide';
+export const ILLUSTRATED_FALLBACK_NOTE = 'Demonstration only — count your own reps.';
 
 /** Shown when a poster or an authorized demonstration IS supplied for a goal. */
-export const DEMO_MEDIA_LABEL = 'Demonstration';
-export const DEMO_MEDIA_NOTE = 'Supplied with this goal and shown as it was given.';
+export const DEMO_MEDIA_LABEL = 'Movement guide';
+export const DEMO_MEDIA_NOTE = 'Demonstration only — count your own reps.';
 
 export type MediaPresentation = {
   /** `fallback` — this app's own drawing. `supplied` — a poster or demo given for the goal. */

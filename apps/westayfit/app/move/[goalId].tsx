@@ -4,6 +4,13 @@
  * A timed follow-along for one goal's activity, on a phone in someone's hand
  * or on a station screen in a hall. It is WSF's own.
  *
+ * WHERE THE PLAYER ITSELF LIVES. The round, the clock and the picture are
+ * `useFollowAlongSession` + `<FollowAlongCard>`, because the same player also
+ * runs inside a turn — at a station calling people up, and on the phone of the
+ * person whose turn it is. This route is one of three hosts, and owns only
+ * what is its own: the address it was opened at, the goal it read, the way
+ * back, and the handoff to the contribute screen.
+ *
  * WHAT IT SHOWS, AND WHAT IT SAYS ABOUT IT. There is no movement video catalog
  * in this repository — that is an asset gap, stated here rather than papered
  * over. When a goal supplies a poster or an authorized demonstration, this
@@ -34,36 +41,12 @@
  */
 import { useLocalSearchParams } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseFunctions } from '../../src/firebase';
-import {
-  buildFollowAlongPlan,
-  clockElapsed,
-  clockRunning,
-  INTERRUPTED_NOTICE,
-  LENGTH_LABELS,
-  mediaPresentation,
-  pauseClock,
-  pausesForInterruption,
-  resetClock,
-  secondsLeft,
-  startClock,
-  stepAt,
-  type FollowAlongClock,
-  type FollowAlongLength,
-} from '../../src/followAlong';
+import { useFollowAlongSession, type FollowAlongPhase } from '../../src/followAlongSession';
 import {
   mintMoveRoundId,
   moveBackHref,
@@ -75,15 +58,11 @@ import {
 import { wsfTheme } from '../../src/theme';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { readEventParam } from '../../src/ui/eventLinks';
-import { kit, NAVY, SAMPLE_TINT } from '../../src/ui/kit';
-import { figureKindFor, moveFigureLabel, moveFigureSvgDataUriRaw } from '../../src/ui/moveFigure';
+import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
+import { kit } from '../../src/ui/kit';
 import { encodeQr, qrSvgDataUriRaw } from '../../src/ui/qr';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
-/** How often the screen re-reads the clock. Fine enough to look alive. */
-const TICK_MS = 250;
-/** How fast the two poses alternate while the round is running. */
-const POSE_MS = 1_200;
 /** The same breakpoint, and the same hydration gate, the kiosk and station use. */
 const STATION_MIN_WIDTH = 900;
 /** The query as the static export sees it: empty, because a shell has none. */
@@ -95,8 +74,6 @@ type Screen =
   | { kind: 'loading' }
   | { kind: 'unavailable' }
   | { kind: 'ready'; unit: string; goalTitle: string; communityName: string };
-
-type Phase = 'ready' | 'countdown' | 'round' | 'finished';
 
 export default function MoveScreen() {
   const params = useLocalSearchParams<{
@@ -144,7 +121,6 @@ export default function MoveScreen() {
   });
 
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
-  const [length, setLength] = useState<FollowAlongLength>('short');
   // The round's own id, minted when a round starts and null before that. It
   // is what makes one round one attempt, wherever it is finished.
   const [roundId, setRoundId] = useState<string | null>(() => readMoveRoundId(params.attempt));
@@ -156,13 +132,7 @@ export default function MoveScreen() {
     const carried = readMoveRoundId(params.attempt);
     if (carried) setRoundId((current) => current ?? carried);
   }, [params.attempt]);
-  const [clock, setClock] = useState<FollowAlongClock>(resetClock);
-  const [stopped, setStopped] = useState(false);
-  const [interrupted, setInterrupted] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-  const [reducedMotion, setReducedMotion] = useState(false);
   const [origin, setOrigin] = useState<string | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // The activity this goal counts, read from the same public pulse the kiosk
   // and the display use. A goal this caller may not read simply has no
@@ -198,18 +168,6 @@ export default function MoveScreen() {
     };
   }, [goalId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled?.()
-      .then((on) => {
-        if (!cancelled) setReducedMotion(Boolean(on));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // The served origin, read once on the client. The static export has none at
   // build time, so the QR is drawn from the address the page actually has.
   useEffect(() => {
@@ -217,119 +175,12 @@ export default function MoveScreen() {
     setOrigin(window.location?.origin ?? null);
   }, []);
 
-  const running = clockRunning(clock);
-
-  // One interval, only while something is running.
-  useEffect(() => {
-    if (!running) {
-      if (tickRef.current) {
-        clearInterval(tickRef.current);
-        tickRef.current = null;
-      }
-      return undefined;
-    }
-    setNow(Date.now());
-    tickRef.current = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => {
-      if (tickRef.current) {
-        clearInterval(tickRef.current);
-        tickRef.current = null;
-      }
-    };
-  }, [running]);
-
   const unit = screen.kind === 'ready' ? screen.unit : '';
-  const plan = useMemo(() => buildFollowAlongPlan({ unit, length }), [unit, length]);
-
-  const elapsedMs = clockElapsed(clock, now);
-  const at = stepAt(plan, elapsedMs);
-  const started = roundId !== null && (running || clock.heldMs > 0 || stopped);
-  const finished = started && (stopped || at.finished);
-  const phase: Phase = !started ? 'ready' : finished ? 'finished' : at.step.kind === 'countdown' ? 'countdown' : 'round';
-
-  // A round that ran to its end stops the clock rather than accruing forever.
-  useEffect(() => {
-    if (finished && clockRunning(clock)) setClock((c) => pauseClock(c, Date.now()));
-  }, [finished, clock]);
-
-  const onStart = useCallback(() => {
-    // A NEW round is a new attempt. Starting again after a stop mints a fresh
-    // id rather than replaying the previous round's, because it is a different
-    // round — and the person's entry for it is a different contribution.
-    setRoundId((prev) => prev ?? mintMoveRoundId());
-    setStopped(false);
-    setInterrupted(false);
-    setNow(Date.now());
-    setClock(startClock(resetClock(), Date.now()));
-  }, []);
-
-  const onResume = useCallback(() => {
-    setInterrupted(false);
-    setNow(Date.now());
-    setClock((c) => startClock(c, Date.now()));
-  }, []);
-
-  const onPause = useCallback(() => {
-    setClock((c) => pauseClock(c, Date.now()));
-  }, []);
-
-  // STOP EARLY AND RUN TO THE END ARRIVE AT THE SAME PLACE. Stopping is not a
-  // discard: what the person counted is theirs, and the next thing they see is
-  // where to enter it.
-  const onStop = useCallback(() => {
-    setClock((c) => pauseClock(c, Date.now()));
-    setStopped(true);
-  }, []);
-
-  // Back to the beginning. Nothing was recorded and nothing is kept.
-  const onStartOver = useCallback(() => {
-    setRoundId(null);
-    setStopped(false);
-    setInterrupted(false);
-    setClock(resetClock());
-  }, []);
-
-  // AN INTERRUPTION PAUSES THE ROUND. A tab the person left, a screen that
-  // went away, media that stopped on its own: the round is not usable, so it
-  // is not consumed. The clock banks what ran and waits.
-  //
-  // The listener is attached ONCE and reads the clock through a ref: a handler
-  // re-bound on every tick would miss the event that arrives between renders,
-  // and asking the ref lets the effect decide whether anything was running
-  // without a state updater having to cause a second state change.
-  const clockRef = useRef(clock);
-  useEffect(() => {
-    clockRef.current = clock;
-  }, [clock]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const interrupt = (reason: string) => {
-      if (!pausesForInterruption(reason)) return;
-      if (!clockRunning(clockRef.current)) return;
-      setInterrupted(true);
-      setClock((c) => pauseClock(c, Date.now()));
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') interrupt('hidden');
-    };
-    const onHide = () => interrupt('pagehide');
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', onHide);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', onHide);
-    };
-  }, []);
-
-  const kind = figureKindFor(unit);
-  const media = mediaPresentation(plan.media);
-  const alternating = running && at.step.kind === 'round' && !reducedMotion;
-  const pose = alternating && Math.floor(elapsedMs / POSE_MS) % 2 === 1 ? 'end' : 'start';
-
-  // What the player's card says right now: the Ready state before a round, the
-  // closing step once one is over however it ended, and the live step between.
-  const shown = phase === 'ready' ? plan.ready : phase === 'finished' ? plan.steps[plan.steps.length - 1] : at.step;
+  // A NEW round is a new attempt; a round already adopted from ?attempt= is
+  // continued rather than replaced.
+  const onRoundStart = useCallback(() => setRoundId((prev) => prev ?? mintMoveRoundId()), []);
+  const onRoundReset = useCallback(() => setRoundId(null), []);
+  const session = useFollowAlongSession({ unit, roundId, onRoundStart, onRoundReset });
 
   const handoffHref = moveHandoffHref({ goalId, roundId, groupId: groupIdHint });
   const handoffUrl = moveHandoffUrl({ origin, goalId, roundId, groupId: groupIdHint });
@@ -344,17 +195,6 @@ export default function MoveScreen() {
       return null;
     }
   }, [handoffUrl]);
-
-  const statusLine =
-    phase === 'ready'
-      ? `Not started · a ${LENGTH_LABELS[length]} round`
-      : phase === 'countdown'
-        ? `Starting in ${secondsLeft(at.remainingMs)}`
-        : phase === 'round'
-          ? running
-            ? `${secondsLeft(at.remainingMs)} left in this round`
-            : `Paused · ${secondsLeft(at.remainingMs)} left in this round`
-          : 'Round finished · enter your own count';
 
   if (screen.kind === 'loading') {
     return (
@@ -379,179 +219,17 @@ export default function MoveScreen() {
     );
   }
 
-  const player = (
-    <View style={styles.playerColumn}>
-      <View style={kit.card}>
-        <Text style={kit.cardTitle} testID="wsf-move-step-title">
-          {shown.title}
-        </Text>
-        <Text style={kit.body} testID="wsf-move-step-rule">
-          {shown.detail}
-        </Text>
-
-        {/*
-          THE HONEST DEFAULT STATE. A poster when the goal supplies one; this
-          app's own drawing when it does not — labelled as exactly that.
-        */}
-        <View style={styles.figureRow} testID="wsf-move-figure">
-          {media.posterUri ? (
-            <Image
-              source={{ uri: media.posterUri }}
-              style={styles.figure}
-              resizeMode="contain"
-              accessibilityLabel={`${media.label}: ${plan.unit}.`}
-              testID="wsf-move-poster"
-            />
-          ) : (
-            <>
-              <Image
-                source={{ uri: moveFigureSvgDataUriRaw({ kind, pose }) }}
-                style={styles.figure}
-                resizeMode="contain"
-                accessibilityLabel={moveFigureLabel(kind, pose)}
-                testID="wsf-move-figure-image"
-              />
-              {/*
-                With reduced motion asked for, nothing alternates: both
-                positions are shown side by side instead, so the shape reads.
-              */}
-              {reducedMotion ? (
-                <Image
-                  source={{ uri: moveFigureSvgDataUriRaw({ kind, pose: 'end', accent: true }) }}
-                  style={styles.figure}
-                  resizeMode="contain"
-                  accessibilityLabel={moveFigureLabel(kind, 'end')}
-                  testID="wsf-move-reduced-motion"
-                />
-              ) : null}
-            </>
-          )}
-        </View>
-        <View style={styles.mediaNote} testID="wsf-move-media">
-          {/*
-            A plain tinted label rather than kit.badge: the badge clips what it
-            cannot fit, and this line must stay readable at 195 px wide.
-          */}
-          <View style={styles.mediaBadge}>
-            <Text style={styles.mediaBadgeText} testID="wsf-move-media-label">
-              {media.label}
-            </Text>
-          </View>
-          <Text style={kit.caption} testID="wsf-move-media-note">
-            {media.note}
-          </Text>
-        </View>
-
-        {/*
-          The count in reads as a bare 3 · 2 · 1, the way the reference player
-          in .claude/workout-player-spec.md counts a member in; the round reads
-          as seconds remaining.
-        */}
-        <Text style={styles.timer} testID="wsf-move-timer">
-          {phase === 'ready'
-            ? `${plan.roundSeconds}s`
-            : phase === 'finished'
-              ? 'Done'
-              : phase === 'countdown'
-                ? `${secondsLeft(at.remainingMs)}`
-                : `${secondsLeft(at.remainingMs)}s`}
-        </Text>
-        <Text style={kit.cardMeta} testID="wsf-move-round">
-          {`${plan.countdownSeconds}s count in · ${plan.roundSeconds}s round`}
-        </Text>
-        <Text style={kit.statusText} testID="wsf-move-status">
-          {statusLine}
-        </Text>
-        {interrupted ? (
-          <Text style={kit.caption} testID="wsf-move-interrupted">
-            {INTERRUPTED_NOTICE}
-          </Text>
-        ) : null}
-      </View>
-
-      {phase === 'finished' ? (
-        <View style={kit.card} testID="wsf-move-finished">
-          <Text style={kit.cardTitle}>That’s the round</Text>
-          <Text style={kit.body}>
-            {`Enter the number of ${plan.unit} you counted yourself. This screen counted nothing.`}
-          </Text>
-          <ButtonLink
-            href={handoffHref}
-            label="Enter my reps"
-            style={kit.primaryButton}
-            textStyle={kit.primaryButtonText}
-            testID="wsf-move-contribute"
-          />
-          <Pressable onPress={onStartOver} style={kit.secondaryButton} testID="wsf-move-again">
-            <Text style={kit.secondaryButtonText}>Start another round</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <>
-          <View style={kit.card}>
-            <Text style={kit.cardTitle}>Round length</Text>
-            <View style={styles.row}>
-              <Choice
-                label={LENGTH_LABELS.short}
-                selected={length === 'short'}
-                onPress={() => {
-                  onStartOver();
-                  setLength('short');
-                }}
-                testID="wsf-move-length-short"
-              />
-              <Choice
-                label={LENGTH_LABELS.full}
-                selected={length === 'full'}
-                onPress={() => {
-                  onStartOver();
-                  setLength('full');
-                }}
-                testID="wsf-move-length-full"
-              />
-            </View>
-          </View>
-
-          <View style={styles.row}>
-            {running ? (
-              <Pressable onPress={onPause} style={kit.primaryButton} testID="wsf-move-pause">
-                <Text style={kit.primaryButtonText}>Pause</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={started ? onResume : onStart}
-                style={kit.primaryButton}
-                testID="wsf-move-start"
-              >
-                <Text style={kit.primaryButtonText}>{started ? 'Resume' : 'Start'}</Text>
-              </Pressable>
-            )}
-            {started ? (
-              <Pressable onPress={onStop} style={kit.secondaryButton} testID="wsf-move-stop">
-                <Text style={kit.secondaryButtonText}>Stop and enter my reps</Text>
-              </Pressable>
-            ) : (
-              <ButtonLink
-                href={handoffHref}
-                label="Enter my reps"
-                style={kit.secondaryButton}
-                textStyle={kit.secondaryButtonText}
-                testID="wsf-move-contribute"
-              />
-            )}
-          </View>
-        </>
-      )}
-
-      {/*
-        The whole point, stated on screen and never implied: this screen does
-        not count and does not record. The member adds their own number where
-        they always have.
-      */}
-      <Text style={kit.caption} testID="wsf-move-self-count">
-        {plan.selfCountNote}
-      </Text>
-    </View>
+  // THE HANDOFF, AND IT IS THE ONLY WAY OFF THIS SCREEN WITH A NUMBER. Both
+  // the finished round and the not-yet-started state offer the same address;
+  // neither of them sends anything.
+  const enterMyReps = (style: 'primary' | 'secondary') => (
+    <ButtonLink
+      href={handoffHref}
+      label="Enter my reps"
+      style={style === 'primary' ? kit.primaryButton : kit.secondaryButton}
+      textStyle={style === 'primary' ? kit.primaryButtonText : kit.secondaryButtonText}
+      testID="wsf-move-contribute"
+    />
   );
 
   // THE PANEL. On a station it stands beside the player and stays there for
@@ -562,7 +240,7 @@ export default function MoveScreen() {
     <View style={station ? styles.panelStation : styles.panelStacked} testID="wsf-move-panel">
       <Text style={kit.eyebrow}>At this screen</Text>
       <Text style={kit.cardTitle} testID="wsf-move-panel-status">
-        {statusLine}
+        {session.statusLine}
       </Text>
       {qrUri ? (
         <>
@@ -587,42 +265,29 @@ export default function MoveScreen() {
   );
 
   return (
-    <Page station={station} phase={phase} backHref={backHref}>
+    <Page station={station} phase={session.phase} backHref={backHref}>
       <Text style={kit.eyebrow} testID="wsf-move-heading">
         Follow along
       </Text>
-      <Text style={kit.heading}>{screen.goalTitle || plan.unit}</Text>
+      <Text style={kit.heading}>{screen.goalTitle || session.plan.unit}</Text>
       {activityHint || screen.communityName ? (
         <Text style={kit.intro} testID="wsf-move-activity">
-          {[screen.communityName, activityHint ?? plan.unit].filter(Boolean).join(' · ')}
+          {[screen.communityName, activityHint ?? session.plan.unit].filter(Boolean).join(' · ')}
         </Text>
       ) : null}
 
       <View style={station ? styles.stationRow : styles.stack}>
-        {player}
+        <FollowAlongCard
+          session={session}
+          wide={station}
+          inRow={station}
+          testIDPrefix="wsf-move"
+          finishedAction={enterMyReps('primary')}
+          idleSecondary={enterMyReps('secondary')}
+        />
         {panel}
       </View>
     </Page>
-  );
-}
-
-function Choice(props: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  testID: string;
-}) {
-  return (
-    <Pressable
-      onPress={props.onPress}
-      style={[kit.pill, props.selected ? styles.pillSelected : null]}
-      testID={props.testID}
-      accessibilityRole="radio"
-      accessibilityState={{ checked: props.selected }}
-      {...({ 'aria-checked': props.selected } as Record<string, unknown>)}
-    >
-      <Text style={props.selected ? styles.pillTextSelected : kit.pillText}>{props.label}</Text>
-    </Pressable>
   );
 }
 
@@ -634,7 +299,7 @@ function Page({
 }: {
   children: React.ReactNode;
   station: boolean;
-  phase?: Phase;
+  phase?: FollowAlongPhase;
   backHref: string;
 }) {
   return (
@@ -667,16 +332,18 @@ function Page({
 
 const styles = StyleSheet.create({
   columnStation: { maxWidth: 1160, width: '100%', gap: 18 },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
   stack: { gap: 18 },
   // The station's two columns. The panel keeps its own width and never sits
   // under the player's controls; the player takes what is left.
   stationRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 24 },
-  playerColumn: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: 18 },
+  // THE RAIL IS A THIRD OF THE SCREEN, and the movement owns the other two.
+  // A fixed 320 left the player's column stretched across whatever remained
+  // on a venue screen, which is where the empty acreage came from.
   panelStation: {
-    width: 320,
-    flexGrow: 0,
-    flexShrink: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 260,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
@@ -696,33 +363,4 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   qr: { width: QR_SIZE, height: QR_SIZE, alignSelf: 'center' },
-  figureRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, alignItems: 'center' },
-  figure: { width: 100, height: 120 },
-  mediaNote: { gap: 6, alignItems: 'flex-start' },
-  mediaBadge: {
-    backgroundColor: SAMPLE_TINT,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
-    flexShrink: 1,
-  },
-  mediaBadgeText: {
-    color: NAVY,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    flexShrink: 1,
-  },
-  timer: {
-    color: wsfTheme.colors.text,
-    fontSize: 46,
-    lineHeight: 50,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  pillSelected: { backgroundColor: wsfTheme.colors.text, borderColor: wsfTheme.colors.text },
-  pillTextSelected: { color: '#F7F5F0', fontSize: 15, fontWeight: '700' },
 });

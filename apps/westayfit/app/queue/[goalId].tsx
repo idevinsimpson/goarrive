@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -10,6 +10,7 @@ import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
+import { useFollowAlongSession } from '../../src/followAlongSession';
 import { wsfTheme } from '../../src/theme';
 import {
   RESULT_VISIBLE_SECONDS,
@@ -21,6 +22,7 @@ import {
   type TurnStatus,
 } from '../../src/turnContract';
 import { ButtonLink } from '../../src/ui/ButtonLink';
+import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
 import { CREAM, NAVY, kit } from '../../src/ui/kit';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -78,6 +80,7 @@ type MyTurn = {
   calledName: string;
   status: TurnStatus;
   goalId: string;
+  activityUnit: string;
   ahead: number;
   stationLabel: string | null;
   readySecondsLeft: number | null;
@@ -97,6 +100,7 @@ type TurnScreenState =
 
 export default function QueueScreen() {
   const params = useLocalSearchParams<{ goalId: string }>();
+  const router = useRouter();
   const goalId = typeof params.goalId === 'string' ? params.goalId.trim() : '';
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<TurnScreenState>({ kind: 'loading' });
@@ -251,6 +255,46 @@ export default function QueueScreen() {
     }
   }, [state, busy, count, goalId]);
 
+  /**
+   * SWITCH TO MY PHONE — leaving the line and going to do it themselves, as
+   * one action rather than two.
+   *
+   * It frees the event place with `switchingToPhone: true`, which is the same
+   * unconditional release an ordinary leave performs: the flag changes only
+   * what the row records about WHY, which is the one thing a Champion looking
+   * at a wedged event cannot work out afterwards.
+   *
+   * NOT OFFERED ONCE A STATION HAS STARTED THE ATTEMPT. By then a canonical
+   * attempt is open against this turn, and the honest thing to do with it is
+   * finish it — on this phone or at the screen, which are the same write under
+   * the same key. Walking away from a started turn is the station's "Let them
+   * go", not a button on the phone that looks like a shortcut.
+   *
+   * The place is freed BEFORE the journey opens, so nobody is standing in a
+   * line they have already left.
+   */
+  const onSwitchToPhone = useCallback(async () => {
+    if (state.kind !== 'inLine' || busy) return;
+    const { entryId, goalId: activityGoalId } = state.turn;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const fn = httpsCallable<{ entryId: string; switchingToPhone: boolean }, { status: string }>(
+        getFirebaseFunctions(),
+        'wsfLeaveTurnLine'
+      );
+      await fn({ entryId, switchingToPhone: true });
+      stoppedRef.current = true;
+      wasLiveRef.current = false;
+      setState({ kind: 'notInLine', receipt: state.receipt, noShow: false });
+      router.replace(`/contribute/${activityGoalId}`);
+    } catch (e) {
+      setActionError(describeCallableError(e, 'We couldn’t move you to your phone. Try again.'));
+    } finally {
+      setBusy(false);
+    }
+  }, [state, busy, router]);
+
   const onLeave = useCallback(async () => {
     if (state.kind !== 'inLine' || busy) return;
     const entryId = state.turn.entryId;
@@ -273,6 +317,30 @@ export default function QueueScreen() {
       setBusy(false);
     }
   }, [state, busy]);
+
+  // THE FOLLOW-ALONG, BOUND TO THIS TURN. The hook runs unconditionally and
+  // above every early return, because it is a hook; it is simply inert until
+  // there is a live turn to run, since a null round id is the player's own
+  // "not started".
+  //
+  // The round id is the ENTRY's id rather than something this screen mints:
+  // the turn already has a canonical attempt, bound server-side by
+  // wsfStartTurn, and inventing a second id here would be inventing a second
+  // round. So nothing is minted and nothing is dropped — hence the two inert
+  // callbacks.
+  const turnUnit = state.kind === 'inLine' ? state.turn.activityUnit : '';
+  const turnRoundId =
+    state.kind === 'inLine' && state.turn.status === 'active' ? state.turn.entryId : null;
+  const keepRound = useCallback(() => undefined, []);
+  const session = useFollowAlongSession({
+    unit: turnUnit,
+    roundId: turnRoundId,
+    onRoundStart: keepRound,
+    onRoundReset: keepRound,
+    // ONE 60-SECOND ROUND PER TURN. The throughput contract for a line, not a
+    // preference — so the two-minute chip is not offered here at all.
+    fixedLength: 'short',
+  });
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Your turn" testID="wsf-queue-disabled" />;
@@ -426,13 +494,22 @@ export default function QueueScreen() {
         sentence the screen shows. It is assertive only for a turn — a change
         of place is news, but it is not worth interrupting somebody mid-word.
       */}
+      {/*
+        IT IS STILL ALWAYS MOUNTED, and it is now SCREEN-READER ONLY.
+        A live region has to exist before its text changes or the change is
+        never announced, so this cannot move inside a branch — but the same
+        sentence was also the only place the person's POSITION appeared, in
+        small type above the hero, while the hero itself said the much less
+        useful "You're in the line". The position is the message, so it has
+        been promoted into the hero below and this keeps only the announcement.
+      */}
       <View
-        style={styles.announce}
+        style={styles.announceHidden}
         testID="wsf-queue-announce"
         aria-live={called ? 'assertive' : 'polite'}
         {...({ 'aria-atomic': 'true' } as Record<string, unknown>)}
       >
-        <Text style={called ? styles.calledPlace : kit.statusText} testID="wsf-queue-place">
+        <Text style={kit.statusText} testID="wsf-queue-place">
           {place}
         </Text>
       </View>
@@ -440,12 +517,22 @@ export default function QueueScreen() {
       {turn.status === 'waiting' ? (
         <View style={kit.hero} testID="wsf-queue-waiting">
           <Text style={kit.eyebrowOnNavy}>In line</Text>
-          <Text style={kit.heroTitle} {...HEADING}>
-            You’re in the line
+          {/* WHERE THEY ARE, as the largest thing on the screen. */}
+          <Text style={kit.heroTitle} testID="wsf-queue-waiting-place" {...HEADING}>
+            {place}
+          </Text>
+          {/*
+            INITIALS ALREADY END IN A FULL STOP. "A.L." inside a sentence that
+            adds its own produced "The screen will call you A.L..", on the
+            first line of the first screen anybody in the line reads.
+          */}
+          <Text style={kit.heroMeta} testID="wsf-queue-will-call">
+            {`The screen will call you ${turn.calledName}${
+              turn.calledName.endsWith('.') ? '' : '.'
+            }`}
           </Text>
           <Text style={kit.heroMeta}>
-            Keep this page open, or come back to it. The screen in the room will call you — and
-            you’ll have 45 seconds to say you’re coming.
+            Keep this page open, or come back to it. You’ll have 45 seconds to say you’re coming.
           </Text>
         </View>
       ) : (
@@ -467,6 +554,16 @@ export default function QueueScreen() {
           <Text style={kit.heroMeta} testID="wsf-queue-station">
             {turn.stationLabel ? `Go to ${turn.stationLabel}.` : 'Go to the screen in the room.'}
           </Text>
+          {/*
+            THE 45 SECONDS, ON THE SCREEN. It was only ever in the live region,
+            which means the one person under time pressure was the one who
+            could not see how much of it was left.
+          */}
+          {turn.status === 'assigned' && turn.readySecondsLeft !== null ? (
+            <Text style={styles.lease} testID="wsf-queue-lease">
+              {`${turn.readySecondsLeft}s to say you’re coming`}
+            </Text>
+          ) : null}
         </View>
       )}
 
@@ -494,6 +591,28 @@ export default function QueueScreen() {
           >
             <Text style={kit.primaryButtonText}>{busy ? 'Telling them…' : 'I’m ready'}</Text>
           </Pressable>
+        </View>
+      ) : null}
+
+      {/*
+        THE SAME PLAYER THE STATION RUNS. Not a copy of it and not a phone
+        variant of it: `<FollowAlongCard>` on the session from
+        `useFollowAlongSession`, which is the one the /move route runs too.
+        What differs is the host, and what a host supplies is what happens when
+        the round ends — here, the record panel directly below, which stays the
+        only control that sends a number anywhere.
+      */}
+      {turn.status === 'active' ? (
+        <View testID="wsf-queue-player">
+          <FollowAlongCard
+            session={session}
+            testIDPrefix="wsf-queue-move"
+            finishedAction={
+              <Text style={kit.body} testID="wsf-queue-move-handoff">
+                Enter what you counted below.
+              </Text>
+            }
+          />
         </View>
       ) : null}
 
@@ -544,11 +663,13 @@ export default function QueueScreen() {
       ) : null}
 
       <View style={kit.card}>
-        <Text style={kit.cardMeta}>The screen will call you</Text>
         {/*
           What they chose, shown back to them, so nobody is surprised by what a
-          room is about to read out.
+          room is about to read out. It used to be headed "The screen will call
+          you" — which is now word for word the line in the hero above it, so
+          the heading goes and the name and the privacy note stay.
         */}
+        <Text style={kit.cardMeta}>Your name on the screen</Text>
         <Text style={styles.chosenName} testID="wsf-queue-called-as">
           {turn.calledName}
         </Text>
@@ -559,15 +680,36 @@ export default function QueueScreen() {
       </View>
 
       <View style={styles.actions}>
+        {/*
+          THE OTHER WAY THROUGH, offered for as long as it is honest to offer
+          it: waiting, called, and ready. Once a station has STARTED the
+          attempt it is gone — see onSwitchToPhone.
+        */}
+        {turn.status !== 'active' ? (
+          <Pressable
+            onPress={() => void onSwitchToPhone()}
+            disabled={busy}
+            style={[kit.secondaryButton, busy ? kit.primaryButtonDisabled : null]}
+            testID="wsf-queue-switch-to-phone"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+          >
+            <Text style={kit.secondaryButtonText}>
+              {busy ? 'Moving you over…' : 'Use my phone instead'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {/* Still here, and now plainly the last resort rather than the only
+            thing on offer. */}
         <Pressable
           onPress={() => void onLeave()}
           disabled={busy}
-          style={[kit.secondaryButton, busy ? kit.primaryButtonDisabled : null]}
+          style={styles.tertiary}
           testID="wsf-queue-leave"
           accessibilityRole="button"
           accessibilityState={{ disabled: busy }}
         >
-          <Text style={kit.secondaryButtonText}>
+          <Text style={styles.tertiaryText}>
             {busy ? 'Taking your name off…' : 'Take my name off the screen'}
           </Text>
         </Pressable>
@@ -596,6 +738,29 @@ const styles = StyleSheet.create({
   announce: { width: '100%' },
   // Large enough to read at arm's length while somebody is walking.
   calledPlace: { color: NAVY, fontSize: 20, lineHeight: 26, fontWeight: '700' },
+  tertiary: { minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8 },
+  tertiaryText: { color: wsfTheme.colors.textMuted, fontSize: 15, textDecorationLine: 'underline' },
+  lease: {
+    color: '#F7F5F0',
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  /**
+   * Present to every assistive technology and to no eye: a live region has to
+   * stay mounted to announce, and this one's sentence is shown properly in the
+   * hero. Not `display: none` and not `opacity: 0` on a zero box, either of
+   * which removes it from the accessibility tree along with the pixels.
+   */
+  announceHidden: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    overflow: 'hidden',
+    top: 0,
+    left: 0,
+  },
   calledName: {
     color: CREAM,
     fontSize: 44,

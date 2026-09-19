@@ -567,10 +567,19 @@ export default function EventScreen() {
             {activities.map((activity) => (
               <OptionRow
                 key={activity.key}
-                label={activity.label}
-                // The scanned activity says, in words, that scanning decided
-                // nothing. The event's own activity needs no such sentence.
-                description={activity.carried ? EVENT_ACTIVITY_SCANNED_NOTE : undefined}
+                // WHAT IT IS CALLED, not what it counts. The unit is still the
+                // value this option is keyed and carried by; it just stopped
+                // being the whole of what a person reads.
+                label={activity.title ?? activity.label}
+                // ...and the counting cue underneath, so choosing is choosing
+                // between things rather than between words. The scanned
+                // activity still says, in words, that scanning decided
+                // nothing; the event's own activities need no such sentence.
+                description={
+                  activity.carried
+                    ? `Counted in ${activity.label}. ${EVENT_ACTIVITY_SCANNED_NOTE}`
+                    : `Counted in ${activity.label}.`
+                }
                 selected={selectedActivityKey === activity.key}
                 onPress={() => onChooseActivity(activity.key)}
                 testID={`wsf-event-activity-${activity.key}`}
