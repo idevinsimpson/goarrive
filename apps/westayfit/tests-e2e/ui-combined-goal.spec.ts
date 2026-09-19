@@ -27,12 +27,27 @@
  *     action, and no uid anywhere in the page.
  */
 import { randomBytes } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
+
+// Re-laying the Manage sheet out at four viewports is real work on top of a
+// full sign-up, two goals and a community, and the default 30 s budget is not
+// enough for it.
+test.describe.configure({ timeout: 180_000 });
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
 const PASSWORD = 'combined-secret-1';
+const ARTIFACTS_DIR = path.resolve(__dirname, 'artifacts', 'ui-combined-goal');
+
+/** Evidence, never a reason a test passes: nothing asserts on these images.
+ * The same helper `move-follow-along.spec.ts` uses. */
+async function snap(page: Page, name: string): Promise<void> {
+  mkdirSync(ARTIFACTS_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(ARTIFACTS_DIR, `${name}.png`), fullPage: false });
+}
 
 const unique = (label: string) => `${label}-${randomBytes(6).toString('hex')}@example.com`;
 
@@ -173,6 +188,28 @@ test('Set up kiosk asks one question, defaults to One goal, and leaves the per-g
   }
   // The combined panel is not on screen until it is chosen.
   await expect(page.getByTestId('wsf-combined-setup')).toHaveCount(0);
+
+  // ── CAPTURES ──────────────────────────────────────────────────────────────
+  // Every assertion above has already run. These only photograph the sheet the
+  // Champion actually gets: the "Set up kiosk" card at the three phone widths
+  // the product is used at, and at a short viewport where the sheet has far
+  // less room than its content wants.
+  for (const [name, size] of [
+    ['phone-360-set-up-kiosk', { width: 360, height: 844 }],
+    ['phone-390-set-up-kiosk', { width: 390, height: 844 }],
+    ['phone-430-set-up-kiosk', { width: 430, height: 932 }],
+    ['phone-390-short-set-up-kiosk', { width: 390, height: 640 }],
+  ] as const) {
+    await page.setViewportSize(size);
+    await page.getByTestId('wsf-kiosk-mode').waitFor({ state: 'visible' });
+    await snap(page, name);
+  }
+
+  // The other half of the same card, so the choice is on record both ways.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByTestId('wsf-kiosk-mode-combined').click();
+  await page.getByTestId('wsf-combined-setup').waitFor({ state: 'visible' });
+  await snap(page, 'phone-390-set-up-kiosk-combined');
 });
 
 // ── 2, 3 and 4 in one journey, because they are one journey ────────────────

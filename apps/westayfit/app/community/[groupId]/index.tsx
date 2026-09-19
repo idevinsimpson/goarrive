@@ -1596,12 +1596,20 @@ export default function CommunityPage() {
             <Text style={styles.manageGoalTitle}>Set up kiosk</Text>
             <Text style={styles.manageIntro} testID={`wsf-kiosk-setup-intro-${goal.goalId}`}>
               {goal.aggregateDisplayAuthorized
-                ? 'Open this on the screen at your event, or copy the link and open it there.'
-                : 'Open this on the screen at your event. Until you authorize public display above, that screen will say the goal is not available.'}
+                ? 'Open this on the screen at your event.'
+                : 'Authorize public display above, or that screen will say the goal is not available.'}
             </Text>
             {kioskUrlFor(goal.goalId) ? (
+              /*
+                ONE ACTION, THEN THE UTILITY. Opening the kiosk is the thing a
+                Champion came here to do, so it carries the one green primary
+                on this goal; copying the address is the way to do the same
+                thing on another device, so it is a quiet text control under
+                it. The weight is carried by shape, size and fill together —
+                never by colour alone.
+              */
               <View
-                style={styles.rowWrap}
+                style={styles.actionStack}
                 // The address the controls beside it act on, readable by a test
                 // without being printed for a person.
                 dataSet={{ kioskUrl: kioskUrlFor(goal.goalId) ?? '' }}
@@ -1609,18 +1617,18 @@ export default function CommunityPage() {
                 <ButtonLink
                   href={`/kiosk/${goal.goalId}`}
                   label="Open kiosk"
-                  style={styles.secondaryButton}
-                  textStyle={styles.secondaryButtonText}
+                  style={styles.primaryButton}
+                  textStyle={styles.primaryButtonText}
                   testID={`wsf-kiosk-setup-open-${goal.goalId}`}
                 />
                 <Pressable
                   onPress={() => onCopyKiosk(goal.goalId)}
-                  style={styles.secondaryButton}
+                  style={styles.tertiaryButton}
                   testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
                   accessibilityRole="button"
                   accessibilityLabel={`${goal.title}: copy the kiosk link`}
                 >
-                  <Text style={styles.secondaryButtonText}>
+                  <Text style={styles.tertiaryButtonText}>
                     {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
                       ? 'Copied'
                       : 'Copy kiosk link'}
@@ -1676,25 +1684,31 @@ export default function CommunityPage() {
             it is. You can revoke a screen from here at any time.
           </Text>
           {stationUrlFor(goal.goalId) ? (
+            /*
+              UTILITIES, NOT THE POINT. Getting the address onto a screen is a
+              step on the way; the action on this card is approving the screen
+              that is standing there showing a code. So these two are quiet
+              text controls and the card keeps no second button weight.
+            */
             <View
-              style={styles.rowWrap}
+              style={styles.utilityRow}
               dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
             >
               <ButtonLink
                 href={`/station/${goal.goalId}`}
                 label="Open station screen"
-                style={styles.secondaryButton}
-                textStyle={styles.secondaryButtonText}
+                style={UTILITY_LINK}
+                textStyle={UTILITY_LINK_TEXT}
                 testID={`wsf-kiosk-stations-open-${goal.goalId}`}
               />
               <Pressable
                 onPress={() => onCopyStation(goal.goalId)}
-                style={styles.secondaryButton}
+                style={[styles.tertiaryButton, styles.rowButton]}
                 testID={`wsf-kiosk-stations-copy-${goal.goalId}`}
                 accessibilityRole="button"
                 accessibilityLabel={`${goal.title}: copy the station link`}
               >
-                <Text style={styles.secondaryButtonText}>
+                <Text style={[styles.tertiaryButtonText, styles.rowButtonText]}>
                   {stationCopy.goalId === goal.goalId && stationCopy.state === 'copied'
                     ? 'Copied'
                     : 'Copy station link'}
@@ -2111,14 +2125,316 @@ export default function CommunityPage() {
             </Pressable>
           </View>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+            {/*
+              SET UP KIOSK. One card, one question, one answer — not a stack of
+              sections a Champion has to assemble in their head. The question
+              governs what the goal cards below offer, so it is asked first;
+              "One goal" is the default and is what those per-goal controls
+              already do, and "Combined movement goal" answers itself here.
+
+              Every testID, every control and every state is the one that was
+              here before; what changed is where they sit and how loud they are.
+            */}
+            <View style={styles.setupCard} testID="wsf-kiosk-mode">
+              <Text style={styles.cardTitle}>Set up kiosk</Text>
+              <OptionGroup accessibilityLabel="What kind of screen" testID="wsf-kiosk-mode-options">
+                <OptionRow
+                  label="One goal"
+                  description="One activity and its progress."
+                  selected={kioskMode === 'one'}
+                  onPress={() => setKioskMode('one')}
+                  testID="wsf-kiosk-mode-one"
+                />
+                <OptionRow
+                  label="Combined movement goal"
+                  description="Several activities adding up to one shared total."
+                  selected={kioskMode === 'combined'}
+                  onPress={() => setKioskMode('combined')}
+                  testID="wsf-kiosk-mode-combined"
+                />
+              </OptionGroup>
+              {kioskMode === 'one' ? (
+                <Text style={styles.manageIntro} testID="wsf-kiosk-mode-one-hint">
+                  Each goal below has its own Open kiosk button.
+                </Text>
+              ) : (
+                <View style={styles.setupBody} testID="wsf-combined-setup">
+                  <Text style={styles.manageIntro} testID="wsf-combined-setup-intro">
+                    Each activity keeps its own goal, its own target and its own page.
+                  </Text>
+                  {combinedCreated ? (
+                    <View style={styles.manageGoal} testID="wsf-combined-created">
+                      <Text style={styles.manageGoalTitle}>
+                        “{combinedCreated.title}” is ready
+                      </Text>
+                      <Text style={styles.manageIntro}>
+                        Open this on the screen at your event. It shows the shared total and each
+                        activity — never a member or a contribution.
+                      </Text>
+                      {combinedUrl ? (
+                        /*
+                          The same weighting as a single goal's kiosk: opening
+                          the screen is the action, copying the address is the
+                          way to do it on another device.
+                        */
+                        <View
+                          style={styles.actionStack}
+                          // The address the controls beside it act on, readable
+                          // by a test without being printed at a person.
+                          dataSet={{ combinedUrl }}
+                        >
+                          <ButtonLink
+                            href={`/combined/${combinedCreated.setupId}`}
+                            label="Open combined screen"
+                            style={styles.primaryButton}
+                            textStyle={styles.primaryButtonText}
+                            testID="wsf-combined-open"
+                          />
+                          <Pressable
+                            onPress={() => void onCopyCombined()}
+                            style={styles.tertiaryButton}
+                            testID="wsf-combined-copy"
+                            accessibilityRole="button"
+                            accessibilityLabel={`${combinedCreated.title}: copy the combined screen link`}
+                          >
+                            <Text style={styles.tertiaryButtonText}>
+                              {combinedCopy === 'copied' ? 'Copied' : 'Copy link'}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <Text style={styles.body} testID="wsf-combined-unavailable">
+                          The combined link isn’t ready yet. Reload the page to try again.
+                        </Text>
+                      )}
+                      {/*
+                        The one place this address is deliberately readable, and
+                        only when the clipboard refused: it is the Champion's own
+                        sheet, the link carries no participant token and no
+                        authority, and the alternative is a dead end at an event.
+                      */}
+                      {combinedCopy === 'failed' && combinedUrl ? (
+                        <Text style={styles.body} testID="wsf-combined-copy-failed">
+                          Copy didn’t work on this device. Open the combined screen here, or type this
+                          address on it: {combinedUrl}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={kit.fieldLabel}>What is it called?</Text>
+                      <TextInput
+                        value={combinedTitle}
+                        onChangeText={setCombinedTitle}
+                        placeholder="Our combined movement goal"
+                        placeholderTextColor={wsfTheme.colors.textMuted}
+                        style={kit.input}
+                        testID="wsf-combined-title"
+                        accessibilityLabel="What the combined goal is called"
+                      />
+
+                      <Text style={kit.fieldLabel}>What is the combined count in?</Text>
+                      <TextInput
+                        value={combinedUnit}
+                        onChangeText={setCombinedUnit}
+                        placeholder="movements"
+                        placeholderTextColor={wsfTheme.colors.textMuted}
+                        autoCapitalize="none"
+                        style={kit.input}
+                        testID="wsf-combined-unit"
+                        accessibilityLabel="What the combined count is in"
+                      />
+
+                      <Text style={kit.fieldLabel}>How many together?</Text>
+                      <TextInput
+                        value={combinedTarget}
+                        onChangeText={setCombinedTarget}
+                        placeholder="2000"
+                        placeholderTextColor={wsfTheme.colors.textMuted}
+                        inputMode="numeric"
+                        style={kit.input}
+                        testID="wsf-combined-target"
+                        accessibilityLabel="How many together"
+                      />
+
+                      <Text style={kit.fieldLabel}>Starts</Text>
+                      <DateTimeField
+                        value={combinedStart}
+                        onChange={setCombinedStart}
+                        testID="wsf-combined-start"
+                        accessibilityLabel="When the combined period starts"
+                      />
+                      <Text style={kit.fieldLabel}>Ends</Text>
+                      <DateTimeField
+                        value={combinedEnd}
+                        onChange={setCombinedEnd}
+                        testID="wsf-combined-end"
+                        accessibilityLabel="When the combined period ends"
+                      />
+                      {/*
+                        A STATED FACT, not a picker. There is no zone control of
+                        any kind here: the times above are read in this zone and
+                        this zone is what is stored, so the words, the instants
+                        and the stored value can never disagree.
+                      */}
+                      {combinedZone.trim() ? (
+                        <Text style={kit.caption} testID="wsf-combined-timezone-line">
+                          Times are in {zoneInWords(combinedZone)}
+                        </Text>
+                      ) : (
+                        <Text style={styles.error} testID="wsf-combined-timezone-error">
+                          We can&apos;t read your device&apos;s time zone, so this goal can&apos;t be
+                          started here.
+                        </Text>
+                      )}
+
+                      <Text style={kit.fieldLabel}>Which activities?</Text>
+                      {combinedCandidates.length === 0 ? (
+                        <Text style={styles.body} testID="wsf-combined-activities-empty">
+                          There are no activities to combine yet.
+                        </Text>
+                      ) : !combinedWindow ? (
+                        <Text style={styles.body} testID="wsf-combined-activities-pending">
+                          Choose the combined period first, and the activities that fit inside it will
+                          be listed here.
+                        </Text>
+                      ) : (
+                        combinedCandidates.map(({ goal, reason }) =>
+                          reason === null ? (
+                            /*
+                              OPTION-ROW SHAPED, CHECKBOX SEMANTICS. Several
+                              activities are chosen at once, so this is not a
+                              radio: role="radio" outside a radiogroup is an axe
+                              violation (aria-required-parent) and, worse, would
+                              tell a screen reader that choosing one unchooses
+                              the others. The look is the kit's option row so the
+                              list reads like every other guided decision, and
+                              the geometry is stable whether a row is picked or
+                              not.
+                            */
+                            <Pressable
+                              key={goal.goalId}
+                              onPress={() =>
+                                setCombinedPicks((prev) =>
+                                  prev.includes(goal.goalId)
+                                    ? prev.filter((id) => id !== goal.goalId)
+                                    : prev.length >= MAX_COMBINED_CHILDREN
+                                      ? prev
+                                      : [...prev, goal.goalId]
+                                )
+                              }
+                              style={[
+                                kit.optionRow,
+                                combinedPicks.includes(goal.goalId) ? kit.optionRowSelected : null,
+                              ]}
+                              testID={`wsf-combined-pick-${goal.goalId}`}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: combinedPicks.includes(goal.goalId) }}
+                              accessibilityLabel={`${goal.title}. Its own goal: ${formatCount(goal.target)} ${goal.unit}`}
+                              {...({
+                                'aria-checked': combinedPicks.includes(goal.goalId),
+                              } as Record<string, unknown>)}
+                            >
+                              <View style={kit.optionIndicator}>
+                                {combinedPicks.includes(goal.goalId) ? (
+                                  <View style={kit.optionIndicatorDot} />
+                                ) : null}
+                              </View>
+                              <View style={styles.combinedPickText}>
+                                <Text style={kit.optionLabel}>{goal.title}</Text>
+                                <Text style={kit.optionDescription}>
+                                  Its own goal: {formatCount(goal.target)} {goal.unit}
+                                </Text>
+                              </View>
+                            </Pressable>
+                          ) : (
+                            <View
+                              key={goal.goalId}
+                              style={styles.manageGoal}
+                              testID={`wsf-combined-pick-ineligible-${goal.goalId}`}
+                            >
+                              <Text style={styles.manageGoalTitle}>{goal.title}</Text>
+                              <Text style={styles.body}>{ineligibleMessage(reason)}</Text>
+                            </View>
+                          )
+                        )
+                      )}
+
+                      {/*
+                        REVIEW BEFORE COMMIT. A confirmation, not a wizard step:
+                        the same facts the Champion just entered, read back in
+                        local words, directly above the one action.
+                      */}
+                      <View style={styles.manageGoal} testID="wsf-combined-summary">
+                        <Text style={styles.manageGoalTitle}>Check this over</Text>
+                        <Row label="Community" value={group.displayName} quiet />
+                        <Row label="Combined goal" value={combinedTitle.trim() || '—'} quiet />
+                        <Row
+                          label="Together"
+                          value={
+                            parseTargetInput(combinedTarget) !== null && combinedUnit.trim()
+                              ? `${formatCount(parseTargetInput(combinedTarget) as number)} ${combinedUnit.trim()}`
+                              : '—'
+                          }
+                          quiet
+                        />
+                        <Row
+                          label="Period"
+                          value={
+                            combinedWindow
+                              ? (formatPeriod(
+                                  combinedWindow.startsAt.toISOString(),
+                                  combinedWindow.endsAt.toISOString(),
+                                  { timeZone: combinedZone }
+                                ) ?? '—')
+                              : '—'
+                          }
+                          quiet
+                        />
+                        <Row label="Time zone" value={zoneInWords(combinedZone)} quiet />
+                        <Row
+                          label="Activities"
+                          value={
+                            combinedPicks.length
+                              ? combinedPicks
+                                  .map(
+                                    (id) =>
+                                      combinedCandidates.find((c) => c.goal.goalId === id)?.goal
+                                        .title ?? ''
+                                  )
+                                  .filter(Boolean)
+                                  .join(', ')
+                              : '—'
+                          }
+                          quiet
+                        />
+                      </View>
+
+                      {combinedError ? (
+                        <Text style={styles.error} testID="wsf-combined-error">
+                          {combinedError}
+                        </Text>
+                      ) : null}
+                      <Pressable
+                        onPress={() => void onCreateCombined()}
+                        disabled={combinedBusy}
+                        style={[kit.primaryButton, combinedBusy ? kit.primaryButtonDisabled : null]}
+                        testID="wsf-combined-submit"
+                        accessibilityRole="button"
+                      >
+                        <Text style={kit.primaryButtonText}>
+                          {combinedBusy ? 'Starting…' : 'Start this combined goal'}
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
             {goalsState.kind === 'loaded' && loadedGoals.length ? (
               <View style={styles.sheetSection}>
                 <Text style={styles.sheetSectionTitle}>Public display</Text>
-                <Text style={styles.manageIntro}>
-                  Public display is a permission you grant per goal. An authorized display can
-                  show the community name, the goal and its period, and the shared progress —
-                  nothing about individual members.
-                </Text>
+                <Text style={styles.manageIntro}>A permission you grant per goal.</Text>
                 {[...activeGoals, ...closedGoals].map((goal) => renderDisplayAuthControl(goal))}
               </View>
             ) : goalsState.kind === 'loaded' ? (
@@ -2128,312 +2444,6 @@ export default function CommunityPage() {
             ) : (
               <Text style={styles.body}>Loading goals…</Text>
             )}
-            {/*
-              WHAT KIND OF SCREEN. One question, asked once, above both
-              answers. "One goal" is the default and is what the Set up kiosk
-              controls on each goal above already do; "Combined movement goal"
-              opens the panel below it.
-
-              This section is ADDITIVE: it sits after Public display, it moves
-              no existing control, and it changes no existing testID.
-            */}
-            <View style={styles.sheetSection} testID="wsf-kiosk-mode">
-              <Text style={styles.sheetSectionTitle}>Set up kiosk</Text>
-              <OptionGroup accessibilityLabel="What kind of screen" testID="wsf-kiosk-mode-options">
-                <OptionRow
-                  label="One goal"
-                  description="A screen showing one activity and its progress."
-                  selected={kioskMode === 'one'}
-                  onPress={() => setKioskMode('one')}
-                  testID="wsf-kiosk-mode-one"
-                />
-                <OptionRow
-                  label="Combined movement goal"
-                  description="One screen where several activities add up to one shared total. Each activity keeps its own goal."
-                  selected={kioskMode === 'combined'}
-                  onPress={() => setKioskMode('combined')}
-                  testID="wsf-kiosk-mode-combined"
-                />
-              </OptionGroup>
-              {kioskMode === 'one' ? (
-                <Text style={styles.manageIntro} testID="wsf-kiosk-mode-one-hint">
-                  Each goal above has its own Open kiosk and Copy kiosk link.
-                </Text>
-              ) : null}
-            </View>
-
-            {kioskMode === 'combined' ? (
-              <View style={styles.sheetSection} testID="wsf-combined-setup">
-                <Text style={styles.sheetSectionTitle}>Combined movement goal</Text>
-                <Text style={styles.manageIntro} testID="wsf-combined-setup-intro">
-                  Choose the activities that add up to one shared total. Every activity keeps its
-                  own goal, its own target and its own page — nothing about them changes.
-                </Text>
-
-                {combinedCreated ? (
-                  <View style={styles.manageGoal} testID="wsf-combined-created">
-                    <Text style={styles.manageGoalTitle}>
-                      “{combinedCreated.title}” is ready
-                    </Text>
-                    <Text style={styles.manageIntro}>
-                      Open this on the screen at your event, or copy the link and open it there. It
-                      shows the shared total and each activity — never a member or a contribution.
-                    </Text>
-                    {combinedUrl ? (
-                      <View
-                        style={styles.rowWrap}
-                        // The address the controls beside it act on, readable
-                        // by a test without being printed at a person.
-                        dataSet={{ combinedUrl }}
-                      >
-                        <ButtonLink
-                          href={`/combined/${combinedCreated.setupId}`}
-                          label="Open combined screen"
-                          style={styles.secondaryButton}
-                          textStyle={styles.secondaryButtonText}
-                          testID="wsf-combined-open"
-                        />
-                        <Pressable
-                          onPress={() => void onCopyCombined()}
-                          style={styles.secondaryButton}
-                          testID="wsf-combined-copy"
-                          accessibilityRole="button"
-                          accessibilityLabel={`${combinedCreated.title}: copy the combined screen link`}
-                        >
-                          <Text style={styles.secondaryButtonText}>
-                            {combinedCopy === 'copied' ? 'Copied' : 'Copy link'}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    ) : (
-                      <Text style={styles.body} testID="wsf-combined-unavailable">
-                        The combined link isn’t ready yet. Reload the page to try again.
-                      </Text>
-                    )}
-                    {/*
-                      The one place this address is deliberately readable, and
-                      only when the clipboard refused: it is the Champion's own
-                      sheet, the link carries no participant token and no
-                      authority, and the alternative is a dead end at an event.
-                    */}
-                    {combinedCopy === 'failed' && combinedUrl ? (
-                      <Text style={styles.body} testID="wsf-combined-copy-failed">
-                        Copy didn’t work on this device. Open the combined screen here, or type this
-                        address on it: {combinedUrl}
-                      </Text>
-                    ) : null}
-                  </View>
-                ) : (
-                  <>
-                    <Text style={kit.fieldLabel}>What is it called?</Text>
-                    <TextInput
-                      value={combinedTitle}
-                      onChangeText={setCombinedTitle}
-                      placeholder="Our combined movement goal"
-                      placeholderTextColor={wsfTheme.colors.textMuted}
-                      style={kit.input}
-                      testID="wsf-combined-title"
-                      accessibilityLabel="What the combined goal is called"
-                    />
-
-                    <Text style={kit.fieldLabel}>What is the combined count in?</Text>
-                    <TextInput
-                      value={combinedUnit}
-                      onChangeText={setCombinedUnit}
-                      placeholder="movements"
-                      placeholderTextColor={wsfTheme.colors.textMuted}
-                      autoCapitalize="none"
-                      style={kit.input}
-                      testID="wsf-combined-unit"
-                      accessibilityLabel="What the combined count is in"
-                    />
-
-                    <Text style={kit.fieldLabel}>How many together?</Text>
-                    <TextInput
-                      value={combinedTarget}
-                      onChangeText={setCombinedTarget}
-                      placeholder="2000"
-                      placeholderTextColor={wsfTheme.colors.textMuted}
-                      inputMode="numeric"
-                      style={kit.input}
-                      testID="wsf-combined-target"
-                      accessibilityLabel="How many together"
-                    />
-
-                    <Text style={kit.fieldLabel}>Starts</Text>
-                    <DateTimeField
-                      value={combinedStart}
-                      onChange={setCombinedStart}
-                      testID="wsf-combined-start"
-                      accessibilityLabel="When the combined period starts"
-                    />
-                    <Text style={kit.fieldLabel}>Ends</Text>
-                    <DateTimeField
-                      value={combinedEnd}
-                      onChange={setCombinedEnd}
-                      testID="wsf-combined-end"
-                      accessibilityLabel="When the combined period ends"
-                    />
-                    {/*
-                      A STATED FACT, not a picker. There is no zone control of
-                      any kind here: the times above are read in this zone and
-                      this zone is what is stored, so the words, the instants
-                      and the stored value can never disagree.
-                    */}
-                    {combinedZone.trim() ? (
-                      <Text style={kit.caption} testID="wsf-combined-timezone-line">
-                        Times are in {zoneInWords(combinedZone)}
-                      </Text>
-                    ) : (
-                      <Text style={styles.error} testID="wsf-combined-timezone-error">
-                        We can&apos;t read your device&apos;s time zone, so this goal can&apos;t be
-                        started here.
-                      </Text>
-                    )}
-
-                    <Text style={kit.fieldLabel}>Which activities?</Text>
-                    {combinedCandidates.length === 0 ? (
-                      <Text style={styles.body} testID="wsf-combined-activities-empty">
-                        There are no activities to combine yet.
-                      </Text>
-                    ) : !combinedWindow ? (
-                      <Text style={styles.body} testID="wsf-combined-activities-pending">
-                        Choose the combined period first, and the activities that fit inside it will
-                        be listed here.
-                      </Text>
-                    ) : (
-                      combinedCandidates.map(({ goal, reason }) =>
-                        reason === null ? (
-                          /*
-                            OPTION-ROW SHAPED, CHECKBOX SEMANTICS. Several
-                            activities are chosen at once, so this is not a
-                            radio: role="radio" outside a radiogroup is an axe
-                            violation (aria-required-parent) and, worse, would
-                            tell a screen reader that choosing one unchooses
-                            the others. The look is the kit's option row so the
-                            list reads like every other guided decision, and
-                            the geometry is stable whether a row is picked or
-                            not.
-                          */
-                          <Pressable
-                            key={goal.goalId}
-                            onPress={() =>
-                              setCombinedPicks((prev) =>
-                                prev.includes(goal.goalId)
-                                  ? prev.filter((id) => id !== goal.goalId)
-                                  : prev.length >= MAX_COMBINED_CHILDREN
-                                    ? prev
-                                    : [...prev, goal.goalId]
-                              )
-                            }
-                            style={[
-                              kit.optionRow,
-                              combinedPicks.includes(goal.goalId) ? kit.optionRowSelected : null,
-                            ]}
-                            testID={`wsf-combined-pick-${goal.goalId}`}
-                            accessibilityRole="checkbox"
-                            accessibilityState={{ checked: combinedPicks.includes(goal.goalId) }}
-                            accessibilityLabel={`${goal.title}. Its own goal: ${formatCount(goal.target)} ${goal.unit}`}
-                            {...({
-                              'aria-checked': combinedPicks.includes(goal.goalId),
-                            } as Record<string, unknown>)}
-                          >
-                            <View style={kit.optionIndicator}>
-                              {combinedPicks.includes(goal.goalId) ? (
-                                <View style={kit.optionIndicatorDot} />
-                              ) : null}
-                            </View>
-                            <View style={styles.combinedPickText}>
-                              <Text style={kit.optionLabel}>{goal.title}</Text>
-                              <Text style={kit.optionDescription}>
-                                Its own goal: {formatCount(goal.target)} {goal.unit}
-                              </Text>
-                            </View>
-                          </Pressable>
-                        ) : (
-                          <View
-                            key={goal.goalId}
-                            style={styles.manageGoal}
-                            testID={`wsf-combined-pick-ineligible-${goal.goalId}`}
-                          >
-                            <Text style={styles.manageGoalTitle}>{goal.title}</Text>
-                            <Text style={styles.body}>{ineligibleMessage(reason)}</Text>
-                          </View>
-                        )
-                      )
-                    )}
-
-                    {/*
-                      REVIEW BEFORE COMMIT. A confirmation, not a wizard step:
-                      the same facts the Champion just entered, read back in
-                      local words, directly above the one action.
-                    */}
-                    <View style={styles.manageGoal} testID="wsf-combined-summary">
-                      <Text style={styles.manageGoalTitle}>Check this over</Text>
-                      <Row label="Community" value={group.displayName} quiet />
-                      <Row label="Combined goal" value={combinedTitle.trim() || '—'} quiet />
-                      <Row
-                        label="Together"
-                        value={
-                          parseTargetInput(combinedTarget) !== null && combinedUnit.trim()
-                            ? `${formatCount(parseTargetInput(combinedTarget) as number)} ${combinedUnit.trim()}`
-                            : '—'
-                        }
-                        quiet
-                      />
-                      <Row
-                        label="Period"
-                        value={
-                          combinedWindow
-                            ? (formatPeriod(
-                                combinedWindow.startsAt.toISOString(),
-                                combinedWindow.endsAt.toISOString(),
-                                { timeZone: combinedZone }
-                              ) ?? '—')
-                            : '—'
-                        }
-                        quiet
-                      />
-                      <Row label="Time zone" value={zoneInWords(combinedZone)} quiet />
-                      <Row
-                        label="Activities"
-                        value={
-                          combinedPicks.length
-                            ? combinedPicks
-                                .map(
-                                  (id) =>
-                                    combinedCandidates.find((c) => c.goal.goalId === id)?.goal
-                                      .title ?? ''
-                                )
-                                .filter(Boolean)
-                                .join(', ')
-                            : '—'
-                        }
-                        quiet
-                      />
-                    </View>
-
-                    {combinedError ? (
-                      <Text style={styles.error} testID="wsf-combined-error">
-                        {combinedError}
-                      </Text>
-                    ) : null}
-                    <Pressable
-                      onPress={() => void onCreateCombined()}
-                      disabled={combinedBusy}
-                      style={[kit.primaryButton, combinedBusy ? kit.primaryButtonDisabled : null]}
-                      testID="wsf-combined-submit"
-                      accessibilityRole="button"
-                    >
-                      <Text style={kit.primaryButtonText}>
-                        {combinedBusy ? 'Starting…' : 'Start this combined goal'}
-                      </Text>
-                    </Pressable>
-                  </>
-                )}
-              </View>
-            ) : null}
-
             {/*
               The confirmation for a change whose card is no longer here to show
               it. Revoking on a closed goal takes the goal out of the list, so
@@ -3530,6 +3540,27 @@ const styles = StyleSheet.create({
   // narrow, rather than a fixed row that would push a label off a 195 px
   // screen.
   rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // ---- Set up kiosk: one card, one decision ----
+  // The quiet card already used elsewhere on this screen (same surface, same
+  // 16 px radius, same border), so the white option rows and inputs inside it
+  // separate from their ground without a new token of any kind.
+  setupCard: {
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+  },
+  setupBody: { gap: 10 },
+  // One action above its utility, never two buttons of equal weight side by
+  // side: the primary takes the full width of the card, the quiet control
+  // sits under it and keeps its own 44 px box.
+  actionStack: { gap: 6, alignItems: 'stretch' },
+  // Quiet text controls that share a line and give way before the viewport
+  // does. The gap is wider than a button row's so two underlined labels do
+  // not read as one.
+  utilityRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
   // The text column of a combined-activity pick row. Shrinks and wraps so a
   // long activity name cannot push the row past a 195 px viewport.
   combinedPickText: { flex: 1, minWidth: 0, gap: 4 },
@@ -3596,3 +3627,7 @@ const styles = StyleSheet.create({
 // whole screen down. So the composed footer link style is flattened here,
 // once, rather than written as an array at the call site.
 const FOOTER_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.footerLink]);
+// Same reason: a ButtonLink demoted to a quiet utility in a wrapping row needs
+// its two styles composed BEFORE the link merges them.
+const UTILITY_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.rowButton]);
+const UTILITY_LINK_TEXT = StyleSheet.flatten([styles.tertiaryButtonText, styles.rowButtonText]);
