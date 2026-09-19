@@ -1327,6 +1327,103 @@ async function caseW9Kiosk(browser) {
   return fx;
 }
 
+// ---- Station callable transport -------------------------------------------
+// THE HOLE THIS CLOSES. A staging deploy went fully green twice while the
+// seven station callables sat on `invoker_iam_check_enabled` — the identical
+// transport state that produced `HTTP 403 (transport)` on
+// wsfGoalRecentAdditions — because this script contained no reference to any
+// of them. "Green" said the deploy succeeded and said nothing at all about
+// whether the stations answer.
+//
+// WHAT IS PROVED: THE DOOR, NOT THE ROOM. Four of the seven are declared
+// `invoker: 'public'` in functions-westayfit/src/index.ts, because a station
+// device has no account and must reach them signed out. For those four, an
+// anonymous POST refused at the TRANSPORT is a deploy fault. Their
+// application-level answer is NOT asserted: 'invalid-argument', 'not-found',
+// 'permission-denied' or an 'expired' status is the right answer to a
+// synthetic request and is not a failure here.
+//
+// THE THREE CHAMPION-ONLY CALLABLES ARE DELIBERATELY NOT PROBED.
+// wsfApproveStation, wsfListStations and wsfRevokeStation are not declared
+// `invoker: 'public'`, so from outside, the refusal an anonymous caller is
+// SUPPOSED to get and the refusal a broken transport produces are the same
+// event: a 403 reads as "correctly closed" and as "unreachable, the Champion
+// station UI is dead" equally well, and a check that passes either way cannot
+// fail for the right reason. Asserting the opposite — that they answer 401
+// from inside the handler — would assert a transport policy their declaration
+// does not claim. So they are left out, and the gap is named in the receipt's
+// limitations instead of being papered over with a check that always passes.
+//
+// NOTHING IS CREATED ON STAGING. Every payload below is refused before it
+// writes, or reads and writes nothing:
+//   * wsfStationRequestPairing is the one that WRITES (a wsfKioskPairings
+//     document). It validates goalId BEFORE it touches Firestore, so a payload
+//     carrying no goalId is refused 'invalid-argument' and no pairing document
+//     is ever minted. A well-formed goalId would mint one, and a pairing
+//     document's id is a random Firestore id with no run tag in it —
+//     cleanup-synthetic.mjs refuses a manifest holding ANY untagged path and
+//     then deletes NOTHING, so tracking a pairing would not clean it up, it
+//     would break the cleanup of every other fixture in the run.
+//   * wsfStationPairingStatus and wsfStationClaimPairing are handed an
+//     obviously-synthetic id that no pairing has: status reads and answers
+//     'expired', claim reads and throws 'not-found'. Neither writes.
+//   * wsfStationState is sent a station id and NO secret, so it refuses at the
+//     boundary before any station document is read or any lastSeenAt is
+//     rewritten. No credential, station secret, pairing code or join code is
+//     sent or logged by any of the four.
+// The one write these calls do cause is the callables' own per-IP rate-limit
+// counter, wsfStationRateLimits/<salted daily IP hash>, which the function
+// writes for any station call, real or synthetic. It is not run-scoped fixture
+// data, its key is a salted hash this script cannot compute, and it is the
+// same document a real station's first poll writes.
+
+/**
+ * The refusal wsfStationState answers with when it is handed no live
+ * credential. It is the ONE station callable whose correct anonymous answer —
+ * 'permission-denied' — is HTTP 403, the same status a transport denial
+ * carries, so status ALONE cannot tell the two apart for this one service and
+ * a bare `status !== 403` there could only ever fail. Its own sentence can
+ * tell them apart: the transport refuses before the container runs and cannot
+ * produce it. The other three probes are decided on status alone.
+ */
+const STATION_REJECTED_MESSAGE = 'This screen is not enrolled.';
+/** Run-tagged, obviously synthetic, and not the shape of any minted id. */
+const STATION_PROBE_ID = `wsfsmoke-absent-${runTag}`;
+const PUBLIC_STATION_PROBES = [
+  // No goalId on purpose: refused before the pairing document is written.
+  { name: 'wsfStationRequestPairing', data: {} },
+  { name: 'wsfStationPairingStatus', data: { pairingId: STATION_PROBE_ID } },
+  { name: 'wsfStationClaimPairing', data: { pairingId: STATION_PROBE_ID } },
+  // No secret at all, so nothing credential-shaped crosses the wire.
+  { name: 'wsfStationState', data: { stationId: STATION_PROBE_ID } },
+];
+
+/** null when the request reached the handler; the failure sentence when it did not. */
+function stationTransportVerdict(name, response) {
+  if (response.status !== 401 && response.status !== 403) return null;
+  const error = response.body?.error;
+  const answeredByHandler =
+    response.status === 403 &&
+    !!error &&
+    typeof error === 'object' &&
+    error.status === 'PERMISSION_DENIED' &&
+    error.message === STATION_REJECTED_MESSAGE;
+  if (answeredByHandler) return null;
+  return `${name} is not publicly invokable on staging: HTTP ${response.status} (transport)`;
+}
+
+async function caseStationTransport() {
+  const refused = [];
+  for (const probe of PUBLIC_STATION_PROBES) {
+    // Every probe runs: one closed door must not hide the other three.
+    const verdict = stationTransportVerdict(probe.name, await callFunction(probe.name, probe.data));
+    if (verdict) refused.push(verdict);
+  }
+  assert(refused.length === 0, refused.join('; '));
+  check('station callable transport', 'PASS', `all ${PUBLIC_STATION_PROBES.length} unauthenticated-by-design station callables reached their handler anonymously; no pairing, station or fixture document created`);
+  return null;
+}
+
 async function isolated(name, run) {
   try {
     return await run();
@@ -1366,6 +1463,12 @@ let mainError = null;
 try {
   browser = await chromium.launch({ headless: true });
   await verifyHostedBuild();
+  // First, and isolated, on purpose. It needs no browser and no fixture, and
+  // the failure it exists to catch must still be reported when a later
+  // non-isolated case aborts the suite — "we did not know" is the whole
+  // reason this row exists. Isolated is not advisory: the row is a FAIL row
+  // and the run still exits non-zero.
+  await isolated('station callable transport', () => caseStationTransport());
   await caseRoundTrip(browser);
   await caseProtectedReads();
   await caseUncertainAndPerGoal(browser);
@@ -1422,10 +1525,16 @@ const receipt = {
     'The D-5 case is isolated: its failure is its own row and the cases after it still run, because the ruleset it asserts is not deployed by this workflow.',
     'The visual-proof captures show a run-tagged synthetic community, goal and members only; the one contribution they record is removed by cleanup.',
     'The candidate B cases (W2, W3, W5, W6, W4/W7/W8, W9) each run on an isolated row; every contribution they record (and its recent-additions entry) is removed by cleanup.',
+    "The station transport row proves only that the four callables declared invoker:'public' (wsfStationRequestPairing, wsfStationPairingStatus, wsfStationClaimPairing, wsfStationState) are reachable anonymously. It asserts nothing about their application-level answers, and it exercises no station end to end.",
+    'The three Champion-only station callables (wsfApproveStation, wsfListStations, wsfRevokeStation) are NOT probed: they are not declared invoker:\'public\', so a transport denial and the refusal an anonymous caller is supposed to get are the same 403 from outside, and a check that passes either way could not fail for the right reason. Their transport remains unverified by this suite.',
+    'The station probes create no pairing, station or fixture document: each is refused before it writes or reads nothing. They do cause the callables\' own per-IP rate-limit counter (wsfStationRateLimits/<salted daily IP hash>) to be written, which is the function\'s own bookkeeping, is not run-scoped, and cannot be addressed by this script.',
   ],
   diagnostics,
 };
 fs.writeFileSync(path.join(RESULT_DIR, 'wsf-package-e-hosted-result.json'), JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+// A fully green run emits 22 rows — one per check(..., 'PASS') site in this
+// file. hosted-smoke-contract.test.mjs pins that number and the row names, so
+// a row added or removed here has to be accounted for there in the same change.
 console.log(`RESULTS=${results.length}`);
 console.log(`FAILURES=${failed.length}`);
 console.log(`RUN_TAG=${runTag}`);

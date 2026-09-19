@@ -328,10 +328,11 @@ test('the D-5 verdict is isolated: its failure is its own row and cannot stop th
   // Only D-5 is isolated: every other case still aborts the suite.
   const isolatedNames = [...main.matchAll(/await isolated\('([^']+)'/g)].map((m) => m[1]);
   assert.deepStrictEqual(isolatedNames, [
+    'station callable transport',
     'membership status rules (D-5)',
     'recent public additions (W2)', 'repeat policy (W3)', 'target-crossing event (W5)', 'durable history (W6)',
     'guided rules, share + momentum, join QR (W4/W7/W8)', 'kiosk mode (W9)',
-  ], 'only D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
+  ], 'only the station transport row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
   assert.ok(main.indexOf("isolated('recent public additions (W2)'") > main.indexOf('await caseVisualProof(browser);'), 'the candidate B rows run after the Package E, D-5, D-1 and visual rows');
 });
 
@@ -391,6 +392,97 @@ test('the candidate B hosted rows exist, each own their synthetic writes, and pr
   const w478 = fnBody('caseW4W7W8Browser');
   assert.ok(w478.includes("getByTestId('wsf-community-qr-section').count()) === 0"), 'W8 must prove the member has no QR section');
   assert.ok(w478.includes('/medical|doctor|diagnos|injur|treat/i'), 'W4 must check for medical wording');
+});
+
+/**
+ * The station transport row. The hole it closes is the one nothing else in
+ * this file could have caught: a green hosted run that never called a station
+ * callable at all. These assertions exist so a later edit cannot quietly undo
+ * it — by widening the probe set onto the three Champion-only callables (where
+ * a refusal proves nothing), by softening the verdict into something that
+ * cannot fail, or by giving a probe a payload that WRITES.
+ */
+const STATION_PROBE_BLOCK = SMOKE.slice(
+  SMOKE.indexOf('const STATION_REJECTED_MESSAGE'),
+  SMOKE.indexOf('async function caseStationTransport(')
+);
+const PUBLIC_STATIONS = ['wsfStationRequestPairing', 'wsfStationPairingStatus', 'wsfStationClaimPairing', 'wsfStationState'];
+const CHAMPION_ONLY_STATIONS = ['wsfApproveStation', 'wsfListStations', 'wsfRevokeStation'];
+
+test('the station transport row exists, runs first, and is isolated rather than able to abort the suite', () => {
+  assert.ok(SMOKE.includes('async function caseStationTransport('), 'caseStationTransport is missing');
+  assert.ok(SMOKE.includes("check('station callable transport', 'PASS'"), 'the station row has no PASS row');
+  const main = SMOKE.slice(SMOKE.indexOf('browser = await chromium.launch('));
+  const station = main.indexOf("await isolated('station callable transport', () => caseStationTransport());");
+  assert.ok(station !== -1, 'the suite never runs the station transport row');
+  assert.ok(station > main.indexOf('await verifyHostedBuild();'), 'the build check still runs first');
+  assert.ok(station < main.indexOf('await caseRoundTrip(browser);'), 'the station row must run before the cases that can abort the suite');
+  assert.ok(!/\n\s*await caseStationTransport\(\);/.test(main), 'the station row is still run bare somewhere');
+});
+
+test('exactly the four invoker:public station callables are probed, and the three Champion-only ones are not', () => {
+  const probed = [...STATION_PROBE_BLOCK.matchAll(/name: '(wsf[A-Za-z]+)'/g)].map((m) => m[1]);
+  assert.deepStrictEqual(probed, PUBLIC_STATIONS, 'the probe list is not exactly the four unauthenticated-by-design callables');
+  for (const name of CHAMPION_ONLY_STATIONS) {
+    assert.equal(
+      new RegExp(`callFunction\\('${name}'|name: '${name}'`).test(SMOKE),
+      false,
+      `${name} is not invoker:'public'; an anonymous refusal of it cannot fail for the right reason, so it must not be probed`
+    );
+  }
+  // The omission is stated in the receipt, not silently carried.
+  assert.match(SMOKE, /The three Champion-only station callables \(wsfApproveStation, wsfListStations, wsfRevokeStation\) are NOT probed/);
+});
+
+test('no station probe can create anything on staging, and none carries a credential-shaped value', () => {
+  // wsfStationRequestPairing is the only one that writes, and it validates
+  // goalId before it touches Firestore: a payload with no goalId is refused
+  // before a wsfKioskPairings document exists.
+  assert.match(STATION_PROBE_BLOCK, /\{ name: 'wsfStationRequestPairing', data: \{\} \}/, 'the pairing request probe must carry no goalId');
+  // wsfStationState refuses before it reads or rewrites a station document
+  // when it is handed no secret; sending one would also put a credential-
+  // shaped value on the wire.
+  assert.match(STATION_PROBE_BLOCK, /\{ name: 'wsfStationState', data: \{ stationId: STATION_PROBE_ID \} \}/, 'the state probe must send a station id and no secret');
+  assert.equal(/secret:/.test(STATION_PROBE_BLOCK), false, 'no station probe may send a secret');
+  assert.equal(/code:|joinCode|pairingCode/.test(STATION_PROBE_BLOCK), false, 'no station probe may send a pairing or join code');
+  // The ids are run-tagged and obviously synthetic, never a minted id.
+  assert.match(SMOKE, /const STATION_PROBE_ID = `wsfsmoke-absent-\$\{runTag\}`;/);
+  const body = fnBody('caseStationTransport');
+  assert.equal(/trackDoc\(|trackUser\(|putDoc\(|seedFixture\(/.test(body), false, 'the station row must create nothing, so it has nothing to track');
+  // The rate-limit counter the callables write for themselves is disclosed.
+  assert.match(SMOKE, /wsfStationRateLimits\/<salted daily IP hash>/);
+});
+
+test('the station verdict names the service and status, and the only 403 it forgives is the handler’s own refusal', () => {
+  const verdict = SMOKE.slice(
+    SMOKE.indexOf('function stationTransportVerdict('),
+    SMOKE.indexOf('async function caseStationTransport(')
+  );
+  // Same sentence W2 uses, so a failure reads the same way.
+  assert.match(verdict, /\$\{name\} is not publicly invokable on staging: HTTP \$\{response\.status\} \(transport\)/);
+  assert.match(SMOKE, /wsfGoalRecentAdditions is not publicly invokable on staging: HTTP \$\{anon\.status\} \(transport\)/, 'the W2 sentence this one follows disappeared');
+  assert.match(verdict, /response\.status !== 401 && response\.status !== 403/, 'a 401 or a 403 is the failure, exactly as in W2');
+  // wsfStationState's correct anonymous answer IS a 403, so status alone would
+  // make its check unable to pass for the right reason. The narrow exception
+  // is the handler's own sentence, which the transport cannot produce.
+  assert.match(verdict, /response\.status === 403 &&/);
+  assert.match(verdict, /error\.status === 'PERMISSION_DENIED'/);
+  assert.match(verdict, /error\.message === STATION_REJECTED_MESSAGE/);
+  assert.match(SMOKE, /const STATION_REJECTED_MESSAGE = 'This screen is not enrolled\.';/);
+  const body = fnBody('caseStationTransport');
+  // Not softened: no catch, no skip, no advisory status, and every probe runs.
+  assert.equal(/catch\s*\(|'WARN'|'SKIP'|'ADVISORY'/.test(body), false, 'the station row must not swallow or downgrade its own failure');
+  assert.match(body, /assert\(refused\.length === 0, refused\.join\('; '\)\)/, 'every closed door must be named, not just the first');
+  assert.ok(body.indexOf('assert(refused.length === 0') < body.indexOf("check('station callable transport', 'PASS'"), 'the PASS row must come after the assertion');
+});
+
+test('the green-run row count is pinned, and every row name is distinct', () => {
+  const rows = [...SMOKE.matchAll(/check\('([^']+)', 'PASS'/g)].map((m) => m[1]);
+  assert.equal(rows.length, 22, `a fully green run emits one row per PASS site; expected 22, found ${rows.length}`);
+  assert.equal(new Set(rows).size, rows.length, 'two rows share a name, so RESULTS could not be read back per row');
+  assert.ok(rows.includes('station callable transport'), 'the station transport row is not among the green rows');
+  assert.match(SMOKE, /console\.log\(`RESULTS=\$\{results\.length\}`\);/);
+  assert.match(SMOKE, /A fully green run emits 22 rows/, 'the script must pin the same count the harness does');
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);
