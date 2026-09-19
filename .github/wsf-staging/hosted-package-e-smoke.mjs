@@ -1580,14 +1580,25 @@ async function caseTurnContract() {
   const uid = fx.member.uid;
 
   // ── THE COMBINED EVENT ────────────────────────────────────────────────────
-  const now = Date.now();
+  //
+  // THE PARENT WINDOW IS THE FIXTURE'S OWN, NOT A FRESH CLOCK READING.
+  //
+  // Run 28 failed here, and the product was right to refuse it. The server
+  // enforces `child.startsAt >= combined.startsAt` (COMBINED_WINDOW_MESSAGE).
+  // seedFixture() stamps the children at ITS now minus 60s; recomputing
+  // `Date.now() - 60_000` here reads the clock again after the fixture has
+  // created three accounts and written a dozen documents, so the parent began
+  // AFTER its own children by however long that took, and the refusal was
+  // FAILED_PRECONDITION every time. Reusing the instants the fixture actually
+  // wrote makes the windows identical, which satisfies the bound at its
+  // boundary and cannot drift with how slow the seeding was.
   const combined = await turnCall('create combined goal', 'wsfCreateCombinedGoal', {
     communityGroupId: fx.groupId,
     title: `Hosted turn ${runTag}`,
     unit: 'movements',
     target: 2000,
-    startsAt: new Date(now - 60_000).toISOString(),
-    endsAt: new Date(now + 3_600_000).toISOString(),
+    startsAt: fx.startsAtIso,
+    endsAt: fx.endsAtIso,
     timezone: 'UTC',
     childGoalIds: [activityA, activityB],
   }, championToken);
