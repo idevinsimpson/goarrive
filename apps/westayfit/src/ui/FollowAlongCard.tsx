@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
   figureWide: { width: 320, height: 384 },
   // THE VENUE FIGURE, sized to the room now that the movement owns the width
   // the attract columns used to take.
-  figureVenue: { width: 260, height: 312 },
+  figureVenue: { width: 210, height: 252 },
   figureCompact: { width: 128, height: 154 },
   control: { minHeight: 56 },
   // THE VENUE GROUND. No white rectangle: the hall screen IS the card, so the
@@ -421,8 +421,8 @@ const styles = StyleSheet.create({
   },
   venueTimer: {
     color: '#F7F5F0',
-    fontSize: 112,
-    lineHeight: 118,
+    fontSize: 96,
+    lineHeight: 102,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
     textAlign: 'center',

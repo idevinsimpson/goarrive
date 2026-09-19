@@ -423,6 +423,9 @@ export default function QueueScreen() {
   }
 
   if (state.kind === 'notInLine') {
+    // The fresh ten-second one when there is one, otherwise the recoverable
+    // one. Never both: they are the same turn.
+    const receipt = justRecorded ?? state.receipt;
     return page(
       'wsf-queue-not-in-line',
       <>
@@ -441,31 +444,63 @@ export default function QueueScreen() {
           </Text>
         </View>
         {/*
-          THE TEN SECONDS, AND THEN NOTHING. What was just recorded, large
-          enough to read while walking away — and gone by itself, so no trace
-          of a turn is left on a phone somebody hands to a friend.
+          WHAT THEY DID, FIRST AND LARGEST.
+
+          This page used to open with "You're not in the line" and bury the
+          number in a quiet card underneath — which is the least interesting
+          true thing on the screen sitting above the only thing anybody came
+          back to see. The result leads; not being in the line any more is a
+          consequence of it and reads as supporting copy.
+
+          The two receipts are the same news arriving by different routes. The
+          TEN-SECOND one is the tap that just worked. The RECOVERABLE one is
+          what is still here when that tap never came back — the whole reason
+          it exists — so it says so in its own words rather than borrowing the
+          fresh one's.
         */}
-        {justRecorded ? (
-          <View style={kit.hero} testID="wsf-queue-result">
-            <Text style={kit.eyebrowOnNavy}>Recorded</Text>
-            <Text style={styles.resultAmount} testID="wsf-queue-result-amount">
-              {justRecorded.unit
-                ? `${justRecorded.amount} ${justRecorded.unit}`
-                : `${justRecorded.amount}`}
+        {receipt ? (
+          <View style={kit.hero} testID={justRecorded ? 'wsf-queue-result' : 'wsf-queue-receipt'}>
+            <Text style={kit.eyebrowOnNavy}>{justRecorded ? 'Recorded' : 'Your last turn here'}</Text>
+            <Text style={styles.resultAmount} testID="wsf-queue-receipt-amount" {...HEADING}>
+              {receipt.unit
+                ? `${receipt.amount} ${receipt.unit} recorded.`
+                : `${receipt.amount} recorded.`}
             </Text>
-            <Text style={kit.heroMeta}>That’s counted. Thank you.</Text>
+            {/* THEIR OWN CREDIT, said to be theirs. This number is what this
+                person added, not where the community stands — the shared total
+                lives on the event and the community pages and is not restated
+                here, where it would be read as the same figure. */}
+            <Text style={kit.heroMeta} testID="wsf-queue-receipt-scope">
+              {justRecorded
+                ? 'Your own part, counted once. Thank you.'
+                : 'Your own part, counted once — whatever happened to the page that recorded it.'}
+            </Text>
+            {goalId ? (
+              <ButtonLink
+                href={`/event/${goalId}`}
+                style={kit.primaryButton}
+                textStyle={kit.primaryButtonText}
+                testID="wsf-queue-back-to-event"
+                label="Back to the event"
+              />
+            ) : null}
           </View>
         ) : null}
-        <View style={kit.card}>
-          <Text style={kit.cardTitle} {...HEADING}>
+
+        {/*
+          NOT BEING IN THE LINE. The headline when there is nothing else to
+          say, and quiet supporting copy when there is.
+        */}
+        <View style={receipt ? kit.cardQuiet : kit.card} testID="wsf-queue-standing">
+          <Text style={receipt ? kit.cardMeta : kit.cardTitle} {...(receipt ? {} : HEADING)}>
             {state.noShow ? 'Your turn timed out' : 'You’re not in the line'}
           </Text>
-          <Text style={kit.body} testID="wsf-queue-not-in-line-reason">
+          <Text style={receipt ? kit.caption : kit.body} testID="wsf-queue-not-in-line-reason">
             {state.noShow
               ? TURN_NO_SHOW_MESSAGE
               : 'Nothing of yours is on the screen in the room. You can get back in line from the event page whenever you like.'}
           </Text>
-          {goalId ? (
+          {goalId && !receipt ? (
             <ButtonLink
               href={`/event/${goalId}`}
               style={kit.primaryButton}
@@ -476,24 +511,6 @@ export default function QueueScreen() {
           ) : null}
           <SecondaryLink href="/" label="Back to home" />
         </View>
-        {/*
-          THE RECOVERABLE RECEIPT. It is the last thing on the page and the
-          quietest, because it is not what anybody came here for — it is what
-          they need when the tap that recorded it never came back.
-        */}
-        {state.receipt && !justRecorded ? (
-          <View style={kit.cardQuiet} testID="wsf-queue-receipt">
-            <Text style={kit.cardMeta}>Your last turn here</Text>
-            <Text style={kit.body} testID="wsf-queue-receipt-amount">
-              {state.receipt.unit
-                ? `${state.receipt.amount} ${state.receipt.unit} recorded.`
-                : `${state.receipt.amount} recorded.`}
-            </Text>
-            <Text style={kit.caption}>
-              Counted once, whatever happened to the page that recorded it.
-            </Text>
-          </View>
-        ) : null}
       </>
     );
   }

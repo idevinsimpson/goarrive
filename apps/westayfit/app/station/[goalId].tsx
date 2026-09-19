@@ -1232,7 +1232,12 @@ const styles = StyleSheet.create({
   canvasNavy: {
     backgroundColor: NAVY,
     paddingHorizontal: 24,
-    paddingVertical: 28,
+    // A BOTTOM SAFE AREA THE CONTROLS CANNOT CROSS. The venue canvas is a
+    // fixed height and never scrolls, so anything that overflows it is simply
+    // gone — and what was going was Pause, Stop and the buttons that end a
+    // turn. This padding is the floor; the stage above gives way instead.
+    paddingTop: 28,
+    paddingBottom: 24,
     justifyContent: 'space-between',
     gap: 16,
   },
@@ -1292,7 +1297,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 40,
+    gap: 36,
     alignSelf: 'stretch',
     minWidth: 0,
     paddingHorizontal: 24,

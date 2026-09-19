@@ -558,7 +558,12 @@ test('a combined event: the station is on one activity, the person picks the oth
   await page.getByTestId(`wsf-combined-pick-${goalA}`).click();
   await page.getByTestId(`wsf-combined-pick-${goalB}`).click();
   await page.getByTestId('wsf-combined-submit').click();
-  await expect(page.getByTestId('wsf-combined-created')).toBeVisible({ timeout: 25_000 });
+  const created = page.getByTestId('wsf-combined-created');
+  await expect(created).toBeVisible({ timeout: 25_000 });
+  const combinedUrl = await created
+    .locator('[data-combined-url]')
+    .getAttribute('data-combined-url');
+  const setupId = combinedUrl!.slice(`${new URL(page.url()).origin}/combined/`.length);
 
   // ---- A SCREEN, ENROLLED ON SQUATS --------------------------------------
   // Station enrolment is a sibling of the kiosk mode, not part of it, so a
@@ -649,6 +654,32 @@ test('a combined event: the station is on one activity, the person picks the oth
     );
     await expect(page.getByTestId('wsf-queue-not-in-line')).not.toContainText('timed out');
     await snap(page, 'combined-390-receipt-for-the-chosen-activity');
+
+    // ---- BOTH TOTALS ROSE, AND EACH ROSE ONCE ----------------------------
+    // THE SEAM THIS WHOLE TEST EXISTS FOR. One recording at a station has to
+    // credit the CHILD the person chose and the PARENT the event is counting,
+    // exactly once each — never the child twice, never the parent from a
+    // backfill, never the wrong child.
+    await page.goto(`/community/${groupId}`);
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 25_000 });
+    // The child that was chosen carries the 12...
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalB}`)).toContainText('12 of', {
+      timeout: 25_000,
+    });
+    // ...the child that was NOT chosen carries nothing...
+    await expect(page.getByTestId(`wsf-community-goal-total-${goalA}`)).toContainText('0 of');
+    await snap(page, 'combined-390-child-total-rose-once');
+
+    // ...and THE PARENT counts it once, in the event's own unit. That total
+    // lives on the combined screen, which is the surface the event is watched
+    // on; Community Home lists the children.
+    await page.goto(`/combined/${setupId}`);
+    await expect(page.getByTestId('wsf-combined-screen')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-combined-screen')).toContainText('12', {
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId('wsf-combined-screen')).toContainText('movements');
+    await snap(page, 'combined-390-parent-total-rose-once');
   } finally {
     await stationContext.close();
   }
