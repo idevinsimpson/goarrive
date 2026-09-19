@@ -220,27 +220,84 @@ test('a long community name does not push the primary action off a short phone',
   const page = await context.newPage();
   await signInVia(page, email, password);
   await page.goto(`/community/${groupId}`);
-  await expect(page.getByTestId(`wsf-community-goal-total-${goalId}`)).toBeVisible({ timeout: 30_000 });
+  // READINESS WITHOUT A LOCATOR.
+  //
+  // Any locator call is a way for the harness to move the view, and a proof
+  // about the arrival viewport cannot depend on one. This waits on a pure DOM
+  // predicate instead: the goal total is in the tree and has laid out.
+  await page.waitForFunction(
+    (id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      return !!el && (el as HTMLElement).getBoundingClientRect().height > 0;
+    },
+    `wsf-community-goal-total-${goalId}`,
+    { timeout: 30_000 }
+  );
   await page.waitForTimeout(1200);
   await expectNoHorizontalOverflow(page, 'long name at 390x640');
 
-  // THE MEASUREMENT IS TAKEN FROM AN UNTOUCHED INITIAL VIEWPORT.
+  // THE MEASUREMENT IS TAKEN FROM AN UNTOUCHED ARRIVAL VIEWPORT, AND SAYS SO
+  // IN A WAY THAT CAN FAIL.
   //
-  // The app is a React Native Web ScrollView, so a measurement that let the
-  // scroller move would prove nothing about what a member sees on arrival.
-  // The container's scrollTop is asserted at zero FIRST, and the rect comes
-  // from a DOM read rather than a locator call, so no Playwright action can
-  // scroll it between the two.
-  const measured = await page.evaluate((id) => {
-    const scroller = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 4);
-    const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { scrollTop: scroller ? (scroller as HTMLElement).scrollTop : 0, top: Math.round(r.top), bottom: Math.round(r.bottom) };
-  }, `wsf-community-goal-link-${goalId}`);
+  // The app is a React Native Web ScrollView, so a measurement that let any
+  // scrolling surface move would prove nothing about what a member sees on
+  // arrival. Asserting one scroller was not enough: this reads the window,
+  // the document, EVERY scrollable ancestor of the primary action, and every
+  // scrollable element in the page, and reports each one that is not at zero.
+  // It also measures the wordmark, so "the capture begins at the wordmark" is
+  // a machine-checked claim rather than something I say about a PNG.
+  const measured = await page.evaluate(
+    ({ id, markId }) => {
+      const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+      const mark = document.querySelector(`[data-testid="${markId}"]`) as HTMLElement | null;
+      if (!el) return null;
+      const scrollable = (e: Element) => e.scrollHeight > e.clientHeight + 4 || e.scrollWidth > e.clientWidth + 4;
+      const moved: string[] = [];
+      const note = (label: string, top: number, left: number) => {
+        if (Math.round(top) !== 0 || Math.round(left) !== 0) moved.push(`${label} @ ${Math.round(top)},${Math.round(left)}`);
+      };
+      note('window', window.scrollY, window.scrollX);
+      note('documentElement', document.documentElement.scrollTop, document.documentElement.scrollLeft);
+      note('body', document.body.scrollTop, document.body.scrollLeft);
+      // Every scrollable ancestor of the primary action, named by its path.
+      let depth = 0;
+      for (let node: Element | null = el; node; node = node.parentElement, depth += 1) {
+        if (scrollable(node)) note(`ancestor[${depth}] ${node.tagName.toLowerCase()}`, node.scrollTop, node.scrollLeft);
+      }
+      // And every other scrollable surface in the document, so a sibling
+      // scroller cannot move unnoticed.
+      let others = 0;
+      for (const node of Array.from(document.querySelectorAll('*'))) {
+        if (!scrollable(node)) continue;
+        others += 1;
+        note(`scroller[${others}] ${node.tagName.toLowerCase()}`, node.scrollTop, node.scrollLeft);
+      }
+      const r = el.getBoundingClientRect();
+      const m = mark?.getBoundingClientRect();
+      return {
+        moved,
+        scrollers: others,
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        markTop: m ? Math.round(m.top) : null,
+        markBottom: m ? Math.round(m.bottom) : null,
+      };
+    },
+    { id: `wsf-community-goal-link-${goalId}`, markId: 'wsf-community-wordmark' }
+  );
   expect(measured, 'the primary action was not found').not.toBeNull();
-  expect(measured!.scrollTop, 'the scroller moved before the measurement, so it proves nothing').toBe(0);
-  console.log(`LONG-NAME start-moving top=${measured!.top} bottom=${measured!.bottom} scrollTop=${measured!.scrollTop} viewport=640`);
+  expect(
+    measured!.moved,
+    `a scrolling surface had moved before the measurement, so it proves nothing about the arrival viewport: ${measured!.moved.join('; ')}`
+  ).toEqual([]);
+  // The capture must visibly begin at the wordmark: it is present, inside the
+  // viewport, and nothing of the community name sits above it.
+  expect(measured!.markTop, 'the wordmark is not in the page, so the capture cannot begin at it').not.toBeNull();
+  expect(measured!.markTop!, 'the wordmark starts above the viewport — the capture begins mid-content').toBeGreaterThanOrEqual(0);
+  expect(measured!.markBottom!, 'the wordmark is not in the arrival viewport').toBeLessThanOrEqual(640);
+  console.log(
+    `LONG-NAME start-moving top=${measured!.top} bottom=${measured!.bottom} wordmark=${measured!.markTop}..${measured!.markBottom} scrollers=${measured!.scrollers} moved=none viewport=640`
+  );
   expect(measured!.bottom, 'the long-name case pushes the primary action off a 390x640 phone').toBeLessThanOrEqual(640);
   await page.screenshot({ path: path.join(OUT, 'home-390x640-long-name.png') });
   await context.close();
