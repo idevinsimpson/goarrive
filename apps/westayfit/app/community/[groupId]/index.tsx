@@ -1494,19 +1494,39 @@ export default function CommunityPage() {
   })();
   // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
   const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
+  /**
+   * THE GOAL TITLE SHRINKS BEFORE IT BREAKS A WORD.
+   *
+   * At 200% text zoom the hero is ~163px of usable width, and "Challenge" set
+   * at 27px is wider than that — so the browser broke INSIDE the word and the
+   * capture read "Challen / ge". A word split down the middle is not a reflow,
+   * it is a defect. The type scales at the two narrow steps so long words keep
+   * their shape; nothing changes at 360 and above.
+   */
+  const heroTitleType =
+    windowWidth < 240
+      ? { fontSize: 20, lineHeight: 25 }
+      : windowWidth < 300
+        ? { fontSize: 23, lineHeight: 29 }
+        : null;
   const smallWeWidth = 104;
   // The hero's progress area reserves the room the We mark, its three facts
   // and the freshness line will take, so a pulse that lands does not move
   // the title above it or the actions below it.
-  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 118;
+  // SLICE 1. 118 -> 74: the freshness row (44px) moved below the actions, so
+  // the space reserved for it inside the progress area moves with it.
+  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 74;
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
   const showInviteCard = isChampion || (linkJoinable && inviteUrl != null);
   // One human line under the name, and only once the goal list has answered:
   // a claim about what the community is doing waits for the facts.
-  const humanLine =
-    goalsState.kind === 'loaded' ? (featured ? 'Moving together.' : 'Ready to get moving.') : null;
+  // SLICE 1. When a goal IS running the hero says so in its own words, and a
+  // generic line above it was costing a row at the most expensive point on the
+  // screen. It survives where it still carries information: the empty state,
+  // where nothing else tells the member what this community is for.
+  const humanLine = goalsState.kind === 'loaded' && !featured ? 'Ready to get moving.' : null;
   /**
    * The one line under the community's name in the Champion sheet. It says
    * what is actually running and, when the count is known, how many people
@@ -1983,10 +2003,14 @@ export default function CommunityPage() {
     </Fragment>
   );
 
+  // SLICE 1. OUTSIDE the navy panel, on the page's own surface. It is utility
+  // — when the number was last confirmed and how to ask again — and it was
+  // sitting inside the emotional payoff. Its colours move with it: on cream it
+  // needs the page's muted text, not the hero's light-on-dark muted.
   const renderFreshness = (p: GoalProgress) =>
     p.kind === 'ok' ? (
-      <View style={styles.freshnessRow}>
-        <Text style={styles.heroFreshness} testID="wsf-community-progress-updated">
+      <View style={styles.freshnessUtilityRow}>
+        <Text style={styles.freshnessUtilityText} testID="wsf-community-progress-updated">
           {`Confirmed ${formatClock(p.at)}`}
         </Text>
         <Pressable
@@ -1996,7 +2020,7 @@ export default function CommunityPage() {
           style={styles.freshnessButton}
           accessibilityLabel="Refresh confirmed progress"
         >
-          <Text style={styles.heroFreshnessLink}>Refresh</Text>
+          <Text style={styles.freshnessUtilityLink}>Refresh</Text>
         </Pressable>
       </View>
     ) : null;
@@ -2998,7 +3022,22 @@ export default function CommunityPage() {
               the page's one top-level heading. Role and level only — the
               styles, and therefore the rendering, are unchanged.
             */}
-            <Text style={[styles.heading, styles.headingName]} testID="wsf-community-name" {...HEADING_1}>
+            {/*
+              SLICE 1. BOUNDED, because the worst case is not hypothetical: an
+              80-character name wraps to four lines and pushed the primary
+              action to within ONE pixel of the bottom of a 390x640 phone. Two
+              lines caps the pre-goal block at a known height whatever the name
+              is. The full name is never lost — it stays the accessible label,
+              and Manage shows it in full.
+            */}
+            <Text
+              style={[styles.heading, styles.headingName]}
+              testID="wsf-community-name"
+              numberOfLines={2}
+              ellipsizeMode="tail"
+              accessibilityLabel={group.displayName}
+              {...HEADING_1}
+            >
               {group.displayName}
             </Text>
             {isSample ? (
@@ -3060,20 +3099,27 @@ export default function CommunityPage() {
                   ? formatActiveWindowLabel(p.pulse.endsAt, { timeZone: p.pulse.timezone })
                   : 'Open';
               return (
+                <Fragment>
                 <View style={styles.hero} testID="wsf-community-goal-hero">
                   {/*
                     A3. The one place this surface can say the target is met
                     while the goal is still open. Confirmed pulse only — an
                     unconfirmed or failed read keeps the neutral eyebrow.
                   */}
-                  <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
-                    {p.kind === 'ok' &&
-                    progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen'
-                      ? 'Goal reached'
-                      : 'What we’re doing'}
-                  </Text>
+                  {/*
+                    SLICE 1. The neutral "What we're doing" labelled what the
+                    card's own content already said, and cost a row at the most
+                    expensive point on a phone. "Goal reached" is real news and
+                    keeps the slot; the label does not.
+                  */}
+                  {p.kind === 'ok' &&
+                  progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen' ? (
+                    <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
+                      Goal reached
+                    </Text>
+                  ) : null}
                   <Text
-                    style={styles.heroTitle}
+                    style={[styles.heroTitle, heroTitleType]}
                     testID={`wsf-community-goal-title-${featured.goalId}`}
                     {...HEADING_2}
                   >
@@ -3103,8 +3149,38 @@ export default function CommunityPage() {
                       </View>
                     ) : null}
                     {renderProgressFacts(featured, p, 'hero')}
-                    {renderFreshness(p)}
                   </View>
+                  {/*
+                    SLICE 1f. BOTH ROUTES ARE GATED, NOT ONE.
+
+                    Slice 1 moved the repeat-policy check onto the quiet route
+                    when the "Your part" duplicate was removed, and stopped
+                    there. That left the green primary still inviting a
+                    contribution the server refuses with "This goal takes one
+                    contribution from each member" — the loudest control on the
+                    screen offering a journey that ends in a refusal. Hiding
+                    the quiet route and keeping the loud one is worse than
+                    hiding neither, because it reads as deliberate.
+
+                    On a `once` goal this member has already contributed to,
+                    neither route is offered and the screen says plainly what
+                    it recorded and why there is nothing more to do. It states
+                    what was RECORDED — the system confirms a recorded
+                    contribution, never that a person exercised.
+                  */}
+                  {p.kind === 'ok' && p.repeatPolicy === 'once' && (p.ownCredit ?? 0) > 0 ? (
+                    <View
+                      style={styles.heroDone}
+                      testID={`wsf-community-goal-complete-${featured.goalId}`}
+                    >
+                      <Text style={styles.heroDoneLead}>
+                        {`You’ve recorded ${formatCount(p.ownCredit ?? 0)} ${p.pulse.unit}.`}
+                      </Text>
+                      <Text style={styles.heroDoneNote}>
+                        This goal takes one contribution from each member.
+                      </Text>
+                    </View>
+                  ) : (
                   <View style={styles.actions}>
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'move')}
@@ -3115,12 +3191,22 @@ export default function CommunityPage() {
                     />
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
-                      style={styles.heroOutlineButtonWide}
-                      textStyle={styles.heroOutlineButtonText}
+                      style={styles.heroSecondaryAction}
+                      textStyle={styles.heroSecondaryActionText}
                       testID={`wsf-community-goal-record-${featured.goalId}`}
-                      label={`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
+                      // SLICE 1. Was "Already moved? Record <unit>" — a question
+                      // plus a verb plus a unit, set as wide as the primary, so
+                      // it competed with it. The destination screen names the
+                      // unit; this only has to name the situation.
+                      label="I already moved"
                     />
                   </View>
+                  )}
+                  {/*
+                    SLICE 1. Below the actions, not between the figures and the
+                    primary control. It is maintenance metadata, and in the old
+                    order it was the last thing a 390x640 phone could show.
+                  */}
                   {/*
                     W7. Sharing, and only what is already published. The control
                     exists only when this goal's aggregate is authorized for
@@ -3152,6 +3238,8 @@ export default function CommunityPage() {
                     </View>
                   ) : null}
                 </View>
+                {renderFreshness(p)}
+                </Fragment>
               );
             })()
           ) : (
@@ -3222,15 +3310,13 @@ export default function CommunityPage() {
                       resolves to 'multiple' — unchanged behaviour — and keeps
                       the link exactly as it was.
                     */}
-                    {p.repeatPolicy === 'once' && p.ownCredit > 0 ? null : (
-                      <ButtonLink
-                        href={contributeHref(featured.goalId, 'record')}
-                        style={styles.inlineLink}
-                        textStyle={styles.inlineLinkText}
-                        testID={`wsf-community-your-part-link-${featured.goalId}`}
-                        label={p.ownCredit > 0 ? `Record more ${p.pulse.unit}` : `Record ${p.pulse.unit}`}
-                      />
-                    )}
+                    {/*
+                      SLICE 1. REMOVED. This was the THIRD route to the
+                      contribution flow on one screen, after the hero's primary
+                      action and "I already moved" directly above it. "Your
+                      part" reports what the member has done; it does not
+                      re-ask. The action lives in the hero, once.
+                    */}
                   </View>
                 );
               })()
@@ -3558,11 +3644,15 @@ const styles = StyleSheet.create({
   identity: { gap: 4 },
   headingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   heading: {
+    // SLICE 1. Was 32/38/800 — larger than the goal title it sat above, so the
+    // community's own name was the loudest thing on a screen whose job is the
+    // goal. Demoted to context. At this size the two-line names that were
+    // costing 76px of a 640px phone fit on one line.
     color: wsfTheme.colors.text,
-    fontSize: 32,
-    fontWeight: '800',
-    lineHeight: 38,
-    letterSpacing: -0.5,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 26,
+    letterSpacing: -0.2,
   },
   // The community name is a stored string of up to 80 characters sitting in a
   // row beside the Sample badge. A flex child's default minimum size is its
@@ -3635,10 +3725,50 @@ const styles = StyleSheet.create({
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  freshnessUtilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 10,
+  },
+  freshnessUtilityText: { color: wsfTheme.colors.textMuted, fontSize: 13 },
+  freshnessUtilityLink: {
+    color: wsfTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   heroFreshness: { color: HERO_MUTED, fontSize: 13 },
   freshnessButton: { minHeight: 44, justifyContent: 'center' },
   heroFreshnessLink: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
-  actions: { gap: 10, marginTop: 8 },
+  // SLICE 1. marginTop 8 -> 14. Removing the freshness row took the hero's
+  // breathing room with it and the button sat too close to "to go". 20 read
+  // better still, but it cost the worst-case long name its clearance on a
+  // 390x640 phone (15px left); 14 keeps the air and returns the margin.
+  actions: { gap: 10, marginTop: 14 },
+  // SLICE 1f. THE COMPLETED STATE SITS WHERE THE BUTTONS WERE, and is quiet.
+  // It replaces two controls, so it must not read as a third: no fill, no
+  // border, no tap affordance — a statement, in the hero's own type.
+  heroDone: { marginTop: 14, gap: 4 },
+  heroDoneLead: { color: '#FFFFFF', fontSize: 17, lineHeight: 23, fontWeight: '700' },
+  heroDoneNote: { color: '#C7D2E0', fontSize: 14, lineHeight: 20 },
+  // SLICE 1. The already-moved route is DEMOTED, not duplicated and not
+  // stripped. Bare centred text (the first attempt) read as a caption and
+  // lost every signal that it could be tapped. This is a quiet chip: hairline
+  // border at lower contrast than the share control, sized to its label rather
+  // than the full width, and still a 44px target.
+  heroSecondaryAction: {
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(247,245,240,0.22)',
+    borderRadius: 999,
+    minHeight: 44,
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroSecondaryActionText: { color: HERO_MUTED, fontSize: 15, fontWeight: '600' },
   primaryButton: {
     backgroundColor: PROGRESS_GREEN,
     borderRadius: 14,

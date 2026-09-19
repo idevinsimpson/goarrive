@@ -348,11 +348,21 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
     'You’ve added 60 squats'
   );
-  // The control is a contribution action, named as one — not an activity history.
-  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
-    'Record more squats'
-  );
-  await expect(page.getByTestId('wsf-community-human-line')).toHaveText('Moving together.');
+  // SLICE 1. The control is GONE from Your part. It was the third route to the
+  // contribution flow on one screen, after the hero's primary action and the
+  // quiet "I already moved" directly above it. Your part reports what the
+  // member has done; it does not re-ask. The action lives in the hero, once.
+  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveCount(0);
+  // And the one that remains is still there, so the route is demoted, not lost.
+  await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
+  // SLICE 1. The generic line above the hero is GONE while a goal is running:
+  // the hero says what is happening in the goal's own words, and the line was
+  // costing a row at the most expensive point on a phone. It survives only in
+  // the empty state, where nothing else tells the member what this community
+  // is for. The surviving branch is asserted on the no-goal community in
+  // ui-mobile-acceptance.spec.ts, so the line keeps coverage on both sides:
+  // present when it carries information, absent when the hero does.
+  await expect(page.getByTestId('wsf-community-human-line')).toHaveCount(0);
   await expect(page.getByTestId(`wsf-community-goal-link-${featured}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
   // The second open goal prints its own honest number: 35 of 5,000 is 0.7%.
@@ -453,9 +463,9 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
     'Your first contribution counts here.'
   );
-  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveText(
-    'Record squats'
-  );
+  // SLICE 1. Gone from Your part for the Champion too; the route is the hero's.
+  await expect(page.getByTestId(`wsf-community-your-part-link-${featured}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-record-${featured}`)).toBeVisible();
   await scrollTo(page, 0);
   await snapViewport(page, 'champion-01-top-manage-closed');
   const heroBoxBefore = await page.getByTestId('wsf-community-goal-hero').boundingBox();
@@ -572,9 +582,14 @@ test('Living WE static states through the real data path', async ({ page }) => {
     // A3. The hero eyebrow is the one place this surface says the target is
     // met while the goal is still open. Every other state keeps the neutral
     // "What we're doing".
-    await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText(
-      state.key === '500-of-500' ? 'Goal reached' : 'What we’re doing'
-    );
+    // SLICE 1. The neutral label is gone — it named what the card already
+    // said. "Goal reached" is real news and keeps the slot, so the eyebrow is
+    // now present ONLY in that state.
+    if (state.key === '500-of-500') {
+      await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText('Goal reached');
+    } else {
+      await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveCount(0);
+    }
     const we = page.getByTestId(`wsf-community-goal-we-${goalId}`);
     await expect(we).toHaveAttribute('data-fill-ratio', state.ratio);
     await expect(we).toHaveAttribute(

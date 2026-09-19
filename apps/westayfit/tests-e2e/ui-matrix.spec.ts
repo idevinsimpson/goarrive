@@ -431,9 +431,12 @@ test.describe('phone 390×844', () => {
         await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveText(
           s.percentText
         );
-        await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText(
-          s.key === '515-of-500-open' ? 'Goal reached' : 'What we’re doing'
-        );
+        // SLICE 1. Present only when it is news; the neutral label is gone.
+        if (s.key === '515-of-500-open') {
+          await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText('Goal reached');
+        } else {
+          await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveCount(0);
+        }
       }
       await page.waitForTimeout(700);
       await clip(

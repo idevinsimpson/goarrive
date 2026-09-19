@@ -391,8 +391,31 @@ test('once: today’s copy is unchanged, no second contribution is offered, and 
   await expect(page.getByTestId(`wsf-community-your-part-${goalId}`)).toContainText(
     'You’ve added 20 squats to this goal.'
   );
+  // SLICE 1. The Your-part duplicate is gone from every goal now, so asserting
+  // its absence here would pass for the wrong reason and prove nothing about
+  // the repeat policy. The property this test exists for — Community Home does
+  // not invite what the goal will refuse — now lives on the hero's own
+  // controls, so that is what is asserted.
+  //
+  // SLICE 1f. BOTH ROUTES, not just the quiet one. Slice 1 gated only
+  // "I already moved" and left the green primary inviting exactly the journey
+  // this test proves the server refuses. Asserting only the quiet route's
+  // absence would have passed while the loudest control on the screen still
+  // offered it.
   await expect(page.getByTestId(`wsf-community-your-part-link-${goalId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-record-${goalId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-link-${goalId}`)).toHaveCount(0);
+  // And the screen does not simply go blank where two controls were: it says
+  // what was RECORDED, and why there is nothing further to do.
+  const completed = page.getByTestId(`wsf-community-goal-complete-${goalId}`);
+  await expect(completed).toBeVisible();
+  await expect(completed).toContainText('You’ve recorded 20 squats.');
+  await expect(completed).toContainText('This goal takes one contribution from each member.');
   await snap(page, '08-community-home-no-invitation');
+  // The state a member actually meets, at phone width.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(completed).toBeVisible();
+  await snap(page, '09-community-home-once-contributed-390');
   const totals = await firestoreRead(`wsfGoalMemberTotals/${goalId}_${fx.memberUid}`);
   expect(Number(totals?.total?.integerValue)).toBe(20);
   expect(Number(totals?.contributionCount?.integerValue)).toBe(1);

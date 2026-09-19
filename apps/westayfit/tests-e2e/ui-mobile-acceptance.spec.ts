@@ -594,6 +594,14 @@ for (const def of PHONE_CONTEXTS) {
         await page.waitForURL(/\/community\/[^/]+$/, { timeout: 45_000 });
         const groupId = new URL(page.url()).pathname.split('/').filter(Boolean).pop() ?? '';
         expect(groupId, 'Start your community: the created community has a route').not.toBe('');
+        // SLICE 1. The line above the hero now renders ONLY here — a community
+        // with no goal running, where nothing else tells the member what this
+        // place is for. While a goal IS running the hero speaks for itself and
+        // the line is gone (asserted absent in ui-community-home.spec.ts).
+        await expect(page.getByTestId('wsf-community-human-line')).toHaveText(
+          'Ready to get moving.',
+          { timeout: 30_000 }
+        );
         await expect(page.getByTestId('wsf-community-name').last()).toHaveText('Cedar Court Crew', {
           timeout: 30_000,
         });
