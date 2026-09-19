@@ -219,7 +219,14 @@ await test('the new service transport is reported, not treated as a failure', as
   assert.equal(r.receipt.newServiceTransportRequiresSeparateApproval, true);
 });
 
-await test("the candidate's new service transport is reported the same way, and never counted as pre-existing drift", async () => {
+/**
+ * THE SEVEN STATION SERVICES, which this candidate did NOT create.
+ *
+ * They sit in RECENTLY_CREATED and their transport is still reported, because
+ * it is still closed. Kept as its own case so that moving them out of
+ * CREATED_BY_CANDIDATE did not quietly drop the only coverage they had.
+ */
+await test("a previously-created station service's transport is still reported, and never counted as pre-existing drift", async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
   const services = ALL.map((n) =>
     n === 'wsfstationstate' ? svc(n, { invokerIamDisabled: false }) : svc(n)
@@ -227,7 +234,7 @@ await test("the candidate's new service transport is reported the same way, and 
   const { server, base } = await startMock({ services });
   const r = await run(base, beforeFile(d), d);
   server.close();
-  assert.equal(r.code, 0, 'the candidate service transport state alone must not fail the deploy verification');
+  assert.equal(r.code, 0, 'the transport state alone must not fail the deploy verification');
   assert.equal(r.receipt.candidateServiceTransports.wsfstationstate, 'invoker_iam_check_enabled');
   assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true);
   assert.deepEqual(r.receipt.candidateServiceTransportNeedingApproval, ['wsfstationstate']);
@@ -235,6 +242,76 @@ await test("the candidate's new service transport is reported the same way, and 
   assert.equal(r.receipt.candidateServiceTransports.wsfliststations, 'invoker_iam_check_disabled');
   assert.deepEqual(r.receipt.preExistingTransportDrifted, []);
   assert.match(r.out, /CANDIDATE_SERVICE_TRANSPORT=.*wsfstationstate:invoker_iam_check_enabled/);
+});
+
+/**
+ * AND THE SAME FOR A SERVICE THIS CANDIDATE ACTUALLY CREATES.
+ *
+ * The case above used to carry this name while exercising wsfStationState —
+ * which this change moved OUT of CREATED_BY_CANDIDATE. It still passed,
+ * because candidateServiceTransports spans both sets, so the coverage gap was
+ * invisible: a test named for the current candidate, proving something about
+ * the previous one. wsfTurnState is a real member of CREATED_BY_CANDIDATE.
+ */
+await test("a current-candidate service's transport is reported, named for approval, and never pre-existing drift", async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
+  const services = ALL.map((n) =>
+    n === 'wsfturnstate' ? svc(n, { invokerIamDisabled: false }) : svc(n)
+  );
+  const { server, base } = await startMock({ services });
+  const r = await run(base, beforeFile(d), d);
+  server.close();
+  assert.equal(r.code, 0, 'the transport state alone must not fail the deploy verification');
+  assert.equal(r.receipt.candidateServiceTransports.wsfturnstate, 'invoker_iam_check_enabled');
+  assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true);
+  assert.deepEqual(r.receipt.candidateServiceTransportNeedingApproval, ['wsfturnstate']);
+  // A sibling from the same set is reported open, so the flag is about this
+  // service and not about the set.
+  assert.equal(r.receipt.candidateServiceTransports.wsfcallnext, 'invoker_iam_check_disabled');
+  assert.deepEqual(r.receipt.preExistingTransportDrifted, []);
+  assert.match(r.out, /CANDIDATE_SERVICE_TRANSPORT=.*wsfturnstate:invoker_iam_check_enabled/);
+});
+
+/**
+ * THE NEXT RUN, WHICH IS THE ONE THAT ACTUALLY HAPPENS NOW.
+ *
+ * Every case above models the historical path: an old inventory, then the 15
+ * are created. Staging is already at 46, so the next dispatch creates nothing
+ * — and a verifier that only knows the creation path could treat "nothing was
+ * created" as a failed deploy, or quietly stop reporting the closed transports
+ * because no service is new any more. Neither is allowed: createdThisDeploy is
+ * empty, nothing is missing or unexpected, and all 22 shut services are still
+ * named.
+ */
+await test('46 before and 46 after: nothing created, nothing lost, closed transport still reported', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
+  const shut = new Set([...TURN, ...STATION]);
+  const services = ALL.map((n) => (shut.has(n) ? svc(n, { invokerIamDisabled: false }) : svc(n)));
+  const { server, base } = await startMock({ services });
+  // The before-inventory is the full 46 — the real state of staging now.
+  const r = await run(base, beforeFile(d, ALL), d);
+  server.close();
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /VERIFY=pass/);
+  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [], 'a re-deploy creates nothing');
+  assert.deepEqual(r.receipt.inventory.lostThisDeploy, [], 'and loses nothing');
+  // Missing and unexpected are not receipt fields — they raise failures — so
+  // VERIFY=pass above is what proves neither fired. The counts are asserted
+  // directly, because "46 before, 46 after" is the whole point of this case.
+  assert.equal(r.receipt.inventory.beforeCount, 46);
+  assert.equal(r.receipt.inventory.afterCount, 46);
+  assert.equal(r.receipt.candidateCallablePresent, true);
+  // Still reported, still needing approval, still not called drift.
+  assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true);
+  assert.deepEqual(
+    r.receipt.candidateServiceTransportNeedingApproval.sort(),
+    [...TURN, ...STATION].sort(),
+    'all 22 shut services stay named when nothing is newly created'
+  );
+  assert.deepEqual(r.receipt.preExistingTransportDrifted, []);
+  for (const n of TURN) {
+    assert.equal(r.receipt.candidateServiceTransports[n], 'invoker_iam_check_enabled', n);
+  }
 });
 
 console.log(`\nverify-deployment: ${passed} passed`);
