@@ -16,6 +16,6 @@
   "approvedAppSha": "15afae974302d2624524a9ddbfdb7952c4180d4a",
   "packageLabel": "Expo package: polished kiosk setup and stable links; fixed multi-activity parent moves; public QR and account-preserving phone choice; private event FIFO with ready lease and two-station claim safety; shared 3-second/60-second follow-along player; canonical child and parent recording, correction, recovery and receipt.",
   "sourceAcceptedOn": "2026-09-19",
-  "expectedPriorFunctions": 31,
-  "_expectedPriorFunctionsNote": "31, established by run 35420931701 and unchanged on the currently served bd4bfec staging build. The accepted candidate adds the reviewed WSF event, station, queue, combined-goal and canonical-attempt services. Deployment remains WSF-only; hosted verification must confirm the exact resulting inventory and the seven station transports. Public-invoker remediation, if still required, is staging-only and must be verified and reversible."
+  "expectedPriorFunctions": 46,
+  "_expectedPriorFunctionsNote": "46, established by the read-only inventory in run 35440701488 after run 35440110564 partially created/updated the 15 accepted WSF event, queue and combined-goal services but failed to grant public invoker IAM. This is the reviewed candidate's exact inventory, not unrelated drift. The release must remain red until callable transport is verified."
 }
