@@ -264,8 +264,21 @@ function featuredOpenGoal(goals: ListedGoal[]): ListedGoal | null {
   return open[0] ?? null;
 }
 
+/**
+ * Which account is signed in, said clearly enough to tell two of them apart.
+ *
+ * This used to print the display name alone whenever one existed. Two accounts
+ * with the same display name then produced byte-identical screens, so someone
+ * who signed out and signed in again could not tell which account they were
+ * looking at — and reasonably read an empty new account as the old one
+ * misbehaving. The address is what distinguishes them, so it is always shown
+ * when we have it.
+ */
 function identityLine(user: { displayName?: string | null; email?: string | null }): string {
-  const who = user.displayName || user.email;
+  const name = user.displayName?.trim();
+  const email = user.email?.trim();
+  if (name && email) return `Signed in as ${name} · ${email}`;
+  const who = name || email;
   return who ? `Signed in as ${who}` : 'Signed in';
 }
 

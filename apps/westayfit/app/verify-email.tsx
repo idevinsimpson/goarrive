@@ -17,6 +17,12 @@ import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 import { requestVerificationEmail } from '../src/verificationEmail';
+import {
+  forgetVerificationSend,
+  readVerificationSend,
+  recordVerificationSend,
+  type VerificationSendOutcome,
+} from '../src/verificationSendState';
 
 export default function VerifyEmail() {
   const { ready, user } = useWsfAuth();
@@ -74,6 +80,7 @@ export default function VerifyEmail() {
       // through mail that does not arrive and mints a link that does not
       // resolve. See wsfSendVerificationEmail.
       const result = await requestVerificationEmail();
+      recordVerificationSend(user.uid, result.sent ? 'sent' : 'already-verified');
       setStatus(
         result.sent
           ? 'Verification email sent.'
@@ -87,8 +94,10 @@ export default function VerifyEmail() {
       // a plain sentence a member can act on instead (the testID keeps the
       // state distinguishable for the specs).
       if (authErrorCode(e) === 'functions/failed-precondition') {
+        recordVerificationSend(user.uid, 'unconfigured');
         setUnconfigured(true);
       } else {
+        recordVerificationSend(user.uid, 'failed');
         setError(authErrorMessage(e, 'Send failed.'));
       }
     } finally {
@@ -97,6 +106,9 @@ export default function VerifyEmail() {
   }, [user]);
 
   const onSignOut = useCallback(async () => {
+    // The record describes one attempt for one account; it must not survive
+    // into whoever signs in next.
+    forgetVerificationSend();
     await signOut(getFirebaseAuth());
     router.replace('/');
   }, []);
@@ -125,16 +137,32 @@ export default function VerifyEmail() {
     );
   }
 
+  // What this screen may claim depends entirely on what the send actually did.
+  // 'sending' and null are deliberately non-committal: nothing has been
+  // confirmed, so nothing is asserted.
+  const where = user.email ?? 'your email';
+  const outcome: VerificationSendOutcome | null = unconfigured
+    ? 'unconfigured'
+    : readVerificationSend(user.uid);
+  const INTRO: Record<VerificationSendOutcome, string> = {
+    sending: `Sending a verification link to ${where}. Confirm it, then tap I have verified.`,
+    sent: `We sent a verification link to ${where}. Confirm it, then tap I have verified.`,
+    'already-verified': `${where} is already verified. Tap I have verified to continue.`,
+    unconfigured: `Email isn't switched on for this test build, so no verification link can be sent to ${where} yet.`,
+    failed: `We could not send a verification link to ${where}. Tap Resend to try again.`,
+  };
+  const intro = outcome
+    ? INTRO[outcome]
+    : `Confirm your email address at ${where}, then tap I have verified.`;
+
   return (
-    <FormShell
-      heading="Verify your email"
-      intro={`We sent a verification link to ${user.email ?? 'your email'}. Confirm it, then tap I have verified.`}
-      testID="wsf-verify"
-    >
+    <FormShell heading="Verify your email" intro={intro} testID="wsf-verify">
       {status ? <StatusText testID="wsf-verify-status">{status}</StatusText> : null}
-      {unconfigured ? (
+      {outcome === 'unconfigured' ? (
         <ErrorText testID="wsf-verify-unconfigured">
-          Email isn't switched on for this test build yet, so no message was sent.
+          Email isn't switched on for this test build yet, so no message was sent. Nobody can
+          finish verifying a new account here until it is switched on. Sign out to use an account
+          that is already verified.
         </ErrorText>
       ) : null}
       {error ? <ErrorText testID="wsf-verify-error">{error}</ErrorText> : null}

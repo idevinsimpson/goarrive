@@ -57,14 +57,18 @@ describe('JoinQrCode', () => {
     expect(container.querySelector('[data-qr-url]')).toBeNull();
   });
 
-  it('reveals the symbol, the URL beneath it and the honest note', () => {
+  it('reveals the symbol carrying the link, without printing it, and the honest note', () => {
     render(URL_A);
     clickToggle();
 
     const symbol = byTestId('wsf-community-qr-symbol');
     expect(symbol).not.toBeNull();
     expect(symbol?.getAttribute('data-qr-url')).toBe(URL_A);
-    expect(byTestId('wsf-community-qr-url')?.textContent).toBe(URL_A);
+    // Clause 5: the link is CARRIED by the symbol, never PRINTED as body copy.
+    // Stronger than the assertion it replaces: it pinned one element's text,
+    // this pins that the link appears nowhere a person could read or copy it.
+    expect(byTestId('wsf-community-qr-url')).toBeNull();
+    expect(container.textContent ?? '').not.toContain(URL_A);
 
     const note = byTestId('wsf-community-qr-caveat')?.textContent ?? '';
     expect(note).toContain('has to sign in');
@@ -116,7 +120,9 @@ describe('JoinQrCode', () => {
       .querySelector('[data-testid="wsf-community-qr-image"] img')
       ?.getAttribute('src');
     expect(byTestId('wsf-community-qr-symbol')?.getAttribute('data-qr-url')).toBe(URL_B);
-    expect(byTestId('wsf-community-qr-url')?.textContent).toBe(URL_B);
+    // Rotated, and still carried rather than printed.
+    expect(byTestId('wsf-community-qr-url')).toBeNull();
+    expect(container.textContent ?? '').not.toContain(URL_B);
     expect(after).not.toBe(before);
     // The old URL is gone from the DOM entirely — no stale symbol, no stale text.
     expect(container.innerHTML).not.toContain('9wq2Zc4TpK1nRu7bVdA0Xg');

@@ -380,8 +380,12 @@ test('Q-4: creating a new invite link changes the URL the QR encodes, after a co
   expect(after).not.toBe(before);
   expect(after).toContain(`/join/${rotated}`);
   expect(after).not.toContain(fx.joinCode);
-  // The printed URL moves with it — the two can never disagree.
-  await expect(champion.getByTestId('wsf-community-qr-url')).toHaveText(after);
+  // Nothing prints the link, here or anywhere: the symbol carries it. The old
+  // code must also be gone from the sheet entirely, so a rotation cannot leave
+  // a stale token readable on screen.
+  await expect(champion.getByTestId('wsf-community-qr-url')).toHaveCount(0);
+  await expect(champion.getByTestId('wsf-community-manage-panel')).not.toContainText(fx.joinCode);
+  await expect(champion.getByTestId('wsf-community-manage-panel')).not.toContainText(rotated);
 
   await ctx.close();
 });
