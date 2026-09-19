@@ -17,10 +17,13 @@ import {
 } from '../../src/deviceMode';
 import type { GoalPulse } from '../../src/displayPulse';
 import {
+  activityGoalIdFor,
   activityLabelFor,
   eventActivities,
+  eventActivitiesFrom,
   initialSelection,
   readActivityLabel,
+  type ResolvedActivity,
   EVENT_ACTIVITY_HEADING,
   EVENT_ACTIVITY_INTRO,
   EVENT_ACTIVITY_SCANNED_NOTE,
@@ -35,6 +38,7 @@ import {
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
 import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
+import { TURN_NAME_REFUSED } from '../../src/turnContract';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
 import { kit } from '../../src/ui/kit';
@@ -93,7 +97,7 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *
  * NOTHING ON THIS PAGE PUTS ANYBODY IN A LINE. Not the scan, not the activity,
  * not opening the choice, not opening the name control. The one call that
- * creates a place in the line is `wsfJoinQueue`, in `onJoinQueue` below, and
+ * creates a place in the line is `wsfJoinTurnLine`, in `onJoinQueue` below, and
  * it runs on exactly one tap: the confirmation inside the name control. There
  * is no other queue write on this screen and no second join path anywhere.
  *
@@ -173,12 +177,31 @@ export default function EventScreen() {
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const [picked, setPicked] = useState(false);
   const memberUnit = state.kind === 'member' ? state.unit : null;
+  /**
+   * WHAT THIS QR ACTUALLY RESOLVES TO, from the server.
+   *
+   * A combined-event QR resolves to the setup's FROZEN CHILDREN — the real
+   * multi-activity choice — and a single-goal QR resolves to exactly one
+   * activity. It is empty until the answer arrives, and it stays empty if the
+   * answer cannot be had, in which case everything below falls back to
+   * `eventActivities` and this page behaves exactly as it did.
+   */
+  const [resolved, setResolved] = useState<ResolvedActivity[]>([]);
   const activities = useMemo(
-    () => eventActivities({ unit: memberUnit, carried: carriedActivity }),
-    [memberUnit, carriedActivity]
+    () =>
+      resolved.length
+        ? eventActivitiesFrom({ resolved, carried: carriedActivity })
+        : eventActivities({ unit: memberUnit, carried: carriedActivity }),
+    [resolved, memberUnit, carriedActivity]
   );
   const selectedActivityKey = picked ? pickedKey : initialSelection(activities, carriedActivity);
   const selectedActivity = activityLabelFor(activities, selectedActivityKey);
+  /**
+   * THE GOAL THE CHOICE LANDS ON. For a combined event it is the child the
+   * person picked; for a one-goal event it is the goal in the address, which
+   * is what it has always been.
+   */
+  const selectedGoalId = activityGoalIdFor(activities, selectedActivityKey) ?? goalId;
 
   const onChooseActivity = useCallback((key: string) => {
     setPicked(true);
@@ -257,9 +280,7 @@ export default function EventScreen() {
     if (!selectedActivityKey) return;
     const chosen = (callName ?? '').trim();
     if (!isUsableCallName(chosen)) {
-      setQueueError(
-        'Choose a name for the screen — up to 24 characters, and not an email address.'
-      );
+      setQueueError(TURN_NAME_REFUSED);
       return;
     }
     setJoining(true);
@@ -267,9 +288,13 @@ export default function EventScreen() {
     try {
       const fn = httpsCallable<{ goalId: string; calledName: string }, { entryId: string }>(
         getFirebaseFunctions(),
-        'wsfJoinQueue'
+        'wsfJoinTurnLine'
       );
-      await fn({ goalId, calledName: chosen });
+      // THE ACTIVITY THEY CHOSE, carried onto their place in the line. One
+      // line per event, and the chosen child on the entry — which is also why
+      // the server can refuse a second place in another activity's name: it is
+      // the same line and the same one-place-per-account document.
+      await fn({ goalId: selectedGoalId, calledName: chosen });
       // Their own view of the line. `push`, not `replace`: the event page is a
       // reasonable place to come back to.
       router.push(`/queue/${goalId}` as never);
@@ -278,7 +303,7 @@ export default function EventScreen() {
     } finally {
       setJoining(false);
     }
-  }, [callName, goalId, joining, selectedActivityKey]);
+  }, [callName, goalId, joining, selectedActivityKey, selectedGoalId]);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -313,6 +338,27 @@ export default function EventScreen() {
         const mine = await mineFn({ goalId });
         if (cancelled) return;
         const unit = typeof mine.data?.unit === 'string' ? mine.data.unit : null;
+
+        // WHAT THIS QR RESOLVES TO. Best-effort, and deliberately after the
+        // membership decision: a combined event answers with the setup's
+        // frozen children, a one-goal event answers with its one activity,
+        // and a failure here leaves the page on the legacy path it already
+        // had rather than offering nothing.
+        try {
+          const contextFn = httpsCallable<
+            { goalId: string },
+            { activities: ResolvedActivity[] }
+          >(functions, 'wsfEventContext');
+          const context = await contextFn({ goalId });
+          if (!cancelled) {
+            const list = Array.isArray(context.data?.activities) ? context.data.activities : [];
+            setResolved(list.filter((a) => typeof a?.goalId === 'string' && a.goalId !== ''));
+          }
+        } catch {
+          // Nothing to say and nothing to fix: the activity list falls back to
+          // the event's own unit, which is what it was before.
+        }
+        if (cancelled) return;
 
         // Context, and only context. A member is entitled to it, and a failure
         // here changes nothing about what this page offers — it just says
@@ -567,7 +613,7 @@ export default function EventScreen() {
           <Text style={kit.body}>{EVENT_CHOICE_INTRO}</Text>
           <View style={styles.actions}>
             <ButtonLink
-              href={`/contribute/${goalId}`}
+              href={`/contribute/${selectedGoalId}`}
               style={kit.primaryButton}
               textStyle={kit.primaryButtonText}
               testID="wsf-event-add"

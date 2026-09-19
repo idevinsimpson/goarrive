@@ -82,7 +82,21 @@ export type EventActivity = {
   label: string;
   /** True when this is the activity the scanned screen was running. */
   carried: boolean;
+  /**
+   * WHICH GOAL THIS ACTIVITY IS, when the server has resolved the event.
+   *
+   * A combined event is several activity goals behind one QR, so the choice a
+   * person makes here decides which goal their repetitions land on — and it
+   * has to be carried, not inferred from the address, because the address
+   * names the event and not the answer. Absent on the legacy one-goal path,
+   * where the address IS the answer and nothing about it changed.
+   */
+  goalId?: string;
 };
+
+/** What the server says this event actually is: a combined setup's frozen
+ * children, or the one goal standing on its own. */
+export type ResolvedActivity = { goalId: string; title: string; unit: string };
 
 /**
  * What this event offers, in the order it is offered.
@@ -128,6 +142,71 @@ export function eventActivities(opts: {
     used.add(key);
     return { ...activity, key };
   });
+}
+
+/**
+ * THE REAL MULTI-ACTIVITY CHOICE, from what the server resolved.
+ *
+ * A combined-event QR resolves to the setup's FROZEN CHILDREN — what the
+ * Champion agreed to when they froze the setup, not a live re-read that a
+ * later edit could widen — and every one of them is offered here, carrying its
+ * own goal id. An event that names a single goal resolves to exactly one
+ * activity, which is what its address always meant.
+ *
+ * The carried activity still comes first and still folds into a resolved one
+ * with the same word, so somebody who scanned the squats screen sees squats at
+ * the top of the list rather than squats twice.
+ *
+ * `eventActivities` above is untouched and is still the whole of the legacy
+ * path: when the server's answer cannot be had, the screen falls back to it
+ * and behaves exactly as it did.
+ */
+export function eventActivitiesFrom(opts: {
+  resolved: readonly ResolvedActivity[];
+  carried?: string | null;
+}): EventActivity[] {
+  const carried = readActivityLabel(opts.carried);
+  const out: EventActivity[] = [];
+  const seen = new Set<string>();
+  const push = (label: string, isCarried: boolean, goalId: string) => {
+    const fold = label.toLowerCase();
+    if (seen.has(fold)) return;
+    seen.add(fold);
+    out.push({ key: '', label, carried: isCarried, goalId });
+  };
+  if (carried) {
+    const match = opts.resolved.find(
+      (a) => readActivityLabel(a.unit)?.toLowerCase() === carried.toLowerCase()
+    );
+    if (match) push(carried, true, match.goalId);
+  }
+  for (const activity of opts.resolved) {
+    const label = readActivityLabel(activity.unit);
+    if (!label || !activity.goalId) continue;
+    push(label, false, activity.goalId);
+  }
+
+  // Keys last, so a collision between two different labels is resolved here
+  // and cannot reach a testID as a duplicate.
+  const used = new Set<string>();
+  return out.map((activity) => {
+    const base = activityKey(activity.label);
+    let key = base;
+    let n = 2;
+    while (used.has(key)) key = `${base}-${n++}`;
+    used.add(key);
+    return { ...activity, key };
+  });
+}
+
+/** The goal behind a key, or null — so a screen never picks a goal by index
+ * and never joins a line for an activity it cannot name. */
+export function activityGoalIdFor(
+  activities: readonly EventActivity[],
+  key: string | null | undefined
+): string | null {
+  if (!key) return null;
+  return activities.find((a) => a.key === key)?.goalId ?? null;
 }
 
 /**

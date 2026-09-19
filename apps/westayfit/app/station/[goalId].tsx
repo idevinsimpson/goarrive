@@ -8,17 +8,25 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import {
-  announceCall,
-  describeLineLength,
-  nextUp,
-  type QueueEntryPublic,
-} from '../../src/queueLine';
+  announceHallTurn,
+  describeHallResult,
+  describeWaitingCount,
+  formatTurnCode,
+  isUsableTurnCount,
+  stationAction,
+  stationActionLabel,
+  turnCountValue,
+  type HallAssignment,
+  type HallResult,
+  type HallState,
+} from '../../src/turnContract';
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE } from '../../src/kioskSession';
 import {
@@ -53,16 +61,20 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *   3. A REJECTED CREDENTIAL. Revoked by the Champion, or no longer a station
  *      at all. The screen empties its own storage and falls back to mode 1.
  *
- * AND, SINCE THE QUEUE, IT CALLS PEOPLE. "Call next" takes the oldest place in
- * the line and prints the name THAT PERSON CHOSE — never their account name,
- * never a surname, never a uid, because `wsfQueueState` publishes exactly
- * {entryId, calledName, position} and this screen has no way to ask for more.
- * The call is announced through an ARIA live region as well as printed, and
- * nothing about a turn depends on an animation: there is none on this screen.
+ * AND, SINCE THE TURN CONTRACT, IT RUNS TURNS. "Call next" assigns the oldest
+ * place in the line and prints ONE name — the one THAT PERSON CHOSE — beside a
+ * short code, and nothing about anybody else: `wsfTurnState` publishes one
+ * assigned person, a ten-second result and a COUNT, and this screen has no way
+ * to ask for more. The call is announced through an ARIA live region as well
+ * as printed, and nothing about a turn depends on an animation: there is none
+ * on this screen.
  *
- * WHAT THIS SCREEN CANNOT DO, BY CONSTRUCTION. It cannot record a
- * contribution: it does not know who is standing in front of it, so it records
- * nothing about them and calls nothing that writes a total. It cannot see more
+ * WHAT IT CAN NOW DO, AND WHY THAT IS NOT A NEW AUTHORITY. It starts and
+ * records the turn it called — the SAME canonical attempt the person's own
+ * phone would record, minted by the server and bound to this station, this
+ * account and the activity they chose. It still cannot name anybody: the
+ * account comes from the entry, written when that person joined the line under
+ * their own account, and this screen never supplies a uid. It cannot see more
  * than the public display sees: `wsfStationState` reads the goal through the
  * SAME function `wsfGoalPulse` uses, with no uid, so a goal whose Champion has
  * not authorized public display refuses here and this screen renders the
@@ -99,11 +111,16 @@ const STATE_POLL_MS = 2_000;
  * is a quick enough answer and a tenth of the state poll's traffic. */
 const PAIRING_POLL_MS = 3_000;
 
-type QueueState = {
-  serving: QueueEntryPublic | null;
-  waiting: QueueEntryPublic[];
-  waitingCount: number;
-};
+/**
+ * WHAT THIS SCREEN IS ALLOWED TO KNOW, and it is the whole of it.
+ *
+ * `wsfTurnState` publishes ONE assigned person — a first name or alias and a
+ * short code — a ten-second result carrying a code and a number, and a COUNT.
+ * There is no array in this type at any depth, so "the hall shows a column of
+ * names" is not something a different argument could produce; it would be a
+ * change to a type, and the tests read the type's shape.
+ */
+type TurnState = HallState;
 
 type PairingPhase =
   | { kind: 'requesting' }
@@ -126,7 +143,7 @@ type EnrolledPhase =
       stale: boolean;
     };
 
-type QueueStateResponse = QueueState;
+type TurnStateResponse = TurnState;
 
 type StationStateResponse = {
   stationId: string;
@@ -184,9 +201,15 @@ export default function StationScreen() {
    * is not the same as an empty line: a screen must not print "nobody is
    * waiting" before it has asked.
    */
-  const [queue, setQueue] = useState<QueueState | null>(null);
+  const [queue, setQueue] = useState<TurnState | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  /**
+   * What the person at the screen says they did. It exists only while a turn
+   * is `active`, and it is cleared the instant a turn ends — a number left in
+   * a box at a public screen is the next person's number by accident.
+   */
+  const [turnCount, setTurnCount] = useState('');
 
   const [pairing, setPairing] = useState<PairingPhase>({ kind: 'requesting' });
   const [enrolled, setEnrolled] = useState<EnrolledPhase>({ kind: 'loading' });
@@ -424,9 +447,9 @@ export default function StationScreen() {
     const tick = async () => {
       const seq = ++issued;
       try {
-        const fn = httpsCallable<{ stationId: string; secret: string }, QueueStateResponse>(
+        const fn = httpsCallable<{ stationId: string; secret: string }, TurnStateResponse>(
           getFirebaseFunctions(),
-          'wsfQueueState'
+          'wsfTurnState'
         );
         const result = await fn({ stationId: credential.stationId, secret: credential.secret });
         if (cancelled) return;
@@ -448,25 +471,54 @@ export default function StationScreen() {
     };
   }, [hydrated, goalId, credential]);
 
-  const runQueueAction = useCallback(
-    async (name: 'wsfCallNext' | 'wsfFinishServing') => {
+  /**
+   * ONE HELPER FOR EVERY TURN ACTION, because they are the same shape: prove
+   * the credential, send nothing but the credential (and a count, where there
+   * is one), and paint whatever the server says the hall now is. The server's
+   * answer is always the whole hall state, so this screen never patches its
+   * own idea of the line from a response and then drifts from it.
+   */
+  const runTurnAction = useCallback(
+    async (
+      name: 'wsfCallNext' | 'wsfStartTurn' | 'wsfCompleteTurn' | 'wsfCancelTurn',
+      count?: number
+    ) => {
       if (!credential || queueBusy) return;
       setQueueBusy(true);
       setQueueError(null);
       try {
-        const fn = httpsCallable<{ stationId: string; secret: string }, QueueStateResponse>(
-          getFirebaseFunctions(),
-          name
-        );
-        const result = await fn({ stationId: credential.stationId, secret: credential.secret });
+        const fn = httpsCallable<
+          { stationId: string; secret: string; count?: number },
+          TurnStateResponse & { blockedMessage?: string | null }
+        >(getFirebaseFunctions(), name);
+        const result = await fn({
+          stationId: credential.stationId,
+          secret: credential.secret,
+          ...(typeof count === 'number' ? { count } : {}),
+        });
         setQueue({
-          serving: result.data.serving,
-          waiting: result.data.waiting,
+          stationId: result.data.stationId,
+          stationLabel: result.data.stationLabel,
+          assigned: result.data.assigned,
+          result: result.data.result,
           waitingCount: result.data.waitingCount,
         });
-      } catch {
-        // No code, no identifier and no vendor string on a screen in a room.
-        setQueueError('That didn’t go through. Try again.');
+        // CALL NEXT NEVER CLOSES AN UNFINISHED TURN. When the server refuses
+        // because this screen still holds one, it says so in its own words and
+        // the screen prints them — no second copy of the sentence here.
+        if (result.data.blockedMessage) setQueueError(result.data.blockedMessage);
+        if (name === 'wsfCompleteTurn' || name === 'wsfCancelTurn') setTurnCount('');
+      } catch (e) {
+        // No code, no identifier and no vendor string on a screen in a room —
+        // but a refusal the product itself wrote ("this goal takes one
+        // contribution from each member") is the product's own sentence and
+        // names nobody, so it is shown rather than swallowed.
+        const message = (e as { message?: unknown })?.message;
+        setQueueError(
+          typeof message === 'string' && message && !/^[A-Z_]+$/.test(message)
+            ? message
+            : 'That didn’t go through. Try again.'
+        );
       } finally {
         setQueueBusy(false);
       }
@@ -474,11 +526,17 @@ export default function StationScreen() {
     [credential, queueBusy]
   );
 
-  const onCallNext = useCallback(() => void runQueueAction('wsfCallNext'), [runQueueAction]);
-  const onFinishServing = useCallback(
-    () => void runQueueAction('wsfFinishServing'),
-    [runQueueAction]
-  );
+  const onCallNext = useCallback(() => void runTurnAction('wsfCallNext'), [runTurnAction]);
+  const onStartTurn = useCallback(() => void runTurnAction('wsfStartTurn'), [runTurnAction]);
+  const onCancelTurn = useCallback(() => void runTurnAction('wsfCancelTurn'), [runTurnAction]);
+  const onCompleteTurn = useCallback(() => {
+    const value = turnCountValue(turnCount);
+    if (value === null) {
+      setQueueError('Enter how many they did — a whole number.');
+      return;
+    }
+    void runTurnAction('wsfCompleteTurn', value);
+  }, [runTurnAction, turnCount]);
 
   const onNewCode = useCallback(() => {
     setPairing({ kind: 'requesting' });
@@ -645,8 +703,14 @@ export default function StationScreen() {
     : Math.max(96, Math.min(260, windowWidth - 2 * 24 - 2 * 22));
   const qrSize = wide ? QR_SIZE_WIDE : QR_SIZE_PHONE;
 
-  const upNext = nextUp(queue?.waiting ?? []);
-  const callSentence = announceCall(queue?.serving ?? null, label);
+  // THE ONE PERSON, AND THE ONE CONTROL. Both are derived from the state the
+  // server sent rather than from which buttons this screen remembered to
+  // disable, so a control that cannot work is not on the screen at all.
+  const assigned: HallAssignment | null = queue?.assigned ?? null;
+  const turnResult: HallResult | null = queue?.result ?? null;
+  const action = stationAction(queue);
+  const callSentence = announceHallTurn(queue, label);
+  const resultSentence = describeHallResult(turnResult);
 
   const origin = typeof window === 'undefined' ? null : (window.location?.origin ?? null);
   // The newcomer link exists only when the server handed this screen a code,
@@ -749,12 +813,25 @@ export default function StationScreen() {
         </View>
 
         {/*
-          THE CALLING HALF.
+          THE CALLING HALF — AND IT SHOWS ONE PERSON.
 
-          The name in the largest type on this screen is the one the person
-          CHOSE as they got in line. `wsfQueueState` publishes {entryId,
-          calledName, position} and nothing else, so there is no surname, no
-          email and no uid for this screen to print even by accident.
+          `wsfTurnState` publishes ONE assigned person — the first name or alias
+          they chose, and a short duplicate-safe code — plus a ten-second result
+          and a COUNT of who is waiting. There is no waiting list in the
+          response, in the type, or anywhere this screen could reach: a hall
+          full of strangers reading a column of everybody's names was the defect
+          this replaced, and it is not a thing a different argument can produce.
+
+          THE CODE IS WHY TWO PEOPLE CALLED SAM BOTH KNOW. It is minted from the
+          line's own position counter and a random per-line salt — never from an
+          account — and the same three characters are on that person's phone.
+
+          ONE CONTROL AT A TIME. `stationAction` decides which, from the state
+          the server sent: call the next person, wait for them to tap ready,
+          start their turn, or record it. A control that cannot work is not on
+          the screen, and "Call next" is never a way to close somebody's turn
+          without a result — the server refuses that, in its own words, and
+          those words are what appears below.
 
           BEING CALLED WORKS WITHOUT SEEING THE SCREEN. The block below is an
           assertive live region that is always mounted — a region created at the
@@ -778,19 +855,35 @@ export default function StationScreen() {
             aria-live="assertive"
             {...({ 'aria-atomic': 'true' } as Record<string, unknown>)}
           >
-            {queue?.serving ? (
+            {assigned ? (
               <>
                 <Text
                   style={[styles.servingName, wide ? styles.servingNameWide : null]}
                   testID="wsf-station-queue-serving"
                   {...({ 'aria-hidden': 'true' } as Record<string, unknown>)}
                 >
-                  {queue.serving.calledName}
+                  {assigned.calledName}
+                </Text>
+                <Text
+                  style={styles.servingCode}
+                  testID="wsf-station-queue-code"
+                  {...({ 'aria-hidden': 'true' } as Record<string, unknown>)}
+                >
+                  {formatTurnCode(assigned.code)}
                 </Text>
                 <Text style={styles.servingSentence} testID="wsf-station-queue-sentence">
                   {callSentence}
                 </Text>
               </>
+            ) : resultSentence ? (
+              /*
+                THE TEN SECONDS. A code and a number — and NO NAME: the moment a
+                turn is recorded every name on this screen is gone, and ten
+                seconds later so is this.
+              */
+              <Text style={styles.servingSentence} testID="wsf-station-queue-result">
+                {resultSentence}
+              </Text>
             ) : (
               <Text style={styles.queueEmpty} testID="wsf-station-queue-serving-empty">
                 {queue === null ? 'Reading the line…' : 'Nobody is being called.'}
@@ -798,49 +891,85 @@ export default function StationScreen() {
             )}
           </View>
 
-          <Text style={styles.queueEyebrow}>Next up</Text>
-          {upNext.length ? (
-            <View style={styles.queueNext} testID="wsf-station-queue-next">
-              {upNext.map((waiting, index) => (
-                <Text
-                  key={waiting.entryId}
-                  style={styles.queueNextName}
-                  testID={`wsf-station-queue-next-${index}`}
-                >
-                  {waiting.calledName}
-                </Text>
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.queueEmpty} testID="wsf-station-queue-next-empty">
-              Nobody is waiting.
-            </Text>
-          )}
+          {/* THE WAITING ARE A NUMBER. Not a list, and not a list truncated to
+              four either — the room does not need to read anybody's name but
+              the one person who is up. */}
           <Text style={styles.queueCount} testID="wsf-station-queue-count">
-            {describeLineLength(queue?.waitingCount ?? 0)}
+            {describeWaitingCount(queue?.waitingCount ?? 0)}
           </Text>
+
+          {/* RECORDING THE TURN, at the screen. It is the SAME attempt the
+              server minted when this station started them, so recording it
+              here and recording it on their own phone are one write under one
+              key — whichever lands first is the one that counts, and the other
+              adds nothing. */}
+          {action === 'complete' ? (
+            <View style={styles.turnRecord} testID="wsf-station-turn-record">
+              <Text style={styles.queueEyebrow}>How many did they do?</Text>
+              <TextInput
+                value={turnCount}
+                onChangeText={(next) => {
+                  setTurnCount(next);
+                  setQueueError(null);
+                }}
+                style={styles.turnInput}
+                testID="wsf-station-turn-count"
+                placeholder="30"
+                placeholderTextColor={wsfTheme.colors.textMuted}
+                keyboardType="number-pad"
+                inputMode="numeric"
+                maxLength={6}
+                accessibilityLabel="How many did they do?"
+              />
+            </View>
+          ) : null}
 
           <View style={styles.queueActions}>
             <Pressable
-              onPress={onCallNext}
-              disabled={queueBusy}
-              style={[styles.secondaryButton, queueBusy ? styles.buttonDisabled : null]}
-              testID="wsf-station-call-next"
+              onPress={
+                action === 'complete'
+                  ? onCompleteTurn
+                  : action === 'start'
+                    ? onStartTurn
+                    : onCallNext
+              }
+              disabled={
+                queueBusy ||
+                action === 'awaitReady' ||
+                (action === 'complete' && !isUsableTurnCount(turnCount))
+              }
+              style={[
+                styles.secondaryButton,
+                queueBusy ||
+                action === 'awaitReady' ||
+                (action === 'complete' && !isUsableTurnCount(turnCount))
+                  ? styles.buttonDisabled
+                  : null,
+              ]}
+              testID={action === 'callNext' ? 'wsf-station-call-next' : 'wsf-station-turn-action'}
               accessibilityRole="button"
-              accessibilityState={{ disabled: queueBusy }}
+              accessibilityState={{
+                disabled:
+                  queueBusy ||
+                  action === 'awaitReady' ||
+                  (action === 'complete' && !isUsableTurnCount(turnCount)),
+              }}
             >
-              <Text style={styles.secondaryButtonText}>Call next</Text>
+              <Text style={styles.secondaryButtonText}>{stationActionLabel(action)}</Text>
             </Pressable>
-            {queue?.serving ? (
+            {/* ENDING A TURN WITHOUT A RESULT IS A DECISION SOMEBODY TAKES,
+                and it is this control — never a side effect of calling the
+                next person. */}
+            {assigned ? (
               <Pressable
-                onPress={onFinishServing}
+                onPress={onCancelTurn}
                 disabled={queueBusy}
                 style={[styles.outlineButton, queueBusy ? styles.buttonDisabled : null]}
-                testID="wsf-station-finish-serving"
+                testID="wsf-station-turn-cancel"
                 accessibilityRole="button"
                 accessibilityState={{ disabled: queueBusy }}
               >
-                <Text style={styles.outlineButtonText}>Finish</Text>
+                <Text style={styles.outlineButtonText}>Let them go</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1055,21 +1184,33 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   servingNameWide: { fontSize: 88, lineHeight: 100, letterSpacing: -1.5 },
-  servingSentence: { color: HERO_MUTED, fontSize: 16, lineHeight: 22, textAlign: 'center' },
-  queueNext: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'center',
-    minWidth: 0,
-  },
-  queueNextName: {
-    color: CREAM,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '700',
+  // The code, under the name and quieter than it: a person reads the name
+  // first and checks the code second, which is the order they need.
+  servingCode: {
+    color: PROGRESS_GREEN,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '800',
+    letterSpacing: 6,
+    textAlign: 'center',
     flexShrink: 1,
     minWidth: 0,
+  },
+  servingSentence: { color: HERO_MUTED, fontSize: 16, lineHeight: 22, textAlign: 'center' },
+  turnRecord: { alignSelf: 'stretch', alignItems: 'center', gap: 6, minWidth: 0 },
+  turnInput: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(247,245,240,0.35)',
+    borderRadius: 14,
+    minHeight: 48,
+    minWidth: 120,
+    maxWidth: 195,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 22,
+    fontWeight: '700',
+    color: CREAM,
+    textAlign: 'center',
   },
   queueEmpty: { color: HERO_MUTED, fontSize: 16, lineHeight: 22, textAlign: 'center' },
   queueCount: { color: HERO_MUTED, fontSize: 14, lineHeight: 19, textAlign: 'center' },

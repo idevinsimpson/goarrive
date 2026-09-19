@@ -1,5 +1,6 @@
 /**
- * THE QUEUE — a real line, and a screen that calls a participant by name.
+ * THE TURN CONTRACT — a real line, and a screen that calls ONE person by the
+ * name they chose and a short code.
  *
  * What this proves, end to end, in real browsers, with three devices that
  * cannot see each other's storage:
@@ -8,15 +9,19 @@
  *      control offers their first name pre-filled and initials one tap away;
  *      this journey takes the initials, which is the choice the feature exists
  *      to make possible.
- *   2. THE DISCLOSURE RULE. The screen in the hall shows those initials and
- *      NOT their name, NOT their surname, NOT their email and NOT their uid —
- *      asserted against the whole rendered page, not against one element.
- *   3. "Call next" calls them, and the call is announced through an ARIA live
- *      region as well as printed, so being called works for somebody who
- *      cannot see the screen.
- *   4. Their OWN phone says it is their turn, so being called works for
- *      somebody who cannot hear a room.
- *   5. Finishing clears the screen.
+ *   2. THE DISCLOSURE RULE, and it is stricter than it was. While somebody is
+ *      WAITING the hall shows no name at all — not their account name, not
+ *      their surname, not their uid, and not even the alias they chose. The
+ *      hall shows a COUNT. Asserted against the whole rendered page, not
+ *      against one element.
+ *   3. "Call next" assigns them, printing the one name AND a short code, and
+ *      announcing it through an ARIA live region, so being called works for
+ *      somebody who cannot see the screen.
+ *   4. Their OWN phone says it is their turn, carries THE SAME CODE, and
+ *      offers "I'm ready" — so being called works for somebody who cannot hear
+ *      a room, and so a call is an offer rather than a summons.
+ *   5. The station starts the READY turn and records it, and recording clears
+ *      every name from the hall while leaving the person their receipt.
  *   6. Nothing about a turn depends on an animation: no element on either
  *      screen has a CSS animation or transition at any point in the journey.
  */
@@ -153,7 +158,7 @@ async function expectNoMotion(page: Page, where: string): Promise<void> {
   expect(animated, `${where} must not animate`).toEqual([]);
 }
 
-test('a member chooses initials, the screen calls them by those initials, their phone says it is their turn, and finishing clears the screen', async ({
+test('a member chooses initials, the screen calls them by those initials and a code, their phone says it is their turn and taps ready, and recording clears the screen', async ({
   page,
   browser,
   context,
@@ -239,14 +244,18 @@ test('a member chooses initials, the screen calls them by those initials, their 
     });
 
     // ---- 2. THE DISCLOSURE RULE, on the screen in the hall ----------------
-    await expect(station.page.getByTestId('wsf-station-queue-next-0')).toHaveText('A.L.', {
-      timeout: 20_000,
-    });
+    //
+    // A WAITING PERSON IS A NUMBER. The hall knows somebody is there and knows
+    // nothing else about them — not their account name, not their surname, not
+    // their uid, and not the alias they chose either. The old queue printed
+    // that alias in a "next up" column, which is the defect this replaced.
     await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
-      '1 person waiting.'
+      '1 person waiting.',
+      { timeout: 20_000 }
     );
+    await expect(station.page.getByTestId('wsf-station-queue-serving-empty')).toBeVisible();
     const hallBefore = await station.page.evaluate(() => document.body.innerText);
-    for (const secret of ['Ada', 'Lovelace', memberUid]) {
+    for (const secret of ['Ada', 'Lovelace', 'A.L.', memberUid]) {
       expect(hallBefore, `the hall must not read "${secret}"`).not.toContain(secret);
     }
     expect(await station.page.content()).not.toContain(memberUid);
@@ -258,9 +267,16 @@ test('a member chooses initials, the screen calls them by those initials, their 
     });
     const announce = station.page.getByTestId('wsf-station-queue-announce');
     await expect(announce).toHaveAttribute('aria-live', 'assertive');
-    await expect(announce).toContainText('A.L. — it’s your turn at Station 1.');
+    await expect(announce).toContainText('A.L.');
+    await expect(announce).toContainText('it’s your turn at Station 1.');
+    // THE CODE, beside the name. Three characters from an alphabet with I, O,
+    // 0 and 1 removed, so it cannot be misread across a hall.
+    const hallCode = (await station.page.getByTestId('wsf-station-queue-code').innerText()).trim();
+    expect(hallCode).toMatch(/^[A-HJ-NP-Z2-9]{3}$/);
     // The line is theirs alone, so nobody is left behind them.
-    await expect(station.page.getByTestId('wsf-station-queue-next-empty')).toBeVisible();
+    await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
+      'Nobody is waiting.'
+    );
     station.assertNoCrash();
 
     const hallCalled = await station.page.evaluate(() => document.body.innerText);
@@ -268,31 +284,71 @@ test('a member chooses initials, the screen calls them by those initials, their 
       expect(hallCalled, `the hall must not read "${secret}"`).not.toContain(secret);
     }
 
-    // ---- 4. THEIR OWN PHONE SAYS SO ---------------------------------------
+    // ---- 4. THEIR OWN PHONE SAYS SO, AND CARRIES THE SAME CODE ------------
     await expect(memberPage.getByTestId('wsf-queue-called')).toBeVisible({ timeout: 25_000 });
     await expect(memberPage.getByTestId('wsf-queue-called-name')).toHaveText('A.L.');
+    // THE SAME THREE CHARACTERS as the wall, which is the whole reason the
+    // code exists: two people called Sam each know which one is theirs.
+    await expect(memberPage.getByTestId('wsf-queue-code')).toHaveText(hallCode);
+    await expect(memberPage.getByTestId('wsf-queue-station')).toHaveText('Go to Station 1.');
     const phoneAnnounce = memberPage.getByTestId('wsf-queue-announce');
     await expect(phoneAnnounce).toHaveAttribute('aria-live', 'assertive');
-    await expect(phoneAnnounce).toContainText('It’s your turn — go to Station 1.');
+    await expect(phoneAnnounce).toContainText('It’s your turn at Station 1.');
 
     // ---- 6. AND NOTHING MOVED ---------------------------------------------
     await expectNoMotion(station.page, 'the screen in the hall');
     await expectNoMotion(memberPage, 'the member’s own phone');
 
-    // ---- 5. FINISHING CLEARS THE SCREEN -----------------------------------
-    await station.page.getByTestId('wsf-station-finish-serving').click();
-    await expect(station.page.getByTestId('wsf-station-queue-serving-empty')).toBeVisible({
+    // ---- 5. READY, START, RECORD ------------------------------------------
+    //
+    // A CALL IS AN OFFER. The station cannot start anybody who has not said
+    // they are coming, so its one control is disabled until the phone taps.
+    await expect(station.page.getByTestId('wsf-station-turn-action')).toBeDisabled();
+    await memberPage.getByTestId('wsf-queue-ready').click();
+    await expect(station.page.getByTestId('wsf-station-turn-action')).toBeEnabled({
       timeout: 20_000,
     });
+    await expect(station.page.getByTestId('wsf-station-turn-action')).toHaveText(
+      'Start their turn'
+    );
+    await station.page.getByTestId('wsf-station-turn-action').click();
+
+    // The turn is running, and the screen asks for the one thing it needs.
+    await expect(station.page.getByTestId('wsf-station-turn-record')).toBeVisible({
+      timeout: 20_000,
+    });
+    await station.page.getByTestId('wsf-station-turn-count').fill('30');
+    await expect(station.page.getByTestId('wsf-station-turn-action')).toHaveText(
+      'Record this turn'
+    );
+    await station.page.getByTestId('wsf-station-turn-action').click();
+
+    // RECORDING CLEARS EVERY NAME AT ONCE, and leaves a code and a number for
+    // ten seconds — which is the only thing of theirs a room is left holding.
+    await expect(station.page.getByTestId('wsf-station-queue-result')).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(station.page.getByTestId('wsf-station-queue-result')).toContainText(hallCode);
+    await expect(station.page.getByTestId('wsf-station-queue-result')).toContainText(
+      '30 squats recorded.'
+    );
     await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
       'Nobody is waiting.',
       { timeout: 20_000 }
     );
     const hallAfter = await station.page.evaluate(() => document.body.innerText);
-    expect(hallAfter).not.toContain('A.L.');
+    for (const secret of ['Ada', 'Lovelace', 'A.L.', memberUid]) {
+      expect(hallAfter, `the hall must not read "${secret}"`).not.toContain(secret);
+    }
+    station.assertNoCrash();
 
-    // And the member is out of the line, on their own page, without asking.
+    // And the member is out of the line, on their own page, without asking —
+    // holding their own receipt, which is theirs and nobody else's.
     await expect(memberPage.getByTestId('wsf-queue-not-in-line')).toBeVisible({ timeout: 25_000 });
+    await expect(memberPage.getByTestId('wsf-queue-receipt-amount')).toHaveText(
+      '30 squats recorded.',
+      { timeout: 25_000 }
+    );
   } finally {
     await memberContext.close();
     await station.context.close();
@@ -336,24 +392,31 @@ test('a person can take their own name off the screen, immediately and without a
     await page.getByTestId('wsf-device-choice-personal').click();
     await expect(page.getByTestId('wsf-event-member')).toBeVisible({ timeout: 25_000 });
     await page.getByTestId('wsf-event-queue-start').click();
-    await page.getByTestId('wsf-event-queue-name').fill('Q');
+    // A distinctive alias, so "the hall does not print it" is a real
+    // assertion about the whole page rather than a search for one letter.
+    await page.getByTestId('wsf-event-queue-name').fill('Quillon');
     await page.getByTestId('wsf-event-queue-join').click();
     await expect(page.getByTestId('wsf-queue-screen')).toBeVisible({ timeout: 25_000 });
 
-    await expect(station.page.getByTestId('wsf-station-queue-next-0')).toHaveText('Q', {
-      timeout: 20_000,
-    });
+    // The hall counts them and does not name them.
+    await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
+      '1 person waiting.',
+      { timeout: 20_000 }
+    );
+    const hallWaiting = await station.page.evaluate(() => document.body.innerText);
+    expect(hallWaiting, 'a waiting person is a number, not a name').not.toContain('Quillon');
 
     // One plain control, no confirmation, nobody else's permission.
     await page.getByTestId('wsf-queue-leave').click();
     await expect(page.getByTestId('wsf-queue-not-in-line')).toBeVisible({ timeout: 20_000 });
 
-    // And the screen in the room no longer has them, on its next read.
-    await expect(station.page.getByTestId('wsf-station-queue-next-empty')).toBeVisible({
-      timeout: 20_000,
-    });
+    // And the screen in the room no longer counts them, on its next read.
+    await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
+      'Nobody is waiting.',
+      { timeout: 20_000 }
+    );
     const hall = await station.page.evaluate(() => document.body.innerText);
-    expect(hall).not.toContain('Q —');
+    expect(hall).not.toContain('Quillon');
   } finally {
     await station.context.close();
   }

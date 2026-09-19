@@ -2792,9 +2792,15 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
 //
 //   * wsfCombinedCredits/{creditId} — the durable linkage. One row per credit,
 //     naming the setup, the setup version, the child, the member and the
-//     attempt (or the adjustment) that caused it. It is what makes a credit
-//     reconstructible after the fact and what a recovery compares the parent
-//     shards against.
+//     attempt (or the adjustment) that caused it. A contribution credit is
+//     named {goalId}_{uid}_{attemptId} — the SAME name as the contribution
+//     row it credits — and a correction credit {setupId}_adj_{adjustmentId}. It is what makes a credit
+//     reconstructible after the fact and what wsfRepairCombinedGoal compares
+//     the parent shards against — and rebuilds them from. It is ALSO the
+//     address a correction is aimed at: a contribution credit row is named
+//     after the contribution it credits, so wsfAdjustGoal can ask "was this
+//     attempt credited, and to which setup" by reading one document, instead
+//     of guessing from the claim's current state and the clock.
 //
 // THE COLLISION HAZARD THIS DELIBERATELY DOES NOT REPEAT. wsfContribute
 // already writes wsfGoals/{goalId}/recentAdditions/{attemptId} — a document
@@ -2900,21 +2906,45 @@ function combinedCreditRef(creditId: string) {
 }
 
 /**
- * The linkage id for a CONTRIBUTION credit. It carries the uid, so it is not a
- * second wsfGoals/{goalId}/recentAdditions/{attemptId}: two members minting
- * the same attemptId produce two different rows, as they must.
+ * The linkage id for a CONTRIBUTION credit.
  *
- * It is also derived entirely from facts the contribution transaction already
- * has, which is what makes the write idempotent by construction: a transaction
+ * IT IS THE NAME OF THE CONTRIBUTION IT CREDITS. `wsfContributions/{goalId}_
+ * {uid}_{attemptId}` is the immutable row wsfContribute's idempotency is built
+ * on; this row is named identically, in its own collection. That is not a
+ * cosmetic echo — it is the whole mechanism by which a CORRECTION finds the
+ * credit it is correcting:
+ *
+ *   a correction names (goalId, targetUid, attemptId)
+ *     → wsfContributions/{goalId}_{uid}_{attemptId}  says the contribution exists
+ *     → wsfCombinedCredits/{goalId}_{uid}_{attemptId} says whether it was CREDITED,
+ *       and to which setup and setup version.
+ *
+ * Both are document reads by name. No query, no index, no scan, and above all
+ * no inference from the claim's CURRENT state or from the clock — which is
+ * what the correction path used to do, and which could not tell a correction
+ * of pre-activation history apart from a correction of a credited attempt.
+ *
+ * THE SETUP ID IS DELIBERATELY NOT IN THE NAME, and nothing is lost by that.
+ * (goalId, uid, attemptId) is ALREADY unique — wsfContribute refuses a second
+ * contribution under the same triple — so no two setups can ever credit the
+ * same attempt, and a name carrying the setup id would only make the row
+ * unfindable by the one caller that has to find it. The setup id is a FIELD on
+ * the row, which is where a fact that a correction reads back belongs.
+ *
+ * It still carries the uid, so it is not a second
+ * wsfGoals/{goalId}/recentAdditions/{attemptId}: two members minting the same
+ * attemptId produce two different rows, as they must.
+ *
+ * It is derived entirely from facts the contribution transaction already has,
+ * which is what makes the write idempotent by construction: a transaction
  * retry writes the same id, and a replayed attemptId never reaches it at all.
  */
 function combinedContributionCreditId(args: {
-  setupId: string;
   goalId: string;
   uid: string;
   attemptId: string;
 }): string {
-  return `${args.setupId}_${args.goalId}_${args.uid}_${args.attemptId}`;
+  return `${args.goalId}_${args.uid}_${args.attemptId}`;
 }
 
 /**
@@ -2937,9 +2967,108 @@ function timestampMillis(v: unknown): number | null {
 type CombinedCredit = { setupId: string; setupVersion: number };
 
 /**
- * THE ONE PLACE A PARENT CREDIT IS DECIDED. Pure, total, and called from both
- * write paths — the contribution and the correction — so the two cannot drift
- * into two different answers.
+ * A STORED CREDIT ROW — the immutable record that a parent was credited.
+ *
+ * `source: 'contribution'` rows are written by wsfContribute and named by the
+ * contribution they credit. `source: 'adjustment'` rows are written by
+ * wsfAdjustGoal and named by the adjustment that caused them. Both carry the
+ * setup, the setup version, the child, the member and the amount that actually
+ * moved, so the parent's counter is rebuildable from the rows alone.
+ */
+type CombinedCreditDoc = {
+  setupId?: unknown;
+  setupVersion?: unknown;
+  contributionRuleVersion?: unknown;
+  goalId?: unknown;
+  userId?: unknown;
+  attemptId?: unknown;
+  adjustmentId?: unknown;
+  source?: unknown;
+  amount?: unknown;
+  requestedAmount?: unknown;
+  shardIndex?: unknown;
+  communityGroupId?: unknown;
+};
+
+/**
+ * READ BACK A CONTRIBUTION CREDIT ROW, and refuse to half-believe it.
+ *
+ * THIS IS WHAT A CORRECTION IS ADDRESSED TO. It answers exactly one question —
+ * "was THIS contribution credited to a combined parent, and to which?" — from
+ * the immutable row and from nothing else. It does not look at the claim, it
+ * does not look at the setup, and it does not look at the clock, so:
+ *
+ *   • a contribution that predates activation, or fell outside the frozen
+ *     window, or landed while the child was unclaimed, has NO row here, and
+ *     the answer is `null`: the correction moves the child and never the
+ *     parent;
+ *   • a contribution that WAS credited has a row here forever, and the answer
+ *     stays the same after the window closes, after the claim is released and
+ *     after the setup is closed. Unwinding a credit is not a new credit, and
+ *     nothing about the passage of time changes what was earned.
+ *
+ * Three outcomes, deliberately distinguished:
+ *   'none'       — no row. Never credited. The parent does not move.
+ *   'credited'   — a readable row. The parent moves.
+ *   'unreadable' — a row exists but does not describe this contribution, or
+ *                  names no usable setup. The CALLER REFUSES rather than
+ *                  guessing: silently treating corruption as "never credited"
+ *                  would quietly desynchronise the parent, which is the exact
+ *                  failure this linkage exists to prevent.
+ */
+type CombinedCreditLookup =
+  | { kind: 'none' }
+  | { kind: 'unreadable' }
+  | { kind: 'credited'; credit: CombinedCredit; amount: number };
+
+function readContributionCredit(
+  snap: FirebaseFirestore.DocumentSnapshot,
+  expected: { goalId: string; uid: string; attemptId: string }
+): CombinedCreditLookup {
+  if (!snap.exists) return { kind: 'none' };
+  const row = snap.data() as CombinedCreditDoc;
+
+  // It must describe THIS contribution. A row that does not is not evidence
+  // about it, whatever else it may be.
+  if (row.source !== 'contribution') return { kind: 'unreadable' };
+  if (normalizeStringId(row.goalId) !== expected.goalId) return { kind: 'unreadable' };
+  if (normalizeStringId(row.userId) !== expected.uid) return { kind: 'unreadable' };
+  if (normalizeStringId(row.attemptId) !== expected.attemptId) {
+    return { kind: 'unreadable' };
+  }
+
+  const setupId = normalizeStringId(row.setupId);
+  if (!setupId) return { kind: 'unreadable' };
+
+  const setupVersion = row.setupVersion;
+  if (
+    typeof setupVersion !== 'number' ||
+    !Number.isInteger(setupVersion) ||
+    setupVersion < 1
+  ) {
+    return { kind: 'unreadable' };
+  }
+
+  const amount = row.amount;
+  if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0) {
+    return { kind: 'unreadable' };
+  }
+
+  return { kind: 'credited', credit: { setupId, setupVersion }, amount };
+}
+
+/**
+ * THE ONE PLACE A **NEW** PARENT CREDIT IS DECIDED. Pure, total, and reached
+ * from exactly one caller: the contribution transaction.
+ *
+ * IT IS NOT THE CORRECTION PATH'S DECISION, AND THAT IS THE FIX. It answers
+ * "may this repetition, happening NOW, create a credit?" — a question about
+ * the claim and the clock. A correction asks a different question entirely:
+ * "was THIS contribution credited, whenever that was?" — a question about an
+ * immutable row, answered by readContributionCredit above. Asking the first
+ * question on the correction path is what could not tell a correction of
+ * pre-activation history apart from a correction of a credited attempt, and
+ * what stopped corrections reaching the parent once the window closed.
  *
  * It returns the setup to credit, or null. Null is the ordinary case: most
  * goals are in no combined setup at all, and for those this function is
@@ -3128,429 +3257,483 @@ export const wsfContribute = onCall<ContributeRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
-    const uid = request.auth.uid;
+    // THE ONE CANONICAL CONTRIBUTION. Everything that used to stand here
+    // still stands, unchanged and in the same order, in performContribution
+    // below: the same normalizations and the same messages, the same
+    // (goal, uid, attemptId) key, the same sharded counters, the same
+    // combined-parent credit and the same receipt. This callable is now only
+    // what it was always supposed to be on its own — the AUTHENTICATED door
+    // onto it.
+    //
+    // WHY IT WAS SPLIT. A turn started at a station is finished at that
+    // station, and a station has no account: see the station section, where
+    // an account standing unattended in a public hall is exactly the thing a
+    // station must not be. The station path therefore cannot come through
+    // request.auth — and it must record the SAME attempt through the SAME
+    // gates, or there are two ways to count and the two will disagree. So
+    // there is ONE function, called with a uid its caller has PROVED: here by
+    // Firebase Auth, and on the station path by the turn entry, whose uid was
+    // written when that person joined the line under their own account and is
+    // never taken from a request.
+    return performContribution({
+      uid: request.auth.uid,
+      goalId: request.data?.goalId,
+      attemptId: request.data?.attemptId,
+      count: request.data?.count,
+    });
+  }
+);
 
-    const goalId = normalizeStringId(request.data?.goalId);
-    if (!goalId) {
-      throw new HttpsError('invalid-argument', 'goalId is required.');
-    }
-    const attemptId = normalizeAttemptId(request.data?.attemptId);
-    if (!attemptId) {
-      throw new HttpsError(
-        'invalid-argument',
-        'attemptId must be 8..128 chars of A-Z, a-z, 0-9, _ or -.'
-      );
-    }
-    const count = normalizeContributionCount(request.data?.count);
-    if (count === null) {
-      throw new HttpsError(
-        'invalid-argument',
-        'count must be a positive integer up to 100000.'
-      );
-    }
+/**
+ * The contribution itself, for a uid its caller has already proved.
+ *
+ * MOVED, NOT CHANGED. The body below is the body wsfContribute had, line for
+ * line: `git diff -w` shows the normalizations, the transaction, the reads,
+ * the writes, their ordering, the refusals, the idempotent replay branch, the
+ * recent-additions row, the combined credit, the target crossing, the
+ * aggregate-access decision and the receipt all identical. The only
+ * substantive edits in the whole function are the three `request.data?.x`
+ * reads becoming `args.x`, and the uid arriving as a parameter.
+ *
+ * IT KEEPS ITS OWN ARGUMENT GATES. goalId, attemptId and count are validated
+ * HERE rather than at the callers, so a second caller cannot acquire a looser
+ * door: whatever asks for a contribution passes the same three checks, in the
+ * same order, with the same three messages.
+ */
+async function performContribution(args: {
+  uid: string;
+  goalId: unknown;
+  attemptId: unknown;
+  count: unknown;
+}): Promise<ContributeResponse> {
+  const uid = args.uid;
 
-    const db = getFirestore();
-    const goalRef = db.doc(`wsfGoals/${goalId}`);
-    // Attempt identity is goal + authenticated uid + attemptId. Same member,
-    // same attemptId -> one recorded contribution and the original receipt
-    // on replay; different members with the same attemptId -> distinct keys.
-    const contribRef = db.doc(
-      `wsfContributions/${goalId}_${uid}_${attemptId}`
+  const goalId = normalizeStringId(args.goalId);
+  if (!goalId) {
+    throw new HttpsError('invalid-argument', 'goalId is required.');
+  }
+  const attemptId = normalizeAttemptId(args.attemptId);
+  if (!attemptId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'attemptId must be 8..128 chars of A-Z, a-z, 0-9, _ or -.'
     );
-    const memberTotalRef = db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`);
-    // The combined-goal claim for this child, if it has one. Named by the goal
-    // id, so this is a document read and never a query. For the overwhelming
-    // majority of goals the document does not exist, the read returns a
-    // missing snapshot, and nothing below it runs.
-    const claimRef = combinedClaimRef(goalId);
+  }
+  const count = normalizeContributionCount(args.count);
+  if (count === null) {
+    throw new HttpsError(
+      'invalid-argument',
+      'count must be a positive integer up to 100000.'
+    );
+  }
 
-    // Two-phase read inside the transaction: goal first (need communityGroupId
-    // to derive the membership path), then contribution + memberTotal +
-    // membership in parallel. Mirrors wsfCheckIn's §E3-fix-3 shape — the
-    // "all reads before writes" rule stops at the first write, so sequential
-    // tx.get() plus a Promise.all is legal.
-    const {
-      addedCount,
-      alreadyRecorded,
-      crossedTarget: storedCrossedTarget,
-      goalHadNoEvent,
-      goalTracked,
-      goalTarget,
-      goalUnit,
-      goalStatus,
-      callerIsActiveMember,
-      goalDisplayAuthorized,
-      goalCommunityGroupId,
-    } =
-      await db.runTransaction(async (tx) => {
-        const goalSnap = await tx.get(goalRef);
-        if (!goalSnap.exists) {
-          throw new HttpsError('not-found', 'Goal not found.');
-        }
-        const goal = goalSnap.data() as GoalDoc;
-        const membershipRef = db.doc(
-          `wsfMemberships/${goal.communityGroupId}_${uid}`
-        );
+  const db = getFirestore();
+  const goalRef = db.doc(`wsfGoals/${goalId}`);
+  // Attempt identity is goal + authenticated uid + attemptId. Same member,
+  // same attemptId -> one recorded contribution and the original receipt
+  // on replay; different members with the same attemptId -> distinct keys.
+  const contribRef = db.doc(
+    `wsfContributions/${goalId}_${uid}_${attemptId}`
+  );
+  const memberTotalRef = db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`);
+  // The combined-goal claim for this child, if it has one. Named by the goal
+  // id, so this is a document read and never a query. For the overwhelming
+  // majority of goals the document does not exist, the read returns a
+  // missing snapshot, and nothing below it runs.
+  const claimRef = combinedClaimRef(goalId);
 
-        // The claim joins this existing batch rather than adding a round trip.
-        // It is read BEFORE any write, as the transaction requires, and being
-        // read inside the transaction is what makes the boundary hold: a claim
-        // taken or released concurrently aborts this contribution rather than
-        // letting it credit a parent that no longer owns this child.
-        const [contribSnap, memberTotalSnap, membershipSnap, claimSnap] =
-          await Promise.all([
-            tx.get(contribRef),
-            tx.get(memberTotalRef),
-            tx.get(membershipRef),
-            tx.get(claimRef),
-          ]);
+  // Two-phase read inside the transaction: goal first (need communityGroupId
+  // to derive the membership path), then contribution + memberTotal +
+  // membership in parallel. Mirrors wsfCheckIn's §E3-fix-3 shape — the
+  // "all reads before writes" rule stops at the first write, so sequential
+  // tx.get() plus a Promise.all is legal.
+  const {
+    addedCount,
+    alreadyRecorded,
+    crossedTarget: storedCrossedTarget,
+    goalHadNoEvent,
+    goalTracked,
+    goalTarget,
+    goalUnit,
+    goalStatus,
+    callerIsActiveMember,
+    goalDisplayAuthorized,
+    goalCommunityGroupId,
+  } =
+    await db.runTransaction(async (tx) => {
+      const goalSnap = await tx.get(goalRef);
+      if (!goalSnap.exists) {
+        throw new HttpsError('not-found', 'Goal not found.');
+      }
+      const goal = goalSnap.data() as GoalDoc;
+      const membershipRef = db.doc(
+        `wsfMemberships/${goal.communityGroupId}_${uid}`
+      );
 
-        // Idempotency wins over closure, window end, AND membership drift.
-        // A member who already succeeded must never see "you did the reps,
-        // we say you didn't" — even if the goal has since closed, the window
-        // has ended, or their membership was revoked. Matches wsfCheckIn
-        // §5.3 discipline.
-        if (contribSnap.exists) {
-          const prev = contribSnap.data() as {
-            count?: number;
-            userId?: string;
-            crossedTarget?: boolean;
-          };
-          // The key is scoped by uid, so an existing doc IS this caller's own
-          // earlier attempt. If storage ever disagreed that would be corruption,
-          // not a caller-observable state: refuse rather than leak a count.
-          if (prev.userId !== uid) {
-            throw new HttpsError('internal', 'Contribution record mismatch.');
-          }
-          // Idempotency is untouched: this returns without writing, so the
-          // attempt is still counted exactly once. What changed is that the
-          // branch now reports whether the caller is STILL an active member,
-          // so the handler below can decide what they may be told. Deciding
-          // that here would mean reading shared state before knowing whether
-          // it may be disclosed.
-          const replayMembership = membershipSnap.exists
-            ? (membershipSnap.data() as { membershipStatus?: string })
-            : null;
-          return {
-            addedCount: typeof prev.count === 'number' ? prev.count : 0,
-            alreadyRecorded: true as const,
-            // Read from the ATTEMPT, never recomputed. The stored outcome is
-            // what this attempt did when it landed; recomputing it from the
-            // current total would let a replay claim a crossing someone else
-            // made, or deny one this attempt really made after a correction.
-            // An attempt recorded before this field existed carries no value
-            // and is reported as false — it is not evidence of a crossing.
-            crossedTarget: prev.crossedTarget === true,
-            goalHadNoEvent: false,
-            goalTracked: goal.crossingTracked === true,
-            goalTarget: goal.target,
-            goalUnit: goal.unit,
-            goalStatus: goal.status,
-            callerIsActiveMember: replayMembership?.membershipStatus === 'active',
-            goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
-            goalCommunityGroupId: goal.communityGroupId,
-          };
-        }
+      // The claim joins this existing batch rather than adding a round trip.
+      // It is read BEFORE any write, as the transaction requires, and being
+      // read inside the transaction is what makes the boundary hold: a claim
+      // taken or released concurrently aborts this contribution rather than
+      // letting it credit a parent that no longer owns this child.
+      const [contribSnap, memberTotalSnap, membershipSnap, claimSnap] =
+        await Promise.all([
+          tx.get(contribRef),
+          tx.get(memberTotalRef),
+          tx.get(membershipRef),
+          tx.get(claimRef),
+        ]);
 
-        // NEW contribution — enforce all gates in strict order.
-        //   1. Active membership in the goal's community. Non-member and
-        //      wrong-group callers both fall out here with the same message
-        //      (avoids leaking whether a given group id exists).
-        if (!membershipSnap.exists) {
-          throw new HttpsError('permission-denied', 'Members only.');
-        }
-        const membership = membershipSnap.data() as {
-          membershipStatus?: string;
+      // Idempotency wins over closure, window end, AND membership drift.
+      // A member who already succeeded must never see "you did the reps,
+      // we say you didn't" — even if the goal has since closed, the window
+      // has ended, or their membership was revoked. Matches wsfCheckIn
+      // §5.3 discipline.
+      if (contribSnap.exists) {
+        const prev = contribSnap.data() as {
+          count?: number;
+          userId?: string;
+          crossedTarget?: boolean;
         };
-        if (membership.membershipStatus !== 'active') {
-          throw new HttpsError('permission-denied', 'Members only.');
+        // The key is scoped by uid, so an existing doc IS this caller's own
+        // earlier attempt. If storage ever disagreed that would be corruption,
+        // not a caller-observable state: refuse rather than leak a count.
+        if (prev.userId !== uid) {
+          throw new HttpsError('internal', 'Contribution record mismatch.');
         }
-
-        //   2. Goal must be active.
-        if (goal.status !== 'active') {
-          throw new HttpsError('failed-precondition', 'This goal is closed.');
-        }
-
-        //   3. Server-time window enforcement. startsAt inclusive, endsAt
-        //      exclusive — a contribution landing exactly at endsAt is
-        //      rejected. Uses Timestamp.now() so a client clock skew can
-        //      never open or close the window early.
-        const now = Timestamp.now();
-        const startMs = goal.startsAt.toMillis();
-        const endMs = goal.endsAt.toMillis();
-        if (now.toMillis() < startMs) {
-          throw new HttpsError(
-            'failed-precondition',
-            'Goal has not started yet.'
-          );
-        }
-        if (now.toMillis() >= endMs) {
-          throw new HttpsError(
-            'failed-precondition',
-            'Goal window has ended.'
-          );
-        }
-
-        //   4. Repeat policy. Under 'once' a member's contribution to this
-        //      goal is recorded once, and a SECOND attempt is refused even
-        //      though its attemptId is new and well-formed. Minting a fresh
-        //      attemptId is how a client says "this is a different attempt";
-        //      it is never how it earns a second one. The replay branch above
-        //      already returned, so reaching here with a known attemptId is
-        //      impossible and an honest earlier contribution is never refused.
-        //
-        //      The evidence is the member's own totals document, which was
-        //      already read above — a document read, not a query, so two
-        //      transactions racing two different attemptIds contend on it and
-        //      exactly one commits.
-        const priorMemberTotal = memberTotalSnap.data() as
-          | { total?: number; contributionCount?: number }
-          | undefined;
-        const previousMemberTotal =
-          typeof priorMemberTotal?.total === 'number' ? priorMemberTotal.total : 0;
-        // Rows written before contributionCount existed carry no count. Their
-        // total is not proof either way — wsfAdjustGoal can move a total
-        // without any contribution behind it — so the ledger itself is asked,
-        // and only for those rows. A member with no totals document at all has
-        // nothing recorded: the contribution write below always creates one.
-        let previousContributionCount: number | null =
-          typeof priorMemberTotal?.contributionCount === 'number'
-            ? priorMemberTotal.contributionCount
-            : null;
-        if (previousContributionCount === null && memberTotalSnap.exists) {
-          const priorContributions = await tx.get(
-            db
-              .collection('wsfContributions')
-              .where('goalId', '==', goalId)
-              .where('userId', '==', uid)
-              .limit(1)
-          );
-          previousContributionCount = priorContributions.empty ? 0 : 1;
-        }
-        const recordedBefore = (previousContributionCount ?? 0) > 0;
-        if (goalRepeatPolicy(goal) === 'once' && recordedBefore) {
-          throw new HttpsError(
-            'failed-precondition',
-            'This goal takes one contribution from each member, and yours is already recorded.'
-          );
-        }
-
-        const shardIndex = randomGoalShardIndex();
-        const shard = goalShardRef(goalId, shardIndex);
-
-        tx.set(contribRef, {
-          goalId,
-          attemptId,
-          userId: uid,
-          count,
-          shardIndex,
-          unit: goal.unit,
-          communityGroupId: goal.communityGroupId,
-          // Part of the attempt's stored outcome, exactly like `count`: a
-          // replay reports it rather than deciding it again. False until the
-          // post-commit claim below credits this attempt.
-          crossedTarget: false,
-          createdAt: FieldValue.serverTimestamp(),
-        });
-        tx.set(
-          shard,
-          { count: FieldValue.increment(count) },
-          { merge: true }
-        );
-
-        tx.set(
-          memberTotalRef,
-          {
-            goalId,
-            userId: uid,
-            total: previousMemberTotal + count,
-            // How many contributions this member has recorded toward this
-            // goal, as distinct from how many units they are credited with.
-            // The repeat policy is about the former; an authorized correction
-            // moves the latter and must not change it.
-            contributionCount: (previousContributionCount ?? 0) + 1,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        // The recent-additions tail. Written HERE, on the branch that records
-        // a new contribution, and nowhere else: the replay branch above
-        // returns before reaching this line, so an attemptId replayed any
-        // number of times records exactly once.
-        //
-        // ONE SMALL DOCUMENT OF ITS OWN, keyed by the attempt id. Nothing is
-        // read first and nothing is rewritten, so this adds no contention:
-        // the goal document is untouched, and two members contributing at the
-        // same instant write two different documents rather than queueing on
-        // one. Keying by the attempt id makes the write idempotent by
-        // construction — a transaction retry, or any future path that reached
-        // this line twice for one attempt, writes the same id with the same
-        // content and there is still exactly one document.
-        //
-        // `now` is the SERVER time already used to enforce the window, rounded
-        // down to the minute. The amount is the count just recorded. Nothing
-        // that identifies the contributor — uid, attemptId as a FIELD, shard,
-        // member total, position in any sequence — is written; the attempt id
-        // is the document's name, not data inside it, and it is a per-tap
-        // random value that names no one.
-        const addition: RecentAddition = {
-          amount: count,
-          at: isoMinute(now.toMillis()),
-        };
-        tx.set(recentAdditionsRef(goalId).doc(attemptId), addition);
-
-        // ── THE COMBINED PARENT CREDIT ───────────────────────────────────
-        //
-        // CANONICAL CHILD AND PARENT CREDIT, IN ONE TRANSACTION. The child's
-        // shard, the member total, the contribution row, the parent's shard
-        // and the parent's linkage row all commit together or not at all.
-        // There is no second transaction to fail halfway and no reconciler to
-        // forget.
-        //
-        // ON THIS BRANCH ONLY. The replay branch returned long before this
-        // line, so a retried attemptId credits the parent no more than it
-        // credits the child: exactly zero more times.
-        //
-        // NEW REPETITIONS AFTER ACTIVATION ONLY. `now` is the SERVER time
-        // already used to enforce the child's own window, and
-        // combinedCreditDecision refuses anything at or before the claim's
-        // activation instant or outside the frozen parent window. A repetition
-        // recorded before the Champion activated the combined goal never
-        // reaches this code at all — it was recorded by an earlier call, which
-        // committed and is finished — and that is why activating a setup over
-        // a child with a long history opens the parent at zero.
-        //
-        // AND FOR EVERY OTHER GOAL: `claimSnap` does not exist,
-        // combinedCreditDecision returns null on its first line, and this
-        // block writes nothing. The contribution's writes, its receipt and its
-        // refusals are exactly what they were.
-        const credit = combinedCreditDecision({
-          claim: claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null,
-          goalId,
-          communityGroupId: goal.communityGroupId,
-          atMillis: now.toMillis(),
-        });
-        if (credit) {
-          // One of the parent's ten shards FOR THIS CHILD, chosen at random,
-          // for the same reason the child's own counter is sharded: two
-          // members contributing in the same instant must not queue on one
-          // document.
-          const parentShardIndex = randomCombinedShardIndex();
-          tx.set(
-            combinedShardRef(credit.setupId, goalId, parentShardIndex),
-            { count: FieldValue.increment(count) },
-            { merge: true }
-          );
-          // THE DURABLE LINKAGE. `create`, not `set`: the id is derived from
-          // (setup, child, member, attempt), so the only way it can already
-          // exist is that this attempt has already been credited — in which
-          // case the shard is about to be incremented twice and refusing the
-          // whole contribution is the correct answer, not overwriting the
-          // evidence. A transaction RETRY cannot trip it: the earlier attempt
-          // never committed.
-          tx.create(
-            combinedCreditRef(
-              combinedContributionCreditId({
-                setupId: credit.setupId,
-                goalId,
-                uid,
-                attemptId,
-              })
-            ),
-            {
-              setupId: credit.setupId,
-              setupVersion: credit.setupVersion,
-              contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
-              goalId,
-              userId: uid,
-              attemptId,
-              source: 'contribution',
-              amount: count,
-              shardIndex: parentShardIndex,
-              communityGroupId: goal.communityGroupId,
-              createdAt: FieldValue.serverTimestamp(),
-            }
-          );
-        }
-
-        // Reached only after the active-membership gate above, so this caller
-        // is an active member by construction.
+        // Idempotency is untouched: this returns without writing, so the
+        // attempt is still counted exactly once. What changed is that the
+        // branch now reports whether the caller is STILL an active member,
+        // so the handler below can decide what they may be told. Deciding
+        // that here would mean reading shared state before knowing whether
+        // it may be disclosed.
+        const replayMembership = membershipSnap.exists
+          ? (membershipSnap.data() as { membershipStatus?: string })
+          : null;
         return {
-          addedCount: count,
-          alreadyRecorded: false as const,
-          crossedTarget: false,
-          goalHadNoEvent: goal.reachedAt == null,
+          addedCount: typeof prev.count === 'number' ? prev.count : 0,
+          alreadyRecorded: true as const,
+          // Read from the ATTEMPT, never recomputed. The stored outcome is
+          // what this attempt did when it landed; recomputing it from the
+          // current total would let a replay claim a crossing someone else
+          // made, or deny one this attempt really made after a correction.
+          // An attempt recorded before this field existed carries no value
+          // and is reported as false — it is not evidence of a crossing.
+          crossedTarget: prev.crossedTarget === true,
+          goalHadNoEvent: false,
           goalTracked: goal.crossingTracked === true,
           goalTarget: goal.target,
           goalUnit: goal.unit,
           goalStatus: goal.status,
-          callerIsActiveMember: true,
+          callerIsActiveMember: replayMembership?.membershipStatus === 'active',
           goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
           goalCommunityGroupId: goal.communityGroupId,
         };
-      });
-
-    // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
-    // document only. See claimTargetCrossing for the rule.
-    // `crossedTarget` is never raised here: see ContributeResponse.
-    const crossedTarget = storedCrossedTarget === true;
-    let observedSharedTotal: number | null = null;
-    if (!alreadyRecorded && goalHadNoEvent && goalTarget > 0) {
-      observedSharedTotal = await sumGoalShards(goalId);
-      if (observedSharedTotal >= goalTarget) {
-        await recordTargetCrossing({ goalRef, count, observedSharedTotal, goalTracked });
       }
+
+      // NEW contribution — enforce all gates in strict order.
+      //   1. Active membership in the goal's community. Non-member and
+      //      wrong-group callers both fall out here with the same message
+      //      (avoids leaking whether a given group id exists).
+      if (!membershipSnap.exists) {
+        throw new HttpsError('permission-denied', 'Members only.');
+      }
+      const membership = membershipSnap.data() as {
+        membershipStatus?: string;
+      };
+      if (membership.membershipStatus !== 'active') {
+        throw new HttpsError('permission-denied', 'Members only.');
+      }
+
+      //   2. Goal must be active.
+      if (goal.status !== 'active') {
+        throw new HttpsError('failed-precondition', 'This goal is closed.');
+      }
+
+      //   3. Server-time window enforcement. startsAt inclusive, endsAt
+      //      exclusive — a contribution landing exactly at endsAt is
+      //      rejected. Uses Timestamp.now() so a client clock skew can
+      //      never open or close the window early.
+      const now = Timestamp.now();
+      const startMs = goal.startsAt.toMillis();
+      const endMs = goal.endsAt.toMillis();
+      if (now.toMillis() < startMs) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Goal has not started yet.'
+        );
+      }
+      if (now.toMillis() >= endMs) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Goal window has ended.'
+        );
+      }
+
+      //   4. Repeat policy. Under 'once' a member's contribution to this
+      //      goal is recorded once, and a SECOND attempt is refused even
+      //      though its attemptId is new and well-formed. Minting a fresh
+      //      attemptId is how a client says "this is a different attempt";
+      //      it is never how it earns a second one. The replay branch above
+      //      already returned, so reaching here with a known attemptId is
+      //      impossible and an honest earlier contribution is never refused.
+      //
+      //      The evidence is the member's own totals document, which was
+      //      already read above — a document read, not a query, so two
+      //      transactions racing two different attemptIds contend on it and
+      //      exactly one commits.
+      const priorMemberTotal = memberTotalSnap.data() as
+        | { total?: number; contributionCount?: number }
+        | undefined;
+      const previousMemberTotal =
+        typeof priorMemberTotal?.total === 'number' ? priorMemberTotal.total : 0;
+      // Rows written before contributionCount existed carry no count. Their
+      // total is not proof either way — wsfAdjustGoal can move a total
+      // without any contribution behind it — so the ledger itself is asked,
+      // and only for those rows. A member with no totals document at all has
+      // nothing recorded: the contribution write below always creates one.
+      let previousContributionCount: number | null =
+        typeof priorMemberTotal?.contributionCount === 'number'
+          ? priorMemberTotal.contributionCount
+          : null;
+      if (previousContributionCount === null && memberTotalSnap.exists) {
+        const priorContributions = await tx.get(
+          db
+            .collection('wsfContributions')
+            .where('goalId', '==', goalId)
+            .where('userId', '==', uid)
+            .limit(1)
+        );
+        previousContributionCount = priorContributions.empty ? 0 : 1;
+      }
+      const recordedBefore = (previousContributionCount ?? 0) > 0;
+      if (goalRepeatPolicy(goal) === 'once' && recordedBefore) {
+        throw new HttpsError(
+          'failed-precondition',
+          'This goal takes one contribution from each member, and yours is already recorded.'
+        );
+      }
+
+      const shardIndex = randomGoalShardIndex();
+      const shard = goalShardRef(goalId, shardIndex);
+
+      tx.set(contribRef, {
+        goalId,
+        attemptId,
+        userId: uid,
+        count,
+        shardIndex,
+        unit: goal.unit,
+        communityGroupId: goal.communityGroupId,
+        // Part of the attempt's stored outcome, exactly like `count`: a
+        // replay reports it rather than deciding it again. False until the
+        // post-commit claim below credits this attempt.
+        crossedTarget: false,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(
+        shard,
+        { count: FieldValue.increment(count) },
+        { merge: true }
+      );
+
+      tx.set(
+        memberTotalRef,
+        {
+          goalId,
+          userId: uid,
+          total: previousMemberTotal + count,
+          // How many contributions this member has recorded toward this
+          // goal, as distinct from how many units they are credited with.
+          // The repeat policy is about the former; an authorized correction
+          // moves the latter and must not change it.
+          contributionCount: (previousContributionCount ?? 0) + 1,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // The recent-additions tail. Written HERE, on the branch that records
+      // a new contribution, and nowhere else: the replay branch above
+      // returns before reaching this line, so an attemptId replayed any
+      // number of times records exactly once.
+      //
+      // ONE SMALL DOCUMENT OF ITS OWN, keyed by the attempt id. Nothing is
+      // read first and nothing is rewritten, so this adds no contention:
+      // the goal document is untouched, and two members contributing at the
+      // same instant write two different documents rather than queueing on
+      // one. Keying by the attempt id makes the write idempotent by
+      // construction — a transaction retry, or any future path that reached
+      // this line twice for one attempt, writes the same id with the same
+      // content and there is still exactly one document.
+      //
+      // `now` is the SERVER time already used to enforce the window, rounded
+      // down to the minute. The amount is the count just recorded. Nothing
+      // that identifies the contributor — uid, attemptId as a FIELD, shard,
+      // member total, position in any sequence — is written; the attempt id
+      // is the document's name, not data inside it, and it is a per-tap
+      // random value that names no one.
+      const addition: RecentAddition = {
+        amount: count,
+        at: isoMinute(now.toMillis()),
+      };
+      tx.set(recentAdditionsRef(goalId).doc(attemptId), addition);
+
+      // ── THE COMBINED PARENT CREDIT ───────────────────────────────────
+      //
+      // CANONICAL CHILD AND PARENT CREDIT, IN ONE TRANSACTION. The child's
+      // shard, the member total, the contribution row, the parent's shard
+      // and the parent's linkage row all commit together or not at all.
+      // There is no second transaction to fail halfway and no reconciler to
+      // forget.
+      //
+      // ON THIS BRANCH ONLY. The replay branch returned long before this
+      // line, so a retried attemptId credits the parent no more than it
+      // credits the child: exactly zero more times.
+      //
+      // NEW REPETITIONS AFTER ACTIVATION ONLY. `now` is the SERVER time
+      // already used to enforce the child's own window, and
+      // combinedCreditDecision refuses anything at or before the claim's
+      // activation instant or outside the frozen parent window. A repetition
+      // recorded before the Champion activated the combined goal never
+      // reaches this code at all — it was recorded by an earlier call, which
+      // committed and is finished — and that is why activating a setup over
+      // a child with a long history opens the parent at zero.
+      //
+      // AND FOR EVERY OTHER GOAL: `claimSnap` does not exist,
+      // combinedCreditDecision returns null on its first line, and this
+      // block writes nothing. The contribution's writes, its receipt and its
+      // refusals are exactly what they were.
+      const credit = combinedCreditDecision({
+        claim: claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null,
+        goalId,
+        communityGroupId: goal.communityGroupId,
+        atMillis: now.toMillis(),
+      });
+      if (credit) {
+        // One of the parent's ten shards FOR THIS CHILD, chosen at random,
+        // for the same reason the child's own counter is sharded: two
+        // members contributing in the same instant must not queue on one
+        // document.
+        const parentShardIndex = randomCombinedShardIndex();
+        tx.set(
+          combinedShardRef(credit.setupId, goalId, parentShardIndex),
+          { count: FieldValue.increment(count) },
+          { merge: true }
+        );
+        // THE DURABLE LINKAGE. `create`, not `set`: the id is derived from
+        // (child, member, attempt) — the same triple that names the
+        // contribution row itself — so the only way it can already exist is
+        // that this attempt has already been credited, in which case the
+        // shard is about to be incremented twice and refusing the whole
+        // contribution is the correct answer, not overwriting the evidence.
+        // A transaction RETRY cannot trip it: the earlier attempt never
+        // committed.
+        //
+        // IT IS ALSO THE ADDRESS A CORRECTION USES. wsfAdjustGoal reads this
+        // exact document, by this exact name, to learn whether the
+        // contribution it has been asked to correct was ever credited and to
+        // which setup. That is why the name is the contribution's name and
+        // not the setup's: see combinedContributionCreditId.
+        tx.create(
+          combinedCreditRef(
+            combinedContributionCreditId({
+              goalId,
+              uid,
+              attemptId,
+            })
+          ),
+          {
+            setupId: credit.setupId,
+            setupVersion: credit.setupVersion,
+            contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+            goalId,
+            userId: uid,
+            attemptId,
+            source: 'contribution',
+            amount: count,
+            shardIndex: parentShardIndex,
+            communityGroupId: goal.communityGroupId,
+            createdAt: FieldValue.serverTimestamp(),
+          }
+        );
+      }
+
+      // Reached only after the active-membership gate above, so this caller
+      // is an active member by construction.
+      return {
+        addedCount: count,
+        alreadyRecorded: false as const,
+        crossedTarget: false,
+        goalHadNoEvent: goal.reachedAt == null,
+        goalTracked: goal.crossingTracked === true,
+        goalTarget: goal.target,
+        goalUnit: goal.unit,
+        goalStatus: goal.status,
+        callerIsActiveMember: true,
+        goalDisplayAuthorized: isAggregateDisplayAuthorized(goal),
+        goalCommunityGroupId: goal.communityGroupId,
+      };
+    });
+
+  // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
+  // document only. See claimTargetCrossing for the rule.
+  // `crossedTarget` is never raised here: see ContributeResponse.
+  const crossedTarget = storedCrossedTarget === true;
+  let observedSharedTotal: number | null = null;
+  if (!alreadyRecorded && goalHadNoEvent && goalTarget > 0) {
+    observedSharedTotal = await sumGoalShards(goalId);
+    if (observedSharedTotal >= goalTarget) {
+      await recordTargetCrossing({ goalRef, count, observedSharedTotal, goalTracked });
     }
-
-    // May this caller be told the community's CURRENT shared state? Decided by
-    // evaluateGoalAggregateAccess — the SAME policy wsfGoalPulse uses — so a
-    // replay can never bypass a restriction the display path enforces. It
-    // previously checked only membership-or-authorization, which meant a
-    // non-member replaying an authorized goal in a SAMPLE community received
-    // state the display itself refuses.
-    //
-    // The caller's own receipt is decided separately below and is not subject
-    // to this: addedCount, ownCredit and alreadyRecorded are theirs.
-    const { allowed: maySeeCurrentSharedState } = await evaluateGoalAggregateAccess(
-      {
-        communityGroupId: goalCommunityGroupId,
-        aggregateDisplayAuthorized: goalDisplayAuthorized ? true : undefined,
-      },
-      callerIsActiveMember ? uid : null
-    );
-
-    // Their own credit is theirs either way, and is read for both cases. It is
-    // derived from their own uid, never from anyone else's row.
-    const ownCreditSnap = await memberTotalRef.get();
-    const ownCredit =
-      (ownCreditSnap.data() as { total?: number } | undefined)?.total ?? 0;
-
-    if (!maySeeCurrentSharedState) {
-      // A removed member replaying a valid attempt. They keep the honest
-      // answer about their own contribution — it happened, it counted once,
-      // here is what it was — and learn nothing about where the community
-      // stands now. sumGoalShards is not even called, and `crossedTarget` is
-      // withheld with the rest: whether the community's total reached its
-      // target is the community's state, and this caller is not entitled to
-      // it. Nothing false is said; a fact they may not see is not shown.
-      return { addedCount, ownCredit, alreadyRecorded };
-    }
-
-    const sharedTotal = observedSharedTotal ?? (await sumGoalShards(goalId));
-
-    return {
-      addedCount,
-      ownCredit,
-      sharedTotal,
-      target: goalTarget,
-      unit: goalUnit,
-      status: goalStatus,
-      alreadyRecorded,
-      crossedTarget,
-    };
   }
-);
+
+  // May this caller be told the community's CURRENT shared state? Decided by
+  // evaluateGoalAggregateAccess — the SAME policy wsfGoalPulse uses — so a
+  // replay can never bypass a restriction the display path enforces. It
+  // previously checked only membership-or-authorization, which meant a
+  // non-member replaying an authorized goal in a SAMPLE community received
+  // state the display itself refuses.
+  //
+  // The caller's own receipt is decided separately below and is not subject
+  // to this: addedCount, ownCredit and alreadyRecorded are theirs.
+  const { allowed: maySeeCurrentSharedState } = await evaluateGoalAggregateAccess(
+    {
+      communityGroupId: goalCommunityGroupId,
+      aggregateDisplayAuthorized: goalDisplayAuthorized ? true : undefined,
+    },
+    callerIsActiveMember ? uid : null
+  );
+
+  // Their own credit is theirs either way, and is read for both cases. It is
+  // derived from their own uid, never from anyone else's row.
+  const ownCreditSnap = await memberTotalRef.get();
+  const ownCredit =
+    (ownCreditSnap.data() as { total?: number } | undefined)?.total ?? 0;
+
+  if (!maySeeCurrentSharedState) {
+    // A removed member replaying a valid attempt. They keep the honest
+    // answer about their own contribution — it happened, it counted once,
+    // here is what it was — and learn nothing about where the community
+    // stands now. sumGoalShards is not even called, and `crossedTarget` is
+    // withheld with the rest: whether the community's total reached its
+    // target is the community's state, and this caller is not entitled to
+    // it. Nothing false is said; a fact they may not see is not shown.
+    return { addedCount, ownCredit, alreadyRecorded };
+  }
+
+  const sharedTotal = observedSharedTotal ?? (await sumGoalShards(goalId));
+
+  return {
+    addedCount,
+    ownCredit,
+    sharedTotal,
+    target: goalTarget,
+    unit: goalUnit,
+    status: goalStatus,
+    alreadyRecorded,
+    crossedTarget,
+  };
+}
 
 /**
  * Record the one-time target-crossing event for a goal whose shard total was
@@ -4005,6 +4188,53 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
 //   • Because nothing here clears the field, a later contribution that
 //     crosses the target a second time emits nothing. The goal keeps the
 //     first crossing, which is the one that happened.
+//
+// ── WHAT A CORRECTION IS ADDRESSED TO, AND WHY IT IS NOT THE CLOCK ──────────
+//
+// THE DEFECT THIS REPLACES, written down so it is not re-proposed. The first
+// build of the combined credit decided whether a correction reached a combined
+// parent by reading the child's claim AS IT IS NOW and comparing
+// `Timestamp.now()` against the frozen window. Two things follow from that, and
+// both are wrong:
+//
+//   1. IT COULD NOT TELL WHAT WAS BEING CORRECTED. A correction to repetitions
+//      recorded BEFORE the Champion activated the combined goal — which the
+//      parent never counted — moved the parent anyway, because the claim was
+//      active and the clock was inside the window. The parent lost units it
+//      had never been given.
+//   2. IT STOPPED CORRECTING AT THE WINDOW. Once the combined window closed or
+//      the claim was released, a correction to an attempt the parent HAD
+//      counted moved only the child. The two numbers silently diverged, and
+//      the divergence grew with every post-event recount — which is when
+//      recounts actually happen.
+//
+// THE RULE NOW: A PARENT CORRECTION IS LINKED TO THE IMMUTABLE CREDIT ROW,
+// never to the claim and never to the clock.
+//
+//   * A correction that names no contribution (no `attemptId`) NEVER moves a
+//     parent. It cannot be traced to a credit, so it is not a correction of
+//     one. This is the "tally counter was jammed" case and it is unchanged
+//     from the day it shipped.
+//   * A correction that names a contribution reads
+//     wsfCombinedCredits/{goalId}_{uid}_{attemptId} — the row wsfContribute
+//     wrote, named after the contribution itself.
+//       – NO ROW  → that contribution was never credited to any parent (it
+//                   predates activation, or fell outside the frozen window, or
+//                   the child was unclaimed at the time). The child moves. The
+//                   parent does not. Ever.
+//       – A ROW   → it WAS credited. The child and the parent both move, once
+//                   each, in this transaction — INCLUDING after the window has
+//                   closed, after the claim has been released and after the
+//                   setup has been closed. The credit happened; unwinding it is
+//                   not a new credit, and no passage of time makes it one.
+//   * A REPEATED OR RETRIED correction does not double-apply: an addressed
+//     correction carries a caller-minted `correctionId`, the adjustment row is
+//     named from it, and a second call with the same key returns the first
+//     call's outcome and writes nothing.
+//
+// A goal in no combined setup reaches none of this: with no `attemptId` there
+// is no credit read and no parent branch, and the rows, the refusals and the
+// six-key response are exactly what they were.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type AdjustGoalRequest = {
@@ -4013,6 +4243,39 @@ type AdjustGoalRequest = {
   targetUid?: unknown;
   reason?: unknown;
   repeatPolicy?: unknown; // 'once' | 'multiple'
+  /**
+   * WHICH CONTRIBUTION THIS CORRECTION IS ADDRESSED TO. Optional, and the
+   * whole of the answer to "how does a correction name the credited attempt".
+   *
+   * Present, with `targetUid`, it means: correct the contribution
+   * wsfContributions/{goalId}_{targetUid}_{attemptId}. The server then reads
+   * the immutable credit row for that exact contribution and moves the
+   * combined parent if and only if that row exists — whatever the claim says
+   * now, and whatever the clock says now.
+   *
+   * ABSENT it means what it has always meant: a correction to the goal's
+   * totals that names no contribution ("the tally counter was jammed by 40").
+   * Such a correction CANNOT be traced to a credit, so it never moves a
+   * combined parent. It moves the child, writes its audit row, and behaves
+   * exactly as it did before combined goals existed.
+   */
+  attemptId?: unknown;
+  /**
+   * THE CORRECTION'S OWN IDEMPOTENCY KEY, minted by the caller, in the same
+   * shape and with the same validator as a contribution's attemptId.
+   *
+   * REQUIRED whenever `attemptId` is given, because an addressed correction
+   * moves two counters and a retried network call must not move them twice.
+   * With it, the adjustment document's id is derived rather than random, and a
+   * repeat is recognised and returns the first call's outcome without applying
+   * anything — the same discipline wsfContribute's (goal, uid, attemptId)
+   * replay branch uses, for the same reason.
+   *
+   * Optional on an unaddressed correction, where it is equally welcome and
+   * equally replay-safe, and where leaving it out preserves today's behaviour
+   * exactly.
+   */
+  correctionId?: unknown;
 };
 
 type AdjustGoalResponse = {
@@ -4463,20 +4726,90 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       targetUid = normalized;
     }
 
+    // ── WHAT THIS CORRECTION IS ADDRESSED TO ────────────────────────────────
+    //
+    // `attemptId` names the contribution being corrected. It is validated with
+    // the SAME validator and the SAME message wsfContribute uses, because it
+    // is the same identifier: a correction that names an attempt id the
+    // contribution path could never have accepted is naming nothing.
+    let attemptId: string | null = null;
+    const rawAttemptId = request.data?.attemptId;
+    if (rawAttemptId !== undefined && rawAttemptId !== null) {
+      attemptId = normalizeAttemptId(rawAttemptId);
+      if (!attemptId) {
+        throw new HttpsError(
+          'invalid-argument',
+          'attemptId must be 8..128 chars of A-Z, a-z, 0-9, _ or -.'
+        );
+      }
+    }
+    // A contribution belongs to a member. Without the member there is no
+    // document to read and no credit to find, so an addressed correction that
+    // omits targetUid is refused rather than quietly widened into a goal-level
+    // correction that happens to carry an attempt id.
+    if (attemptId && !targetUid) {
+      throw new HttpsError(
+        'invalid-argument',
+        'targetUid is required when attemptId names the contribution to correct.'
+      );
+    }
+    let correctionId: string | null = null;
+    const rawCorrectionId = request.data?.correctionId;
+    if (rawCorrectionId !== undefined && rawCorrectionId !== null) {
+      correctionId = normalizeAttemptId(rawCorrectionId);
+      if (!correctionId) {
+        throw new HttpsError(
+          'invalid-argument',
+          'correctionId must be 8..128 chars of A-Z, a-z, 0-9, _ or -.'
+        );
+      }
+    }
+    // An addressed correction moves TWO counters. A retried network call must
+    // not move them twice, and the only thing that can make that guarantee is
+    // a key the caller mints and reuses on the retry.
+    if (attemptId && !correctionId) {
+      throw new HttpsError(
+        'invalid-argument',
+        'correctionId is required when attemptId names the contribution to correct.'
+      );
+    }
+
     const db = getFirestore();
     const goalRef = db.doc(`wsfGoals/${goalId}`);
-    const adjustmentRef = db.collection('wsfGoalAdjustments').doc();
+    // A DERIVED ADJUSTMENT ID when the caller supplied a correction key, a
+    // random one otherwise. Derived means the replay branch below can find the
+    // first call's row by name, with no query and no second mechanism; random
+    // means a caller who asked for no idempotency gets exactly the behaviour
+    // this callable has always had.
+    const adjustmentRef = correctionId
+      ? db.doc(`wsfGoalAdjustments/${goalId}_${correctionId}`)
+      : db.collection('wsfGoalAdjustments').doc();
     const shardRefs: FirebaseFirestore.DocumentReference[] = [];
     for (let i = 0; i < GOAL_SHARD_COUNT; i++) {
       shardRefs.push(db.doc(`wsfGoalCounters/${goalId}/shards/${i}`));
     }
     const writeShardRef = shardRefs[0]!; // deterministic; corrections aren't hot
-    // The child's combined claim, read by name. A correction is a cold path,
-    // so it can afford to read the parent's ten shards for this child as well
-    // and clamp honestly rather than guess.
-    const claimRef = combinedClaimRef(goalId);
+    // THE CONTRIBUTION BEING CORRECTED, and THE CREDIT IT EARNED — both read
+    // by name, both only when this correction actually names one. The claim is
+    // NOT read here any more, and neither is the clock: what a correction is
+    // addressed to is a fact in the ledger, not a fact about now.
+    const correctedContributionRef =
+      attemptId && targetUid
+        ? db.doc(`wsfContributions/${goalId}_${targetUid}_${attemptId}`)
+        : null;
+    const correctedCreditRef =
+      attemptId && targetUid
+        ? combinedCreditRef(
+            combinedContributionCreditId({ goalId, uid: targetUid, attemptId })
+          )
+        : null;
 
-    const { newTargetTotal, effectiveRepeatPolicy } = await db.runTransaction(async (tx) => {
+    const {
+      newTargetTotal,
+      effectiveRepeatPolicy,
+      appliedDelta,
+      appliedTargetUid,
+    } = await db.runTransaction(async (tx) => {
       const goalSnap = await tx.get(goalRef);
       if (!goalSnap.exists) {
         throw new HttpsError('not-found', 'Goal not found.');
@@ -4503,39 +4836,121 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         ? db.doc(`wsfGoalMemberTotals/${goalId}_${targetUid}`)
         : null;
 
-      const [shardSnaps, targetTotalSnap, claimSnap] = await Promise.all([
-        Promise.all(shardRefs.map((r) => tx.get(r))),
-        targetMemberTotalRef
-          ? tx.get(targetMemberTotalRef)
-          : Promise.resolve(null),
-        tx.get(claimRef),
-      ]);
+      const [shardSnaps, targetTotalSnap, existingAdjustmentSnap, contributionSnap, creditSnap] =
+        await Promise.all([
+          Promise.all(shardRefs.map((r) => tx.get(r))),
+          targetMemberTotalRef
+            ? tx.get(targetMemberTotalRef)
+            : Promise.resolve(null),
+          // Only a DERIVED adjustment id can already exist. With no
+          // correctionId the ref is a fresh random document and this read is
+          // skipped entirely, so an unaddressed correction issues exactly the
+          // reads it always did.
+          correctionId ? tx.get(adjustmentRef) : Promise.resolve(null),
+          correctedContributionRef
+            ? tx.get(correctedContributionRef)
+            : Promise.resolve(null),
+          correctedCreditRef ? tx.get(correctedCreditRef) : Promise.resolve(null),
+        ]);
 
-      // ── DOES THIS CORRECTION REACH A COMBINED PARENT? ──────────────────
+      // ── THE REPLAY BRANCH ───────────────────────────────────────────────
       //
-      // The SAME decision function the contribution path uses, so a
-      // correction can never apply a rule the credit did not. `Timestamp.now()`
-      // is the server's clock, exactly as in wsfContribute: a correction made
-      // after the frozen window closed, or on a released claim, moves the
-      // child and leaves the parent alone — the parent's total is what was
-      // earned inside its own window, and a later correction cannot smuggle
-      // units into a window that has ended.
-      const parentCredit =
-        delta === 0
-          ? null
-          : combinedCreditDecision({
-              claim: claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null,
-              goalId,
-              communityGroupId: goal.communityGroupId,
-              atMillis: Timestamp.now().toMillis(),
-            });
+      // A correction carrying a correctionId is identified by that key, and a
+      // key that already named an adjustment has already been applied. Return
+      // what the first call did and write NOTHING — neither the child, nor the
+      // parent, nor a second audit row. This is the same discipline
+      // wsfContribute's (goal, uid, attemptId) replay uses, and it is placed
+      // here for the same reason: before any decision that could move a
+      // counter, and after the authorization gates, so a replay is not an
+      // oracle for a caller who has no authority over this goal.
+      if (existingAdjustmentSnap?.exists) {
+        const prior = existingAdjustmentSnap.data() as {
+          delta?: unknown;
+          targetUid?: unknown;
+        };
+        const priorDelta =
+          typeof prior.delta === 'number' && Number.isFinite(prior.delta)
+            ? prior.delta
+            : 0;
+        const priorTargetUid = normalizeStringId(prior.targetUid);
+        let priorTargetTotal: number | null = null;
+        if (priorTargetUid) {
+          const snap =
+            priorTargetUid === targetUid && targetTotalSnap
+              ? targetTotalSnap
+              : await tx.get(db.doc(`wsfGoalMemberTotals/${goalId}_${priorTargetUid}`));
+          priorTargetTotal =
+            (snap.data() as { total?: number } | undefined)?.total ?? 0;
+        }
+        return {
+          newTargetTotal: priorTargetTotal,
+          effectiveRepeatPolicy: goalRepeatPolicy(goal),
+          appliedDelta: priorDelta,
+          appliedTargetUid: priorTargetUid,
+        };
+      }
 
-      // Read the parent's credit FOR THIS CHILD so a downward correction
-      // cannot drive it below zero. This matters because the child's own total
-      // may include repetitions taken BEFORE activation, which the parent
-      // never counted: a −100 on a child that gave the parent 20 must take the
-      // parent to 0, not to −80. The applied amount is recorded, so the ledger
-      // says what actually moved rather than what was asked for.
+      // ── DOES THIS CORRECTION REACH A COMBINED PARENT? ───────────────────
+      //
+      // NOT decided from the claim, and NOT decided from the clock. Decided
+      // from the immutable credit row named after the contribution being
+      // corrected — see readContributionCredit and the header block above.
+      //
+      // Consequences, all of them deliberate:
+      //   • no attemptId          → parentCredit stays null. An untraceable
+      //                             correction never moves a parent.
+      //   • attemptId, no row     → never credited (pre-activation history, an
+      //                             attempt outside the frozen window, or an
+      //                             unclaimed child). The child moves alone.
+      //   • attemptId, a row      → credited. Both move, once each, EVEN IF
+      //                             the window has since closed, the claim has
+      //                             been released and the setup has been
+      //                             closed. The row does not expire.
+      let parentCredit: CombinedCredit | null = null;
+      let creditedAmount = 0;
+      if (correctedContributionRef) {
+        // An addressed correction must name a contribution that exists. A
+        // typo must not degrade into "apparently never credited, so correct
+        // the child alone" — that is inferring the target from absence, which
+        // is exactly what this change exists to stop.
+        if (!contributionSnap?.exists) {
+          throw new HttpsError(
+            'not-found',
+            'That contribution was not found on this goal.'
+          );
+        }
+        const lookup = readContributionCredit(creditSnap!, {
+          goalId,
+          uid: targetUid!,
+          attemptId: attemptId!,
+        });
+        if (lookup.kind === 'unreadable') {
+          // A row exists but does not describe this contribution. Refusing is
+          // the only honest answer: applying the correction would move the
+          // child while leaving the parent in a state nobody can account for.
+          throw new HttpsError(
+            'failed-precondition',
+            'The combined-goal credit for that contribution cannot be read.'
+          );
+        }
+        if (lookup.kind === 'credited' && delta !== 0) {
+          parentCredit = lookup.credit;
+          creditedAmount = lookup.amount;
+        }
+      }
+
+      // TWO FLOORS ON A DOWNWARD CORRECTION, and the applied amount is
+      // recorded so the ledger says what actually moved rather than what was
+      // asked for.
+      //
+      //   1. NOT BELOW WHAT THIS ATTEMPT GAVE THE PARENT. Unwinding a credit
+      //      cannot unwind more than that credit was worth: a −100 aimed at an
+      //      attempt that credited 20 takes 20 off the parent, and the other
+      //      80 come off the child, which really did have them.
+      //   2. NOT BELOW ZERO FOR THIS CHILD. The child's own total may include
+      //      repetitions taken BEFORE activation, which the parent never
+      //      counted, and two corrections of the same attempt must not drive
+      //      the parent negative.
       let appliedCombinedDelta = 0;
       if (parentCredit) {
         const parentShardRefs: FirebaseFirestore.DocumentReference[] = [];
@@ -4547,7 +4962,8 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
           const data = snap.data() as { count?: number } | undefined;
           return sum + (typeof data?.count === 'number' ? data.count : 0);
         }, 0);
-        appliedCombinedDelta = delta < 0 ? Math.max(delta, -parentChildTotal) : delta;
+        const floor = Math.min(creditedAmount, Math.max(parentChildTotal, 0));
+        appliedCombinedDelta = delta < 0 ? Math.max(delta, -floor) : delta;
       }
 
       const currentSharedTotal = shardSnaps.reduce((sum, snap) => {
@@ -4589,6 +5005,11 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         // Present only on a call that changed it, so the ledger reads as
         // "this is what this correction did".
         ...(repeatPolicy ? { repeatPolicy } : {}),
+        // Present ONLY on an addressed correction, naming the contribution it
+        // was aimed at and the key it was made idempotent by. An unaddressed
+        // correction writes neither and its audit row is what it always was.
+        ...(attemptId ? { attemptId } : {}),
+        ...(correctionId ? { correctionId } : {}),
         // Present ONLY when this correction also moved a combined parent, and
         // carrying the amount that actually moved. A goal in no combined setup
         // writes the same audit row it always did, field for field.
@@ -4610,12 +5031,16 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
           { count: FieldValue.increment(appliedCombinedDelta) },
           { merge: true }
         );
-        // The linkage, named by the adjustment id, which the server minted
-        // once before this transaction opened. A transaction retry writes the
-        // same id; a second correction is a second adjustment id and a second
-        // row. `create` for the same reason the contribution's linkage uses
-        // it: if the id already existed the parent would be moved twice, and
-        // refusing is the correct answer.
+        // The linkage, named by the adjustment id — which is now DERIVED from
+        // the caller's correctionId on every addressed correction, so it is
+        // the same id on a retry and a different id on a genuinely different
+        // correction. `create` for the same reason the contribution's linkage
+        // uses it: if the id already existed the parent would be moved twice,
+        // and refusing is the correct answer. In practice the replay branch
+        // above returns long before this line on a retry.
+        //
+        // It names the corrected attempt too, so the ledger reads as "this
+        // correction, of that credit" and a recovery can walk from either end.
         tx.create(
           combinedCreditRef(
             combinedAdjustmentCreditId(parentCredit.setupId, adjustmentRef.id)
@@ -4632,6 +5057,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
             requestedAmount: delta,
             shardIndex: 0,
             communityGroupId: goal.communityGroupId,
+            ...(attemptId ? { correctsAttemptId: attemptId } : {}),
             createdAt: FieldValue.serverTimestamp(),
           }
         );
@@ -4673,14 +5099,20 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       return {
         newTargetTotal: projectedTargetTotal,
         effectiveRepeatPolicy: repeatPolicy ?? goalRepeatPolicy(goal),
+        appliedDelta: delta,
+        appliedTargetUid: targetUid,
       };
     });
 
     const sharedTotal = await sumGoalShards(goalId);
+    // `appliedDelta` and `appliedTargetUid` are the request's own values on
+    // every first call. They differ only on a REPLAY, where they are the
+    // FIRST call's values — the same discipline as wsfContribute returning the
+    // original count, so a retry sees the body it would have seen at the time.
     return {
       adjustmentId: adjustmentRef.id,
-      delta,
-      targetUid,
+      delta: appliedDelta,
+      targetUid: appliedTargetUid,
       sharedTotal,
       targetMemberTotal: newTargetTotal,
       repeatPolicy: effectiveRepeatPolicy,
@@ -4868,9 +5300,10 @@ async function enforceStationRateLimit(ip: string, now: number): Promise<void> {
 }
 
 /**
- * What a screen is currently showing as "up now": the SAME three fields
- * wsfQueueState publishes, plus when the call was made. A uid does not reach
- * this document either — see publicQueueEntry in the queue section.
+ * What a screen is currently showing as "up now": the cached pointer at the
+ * person this station called, plus when the call was made. A uid does not
+ * reach this document — see hallAssignment in the turn contract, which is the
+ * one place an entry is projected for a screen.
  *
  * It is a cached pointer, not the truth. The queue entry is the truth, and
  * every reader re-reads it before showing anybody.
@@ -4885,8 +5318,9 @@ type StationServing = {
 /**
  * wsfKioskStations/{stationId} — one enrolled screen.
  *
- * `serving` starts null and is written only by the queue section at the bottom
- * of this file (wsfCallNext / wsfFinishServing). It was declared as `null` by
+ * `serving` starts null and is written only by the turn contract at the bottom
+ * of this file (wsfCallNext / wsfCancelTurn, and blanked by a completion). It
+ * was declared as `null` by
  * the station slice precisely so the document's shape would not change under a
  * live station when the queue arrived; widening the TYPE here changes no
  * stored document and no existing callable — nothing above this line reads or
@@ -5600,12 +6034,24 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
 //      goal is by being recorded against one of its activities, through the
 //      ordinary contribute page, under the ordinary membership, window and
 //      repeat-policy gates. Nothing below accepts a contribution.
+//   5. A CORRECTION IS LINKED TO THE CREDIT, NOT TO THE CLOCK. wsfAdjustGoal
+//      moves a parent if and only if the contribution it names has a credit
+//      row — never because a claim happens to be active now, and never
+//      refusing because a window has since closed. See the block headed
+//      "WHAT A CORRECTION IS ADDRESSED TO, AND WHY IT IS NOT THE CLOCK".
+//   6. A BOUNDED RECOVERY WITH A RECEIPT. wsfRepairCombinedGoal recomputes a
+//      parent's counters from the credit rows alone, repairs what disagrees,
+//      reports what it found even when it changes nothing, is safe to run
+//      twice, and refuses to write at all when it could not read the whole
+//      ledger.
 //
 // The claim, the activation boundary, the parent's sharded counter and the
 // credit linkage are declared ABOVE wsfContribute — see the block headed
 // "THE CLAIM, THE ACTIVATION BOUNDARY, AND THE PARENT COUNTER" — because the
 // contribution transaction is where a credit is made and that is where the
-// rule belongs. This section holds the three callables: freeze, read, close.
+// rule belongs. This section holds four callables: freeze, read, close, and
+// the bounded recovery that rebuilds a parent's counters from the credit rows
+// and hands back an audit receipt (wsfRepairCombinedGoal).
 //
 // WHAT WAS TRIED FIRST AND REFUSED, recorded so it is not re-proposed. The
 // parent had NO counter: its total was the sum of its children's LIFETIME
@@ -5619,8 +6065,10 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
 // are two numbers where there was one, and they could in principle disagree.
 // What keeps them from disagreeing is that neither is ever written without the
 // other: the same transaction writes the child's shard, the parent's shard and
-// the linkage row, and the linkage row is what a recovery would rebuild the
-// parent from. The old design avoided drift by refusing to count correctly.
+// the linkage row, and wsfRepairCombinedGoal rebuilds the parent from those
+// rows — a real, bounded, Champion-invoked operation with a receipt, not a
+// property that would hold if someone wrote the code. The old design avoided
+// drift by refusing to count correctly.
 //
 // New Admin-SDK-only collections (no firestore.rules change; the catch-all
 // deny at the bottom of the WSF section covers them — same position as
@@ -6122,6 +6570,330 @@ export const wsfCloseCombinedGoal = onCall<CloseCombinedGoalRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// wsfRepairCombinedGoal — THE BOUNDED RECOVERY PATH, AND ITS RECEIPT.
+//
+// WHAT IT IS FOR. The parent's number lives in two places that must agree: the
+// sharded counters under wsfCombinedCounters/{setupId}/shards, which are what
+// the screen reads, and the immutable credit rows in wsfCombinedCredits, which
+// are what actually happened. Every write puts both in one transaction, so
+// they cannot drift in the ordinary course of events. They can still be driven
+// apart by something outside the ordinary course — a hand edit, a restore from
+// an older backup, a migration. "The ledger makes the parent rebuildable" was
+// true before this callable existed and it repaired nothing: a recovery path
+// that only exists in principle is not a recovery path.
+//
+// THE LEDGER IS THE AUTHORITY, AND IT IS THE ONLY AUTHORITY. A child's new
+// counter total is the SUM OF ITS CREDIT ROWS — contribution rows and
+// correction rows alike, each by the amount that actually moved. Nothing else
+// is consulted: not the child's own shards, not the claim, not the clock, and
+// above all not "what the total looks like it ought to be". THIS IS WHAT
+// "NEVER INVENT A CREDIT" MEANS MECHANICALLY: a counter with no rows behind it
+// is repaired to zero, and a counter can only ever be raised to a number that
+// a set of rows literally adds up to.
+//
+// IT IS SAFE TO RUN TWICE. The repair writes an ABSOLUTE value derived from
+// rows read in the same transaction, never an increment, so a second run finds
+// ledger and counter equal and writes nothing at all. Running it on a healthy
+// parent is a read.
+//
+// IT REPORTS EVEN WHEN IT CHANGES NOTHING. The receipt always states, per
+// child, what the ledger says, what the counter said, and the difference —
+// including when the difference is zero, and including when it declines to
+// write. A recovery that answers "done" is not an audit.
+//
+// THE BOUND, stated rather than hoped for. The scan is
+//   • at most COMBINED_REPAIR_CREDIT_LIMIT credit rows for the setup, fetched
+//     by a SINGLE-FIELD EQUALITY (setupId ==) with an explicit limit; and
+//   • at most MAX_COMBINED_CHILDREN × COMBINED_SHARD_COUNT counter documents,
+//     which the six-child cap fixes at 60.
+// One more row than the limit is read deliberately, so "there are more" is a
+// fact and not an inference. WHEN THE BOUND IS EXCEEDED IT WRITES NOTHING and
+// returns status 'notVerified' with scanComplete false: repairing a counter
+// from a ledger this pass could not finish reading would destroy exactly the
+// credits it failed to see. The same refusal covers a row it cannot read —
+// a ledger that is not fully legible is not a ledger to rebuild from.
+//
+// AUTHORIZATION is the setup's own: an active foundingChampion of the
+// community the setup belongs to, and nobody else. A caller without that
+// authority, and a setupId that does not exist, get the same generic not-found
+// — the same answer wsfCloseCombinedGoal and wsfAdjustGoal give, so this
+// cannot become an oracle for which setups exist.
+//
+// THE RECEIPT NAMES NO PERSON. Credit rows carry a userId; the receipt carries
+// goal ids and numbers. A Champion repairing a counter does not need to be
+// handed a list of who contributed what, and an audit artifact is exactly the
+// kind of thing that gets pasted somewhere.
+//
+// No firestore.rules change and no index entry: one single-field equality and
+// document reads, on collections that already fall to the catch-all deny.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How many credit rows one repair pass will read. Two thousand is far above
+ * any single combined goal this product has seen — an event of six activities
+ * and a few hundred members — and far below the point at which a single
+ * transaction becomes unwise. It is a CEILING, not a budget: a healthy setup
+ * reads exactly the rows it has.
+ */
+const COMBINED_REPAIR_CREDIT_LIMIT = 2000;
+
+type RepairCombinedGoalRequest = { setupId?: unknown };
+
+/** What the ledger and the counter each say about ONE activity. */
+type CombinedRepairChild = {
+  goalId: string;
+  /** The sum of this child's credit rows. The authority. */
+  ledgerTotal: number;
+  /** What the parent's shards for this child said before this pass. */
+  counterTotalBefore: number;
+  /** What they say after it. Equal to `counterTotalBefore` when nothing was written. */
+  counterTotalAfter: number;
+  /** ledgerTotal − counterTotalBefore. Zero is the healthy answer, and it is still reported. */
+  discrepancy: number;
+  /** How many credit rows this child's total was built from. */
+  creditRows: number;
+  /** Whether THIS pass wrote a counter for this child. */
+  repaired: boolean;
+};
+
+/**
+ * THE AUDIT RECEIPT. Every field is a finding, not a status line: what was
+ * examined, what disagreed, what was changed, and what was deliberately left
+ * alone.
+ */
+type RepairCombinedGoalResponse = {
+  setupId: string;
+  /** The setup's frozen version, or 0 when the setup carries none that can be read. */
+  setupVersion: number;
+  /**
+   * 'healthy'     — ledger and counters agreed everywhere; nothing was written.
+   * 'repaired'    — at least one counter was brought back to its ledger.
+   * 'notVerified' — the ledger could not be fully read (over the bound, or a
+   *                 row that does not parse). NOTHING was written.
+   */
+  status: 'healthy' | 'repaired' | 'notVerified';
+  /** False when there are more credit rows than one pass reads. */
+  scanComplete: boolean;
+  creditScanLimit: number;
+  creditRowsExamined: number;
+  /** Rows naming this setup that do not describe a usable credit. */
+  unreadableCreditRows: number;
+  /** Rows naming a goal that is not a child of this setup. Counted, never applied. */
+  orphanCreditRows: number;
+  ledgerTotal: number;
+  counterTotalBefore: number;
+  counterTotalAfter: number;
+  /** ledgerTotal − counterTotalBefore, over the whole setup. */
+  discrepancyTotal: number;
+  childrenExamined: number;
+  childrenRepaired: number;
+  children: CombinedRepairChild[];
+  /** When this pass ran, as an ISO instant. */
+  checkedAt: string;
+};
+
+export const wsfRepairCombinedGoal = onCall<RepairCombinedGoalRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<RepairCombinedGoalResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const setupId = normalizeStringId(request.data?.setupId);
+    if (!setupId) {
+      throw new HttpsError('invalid-argument', 'setupId is required.');
+    }
+
+    const db = getFirestore();
+    const setupRef = db.doc(`wsfCombinedGoals/${setupId}`);
+    // THE BOUND, expressed as a limit on the query itself rather than as a
+    // count taken afterwards. One extra row so "there are more than the limit"
+    // is observed and not guessed.
+    const creditQuery = db
+      .collection('wsfCombinedCredits')
+      .where('setupId', '==', setupId)
+      .limit(COMBINED_REPAIR_CREDIT_LIMIT + 1);
+    const checkedAt = new Date().toISOString();
+
+    return db.runTransaction(async (tx) => {
+      const setupSnap = await tx.get(setupRef);
+      // A setup that does not exist and one the caller has no authority over
+      // are the same answer, matching wsfCloseCombinedGoal and wsfAdjustGoal.
+      if (!setupSnap.exists) notFound();
+      const setup = setupSnap.data() as CombinedGoalDoc;
+      const communityGroupId = normalizeStringId(setup.communityGroupId);
+      if (!communityGroupId) notFound();
+
+      const membership = await readActiveMembership(tx, communityGroupId, uid);
+      if (!membership) notFound();
+      if (membership.role !== 'foundingChampion') notFound();
+
+      const setupVersion =
+        typeof setup.version === 'number' &&
+        Number.isInteger(setup.version) &&
+        setup.version >= 1
+          ? setup.version
+          : 0;
+
+      // The children, deduplicated, and bounded by the same cap activation
+      // enforces. A hand-edited setup with more than the cap is truncated to
+      // it rather than scanned, because the cap is the contract.
+      const childIds: string[] = [];
+      const rawIds = Array.isArray(setup.childGoalIds) ? setup.childGoalIds : [];
+      for (const raw of rawIds) {
+        if (childIds.length >= MAX_COMBINED_CHILDREN) break;
+        const id = normalizeStringId(raw);
+        if (id && !childIds.includes(id)) childIds.push(id);
+      }
+
+      // ── READ THE LEDGER ────────────────────────────────────────────────
+      //
+      // Inside the transaction on purpose: the credit rows are in this pass's
+      // read set, so a contribution that credits this setup while the pass is
+      // running aborts and retries it rather than being silently overwritten
+      // by a total computed before it existed.
+      const creditSnap = await tx.get(creditQuery);
+      const scanComplete = creditSnap.size <= COMBINED_REPAIR_CREDIT_LIMIT;
+
+      const ledgerByChild = new Map<string, number>();
+      const rowsByChild = new Map<string, number>();
+      for (const id of childIds) {
+        ledgerByChild.set(id, 0);
+        rowsByChild.set(id, 0);
+      }
+      let unreadableCreditRows = 0;
+      let orphanCreditRows = 0;
+      for (const doc of creditSnap.docs) {
+        const row = doc.data() as CombinedCreditDoc;
+        const rowGoalId = normalizeStringId(row.goalId);
+        const amount = row.amount;
+        if (
+          !rowGoalId ||
+          typeof amount !== 'number' ||
+          !Number.isFinite(amount) ||
+          !Number.isInteger(amount)
+        ) {
+          unreadableCreditRows += 1;
+          continue;
+        }
+        if (!ledgerByChild.has(rowGoalId)) {
+          // A row naming a goal this setup does not have. It is reported and
+          // NEVER applied: a repair that wrote a counter for a child the setup
+          // never claimed would be inventing a credit by another route.
+          orphanCreditRows += 1;
+          continue;
+        }
+        ledgerByChild.set(rowGoalId, ledgerByChild.get(rowGoalId)! + amount);
+        rowsByChild.set(rowGoalId, rowsByChild.get(rowGoalId)! + 1);
+      }
+
+      // ── READ THE COUNTERS ──────────────────────────────────────────────
+      // Ten documents per child, at most sixty in all.
+      const shardRefsByChild = new Map<string, FirebaseFirestore.DocumentReference[]>();
+      const allShardRefs: FirebaseFirestore.DocumentReference[] = [];
+      for (const goalId of childIds) {
+        const refs: FirebaseFirestore.DocumentReference[] = [];
+        for (let i = 0; i < COMBINED_SHARD_COUNT; i++) {
+          refs.push(combinedShardRef(setupId, goalId, i));
+        }
+        shardRefsByChild.set(goalId, refs);
+        allShardRefs.push(...refs);
+      }
+      const shardSnaps = await Promise.all(allShardRefs.map((r) => tx.get(r)));
+      const shardValueByPath = new Map<string, number>();
+      shardSnaps.forEach((snap, i) => {
+        const data = snap.data() as { count?: number } | undefined;
+        shardValueByPath.set(
+          allShardRefs[i]!.path,
+          typeof data?.count === 'number' && Number.isFinite(data.count) ? data.count : 0
+        );
+      });
+
+      // ── COMPARE, THEN — ONLY IF THE LEDGER WAS FULLY LEGIBLE — REPAIR ──
+      //
+      // A ledger that could not be read to the end, or that contains a row
+      // this build cannot parse, is not a ledger to rebuild from. The pass
+      // still reports everything it found; it simply writes nothing.
+      const mayRepair = scanComplete && unreadableCreditRows === 0;
+
+      const children: CombinedRepairChild[] = [];
+      let ledgerTotal = 0;
+      let counterTotalBefore = 0;
+      let counterTotalAfter = 0;
+      let childrenRepaired = 0;
+
+      for (const goalId of childIds) {
+        const refs = shardRefsByChild.get(goalId)!;
+        const counterBefore = refs.reduce(
+          (sum, ref) => sum + (shardValueByPath.get(ref.path) ?? 0),
+          0
+        );
+        const ledger = ledgerByChild.get(goalId) ?? 0;
+        const discrepancy = ledger - counterBefore;
+        let counterAfter = counterBefore;
+        let repaired = false;
+
+        if (mayRepair && discrepancy !== 0) {
+          // AN ABSOLUTE VALUE, not an increment. Shard 0 absorbs the whole
+          // difference — the same shard a correction writes, and for the same
+          // reason: a repair is not a hot path. Every other shard is left
+          // exactly as it is, so this write is the smallest one that makes the
+          // total equal the ledger, and re-running it is a no-op.
+          const shard0 = refs[0]!;
+          tx.set(
+            shard0,
+            { count: (shardValueByPath.get(shard0.path) ?? 0) + discrepancy },
+            { merge: true }
+          );
+          counterAfter = ledger;
+          repaired = true;
+          childrenRepaired += 1;
+        }
+
+        ledgerTotal += ledger;
+        counterTotalBefore += counterBefore;
+        counterTotalAfter += counterAfter;
+        children.push({
+          goalId,
+          ledgerTotal: ledger,
+          counterTotalBefore: counterBefore,
+          counterTotalAfter: counterAfter,
+          discrepancy,
+          creditRows: rowsByChild.get(goalId) ?? 0,
+          repaired,
+        });
+      }
+
+      const status: RepairCombinedGoalResponse['status'] = !mayRepair
+        ? 'notVerified'
+        : childrenRepaired > 0
+          ? 'repaired'
+          : 'healthy';
+
+      return {
+        setupId,
+        setupVersion,
+        status,
+        scanComplete,
+        creditScanLimit: COMBINED_REPAIR_CREDIT_LIMIT,
+        creditRowsExamined: Math.min(creditSnap.size, COMBINED_REPAIR_CREDIT_LIMIT),
+        unreadableCreditRows,
+        orphanCreditRows,
+        ledgerTotal,
+        counterTotalBefore,
+        counterTotalAfter,
+        discrepancyTotal: ledgerTotal - counterTotalBefore,
+        childrenExamined: childIds.length,
+        childrenRepaired,
+        children,
+        checkedAt,
+      };
+    });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // wsfCombinedGoalPulse — the read.
 //
 // A SEPARATE CALLABLE, for the same reason wsfGoalRecentAdditions is separate:
@@ -6456,234 +7228,443 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
-// QUEUE — a real line, and a screen that calls a person by a name THEY chose.
+// THE TURN CONTRACT — one line per EVENT, one place per ACCOUNT, and one
+// canonical attempt per turn.
 //
-// THE ONE DECISION THIS FEATURE IS REALLY MAKING: a queue puts a person's name
-// on a screen in a room full of strangers. That is a disclosure, and it is the
-// whole design problem; the rest is plumbing. So:
+// WHAT WAS REFUSED, AND WHY THE SHAPE CHANGED. The queue this replaces
+// published the whole waiting list BY NAME, kept a line per GOAL, gave a call
+// ten minutes with no way for the person to say they were coming, had no
+// station-side start, recorded nothing, and closed the previous person the
+// moment somebody pressed "Call next" — without a confirmed result. Every one
+// of those is a promise this file can keep instead:
 //
-//   * the label on the screen is CHOSEN at the moment of joining and never
-//     inferred. The client offers the profile's FIRST name, with initials one
-//     tap away, and the box is the person's to overwrite. The server takes
-//     whatever arrives and stores only that.
-//   * it is stored ONLY on the queue entry. It is not written to the member
-//     profile, not to the membership row, not to a contribution, not to a log.
-//     It leaves when the entry leaves.
-//   * `wsfQueueState` publishes `{entryId, calledName, position}` and NOTHING
-//     else. There is exactly ONE function below that turns an entry into
-//     something a caller may see — `publicQueueEntry` — and it is the only
-//     place a queue entry is ever projected. No uid, ever, for any caller.
+//   1. THE HALL SEES ONE PERSON. `wsfTurnState` publishes the currently
+//      assigned first name or alias and a short code, and NOTHING about anyone
+//      else. There is no array of entries in the response type, in any nested
+//      type, or anywhere in this section. `hallAssignment` is the ONE function
+//      that turns an entry into something a screen may show, exactly as
+//      publicQueueEntry was — and it returns four fields, none of which is a
+//      uid. The waiting are a NUMBER.
+//   2. ONE PLACE PER ACCOUNT PER EVENT. The line is keyed by the EVENT — a
+//      combined setup, or a lone goal — and the one-place document is
+//      wsfTurnMembers/{lineId}__{uid}. Because lineId names the event and not
+//      the activity, one account cannot stand in the squats line and the
+//      push-ups line of the same expo setup. It is a by-id read inside every
+//      transaction that could create a place, so two taps in the same instant
+//      contend on one document and one of them is retried into seeing the
+//      other's entry.
+//   3. A 45-SECOND READY LEASE. A call is an offer, not a summons: the phone
+//      shows the station, the code and "I'm ready", and if that tap does not
+//      arrive in 45 seconds the place is recovered as a no-show. Expiry is a
+//      PURE FUNCTION OF TIME for every reader, so a lapsed lease is invisible
+//      from the instant it lapses; it is MATERIALISED by the next transaction
+//      that has a reason to write (a station call, or the person rejoining).
+//      No polling path in this section writes anything, for the reason
+//      wsfStationState writes down: a transactional write on the 2-second path
+//      is one contended document per venue NAT address.
+//   4. START IS A CLAIM ON A READY ENTRY, AND IT MINTS THE ATTEMPT. The
+//      station may start only an entry that is `ready` AND assigned to that
+//      station. Starting mints ONE attemptId and binds it, on the entry, to
+//      the station, the account and the CHILD GOAL the person chose. A second
+//      start returns the same attemptId and writes nothing.
+//   5. THE SAME ATTEMPT IS RECORDED FROM EITHER DEVICE. The station's
+//      completion and the phone's completion both call performContribution
+//      with that one attemptId, so finishing twice, retrying a lost response,
+//      or finishing on the phone after starting at the station all record
+//      exactly once — by wsfContribute's own (goal, uid, attemptId)
+//      idempotency, not by a second mechanism next to it.
+//   6. CALL NEXT NEVER CLOSES AN UNFINISHED TURN. If this station still holds
+//      a live turn, "Call next" refuses and says so. A turn ends in exactly
+//      one of four ways, all explicit: a recorded result, a lease that lapsed,
+//      the person leaving, or the station cancelling.
+//   7. A COMBINED EVENT RESOLVES ITS FROZEN CHILDREN. One QR, one line, and
+//      the real multi-activity choice on the phone, carried onto the entry. A
+//      goal in no combined setup is its own event and behaves exactly as it
+//      did.
 //
-// COLLECTIONS, all Admin-SDK-only. None of them appears in firestore.rules, so
-// all three fall to the catch-all deny at the bottom of the WSF section, the
-// same position wsfKioskStations and wsfCombinedGoals hold. No rules change.
+// COLLECTIONS, all Admin-SDK-only, none in firestore.rules, all covered by the
+// catch-all deny at the bottom of the WSF section — the same position
+// wsfKioskStations, wsfCombinedGoals and wsfGoalCounters already hold. No
+// rules change and no firestore.indexes.json entry: every access below is a
+// document read by name or a SINGLE-FIELD EQUALITY.
 //
-//   * wsfQueues/{queueId}                  — the queue's own document. Holds
-//     the POSITION COUNTER, and is the single point two concurrent writers
-//     contend on (see below). `queueId` equals `goalId`, as the station slice
-//     already writes.
-//   * wsfQueueEntries/{entryId}            — one place in line. Random id, so
-//     the entryId a screen is handed cannot be read back into a uid.
-//   * wsfQueueMembers/{queueId}__{uid}     — ONE PLACE PER PERSON, addressed by
-//     id. It exists so "already in line" is a document read rather than a
-//     query: a by-id read inside a transaction is unambiguously in the read
-//     set, so two taps at the same instant cannot become two places in line.
+//   * wsfTurnLines/{lineId}            — the event's line. Position counter,
+//     call sequence, code salt, and the last result the hall may show.
+//   * wsfTurnEntries/{entryId}         — one turn. Random id, so an id handed
+//     to a screen cannot be read back into a uid.
+//   * wsfTurnMembers/{lineId}__{uid}   — THE ONE PLACE PER ACCOUNT PER EVENT.
+//   * wsfTurnReceipts/{lineId}__{uid}  — the person's own last recorded turn,
+//     so a phone that lost the response can still be shown what happened.
 //
-// EVERY QUERY IS A SINGLE-FIELD EQUALITY, so Firestore serves it from its
-// automatic index and firestore.indexes.json is untouched. The waiting list is
-// found by equality on `queueStatusKey` — a denormalized `${queueId}#${status}`
-// written by the same helper that writes `status`, so the two cannot diverge —
-// which also means a `done` or `left` entry drops out of the query entirely
-// rather than accumulating in front of it.
-//
-// WHAT THIS FEATURE DOES NOT DO. It records no contribution. Being called is
-// not recording. Nothing below writes wsfContributions, wsfGoalCounters or
-// wsfGoalMemberTotals, and wsfContribute, wsfGoalPulse, wsfAdjustGoal,
-// wsfListGoals, wsfCreateGoal, wsfCreateCombinedGoal and wsfCombinedGoalPulse
-// are not reached into by any line of it. A queue admits nobody to anything
-// either: LINK_JOINABLE is untouched and joining a line requires an ACTIVE
-// membership that already existed.
+// WHAT IS NEVER LOGGED ANYWHERE IN THIS SECTION: a name, a uid, a code, a join
+// code. There is no logger call in it at all.
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** Long enough for a real name, short enough to read from the back of a hall.
  * Mirrored — deliberately, as a copy — by CALL_NAME_MAX in
  * apps/westayfit/src/queueName.ts. Both are pinned by tests. */
-const QUEUE_CALL_NAME_MAX = 24;
+const TURN_CALL_NAME_MAX = 24;
 
 /**
- * The most waiting entries one read will carry. A single-field equality with
- * no orderBy is ordered by document name, so the limit has to sit above any
- * real line rather than act as a page: the list is sorted by `position` in
- * memory afterwards. A line of two hundred people at one station is not a
- * queue, it is a fire marshal's problem.
+ * FORTY-FIVE SECONDS, and the number is the design.
+ *
+ * It is not how long somebody has to walk across a hall — it is how long a
+ * station waits for a phone in a pocket to say "coming". Ten minutes (what the
+ * old call gave) means a station is dead for ten minutes when somebody has
+ * gone home; two seconds means a person who is looking at the screen rather
+ * than their phone loses their place. Forty-five seconds is long enough to
+ * feel a buzz, take out a phone and tap, and short enough that a line of
+ * twenty people does not notice the gap.
  */
-const QUEUE_WAITING_LIMIT = 200;
+const TURN_READY_LEASE_MS = 45_000;
+
+/** Ten seconds of result, and then the screen is empty. Long enough for the
+ * person to read their own number on the way past; short enough that nothing
+ * of theirs is still on a wall when the next person walks up. */
+const TURN_RESULT_VISIBLE_MS = 10_000;
 
 /**
- * Ten minutes. A `called` entry that is never finished expires, so a queue
- * cannot wedge on somebody who was called and walked out: the screen stops
- * showing them, and — this is the half that actually matters to a person —
- * their own place is freed so they can get back in line.
+ * The most waiting entries one read will carry, for the same reason the queue
+ * had a limit: a single-field equality with no orderBy comes back in document
+ * name order, so the limit has to sit above any real line rather than act as a
+ * page. The list never leaves this file — only its LENGTH does.
  */
-const QUEUE_CALL_EXPIRY_MS = 10 * 60 * 1000;
+const TURN_WAITING_LIMIT = 200;
 
-type QueueStatus = 'waiting' | 'called' | 'done' | 'left';
+/**
+ * The code alphabet, and the code length, of THE SHORT DUPLICATE-SAFE CODE.
+ *
+ * Two people called Sam are in the hall. The screen says "Sam · K7P" and one
+ * of them knows it is theirs, because the same three characters are on their
+ * own phone. That is the entire job.
+ *
+ * IT IS NOT DERIVED FROM A UID, and cannot be: the only inputs are the
+ * position the line's own counter handed out and a random per-line salt minted
+ * when the line was created.
+ *
+ * IT IS DUPLICATE-SAFE WITHIN AN EVENT, provably. 32^3 = 32768 = 2^15, and
+ * `turnCodeFor` is a bijection on the low 15 bits of the position: multiplying
+ * by an ODD constant modulo 2^15 is a bijection, and XOR with a fixed salt is
+ * a bijection, so two positions produce the same code only if they differ by a
+ * multiple of 32768. Positions come from one monotonic counter and are never
+ * reused, so that needs 32768 turns at one event before a LIVE duplicate is
+ * even arithmetically possible. The alphabet is the pairing alphabet — I, O, 0
+ * and 1 removed — so a code read across a hall and repeated out loud cannot be
+ * heard as a different valid code.
+ */
+const TURN_CODE_ALPHABET = STATION_PAIRING_ALPHABET;
+const TURN_CODE_LENGTH = 3;
 
-/** wsfQueueEntries/{entryId} — one place in line. */
-type QueueEntryDoc = {
-  /** Equal to goalId, as the station already writes. Written explicitly so the
-   * two can part company later without a migration of meaning. */
-  queueId: string;
-  goalId: string;
-  communityGroupId: string;
-  /** Who is in the line. Never published — see publicQueueEntry. */
-  uid: string;
-  /** What THEY chose to be called. 1..24 characters. Stored here and nowhere
-   * else in this system, and deleted with this document's status. */
-  calledName: string;
-  status: QueueStatus;
-  /**
-   * `${queueId}#${status}`, written by queueStatusKey() alongside every status
-   * change. It is what makes "the waiting list" a single-field equality.
-   */
-  queueStatusKey: string;
-  joinedAt: FirebaseFirestore.Timestamp;
-  calledAt: FirebaseFirestore.Timestamp | null;
-  calledByStationId: string | null;
-  /** Monotonic within the queue, allocated from the queue document's counter,
-   * and never reused. NOT a count of existing entries. */
-  position: number;
-  /** Set when a call was never finished and the ten minutes ran out. */
-  expiredAt?: FirebaseFirestore.Timestamp | null;
-  leftAt?: FirebaseFirestore.Timestamp | null;
-  doneAt?: FirebaseFirestore.Timestamp | null;
-};
+/** An event is a combined setup, or a single goal standing on its own. */
+type TurnEventScope = 'setup' | 'goal';
 
-/** wsfQueues/{queueId} — the queue's own document. */
-type QueueDoc = {
-  queueId: string;
-  goalId: string;
-  communityGroupId: string;
-  /** The next position to hand out. Read and written inside a transaction, so
-   * two people tapping at the same instant cannot receive the same number. */
-  nextPosition: number;
-  /**
-   * Incremented by every wsfCallNext. It has no meaning on its own: it exists
-   * so that two stations calling at the same moment ALWAYS contend on this one
-   * document and Firestore serializes them, whatever the waiting query
-   * returned to each of them.
-   */
-  callSeq?: number;
-};
+type TurnStatus =
+  /** In line. Nobody has called them. */
+  | 'waiting'
+  /** A station called them. The hall shows their name and code; the lease is
+   * running; their phone is asking them to tap "I'm ready". */
+  | 'assigned'
+  /** They tapped. The station may now start them, and only them. */
+  | 'ready'
+  /** A station started the turn. One attempt is minted and bound. */
+  | 'active'
+  /** The attempt was recorded. Terminal. */
+  | 'done'
+  /** The lease lapsed, or a station cancelled an assignment. Terminal. */
+  | 'noShow'
+  /** They left, or switched to their own phone, or a station released them.
+   * Terminal. */
+  | 'left';
 
-/** wsfQueueMembers/{queueId}__{uid} — one place per person, by id. */
-type QueueMemberDoc = { entryId: string };
-
-function queueStatusKey(queueId: string, status: QueueStatus): string {
-  return `${queueId}#${status}`;
+/** The four statuses that mean this entry still holds its owner's ONE place at
+ * the event. Everything else is terminal and frees the place. */
+function isTurnLive(status: TurnStatus): boolean {
+  return (
+    status === 'waiting' || status === 'assigned' || status === 'ready' || status === 'active'
+  );
 }
 
-function queueMemberDocId(queueId: string, uid: string): string {
-  return `${queueId}__${uid}`;
+/** wsfTurnEntries/{entryId} — one turn. */
+type TurnEntryDoc = {
+  lineId: string;
+  /** `setup:<setupId>` or `goal:<goalId>`. Never published. */
+  eventKey: string;
+  eventScope: TurnEventScope;
+  setupId: string | null;
+  /** THE CHILD ACTIVITY THIS PERSON CHOSE, carried on the entry. It is the
+   * goal the attempt is bound to and the goal the contribution lands on. */
+  goalId: string;
+  communityGroupId: string;
+  /** Who is in the line. Never published — see hallAssignment. */
+  uid: string;
+  /** What THEY chose to be called, 1..24 characters. Stored here and nowhere
+   * else in this system, and gone when this entry is. */
+  calledName: string;
+  /** Short, duplicate-safe within the event, not derived from a uid. */
+  code: string;
+  status: TurnStatus;
+  /** `${lineId}#${status}`, written by turnStatusKey() alongside every status
+   * change, which is what makes "who is waiting" a single-field equality. */
+  lineStatusKey: string;
+  /** Monotonic within the line, allocated from the line's counter, never
+   * reused. NOT a count of anything. */
+  position: number;
+  joinedAt: FirebaseFirestore.Timestamp;
+  assignedAt: FirebaseFirestore.Timestamp | null;
+  assignedStationId: string | null;
+  /** The station's visible label ("Station 2"), so a phone can say where to
+   * walk without a second read. Server-derived, never client-supplied. */
+  assignedStationLabel: string | null;
+  /** When the 45 seconds run out. Null except while `assigned`. */
+  readyLeaseExpiresAt: FirebaseFirestore.Timestamp | null;
+  readyAt: FirebaseFirestore.Timestamp | null;
+  /** THE CANONICAL ATTEMPT, minted once at start and bound here. */
+  attemptId: string | null;
+  attemptStationId: string | null;
+  attemptStartedAt: FirebaseFirestore.Timestamp | null;
+  /** What was recorded, for the hall's ten seconds and the person's receipt. */
+  resultAmount: number | null;
+  resultUnit: string | null;
+  doneAt?: FirebaseFirestore.Timestamp | null;
+  noShowAt?: FirebaseFirestore.Timestamp | null;
+  leftAt?: FirebaseFirestore.Timestamp | null;
+  /** 'member' | 'station' | 'lease'. Never a uid. */
+  endedBy?: string | null;
+};
+
+/** wsfTurnLines/{lineId} — the event's line. */
+type TurnLineDoc = {
+  lineId: string;
+  eventKey: string;
+  eventScope: TurnEventScope;
+  setupId: string | null;
+  communityGroupId: string;
+  /** The next position to hand out. Read and written inside a transaction, so
+   * two people tapping in the same instant cannot receive the same number. */
+  nextPosition: number;
+  /**
+   * Incremented by every call. It has no meaning on its own: it exists so two
+   * stations calling in the same moment ALWAYS contend on this one document
+   * and Firestore serializes them, whatever their waiting query returned.
+   */
+  callSeq?: number;
+  /** Random, minted once with the line. An input to the code, so codes do not
+   * read as a counter — and nothing about it comes from an account. */
+  codeSalt: number;
+  /** The last recorded result, for the hall's ten seconds. It carries the CODE
+   * and the amount. It deliberately carries NO NAME: the moment a turn is
+   * recorded, every name on that screen is gone. */
+  lastResult?: {
+    stationId: string;
+    code: string;
+    amount: number;
+    unit: string;
+    atMillis: number;
+  } | null;
+};
+
+/** wsfTurnMembers/{lineId}__{uid} — ONE PLACE PER ACCOUNT PER EVENT. */
+type TurnMemberDoc = { entryId: string };
+
+/** wsfTurnReceipts/{lineId}__{uid} — the person's own last recorded turn. */
+type TurnReceiptDoc = {
+  entryId: string;
+  goalId: string;
+  attemptId: string;
+  amount: number;
+  unit: string;
+  recordedAtMillis: number;
+};
+
+function turnStatusKey(lineId: string, status: TurnStatus): string {
+  return `${lineId}#${status}`;
+}
+
+function turnMemberDocId(lineId: string, uid: string): string {
+  return `${lineId}__${uid}`;
+}
+
+/** See TURN_CODE_ALPHABET for why this is a bijection and therefore
+ * duplicate-safe within a line. */
+function turnCodeFor(position: number, salt: number): string {
+  const p = Number.isFinite(position) ? Math.floor(position) : 0;
+  // 0x9e37 is odd, so multiplication modulo 2^15 is invertible.
+  let n = ((p * 0x9e37) ^ (salt | 0)) & 0x7fff;
+  let out = '';
+  for (let i = 0; i < TURN_CODE_LENGTH; i += 1) {
+    out += TURN_CODE_ALPHABET[n % TURN_CODE_ALPHABET.length];
+    n = Math.floor(n / TURN_CODE_ALPHABET.length);
+  }
+  return out;
+}
+
+function mintTurnCodeSalt(): number {
+  return randomBytes(2).readUInt16BE(0) & 0x7fff;
+}
+
+/**
+ * The attempt id a turn is recorded under.
+ *
+ * Shaped to pass normalizeAttemptId unchanged (8..128 of A-Z a-z 0-9 _ -), so
+ * the station path and the phone path put the same kind of value through the
+ * same validation the contribute page has always used. 144 bits of CSPRNG: an
+ * attempt id is not a secret, but it is a document name in a collection two
+ * devices write to, and guessing one must not be a way to collide with it.
+ */
+function mintTurnAttemptId(): string {
+  return `turn_${randomBytes(18).toString('base64url')}`;
 }
 
 /**
  * The label a screen may show, normalized here and refused here.
  *
- * Mirrors normalizeCallName + isUsableCallName in
+ * Unchanged from the queue it replaces, including its message: an address is
+ * refused wholesale — not because '@' is magic, but because the single
+ * likeliest way somebody's email ends up projected on a wall is that they
+ * pasted it into a name box without thinking. A bare URL is the same mistake
+ * wearing a different coat. Mirrors normalizeCallName + isUsableCallName in
  * apps/westayfit/src/queueName.ts, deliberately as a copy: the client cannot
  * be the only place this is enforced, because the client is not the only
- * possible caller. Both are pinned by tests.
- *
- * An address is refused wholesale — not because '@' is magic, but because the
- * single likeliest way somebody's email ends up projected on a wall is that
- * they pasted it into a name box without thinking. A bare URL is the same
- * mistake wearing a different coat.
+ * possible caller.
  */
-function normalizeQueueCallName(v: unknown): string | null {
+function normalizeTurnCallName(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const cleaned = v.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!cleaned) return null;
-  const cut = cleaned.slice(0, QUEUE_CALL_NAME_MAX).trim();
+  const cut = cleaned.slice(0, TURN_CALL_NAME_MAX).trim();
   if (!cut) return null;
   if (cut.includes('@')) return null;
   if (/https?:\/\//i.test(cut)) return null;
   return cut;
 }
 
-/**
- * THE DISCLOSURE BOUNDARY, in one function.
- *
- * Everything any caller is ever shown about somebody else's place in line goes
- * through here, and it returns three fields. There is no uid in the return
- * type, none is read into it, and there is no second projection anywhere in
- * this file. If this function is right, the feature's central promise is kept
- * for every caller; if a field is added here, it is disclosed to a room.
- */
-type QueueEntryPublic = { entryId: string; calledName: string; position: number };
+/** The one sentence a name that cannot go on a screen gets. It names no field
+ * and no function: it is written for the person holding the phone. */
+const TURN_NAME_REFUSED =
+  'Choose a name for the screen — up to 24 characters, and not an email address.';
 
-function publicQueueEntry(entryId: string, entry: QueueEntryDoc): QueueEntryPublic {
+const TURN_IN_PROGRESS_MESSAGE =
+  'Finish or cancel the turn on this screen before calling the next person.';
+const TURN_NOT_READY_MESSAGE = 'Ask them to tap “I’m ready” on their phone first.';
+const TURN_NOBODY_MESSAGE = 'Nobody is up at this screen.';
+const TURN_OTHER_ACTIVITY_MESSAGE =
+  'You’re already in the line at this event. Finish or leave that turn first.';
+const TURN_LEASE_LAPSED_MESSAGE =
+  'That turn timed out. Get back in line and the screen will call you again.';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE EVENT, RESOLVED FROM A GOAL.
+//
+// A combined setup is ONE event across its frozen children: one line, one
+// place per account, and the activity chosen on the entry. A goal that no
+// active setup has claimed is its own event, which is what makes the legacy
+// one-goal route keep working — `lineId` is then `goal__<goalId>`, the
+// activities list has exactly one member, and every path below behaves as the
+// per-goal queue did.
+//
+// It is a document read by name and then at most two more: the goal, its claim
+// (named by the goal id), and the setup (named by the claim). No query.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TurnActivity = { goalId: string; title: string; unit: string };
+
+type TurnEvent = {
+  scope: TurnEventScope;
+  eventKey: string;
+  lineId: string;
+  setupId: string | null;
+  communityGroupId: string;
+  /** The event's own title — the combined goal's, or the goal's. */
+  title: string;
+  /** Every activity a person may choose here. Exactly one for a lone goal;
+   * the setup's FROZEN children for a combined event. */
+  activities: TurnActivity[];
+};
+
+async function resolveTurnEvent(goalId: string): Promise<TurnEvent> {
+  const db = getFirestore();
+  const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+  if (!goalSnap.exists) notFound();
+  const goal = goalSnap.data() as GoalDoc;
+  const groupId = normalizeStringId(goal.communityGroupId);
+  if (!groupId) notFound();
+
+  const claimSnap = await combinedClaimRef(goalId).get();
+  const claim = claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null;
+  const setupId = claim && claim.status === 'active' ? normalizeStringId(claim.setupId) : null;
+
+  if (setupId) {
+    const setupSnap = await db.doc(`wsfCombinedGoals/${setupId}`).get();
+    if (setupSnap.exists) {
+      const setup = setupSnap.data() as CombinedGoalDoc;
+      const setupGroupId = normalizeStringId(setup.communityGroupId);
+      if (setup.status === 'active' && setupGroupId === groupId) {
+        // THE FROZEN CHILDREN, and deliberately the frozen copy rather than a
+        // live re-read: what the QR resolves to is what the Champion agreed
+        // to when they froze the setup. Deduped defensively — one guard at a
+        // boundary is not a guard against a hand edit.
+        const seen = new Set<string>();
+        const activities: TurnActivity[] = [];
+        for (const child of Array.isArray(setup.children) ? setup.children : []) {
+          const childId = normalizeStringId((child as FrozenChild)?.goalId);
+          if (!childId || seen.has(childId)) continue;
+          seen.add(childId);
+          activities.push({
+            goalId: childId,
+            title: typeof child.title === 'string' ? child.title : '',
+            unit: typeof child.unit === 'string' ? child.unit : '',
+          });
+        }
+        if (activities.length > 0) {
+          return {
+            scope: 'setup',
+            eventKey: `setup:${setupId}`,
+            lineId: `setup__${setupId}`,
+            setupId,
+            communityGroupId: groupId,
+            title: typeof setup.title === 'string' ? setup.title : '',
+            activities,
+          };
+        }
+      }
+    }
+  }
+
   return {
-    entryId,
-    calledName: typeof entry.calledName === 'string' ? entry.calledName : '',
-    position: typeof entry.position === 'number' ? entry.position : 0,
+    scope: 'goal',
+    eventKey: `goal:${goalId}`,
+    lineId: `goal__${goalId}`,
+    setupId: null,
+    communityGroupId: groupId,
+    title: typeof goal.title === 'string' ? goal.title : '',
+    activities: [
+      {
+        goalId,
+        title: typeof goal.title === 'string' ? goal.title : '',
+        unit: typeof goal.unit === 'string' ? goal.unit : '',
+      },
+    ],
   };
 }
 
-function queueEntryMillis(v: unknown): number | null {
-  const ts = v as { toMillis?: () => number } | null | undefined;
-  const ms = ts?.toMillis?.();
-  return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
-}
-
-/**
- * Whether a `called` entry has run out its ten minutes. A `waiting` entry
- * never expires: somebody standing in a line is still in the line.
- */
-function isQueueCallExpired(entry: QueueEntryDoc, now: number): boolean {
-  if (entry.status !== 'called') return false;
-  const at = queueEntryMillis(entry.calledAt);
-  if (at === null) return false;
-  return now - at >= QUEUE_CALL_EXPIRY_MS;
-}
-
-/** Whether this entry still holds its owner's one place in the line. */
-function isQueueEntryLive(entry: QueueEntryDoc, now: number): boolean {
-  if (entry.status === 'waiting') return true;
-  if (entry.status === 'called') return !isQueueCallExpired(entry, now);
-  return false;
-}
-
-/** Oldest first, by the allocated position — never by joinedAt, which two
- * writes a millisecond apart can report identically, and never by document
- * name, which is random. */
-function sortQueueEntries<T extends { position: number }>(entries: T[]): T[] {
-  return entries.sort((a, b) => a.position - b.position);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// The station credential, for the two callables a SCREEN makes.
+// THE STATION CREDENTIAL, for the callables a SCREEN makes.
 //
-// Deliberately its own function rather than a refactor of wsfStationState: that
-// callable is live, it is on a two-second polling path, and its refusal
-// ordering is load-bearing. This duplicates the check — sha256 + timingSafeEqual,
-// never `===` — and charges the per-IP bucket on refusals only, for the same
-// reason wsfStationState does: a screen doing its job must not put a
-// transactional write on one document per venue NAT address every two seconds.
-//
-// ONE ANSWER for every way a credential can fail to be a live one: an unknown
-// station, a revoked one, a wrong secret and a malformed request are all the
-// same sentence and the same code, so none of them tells a caller which it was.
+// Carried over unchanged from the queue: sha256 + timingSafeEqual, never
+// `===`; ONE answer for every way a credential can fail to be a live one —
+// unknown station, revoked station, wrong secret, malformed request — so none
+// of them tells a caller which it was; and the per-IP bucket charged on
+// REFUSALS ONLY, for the reason wsfStationState writes down at length.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type AuthorizedStation = {
   stationId: string;
   station: StationDoc;
   stationRef: FirebaseFirestore.DocumentReference;
-  queueId: string;
+  goalId: string;
 };
 
-async function authorizeStationForQueue(
+async function authorizeStationForTurn(
   data: { stationId?: unknown; secret?: unknown } | undefined,
   rawRequest: { ip?: string; headers?: Record<string, unknown> } | undefined,
   now: number
@@ -6706,118 +7687,291 @@ async function authorizeStationForQueue(
   if (station.status !== 'active') throw await refuse();
   if (!constantTimeHexEqual(station.secretHash, sha256Hex(secret))) throw await refuse();
 
-  const queueId = normalizeStringId(station.queueId) ?? normalizeStringId(station.goalId);
-  if (!queueId) throw await refuse();
+  const goalId = normalizeStringId(station.goalId);
+  if (!goalId) throw await refuse();
 
-  return { stationId, station, stationRef, queueId };
+  return { stationId, station, stationRef, goalId };
 }
 
-/**
- * The same station, re-read after this request's own transaction committed, so
- * the state a screen is handed back reflects the write that just happened. The
- * credential has already been proved; this re-reads a document, and never
- * re-decides authorization.
- */
-async function refreshStation(authorized: AuthorizedStation): Promise<AuthorizedStation> {
-  const snap = await authorized.stationRef.get();
-  if (!snap.exists) return authorized;
-  return { ...authorized, station: snap.data() as StationDoc };
+function stationVisibleLabel(station: StationDoc): string {
+  if (typeof station.label === 'string' && station.label !== '') return station.label;
+  const slot = normalizeStationSlot(station.slot);
+  return slot ? stationLabelForSlot(slot) : '';
 }
 
-/**
- * What a screen is told about the line. Both fields carry the three-field
- * projection and nothing else.
- */
-type QueueStateResponse = {
-  /** Who is up now at THIS station, re-derived from the entry itself rather
-   * than trusted from the station's cached pointer. Null when nobody is. */
-  serving: QueueEntryPublic | null;
-  /** Oldest first. The screen shows the first few; the count is the whole line. */
-  waiting: QueueEntryPublic[];
+// ─────────────────────────────────────────────────────────────────────────────
+// THE DISCLOSURE BOUNDARY, in one function and one type.
+//
+// EVERYTHING ANY SCREEN IS EVER TOLD about the person in front of it goes
+// through `hallAssignment`, and it returns four fields. There is no uid in the
+// return type, none is read into it, and there is no second projection
+// anywhere in this section. There is also no LIST: the response type below has
+// no array in it at any depth, so "the hall shows a column of names" is not a
+// change somebody could make by passing a different argument — it is a change
+// to a type, which the tests read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TurnHallAssignment = {
+  /** The short duplicate-safe code. */
+  code: string;
+  /** The first name or alias THEY chose. */
+  calledName: string;
+  /** Where the turn is, in the hall's words. */
+  state: 'assigned' | 'ready' | 'active';
+  /** Whole seconds of the ready lease left, or null once it no longer runs. */
+  readySecondsLeft: number | null;
+};
+
+/** The ten-second result. A CODE and a number — never a name. */
+type TurnHallResult = { code: string; amount: number; unit: string; secondsLeft: number };
+
+type TurnStateResponse = {
+  stationId: string;
+  stationLabel: string;
+  /** The one person this screen is serving, or nobody. */
+  assigned: TurnHallAssignment | null;
+  /** What was just recorded here, for ten seconds. */
+  result: TurnHallResult | null;
+  /** How many are waiting. A NUMBER. There is no list, at any depth. */
   waitingCount: number;
 };
 
-/**
- * The line as it stands, read OUTSIDE any transaction.
- *
- * `station.serving` is a cached pointer, kept so a screen does not have to
- * query for the person in front of it. The ENTRY is the truth: it is read back
- * by id and shown only while it is still `called`, still called by THIS
- * station, and still inside its ten minutes. That is what makes "leaving
- * removes the person from what the station shows, on the next read" true even
- * for somebody who had already been called.
- */
-async function readQueueState(
-  authorized: AuthorizedStation,
-  now: number
-): Promise<QueueStateResponse> {
-  const db = getFirestore();
+function turnMillis(v: unknown): number | null {
+  const ts = v as { toMillis?: () => number } | null | undefined;
+  const ms = ts?.toMillis?.();
+  return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+}
 
+/**
+ * Whether an `assigned` entry's 45 seconds have run out.
+ *
+ * PURE, and a function of the clock alone, so every reader agrees the instant
+ * it lapses — before any write has happened anywhere. A `waiting` entry never
+ * lapses: somebody standing in a line is still in the line. A `ready` entry
+ * never lapses either: they said they were coming, and a person walking across
+ * a hall must not lose their place to a timer.
+ */
+function isTurnLeaseLapsed(entry: TurnEntryDoc, now: number): boolean {
+  if (entry.status !== 'assigned') return false;
+  const at = turnMillis(entry.readyLeaseExpiresAt);
+  if (at === null) return false;
+  return now >= at;
+}
+
+/** The status every reader must act on: the stored one, with a lapsed lease
+ * already applied. */
+function effectiveTurnStatus(entry: TurnEntryDoc, now: number): TurnStatus {
+  return isTurnLeaseLapsed(entry, now) ? 'noShow' : entry.status;
+}
+
+function hallAssignment(entry: TurnEntryDoc, now: number): TurnHallAssignment | null {
+  const status = effectiveTurnStatus(entry, now);
+  if (status !== 'assigned' && status !== 'ready' && status !== 'active') return null;
+  let readySecondsLeft: number | null = null;
+  if (status === 'assigned') {
+    const at = turnMillis(entry.readyLeaseExpiresAt);
+    readySecondsLeft = at === null ? null : Math.max(0, Math.ceil((at - now) / 1000));
+  }
+  return {
+    code: typeof entry.code === 'string' ? entry.code : '',
+    calledName: typeof entry.calledName === 'string' ? entry.calledName : '',
+    state: status,
+    readySecondsLeft,
+  };
+}
+
+/** Oldest first, by the allocated position — never by a timestamp two writes a
+ * millisecond apart report identically, and never by document name, which is
+ * random. */
+function sortTurnEntries<T extends { position: number }>(entries: T[]): T[] {
+  return entries.sort((a, b) => a.position - b.position);
+}
+
+async function countTurnWaiting(lineId: string): Promise<number> {
+  const snap = await getFirestore()
+    .collection('wsfTurnEntries')
+    .where('lineStatusKey', '==', turnStatusKey(lineId, 'waiting'))
+    .limit(TURN_WAITING_LIMIT)
+    .get();
+  return snap.size;
+}
+
+/**
+ * The line as it stands, read OUTSIDE any transaction and WITHOUT WRITING.
+ *
+ * `station.serving` is a cached pointer kept so a screen does not have to
+ * query for the person in front of it. THE ENTRY IS THE TRUTH: it is read back
+ * by id and shown only while it is still assigned to THIS station and still
+ * live once the lease is applied. That is what makes "the lease lapsed" and
+ * "they left" both true on the very next read, with no write in between.
+ */
+async function readTurnState(
+  authorized: AuthorizedStation,
+  lineId: string,
+  now: number
+): Promise<TurnStateResponse> {
+  const db = getFirestore();
+  const snap = await authorized.stationRef.get();
+  const station = snap.exists ? (snap.data() as StationDoc) : authorized.station;
+  const stationLabel = stationVisibleLabel(station);
+
+  let assigned: TurnHallAssignment | null = null;
   const servingId = normalizeStringId(
-    (authorized.station.serving as { entryId?: unknown } | null | undefined)?.entryId
+    (station.serving as { entryId?: unknown } | null | undefined)?.entryId
   );
-  let serving: QueueEntryPublic | null = null;
   if (servingId) {
-    const snap = await db.doc(`wsfQueueEntries/${servingId}`).get();
-    if (snap.exists) {
-      const entry = snap.data() as QueueEntryDoc;
-      if (
-        entry.queueId === authorized.queueId &&
-        entry.status === 'called' &&
-        entry.calledByStationId === authorized.stationId &&
-        !isQueueCallExpired(entry, now)
-      ) {
-        serving = publicQueueEntry(snap.id, entry);
+    const entrySnap = await db.doc(`wsfTurnEntries/${servingId}`).get();
+    if (entrySnap.exists) {
+      const entry = entrySnap.data() as TurnEntryDoc;
+      if (entry.lineId === lineId && entry.assignedStationId === authorized.stationId) {
+        assigned = hallAssignment(entry, now);
       }
     }
   }
 
-  const waitingSnap = await db
-    .collection('wsfQueueEntries')
-    .where('queueStatusKey', '==', queueStatusKey(authorized.queueId, 'waiting'))
-    .limit(QUEUE_WAITING_LIMIT)
-    .get();
-  const waiting = sortQueueEntries(
-    waitingSnap.docs.map((d) => publicQueueEntry(d.id, d.data() as QueueEntryDoc))
-  );
+  let result: TurnHallResult | null = null;
+  const lineSnap = await db.doc(`wsfTurnLines/${lineId}`).get();
+  const last = lineSnap.exists ? (lineSnap.data() as TurnLineDoc).lastResult : null;
+  if (
+    last &&
+    last.stationId === authorized.stationId &&
+    typeof last.atMillis === 'number' &&
+    now - last.atMillis < TURN_RESULT_VISIBLE_MS
+  ) {
+    result = {
+      code: typeof last.code === 'string' ? last.code : '',
+      amount: typeof last.amount === 'number' ? last.amount : 0,
+      unit: typeof last.unit === 'string' ? last.unit : '',
+      secondsLeft: Math.max(
+        0,
+        Math.ceil((last.atMillis + TURN_RESULT_VISIBLE_MS - now) / 1000)
+      ),
+    };
+  }
 
-  return { serving, waiting, waitingCount: waiting.length };
+  return {
+    stationId: authorized.stationId,
+    stationLabel,
+    assigned,
+    result,
+    waitingCount: await countTurnWaiting(lineId),
+  };
+}
+
+/**
+ * Materialise a lapsed lease, inside a transaction that was opening anyway.
+ *
+ * Reads are the caller's job — this is called after them and only writes. It
+ * is the ONE place a no-show is recorded, so "the place came back" is one
+ * statement rather than four copies that could drift.
+ */
+function recoverLapsedTurn(
+  tx: FirebaseFirestore.Transaction,
+  entryRef: FirebaseFirestore.DocumentReference,
+  entry: TurnEntryDoc
+): void {
+  const db = getFirestore();
+  tx.update(entryRef, {
+    status: 'noShow' satisfies TurnStatus,
+    lineStatusKey: turnStatusKey(entry.lineId, 'noShow'),
+    noShowAt: FieldValue.serverTimestamp(),
+    endedBy: 'lease',
+    readyLeaseExpiresAt: null,
+  });
+  const uid = normalizeStringId(entry.uid);
+  if (uid) {
+    tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(entry.lineId, uid)}`));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wsfJoinQueue — a person puts their name down.
+// wsfEventContext — what this QR resolves to.
 //
-// AUTHORIZATION: an ACTIVE member of the goal's community. Anyone else — a
+// AUTHORIZATION: an ACTIVE member of the event's community. Anyone else — a
 // stranger, a removed member, a member of another community — gets the same
 // generic not-found an unknown goal gives, so this callable is no more of an
 // existence oracle than the join page is.
 //
-// IDEMPOTENT PER UID PER QUEUE. Joining twice while already `waiting` or
-// `called` returns the EXISTING entry, at its existing position, and writes
-// nothing: a second tap is a second tap, not a second place in line. The check
-// is a by-id read of wsfQueueMembers/{queueId}__{uid} inside the transaction,
-// so two taps at the same instant contend on one document and one of them is
-// retried into seeing the other's entry.
+// A COMBINED QR RESOLVES ITS FROZEN CHILDREN. A single-goal QR resolves to
+// exactly one activity, which is what it always meant.
+//
+// It returns NOTHING about anybody else: no line, no names, no count of who
+// chose what.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type JoinQueueRequest = { goalId?: unknown; calledName?: unknown };
-type JoinQueueResponse = {
+type EventContextRequest = { goalId?: unknown };
+type EventContextResponse = {
+  eventScope: TurnEventScope;
+  /** Present only for a combined event. It is a document id, not authority:
+   * holding it grants nothing, exactly as the setup URL grants nothing. */
+  setupId: string | null;
+  title: string;
+  activities: TurnActivity[];
+};
+
+export const wsfEventContext = onCall<EventContextRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<EventContextResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const event = await resolveTurnEvent(goalId);
+    const db = getFirestore();
+    const membershipSnap = await db
+      .doc(`wsfMemberships/${event.communityGroupId}_${uid}`)
+      .get();
+    const membership = membershipSnap.data() as { membershipStatus?: string } | undefined;
+    if (membership?.membershipStatus !== 'active') notFound();
+
+    return {
+      eventScope: event.scope,
+      setupId: event.setupId,
+      title: event.title,
+      activities: event.activities,
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfJoinTurnLine — a person takes ONE place at the event.
+//
+// AUTHORIZATION: an ACTIVE member of the event's community, refused with the
+// same generic not-found everything else here uses.
+//
+// ONE PLACE PER ACCOUNT ACROSS THE WHOLE EVENT, and this is where that is
+// enforced. wsfTurnMembers/{lineId}__{uid} is read BY ID inside the
+// transaction, so it is unambiguously in the read set and two taps in the same
+// instant cannot become two places. Because lineId names the EVENT, the same
+// document is in the way whichever activity the second tap chose — which is
+// the cross-activity exclusion, enforced by the same read rather than by a
+// second rule somebody has to remember.
+//
+// IDEMPOTENT for the same activity: a second tap returns the existing place,
+// at its existing position and with its existing code, and writes nothing —
+// including no rewrite of calledName, because a second tap must not silently
+// relabel somebody who is already on a screen.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type JoinTurnLineRequest = { goalId?: unknown; calledName?: unknown };
+type JoinTurnLineResponse = {
   entryId: string;
+  code: string;
   calledName: string;
-  position: number;
-  status: QueueStatus;
+  status: TurnStatus;
+  goalId: string;
   /** True when this call found the caller already in line and wrote nothing. */
   alreadyInLine: boolean;
 };
 
-/** The one sentence a name that cannot go on a screen gets. It names no field
- * and no function: it is written for the person holding the phone. */
-const QUEUE_NAME_REFUSED =
-  'Choose a name for the screen — up to 24 characters, and not an email address.';
-
-export const wsfJoinQueue = onCall<JoinQueueRequest>(
+export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
   { region: 'us-central1' },
-  async (request): Promise<JoinQueueResponse> => {
+  async (request): Promise<JoinTurnLineResponse> => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
@@ -6829,103 +7983,124 @@ export const wsfJoinQueue = onCall<JoinQueueRequest>(
     if (!goalId) {
       throw new HttpsError('invalid-argument', 'goalId is required.');
     }
-    const calledName = normalizeQueueCallName(request.data?.calledName);
+    const calledName = normalizeTurnCallName(request.data?.calledName);
     if (!calledName) {
-      throw new HttpsError('invalid-argument', QUEUE_NAME_REFUSED);
+      throw new HttpsError('invalid-argument', TURN_NAME_REFUSED);
     }
 
-    const db = getFirestore();
-    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
-    if (!goalSnap.exists) notFound();
-    const goal = goalSnap.data() as GoalDoc;
-    const groupId = normalizeStringId(goal.communityGroupId);
-    if (!groupId) notFound();
+    const event = await resolveTurnEvent(goalId);
+    // The activity has to be one this event actually offers. A combined event
+    // resolved from one child accepts any of the setup's frozen children; a
+    // lone goal accepts itself.
+    if (!event.activities.some((a) => a.goalId === goalId)) notFound();
 
-    const queueId = goalId;
+    const db = getFirestore();
     const now = Date.now();
-    const queueRef = db.doc(`wsfQueues/${queueId}`);
-    const memberRef = db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, uid)}`);
+    const lineRef = db.doc(`wsfTurnLines/${event.lineId}`);
+    const memberRef = db.doc(`wsfTurnMembers/${turnMemberDocId(event.lineId, uid)}`);
 
     return db.runTransaction(async (tx) => {
-      // AUTHORIZATION BEFORE ANYTHING IS SAID. A non-member is refused with
-      // the same words and the same code an unknown goal is refused with.
-      const membership = await readActiveMembership(tx, groupId, uid);
+      // AUTHORIZATION BEFORE ANYTHING IS SAID.
+      const membership = await readActiveMembership(tx, event.communityGroupId, uid);
       if (!membership) notFound();
 
       const memberSnap = await tx.get(memberRef);
-      const heldEntryId = normalizeStringId((memberSnap.data() as QueueMemberDoc | undefined)?.entryId);
-      const heldRef = heldEntryId ? db.doc(`wsfQueueEntries/${heldEntryId}`) : null;
+      const heldEntryId = normalizeStringId(
+        (memberSnap.data() as TurnMemberDoc | undefined)?.entryId
+      );
+      const heldRef = heldEntryId ? db.doc(`wsfTurnEntries/${heldEntryId}`) : null;
       const heldSnap = heldRef ? await tx.get(heldRef) : null;
-      // EVERY READ FIRST. A Firestore transaction refuses a read after a write,
-      // and the expiry cleanup below is a write — so the counter is read here,
-      // before any branch can write, rather than where it is used.
-      const queueSnap = await tx.get(queueRef);
+      // EVERY READ FIRST. A Firestore transaction refuses a read after a
+      // write, and the lease recovery below is a write — so the line document
+      // is read here, before any branch can write, rather than where it is
+      // used.
+      const lineSnap = await tx.get(lineRef);
 
       if (heldRef && heldSnap?.exists) {
-        const held = heldSnap.data() as QueueEntryDoc;
-        if (held.queueId === queueId && held.uid === uid && isQueueEntryLive(held, now)) {
-          // ALREADY IN LINE. Their place, unchanged, and no write at all —
-          // including no rewrite of calledName, because a second tap must not
-          // silently relabel somebody who is already on a screen.
-          return {
-            entryId: heldSnap.id,
-            calledName: held.calledName,
-            position: held.position,
-            status: held.status,
-            alreadyInLine: true,
-          };
-        }
-        if (held.queueId === queueId && held.uid === uid && held.status === 'called') {
-          // Called, and the ten minutes ran out. Close it honestly rather than
-          // leaving a stale `called` row holding this person's place forever.
-          tx.update(heldRef, {
-            status: 'done' satisfies QueueStatus,
-            queueStatusKey: queueStatusKey(queueId, 'done'),
-            expiredAt: FieldValue.serverTimestamp(),
-          });
+        const held = heldSnap.data() as TurnEntryDoc;
+        if (held.lineId === event.lineId && held.uid === uid) {
+          const status = effectiveTurnStatus(held, now);
+          if (isTurnLive(status)) {
+            if (held.goalId === goalId) {
+              return {
+                entryId: heldSnap.id,
+                code: held.code,
+                calledName: held.calledName,
+                status,
+                goalId: held.goalId,
+                alreadyInLine: true,
+              };
+            }
+            // SAME ACCOUNT, SAME EVENT, DIFFERENT ACTIVITY. Refused, and told
+            // in words that name no activity: they are looking at the page and
+            // can see which one they are in.
+            throw new HttpsError('failed-precondition', TURN_OTHER_ACTIVITY_MESSAGE);
+          }
+          if (held.status === 'assigned') {
+            // The lease lapsed. Close it honestly rather than leaving a stale
+            // row holding this person's place for the rest of the event.
+            recoverLapsedTurn(tx, heldRef, held);
+          }
         }
       }
 
-      const queue = queueSnap.data() as QueueDoc | undefined;
-      // THE POSITION COUNTER. Read and written inside this transaction, so two
-      // people tapping at once cannot get the same number — and never derived
-      // by counting existing entries, which would reuse a number the moment
-      // somebody left.
-      const rawNext = typeof queue?.nextPosition === 'number' ? queue.nextPosition : 1;
+      const line = lineSnap.data() as TurnLineDoc | undefined;
+      const rawNext = typeof line?.nextPosition === 'number' ? line.nextPosition : 1;
       const position = Number.isFinite(rawNext) && rawNext >= 1 ? Math.floor(rawNext) : 1;
+      const codeSalt =
+        typeof line?.codeSalt === 'number' && Number.isFinite(line.codeSalt)
+          ? line.codeSalt
+          : mintTurnCodeSalt();
+      const code = turnCodeFor(position, codeSalt);
 
-      const entryRef = db.collection('wsfQueueEntries').doc();
-      const entry: QueueEntryDoc = {
-        queueId,
+      const entryRef = db.collection('wsfTurnEntries').doc();
+      const entry: TurnEntryDoc = {
+        lineId: event.lineId,
+        eventKey: event.eventKey,
+        eventScope: event.scope,
+        setupId: event.setupId,
         goalId,
-        communityGroupId: groupId,
+        communityGroupId: event.communityGroupId,
         uid,
         calledName,
+        code,
         status: 'waiting',
-        queueStatusKey: queueStatusKey(queueId, 'waiting'),
-        joinedAt: Timestamp.fromMillis(now),
-        calledAt: null,
-        calledByStationId: null,
+        lineStatusKey: turnStatusKey(event.lineId, 'waiting'),
         position,
+        joinedAt: Timestamp.fromMillis(now),
+        assignedAt: null,
+        assignedStationId: null,
+        assignedStationLabel: null,
+        readyLeaseExpiresAt: null,
+        readyAt: null,
+        attemptId: null,
+        attemptStationId: null,
+        attemptStartedAt: null,
+        resultAmount: null,
+        resultUnit: null,
       };
       tx.set(entryRef, entry);
-      tx.set(memberRef, { entryId: entryRef.id } satisfies QueueMemberDoc);
+      tx.set(memberRef, { entryId: entryRef.id } satisfies TurnMemberDoc);
       tx.set(
-        queueRef,
+        lineRef,
         {
-          queueId,
-          goalId,
-          communityGroupId: groupId,
+          lineId: event.lineId,
+          eventKey: event.eventKey,
+          eventScope: event.scope,
+          setupId: event.setupId,
+          communityGroupId: event.communityGroupId,
           nextPosition: position + 1,
+          codeSalt,
         },
         { merge: true }
       );
 
       return {
         entryId: entryRef.id,
+        code,
         calledName,
-        position,
-        status: 'waiting' as QueueStatus,
+        status: 'waiting' as TurnStatus,
+        goalId,
         alreadyInLine: false,
       };
     });
@@ -6933,23 +8108,143 @@ export const wsfJoinQueue = onCall<JoinQueueRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wsfLeaveQueue — a person takes their name back off a screen.
+// wsfMyTurn — the person's own phone, telling them where they are.
 //
-// AUTHORIZATION: the ENTRY'S OWN UID, and nobody else. Not a Champion, not a
-// station, not the person who called them. A queue puts a name on a wall, so
-// taking it down has to be immediate, unilateral and unconditional — including
-// while they are the one being called.
+// AUTHORIZATION: the caller, about themselves. It reads their own place by
+// document id and returns NOTHING about anybody else — not a name, not an id,
+// not a list. `ahead` is a NUMBER.
 //
-// Everyone who is not that uid gets the generic not-found, so an entryId
-// cannot be probed for whose it is.
+// IT WRITES NOTHING, including when it can see that a lease has lapsed. This
+// is a polling path, and a poll that writes is a poll that costs; the lapse is
+// already true for every reader (isTurnLeaseLapsed) and is materialised by the
+// next transaction with a reason to write.
+//
+// IT CARRIES THE RECEIPT. A phone that lost the response to its own completion
+// finds what happened here, by its own uid, after the entry is terminal and
+// after every name has left every screen.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type LeaveQueueRequest = { entryId?: unknown };
-type LeaveQueueResponse = { entryId: string; status: QueueStatus };
+type MyTurnRequest = { goalId?: unknown };
+type MyTurnResponse = {
+  turn: {
+    entryId: string;
+    /** Their own code — the same three characters the hall is showing. */
+    code: string;
+    calledName: string;
+    status: TurnStatus;
+    /** The activity THEY chose, carried on their entry. */
+    goalId: string;
+    /** How many are in front of them. A count, never a list. */
+    ahead: number;
+    /** Which screen to walk to, by its visible label. Null until assigned. */
+    stationLabel: string | null;
+    /** Whole seconds left to tap "I'm ready". Null unless the lease runs. */
+    readySecondsLeft: number | null;
+    /** True once a station has started this turn and bound its attempt. */
+    attemptOpen: boolean;
+  } | null;
+  /** Their own last recorded turn at this event, if any. */
+  receipt: { amount: number; unit: string; goalId: string } | null;
+};
 
-export const wsfLeaveQueue = onCall<LeaveQueueRequest>(
+export const wsfMyTurn = onCall<MyTurnRequest>(
   { region: 'us-central1' },
-  async (request): Promise<LeaveQueueResponse> => {
+  async (request): Promise<MyTurnResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const event = await resolveTurnEvent(goalId);
+    const db = getFirestore();
+    const now = Date.now();
+
+    const receiptSnap = await db
+      .doc(`wsfTurnReceipts/${turnMemberDocId(event.lineId, uid)}`)
+      .get();
+    const stored = receiptSnap.exists ? (receiptSnap.data() as TurnReceiptDoc) : null;
+    const receipt = stored
+      ? {
+          amount: typeof stored.amount === 'number' ? stored.amount : 0,
+          unit: typeof stored.unit === 'string' ? stored.unit : '',
+          goalId: typeof stored.goalId === 'string' ? stored.goalId : '',
+        }
+      : null;
+
+    const memberSnap = await db
+      .doc(`wsfTurnMembers/${turnMemberDocId(event.lineId, uid)}`)
+      .get();
+    const entryId = normalizeStringId((memberSnap.data() as TurnMemberDoc | undefined)?.entryId);
+    if (!entryId) return { turn: null, receipt };
+
+    const entrySnap = await db.doc(`wsfTurnEntries/${entryId}`).get();
+    if (!entrySnap.exists) return { turn: null, receipt };
+    const entry = entrySnap.data() as TurnEntryDoc;
+    // Somebody else's entry could only be here through a hand edit, and the
+    // answer for it is the answer for no entry at all.
+    if (entry.uid !== uid || entry.lineId !== event.lineId) return { turn: null, receipt };
+    const status = effectiveTurnStatus(entry, now);
+    if (!isTurnLive(status)) return { turn: null, receipt };
+
+    let ahead = 0;
+    if (status === 'waiting') {
+      const waitingSnap = await db
+        .collection('wsfTurnEntries')
+        .where('lineStatusKey', '==', turnStatusKey(event.lineId, 'waiting'))
+        .limit(TURN_WAITING_LIMIT)
+        .get();
+      for (const d of waitingSnap.docs) {
+        const other = d.data() as TurnEntryDoc;
+        if (typeof other.position === 'number' && other.position < entry.position) ahead += 1;
+      }
+    }
+
+    let readySecondsLeft: number | null = null;
+    if (status === 'assigned') {
+      const at = turnMillis(entry.readyLeaseExpiresAt);
+      readySecondsLeft = at === null ? null : Math.max(0, Math.ceil((at - now) / 1000));
+    }
+
+    return {
+      turn: {
+        entryId: entrySnap.id,
+        code: entry.code,
+        calledName: entry.calledName,
+        status,
+        goalId: entry.goalId,
+        ahead,
+        stationLabel: entry.assignedStationLabel ?? null,
+        readySecondsLeft,
+        attemptOpen: status === 'active' && typeof entry.attemptId === 'string',
+      },
+      receipt,
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfTurnReady — "I'm ready", from the phone of the person who was called.
+//
+// AUTHORIZATION: the ENTRY'S OWN UID and nobody else. Not a Champion, not a
+// station. Everyone else gets the generic not-found, so an entryId cannot be
+// probed for whose it is.
+//
+// It is the ONLY way out of `assigned`, and it closes the lease. A tap that
+// arrives after the 45 seconds does not sneak through: the lapse is recovered
+// in this same transaction and the person is told, in words, to get back in
+// line.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TurnReadyRequest = { entryId?: unknown };
+type TurnReadyResponse = { entryId: string; status: TurnStatus; stationLabel: string | null };
+
+export const wsfTurnReady = onCall<TurnReadyRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<TurnReadyResponse> => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
@@ -6960,34 +8255,136 @@ export const wsfLeaveQueue = onCall<LeaveQueueRequest>(
     }
 
     const db = getFirestore();
-    const entryRef = db.doc(`wsfQueueEntries/${entryId}`);
+    const entryRef = db.doc(`wsfTurnEntries/${entryId}`);
+    const now = Date.now();
+
+    // A REFUSAL IS DECIDED INSIDE THE TRANSACTION AND THROWN OUTSIDE IT.
+    // Throwing from inside would abort the transaction — and with it the
+    // no-show recovery this tap just earned, which is the half that gives the
+    // person their place back. So the transaction returns a verdict and
+    // commits its writes; the sentence is raised afterwards.
+    const outcome = await db.runTransaction(
+      async (tx): Promise<TurnReadyResponse | 'lapsed'> => {
+        const snap = await tx.get(entryRef);
+        if (!snap.exists) notFound();
+        const entry = snap.data() as TurnEntryDoc;
+        if (entry.uid !== uid) notFound();
+
+        if (entry.status === 'ready' || entry.status === 'active') {
+          // Already said. A second tap is a second tap.
+          return {
+            entryId,
+            status: entry.status,
+            stationLabel: entry.assignedStationLabel ?? null,
+          };
+        }
+        if (entry.status !== 'assigned') return 'lapsed';
+        if (isTurnLeaseLapsed(entry, now)) {
+          recoverLapsedTurn(tx, entryRef, entry);
+          return 'lapsed';
+        }
+
+        tx.update(entryRef, {
+          status: 'ready' satisfies TurnStatus,
+          lineStatusKey: turnStatusKey(entry.lineId, 'ready'),
+          readyAt: FieldValue.serverTimestamp(),
+          readyLeaseExpiresAt: null,
+        });
+        return {
+          entryId,
+          status: 'ready' as TurnStatus,
+          stationLabel: entry.assignedStationLabel ?? null,
+        };
+      }
+    );
+    if (outcome === 'lapsed') {
+      throw new HttpsError('failed-precondition', TURN_LEASE_LAPSED_MESSAGE);
+    }
+    return outcome;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfLeaveTurnLine — the person takes their place back, from any live state.
+//
+// AUTHORIZATION: the ENTRY'S OWN UID, and nobody else.
+//
+// A queue puts a name on a wall, so taking it down has to be immediate,
+// unilateral and unconditional — including while they are the one being
+// called, and including after a station has started their turn. An active turn
+// that is abandoned here recorded nothing: the attempt was minted, never
+// contributed, and a minted-but-unrecorded attempt is not a number anywhere.
+//
+// SWITCHING TO YOUR OWN PHONE IS THIS CALL. It frees the event place — which
+// is the point: the contribution page needs no line, and nobody should be
+// holding a place at a station while they are doing the activity themselves.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type LeaveTurnLineRequest = { entryId?: unknown; switchingToPhone?: unknown };
+type LeaveTurnLineResponse = { entryId: string; status: TurnStatus };
+
+export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<LeaveTurnLineResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const entryId = normalizeStringId(request.data?.entryId);
+    if (!entryId) {
+      throw new HttpsError('invalid-argument', 'entryId is required.');
+    }
+    // SWITCHING TO YOUR OWN PHONE AND SIMPLY LEAVING DO THE SAME THING, on
+    // purpose: both free the event place, immediately and unconditionally.
+    // The flag changes only what the row records about why, which is the one
+    // thing a Champion looking at a wedged event would want to know and the
+    // one thing that cannot be inferred afterwards.
+    const endedBy = request.data?.switchingToPhone === true ? 'memberToPhone' : 'member';
+
+    const db = getFirestore();
+    const entryRef = db.doc(`wsfTurnEntries/${entryId}`);
 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(entryRef);
       if (!snap.exists) notFound();
-      const entry = snap.data() as QueueEntryDoc;
+      const entry = snap.data() as TurnEntryDoc;
       // The authorization, and the same answer for "not yours" as for "not
       // there": an entryId is not a way to learn whose place it is.
       if (entry.uid !== uid) notFound();
 
-      const queueId = normalizeStringId(entry.queueId);
-      if (!queueId) notFound();
-      const memberRef = db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, uid)}`);
+      const lineId = normalizeStringId(entry.lineId);
+      if (!lineId) notFound();
+      const memberRef = db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`);
       const memberSnap = await tx.get(memberRef);
+      const stationId = normalizeStringId(entry.assignedStationId);
+      const stationRef = stationId ? db.doc(`wsfKioskStations/${stationId}`) : null;
+      const stationSnap = stationRef ? await tx.get(stationRef) : null;
 
-      if (entry.status === 'waiting' || entry.status === 'called') {
+      if (isTurnLive(entry.status)) {
         tx.update(entryRef, {
-          status: 'left' satisfies QueueStatus,
-          queueStatusKey: queueStatusKey(queueId, 'left'),
+          status: 'left' satisfies TurnStatus,
+          lineStatusKey: turnStatusKey(lineId, 'left'),
           leftAt: FieldValue.serverTimestamp(),
+          endedBy,
+          readyLeaseExpiresAt: null,
         });
       }
+      // The screen stops showing them on its very next read anyway — it
+      // re-reads the entry — but the pointer is cleared so the station is not
+      // left believing it is mid-turn and refusing to call the next person.
+      if (stationRef && stationSnap?.exists) {
+        const station = stationSnap.data() as StationDoc;
+        const servingId = normalizeStringId(
+          (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+        );
+        if (servingId === entryId) tx.update(stationRef, { serving: null });
+      }
       // The place is freed whether or not the status needed changing, so a
-      // second tap on Leave cannot strand somebody out of the line and unable
-      // to rejoin.
+      // second tap cannot strand somebody out of the line and unable to
+      // rejoin.
       if (
         memberSnap.exists &&
-        normalizeStringId((memberSnap.data() as QueueMemberDoc).entryId) === entryId
+        normalizeStringId((memberSnap.data() as TurnMemberDoc).entryId) === entryId
       ) {
         tx.delete(memberRef);
       }
@@ -6998,287 +8395,574 @@ export const wsfLeaveQueue = onCall<LeaveQueueRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wsfMyQueueEntry — the person's own phone, telling them where they are.
+// wsfTurnState — what the screen at the event may show.
 //
-// AUTHORIZATION: the caller, about themselves. It reads the caller's own place
-// by document id and returns nothing about anybody else — not a name, not a
-// count of who is in front by name, not an id. `ahead` is a NUMBER.
+// AUTHORIZATION: the station secret, exactly as wsfStationState authenticates.
 //
-// It writes nothing. It is on a polling path, and a poll that writes is a poll
-// that costs.
+// IT RETURNS ONE ASSIGNED PERSON, OR NOBODY, plus a ten-second result and a
+// COUNT. There is no list of waiting people in the response type, in any type
+// it contains, or anywhere in this file — and no uid, ever, for any caller.
+// The entryId is not in the response either: the hall has no use for it, and
+// the fewer handles a public screen holds the better.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type MyQueueEntryRequest = { goalId?: unknown };
-type MyQueueEntryResponse = {
-  entry: {
-    entryId: string;
-    calledName: string;
-    position: number;
-    status: QueueStatus;
-    /** How many people are in front of them. A count, never a list. */
-    ahead: number;
-    /** Which screen called them, by its visible label ("Station 2"), so they
-     * know where to walk. Null until they are called. */
-    calledByLabel: string | null;
-  } | null;
-};
+type TurnStateRequest = { stationId?: unknown; secret?: unknown };
 
-export const wsfMyQueueEntry = onCall<MyQueueEntryRequest>(
-  { region: 'us-central1' },
-  async (request): Promise<MyQueueEntryResponse> => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Sign in first.');
-    }
-    const uid = request.auth.uid;
-    const goalId = normalizeStringId(request.data?.goalId);
-    if (!goalId) {
-      throw new HttpsError('invalid-argument', 'goalId is required.');
-    }
-
-    const db = getFirestore();
-    const queueId = goalId;
-    const now = Date.now();
-
-    const memberSnap = await db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, uid)}`).get();
-    const entryId = normalizeStringId((memberSnap.data() as QueueMemberDoc | undefined)?.entryId);
-    if (!entryId) return { entry: null };
-
-    const entrySnap = await db.doc(`wsfQueueEntries/${entryId}`).get();
-    if (!entrySnap.exists) return { entry: null };
-    const entry = entrySnap.data() as QueueEntryDoc;
-    // Somebody else's entry could only be here through a hand-edit, and the
-    // answer for it is the answer for no entry at all.
-    if (entry.uid !== uid || entry.queueId !== queueId) return { entry: null };
-    if (!isQueueEntryLive(entry, now)) return { entry: null };
-
-    let ahead = 0;
-    if (entry.status === 'waiting') {
-      const waitingSnap = await db
-        .collection('wsfQueueEntries')
-        .where('queueStatusKey', '==', queueStatusKey(queueId, 'waiting'))
-        .limit(QUEUE_WAITING_LIMIT)
-        .get();
-      for (const d of waitingSnap.docs) {
-        const other = d.data() as QueueEntryDoc;
-        if (typeof other.position === 'number' && other.position < entry.position) ahead += 1;
-      }
-    }
-
-    let calledByLabel: string | null = null;
-    const stationId = normalizeStringId(entry.calledByStationId);
-    if (entry.status === 'called' && stationId) {
-      const stationSnap = await db.doc(`wsfKioskStations/${stationId}`).get();
-      if (stationSnap.exists) {
-        const station = stationSnap.data() as StationDoc;
-        const slot = normalizeStationSlot(station.slot);
-        calledByLabel =
-          typeof station.label === 'string' && station.label !== ''
-            ? station.label
-            : slot
-              ? stationLabelForSlot(slot)
-              : null;
-      }
-    }
-
-    return {
-      entry: {
-        entryId: entrySnap.id,
-        calledName: entry.calledName,
-        position: entry.position,
-        status: entry.status,
-        ahead,
-        calledByLabel,
-      },
-    };
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// wsfQueueState — what the screen at the event may show.
-//
-// AUTHORIZATION: the station secret, exactly as wsfStationState authenticates —
-// sha256 + timingSafeEqual, never `===` — and the same one answer for every way
-// a credential can fail to be a live one.
-//
-// IT RETURNS {entryId, calledName, position} AND NOTHING ELSE, per entry, for
-// every caller, through publicQueueEntry and through no other path. No uid,
-// ever. The entryId is a random Firestore id, so it is not a uid wearing a hat
-// either.
-// ─────────────────────────────────────────────────────────────────────────────
-
-type QueueStateRequest = { stationId?: unknown; secret?: unknown };
-
-export const wsfQueueState = onCall<QueueStateRequest>(
+export const wsfTurnState = onCall<TurnStateRequest>(
   { region: 'us-central1', invoker: 'public' },
-  async (request): Promise<QueueStateResponse> => {
+  async (request): Promise<TurnStateResponse> => {
     const now = Date.now();
-    const authorized = await authorizeStationForQueue(request.data, request.rawRequest, now);
-    return readQueueState(authorized, now);
+    const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const event = await resolveTurnEvent(authorized.goalId);
+    return readTurnState(authorized, event.lineId, now);
   }
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wsfCallNext — the screen calls the next person by the name they chose.
+// wsfCallNext — the screen assigns the oldest place in the line.
 //
 // AUTHORIZATION: the station secret, as above.
 //
-// HOW TWO STATIONS CANNOT CALL THE SAME PERSON. One transaction does all of it,
-// and it touches wsfQueues/{queueId} — a single document — on every call, whose
-// `callSeq` it increments. Two stations calling at the same instant therefore
-// always overlap on that document's read set, so Firestore aborts and retries
-// the loser; the retry re-runs the waiting query and sees the entry the winner
-// has just marked `called`. The chosen entry itself is also read and re-checked
-// as `waiting` inside the same transaction, so even without the counter the
-// second writer's read set is invalidated. Both guarantees are deliberate: the
-// counter makes the contention unconditional rather than dependent on the two
-// stations happening to pick the same row.
+// IT NEVER CLOSES AN UNFINISHED TURN. If this screen still holds a live turn —
+// assigned inside its lease, ready, or active — this refuses and says so. The
+// previous person is finished by a RESULT, by their own leaving, by the lease
+// lapsing or by an explicit cancel, and by nothing else. That is the defect
+// this call had: "call next" used to mark the previous person done, with no
+// confirmed result, because somebody pressed a button.
+//
+// HOW TWO STATIONS CANNOT ASSIGN THE SAME PERSON. One transaction does all of
+// it and it touches wsfTurnLines/{lineId} — a single document — on every call,
+// whose `callSeq` it increments unconditionally. Two stations calling in the
+// same instant therefore always overlap on that document's read set, so
+// Firestore aborts and retries the loser; the retry re-runs the waiting query
+// and sees the entry the winner has just assigned. The chosen entry itself is
+// also read and re-checked as `waiting` inside the same transaction, so even
+// without the counter the second writer's read set is invalidated. Both are
+// deliberate: the counter makes the contention unconditional rather than
+// dependent on the two stations happening to pick the same row.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type CallNextRequest = { stationId?: unknown; secret?: unknown };
-type CallNextResponse = QueueStateResponse & {
+type CallNextResponse = TurnStateResponse & {
   /** False when the line was empty. Not an error: an empty line is a normal
    * state at an event, not a failure to report. */
   called: boolean;
+  /** Set when this screen still holds a live turn. The hall is told to finish
+   * it; nobody is assigned and nobody is closed. */
+  blocked: 'turnInProgress' | null;
+  /** The sentence the hall prints when it is blocked, written here so there is
+   * one copy of it rather than one per screen. Null when nothing is blocked. */
+  blockedMessage: string | null;
 };
 
 export const wsfCallNext = onCall<CallNextRequest>(
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<CallNextResponse> => {
     const now = Date.now();
-    const authorized = await authorizeStationForQueue(request.data, request.rawRequest, now);
+    const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
-    const { queueId, stationId, stationRef } = authorized;
-    const queueRef = db.doc(`wsfQueues/${queueId}`);
+    const { stationId, stationRef } = authorized;
+    const lineId = event.lineId;
+    const lineRef = db.doc(`wsfTurnLines/${lineId}`);
 
-    const called = await db.runTransaction(async (tx) => {
-      // ── every read first, as a Firestore transaction requires ──
-      const stationSnap = await tx.get(stationRef);
-      if (!stationSnap.exists) return false;
-      const station = stationSnap.data() as StationDoc;
-      // Re-checked inside the transaction: a Champion may have revoked this
-      // screen between the credential check and here, and a revoked screen
-      // must not be able to call anybody.
-      if (station.status !== 'active') return false;
+    const outcome = await db.runTransaction(
+      async (tx): Promise<'called' | 'empty' | 'blocked'> => {
+        // ── every read first, as a Firestore transaction requires ──
+        const stationSnap = await tx.get(stationRef);
+        if (!stationSnap.exists) return 'empty';
+        const station = stationSnap.data() as StationDoc;
+        // Re-checked inside the transaction: a Champion may have revoked this
+        // screen between the credential check and here, and a revoked screen
+        // must not be able to call anybody.
+        if (station.status !== 'active') return 'empty';
+        const label = stationVisibleLabel(station);
 
-      // Read for its own sake: it puts the queue document in this transaction's
-      // read set, which is half of the two-stations guarantee (the other half
-      // is the unconditional callSeq write below).
-      await tx.get(queueRef);
+        // Read for its own sake as well as for the counter: it puts the line
+        // document in this transaction's read set, which is half of the
+        // two-stations guarantee.
+        const lineSnap = await tx.get(lineRef);
 
-      const waitingSnap = await tx.get(
-        db
-          .collection('wsfQueueEntries')
-          .where('queueStatusKey', '==', queueStatusKey(queueId, 'waiting'))
-          .limit(QUEUE_WAITING_LIMIT)
-      );
-      const candidates = sortQueueEntries(
-        waitingSnap.docs.map((d) => ({
-          id: d.id,
-          position: (d.data() as QueueEntryDoc).position ?? 0,
-        }))
-      );
+        const previousId = normalizeStringId(
+          (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+        );
+        const previousRef = previousId ? db.doc(`wsfTurnEntries/${previousId}`) : null;
+        const previousSnap = previousRef ? await tx.get(previousRef) : null;
+        const previous =
+          previousSnap && previousSnap.exists ? (previousSnap.data() as TurnEntryDoc) : null;
 
-      const previousId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
-      const previousRef = previousId ? db.doc(`wsfQueueEntries/${previousId}`) : null;
-      const previousSnap = previousRef ? await tx.get(previousRef) : null;
-
-      const chosen = candidates[0] ?? null;
-      const chosenRef = chosen ? db.doc(`wsfQueueEntries/${chosen.id}`) : null;
-      const chosenSnap = chosenRef ? await tx.get(chosenRef) : null;
-      const chosenEntry =
-        chosenSnap && chosenSnap.exists ? (chosenSnap.data() as QueueEntryDoc) : null;
-
-      // ── and only then the writes ──
-
-      // THE SERIALIZATION POINT. Unconditional, so two stations always contend.
-      tx.set(
-        queueRef,
-        { queueId, goalId: queueId, callSeq: FieldValue.increment(1) },
-        { merge: true }
-      );
-
-      // The person this screen was serving is finished by the act of calling
-      // the next one — but only if this screen is still the one that called
-      // them. A station never closes another station's call.
-      if (previousRef && previousSnap?.exists) {
-        const previous = previousSnap.data() as QueueEntryDoc;
-        if (
-          previous.queueId === queueId &&
-          previous.status === 'called' &&
-          previous.calledByStationId === stationId
-        ) {
-          tx.update(previousRef, {
-            status: 'done' satisfies QueueStatus,
-            queueStatusKey: queueStatusKey(queueId, 'done'),
-            doneAt: FieldValue.serverTimestamp(),
-          });
-          const previousUid = normalizeStringId(previous.uid);
-          if (previousUid) {
-            tx.delete(db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, previousUid)}`));
+        if (previous && previous.lineId === lineId && previous.assignedStationId === stationId) {
+          const status = effectiveTurnStatus(previous, now);
+          if (isTurnLive(status)) {
+            // THE REFUSAL THAT REPLACES THE OLD SILENT CLOSE.
+            return 'blocked';
           }
         }
+
+        const waitingSnap = await tx.get(
+          db
+            .collection('wsfTurnEntries')
+            .where('lineStatusKey', '==', turnStatusKey(lineId, 'waiting'))
+            .limit(TURN_WAITING_LIMIT)
+        );
+        const candidates = sortTurnEntries(
+          waitingSnap.docs.map((d) => ({
+            id: d.id,
+            position: (d.data() as TurnEntryDoc).position ?? 0,
+          }))
+        );
+        const chosen = candidates[0] ?? null;
+        const chosenRef = chosen ? db.doc(`wsfTurnEntries/${chosen.id}`) : null;
+        const chosenSnap = chosenRef ? await tx.get(chosenRef) : null;
+        const chosenEntry =
+          chosenSnap && chosenSnap.exists ? (chosenSnap.data() as TurnEntryDoc) : null;
+
+        // ── and only then the writes ──
+
+        // THE SERIALIZATION POINT. Unconditional, so two stations always
+        // contend, whatever their waiting queries returned.
+        tx.set(
+          lineRef,
+          {
+            lineId,
+            eventKey: event.eventKey,
+            eventScope: event.scope,
+            setupId: event.setupId,
+            communityGroupId: event.communityGroupId,
+            callSeq: FieldValue.increment(1),
+            codeSalt:
+              typeof (lineSnap.data() as TurnLineDoc | undefined)?.codeSalt === 'number'
+                ? (lineSnap.data() as TurnLineDoc).codeSalt
+                : mintTurnCodeSalt(),
+          },
+          { merge: true }
+        );
+
+        // A lapsed lease on the previous person is MATERIALISED here — this
+        // transaction had a reason to write anyway — so the no-show is a
+        // record and their place is genuinely back.
+        if (
+          previousRef &&
+          previous &&
+          previous.lineId === lineId &&
+          previous.assignedStationId === stationId &&
+          isTurnLeaseLapsed(previous, now)
+        ) {
+          recoverLapsedTurn(tx, previousRef, previous);
+        }
+
+        if (!chosenRef || !chosenEntry || chosenEntry.status !== 'waiting') {
+          // Nobody to call — an empty line, or the entry this transaction
+          // picked was taken by the other station and this is the retry that
+          // saw an empty line afterwards. Clearing the pointer is correct
+          // either way: this screen has finished with whoever it was showing.
+          tx.update(stationRef, { serving: null });
+          return 'empty';
+        }
+
+        tx.update(chosenRef, {
+          status: 'assigned' satisfies TurnStatus,
+          lineStatusKey: turnStatusKey(lineId, 'assigned'),
+          assignedAt: Timestamp.fromMillis(now),
+          assignedStationId: stationId,
+          assignedStationLabel: label,
+          // THE 45-SECOND READY LEASE, written as an absolute instant so every
+          // reader — the hall, the phone, the next transaction — agrees on
+          // when it ends without agreeing on a clock.
+          readyLeaseExpiresAt: Timestamp.fromMillis(now + TURN_READY_LEASE_MS),
+          readyAt: null,
+        });
+        // The cached pointer the screen reads. It carries the fields the hall
+        // may see and no others — a uid must not reach a station document
+        // either — and the entry remains the truth.
+        tx.update(stationRef, {
+          serving: {
+            entryId: chosenRef.id,
+            calledName: chosenEntry.calledName,
+            position: chosenEntry.position,
+            calledAt: Timestamp.fromMillis(now),
+          },
+        });
+        return 'called';
       }
+    );
 
-      if (!chosenRef || !chosenEntry || chosenEntry.status !== 'waiting') {
-        // Nobody to call — either an empty line, or the entry this transaction
-        // picked was taken by the other station and this is the retry that saw
-        // an empty line afterwards. Clearing `serving` is correct either way:
-        // the screen has moved on from whoever it was showing.
-        tx.update(stationRef, { serving: null });
-        return false;
-      }
-
-      tx.update(chosenRef, {
-        status: 'called' satisfies QueueStatus,
-        queueStatusKey: queueStatusKey(queueId, 'called'),
-        calledAt: FieldValue.serverTimestamp(),
-        calledByStationId: stationId,
-      });
-      // The cached pointer the screen reads. It carries the SAME three fields
-      // a caller may see and no others — a uid must not reach a station
-      // document either.
-      tx.update(stationRef, {
-        serving: {
-          entryId: chosenRef.id,
-          calledName: chosenEntry.calledName,
-          position: chosenEntry.position,
-          calledAt: Timestamp.fromMillis(now),
-        },
-      });
-      return true;
-    });
-
-    // Read back afterwards, so what the screen paints is what the queue says,
-    // not what this call believed it would say. The credential was already
-    // proved above; this only re-reads the station document for its new
-    // `serving` pointer.
-    const state = await readQueueState(await refreshStation(authorized), Date.now());
-    return { ...state, called };
+    // Read back afterwards, so what the screen paints is what the line says,
+    // not what this call believed it would say.
+    const state = await readTurnState(authorized, lineId, Date.now());
+    return {
+      ...state,
+      called: outcome === 'called',
+      blocked: outcome === 'blocked' ? 'turnInProgress' : null,
+      blockedMessage: outcome === 'blocked' ? TURN_IN_PROGRESS_MESSAGE : null,
+    };
   }
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wsfFinishServing — the turn is over.
+// wsfStartTurn — the station claims a READY entry and mints the attempt.
 //
-// AUTHORIZATION: the station secret, as above. It closes only a call THIS
-// station made; a station cannot finish another station's person.
+// AUTHORIZATION: the station secret, AND the entry's own assignment. A station
+// can start only somebody IT called, and only after that person has said they
+// are ready. It cannot reach into another station's turn, and it cannot start
+// somebody who is merely `waiting` — which is the whole point of the lease: a
+// name on a screen is an offer, and an offer nobody accepted is not a turn.
 //
-// It marks the entry `done` and clears `serving`. It records NO contribution:
-// being called is not recording, and nothing here touches wsfContributions,
-// wsfGoalCounters or wsfGoalMemberTotals.
+// IT MINTS ONE ATTEMPT AND BINDS IT to (station, account, child goal). The
+// account comes from the ENTRY, written when that person joined the line under
+// their own account; a station never supplies a uid and has no way to name one.
+//
+// IT IS IDEMPOTENT. A second start — a retry, a lost response, a reload of the
+// screen mid-turn — returns the SAME attemptId and writes nothing. That is
+// what makes "one round per turn" a property of the data rather than of the
+// button: there is one attempt per entry, and an entry cannot be started
+// again once it is terminal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type FinishServingRequest = { stationId?: unknown; secret?: unknown };
+type StartTurnRequest = { stationId?: unknown; secret?: unknown };
+type StartTurnResponse = TurnStateResponse & {
+  started: boolean;
+  /** The activity THEY chose, so the screen runs the right one. Public goal
+   * facts, and the same ones the station's hero already shows. */
+  activity: { goalId: string; title: string; unit: string } | null;
+};
 
-export const wsfFinishServing = onCall<FinishServingRequest>(
+export const wsfStartTurn = onCall<StartTurnRequest>(
   { region: 'us-central1', invoker: 'public' },
-  async (request): Promise<QueueStateResponse> => {
+  async (request): Promise<StartTurnResponse> => {
     const now = Date.now();
-    const authorized = await authorizeStationForQueue(request.data, request.rawRequest, now);
+    const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
-    const { queueId, stationId, stationRef } = authorized;
+    const { stationId, stationRef } = authorized;
+    const lineId = event.lineId;
+    // Minted OUTSIDE the transaction so a Firestore retry re-uses the same
+    // value rather than minting a second one and writing whichever landed.
+    const mintedAttemptId = mintTurnAttemptId();
+
+    // Same discipline as wsfTurnReady: the verdict is decided inside the
+    // transaction and raised outside it, so a refusal never throws away the
+    // no-show recovery it just performed.
+    type StartOutcome =
+      | { kind: 'started'; goalId: string }
+      | { kind: 'refused'; code: 'failed-precondition' | 'permission-denied'; message: string };
+
+    const outcome = await db.runTransaction(async (tx): Promise<StartOutcome> => {
+      const nobody = {
+        kind: 'refused',
+        code: 'failed-precondition',
+        message: TURN_NOBODY_MESSAGE,
+      } as const;
+      const stationSnap = await tx.get(stationRef);
+      if (!stationSnap.exists) return nobody;
+      const station = stationSnap.data() as StationDoc;
+      if (station.status !== 'active') {
+        return {
+          kind: 'refused',
+          code: 'permission-denied',
+          message: STATION_REJECTED_MESSAGE,
+        };
+      }
+      const servingId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      if (!servingId) return nobody;
+      const entryRef = db.doc(`wsfTurnEntries/${servingId}`);
+      const entrySnap = await tx.get(entryRef);
+      if (!entrySnap.exists) return nobody;
+      const entry = entrySnap.data() as TurnEntryDoc;
+
+      // THE NARROW AUTHORITY, stated as two equalities: this line, and a turn
+      // THIS station called. A station cannot reach into another's.
+      if (entry.lineId !== lineId) return nobody;
+      if (entry.assignedStationId !== stationId) return nobody;
+
+      if (entry.status === 'active' && normalizeStringId(entry.attemptId)) {
+        // Already started. The same attempt, and not a second one.
+        return { kind: 'started', goalId: entry.goalId };
+      }
+      if (entry.status !== 'ready') {
+        if (isTurnLeaseLapsed(entry, now)) {
+          recoverLapsedTurn(tx, entryRef, entry);
+          tx.update(stationRef, { serving: null });
+          return {
+            kind: 'refused',
+            code: 'failed-precondition',
+            message: TURN_LEASE_LAPSED_MESSAGE,
+          };
+        }
+        return {
+          kind: 'refused',
+          code: 'failed-precondition',
+          message: TURN_NOT_READY_MESSAGE,
+        };
+      }
+
+      tx.update(entryRef, {
+        status: 'active' satisfies TurnStatus,
+        lineStatusKey: turnStatusKey(lineId, 'active'),
+        attemptId: mintedAttemptId,
+        attemptStationId: stationId,
+        attemptStartedAt: Timestamp.fromMillis(now),
+      });
+      return { kind: 'started', goalId: entry.goalId };
+    });
+
+    if (outcome.kind === 'refused') throw new HttpsError(outcome.code, outcome.message);
+    const chosenGoalId: string | null = outcome.goalId;
+
+    const activity =
+      event.activities.find((a) => a.goalId === chosenGoalId) ??
+      (chosenGoalId ? { goalId: chosenGoalId, title: '', unit: '' } : null);
+    const state = await readTurnState(authorized, lineId, Date.now());
+    return { ...state, started: chosenGoalId !== null, activity };
+  }
+);
+
+/**
+ * THE ONE COMPLETION, shared by the station and the phone.
+ *
+ * It calls performContribution — the canonical contribution, the same one the
+ * contribute page has always called — with the attempt this turn minted. That
+ * is the whole of the idempotency story: finishing twice, retrying a lost
+ * response, or finishing on the phone after starting at the station all land
+ * on the same (goal, uid, attemptId) key and record exactly once.
+ *
+ * ORDER MATTERS, and it is deliberate: the CONTRIBUTION commits first, then
+ * the turn is marked done. The contribution is the durable truth; the entry is
+ * bookkeeping. If the bookkeeping write is lost, a retry re-runs the
+ * contribution (which reports `alreadyRecorded` and writes nothing) and
+ * finishes the bookkeeping, so the two converge without a reconciler.
+ */
+async function completeTurnEntry(args: {
+  entryRef: FirebaseFirestore.DocumentReference;
+  entry: TurnEntryDoc;
+  count: unknown;
+}): Promise<ContributeResponse> {
+  const { entryRef, entry } = args;
+  const attemptId = normalizeStringId(entry.attemptId);
+  if (!attemptId) {
+    throw new HttpsError('failed-precondition', 'That turn has not been started yet.');
+  }
+  const receipt = await performContribution({
+    uid: entry.uid,
+    goalId: entry.goalId,
+    attemptId,
+    count: args.count,
+  });
+
+  const db = getFirestore();
+  const lineId = entry.lineId;
+  const stationId = normalizeStringId(entry.attemptStationId);
+  const at = Date.now();
+  const amount = typeof receipt.addedCount === 'number' ? receipt.addedCount : 0;
+  const unit = typeof receipt.unit === 'string' ? receipt.unit : '';
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(entryRef);
+    if (!snap.exists) return;
+    const current = snap.data() as TurnEntryDoc;
+    const stationRef = stationId ? db.doc(`wsfKioskStations/${stationId}`) : null;
+    const stationSnap = stationRef ? await tx.get(stationRef) : null;
+
+    if (current.status !== 'done') {
+      tx.update(entryRef, {
+        status: 'done' satisfies TurnStatus,
+        lineStatusKey: turnStatusKey(lineId, 'done'),
+        doneAt: FieldValue.serverTimestamp(),
+        endedBy: 'result',
+        readyLeaseExpiresAt: null,
+        resultAmount: amount,
+        resultUnit: unit,
+      });
+    }
+    // THE PLACE COMES BACK. A finished turn frees the account's one place at
+    // the event, so they may get back in line — at the BACK of it.
+    const uid = normalizeStringId(current.uid);
+    if (uid) {
+      tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
+      // THE RECOVERABLE RECEIPT. Written under the person's own uid, so a
+      // phone that lost the response to its own completion can still be shown
+      // exactly what happened — after every name has left every screen.
+      tx.set(db.doc(`wsfTurnReceipts/${turnMemberDocId(lineId, uid)}`), {
+        entryId: entryRef.id,
+        goalId: current.goalId,
+        attemptId,
+        amount,
+        unit,
+        recordedAtMillis: at,
+      } satisfies TurnReceiptDoc);
+    }
+    // ALL PRIOR NAME AND SESSION UI IS CLEARED, in the same transaction that
+    // records the result.
+    //
+    // THE NAME GOES; THE POINTER STAYS. Two things had to be true at once and
+    // they pulled in opposite directions. The hall must show no name the
+    // instant a turn is recorded — which it does anyway, because hallAssignment
+    // projects nothing from a `done` entry — and a station whose completion
+    // response was LOST must be able to press the button again and land on the
+    // same attempt rather than on "nobody is up". Clearing the pointer would
+    // have taken that retry away. So the name is blanked where it was cached
+    // and the entry id is kept, which is the smallest thing that keeps both:
+    // nothing a screen can read carries a name, and the retry still knows
+    // whose turn it was finishing. The pointer is replaced outright by the
+    // next call, and cleared by a cancel.
+    if (stationRef && stationSnap?.exists) {
+      const station = stationSnap.data() as StationDoc;
+      const servingId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      if (servingId === entryRef.id) tx.update(stationRef, { 'serving.calledName': '' });
+    }
+    if (stationId) {
+      tx.set(
+        db.doc(`wsfTurnLines/${lineId}`),
+        {
+          lastResult: { stationId, code: current.code, amount, unit, atMillis: at },
+        },
+        { merge: true }
+      );
+    }
+  });
+
+  return receipt;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCompleteTurn — the station records the turn it started.
+//
+// AUTHORIZATION: the station secret, AND the attempt's own binding. A station
+// may complete only an attempt IT started, for the entry IT is serving, on its
+// own line. It never names a uid: the account is the one on the entry.
+//
+// IT RECORDS THE CANONICAL ATTEMPT, through performContribution, under every
+// gate the contribute page is under — active membership, an active goal, the
+// server-time window, the repeat policy — and with the same combined-parent
+// credit. A station cannot record something a phone could not.
+//
+// WHAT THE HALL IS TOLD BACK is a number and a unit. Not a member total, not a
+// name, not a uid. A refusal's sentence is the product's own sentence ("This
+// goal takes one contribution from each member…"), which names nobody.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CompleteTurnRequest = { stationId?: unknown; secret?: unknown; count?: unknown };
+type CompleteTurnResponse = TurnStateResponse & {
+  recorded: { amount: number; unit: string; alreadyRecorded: boolean };
+  /** Whether anybody is waiting. ONE ROUND PER TURN WHILE ANYONE WAITS: when
+   * this is true the screen offers nothing but "Call next", and a person who
+   * wants another round rejoins the line at the back. */
+  anyoneWaiting: boolean;
+};
+
+export const wsfCompleteTurn = onCall<CompleteTurnRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<CompleteTurnResponse> => {
+    const now = Date.now();
+    const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const event = await resolveTurnEvent(authorized.goalId);
+    const db = getFirestore();
+    const lineId = event.lineId;
+
+    const stationSnap = await authorized.stationRef.get();
+    const station = stationSnap.exists
+      ? (stationSnap.data() as StationDoc)
+      : authorized.station;
+    const servingId = normalizeStringId(
+      (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+    );
+    if (!servingId) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+    const entryRef = db.doc(`wsfTurnEntries/${servingId}`);
+    const entrySnap = await entryRef.get();
+    if (!entrySnap.exists) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+    const entry = entrySnap.data() as TurnEntryDoc;
+
+    // THE NARROW AUTHORITY. This station, this line, this station's attempt.
+    if (entry.lineId !== lineId) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+    if (entry.attemptStationId !== authorized.stationId) {
+      throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+    }
+    if (entry.status !== 'active' && entry.status !== 'done') {
+      throw new HttpsError('failed-precondition', TURN_NOT_READY_MESSAGE);
+    }
+
+    const receipt = await completeTurnEntry({ entryRef, entry, count: request.data?.count });
+    const state = await readTurnState(authorized, lineId, Date.now());
+    return {
+      ...state,
+      recorded: {
+        amount: typeof receipt.addedCount === 'number' ? receipt.addedCount : 0,
+        unit: typeof receipt.unit === 'string' ? receipt.unit : '',
+        alreadyRecorded: receipt.alreadyRecorded === true,
+      },
+      anyoneWaiting: state.waitingCount > 0,
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCompleteMyTurn — the same turn, recorded from the person's own phone.
+//
+// AUTHORIZATION: the ENTRY'S OWN UID.
+//
+// It is the SAME attempt: the one the station minted and bound. So a person who
+// starts at the station and finishes on their phone records once, a retry after
+// a lost response records nothing more, and the number the hall saw and the
+// number in their own receipt are the same number, because they are the same
+// contribution.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CompleteMyTurnRequest = { entryId?: unknown; count?: unknown };
+type CompleteMyTurnResponse = { receipt: ContributeResponse; status: TurnStatus };
+
+export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<CompleteMyTurnResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const entryId = normalizeStringId(request.data?.entryId);
+    if (!entryId) {
+      throw new HttpsError('invalid-argument', 'entryId is required.');
+    }
+
+    const db = getFirestore();
+    const entryRef = db.doc(`wsfTurnEntries/${entryId}`);
+    const entrySnap = await entryRef.get();
+    if (!entrySnap.exists) notFound();
+    const entry = entrySnap.data() as TurnEntryDoc;
+    if (entry.uid !== uid) notFound();
+    if (entry.status !== 'active' && entry.status !== 'done') {
+      throw new HttpsError('failed-precondition', 'That turn is not running.');
+    }
+
+    const receipt = await completeTurnEntry({ entryRef, entry, count: request.data?.count });
+    return { receipt, status: 'done' };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCancelTurn — the screen lets somebody go without a result.
+//
+// AUTHORIZATION: the station secret, and only the turn this station holds.
+//
+// A turn has to be endable from the hall — somebody walks off, somebody was
+// called twice by mistake, a device is wedged — but ending it must be a
+// DECISION somebody took, not a side effect of calling the next person. It
+// records no result, because there was none.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CancelTurnRequest = { stationId?: unknown; secret?: unknown };
+
+export const wsfCancelTurn = onCall<CancelTurnRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<TurnStateResponse> => {
+    const now = Date.now();
+    const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const event = await resolveTurnEvent(authorized.goalId);
+    const db = getFirestore();
+    const lineId = event.lineId;
+    const { stationId, stationRef } = authorized;
 
     await db.runTransaction(async (tx) => {
       const stationSnap = await tx.get(stationRef);
@@ -7287,30 +8971,30 @@ export const wsfFinishServing = onCall<FinishServingRequest>(
       const servingId = normalizeStringId(
         (station.serving as { entryId?: unknown } | null | undefined)?.entryId
       );
-      const servingRef = servingId ? db.doc(`wsfQueueEntries/${servingId}`) : null;
-      const servingSnap = servingRef ? await tx.get(servingRef) : null;
+      const entryRef = servingId ? db.doc(`wsfTurnEntries/${servingId}`) : null;
+      const entrySnap = entryRef ? await tx.get(entryRef) : null;
 
-      if (servingRef && servingSnap?.exists) {
-        const entry = servingSnap.data() as QueueEntryDoc;
+      if (entryRef && entrySnap?.exists) {
+        const entry = entrySnap.data() as TurnEntryDoc;
         if (
-          entry.queueId === queueId &&
-          entry.status === 'called' &&
-          entry.calledByStationId === stationId
+          entry.lineId === lineId &&
+          entry.assignedStationId === stationId &&
+          isTurnLive(entry.status)
         ) {
-          tx.update(servingRef, {
-            status: 'done' satisfies QueueStatus,
-            queueStatusKey: queueStatusKey(queueId, 'done'),
-            doneAt: FieldValue.serverTimestamp(),
+          tx.update(entryRef, {
+            status: 'left' satisfies TurnStatus,
+            lineStatusKey: turnStatusKey(lineId, 'left'),
+            leftAt: FieldValue.serverTimestamp(),
+            endedBy: 'station',
+            readyLeaseExpiresAt: null,
           });
-          const servingUid = normalizeStringId(entry.uid);
-          if (servingUid) {
-            tx.delete(db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, servingUid)}`));
-          }
+          const uid = normalizeStringId(entry.uid);
+          if (uid) tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
         }
       }
       tx.update(stationRef, { serving: null });
     });
 
-    return readQueueState(await refreshStation(authorized), Date.now());
+    return readTurnState(authorized, lineId, Date.now());
   }
 );

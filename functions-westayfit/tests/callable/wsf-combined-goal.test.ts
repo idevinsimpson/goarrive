@@ -554,10 +554,17 @@ describe('wsfCreateCombinedGoal / wsfCombinedGoalPulse', () => {
     await contribute(fx.m1, { goalId: fx.goalA, attemptId: 'attempt-a1xx', count: 20 });
     await contribute(fx.m1, { goalId: fx.goalB, attemptId: 'attempt-b1xx', count: 15 });
 
+    // SUPERSEDED ARGUMENTS, not a superseded number. A correction now says
+    // WHICH contribution it corrects (attemptId) and carries its own
+    // idempotency key (correctionId). Without them this is a tally correction
+    // that names no credit, and a correction that names no credit never moves
+    // a parent — see test 26.
     const down = await adjust(fx.champ, {
       goalId: fx.goalA,
       delta: -5,
       targetUid: fx.m1,
+      attemptId: 'attempt-a1xx',
+      correctionId: 'corr-a1-down',
       reason: 'Miscounted by five.',
     });
     expect(down.ok).toBe(true);
@@ -593,6 +600,8 @@ describe('wsfCreateCombinedGoal / wsfCombinedGoalPulse', () => {
       goalId: fx.goalA,
       delta: 5,
       targetUid: fx.m1,
+      attemptId: 'attempt-a1xx',
+      correctionId: 'corr-a1-backup',
       reason: 'Restoring the five.',
     });
     expect(up.ok).toBe(true);
@@ -978,12 +987,32 @@ describe('wsfCreateCombinedGoal / wsfCombinedGoalPulse', () => {
     expect(credit.source).toBe('contribution');
     expect(credit.amount).toBe(20);
 
-    // ITS NAME CARRIES THE UID. The hazard already in this code is
+    // ITS NAME IS THE CONTRIBUTION'S NAME.
+    //
+    // SUPERSEDED: this used to assert `${setupId}_${goalId}_${uid}_${attemptId}`.
+    // The setup id has been dropped from the name, because a CORRECTION has to
+    // find this row from the only three facts that name a contribution — the
+    // goal, the member and the attempt — and a name carrying the setup id made
+    // it findable only by someone who already knew the answer. Nothing is lost:
+    // (goalId, uid, attemptId) is already unique, since wsfContribute refuses a
+    // second contribution under the same triple, so no two setups can ever
+    // credit the same attempt. The setup id is a FIELD on the row, asserted
+    // above, which is where a fact a correction reads back belongs.
+    expect(credits.docs[0]!.id).toBe(`${fx.goalA}_${fx.m1}_one-a-0001`);
+    // IT STILL CARRIES THE UID. The hazard already in this code is
     // wsfGoals/{goalId}/recentAdditions/{attemptId}, keyed by an attempt id
     // with no uid in the path, which two members minting the same attemptId
     // collide on. This row does not repeat it.
-    expect(credits.docs[0]!.id).toBe(`${setupId}_${fx.goalA}_${fx.m1}_one-a-0001`);
     expect(credits.docs[0]!.id).toContain(fx.m1);
+    // AND IT IS EXACTLY THE CONTRIBUTION ROW'S NAME, in its own collection.
+    expect(credits.docs[0]!.id).toBe(
+      (
+        await getFirestore()
+          .collection('wsfContributions')
+          .where('goalId', '==', fx.goalA)
+          .get()
+      ).docs[0]!.id
+    );
 
     // Two members, the SAME attemptId, two separate parent credits — which is
     // the collision the id shape exists to avoid.
@@ -1044,10 +1073,15 @@ describe('wsfCreateCombinedGoal / wsfCombinedGoalPulse', () => {
     const setupId = await freeze(fx);
     await contribute(fx.m1, { goalId: fx.goalA, attemptId: 'corr-a-0001', count: 20 });
 
+    // SUPERSEDED ARGUMENTS: the correction now NAMES the contribution it
+    // corrects and carries its own idempotency key. That is what links the
+    // parent's movement to the credit rather than to the claim and the clock.
     const down = await adjust(fx.champ, {
       goalId: fx.goalA,
       delta: -5,
       targetUid: fx.m1,
+      attemptId: 'corr-a-0001',
+      correctionId: 'corr-a-fix01',
       reason: 'Miscounted by five.',
     });
     expect(down.ok).toBe(true);
@@ -1092,11 +1126,15 @@ describe('wsfCreateCombinedGoal / wsfCombinedGoalPulse', () => {
     const setupId = await freeze(fx);
     await contribute(fx.m1, { goalId: fx.goalA, attemptId: 'clamp-post-1', count: 20 });
 
-    // A correction big enough to wipe out the pre-activation history too.
+    // A correction big enough to wipe out the pre-activation history too,
+    // addressed to the POST-activation attempt — the only one that ever gave
+    // the parent anything.
     const down = await adjust(fx.champ, {
       goalId: fx.goalA,
       delta: -100,
       targetUid: fx.m1,
+      attemptId: 'clamp-post-1',
+      correctionId: 'clamp-fix-01',
       reason: 'Recount after the event.',
     });
     expect(down.ok).toBe(true);
@@ -1307,6 +1345,8 @@ describe('wsfCreateCombinedGoal / wsfCombinedGoalPulse', () => {
       goalId: fx.goalA,
       delta: -5,
       targetUid: fx.m1,
+      attemptId: 'cycle-a-0001',
+      correctionId: 'cycle-fix-01',
       reason: 'Miscounted by five.',
     });
 

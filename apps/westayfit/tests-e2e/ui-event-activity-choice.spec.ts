@@ -225,10 +225,15 @@ async function seedProfile(uid: string, displayName: string): Promise<void> {
 /**
  * THE LINE ITSELF, read from the store it lives in.
  *
- * The claim "no queue row exists yet" is about the queue, so it is asked of
- * the queue: a structured query over `wsfQueueEntries` filtered to this run's
+ * The claim "no queue row exists yet" is about the line, so it is asked of
+ * the line: a structured query over `wsfTurnEntries` filtered to this run's
  * own goal. Asking a screen instead would prove only that a screen was not
  * showing something, which is a different and much weaker sentence.
+ *
+ * The line is keyed per EVENT now, not per goal, so one account cannot sit in
+ * several activity queues at once. The chosen child activity rides on the
+ * entry as `goalId`, which is what this filter asks for — the same question
+ * this helper always asked, at the address the entry actually has.
  */
 async function queueRows(goalId: string): Promise<{ calledName: string; status: string }[]> {
   const url =
@@ -238,10 +243,10 @@ async function queueRows(goalId: string): Promise<{ calledName: string; status: 
     headers: OWNER,
     body: JSON.stringify({
       structuredQuery: {
-        from: [{ collectionId: 'wsfQueueEntries' }],
+        from: [{ collectionId: 'wsfTurnEntries' }],
         where: {
           fieldFilter: {
-            field: { fieldPath: 'queueId' },
+            field: { fieldPath: 'goalId' },
             op: 'EQUAL',
             value: { stringValue: goalId },
           },
