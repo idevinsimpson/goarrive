@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -56,6 +57,14 @@ import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { JoinQrCode } from '../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../src/ui/joinLink';
 import { buildKioskUrl, currentOrigin } from '../../../src/ui/kioskLink';
+import { buildStationUrl } from '../../../src/ui/eventLinks';
+import {
+  normalizePairingCode,
+  pairingCodeInputValue,
+  STATION_PAIRING_CODE_LENGTH,
+  STATION_SLOTS,
+  type StationSlot,
+} from '../../../src/stationSession';
 import {
   formatActiveWindowLabel,
   formatClock,
@@ -326,6 +335,55 @@ export default function CommunityPage() {
     }
   }, []);
   useEffect(() => clearKioskCopyReset, [clearKioskCopyReset]);
+
+  // ── SCREENS AT THIS EVENT ────────────────────────────────────────────────
+  //
+  // A station is a screen standing at an event with one goal open on it. It is
+  // not an account and never becomes one: the Champion approves a six-
+  // character code the screen shows, the server mints a secret that only that
+  // screen holds, and the Champion can revoke it from here at any time.
+  //
+  // Everything this block touches is its own state. The Set-up-kiosk controls
+  // beside it are untouched.
+  type StationRow = {
+    stationId: string;
+    slot: StationSlot;
+    label: string;
+    status: 'pendingClaim' | 'active' | 'revoked';
+    createdAt: string | null;
+    claimedAt: string | null;
+    lastSeenAt: string | null;
+    revokedAt: string | null;
+  };
+  type StationsCell =
+    | { kind: 'loading' }
+    | { kind: 'ready'; rows: StationRow[] }
+    | { kind: 'failed'; message: string };
+
+  const [stations, setStations] = useState<Record<string, StationsCell>>({});
+  const [stationsToken, setStationsToken] = useState(0);
+  const [stationCode, setStationCode] = useState<Record<string, string>>({});
+  const [stationSlot, setStationSlot] = useState<Record<string, StationSlot>>({});
+  const [stationBusy, setStationBusy] = useState<string | null>(null);
+  // One notice per goal, and it stays until the next action on that goal
+  // replaces it: an approval or a revocation is a thing the Champion has to be
+  // able to read after the list under it has already moved.
+  const [stationNotice, setStationNotice] = useState<
+    Record<string, { kind: 'ok' | 'error'; message: string }>
+  >({});
+  const [stationCopy, setStationCopy] = useState<{
+    goalId: string | null;
+    state: 'idle' | 'copied' | 'failed';
+  }>({ goalId: null, state: 'idle' });
+  const stationCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearStationCopyReset = useCallback(() => {
+    if (stationCopyResetRef.current) {
+      clearTimeout(stationCopyResetRef.current);
+      stationCopyResetRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearStationCopyReset, [clearStationCopyReset]);
+
   // The same one-timer-at-a-time rule for the display-link control.
   const shareResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearShareReset = useCallback(() => {
@@ -662,6 +720,173 @@ export default function CommunityPage() {
       }
     },
     [clearKioskCopyReset]
+  );
+
+  /** The address a screen at an event is opened on. A goal id and nothing
+   * else: opening it enrols nobody, because that device still has to show a
+   * code and wait for this Champion to approve it. */
+  const stationUrlFor = useCallback(
+    (goalId: string) => buildStationUrl({ origin: currentOrigin(), goalId }),
+    []
+  );
+
+  const onCopyStation = useCallback(
+    async (goalId: string) => {
+      const url = buildStationUrl({ origin: currentOrigin(), goalId });
+      if (!url || typeof navigator === 'undefined') return;
+      clearStationCopyReset();
+      try {
+        await navigator.clipboard.writeText(url);
+        setStationCopy({ goalId, state: 'copied' });
+        stationCopyResetRef.current = setTimeout(() => {
+          stationCopyResetRef.current = null;
+          setStationCopy({ goalId: null, state: 'idle' });
+        }, 2_000);
+      } catch {
+        setStationCopy({ goalId, state: 'failed' });
+      }
+    },
+    [clearStationCopyReset]
+  );
+
+  const reloadStations = useCallback(() => setStationsToken((n) => n + 1), []);
+
+  /**
+   * The enrolled screens for every goal that carries a card, loaded when the
+   * Champion opens the sheet and again after every approval or revocation.
+   * The callable refuses anyone who is not this community's Champion, so this
+   * asks only while the Champion's own sheet is open.
+   */
+  const manageGoalIdsKey =
+    goalsState.kind === 'loaded' ? goalsState.goals.map((g) => g.goalId).join(',') : '';
+  useEffect(() => {
+    if (!manageOpen) return;
+    if (!manageGoalIdsKey) return;
+    const goalIds = manageGoalIdsKey.split(',').filter(Boolean);
+    let cancelled = false;
+    setStations((prev) => {
+      const next = { ...prev };
+      for (const id of goalIds) if (!next[id]) next[id] = { kind: 'loading' };
+      return next;
+    });
+    (async () => {
+      const fn = httpsCallable<{ goalId: string }, { stations: StationRow[] }>(
+        getFirebaseFunctions(),
+        'wsfListStations'
+      );
+      for (const goalId of goalIds) {
+        try {
+          const result = await fn({ goalId });
+          if (cancelled) return;
+          setStations((prev) => ({
+            ...prev,
+            [goalId]: { kind: 'ready', rows: result.data.stations ?? [] },
+          }));
+        } catch (e) {
+          if (cancelled) return;
+          setStations((prev) => ({
+            ...prev,
+            [goalId]: {
+              kind: 'failed',
+              message: describeCallableError(e, 'We couldn’t load the screens for this goal.'),
+            },
+          }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [manageOpen, manageGoalIdsKey, stationsToken]);
+
+  /**
+   * APPROVE. The Champion types the six characters showing on the screen and
+   * says which station it is. The slot is the Champion's choice; the screen
+   * never names itself, and the server derives the label from the slot.
+   */
+  const onApproveStation = useCallback(
+    async (goalId: string) => {
+      const typed = stationCode[goalId] ?? '';
+      const code = normalizePairingCode(typed);
+      const slot = stationSlot[goalId] ?? 1;
+      if (!code) {
+        setStationNotice((prev) => ({
+          ...prev,
+          [goalId]: {
+            kind: 'error',
+            message: `Enter the ${STATION_PAIRING_CODE_LENGTH} characters showing on that screen.`,
+          },
+        }));
+        return;
+      }
+      setStationBusy(`approve-${goalId}`);
+      setStationNotice((prev) => {
+        const next = { ...prev };
+        delete next[goalId];
+        return next;
+      });
+      try {
+        const fn = httpsCallable<
+          { goalId: string; code: string; slot: StationSlot },
+          { stationId: string; slot: StationSlot; label: string }
+        >(getFirebaseFunctions(), 'wsfApproveStation');
+        const result = await fn({ goalId, code, slot });
+        setStationCode((prev) => ({ ...prev, [goalId]: '' }));
+        setStationNotice((prev) => ({
+          ...prev,
+          [goalId]: {
+            kind: 'ok',
+            message: `${result.data.label} is approved. That screen will finish setting itself up in a moment.`,
+          },
+        }));
+        reloadStations();
+      } catch (e) {
+        setStationNotice((prev) => ({
+          ...prev,
+          [goalId]: {
+            kind: 'error',
+            message: describeCallableError(e, 'That screen could not be approved. Try again.'),
+          },
+        }));
+      } finally {
+        setStationBusy(null);
+      }
+    },
+    [stationCode, stationSlot, reloadStations]
+  );
+
+  /**
+   * REVOKE. The screen's next poll is refused and it empties its own storage,
+   * so a screen left behind in a hall stops being a screen of this community's
+   * — from here, without touching it.
+   */
+  const onRevokeStation = useCallback(
+    async (goalId: string, stationId: string, label: string) => {
+      setStationBusy(`revoke-${stationId}`);
+      try {
+        const fn = httpsCallable<{ stationId: string }, { stationId: string }>(
+          getFirebaseFunctions(),
+          'wsfRevokeStation'
+        );
+        await fn({ stationId });
+        setStationNotice((prev) => ({
+          ...prev,
+          [goalId]: { kind: 'ok', message: `${label} is revoked. It will stop showing this goal.` },
+        }));
+        reloadStations();
+      } catch (e) {
+        setStationNotice((prev) => ({
+          ...prev,
+          [goalId]: {
+            kind: 'error',
+            message: describeCallableError(e, 'That screen could not be revoked. Try again.'),
+          },
+        }));
+      } finally {
+        setStationBusy(null);
+      }
+    },
+    [reloadStations]
   );
 
   const onCopyInvite = useCallback(async () => {
@@ -1241,6 +1466,186 @@ export default function CommunityPage() {
               screen: {kioskUrlFor(goal.goalId)}
             </Text>
           ) : null}
+        </View>
+        {/*
+          SCREENS AT THIS EVENT — station enrolment.
+
+          A SIBLING of Set up kiosk, not a change to it. Setting up a kiosk is
+          "here is the address of the screen"; this is "and this screen, the
+          one showing that code right now, is Station 1".
+
+          WHY A CODE AND NOT A LINK. The screen cannot be signed in as anybody
+          — the kiosk deliberately signs itself out — so its identity is a
+          secret the server mints at the moment of approval and hands only to
+          the screen that asked. Nothing enrolling rides in a URL or a QR: a
+          copied station link opens a screen that still has to ask, and an
+          attendee scanning either code on that screen gets a page on their own
+          phone and no authority of any kind.
+
+          WHAT IT CANNOT DO. A station shows this goal's shared progress —
+          exactly what authorizing public display already allows, through the
+          same server read — and it records nothing, because it cannot know who
+          is standing at it.
+        */}
+        <View style={styles.manageGoal} testID={`wsf-kiosk-stations-${goal.goalId}`}>
+          <Text style={styles.manageGoalTitle}>Screens at this event</Text>
+          <Text style={styles.manageIntro} testID={`wsf-kiosk-stations-intro-${goal.goalId}`}>
+            Open this address on each screen, then type the code it shows and choose which station
+            it is. You can revoke a screen from here at any time.
+          </Text>
+          {stationUrlFor(goal.goalId) ? (
+            <View
+              style={styles.rowWrap}
+              dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
+            >
+              <ButtonLink
+                href={`/station/${goal.goalId}`}
+                label="Open station screen"
+                style={styles.secondaryButton}
+                textStyle={styles.secondaryButtonText}
+                testID={`wsf-kiosk-stations-open-${goal.goalId}`}
+              />
+              <Pressable
+                onPress={() => onCopyStation(goal.goalId)}
+                style={styles.secondaryButton}
+                testID={`wsf-kiosk-stations-copy-${goal.goalId}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${goal.title}: copy the station link`}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {stationCopy.goalId === goal.goalId && stationCopy.state === 'copied'
+                    ? 'Copied'
+                    : 'Copy station link'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.body} testID={`wsf-kiosk-stations-unavailable-${goal.goalId}`}>
+              The station link isn’t ready yet. Reload the page to try again.
+            </Text>
+          )}
+          {stationCopy.goalId === goal.goalId && stationCopy.state === 'failed' ? (
+            <Text style={styles.body} testID={`wsf-kiosk-stations-copy-failed-${goal.goalId}`}>
+              Copy didn’t work on this device. Open the station screen here, or type this address on
+              it: {stationUrlFor(goal.goalId)}
+            </Text>
+          ) : null}
+
+          <Text style={styles.manageIntro}>Approve a screen</Text>
+          <TextInput
+            value={stationCode[goal.goalId] ?? ''}
+            onChangeText={(raw) =>
+              setStationCode((prev) => ({ ...prev, [goal.goalId]: pairingCodeInputValue(raw) }))
+            }
+            placeholder="Code on the screen"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={STATION_PAIRING_CODE_LENGTH}
+            style={styles.stationCodeInput}
+            testID={`wsf-kiosk-stations-code-${goal.goalId}`}
+            accessibilityLabel={`${goal.title}: the code showing on that screen`}
+          />
+          <View style={styles.rowWrap}>
+            {STATION_SLOTS.map((slot) => {
+              const chosen = (stationSlot[goal.goalId] ?? 1) === slot;
+              return (
+                <Pressable
+                  key={slot}
+                  onPress={() => setStationSlot((prev) => ({ ...prev, [goal.goalId]: slot }))}
+                  style={[styles.secondaryButton, chosen ? styles.stationSlotChosen : null]}
+                  testID={`wsf-kiosk-stations-slot-${slot}-${goal.goalId}`}
+                  accessibilityRole="button"
+                  aria-pressed={chosen}
+                  accessibilityLabel={`${goal.title}: approve as Station ${slot}`}
+                >
+                  <Text
+                    style={[
+                      styles.secondaryButtonText,
+                      chosen ? styles.stationSlotChosenText : null,
+                    ]}
+                  >
+                    {`Station ${slot}`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => onApproveStation(goal.goalId)}
+              disabled={stationBusy === `approve-${goal.goalId}`}
+              style={styles.secondaryButton}
+              testID={`wsf-kiosk-stations-approve-${goal.goalId}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${goal.title}: approve this screen`}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {stationBusy === `approve-${goal.goalId}` ? 'Approving…' : 'Approve'}
+              </Text>
+            </Pressable>
+          </View>
+          {stationNotice[goal.goalId] ? (
+            <Text
+              style={stationNotice[goal.goalId]!.kind === 'ok' ? styles.body : styles.error}
+              testID={`wsf-kiosk-stations-notice-${goal.goalId}`}
+            >
+              {stationNotice[goal.goalId]!.message}
+            </Text>
+          ) : null}
+
+          <View testID={`wsf-kiosk-stations-list-${goal.goalId}`} style={styles.stationList}>
+            {(() => {
+              const cell = stations[goal.goalId];
+              if (!cell || cell.kind === 'loading') {
+                return (
+                  <Text style={styles.body} testID={`wsf-kiosk-stations-loading-${goal.goalId}`}>
+                    Loading screens…
+                  </Text>
+                );
+              }
+              if (cell.kind === 'failed') {
+                return (
+                  <Text style={styles.error} testID={`wsf-kiosk-stations-error-${goal.goalId}`}>
+                    {cell.message}
+                  </Text>
+                );
+              }
+              const live = cell.rows.filter((row) => row.status !== 'revoked');
+              if (!live.length) {
+                return (
+                  <Text style={styles.body} testID={`wsf-kiosk-stations-empty-${goal.goalId}`}>
+                    No screens are enrolled on this goal yet.
+                  </Text>
+                );
+              }
+              return live.map((row) => (
+                <View
+                  key={row.stationId}
+                  style={styles.rowWrap}
+                  testID={`wsf-kiosk-stations-row-${row.stationId}`}
+                >
+                  <Text style={styles.body}>
+                    {/*
+                      The label the SERVER derived from the slot, and the one
+                      fact about the screen's state. Nothing about where it is,
+                      what it is, or who set it up.
+                    */}
+                    {`${row.label} — ${row.status === 'active' ? 'enrolled' : 'waiting to finish setting up'}`}
+                  </Text>
+                  <Pressable
+                    onPress={() => onRevokeStation(goal.goalId, row.stationId, row.label)}
+                    disabled={stationBusy === `revoke-${row.stationId}`}
+                    style={styles.secondaryButton}
+                    testID={`wsf-kiosk-stations-revoke-${row.stationId}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${goal.title}: revoke ${row.label}`}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {stationBusy === `revoke-${row.stationId}` ? 'Revoking…' : 'Revoke'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ));
+            })()}
+          </View>
         </View>
         {unsettled ? (
           <View>
@@ -2596,6 +3001,21 @@ const styles = StyleSheet.create({
   // screen.
   rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   manageGoalTitle: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
+  stationCodeInput: {
+    borderWidth: 1.5,
+    borderColor: '#D5DCE5',
+    borderRadius: 12,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    color: wsfTheme.colors.text,
+    fontSize: 18,
+    letterSpacing: 4,
+    fontWeight: '700',
+    backgroundColor: '#FFFFFF',
+  },
+  stationSlotChosen: { backgroundColor: wsfTheme.colors.primary, borderColor: wsfTheme.colors.primary },
+  stationSlotChosenText: { color: wsfTheme.colors.background },
+  stationList: { gap: 8, paddingTop: 4 },
 
   // ---- about ----
   // Label and value sit on one line; on a very narrow screen (or at 200%

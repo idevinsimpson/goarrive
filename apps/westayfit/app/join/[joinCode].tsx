@@ -21,6 +21,13 @@ import {
   clearPendingJoinCode,
   setPendingJoinCode,
 } from '../../src/pendingJoinCode';
+import {
+  clearPendingEventGoal,
+  readPendingEventGoal,
+  routeAfterJoin,
+  setPendingEventGoal,
+} from '../../src/stationSession';
+import { readEventParam } from '../../src/ui/eventLinks';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { kit } from '../../src/ui/kit';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
@@ -44,8 +51,17 @@ type JoinState =
   | { kind: 'error'; message: string };
 
 export default function JoinPage() {
-  const params = useLocalSearchParams<{ joinCode: string }>();
+  const params = useLocalSearchParams<{ joinCode: string; event?: string }>();
   const joinCode = typeof params.joinCode === 'string' ? params.joinCode.trim() : '';
+  /**
+   * `?event=<goalId>` — set only by the QR on the screen at an event. It names
+   * a goal and nothing else: no token, no authority, and nothing that changes
+   * who may be admitted. A join that arrives with it finishes at that event's
+   * page instead of the community page, which is the difference between
+   * someone standing in a hall being shown where to add their part and being
+   * dropped somewhere they have to navigate out of.
+   */
+  const eventGoalId = readEventParam(params.event);
   const { ready, user } = useWsfAuth();
 
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: 'loading' });
@@ -57,6 +73,13 @@ export default function JoinPage() {
   useEffect(() => {
     if (joinCode) setPendingJoinCode(joinCode);
   }, [joinCode]);
+
+  // The event rides sessionStorage for the same reason the join code does:
+  // signup -> verify -> profile-setup replace this screen, and the round trip
+  // returns to `/join/<code>` without the query string it left with.
+  useEffect(() => {
+    if (eventGoalId) setPendingEventGoal(eventGoalId);
+  }, [eventGoalId]);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -112,7 +135,12 @@ export default function JoinPage() {
       );
       const result = await fn({ joinCode });
       clearPendingJoinCode();
-      router.replace(`/community/${result.data.groupId}`);
+      // Where a finished join lands: the event this visitor scanned into, or —
+      // for every join that did not come from an event — exactly where it
+      // landed before.
+      const destination = routeAfterJoin(result.data.groupId, readPendingEventGoal());
+      clearPendingEventGoal();
+      router.replace(destination as never);
     } catch (e) {
       setJoinState({
         kind: 'error',

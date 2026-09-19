@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -3240,6 +3240,102 @@ async function recordTargetCrossing(args: {
 
 type GoalPulseRequest = { goalId?: unknown };
 
+/**
+ * THE GOAL PULSE READ ITSELF — the gate, the context and the nine published
+ * fields, lifted out of `wsfGoalPulse` so a second callable can answer with
+ * EXACTLY this and not with a second implementation of it.
+ *
+ * `wsfStationState` needs the same nine fields for the screen standing at an
+ * event. Copying the body would have given the product two places where the
+ * display gate is decided, and the one thing this gate must never become is
+ * a pair of rules that drift. So the body moved here unchanged and both
+ * callables call it: wsfGoalPulse's response stays byte-identical (its own
+ * test file is the guard), and a station can be no more of an oracle than the
+ * public display already is.
+ *
+ * `callerUid` is the caller's own uid or null. A station passes null — it is
+ * not signed in as anybody and must never be treated as a member — so it
+ * reaches these totals only by the display route, which is exactly the
+ * Champion's published-display permission and nothing wider.
+ *
+ * Throws the same generic not-found for every refusal, as before.
+ */
+async function readGoalPulseTotals(
+  goalId: string,
+  callerUid: string | null
+): Promise<GoalPulseTotals> {
+  const db = getFirestore();
+  const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+  if (!goalSnap.exists) notFound();
+  const goal = goalSnap.data() as GoalDoc;
+
+  // THE GATE — two independent routes to the same aggregate, which is the
+  // whole model: membership permits the member experience, per-goal
+  // authorization permits the display experience, and neither implies the
+  // other.
+  //
+  //   1. An ACTIVE MEMBER of this goal's community. This is the member
+  //      experience — the contribution screen polls here so a peer's
+  //      contribution surfaces — and it does not depend on the goal being
+  //      authorized for public display. A member of a private community
+  //      that publishes nothing still sees their own community's progress.
+  //   2. ANYONE, when the goal itself carries an explicit
+  //      aggregateDisplayAuthorized. This is the display route.
+  //
+  // Read before the cache is consulted, so a revocation takes effect on the
+  // next read rather than lingering for the cache TTL, and so a cached entry
+  // can never stand in for the decision. That costs a document read per
+  // poll and is the right trade: a Champion who revokes expects it revoked,
+  // not revoked in two seconds.
+  const access = await evaluateGoalAggregateAccess(goal, callerUid);
+  if (!access.allowed) notFound();
+
+  // Context is published only complete and only server-authoritative: the
+  // community name from the community document, the title, window and time
+  // zone from the goal document. A missing community document or an
+  // unusable value refuses (the same generic not-found) rather than serving
+  // a display that names half of what it shows. Nothing here is taken from
+  // the request.
+  if (!access.communityDisplayName) notFound();
+  const goalTitle = typeof goal.title === 'string' ? goal.title.trim() : '';
+  // The same IANA normalization goal creation applies: an unusable stored
+  // zone is never published as if it were authoritative.
+  const timezone = normalizeIanaTimezone(goal.timezone) ?? '';
+  const startsAt = goal.startsAt?.toDate?.();
+  const endsAt = goal.endsAt?.toDate?.();
+  if (!goalTitle || !timezone || !startsAt || !endsAt) notFound();
+
+  // The cache is keyed by goalId, so it may only be consulted once the
+  // caller is known to be entitled to that goal's aggregate. Both routes
+  // above yield the identical, complete response, so one shared entry is
+  // correct: a display can never be served a member-shaped entry missing
+  // its context, and an unentitled caller never reaches the lookup.
+
+  // Stamped when the cache is consulted, after the access reads: a slow
+  // read must not stretch an entry's freshness past the TTL the display's
+  // poll is matched to.
+  const now = Date.now();
+  const cached = goalPulseCacheGet(goalId, now);
+  if (cached) return cached;
+
+  // contributorCount is deliberately not computed. It is not in the response
+  // and countGoalContributors is not called on this path.
+  const sharedTotal = await sumGoalShards(goalId);
+  const totals: GoalPulseTotals = {
+    sharedTotal,
+    target: goal.target,
+    unit: goal.unit,
+    status: goal.status,
+    communityDisplayName: access.communityDisplayName,
+    goalTitle,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+    timezone,
+  };
+  goalPulseCacheSet(goalId, now, totals);
+  return totals;
+}
+
 export const wsfGoalPulse = onCall<GoalPulseRequest>(
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<GoalPulseTotals> => {
@@ -3247,77 +3343,10 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     if (!goalId) {
       throw new HttpsError('invalid-argument', 'goalId is required.');
     }
-
-    const db = getFirestore();
-    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
-    if (!goalSnap.exists) notFound();
-    const goal = goalSnap.data() as GoalDoc;
-
-    // THE GATE — two independent routes to the same aggregate, which is the
-    // whole model: membership permits the member experience, per-goal
-    // authorization permits the display experience, and neither implies the
-    // other.
-    //
-    //   1. An ACTIVE MEMBER of this goal's community. This is the member
-    //      experience — the contribution screen polls here so a peer's
-    //      contribution surfaces — and it does not depend on the goal being
-    //      authorized for public display. A member of a private community
-    //      that publishes nothing still sees their own community's progress.
-    //   2. ANYONE, when the goal itself carries an explicit
-    //      aggregateDisplayAuthorized. This is the display route.
-    //
-    // Read before the cache is consulted, so a revocation takes effect on the
-    // next read rather than lingering for the cache TTL, and so a cached entry
-    // can never stand in for the decision. That costs a document read per
-    // poll and is the right trade: a Champion who revokes expects it revoked,
-    // not revoked in two seconds.
-    const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
-    if (!access.allowed) notFound();
-
-    // Context is published only complete and only server-authoritative: the
-    // community name from the community document, the title, window and time
-    // zone from the goal document. A missing community document or an
-    // unusable value refuses (the same generic not-found) rather than serving
-    // a display that names half of what it shows. Nothing here is taken from
-    // the request.
-    if (!access.communityDisplayName) notFound();
-    const goalTitle = typeof goal.title === 'string' ? goal.title.trim() : '';
-    // The same IANA normalization goal creation applies: an unusable stored
-    // zone is never published as if it were authoritative.
-    const timezone = normalizeIanaTimezone(goal.timezone) ?? '';
-    const startsAt = goal.startsAt?.toDate?.();
-    const endsAt = goal.endsAt?.toDate?.();
-    if (!goalTitle || !timezone || !startsAt || !endsAt) notFound();
-
-    // The cache is keyed by goalId, so it may only be consulted once the
-    // caller is known to be entitled to that goal's aggregate. Both routes
-    // above yield the identical, complete response, so one shared entry is
-    // correct: a display can never be served a member-shaped entry missing
-    // its context, and an unentitled caller never reaches the lookup.
-
-    // Stamped when the cache is consulted, after the access reads: a slow
-    // read must not stretch an entry's freshness past the TTL the display's
-    // poll is matched to.
-    const now = Date.now();
-    const cached = goalPulseCacheGet(goalId, now);
-    if (cached) return cached;
-
-    // contributorCount is deliberately not computed. It is not in the response
-    // and countGoalContributors is not called on this path.
-    const sharedTotal = await sumGoalShards(goalId);
-    const totals: GoalPulseTotals = {
-      sharedTotal,
-      target: goal.target,
-      unit: goal.unit,
-      status: goal.status,
-      communityDisplayName: access.communityDisplayName,
-      goalTitle,
-      startsAt: startsAt.toISOString(),
-      endsAt: endsAt.toISOString(),
-      timezone,
-    };
-    goalPulseCacheSet(goalId, now, totals);
-    return totals;
+    // The whole body is readGoalPulseTotals. Nothing is added to, removed
+    // from or reordered in what it returns: this response is the settled
+    // nine-field contract and this callable is now only its front door.
+    return readGoalPulseTotals(goalId, request.auth?.uid ?? null);
   }
 );
 
@@ -4162,5 +4191,881 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       targetMemberTotal: newTargetTotal,
       repeatPolicy: effectiveRepeatPolicy,
     };
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// STATION ENROLMENT — the second screen at an event.
+//
+// WHAT A STATION IS. One physical screen, standing at an event, showing ONE
+// goal. It is Station 1 or Station 2 of that goal and nothing else. It is
+// enrolled by the goal's Champion, it can be revoked by the goal's Champion,
+// and until it is enrolled it shows nothing but a pairing code.
+//
+// WHY A STATION IS NOT A FIREBASE AUTH USER. app/kiosk/[goalId].tsx signs the
+// device out every time its start screen comes into focus, deliberately, so
+// that no visitor inherits the previous visitor's account. A screen at an
+// event lives on the same kind of device and under the same rule, so an
+// account is exactly the wrong shape for its identity: it would be signed out
+// from under it, and an account that survived would be an account standing
+// unattended in a public hall.
+//
+// So a station's identity is a SECRET, not a session: a random string minted
+// by this server at approval, stored here only as a sha256 hash, held by the
+// device in its own localStorage, presented on every call, compared in
+// constant time, and revocable by the Champion in one action.
+//
+// WHAT A STATION IS DELIBERATELY NOT ABLE TO DO. It cannot record a
+// contribution, it cannot name a person, it cannot list members, and it
+// cannot read anything a public display could not. It calls
+// `readGoalPulseTotals(goalId, null)` — the display route, the Champion's own
+// published-display permission — so a station standing on a goal that is not
+// display-authorized is refused exactly as the kiosk and the display are.
+//
+// WHAT IS DELIBERATELY NOT STORED about a station: no user agent, no IP
+// address, no device fingerprint, no geolocation, and no attendee identity of
+// any kind. A station cannot prove who is standing at it, so it records
+// nothing about them, and nothing here writes wsfContributions,
+// wsfGoalCounters or wsfGoalMemberTotals.
+//
+// RULES. Neither wsfKioskStations nor wsfKioskPairings appears in
+// firestore.rules, so both fall to the catch-all `match /{document=**} { allow
+// read, write: if false; }`. Every document below is server-only and no rules
+// change accompanies this feature. Verified against firestore.rules: the only
+// wsf collections with client rules are wsfMemberProfiles, wsfCommunityGroups
+// and wsfMemberships.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Station 1 or Station 2. A goal has two; there is no third slot. */
+const STATION_SLOTS = [1, 2] as const;
+type StationSlot = (typeof STATION_SLOTS)[number];
+
+type StationStatus = 'pendingClaim' | 'active' | 'revoked';
+type PairingStatus = 'pending' | 'approved' | 'claimed' | 'expired' | 'refused';
+
+/**
+ * The station's visible name, derived HERE from the slot and never taken from
+ * a request. A label a client could supply is a label an unenrolled device
+ * could choose for itself, and "Station 1" on a screen has to mean the slot
+ * the Champion approved.
+ */
+function stationLabelForSlot(slot: StationSlot): string {
+  return `Station ${slot}`;
+}
+
+function normalizeStationSlot(v: unknown): StationSlot | null {
+  if (v === 1 || v === '1') return 1;
+  if (v === 2 || v === '2') return 2;
+  return null;
+}
+
+/**
+ * The pairing-code alphabet: 32 characters with I, O, 0 and 1 removed, so a
+ * code read off a screen across a hall and typed into a phone cannot be
+ * mistyped into a DIFFERENT valid code. 32 divides 256 exactly, so the byte
+ * mapping below is unbiased.
+ *
+ * Mirrored — deliberately, as a copy — by STATION_PAIRING_ALPHABET in
+ * apps/westayfit/src/stationSession.ts, which normalizes what the Champion
+ * types. Both are pinned by tests.
+ */
+const STATION_PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const STATION_PAIRING_CODE_LENGTH = 6;
+
+/** Ten minutes. Long enough to walk a code to the Champion, short enough that
+ * an abandoned code on a screen in a hall stops meaning anything. */
+const STATION_PAIRING_TTL_MS = 10 * 60 * 1000;
+
+function mintPairingCode(): string {
+  const bytes = randomBytes(STATION_PAIRING_CODE_LENGTH);
+  let out = '';
+  for (let i = 0; i < STATION_PAIRING_CODE_LENGTH; i += 1) {
+    out += STATION_PAIRING_ALPHABET[bytes[i]! % STATION_PAIRING_ALPHABET.length];
+  }
+  return out;
+}
+
+/**
+ * The station secret. 256 bits of CSPRNG in base64url — URL-safe characters,
+ * although it must never be in a URL (see the quality bar: no secret, token
+ * or authority ever rides in a URL or a QR code). It is minted once, handed
+ * to one device once, and stored here only as a hash.
+ */
+function mintStationSecret(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/**
+ * Constant-time comparison of two sha256 hex digests.
+ *
+ * `===` on a secret-derived value leaks, through timing, how many leading
+ * characters an attacker got right, which turns a 256-bit secret into a
+ * character-at-a-time search. Both operands here are fixed-length hex digests
+ * of the same function, so their LENGTH is public and a length mismatch can be
+ * refused before the comparison without telling an attacker anything.
+ */
+function constantTimeHexEqual(a: unknown, b: unknown): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) return false;
+  if (left.length === 0) return false;
+  return timingSafeEqual(left, right);
+}
+
+function normalizePairingCode(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  // A person typing a code off a screen adds spaces and dashes. They are
+  // removed here, not rejected, and the code is compared in upper case — the
+  // stored hash is of the upper-case form and of nothing else.
+  const cleaned = v.replace(/[\s-]+/g, '').toUpperCase();
+  if (cleaned.length !== STATION_PAIRING_CODE_LENGTH) return null;
+  for (const ch of cleaned) {
+    if (!STATION_PAIRING_ALPHABET.includes(ch)) return null;
+  }
+  return cleaned;
+}
+
+/** The shape a station secret takes. Anything else cannot be one we minted. */
+function normalizeStationSecret(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Per-IP bucket for the four callables a station device makes UNAUTHENTICATED,
+ * modelled on enforcePreviewRateLimit and kept in its own collection so the
+ * two features cannot exhaust each other's budget.
+ *
+ * 300 a minute: a station polls its state every 2 seconds (30/min), an event
+ * may have two stations, and a hall's devices usually share one NAT address,
+ * so the ceiling has to sit well above honest use while still bounding a cost
+ * pump. The same salted, daily-rotating IP hash: no long-lived per-device
+ * identifier is written anywhere.
+ */
+const STATION_RATE_LIMIT_WINDOW_MS = 60_000;
+const STATION_RATE_LIMIT_MAX = 300;
+
+async function enforceStationRateLimit(ip: string, now: number): Promise<void> {
+  const hash = hashIpForBucket(ip, now);
+  const db = getFirestore();
+  const ref = db.doc(`wsfStationRateLimits/${hash}`);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data() as { windowStart?: number; count?: number } | undefined;
+    const windowStart = data?.windowStart ?? 0;
+    const inWindow = snap.exists && now - windowStart < STATION_RATE_LIMIT_WINDOW_MS;
+    if (inWindow) {
+      const nextCount = (data?.count ?? 0) + 1;
+      if (nextCount > STATION_RATE_LIMIT_MAX) {
+        throw new HttpsError('resource-exhausted', 'Too many requests. Try again shortly.');
+      }
+      tx.update(ref, { count: FieldValue.increment(1) });
+    } else {
+      tx.set(ref, { windowStart: now, count: 1 });
+    }
+  });
+}
+
+/**
+ * wsfKioskStations/{stationId} — one enrolled screen.
+ *
+ * `serving` is null for this slice and stays null: calling a participant by
+ * name is the queue, and the queue is not this slice. The field exists so the
+ * document shape does not change under a live station when it arrives.
+ */
+type StationDoc = {
+  goalId: string;
+  communityGroupId: string;
+  /** Equal to goalId for now — one queue per goal. Written explicitly so the
+   * two can part company later without a migration of meaning. */
+  queueId: string;
+  slot: StationSlot;
+  /** Server-derived from `slot`. Never client-supplied. */
+  label: string;
+  /** sha256 hex of the secret. The secret itself is never stored. */
+  secretHash?: string;
+  /**
+   * The pairing this screen was approved from. Stored so REVOCATION can reach
+   * the in-transit copy of the secret by id — a document read, not a query,
+   * so this costs no entry in firestore.indexes.json.
+   */
+  pairingId?: string;
+  secretVersion: number;
+  status: StationStatus;
+  serving: null;
+  createdAt?: FirebaseFirestore.Timestamp;
+  createdBy: string;
+  claimedAt?: FirebaseFirestore.Timestamp | null;
+  revokedAt?: FirebaseFirestore.Timestamp | null;
+  revokedBy?: string | null;
+  lastSeenAt?: FirebaseFirestore.Timestamp | null;
+};
+
+type PairingDoc = {
+  pairingId: string;
+  goalId: string;
+  /** sha256 of the UPPER-CASE six-character code. The live code is never
+   * stored, so this collection cannot be read back into working codes. */
+  codeHash: string;
+  status: PairingStatus;
+  expiresAt: FirebaseFirestore.Timestamp;
+  createdAt?: FirebaseFirestore.Timestamp;
+  slot?: StationSlot;
+  stationId?: string;
+  deliverySecret?: string;
+  approvedAt?: FirebaseFirestore.Timestamp;
+  claimedAt?: FirebaseFirestore.Timestamp;
+};
+
+function toIso(v: unknown): string | null {
+  const ts = v as { toDate?: () => Date } | undefined | null;
+  const d = ts?.toDate?.();
+  return d instanceof Date && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfStationRequestPairing — an unenrolled screen asks to be let in.
+//
+// UNAUTHENTICATED, because a station has no account and must not have one.
+// The device gets back a `pairingId` only it knows and a six-character code it
+// prints large on itself. The code is what the Champion types; the pairingId
+// is what the device polls and claims with, and it never appears on screen, in
+// a URL or in a QR.
+//
+// IT READS NO GOAL. A request for a well-formed goalId always succeeds,
+// whether or not that goal exists, so this endpoint cannot be walked to learn
+// which goal ids are real. Nothing is granted by a pairing: until a Champion
+// of that exact goal approves the code, an approved pairing does not exist.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StationRequestPairingRequest = { goalId?: unknown };
+type StationRequestPairingResponse = {
+  pairingId: string;
+  /** The live code. In the response only — never stored, only its hash is. */
+  code: string;
+  expiresAt: string;
+};
+
+export const wsfStationRequestPairing = onCall<StationRequestPairingRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<StationRequestPairingResponse> => {
+    const now = Date.now();
+    await enforceStationRateLimit(extractIp(request.rawRequest ?? {}), now);
+
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const db = getFirestore();
+    // Random document id: the pairing is addressed only by a value the
+    // requesting device holds. Nothing enumerates this collection.
+    const ref = db.collection('wsfKioskPairings').doc();
+    const code = mintPairingCode();
+    const expiresAt = Timestamp.fromMillis(now + STATION_PAIRING_TTL_MS);
+
+    const doc: PairingDoc = {
+      pairingId: ref.id,
+      goalId,
+      codeHash: sha256Hex(code),
+      status: 'pending',
+      expiresAt,
+    };
+    await ref.set({ ...doc, createdAt: FieldValue.serverTimestamp() });
+
+    return { pairingId: ref.id, code, expiresAt: expiresAt.toDate().toISOString() };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfStationPairingStatus — the waiting screen asks whether it has been let in.
+//
+// Answers ONE word and no more. It does not say which goal, which community,
+// which slot or which Champion; the screen that asks already knows the goal it
+// is standing on, and everything else arrives with the claim.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StationPairingStatusRequest = { pairingId?: unknown };
+type StationPairingStatusResponse = { status: PairingStatus };
+
+export const wsfStationPairingStatus = onCall<StationPairingStatusRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<StationPairingStatusResponse> => {
+    const now = Date.now();
+    await enforceStationRateLimit(extractIp(request.rawRequest ?? {}), now);
+
+    const pairingId = normalizeStringId(request.data?.pairingId);
+    if (!pairingId) {
+      throw new HttpsError('invalid-argument', 'pairingId is required.');
+    }
+
+    const snap = await getFirestore().doc(`wsfKioskPairings/${pairingId}`).get();
+    // An unknown pairingId and an expired one are the same answer on purpose:
+    // 'expired' is what the screen does something about, and neither reveals
+    // whether that id was ever real.
+    if (!snap.exists) return { status: 'expired' };
+    const pairing = snap.data() as PairingDoc;
+    if (pairing.status === 'pending' && pairing.expiresAt.toMillis() <= now) {
+      return { status: 'expired' };
+    }
+    return { status: pairing.status };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfApproveStation — the Champion lets a screen in, as Station 1 or Station 2.
+//
+// AUTHORIZATION: an ACTIVE foundingChampion of the community that owns the
+// goal the pairing was requested for. Checked inside the transaction through
+// the same `requireChampion` every other Champion action uses; a caller who is
+// not one gets the same not-found a goal that does not exist gets, so this
+// cannot be used to probe goals or communities.
+//
+// The slot comes from the Champion, and the LABEL comes from the slot, here.
+// The screen never names itself.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ApproveStationRequest = { goalId?: unknown; code?: unknown; slot?: unknown };
+type ApproveStationResponse = {
+  stationId: string;
+  slot: StationSlot;
+  label: string;
+  goalId: string;
+};
+
+/** Written for the Champion, who is already authorized and learns nothing from
+ * it that they could not learn by looking at the screen in front of them. */
+const STATION_CODE_INVALID = 'That code is not valid, or it has expired. Ask the screen for a new one.';
+
+export const wsfApproveStation = onCall<ApproveStationRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<ApproveStationResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+    const code = normalizePairingCode(request.data?.code);
+    const slot = normalizeStationSlot(request.data?.slot);
+    if (!slot) {
+      throw new HttpsError('invalid-argument', 'slot must be 1 or 2.');
+    }
+    // A malformed code is refused with the SAME sentence a wrong one gets, so
+    // the shape of the code space is not narrated back to anyone.
+    if (!code) {
+      throw new HttpsError('not-found', STATION_CODE_INVALID);
+    }
+
+    const db = getFirestore();
+    const now = Date.now();
+    const codeHash = sha256Hex(code);
+    const stationRef = db.collection('wsfKioskStations').doc();
+    const secret = mintStationSecret();
+
+    const approved = await db.runTransaction(async (tx) => {
+      // READS FIRST — Firestore requires every read in a transaction to
+      // precede every write.
+      const goalRef = db.doc(`wsfGoals/${goalId}`);
+      const goalSnap = await tx.get(goalRef);
+      if (!goalSnap.exists) notFound();
+      const goal = goalSnap.data() as GoalDoc;
+      const groupId = normalizeStringId(goal.communityGroupId);
+      if (!groupId) notFound();
+
+      // AUTHORITY BEFORE ANYTHING ELSE IS SAID ABOUT THE CODE. A caller who
+      // is not this community's Champion is refused here, so nobody can use
+      // this callable to test codes.
+      await requireChampion(tx, groupId, uid);
+
+      // Looked up by codeHash alone — a single-field equality query, which
+      // Firestore serves from its automatic index and which needs no entry in
+      // firestore.indexes.json. Goal, status and expiry are checked here.
+      const matches = await tx.get(
+        db.collection('wsfKioskPairings').where('codeHash', '==', codeHash).limit(10)
+      );
+      const pairingSnap = matches.docs.find((d) => {
+        const p = d.data() as PairingDoc;
+        return (
+          p.goalId === goalId &&
+          p.status === 'pending' &&
+          p.expiresAt.toMillis() > now
+        );
+      });
+      if (!pairingSnap) {
+        throw new HttpsError('not-found', STATION_CODE_INVALID);
+      }
+
+      // The station document. `secretHash` only — the secret itself is in
+      // this function's memory and, for the next few minutes, in the pairing's
+      // deliverySecret; it is never written here.
+      const station: StationDoc = {
+        goalId,
+        communityGroupId: groupId,
+        queueId: goalId,
+        slot,
+        label: stationLabelForSlot(slot),
+        secretHash: sha256Hex(secret),
+        pairingId: pairingSnap.id,
+        secretVersion: 1,
+        status: 'pendingClaim',
+        serving: null,
+        createdBy: uid,
+        claimedAt: null,
+        revokedAt: null,
+        revokedBy: null,
+        lastSeenAt: null,
+      };
+      tx.set(stationRef, { ...station, createdAt: FieldValue.serverTimestamp() });
+
+      tx.update(pairingSnap.ref, {
+        status: 'approved' satisfies PairingStatus,
+        slot,
+        stationId: stationRef.id,
+        approvedAt: FieldValue.serverTimestamp(),
+        /**
+         * deliverySecret — THE PLAINTEXT SECRET, IN TRANSIT ONLY.
+         *
+         * Say it plainly: this is a deliberate, time-boxed trade. The secret
+         * has to travel from the Champion's approval to the screen that asked
+         * for it, and the screen is not signed in as anybody, so there is no
+         * session to hand it to. The proper answer is an envelope encrypted to
+         * a key the device generated, or a KMS-held key, and standing up KMS
+         * was not something to do against this deadline.
+         *
+         * What bounds it. The field lives on a document in wsfKioskPairings,
+         * which appears nowhere in firestore.rules and therefore falls to the
+         * catch-all deny — no client can read it, ever, on any path. It is
+         * deleted by the first successful claim (see wsfStationClaimPairing),
+         * and the pairing expires ten minutes after it was created whether or
+         * not anyone claims it.
+         *
+         * THE FOLLOW-UP, so it is not lost: have the requesting device
+         * generate a key pair and send its public key with the pairing
+         * request, seal the secret to that public key at approval, and let the
+         * claim return the sealed envelope — at which point no plaintext
+         * secret is ever written to Firestore at all. Until then, this field
+         * is the one place a station secret exists at rest in the clear.
+         */
+        deliverySecret: secret,
+      });
+
+      return { stationId: stationRef.id, slot, label: stationLabelForSlot(slot), goalId };
+    });
+
+    return approved;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfStationClaimPairing — the approved screen collects its credential, ONCE.
+//
+// UNAUTHENTICATED, and authenticated in the only way that is available here:
+// by the `pairingId`, which this server minted and handed to exactly one
+// device and which has never been on screen, in a URL or in a QR code.
+//
+// The first successful claim deletes the delivery copy of the secret. A second
+// claim therefore cannot succeed, and a claim after a revocation cannot
+// resurrect anything: the station document is the authority and this only ever
+// moves it from 'pendingClaim' to 'active'.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StationClaimPairingRequest = { pairingId?: unknown };
+type StationClaimPairingResponse = {
+  stationId: string;
+  /** The only time this value crosses the wire to the device. */
+  secret: string;
+  slot: StationSlot;
+  label: string;
+  goalId: string;
+};
+
+export const wsfStationClaimPairing = onCall<StationClaimPairingRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<StationClaimPairingResponse> => {
+    const now = Date.now();
+    await enforceStationRateLimit(extractIp(request.rawRequest ?? {}), now);
+
+    const pairingId = normalizeStringId(request.data?.pairingId);
+    if (!pairingId) {
+      throw new HttpsError('invalid-argument', 'pairingId is required.');
+    }
+
+    const db = getFirestore();
+    const pairingRef = db.doc(`wsfKioskPairings/${pairingId}`);
+
+    return db.runTransaction(async (tx) => {
+      const pairingSnap = await tx.get(pairingRef);
+      if (!pairingSnap.exists) {
+        throw new HttpsError('not-found', STATION_CODE_INVALID);
+      }
+      const pairing = pairingSnap.data() as PairingDoc;
+      const stationId = normalizeStringId(pairing.stationId);
+      const secret = pairing.deliverySecret;
+      if (
+        pairing.status !== 'approved' ||
+        !stationId ||
+        typeof secret !== 'string' ||
+        secret === '' ||
+        !pairing.slot
+      ) {
+        // Already claimed, never approved, or refused. One answer for all of
+        // them: there is nothing here to collect.
+        throw new HttpsError('failed-precondition', 'This screen has nothing to collect.');
+      }
+
+      const stationRef = db.doc(`wsfKioskStations/${stationId}`);
+      const stationSnap = await tx.get(stationRef);
+      if (!stationSnap.exists) {
+        throw new HttpsError('failed-precondition', 'This screen has nothing to collect.');
+      }
+      const station = stationSnap.data() as StationDoc;
+      if (station.status === 'revoked') {
+        // Revoked between approval and claim. The credential is not delivered,
+        // and the delivery copy goes now rather than sitting until expiry.
+        tx.update(pairingRef, {
+          status: 'refused' satisfies PairingStatus,
+          deliverySecret: FieldValue.delete(),
+        });
+        throw new HttpsError('failed-precondition', 'This screen has nothing to collect.');
+      }
+
+      tx.update(stationRef, {
+        status: 'active' satisfies StationStatus,
+        claimedAt: FieldValue.serverTimestamp(),
+        lastSeenAt: FieldValue.serverTimestamp(),
+      });
+      // The delete and the status change are in the SAME write. A claim either
+      // hands over the credential and destroys the delivery copy, or does
+      // neither.
+      tx.update(pairingRef, {
+        status: 'claimed' satisfies PairingStatus,
+        claimedAt: FieldValue.serverTimestamp(),
+        deliverySecret: FieldValue.delete(),
+      });
+
+      return {
+        stationId,
+        secret,
+        slot: pairing.slot,
+        label: station.label,
+        goalId: station.goalId,
+      };
+    });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfStationState — what an enrolled screen shows.
+//
+// AUTHORIZATION: the station secret, compared in CONSTANT TIME against the
+// stored sha256 hash. Never string equality. An unknown station, a revoked
+// station and a wrong secret are all one answer — 'permission-denied' — which
+// is also the signal the screen acts on: clear the credential and go back to
+// asking for a pairing code.
+//
+// The goal totals come from `readGoalPulseTotals(goalId, null)`. Null uid, so
+// the station reaches them ONLY by the display route — a goal whose Champion
+// has not authorized public display refuses here exactly as it refuses the
+// public display, and the screen renders the same refusal the kiosk does.
+//
+// `joinCode` is the community's EXISTING invite code, and only ever for a
+// community whose join policy admits by link at all (the same LINK_JOINABLE
+// set the join page and the Champion's own QR use). It is here so the screen
+// can draw the newcomer QR the Champion would otherwise print by hand. It is
+// not an admission-policy change: a private community returns null and the
+// screen simply has no newcomer QR to show.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StationStateRequest = { stationId?: unknown; secret?: unknown };
+type StationStateResponse = {
+  stationId: string;
+  slot: StationSlot;
+  label: string;
+  goalId: string;
+  queueId: string;
+  /** Null for a community that admits nobody by link. */
+  joinCode: string | null;
+  /** The identical nine fields wsfGoalPulse publishes; same function. */
+  pulse: GoalPulseTotals;
+};
+
+/**
+ * One answer for every way a credential can fail to be a live one: an unknown
+ * station, a revoked one, a wrong secret and a malformed request are all this
+ * sentence and this code, so none of them tells a caller which it was.
+ */
+const STATION_REJECTED_MESSAGE = 'This screen is not enrolled.';
+
+/** A station that has called in within the last minute does not need its
+ * lastSeenAt rewritten. The screen polls every two seconds; a write per poll
+ * would be 30 writes a minute per screen to record a fact one write records. */
+const STATION_LAST_SEEN_MIN_INTERVAL_MS = 60_000;
+
+export const wsfStationState = onCall<StationStateRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<StationStateResponse> => {
+    const now = Date.now();
+
+    /**
+     * THE BUCKET IS CHARGED FOR REFUSALS, NOT FOR SERVICE.
+     *
+     * The other three unauthenticated station callables take the per-IP limit
+     * on every call, and that is right: they are open doors, and a caller
+     * holding nothing can hammer them. This one is different. It is the only
+     * station callable that is *authenticated* — by a secret this server
+     * minted and handed to exactly one screen — and it is the only one a
+     * screen calls on a timer, every two seconds, for as long as the event
+     * lasts.
+     *
+     * Charging it per call put a transactional write on ONE document per IP
+     * on the main polling path. Two screens behind a venue's single NAT
+     * address is a sustained write per second to that one document, which is
+     * where Firestore's per-document write ceiling sits — so the two screens
+     * an expo hall is most likely to have are exactly the case that contends
+     * with itself. A parallel test run reproduced it: the same two tests pass
+     * one at a time and stall together.
+     *
+     * So: a call that proves it holds a live credential is served without
+     * touching the bucket, and every refusal is charged before it answers.
+     * Brute force is still throttled — guessing is precisely the refusal path
+     * — while a screen doing its job costs no contended write at all.
+     */
+    const ip = extractIp(request.rawRequest ?? {});
+    const stationRefusal = async (): Promise<HttpsError> => {
+      await enforceStationRateLimit(ip, now);
+      return new HttpsError('permission-denied', STATION_REJECTED_MESSAGE);
+    };
+
+    const stationId = normalizeStringId(request.data?.stationId);
+    const secret = normalizeStationSecret(request.data?.secret);
+    if (!stationId || !secret) throw await stationRefusal();
+
+    const db = getFirestore();
+    const stationRef = db.doc(`wsfKioskStations/${stationId}`);
+    const stationSnap = await stationRef.get();
+    if (!stationSnap.exists) throw await stationRefusal();
+    const station = stationSnap.data() as StationDoc;
+    if (station.status !== 'active') throw await stationRefusal();
+    if (!constantTimeHexEqual(station.secretHash, sha256Hex(secret))) {
+      throw await stationRefusal();
+    }
+
+    const slot = normalizeStationSlot(station.slot);
+    if (!slot) throw await stationRefusal();
+
+    // The display gate, unchanged and shared. This may throw the generic
+    // not-found, and that is the intended outcome for an unauthorized goal:
+    // the screen renders the kiosk's refusal, and is no more of an oracle than
+    // the kiosk is.
+    const pulse = await readGoalPulseTotals(station.goalId, null);
+
+    // The invite code, only where a link admits anyone at all.
+    let joinCode: string | null = null;
+    const groupSnap = await db.doc(`wsfCommunityGroups/${station.communityGroupId}`).get();
+    if (groupSnap.exists) {
+      const group = groupSnap.data() as { joinPolicy?: string; joinCode?: string };
+      if (
+        typeof group.joinPolicy === 'string' &&
+        LINK_JOINABLE.has(group.joinPolicy) &&
+        typeof group.joinCode === 'string' &&
+        group.joinCode !== ''
+      ) {
+        joinCode = group.joinCode;
+      }
+    }
+
+    const lastSeenMs = (station.lastSeenAt as { toMillis?: () => number } | null | undefined)
+      ?.toMillis?.();
+    if (typeof lastSeenMs !== 'number' || now - lastSeenMs >= STATION_LAST_SEEN_MIN_INTERVAL_MS) {
+      // Best effort, and deliberately not awaited into the response path's
+      // success: a screen that is up must not go dark because a bookkeeping
+      // write failed.
+      await stationRef
+        .update({ lastSeenAt: FieldValue.serverTimestamp() })
+        .catch(() => undefined);
+    }
+
+    return {
+      stationId,
+      slot,
+      label: station.label,
+      goalId: station.goalId,
+      queueId: station.queueId ?? station.goalId,
+      joinCode,
+      pulse,
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfListStations — the Champion sees which screens are enrolled on a goal.
+//
+// AUTHORIZATION: an ACTIVE foundingChampion of the goal's community.
+//
+// NO SECRET LEAVES THIS FUNCTION. `secretHash` is not in the response type and
+// is not read into it; a list of screens is a list of screens.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ListStationsRequest = { goalId?: unknown };
+type ListedStation = {
+  stationId: string;
+  slot: StationSlot;
+  label: string;
+  status: StationStatus;
+  createdAt: string | null;
+  claimedAt: string | null;
+  lastSeenAt: string | null;
+  revokedAt: string | null;
+};
+type ListStationsResponse = { stations: ListedStation[] };
+
+const STATION_LIST_LIMIT = 50;
+
+export const wsfListStations = onCall<ListStationsRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<ListStationsResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const db = getFirestore();
+    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+    if (!goalSnap.exists) notFound();
+    const goal = goalSnap.data() as GoalDoc;
+    const groupId = normalizeStringId(goal.communityGroupId);
+    if (!groupId) notFound();
+    await db.runTransaction(async (tx) => {
+      await requireChampion(tx, groupId, uid);
+    });
+
+    // Single-field equality, ordered in memory: a `where` plus an `orderBy` on
+    // a different field would need a composite index, and firestore.indexes.json
+    // is not this slice's to change.
+    const snap = await db
+      .collection('wsfKioskStations')
+      .where('goalId', '==', goalId)
+      .limit(STATION_LIST_LIMIT)
+      .get();
+
+    const stations: ListedStation[] = [];
+    for (const d of snap.docs) {
+      const s = d.data() as StationDoc;
+      const slot = normalizeStationSlot(s.slot);
+      if (!slot) continue;
+      stations.push({
+        stationId: d.id,
+        slot,
+        label: s.label ?? stationLabelForSlot(slot),
+        status: s.status,
+        createdAt: toIso(s.createdAt),
+        claimedAt: toIso(s.claimedAt),
+        lastSeenAt: toIso(s.lastSeenAt),
+        revokedAt: toIso(s.revokedAt),
+      });
+    }
+    stations.sort((a, b) => a.slot - b.slot || (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
+    return { stations };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfRevokeStation — the Champion turns a screen off, from anywhere.
+//
+// AUTHORIZATION: an ACTIVE foundingChampion of the goal's community.
+//
+// The secret hash is DELETED, not just marked stale: after this there is
+// nothing stored that the revoked device's secret can match, and its next poll
+// gets the same 'permission-denied' an unknown screen gets, which is what makes
+// it clear its own storage and go back to a pairing code. The document itself
+// stays, with when it was revoked and by whom.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type RevokeStationRequest = { stationId?: unknown };
+type RevokeStationResponse = { stationId: string; status: 'revoked' };
+
+export const wsfRevokeStation = onCall<RevokeStationRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<RevokeStationResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const stationId = normalizeStringId(request.data?.stationId);
+    if (!stationId) {
+      throw new HttpsError('invalid-argument', 'stationId is required.');
+    }
+
+    const db = getFirestore();
+    const stationRef = db.doc(`wsfKioskStations/${stationId}`);
+
+    await db.runTransaction(async (tx) => {
+      const stationSnap = await tx.get(stationRef);
+      if (!stationSnap.exists) notFound();
+      const station = stationSnap.data() as StationDoc;
+      const groupId = normalizeStringId(station.communityGroupId);
+      if (!groupId) notFound();
+      await requireChampion(tx, groupId, uid);
+
+      /**
+       * REVOKING BEFORE THE SCREEN EVER CLAIMED.
+       *
+       * A screen approved but not yet claimed still has its plaintext secret
+       * sitting in the pairing's `deliverySecret`, waiting to be collected.
+       * Revoking the station alone already stops the claim — it is refused on
+       * the station's status — but it would leave that secret at rest in the
+       * clear until the pairing expired, for a screen the Champion has just
+       * said they do not want. A Champion who revokes expects the credential
+       * gone, not gone in ten minutes, so the delivery copy goes here too and
+       * the pairing is closed in the same transaction.
+       *
+       * Read before any write, as a Firestore transaction requires, and by id
+       * rather than by query so no index is needed.
+       */
+      const pairingId = normalizeStringId(station.pairingId);
+      const pairingRef = pairingId ? db.doc(`wsfKioskPairings/${pairingId}`) : null;
+      const pairingSnap = pairingRef ? await tx.get(pairingRef) : null;
+
+      tx.update(stationRef, {
+        status: 'revoked' satisfies StationStatus,
+        secretHash: FieldValue.delete(),
+        revokedAt: FieldValue.serverTimestamp(),
+        revokedBy: uid,
+      });
+
+      if (pairingRef && pairingSnap?.exists) {
+        const pairing = pairingSnap.data() as PairingDoc;
+        // Only this station's own pairing, and only one that has not already
+        // been claimed — a claimed pairing holds no secret anyway, and its
+        // `claimed` status is a record worth keeping intact.
+        if (pairing.stationId === stationId && pairing.status === 'approved') {
+          // 'refused' rather than a new status: the screen already treats it
+          // exactly as it treats 'expired' — it stops waiting and asks for a
+          // fresh code — and adding a status the client has never seen would
+          // leave it polling a word it cannot act on.
+          tx.update(pairingRef, {
+            status: 'refused' satisfies PairingStatus,
+            deliverySecret: FieldValue.delete(),
+          });
+        }
+      }
+    });
+
+    return { stationId, status: 'revoked' };
   }
 );
