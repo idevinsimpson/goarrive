@@ -782,6 +782,35 @@ test('the combined parent is created on the FIXTURE window, never a fresh clock 
   assert.match(SMOKE, /endsAtIso: ends\.toISOString\(\),/);
 });
 
+test('the screens are put on a goal whose public display the Champion authorized', () => {
+  // Run 29's red row. wsfStationState serves the hall through
+  // readGoalPulseTotals(goalId, null) — as nobody — so it is gated on the
+  // goal's own aggregateDisplayAuthorized. A station holds no membership, so
+  // the member route is not available to it. Enrolling screens on an
+  // unauthorized goal cannot work, and the product refusing it is correct.
+  const body = caseSource('caseTurnContract');
+  assert.ok(
+    body.includes('await authorizeDisplay(fx, activityA)'),
+    'the row puts screens on a goal whose public display was never authorized'
+  );
+  // Through the product's own Champion callable, never a direct write.
+  const helper = SMOKE.slice(SMOKE.indexOf('async function authorizeDisplay('), SMOKE.indexOf('function trackContribution('));
+  assert.match(helper, /callFunction\('wsfSetGoalDisplayAuthorization'/);
+  assert.match(helper, /Fixture authorization did not persist/);
+  // Before the screens enrol, not after they have already failed to read.
+  assert.ok(
+    body.indexOf('await authorizeDisplay(fx, activityA)') < body.indexOf('for (const slot of [1, 2])'),
+    'the authorization must come before the screens enrol'
+  );
+  // ONLY the activity the screens are on. The unchosen activity must stay
+  // unauthorized, or the arithmetic assertion stops proving a member read.
+  assert.equal(
+    /authorizeDisplay\(fx, activityB\)/.test(body),
+    false,
+    'the unchosen activity must not be display-authorized'
+  );
+});
+
 test('the in-smoke cleanup deletes BOTH registers, not just the tagged one', () => {
   // cleanup.linked is a second register. A cleanupAll() that walked only
   // cleanup.docs would delete the run's own fixtures, leave every

@@ -1618,6 +1618,24 @@ async function caseTurnContract() {
     }
   }
 
+  // ── THE SCREEN IS A DISPLAY, SO THE DISPLAY MUST BE AUTHORIZED ────────────
+  //
+  // Run 29 failed at `station state` with the generic not-found, and the
+  // product was right again. wsfStationState serves the hall by calling
+  // readGoalPulseTotals(station.goalId, NULL) — deliberately as nobody. That
+  // is the display route, and the display route is gated on the goal's own
+  // aggregateDisplayAuthorized; membership is the other, separate route and a
+  // station holds no membership. So a screen cannot show a goal whose
+  // Champion has not authorized its public display, which is the whole
+  // per-goal model this suite exists to protect.
+  //
+  // The row was skipping the step a real room does. This is that step, taken
+  // through the product's own callable as the Champion, not written into
+  // Firestore behind the product's back. Only the activity the screens are
+  // on is authorized: the unchosen activity stays unauthorized, so the
+  // arithmetic assertion below still reads it as a member, not as a display.
+  await authorizeDisplay(fx, activityA);
+
   // ── TWO SCREENS, ENROLLED THE WAY A CHAMPION ENROLS THEM ──────────────────
   const stations = [];
   for (const slot of [1, 2]) {
