@@ -111,6 +111,14 @@ ROUTE_META: dict[str, tuple[str, str | None]] = {
     ),
     "contribute": (f"Add your part | {SITE_NAME}", None),
     "kiosk": (f"Kiosk | {SITE_NAME}", None),
+    # The expo routes. Titles only, and deliberately generic: a station, an
+    # event chooser, a turn and a follow-along say nothing about which
+    # community or which person is in front of the screen.
+    "station": (f"Station | {SITE_NAME}", None),
+    "event": (f"At the event | {SITE_NAME}", None),
+    "queue": (f"Your turn | {SITE_NAME}", None),
+    "move": (f"Follow along | {SITE_NAME}", None),
+    "combined": (f"Combined goal | {SITE_NAME}", None),
 }
 
 # ------------------------------------------------------------------- failures
