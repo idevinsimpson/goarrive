@@ -3003,7 +3003,22 @@ export default function CommunityPage() {
               the page's one top-level heading. Role and level only — the
               styles, and therefore the rendering, are unchanged.
             */}
-            <Text style={[styles.heading, styles.headingName]} testID="wsf-community-name" {...HEADING_1}>
+            {/*
+              SLICE 1. BOUNDED, because the worst case is not hypothetical: an
+              80-character name wraps to four lines and pushed the primary
+              action to within ONE pixel of the bottom of a 390x640 phone. Two
+              lines caps the pre-goal block at a known height whatever the name
+              is. The full name is never lost — it stays the accessible label,
+              and Manage shows it in full.
+            */}
+            <Text
+              style={[styles.heading, styles.headingName]}
+              testID="wsf-community-name"
+              numberOfLines={2}
+              ellipsizeMode="tail"
+              accessibilityLabel={group.displayName}
+              {...HEADING_1}
+            >
               {group.displayName}
             </Text>
             {isSample ? (
@@ -3071,12 +3086,18 @@ export default function CommunityPage() {
                     while the goal is still open. Confirmed pulse only — an
                     unconfirmed or failed read keeps the neutral eyebrow.
                   */}
-                  <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
-                    {p.kind === 'ok' &&
-                    progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen'
-                      ? 'Goal reached'
-                      : 'What we’re doing'}
-                  </Text>
+                  {/*
+                    SLICE 1. The neutral "What we're doing" labelled what the
+                    card's own content already said, and cost a row at the most
+                    expensive point on a phone. "Goal reached" is real news and
+                    keeps the slot; the label does not.
+                  */}
+                  {p.kind === 'ok' &&
+                  progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen' ? (
+                    <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
+                      Goal reached
+                    </Text>
+                  ) : null}
                   <Text
                     style={styles.heroTitle}
                     testID={`wsf-community-goal-title-${featured.goalId}`}
@@ -3119,10 +3140,14 @@ export default function CommunityPage() {
                     />
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'record')}
-                      style={styles.heroOutlineButtonWide}
-                      textStyle={styles.heroOutlineButtonText}
+                      style={styles.heroSecondaryAction}
+                      textStyle={styles.heroSecondaryActionText}
                       testID={`wsf-community-goal-record-${featured.goalId}`}
-                      label={`Already moved? Record ${p.kind === 'ok' ? p.pulse.unit : featured.unit}`}
+                      // SLICE 1. Was "Already moved? Record <unit>" — a question
+                      // plus a verb plus a unit, set as wide as the primary, so
+                      // it competed with it. The destination screen names the
+                      // unit; this only has to name the situation.
+                      label="I already moved"
                     />
                   </View>
                   {/*
@@ -3653,6 +3678,22 @@ const styles = StyleSheet.create({
   freshnessButton: { minHeight: 44, justifyContent: 'center' },
   heroFreshnessLink: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
   actions: { gap: 10, marginTop: 8 },
+  // SLICE 1. The already-moved route is DEMOTED, not duplicated and not
+  // stripped. Bare centred text (the first attempt) read as a caption and
+  // lost every signal that it could be tapped. This is a quiet chip: hairline
+  // border at lower contrast than the share control, sized to its label rather
+  // than the full width, and still a 44px target.
+  heroSecondaryAction: {
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(247,245,240,0.22)',
+    borderRadius: 999,
+    minHeight: 44,
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroSecondaryActionText: { color: HERO_MUTED, fontSize: 15, fontWeight: '600' },
   primaryButton: {
     backgroundColor: PROGRESS_GREEN,
     borderRadius: 14,
@@ -3663,12 +3704,10 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: NAVY, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   heroOutlineButtonWide: {
-    // SLICE 1. Was a full-width 1.5px-bordered button identical in weight to
-    // the primary, which made two obvious actions instead of one. Now a quiet
-    // control: no border, same 44px minimum target.
-    borderWidth: 0,
+    borderWidth: 1.5,
+    borderColor: HERO_RULE,
     borderRadius: 14,
-    minHeight: 44,
+    minHeight: 48,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
