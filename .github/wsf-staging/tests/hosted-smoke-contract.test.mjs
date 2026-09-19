@@ -669,6 +669,23 @@ test('the hosted turn-service row drives the real journey with real identities, 
     false,
     'sharedTotal is the child pulse field; reading it off the parent yields undefined'
   );
+  // And the other half of the same contract: the CHILD pulses must keep
+  // reading sharedTotal. Pinning only the parent would let a later edit
+  // "fix" the children to combinedTotal and get undefined in the other
+  // direction.
+  assert.ok(
+    /chosen\?\.sharedTotal === TURN_COUNT/.test(body),
+    'the chosen child must be read as sharedTotal (wsfGoalPulse)'
+  );
+  assert.ok(
+    /untouched\?\.sharedTotal === 0/.test(body),
+    'the unchosen child must be read as sharedTotal (wsfGoalPulse)'
+  );
+  assert.equal(
+    /(chosen|untouched)\?\.combinedTotal/.test(body),
+    false,
+    'combinedTotal is the parent field; reading it off a child yields undefined'
+  );
 
   // Privacy: a count, never a list, and no identifier of a real person.
   assert.ok(body.includes('waitingCount'), 'the row does not check the waiting count');
