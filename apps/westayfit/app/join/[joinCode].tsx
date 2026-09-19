@@ -14,6 +14,13 @@ import {
   StatusText,
   SubmitButton,
 } from '../../src/AuthFormPrimitives';
+import {
+  clearDeviceMode,
+  decideDeviceEntry,
+  readDeviceMode,
+  saveDeviceMode,
+  type DeviceMode,
+} from '../../src/deviceMode';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
 import { groupTypeCardLabel, groupTypeLabel } from '../../src/labels';
@@ -29,6 +36,7 @@ import {
 } from '../../src/stationSession';
 import { readEventParam } from '../../src/ui/eventLinks';
 import { ButtonLink } from '../../src/ui/ButtonLink';
+import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
 import { kit } from '../../src/ui/kit';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -80,6 +88,49 @@ export default function JoinPage() {
   useEffect(() => {
     if (eventGoalId) setPendingEventGoal(eventGoalId);
   }, [eventGoalId]);
+
+  /**
+   * WHOSE SCREEN IS THIS — asked on THIS page only when the visitor arrived
+   * from an event QR (`?event=<goalId>`) and is signed out, which is the one
+   * situation where the next tap would create an account.
+   *
+   * A join that did not come from an event is byte-for-byte the flow it always
+   * was: `eventGoalId` is null, `deviceEntry` is null, and nothing below
+   * changes. So is every join by someone already signed in — they already have
+   * an account, and the device question is put to them on the event screen
+   * they land on afterwards (src/stationSession.ts `routeAfterJoin`).
+   *
+   * `undefined` until storage has been read, for the same hydration reason as
+   * the event screen.
+   */
+  const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
+  useEffect(() => {
+    setDeviceMode(readDeviceMode());
+  }, []);
+  const deviceEntry =
+    !eventGoalId || deviceMode === undefined
+      ? null
+      : decideDeviceEntry({ mode: deviceMode, goalId: eventGoalId });
+
+  const onChoosePersonal = useCallback(() => {
+    saveDeviceMode('personal');
+    setDeviceMode('personal');
+  }, []);
+
+  const onChooseShared = useCallback(() => {
+    // NO ACCOUNT IS CREATED ON A SHARED SCREEN. The device is handed to the
+    // existing kiosk start screen for this event's goal instead, which is
+    // where a shared device belongs and the only shared session this app has.
+    const decided = decideDeviceEntry({ mode: 'shared', goalId: eventGoalId });
+    if (decided.kind !== 'shared') return;
+    saveDeviceMode('shared');
+    router.replace(decided.route as never);
+  }, [eventGoalId]);
+
+  const onUseOwnPhoneInstead = useCallback(() => {
+    clearDeviceMode();
+    setDeviceMode(null);
+  }, []);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -233,6 +284,58 @@ export default function JoinPage() {
       </View>
     </>
   );
+
+  // ── the device question, before the account ──────────────────────────────
+  //
+  // Only on the event path, only while signed out, and only after the preview
+  // succeeded — a link that is not valid says so first; a device question
+  // about a dead link would be asking about nothing.
+  if (!user && eventGoalId) {
+    const gatePage = (testID: string, children: React.ReactNode) => (
+      <ScrollView
+        style={kit.scroll}
+        contentContainerStyle={kit.page}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={kit.column} testID={testID}>
+          <View style={kit.chrome}>
+            <WsfWordmark variant="navy" height={22} testID="wsf-join-wordmark" />
+          </View>
+          {children}
+        </View>
+      </ScrollView>
+    );
+
+    if (deviceEntry === null) {
+      // Storage not read yet: the state this screen was already in.
+      return (
+        <FormShell heading="Loading community" testID="wsf-join-loading">
+          <StatusText>Loading…</StatusText>
+        </FormShell>
+      );
+    }
+    if (deviceEntry.kind === 'ask') {
+      return gatePage(
+        'wsf-join-device-choice',
+        <DeviceChoice
+          onChoosePersonal={onChoosePersonal}
+          onChooseShared={onChooseShared}
+          signupAhead
+          testID="wsf-device-choice"
+        />
+      );
+    }
+    if (deviceEntry.kind === 'shared') {
+      return gatePage(
+        'wsf-join-device-shared',
+        <SharedScreenNotice
+          onContinue={() => router.replace(deviceEntry.route as never)}
+          onUseOwnPhone={onUseOwnPhoneInstead}
+          testID="wsf-device-shared"
+        />
+      );
+    }
+  }
 
   // Signed out — preview is safe (D4: only shown for link-joinable active
   // groups, i.e. public or inviteOnly; private never previews) so we

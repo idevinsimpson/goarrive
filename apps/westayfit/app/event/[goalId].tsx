@@ -1,17 +1,25 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import { describeCallableError } from '../../src/callableErrors';
 import { SecondaryLink, StatusText } from '../../src/AuthFormPrimitives';
+import {
+  clearDeviceMode,
+  decideDeviceEntry,
+  readDeviceMode,
+  saveDeviceMode,
+  type DeviceMode,
+} from '../../src/deviceMode';
 import type { GoalPulse } from '../../src/displayPulse';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
 import { ButtonLink } from '../../src/ui/ButtonLink';
+import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
 import { kit } from '../../src/ui/kit';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -19,7 +27,23 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  * EVENT — where an attendee's OWN phone lands after scanning the screen in the
  * room.
  *
- * It is a signpost and deliberately nothing more. One decision, three answers:
+ * It is a signpost and deliberately nothing more.
+ *
+ * BEFORE ANY OF IT, ONE QUESTION: whose screen is this? The same QR is
+ * scanned by someone holding their own phone and by someone standing at a
+ * device the venue shares between strangers, and nothing in the request tells
+ * them apart — so the person is asked, in plain words, before anything signs
+ * in, creates an account or calls the server. "My own phone" runs everything
+ * below exactly as it ran before. "A shared screen here" hands the device to
+ * `/kiosk/<goalId>`, the route that ALREADY implements a shared session — its
+ * sign-out on rest, its Finish, its countdown and its reset, none of which is
+ * reimplemented or altered here. The answer is one of two words in this
+ * browser's localStorage (src/deviceMode.ts) and is never sent anywhere.
+ *
+ * ADMISSION IS UNTOUCHED BY THE QUESTION. Neither answer admits anybody,
+ * shows a join code, or changes what the server will do for whoever signs in.
+ *
+ * Then the signpost proper. One decision, three answers:
  *
  *   - SIGNED OUT: create an account, or sign in. Both are the ordinary flows.
  *   - A MEMBER: one clear way on — "Add your part" — to the EXISTING
@@ -51,8 +75,54 @@ export default function EventScreen() {
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<EventState>({ kind: 'loading' });
 
+  /**
+   * `undefined` until this browser's storage has actually been read.
+   *
+   * The static export renders this route with no storage at all, so the answer
+   * cannot be read during render without the first client render disagreeing
+   * with the served HTML (#418, the same hydration rule the kiosk and station
+   * screens keep). Until it has been read the screen shows its ordinary
+   * loading state, which is what it showed at this moment anyway.
+   */
+  const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
+  useEffect(() => {
+    setDeviceMode(readDeviceMode());
+  }, []);
+
+  const entry = deviceMode === undefined ? null : decideDeviceEntry({ mode: deviceMode, goalId });
+  // The ordinary path runs only once the device has said it is somebody's own.
+  const ownPhone = entry?.kind === 'personal';
+
+  const onChoosePersonal = useCallback(() => {
+    // A browser that refuses storage still gets the path it just chose; it is
+    // simply asked again next time.
+    saveDeviceMode('personal');
+    setDeviceMode('personal');
+  }, []);
+
+  const onChooseShared = useCallback(() => {
+    // One derivation of the hand-off address, and the same one the standing
+    // answer uses: whether a shared session can be entered at all is the
+    // decision function's to make, not this handler's.
+    const decided = decideDeviceEntry({ mode: 'shared', goalId });
+    if (decided.kind !== 'shared') return;
+    saveDeviceMode('shared');
+    // Straight into the EXISTING shared session. `replace`, not push: a shared
+    // device must not have a personal signpost sitting under its back button.
+    // `deviceMode` is deliberately not set here — this screen is leaving, and
+    // the standing-answer notice below is for a device that arrives already
+    // knowing, not for the tap that just answered.
+    router.replace(decided.route as never);
+  }, [goalId]);
+
+  const onUseOwnPhoneInstead = useCallback(() => {
+    clearDeviceMode();
+    setDeviceMode(null);
+  }, []);
+
   useEffect(() => {
     if (!wsfAuthEnabled) return;
+    if (!ownPhone) return;
     if (!ready) return;
     if (!user) {
       setState({ kind: 'signedOut' });
@@ -113,7 +183,7 @@ export default function EventScreen() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId]);
+  }, [ready, user, goalId, ownPhone]);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="At the event" testID="wsf-event-disabled" />;
@@ -133,6 +203,47 @@ export default function EventScreen() {
       </View>
     </ScrollView>
   );
+
+  // ── the device question, before anything else ────────────────────────────
+  //
+  // Ahead of the membership call, ahead of sign-in, ahead of any account being
+  // created. Nothing below this point runs until the device has said it is
+  // somebody's own.
+  if (entry === null) {
+    // Storage has not been read yet — one paint, and the same loading state
+    // this screen showed at this moment before.
+    return page(
+      'wsf-event-loading',
+      <View style={kit.card}>
+        <StatusText>Loading…</StatusText>
+      </View>
+    );
+  }
+
+  if (entry.kind === 'ask') {
+    return page(
+      'wsf-event-device-choice',
+      <DeviceChoice
+        onChoosePersonal={onChoosePersonal}
+        onChooseShared={onChooseShared}
+        testID="wsf-device-choice"
+      />
+    );
+  }
+
+  if (entry.kind === 'shared') {
+    // This device has already said it is shared. It is not offered a personal
+    // sign-in at all; it is offered the shared session it belongs to, and the
+    // one way back for a phone that answered this by mistake.
+    return page(
+      'wsf-event-device-shared',
+      <SharedScreenNotice
+        onContinue={() => router.replace(entry.route as never)}
+        onUseOwnPhone={onUseOwnPhoneInstead}
+        testID="wsf-device-shared"
+      />
+    );
+  }
 
   if (state.kind === 'loading') {
     return page(

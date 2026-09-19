@@ -36,6 +36,7 @@ const FIXTURES = {
   display: 'display/[goalId].html',
   contribute: 'contribute/[goalId].html',
   kiosk: 'kiosk/[goalId].html',
+  combined: 'combined/[setupId].html',
   signin: 'signin.html',
   goalsNew: 'goals/new.html',
   challenge: 'community/[groupId]/challenge.html',
@@ -63,7 +64,15 @@ afterAll(() => {
   for (const dir of temps) rmSync(dir, { recursive: true, force: true });
 });
 
-type Run = { status: number; stdout: string; stderr: string; pages: Record<RouteName, string> };
+type Run = {
+  status: number;
+  stdout: string;
+  stderr: string;
+  pages: Record<RouteName, string>;
+  /** The fixture tree the injector just ran over, so a test can look at the
+   * `__dynamic` aliases it wrote as well as the pages it rewrote. */
+  dist: string;
+};
 
 /** Run the real injector over a fresh fixture tree with exactly this env. */
 function runInjector(env: Record<string, string>, { expectFailure = false } = {}): Run {
@@ -105,7 +114,7 @@ function runInjector(env: Record<string, string>, { expectFailure = false } = {}
   for (const [name, rel] of Object.entries(FIXTURES) as [RouteName, string][]) {
     pages[name] = expectFailure ? '' : readFileSync(path.join(dist, rel), 'utf8');
   }
-  return { status, stdout, stderr, pages };
+  return { status, stdout, stderr, pages, dist };
 }
 
 function parse(html: string): Document {
@@ -159,6 +168,10 @@ const ROUTE_COPY: Record<RouteName, { title: string; description: string }> = {
   },
   kiosk: {
     title: 'Kiosk | WE STAY FIT',
+    description: 'Shared challenges. More movement. Stronger communities.',
+  },
+  combined: {
+    title: 'Combined goal | WE STAY FIT',
     description: 'Shared challenges. More movement. Stronger communities.',
   },
   signin: { title: 'WE STAY FIT', description: 'Shared challenges. More movement. Stronger communities.' },
@@ -243,9 +256,50 @@ describe('exported head — every page', () => {
     // A dynamic template serves many URLs and has no route data at this tier,
     // so it must not publish a URL it cannot name — and must never publish the
     // bracket template or its internal `__dynamic` hosting alias.
-    for (const route of ['join', 'display', 'contribute', 'kiosk', 'challenge'] as RouteName[]) {
+    for (const route of [
+      'join',
+      'display',
+      'contribute',
+      'kiosk',
+      'combined',
+      'challenge',
+    ] as RouteName[]) {
       expect(link(production.pages[route], 'canonical')).toBe(`${PROD_ORIGIN}/`);
     }
+  });
+});
+
+describe('exported head — the combined movement goal route', () => {
+  // A dynamic route only resolves on a cold reload because the build writes a
+  // `__dynamic` alias AND Hosting declares a rewrite to it. The injector fails
+  // the build when an alias has no declared destination, so the pairing below
+  // is what makes `/combined/<setupId>` survive a reload in a browser that has
+  // never seen the app — the same mechanism `/kiosk/<goalId>` already relies on.
+  it('emits the __dynamic alias the Hosting rewrite points at', () => {
+    expect(existsSync(path.join(production.dist, 'combined/__dynamic.html'))).toBe(true);
+  });
+
+  it('is a declared rewrite destination, prefix-disjoint from /kiosk/**', () => {
+    const hosting = JSON.parse(
+      readFileSync(path.resolve(__dirname, '../../../firebase.westayfit.json'), 'utf8')
+    ) as { hosting: { rewrites: Array<{ source: string; destination: string }> } };
+    const rewrite = hosting.hosting.rewrites.find((r) => r.source === '/combined/**');
+    expect(rewrite?.destination).toBe('/combined/__dynamic.html');
+    // Nested under /kiosk/** it would have been served by the single-goal
+    // kiosk page instead, whatever order the entries were written in.
+    expect(rewrite?.source.startsWith('/kiosk/')).toBe(false);
+  });
+
+  it('the emulator harness declares the identical rewrite', () => {
+    // The e2e battery runs against the emulator config; if the two drift the
+    // harness stops testing what actually ships.
+    const emu = JSON.parse(
+      readFileSync(path.resolve(__dirname, '../../../firebase.westayfit.emulators.json'), 'utf8')
+    ) as { hosting: { rewrites: Array<{ source: string; destination: string }> } };
+    expect(emu.hosting.rewrites).toContainEqual({
+      source: '/combined/**',
+      destination: '/combined/__dynamic.html',
+    });
   });
 });
 
@@ -256,6 +310,7 @@ describe('exported head — nothing private or internal leaks', () => {
       '[joinCode]',
       '[goalId]',
       '[groupId]',
+      '[setupId]',
       '__dynamic',
       'uid',
       '@',

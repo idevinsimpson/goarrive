@@ -5069,3 +5069,649 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
     return { stationId, status: 'revoked' };
   }
 );
+
+// ═════════════════════════════════════════════════════════════════════════════
+// COMBINED MOVEMENT GOAL — several activity goals, one shared total.
+//
+// THE ONE IDEA THE WHOLE FEATURE RESTS ON: **the parent has no counter.** A
+// combined goal's total is a pure function of its children's existing sharded
+// counters, computed at read time. Nothing here writes to wsfGoalCounters,
+// nothing here runs on the contribution path, and wsfContribute, wsfAdjustGoal,
+// wsfGoalPulse, wsfListGoals and wsfCreateGoal are untouched by this feature.
+//
+// Everything below follows from that:
+//   * "atomic canonical child-and-parent credit" is satisfied by there being
+//     exactly ONE write — the existing wsfContribute transaction. The instant
+//     it commits, the parent's derived total includes it. There is no second
+//     write to fail, to retry, or to apply twice.
+//   * the existing (goal, uid, attemptId) idempotency cannot break, because no
+//     code here runs when a contribution is recorded or replayed.
+//   * a correction reaches the parent with NO new mechanism: wsfAdjustGoal
+//     moves a child's shard total by `delta`, and the parent is the sum of
+//     child shard totals, so the parent moves by exactly `delta`, once.
+//   * the parent cannot drift from the children, because there is only one
+//     number. Drift is not mitigated here; it is impossible.
+//
+// WHAT WAS REJECTED, and why, so nobody re-proposes it: a
+// wsfCombinedCounters/{setupId}/shards/{i} mirror incremented inside the
+// wsfContribute transaction would need, on the hot path, "which setups does
+// this goal belong to" — an extra read per contribution, or a denormalized
+// field on wsfGoals that has to be kept true — and wsfAdjustGoal would need a
+// parallel fan-out a future correction path could forget. Two numbers, two
+// places to forget. It would also re-introduce exactly the document contention
+// the ten-shard fan-out and the post-commit crossing claim exist to avoid.
+//
+// New Admin-SDK-only collection (no firestore.rules change; the catch-all
+// deny at the bottom of the WSF section covers it — same position as
+// wsfGoals, wsfGoalCounters and wsfKioskStations):
+//   * wsfCombinedGoals/{setupId}
+//
+// Every query below is a document read or an equality on a single field, so
+// firestore.indexes.json is untouched too.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** A combined goal of one activity is not combined. */
+const MIN_COMBINED_CHILDREN = 2;
+/**
+ * The cap bounds the read fan-out of the pulse: 1 setup + N goals + 10N shard
+ * documents + 1 membership + 1 community. At six that is at most 69 document
+ * reads, collapsed to one real read per setup per 2 s per instance by the
+ * cache below.
+ */
+const MAX_COMBINED_CHILDREN = 6;
+
+/**
+ * THE FROZEN RULE, version 1, written down rather than implied.
+ *
+ *   An activity goal is eligible for a combined setup only if its own window
+ *   sits entirely inside the combined window:
+ *     child.startsAt >= combined.startsAt AND child.endsAt <= combined.endsAt
+ *
+ * This is what makes the derivation exact. wsfContribute enforces the child's
+ * own window on the server ("Goal has not started yet." / "Goal window has
+ * ended."), so EVERY contribution that can ever exist on an eligible child
+ * necessarily lands inside the combined window. A child's lifetime shard total
+ * therefore IS its in-window contribution to the parent, and the parent needs
+ * no timestamp filter, no range query and no composite index.
+ *
+ * The alternative — a combined window narrower than a child's — would force
+ * counting from wsfContributions with a createdAt range: a composite index, a
+ * query on the hot read path, and a second definition of "counted" that could
+ * disagree with the shards. Rejected.
+ *
+ * The rule is checked at freeze time AND re-checked on every read, so a
+ * hand-edited document cannot quietly widen what is counted.
+ */
+type CombinedContributionRule = 'childWindowWithin';
+const COMBINED_CONTRIBUTION_RULE: CombinedContributionRule = 'childWindowWithin';
+
+/**
+ * Version 1's whole conversion model: ONE REPETITION OF ANY ELIGIBLE ACTIVITY
+ * COUNTS AS ONE UNIT OF THE COMBINED GOAL. No factor, no weighting, no
+ * conversion table.
+ *
+ * There is deliberately no `repetitionFactor: 1` field — an unapplied stored
+ * field is a trap for the next reader. If weighting is ever wanted it arrives
+ * as contributionRuleVersion 2 with its own field, and every version-1 setup
+ * keeps meaning exactly what it meant.
+ */
+const COMBINED_CONTRIBUTION_RULE_VERSION = 1;
+
+/**
+ * The explicit eligible-repetition metadata, frozen at creation.
+ *
+ * It records what each activity WAS when the Champion froze the setup. It is
+ * not what the screen shows: the pulse reads title, unit, target and status
+ * live from the child documents, because each activity keeps its own goal and
+ * a Champion who renames one should see the new name. The frozen copy is the
+ * record of what was agreed to, and `startsAt`/`endsAt` here are the windows
+ * the frozen rule was checked against.
+ */
+type FrozenChild = {
+  goalId: string;
+  title: string;
+  /** The ACTIVITY's own unit — "squats", "push-ups" — not the combined unit. */
+  unit: string;
+  /** The activity's own target, which it keeps. */
+  target: number;
+  /** Resolved through goalRepeatPolicy(), never the raw field. */
+  repeatPolicy: GoalRepeatPolicy;
+  /** The only value version 1 accepts or writes. See the constant above. */
+  countsAs: 'repetition';
+  startsAt: FirebaseFirestore.Timestamp;
+  endsAt: FirebaseFirestore.Timestamp;
+  statusAtFreeze: GoalStatus;
+};
+
+/**
+ * The persisted setup. NO `sharedTotal`, NO `combinedTotal`, no counter
+ * subcollection, no `reachedAt` — deliberately. Any stored total would be a
+ * second number that can drift from the children.
+ *
+ * `reachedAt` in particular is absent because a crossing cannot be claimed
+ * honestly from a derived sum: it would need the same post-commit claim
+ * machinery recordTargetCrossing uses, on a read path with no write. "Reached
+ * right now" is derived from combinedTotal >= target on the screen, which is
+ * what every other surface already does.
+ */
+type CombinedGoalDoc = {
+  communityGroupId: string;
+  ownerUid: string;
+  title: string;
+  /** The word the COMBINED count is shown in, e.g. "movements". */
+  unit: string;
+  target: number;
+  startsAt: FirebaseFirestore.Timestamp;
+  endsAt: FirebaseFirestore.Timestamp;
+  timezone: string;
+  status: GoalStatus;
+  contributionRule: CombinedContributionRule;
+  contributionRuleVersion: number;
+  children: FrozenChild[];
+  /** The same ids, flat, so a later equality query needs no composite index. */
+  childGoalIds: string[];
+  frozenAt?: FirebaseFirestore.Timestamp;
+  createdAt?: FirebaseFirestore.Timestamp;
+};
+
+/**
+ * The child id list, validated at the boundary.
+ *
+ * THE DUPLICATE CHECK MATTERS MORE THAN IT LOOKS. A repeated id in
+ * `childGoalIds` would be summed twice by the pulse and is the only way this
+ * design could double-count. It is refused here AND deduped defensively on
+ * read, because one guard at a boundary is not a guard against a hand edit.
+ */
+const COMBINED_CHILDREN_MESSAGE =
+  'childGoalIds must be a list of 2 to 6 activity goals.';
+const COMBINED_DUPLICATE_MESSAGE = 'Each activity may be listed once.';
+const COMBINED_WINDOW_MESSAGE =
+  "Every activity's own period must sit inside the combined period.";
+
+function normalizeCombinedChildIds(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  if (v.length < MIN_COMBINED_CHILDREN || v.length > MAX_COMBINED_CHILDREN) return null;
+  const ids: string[] = [];
+  for (const raw of v) {
+    const id = normalizeStringId(raw);
+    if (!id) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCreateCombinedGoal — freeze a setup.
+//
+// AUTHORIZATION, in order, and deliberately the SAME four steps and the SAME
+// strings wsfCreateGoal uses — one verification story and one champion story,
+// not two:
+//   1. no request.auth            -> unauthenticated, "Sign in first."
+//   2. token.email_verified!==true-> failed-precondition, "Verify your email
+//                                    before starting a goal."
+//   3. no active membership       -> permission-denied (inside the transaction)
+//   4. role !== 'foundingChampion'-> permission-denied (inside the transaction)
+//
+// Membership and role are read INSIDE the transaction, exactly as in
+// wsfCreateGoal, so authority cannot be lost between the read and the write.
+//
+// Writes ONE document and reads at most 1 membership + 6 goals: a cheap, cold,
+// Champion-only path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CreateCombinedGoalRequest = {
+  communityGroupId?: unknown;
+  title?: unknown;
+  unit?: unknown;
+  target?: unknown;
+  startsAt?: unknown; // ISO 8601
+  endsAt?: unknown; // ISO 8601
+  timezone?: unknown; // IANA
+  childGoalIds?: unknown; // string[], 2..6, distinct
+};
+
+type CreateCombinedGoalResponse = { setupId: string };
+
+export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<CreateCombinedGoalResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const token = request.auth.token as { email_verified?: boolean };
+    if (token.email_verified !== true) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Verify your email before starting a goal.'
+      );
+    }
+    const uid = request.auth.uid;
+
+    // Every validator here is the one wsfCreateGoal uses, with the same
+    // message, so a Champion meets one vocabulary across both forms.
+    const communityGroupId = normalizeStringId(request.data?.communityGroupId);
+    if (!communityGroupId) {
+      throw new HttpsError('invalid-argument', 'communityGroupId is required.');
+    }
+    const title = normalizeGoalTitle(request.data?.title);
+    if (!title) {
+      throw new HttpsError('invalid-argument', 'title must be 2..120 chars.');
+    }
+    const target = normalizeGoalTarget(request.data?.target);
+    if (target === null) {
+      throw new HttpsError(
+        'invalid-argument',
+        'target must be a positive integer up to 100000000.'
+      );
+    }
+    const unit = normalizeGoalUnit(request.data?.unit);
+    if (!unit) {
+      throw new HttpsError(
+        'invalid-argument',
+        'unit must be 1..40 chars; no ASCII control characters.'
+      );
+    }
+    const startsAtDate = normalizeIsoTimestamp(request.data?.startsAt);
+    if (!startsAtDate) {
+      throw new HttpsError(
+        'invalid-argument',
+        'startsAt must be a valid ISO 8601 timestamp.'
+      );
+    }
+    const endsAtDate = normalizeIsoTimestamp(request.data?.endsAt);
+    if (!endsAtDate) {
+      throw new HttpsError(
+        'invalid-argument',
+        'endsAt must be a valid ISO 8601 timestamp.'
+      );
+    }
+    if (endsAtDate.getTime() <= startsAtDate.getTime()) {
+      throw new HttpsError(
+        'invalid-argument',
+        'endsAt must be strictly after startsAt.'
+      );
+    }
+    const timezone = normalizeIanaTimezone(request.data?.timezone);
+    if (!timezone) {
+      throw new HttpsError(
+        'invalid-argument',
+        'timezone must be a valid IANA identifier.'
+      );
+    }
+    const childGoalIds = normalizeCombinedChildIds(request.data?.childGoalIds);
+    if (!childGoalIds) {
+      throw new HttpsError('invalid-argument', COMBINED_CHILDREN_MESSAGE);
+    }
+    if (new Set(childGoalIds).size !== childGoalIds.length) {
+      throw new HttpsError('invalid-argument', COMBINED_DUPLICATE_MESSAGE);
+    }
+
+    const db = getFirestore();
+    const setupRef = db.collection('wsfCombinedGoals').doc();
+    const startsAt = Timestamp.fromDate(startsAtDate);
+    const endsAt = Timestamp.fromDate(endsAtDate);
+
+    await db.runTransaction(async (tx) => {
+      const membership = await readActiveMembership(tx, communityGroupId, uid);
+      if (!membership) {
+        throw new HttpsError(
+          'permission-denied',
+          'Active membership required in the community.'
+        );
+      }
+      if (membership.role !== 'foundingChampion') {
+        throw new HttpsError(
+          'permission-denied',
+          'Only a foundingChampion can start a goal in this community.'
+        );
+      }
+
+      const snaps = await Promise.all(
+        childGoalIds.map((id) => tx.get(db.doc(`wsfGoals/${id}`)))
+      );
+
+      const children: FrozenChild[] = [];
+      for (let i = 0; i < snaps.length; i++) {
+        const snap = snaps[i]!;
+        const goalId = childGoalIds[i]!;
+        // A goal that does not exist and a goal in ANOTHER community are the
+        // byte-identical generic answer, matching wsfSetGoalDisplayAuthorization
+        // and wsfListStations: this callable must not become an oracle for
+        // which goal ids exist in a community the caller is not a Champion of.
+        if (!snap.exists) notFound();
+        const goal = snap.data() as GoalDoc;
+        if (normalizeStringId(goal.communityGroupId) !== communityGroupId) notFound();
+
+        const childStartsAt = goal.startsAt;
+        const childEndsAt = goal.endsAt;
+        // A child with no usable window cannot be checked against the rule, so
+        // it cannot be frozen into a setup whose whole correctness is that
+        // check. Same generic answer: nothing about the goal is disclosed.
+        if (!childStartsAt?.toMillis || !childEndsAt?.toMillis) notFound();
+
+        // THE FROZEN RULE, applied at freeze time. Bounds are inclusive: a
+        // child whose window is exactly the combined window is eligible.
+        if (
+          childStartsAt.toMillis() < startsAt.toMillis() ||
+          childEndsAt.toMillis() > endsAt.toMillis()
+        ) {
+          throw new HttpsError('failed-precondition', COMBINED_WINDOW_MESSAGE);
+        }
+
+        children.push({
+          goalId,
+          title: typeof goal.title === 'string' ? goal.title : '',
+          unit: typeof goal.unit === 'string' ? goal.unit : '',
+          target: typeof goal.target === 'number' ? goal.target : 0,
+          repeatPolicy: goalRepeatPolicy(goal),
+          countsAs: 'repetition',
+          startsAt: childStartsAt,
+          endsAt: childEndsAt,
+          statusAtFreeze: goal.status === 'closed' ? 'closed' : 'active',
+        });
+      }
+
+      tx.set(setupRef, {
+        communityGroupId,
+        ownerUid: uid,
+        title,
+        unit,
+        target,
+        startsAt,
+        endsAt,
+        timezone,
+        status: 'active' satisfies GoalStatus,
+        contributionRule: COMBINED_CONTRIBUTION_RULE,
+        contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+        children,
+        childGoalIds,
+        // When the rule and the window were frozen. Separate from createdAt
+        // on purpose: a later slice may re-freeze a setup's children, and the
+        // two dates would then be different facts.
+        frozenAt: FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { setupId: setupRef.id };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCombinedGoalPulse — the read.
+//
+// A SEPARATE CALLABLE, for the same reason wsfGoalRecentAdditions is separate:
+// wsfGoalPulse publishes exactly nine fields and that shape is settled.
+// Widening it would re-open a decision that was already made, and would force
+// every caller entitled to a goal's totals to also receive a combined view
+// they may not be entitled to.
+//
+// `invoker: 'public'` exactly like wsfGoalPulse — the transport is public, the
+// handler is the boundary.
+//
+// WHAT IT DISCLOSES, in full: the community's display name, the combined
+// title / unit / target / total / window / zone, and per activity its title,
+// unit, target and total. NO uid, no member name, no contributor count, no
+// individual contribution, no join code, no invite capability — the same list
+// GoalPulseTotals withholds.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CombinedGoalPulseRequest = { setupId?: unknown };
+
+type CombinedActivity = {
+  goalId: string;
+  /** Live, from the child document — each activity keeps its own goal. */
+  title: string;
+  unit: string;
+  target: number;
+  /** The child's summed shards. */
+  total: number;
+  countsAs: 'repetition';
+  status: GoalStatus;
+};
+
+type CombinedGoalPulse = {
+  setupId: string;
+  status: GoalStatus;
+  communityDisplayName: string;
+  title: string;
+  unit: string;
+  target: number;
+  /** Derived: the sum of the children's shard totals. Never stored. */
+  combinedTotal: number;
+  /** ISO, as wsfListGoals already serializes a window. */
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  contributionRule: CombinedContributionRule;
+  contributionRuleVersion: number;
+  activities: CombinedActivity[];
+};
+
+// The same 2 s TTL and per-instance LRU as the goal pulse, in its own Map so
+// the two caches cannot be confused for one another. Consulted AFTER the gate,
+// for the same reason: a revocation must take effect on the next read, not in
+// two seconds.
+const COMBINED_PULSE_CACHE_TTL_MS = 2_000;
+const COMBINED_PULSE_CACHE_MAX = 1_000;
+const combinedPulseCache = new Map<string, { ts: number; value: CombinedGoalPulse }>();
+
+function combinedPulseCacheGet(setupId: string, now: number): CombinedGoalPulse | null {
+  const hit = combinedPulseCache.get(setupId);
+  if (!hit) return null;
+  if (now - hit.ts >= COMBINED_PULSE_CACHE_TTL_MS) {
+    combinedPulseCache.delete(setupId);
+    return null;
+  }
+  return hit.value;
+}
+
+function combinedPulseCacheSet(setupId: string, now: number, value: CombinedGoalPulse): void {
+  if (combinedPulseCache.size >= COMBINED_PULSE_CACHE_MAX && !combinedPulseCache.has(setupId)) {
+    const oldest = combinedPulseCache.keys().next().value;
+    if (oldest !== undefined) combinedPulseCache.delete(oldest);
+  }
+  // Delete before set so eviction order stays LRU.
+  combinedPulseCache.delete(setupId);
+  combinedPulseCache.set(setupId, { ts: now, value });
+}
+
+type CombinedAccess = {
+  asMember: boolean;
+  asDisplay: boolean;
+  allowed: boolean;
+  communityDisplayName: string | null;
+};
+
+/**
+ * THE GATE. Two independent routes, neither implying the other, exactly
+ * parallel to evaluateGoalAggregateAccess:
+ *
+ *   asMember  — an active member of the setup's community. Members see their
+ *               own community's combined progress whether or not anything is
+ *               published, and are not subject to the sample suppression.
+ *   asDisplay — EVERY child carries an explicit aggregateDisplayAuthorized,
+ *               the community exists, and it is not sample data.
+ *
+ * WHY "EVERY CHILD" AND NOT "ANY CHILD". The screen shows each activity's own
+ * total. Publishing the combined view when one activity is unpublished would
+ * publish that activity's progress through the back door. And because the gate
+ * IS the children's own flag, revoking any one child — the existing, tested,
+ * owner-reviewed control — de-authorizes the combined display on the next
+ * read, with no second switch that could disagree with the first. That is also
+ * why the setup document carries no authorization flag of its own.
+ *
+ * The children are the documents already fetched by the pulse, so this costs
+ * one membership read and one community read, not one per child.
+ */
+async function evaluateCombinedAccess(
+  communityGroupId: string,
+  children: GoalDoc[],
+  callerUid: string | null
+): Promise<CombinedAccess> {
+  const db = getFirestore();
+
+  const groupId = normalizeStringId(communityGroupId);
+  if (!groupId) {
+    return { asMember: false, asDisplay: false, allowed: false, communityDisplayName: null };
+  }
+
+  let asMember = false;
+  if (callerUid) {
+    const membershipSnap = await db.doc(`wsfMemberships/${groupId}_${callerUid}`).get();
+    asMember =
+      membershipSnap.exists &&
+      (membershipSnap.data() as { membershipStatus?: string }).membershipStatus === 'active';
+  }
+
+  // Strict `=== true` on every child, through the same helper the single-goal
+  // gate uses. An empty child list would make `every` vacuously true, so it is
+  // refused explicitly rather than relied on not to happen.
+  const everyChildAuthorized =
+    children.length > 0 && children.every((child) => isAggregateDisplayAuthorized(child));
+
+  let asDisplay = false;
+  let communityDisplayName: string | null = null;
+  if (asMember || everyChildAuthorized) {
+    const groupSnap = await db.doc(`wsfCommunityGroups/${groupId}`).get();
+    const group = groupSnap.exists
+      ? (groupSnap.data() as { isSample?: boolean; displayName?: unknown })
+      : null;
+    if (group && typeof group.displayName === 'string' && group.displayName.trim() !== '') {
+      communityDisplayName = group.displayName;
+    }
+    if (everyChildAuthorized) {
+      asDisplay = group !== null && group.isSample !== true;
+    }
+  }
+
+  return { asMember, asDisplay, allowed: asMember || asDisplay, communityDisplayName };
+}
+
+export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<CombinedGoalPulse> => {
+    const setupId = normalizeStringId(request.data?.setupId);
+    if (!setupId) {
+      throw new HttpsError('invalid-argument', 'setupId is required.');
+    }
+
+    const db = getFirestore();
+    const setupSnap = await db.doc(`wsfCombinedGoals/${setupId}`).get();
+    if (!setupSnap.exists) notFound();
+    const setup = setupSnap.data() as CombinedGoalDoc;
+
+    const communityGroupId = normalizeStringId(setup.communityGroupId);
+    if (!communityGroupId) notFound();
+
+    // Defensive dedupe. The boundary already refuses a repeated id; this is the
+    // second guard, against a hand-edited document, and it is what makes
+    // "a child appears in the sum exactly once" true rather than assumed.
+    const rawIds = Array.isArray(setup.childGoalIds) ? setup.childGoalIds : [];
+    const childIds: string[] = [];
+    for (const raw of rawIds) {
+      const id = normalizeStringId(raw);
+      if (id && !childIds.includes(id)) childIds.push(id);
+    }
+    if (childIds.length < MIN_COMBINED_CHILDREN || childIds.length > MAX_COMBINED_CHILDREN) {
+      notFound();
+    }
+
+    const setupStartsAt = setup.startsAt;
+    const setupEndsAt = setup.endsAt;
+    if (!setupStartsAt?.toMillis || !setupEndsAt?.toMillis) notFound();
+    const timezone = normalizeIanaTimezone(setup.timezone) ?? '';
+    const title = typeof setup.title === 'string' ? setup.title.trim() : '';
+    const unit = typeof setup.unit === 'string' ? setup.unit.trim() : '';
+    const target = normalizeGoalTarget(setup.target);
+    const status: GoalStatus = setup.status === 'closed' ? 'closed' : 'active';
+    if (!timezone || !title || !unit || target === null) notFound();
+    // Version 1 is the only rule this build knows how to apply. A setup
+    // carrying anything else was written by a build that understood something
+    // this one does not, and guessing at it would be inventing what was agreed.
+    if (
+      setup.contributionRule !== COMBINED_CONTRIBUTION_RULE ||
+      setup.contributionRuleVersion !== COMBINED_CONTRIBUTION_RULE_VERSION
+    ) {
+      notFound();
+    }
+
+    // ONE batched read for every child, at most six documents.
+    const childSnaps = await db.getAll(...childIds.map((id) => db.doc(`wsfGoals/${id}`)));
+    const children: GoalDoc[] = [];
+    for (const snap of childSnaps) {
+      // A combined goal that cannot name all of its parts does not render half
+      // of itself. Nothing in this repository deletes a wsfGoals document —
+      // there is no delete callable — so this is a corruption or hand-edit
+      // path, handled conservatively and with the same generic answer an
+      // unknown setupId gets.
+      if (!snap.exists) notFound();
+      const goal = snap.data() as GoalDoc;
+      if (normalizeStringId(goal.communityGroupId) !== communityGroupId) notFound();
+      if (!goal.startsAt?.toMillis || !goal.endsAt?.toMillis) notFound();
+      // THE FROZEN RULE, RE-CHECKED ON EVERY READ. A hand-edited child window
+      // cannot quietly widen what this total counts.
+      if (
+        goal.startsAt.toMillis() < setupStartsAt.toMillis() ||
+        goal.endsAt.toMillis() > setupEndsAt.toMillis()
+      ) {
+        notFound();
+      }
+      children.push(goal);
+    }
+
+    const access = await evaluateCombinedAccess(communityGroupId, children, request.auth?.uid ?? null);
+    // Byte-identical to the answer an unknown setupId gets, so the URL cannot
+    // be used to learn whether a setup exists.
+    if (!access.allowed) notFound();
+    // Context is published only complete, the same position wsfGoalPulse takes.
+    if (!access.communityDisplayName) notFound();
+
+    // The cache is keyed by setupId, so it may only be consulted once the
+    // caller is known to be entitled to this setup's aggregate. Both routes
+    // yield the identical response, so one shared entry is correct.
+    const now = Date.now();
+    const cached = combinedPulseCacheGet(setupId, now);
+    if (cached) return cached;
+
+    // THE DERIVATION. Ten shard reads per child, batched in one pass by the
+    // helper wsfListGoals already uses. This is the only place a combined
+    // total exists, and it exists for the length of this response.
+    const totals = await sumGoalShardsForMany(childIds);
+    const activities: CombinedActivity[] = [];
+    let combinedTotal = 0;
+    for (let i = 0; i < childIds.length; i++) {
+      const goalId = childIds[i]!;
+      const goal = children[i]!;
+      const total = totals.get(goalId) ?? 0;
+      combinedTotal += total;
+      activities.push({
+        goalId,
+        title: typeof goal.title === 'string' ? goal.title : '',
+        unit: typeof goal.unit === 'string' ? goal.unit : '',
+        target: typeof goal.target === 'number' ? goal.target : 0,
+        total,
+        countsAs: 'repetition',
+        status: goal.status === 'closed' ? 'closed' : 'active',
+      });
+    }
+
+    const pulse: CombinedGoalPulse = {
+      setupId,
+      status,
+      communityDisplayName: access.communityDisplayName,
+      title,
+      unit,
+      target,
+      combinedTotal,
+      startsAt: setupStartsAt.toDate().toISOString(),
+      endsAt: setupEndsAt.toDate().toISOString(),
+      timezone,
+      contributionRule: COMBINED_CONTRIBUTION_RULE,
+      contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+      activities,
+    };
+    combinedPulseCacheSet(setupId, now, pulse);
+    return pulse;
+  }
+);

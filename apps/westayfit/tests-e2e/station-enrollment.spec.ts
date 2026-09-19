@@ -222,23 +222,35 @@ test('a Champion enrols a screen, the attendee codes grant nothing, and revoking
 
   // SCANNING THE MEMBER CODE: an ordinary page on an attendee's own phone. No
   // station, no credential, no Champion control.
+  //
+  // A scan now meets the device question first — "whose screen is this?" —
+  // before anything offers an account. That is the point of the question and
+  // this test asserts through it rather than around it: the answer that says
+  // "my own phone" must land exactly where a scan landed before the question
+  // existed, and NEITHER state may carry a station credential.
+  const noStationCredential = async () =>
+    expect(
+      await scannerPage.evaluate(() => window.localStorage.getItem('wsf.stationCredential'))
+    ).toBeNull();
+
   const scanner = await browser.newContext();
   const scannerPage = await scanner.newPage();
   await scannerPage.goto(memberQrUrl);
+  await expect(scannerPage.getByTestId('wsf-event-device-choice')).toBeVisible({ timeout: 25_000 });
+  await noStationCredential();
+  await scannerPage.getByTestId('wsf-device-choice-personal').click();
   await expect(scannerPage.getByTestId('wsf-event-signed-out')).toBeVisible({ timeout: 25_000 });
-  expect(
-    await scannerPage.evaluate(() => window.localStorage.getItem('wsf.stationCredential'))
-  ).toBeNull();
+  await noStationCredential();
   await expect(scannerPage.getByTestId('wsf-station-screen')).toHaveCount(0);
   await expect(scannerPage.getByTestId('wsf-community-manage')).toHaveCount(0);
 
   // SCANNING THE NEWCOMER CODE: the ordinary join page, which still asks for
-  // an account. It enrols no screen either.
+  // an account. It enrols no screen either. This context has already answered
+  // "my own phone", and the answer is per-device rather than per-scan, so the
+  // join page does not ask again — it goes straight to the invitation.
   await scannerPage.goto(joinQrUrl);
   await expect(scannerPage.getByTestId('wsf-join-signed-out')).toBeVisible({ timeout: 25_000 });
-  expect(
-    await scannerPage.evaluate(() => window.localStorage.getItem('wsf.stationCredential'))
-  ).toBeNull();
+  await noStationCredential();
   await expect(scannerPage.getByTestId('wsf-station-screen')).toHaveCount(0);
   await scanner.close();
 
