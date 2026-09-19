@@ -515,3 +515,141 @@ test('a combined event offers every frozen activity by name, and the ways on app
   await snap(page, 'combined-390-two-choices');
   await snapWidths(page, 'combined-two-choices');
 });
+
+/**
+ * THE COMBINED EVENT, DRIVEN THROUGH A STATION TURN.
+ *
+ * This is the claim the whole event-scoped line rests on, and until now it was
+ * proved only on the single-goal path: the activity a person CHOOSES is the
+ * one their repetitions land on, even when the station serving them is
+ * addressed at a different child of the same event.
+ *
+ * So the station here is enrolled on SQUATS and the person chooses PUSH-UPS.
+ * If the chosen child were not carried on the entry — if the station's own
+ * address decided it, or the parent's — the receipt at the end would say
+ * squats. It says push-ups.
+ *
+ * One line spans the whole event, which is why a station addressed at one
+ * child can call somebody who picked another one at all.
+ */
+test('a combined event: the station is on one activity, the person picks the other, and the other is what counts', async ({
+  page,
+  browser,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const { groupId, goalA, goalB } = await championWithTwoGoals(page);
+
+  await openManage(page);
+  await authorizeDisplay(page, goalA);
+  await authorizeDisplay(page, goalB);
+  await page.getByTestId('wsf-community-manage-close').click();
+
+  await page.goto(`/community/${groupId}`);
+  await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+  await openManage(page);
+  await page.getByTestId('wsf-kiosk-mode-combined').click();
+  await expect(page.getByTestId('wsf-combined-setup')).toBeVisible();
+  await page.getByTestId('wsf-combined-title').fill('Move together');
+  await page.getByTestId('wsf-combined-unit').fill('movements');
+  await page.getByTestId('wsf-combined-target').fill('2000');
+  await page.getByTestId('wsf-combined-start').fill(localValue(-1));
+  await page.getByTestId('wsf-combined-end').fill(localValue(30));
+  await page.getByTestId(`wsf-combined-pick-${goalA}`).click();
+  await page.getByTestId(`wsf-combined-pick-${goalB}`).click();
+  await page.getByTestId('wsf-combined-submit').click();
+  await expect(page.getByTestId('wsf-combined-created')).toBeVisible({ timeout: 25_000 });
+
+  // ---- A SCREEN, ENROLLED ON SQUATS --------------------------------------
+  // Station enrolment is a sibling of the kiosk mode, not part of it, so a
+  // combined event can still pair its screens.
+  await page.getByTestId(`wsf-kiosk-stations-copy-${goalA}`).click();
+  const stationUrl = (await page.evaluate(() => navigator.clipboard.readText())).trim();
+
+  const stationContext = await browser.newContext();
+  const stationPage = await stationContext.newPage();
+  try {
+    await stationPage.goto(stationUrl);
+    await expect(stationPage.getByTestId('wsf-station-pairing')).toBeVisible({ timeout: 25_000 });
+    const code = (await stationPage.getByTestId('wsf-station-pairing-code').innerText()).replace(
+      /\s+/g,
+      ''
+    );
+    await page.getByTestId(`wsf-kiosk-stations-code-${goalA}`).fill(code);
+    await page.getByTestId(`wsf-kiosk-stations-slot-1-${goalA}`).click();
+    await page.getByTestId(`wsf-kiosk-stations-approve-${goalA}`).click();
+    await expect(stationPage.getByTestId('wsf-station-screen')).toBeVisible({ timeout: 30_000 });
+
+    // ---- THE PERSON PICKS THE OTHER ACTIVITY -----------------------------
+    // A phone, because everything from here is a phone screen. The Champion
+    // tools above were driven at this spec's default width; a capture named
+    // for 390 has to be taken at 390.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/event/${goalA}`);
+    await expect(page.getByTestId('wsf-event-device-choice')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-device-choice-personal').click();
+    await expect(page.getByTestId('wsf-event-member')).toBeVisible({ timeout: 25_000 });
+    // The address says squats. They choose push-ups.
+    await page.getByTestId('wsf-event-activity-push-ups').click();
+    await expect(page.getByTestId('wsf-event-choice-activity')).toHaveText('push-ups');
+    await page.getByTestId('wsf-event-queue-start').click();
+    await page.getByTestId('wsf-event-queue-name').fill('Rune');
+    await page.getByTestId('wsf-event-queue-join').click();
+    await expect(page.getByTestId('wsf-queue-screen')).toBeVisible({ timeout: 25_000 });
+
+    // The screen on the SQUATS address counts them, because the line belongs
+    // to the EVENT and not to either activity.
+    await expect(stationPage.getByTestId('wsf-station-queue-count')).toHaveText(
+      '1 person waiting.',
+      { timeout: 20_000 }
+    );
+
+    // ---- CALLED, READY, STARTED, RECORDED --------------------------------
+    await stationPage.getByTestId('wsf-station-call-next').click();
+    await expect(stationPage.getByTestId('wsf-station-queue-serving')).toHaveText('Rune', {
+      timeout: 20_000,
+    });
+    await page.getByTestId('wsf-queue-ready').click();
+    await expect(stationPage.getByTestId('wsf-station-turn-action')).toBeEnabled({
+      timeout: 20_000,
+    });
+    await stationPage.getByTestId('wsf-station-turn-action').click();
+    await expect(stationPage.getByTestId('wsf-station-turn-record')).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The station — enrolled on SQUATS — is running a follow-along for this
+    // person's turn. Which activity it belongs to is not asserted here: at the
+    // ready step the player's words are the same for every movement, and an
+    // assertion that passes for squats too would prove nothing. The claim is
+    // settled below, by what actually gets recorded.
+    await expect(stationPage.getByTestId('wsf-station-player')).toBeVisible({ timeout: 20_000 });
+    await snap(stationPage, 'combined-1280-station-running-the-chosen-activity');
+
+    await stationPage.getByTestId('wsf-station-turn-count').fill('12');
+    await stationPage.getByTestId('wsf-station-turn-action').click();
+
+    // ---- AND PUSH-UPS IS WHAT COUNTED ------------------------------------
+    await expect(stationPage.getByTestId('wsf-station-queue-result')).toContainText(
+      '12 push-ups recorded.',
+      { timeout: 20_000 }
+    );
+    await expect(page.getByTestId('wsf-queue-receipt-amount')).toHaveText(
+      '12 push-ups recorded.',
+      { timeout: 25_000 }
+    );
+
+    // AND THEY ARE NOT TOLD THEY TIMED OUT. A completed turn and a lapsed one
+    // both end with the turn gone, and the page used to call both a timeout —
+    // so somebody who had just finished was told "Your turn timed out. Get
+    // back in line and it will call you again", directly above the receipt for
+    // the turn they had just done.
+    await expect(page.getByTestId('wsf-queue-not-in-line')).toContainText(
+      'You’re not in the line'
+    );
+    await expect(page.getByTestId('wsf-queue-not-in-line')).not.toContainText('timed out');
+    await snap(page, 'combined-390-receipt-for-the-chosen-activity');
+  } finally {
+    await stationContext.close();
+  }
+});

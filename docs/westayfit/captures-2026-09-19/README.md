@@ -138,6 +138,26 @@ Two things these captures fixed rather than merely recorded:
   offering Expo Squats and Expo Push-ups. The server already resolved the
   event's real title and the screen was dropping it. It now names the event.
 
-Still missing, and not claimed: the combined event driven all the way through a
-station turn. What is proved here is the choice; the turn itself is proved on
-the single-goal path in `queue-call-by-name/`.
+### The combined event, driven all the way through a station turn
+
+`combined-1280-station-running-the-chosen-activity` and
+`combined-390-receipt-for-the-chosen-activity` prove the claim the whole
+event-scoped line rests on:
+
+**The station is enrolled on SQUATS. The person chooses PUSH-UPS. The receipt
+says push-ups.**
+
+One line spans the whole event, which is why a screen addressed at one child
+can call somebody who picked another one at all — and the activity they chose
+rides on their entry, so it is what the attempt binds to and what the
+contribution lands on. If the station's own address decided it, or the parent's,
+that receipt would say squats.
+
+It also found a message that was simply false. A completed turn and a lapsed
+one both end the same way — the turn is gone — and the phone called both a
+timeout. Somebody who had just finished at a station was told **"Your turn timed
+out. Get back in line and it will call you again"**, directly above the receipt
+for the turn they had in fact just done. Only an ASSIGNED turn can lapse: the
+45-second lease exists in that state and nowhere else, which is what the
+server's own recovery reclaims. The page now says so, and a test asserts the
+word "timed out" does not appear after a completed turn.

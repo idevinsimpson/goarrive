@@ -118,6 +118,16 @@ export default function QueueScreen() {
   /** True while the person held a live place, so "it is gone" can be told
    * apart from "they were never in it" when a lease lapses under them. */
   const wasLiveRef = useRef(false);
+  /**
+   * The status of the last live turn this page saw.
+   *
+   * ONLY AN ASSIGNED TURN CAN LAPSE. The 45-second lease exists on `assigned`
+   * and nowhere else — it is the offer to come over, and the server's own
+   * recovery only reclaims entries in that state. A turn that was READY or
+   * ACTIVE and is now gone was finished, or cancelled by the station; it did
+   * not time out.
+   */
+  const lastLiveStatusRef = useRef<TurnStatus | null>(null);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -148,14 +158,25 @@ export default function QueueScreen() {
         const receipt = result.data.receipt ?? null;
         if (turn) {
           wasLiveRef.current = true;
+          lastLiveStatusRef.current = turn.status;
           if (turn.status === 'assigned') nextDelay = TURN_POLL_FAST_MS;
           setState({ kind: 'inLine', turn, receipt });
         } else {
-          // Their place is gone. If they had one a moment ago and did not end
-          // it themselves, the lease lapsed — say so, rather than showing the
-          // blank "you're not in the line" page and leaving them to guess.
-          const noShow = wasLiveRef.current;
+          // Their place is gone. If they had one a moment ago, did not end it
+          // themselves, and it was still only ASSIGNED, the lease lapsed — say
+          // so rather than showing the blank "you're not in the line" page and
+          // leaving them to guess.
+          //
+          // AND IF IT HAD GOT FURTHER THAN THAT, IT DID NOT LAPSE. This used
+          // to read `wasLiveRef.current` alone, which cannot tell a turn that
+          // TIMED OUT from one that was COMPLETED — both end with the turn
+          // gone. So somebody who had just finished their turn at a station
+          // was told "Your turn timed out. Get back in line and it will call
+          // you again", directly above the receipt for the turn they had in
+          // fact just done.
+          const noShow = wasLiveRef.current && lastLiveStatusRef.current === 'assigned';
           wasLiveRef.current = false;
+          lastLiveStatusRef.current = null;
           setState({ kind: 'notInLine', receipt, noShow });
         }
       } catch (e) {

@@ -1672,10 +1672,17 @@ export default function CommunityPage() {
           attendee scanning either code on that screen gets a page on their own
           phone and no authority of any kind.
 
-          WHAT IT CANNOT DO. A station shows this goal's shared progress —
-          exactly what authorizing public display already allows, through the
-          same server read — and it records nothing, because it cannot know who
-          is standing at it.
+          WHAT IT CAN AND CANNOT DO. A station shows this goal's shared
+          progress — exactly what authorizing public display already allows,
+          through the same server read.
+
+          IT DOES RECORD, and this comment used to say it did not. That stopped
+          being true when the turn contract landed: a station calls the person
+          whose turn it is and completes THE SAME canonical attempt their own
+          phone would have, under the same key. What it still cannot do is know
+          who is standing at it on its own — it records against the account the
+          server assigned to that turn, never against an identity the screen
+          worked out for itself.
         */}
         <View style={styles.manageGoal} testID={`wsf-kiosk-stations-${goal.goalId}`}>
           <Text style={styles.manageGoalTitle}>Screens at this event</Text>
