@@ -50,6 +50,7 @@ import {
   runKioskFinish,
   type KioskOutcome,
 } from '../../src/kioskSession';
+import { moveAttemptIdFor } from '../../src/moveSession';
 import {
   clearPendingIfAttempt,
   isSameContext,
@@ -185,6 +186,7 @@ export default function ContributeToGoal() {
     groupId?: string;
     mode?: string;
     kiosk?: string;
+    attempt?: string;
   }>();
   const goalId = params.goalId;
   // KIOSK MODE. The flow below is unchanged — same entry, same review, same
@@ -227,6 +229,27 @@ export default function ContributeToGoal() {
   // re-render (would risk generating a new id mid-submit and defeat
   // idempotency). Cleared on each fresh "Record" tap.
   const attemptRef = useRef<string | null>(null);
+  // THE FOLLOW-ALONG ROUND THIS ENTRY BELONGS TO, if the route named one.
+  //
+  // A round on /move/<goalId> mints one id and hands it here, so the SAME
+  // person finishing that round on a second device — scanning the station
+  // panel's QR onto their own phone, or reloading this page — sends the same
+  // attemptId and `wsfContribute` counts it exactly once. Nothing about the
+  // callable, its (goal, uid, attemptId) idempotency or its receipt changes:
+  // this only decides what this screen's FIRST attempt id is called.
+  //
+  // Derived as `<round>_<uid>` by src/moveSession.ts, never the bare round id
+  // — see the note there on the server's per-attempt recent-additions doc.
+  //
+  // CONSUMED EXACTLY ONCE. "Record more" is a genuinely new contribution, so
+  // it must not replay this one; taking the value out of the ref means the
+  // next Record mints an ordinary random attempt id exactly as it always did.
+  const roundAttemptRef = useRef<string | null>(null);
+  const takeRoundAttemptId = useCallback(() => {
+    const held = roundAttemptRef.current;
+    roundAttemptRef.current = null;
+    return held;
+  }, []);
   // Ref, not the `submitting` state: two taps delivered in the SAME task both
   // read the same rendered `submitting` value (false) and both pass, because
   // React has not re-rendered between them — and `disabled` on the button is
@@ -272,6 +295,7 @@ export default function ContributeToGoal() {
     identityRef.current = uid;
     contextRef.current = { uid, goalId };
     attemptRef.current = null;
+    roundAttemptRef.current = moveAttemptIdFor(params.attempt, uid);
     inFlightRef.current = false;
     // Nothing from the previous context stays on screen while the new one
     // loads: not the pending screen, not the receipt, not the typed entry,
@@ -669,7 +693,7 @@ export default function ContributeToGoal() {
     setSubmitting(true);
     sharedBeforeRef.current = state.pulse.sharedTotal;
 
-    if (!attemptRef.current) attemptRef.current = mintAttemptId();
+    if (!attemptRef.current) attemptRef.current = takeRoundAttemptId() ?? mintAttemptId();
     const attemptId = attemptRef.current;
 
     // Persist BEFORE sending. If the tab crashes mid-flight, a reload sees
@@ -728,7 +752,7 @@ export default function ContributeToGoal() {
       // form, which the new context already reset.
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [state, submitting, reviewCount, goalId, uid, sendContribute]);
+  }, [state, submitting, reviewCount, goalId, uid, sendContribute, takeRoundAttemptId]);
 
   // Replay the SAME attempt. The server keys idempotency on goal, account and
   // attemptId and returns the original receipt if the earlier call landed.
