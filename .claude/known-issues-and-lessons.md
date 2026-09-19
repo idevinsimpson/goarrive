@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-09-07._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -184,6 +184,27 @@ Lesson: keeping a paused media element ready means maintaining a *buffer* around
 takeover position, not repeatedly assigning `currentTime`. Seeking on a timer defeats the
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
+
+### Canvas PiP Hook Starves Foreground Music When Always-On
+`usePipCanvasStream` ran a 30fps `requestAnimationFrame` loop and a `captureStream` unconditionally from player mount. Device testing (PR #289, 2026-08-15) confirmed this starves the foreground `musicGain->destination` path, silencing foreground music entirely while the player is open. The hook's fan-out through `MediaStreamAudioDestinationNode` competed with the normal speaker output.
+
+Fix: gate the hook on `isPiP` so the rAF loop, canvas draws, and captureStream only run while Picture-in-Picture is active. `isPiP` state is hoisted above the canvas hook to drive the `enabled` prop.
+
+Lesson: any hook that drives a persistent audio or rendering loop attached to the Web Audio graph must be gated on the condition it exists to serve — an always-on canvas consumer will interact with the speaker path even when PiP is not visible. Before shipping a media hook unconditionally, verify that its audio fan-out does not shadow the main destination under real device conditions.
+
+### Pricing Engine Swallows Explicit Zero-Week Phases
+`_calculatePricing` used truthiness (logical `||`) for per-phase week fallbacks — `(phases[0]?.weeks) ? ... : Math.round(totalWeeks*0.25)` — so a phase with an explicit `0` weeks was treated as falsy and silently reinflated to the 25/50/25 default split. Found during a live coach call (PR #293, 2026-08-18): a 13-week contract with phases `[0, 0, 13]` (all weeks in phase 3 — self-reliant) displayed ~$421/mo instead of the correct ~$176/mo. The per-row phase breakdown read the zeros correctly so the phase rows on screen never summed to the displayed total — the inconsistency was visible but not obviously a code defect.
+
+Fix: switch to nullish coalescing (`?? 0`) so explicit zeros survive; fall back to 25/50/25 only when the plan carries no phases array at all. 39/39 pricing tests pass after the fix. The sibling `createDefaultPhases` function was reviewed and left untouched — it is a pure-default constructor, not a fallback path that consumes real coach data.
+
+Lesson: use `?? 0` (nullish coalescing), not `|| 0` (logical OR), whenever 0 is a valid explicit value in a computed field. An implicit truthiness fallback is a silent data-erasure defect — it never throws, never logs, and can survive indefinitely because the computed total still looks plausible.
+
+### Mirror Drop Precedes Display Switch in Reveal Window
+On swap-sides movements the mirrored video briefly reverted to un-mirrored for a split second roughly once every ten seconds (PR #303, 2026-08-31). The bug was subtle: `isMirrored` was derived from timer state — it dropped the moment `isInRevealWindow` opened. The visible layer is `displayedUrl`, which the promote effect only advances once the incoming layer reports ready (so the outgoing video keeps playing without a gap). In the window between `isInRevealWindow` opening and `displayedUrl` actually advancing, the still-mirrored outgoing movement was what the member was looking at — with the mirror already gone.
+
+Fix: gate on the display having genuinely switched — `revealDisplaySwitched = isInRevealWindow && displayedUrl === activeVideoUrl`. `isMirrored` stays true until `displayedUrl` matches the active URL. The Tabata case the original gate was written for (unmirror during the reveal window when the next movement's preview is already displayed) is unchanged.
+
+Lesson: when a visual property depends on both timer state and async display state, timer state alone is not the right gate. Derive the condition from what is actually rendered (`displayedUrl`) rather than what the logical event claims (`isInRevealWindow`); otherwise transitions that complete asynchronously create a visible inconsistency window that the timer misses.
 
 ## Known Performance Risks
 
