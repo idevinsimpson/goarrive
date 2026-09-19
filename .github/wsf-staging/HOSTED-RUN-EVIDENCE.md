@@ -130,17 +130,43 @@ only the thing it asserts, on the run it asserted it.
   and all nine read-branch documents already gone. **The live-content branch again ran
   zero times.** Stated this way from the start, rather than corrected afterwards.
 
+## Run 32 — `35474881609`, main `5ab03cd`… merged `657f656`, app `42dd32a`
+
+- **24 PASS, `FAILURES=0`.** All five jobs green, and the **"Preserve an incomplete
+  functions deployment" guard was skipped** — the independent signal that the deploy
+  completed rather than a `continue-on-error` step reading green.
+- **The turn row PASSED, for the first time in its history.** Runs 28, 29, 30 and 31 each
+  died later than the last; this one reached its PASS row. It cleared, on staging: two
+  screens enrolled and approved · an independent participant reading the event without
+  joining · explicit join · leave-as-switch-to-phone · the real 45-second lease expiring ·
+  the rejoin that recovered the place · call next · the outsider refused at the ready gate ·
+  ready · start at the screen · phone completion · a phone retry and a screen retry that
+  both added nothing · chosen activity 12, unchosen 0, combined parent `combinedTotal` 12 ·
+  the immediate anonymous result · and its expiry after the real ten-second window.
+- Cleanup `COMPLETE`, 349/349, `ALREADY_ABSENT=0`, `EVIDENCE_SCAN=clean`, 23 files.
+- **`LINKED_DOCUMENTS_VERIFIED=2`, `ALREADY_ABSENT=9`** — the same composition as runs 30
+  and 31: two uid-in-path documents admitted **by path with no read**, nine read-branch
+  documents already gone. **The live-content branch has now run zero times on three
+  consecutive runs.**
+- `CLEANUP_USERS_DELETED=0` with `USERS_ALREADY_ABSENT=40`: the accounts were removed
+  in-smoke before the cleaner looked. Complete, but not evidence that the cleaner's own
+  user-deletion path ran.
+
 ---
 
 ## Still not established by any run
 
 - **The browser/player journey.** No hosted row opens a browser against the turn flow.
+  Run 32's PASS does not change this and must never be cited for it: a service-level row
+  cannot establish QR → retained activity/auth → phone-or-queue choice → ready/start →
+  shared player → review/receipt → cleared station. `hosted-player-journey.mjs` and its
+  own deploy-free workflow are built for exactly this gate and have **not yet been run**.
   Scan, explicit activity selection, the shared follow-along player, rep review, the hall
   clearing and the station session ending are **not covered**, and a green turn-service
   row does not cover them. That gate is separate and open.
-- **The turn row has never fully passed.** Runs 28, 29, 30 and 31 each failed later than
-  the last; none reached its PASS row. Run 31 got through the whole journey and the
-  arithmetic and died on the ten-second result read.
+- ~~**The turn row has never fully passed.**~~ **Closed by run 32**, which reached its PASS
+  row. Runs 28, 29, 30 and 31 each failed later than the last; run 31 died on the
+  ten-second result read, which was the row spending the window it was measuring.
 - **The live-document-content verification branch** — reading a stored document and
   confirming it references its declared owner before admitting it — has **not** run on
   hosted staging. On runs 28 and 29 nothing reached it; on run 30 all nine read-branch

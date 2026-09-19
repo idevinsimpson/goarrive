@@ -9,6 +9,7 @@ const suites = [
   'scan-evidence.test.mjs',
   'cleanup-synthetic.test.mjs',
   'hosted-smoke-contract.test.mjs',
+  'player-journey-contract.test.mjs',
   'write-sdk-config.test.mjs',
   'verify-deployment.test.mjs',
 ];
