@@ -1,7 +1,7 @@
 import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -373,7 +373,24 @@ export default function CommunityPage() {
   const [combinedEnd, setCombinedEnd] = useState('');
   const [combinedPicks, setCombinedPicks] = useState<string[]>([]);
   const [combinedBusy, setCombinedBusy] = useState(false);
-  const [combinedError, setCombinedError] = useState<string | null>(null);
+  /**
+   * The last failed attempt to start a combined goal, and WHERE it came from.
+   *
+   * The source matters because the two kinds age differently. A validation
+   * message describes the data in the form, so it stops being true the moment
+   * the Champion corrects that data — it is recomputed on every render and a
+   * message the current values no longer produce is never shown. A server
+   * refusal describes something that happened, so it stands until the next
+   * attempt replaces it.
+   *
+   * This existed as a bare string and left "Give this combined goal a name of
+   * at least two characters." sitting in red above a review panel that read
+   * back the name the Champion had just typed. Test green and zero overflow
+   * did not make that state true.
+   */
+  const [combinedFailure, setCombinedFailure] = useState<
+    { source: 'validation' | 'server'; message: string } | null
+  >(null);
   const [combinedCreated, setCombinedCreated] = useState<{
     setupId: string;
     title: string;
@@ -416,53 +433,86 @@ export default function CommunityPage() {
   }, [combinedUrl, clearCombinedCopyReset]);
 
   /**
-   * Freeze the setup. Every check here is also made on the server, inside the
-   * transaction that writes the document — this one exists so the Champion is
-   * told before they submit, never so the client decides. The callable writes
-   * exactly one document and touches no activity.
+   * WHAT IS WRONG WITH THE FORM RIGHT NOW, or null.
+   *
+   * A pure read of the current values, in the order a Champion fills them, and
+   * the ONE place that decides. The submit consults it and the render consults
+   * it, so a message can never outlive the data that produced it: correct the
+   * name and the name's message stops existing, because nothing computes it any
+   * more.
+   *
+   * Every check here is also made on the server, inside the transaction that
+   * writes the document. This one exists so the Champion is told before they
+   * submit, never so the client decides.
    */
-  const onCreateCombined = useCallback(async () => {
-    setCombinedError(null);
+  const combinedValidationMessage = useMemo((): string | null => {
     const title = combinedTitle.trim();
     if (title.length < 2 || title.length > 120) {
-      setCombinedError('Give this combined goal a name of at least two characters.');
-      return;
+      return 'Give this combined goal a name of at least two characters.';
     }
     const unit = combinedUnit.trim();
     if (unit.length < 1 || unit.length > 40) {
-      setCombinedError('Say what the combined count is in — “movements”, for example.');
-      return;
+      return 'Say what the combined count is in — “movements”, for example.';
     }
-    const target = parseTargetInput(combinedTarget);
-    if (target === null) {
-      setCombinedError('The target has to be a whole number of at least one.');
-      return;
+    if (parseTargetInput(combinedTarget) === null) {
+      return 'The target has to be a whole number of at least one.';
     }
     const start = parseLocalDateTime(combinedStart);
-    if (!start) {
-      setCombinedError('Choose when the combined period starts.');
-      return;
-    }
+    if (!start) return 'Choose when the combined period starts.';
     const end = parseLocalDateTime(combinedEnd);
-    if (!end) {
-      setCombinedError('Choose when the combined period ends.');
-      return;
-    }
-    if (end.getTime() <= start.getTime()) {
-      setCombinedError('The end must be after the start.');
-      return;
-    }
+    if (!end) return 'Choose when the combined period ends.';
+    if (end.getTime() <= start.getTime()) return 'The end must be after the start.';
     if (!combinedZone.trim()) {
-      setCombinedError(
-        "We can't read your device's time zone, so this goal can't be started here."
-      );
-      return;
+      return "We can't read your device's time zone, so this goal can't be started here.";
     }
     const problem = validateChildSelection(combinedPicks);
+    return problem ? childSelectionMessage(problem) : null;
+  }, [
+    combinedTitle,
+    combinedUnit,
+    combinedTarget,
+    combinedStart,
+    combinedEnd,
+    combinedZone,
+    combinedPicks,
+  ]);
+
+  /**
+   * The message actually rendered, which is not always the one last recorded.
+   *
+   * A VALIDATION failure is recomputed: what shows is whatever the current
+   * values produce, so a corrected field takes its message with it and a
+   * complete form shows nothing at all. A SERVER refusal is an event, not a
+   * description of the form, so it stands until the next attempt — unless the
+   * Champion has since made the form invalid, in which case the nearer problem
+   * is the true one and is shown instead.
+   */
+  const combinedError =
+    combinedFailure === null
+      ? null
+      : combinedFailure.source === 'validation'
+        ? combinedValidationMessage
+        : (combinedValidationMessage ?? combinedFailure.message);
+
+  /**
+   * Freeze the setup. The callable writes exactly one document and touches no
+   * activity.
+   */
+  const onCreateCombined = useCallback(async () => {
+    const problem = combinedValidationMessage;
     if (problem) {
-      setCombinedError(childSelectionMessage(problem));
+      setCombinedFailure({ source: 'validation', message: problem });
       return;
     }
+    setCombinedFailure(null);
+    // Re-read the values the validator already accepted. Narrowing, not a
+    // second opinion: `combinedValidationMessage` is the single place that
+    // decides, and these cannot be null past that guard.
+    const title = combinedTitle.trim();
+    const unit = combinedUnit.trim();
+    const target = parseTargetInput(combinedTarget) as number;
+    const start = parseLocalDateTime(combinedStart) as Date;
+    const end = parseLocalDateTime(combinedEnd) as Date;
 
     setCombinedBusy(true);
     try {
@@ -492,13 +542,17 @@ export default function CommunityPage() {
       setCombinedCreated({ setupId: result.data.setupId, title });
       setCombinedCopy('idle');
     } catch (e) {
-      setCombinedError(
-        describeCallableError(e, 'That combined goal could not be started. Try again.')
-      );
+      setCombinedFailure({
+        source: 'server',
+        message: describeCallableError(e, 'That combined goal could not be started. Try again.'),
+      });
     } finally {
       setCombinedBusy(false);
     }
   }, [
+    // The validator is the only thing that decides whether this may proceed, so
+    // a stale copy of it would let a submit run against values it never saw.
+    combinedValidationMessage,
     combinedTitle,
     combinedUnit,
     combinedTarget,

@@ -142,3 +142,76 @@ await expect(page.locator(
 Staging serves `15afae97`; hosted verification is 20/21; the 22 staging Cloud Run services
 are shut. **The product remains BLOCKED for end-to-end expo use**, and nothing in this slice
 changes that.
+
+
+---
+
+## Correction, 11:4x ET — a failed submit outliving its data
+
+The 11:07 ET creative review accepted the event-first hierarchy provisionally and
+found one defect, in a capture **this evidence file published**:
+`combined-review-wide-1280.png` showed the review panel reading back
+**“Expo Moves”** with **“Give this combined goal a name of at least two
+characters.”** in red above it. Stale validation feedback attached to corrected
+data. The suite was green and the overflow count was zero; neither made that
+state true.
+
+### Why nothing caught it
+
+`combinedError` was a bare string set on a failed submit and cleared only by the
+*next* submit. Nothing recomputed it when the data changed. And the spec asserted
+what the summary **contained** while never asserting what the error area
+**did not** — so the contradiction had no assertion pointed at it.
+
+### The fix: recompute, do not merely clear
+
+`combinedValidationMessage` is now a `useMemo` over the current values — one pure
+function, consulted by **both** the submit and the render. A message can no longer
+outlive the data that produced it, because nothing computes it any more once the
+data is corrected.
+
+The failure also records **where it came from**, because the two kinds age
+differently:
+
+- **validation** — describes the form, so it is recomputed every render;
+- **server** — describes something that happened, so it stands until the next
+  attempt, *unless* the form has since become invalid, in which case the nearer
+  problem is the true one and is shown instead.
+
+A blunt "clear on any keystroke" would have satisfied the review, but it would
+also have swallowed a genuine server refusal the moment a Champion touched a
+field. The source flag is what makes both behaviours correct at once.
+
+### The regression, and the assertion that was wrong first
+
+The new case fills a valid name after a failed submit and asserts the name's
+message is gone **before any second submit**.
+
+Its first draft asserted `toHaveCount(0)` there — *no error at all* — and **it
+failed**, correctly. At that moment the unit is still empty, so an error area
+*should* be on screen; demanding zero would have required the screen to lie about
+the unit in order to satisfy the test. The assertion now says what is actually
+true: the name's message is absent, and what is shown is the unit's message,
+recomputed from the current values. The review and success states assert
+`toHaveCount(0)`, where it is genuinely true.
+
+The error capture is kept **separate and visibly invalid**: taken with the name
+field still empty, so the summary reads `—` for Combined goal, Together and
+Activities and the red message agrees with the data in front of it.
+
+### Gates on the correction
+
+```
+tsc --noEmit                                   clean
+vitest                                         740 passed (42 files)
+focused Manage/combined/kiosk/station specs    12 passed
+expo export --platform web (production)        exit 0
+functions-westayfit build                      clean
+```
+
+40 captures rebuilt, 40 distinct hashes, and the review captures at 390 and 1280
+were **opened and looked at** rather than counted.
+
+For the record, the superseded commit `70ace55` did pass the complete browser
+suite at **190/190** on its exact committed tree — which is precisely why the
+defect matters: the number was true and the screen was still wrong.

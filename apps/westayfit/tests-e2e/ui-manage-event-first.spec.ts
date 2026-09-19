@@ -378,17 +378,47 @@ test('combined setup shows what is ineligible and why, refuses an incomplete ans
 
   // ERROR. A real refusal, reached the way a Champion reaches it: a period
   // that fits, no name, and the one action pressed.
+  //
+  // This capture must stay VISIBLY INVALID — the name field is empty in it, so
+  // the red message and the form agree with each other. It is deliberately
+  // taken before anything is corrected.
   await page.getByTestId('wsf-combined-end').fill(localValue(30));
   await expect(page.getByTestId(`wsf-combined-pick-${goalA}`)).toBeVisible();
   await page.getByTestId('wsf-combined-submit').click();
   await expect(page.getByTestId('wsf-combined-error')).toContainText(
     'Give this combined goal a name'
   );
+  await expect(page.getByTestId('wsf-combined-title')).toHaveValue('');
   await snapMatrix(page, 'combined-error', 'wsf-combined-error');
+
+  // ── A FAILED SUBMIT DOES NOT OUTLIVE THE DATA THAT CAUSED IT ──────────────
+  //
+  // The regression for the defect this spec's own capture exposed: a review
+  // panel reading back "Expo Moves" with "Give this combined goal a name of at
+  // least two characters." in red above it. The message described data that no
+  // longer existed, and nothing failed to say so.
+  //
+  // Typing a valid name is enough. No second submit, because the point is that
+  // the message goes BEFORE the next submit, not because of it.
+  await page.getByTestId('wsf-combined-title').fill('Expo Moves');
+
+  // The name's message is gone the moment the name is valid — no second submit.
+  //
+  // NOT `toHaveCount(0)` here, and the first draft of this assertion got that
+  // wrong and failed, which is the point of writing it: the unit is still empty
+  // at this moment, so an error area SHOULD be on screen. What must be true is
+  // that it no longer describes the name. Asserting "no error at all" would
+  // have demanded the screen lie about the unit to satisfy the test.
+  await expect(page.getByTestId('wsf-combined-error')).not.toContainText(
+    'Give this combined goal a name'
+  );
+  // And what IS shown is the true next problem, recomputed from current values.
+  await expect(page.getByTestId('wsf-combined-error')).toContainText(
+    'Say what the combined count is in'
+  );
 
   // THE REVIEW. The same facts read back, in local words, above the action —
   // including what actually contributes to the combined total.
-  await page.getByTestId('wsf-combined-title').fill('Expo Moves');
   await page.getByTestId('wsf-combined-unit').fill('movements');
   await page.getByTestId('wsf-combined-target').fill('2000');
   // At least two, because a combined goal that combines one thing is not one.
@@ -399,6 +429,10 @@ test('combined setup shows what is ineligible and why, refuses an incomplete ans
   await expect(summary).toContainText('2,000 movements');
   await expect(summary).toContainText('Expo Squats');
   await expect(summary).toContainText('Expo Push-ups');
+  // THE STATE-TRUTH ASSERTION. The review panel and the error area must not
+  // contradict each other. Asserting the summary's content while leaving a red
+  // refusal above it unasserted is exactly how the defect shipped.
+  await expect(page.getByTestId('wsf-combined-error')).toHaveCount(0);
   await snapMatrix(page, 'combined-review', 'wsf-combined-summary');
 
   // SUCCESS, and the address it produces — from the served origin.
@@ -406,6 +440,7 @@ test('combined setup shows what is ineligible and why, refuses an incomplete ans
   await expect(page.getByTestId('wsf-combined-created')).toContainText('is ready', {
     timeout: 30_000,
   });
+  await expect(page.getByTestId('wsf-combined-error')).toHaveCount(0);
   const combinedUrl = await page
     .locator('[data-combined-url]')
     .getAttribute('data-combined-url');
