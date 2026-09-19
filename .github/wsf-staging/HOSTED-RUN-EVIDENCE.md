@@ -55,10 +55,37 @@ only the thing it asserts, on the run it asserted it.
   **the outsider refused at the ready gate** · ready · start · **phone completion** ·
   the phone retry · the cross-surface station retry · both child pulses at 12 and 0.
 - Cleanup `COMPLETE`, 349/349, evidence scan clean.
-  **`LINKED_DOCUMENTS_VERIFIED=2`, `ALREADY_ABSENT=9`.** First non-zero `VERIFIED`: the
-  live-content verification branch — reading a stored document to confirm it references
-  its declared owner before admitting it — executed against staging across 11 linked
-  documents. The criterion carried since run 28 is **met**.
+  **`LINKED_DOCUMENTS_VERIFIED=2`, `ALREADY_ABSENT=9`**, 11 linked documents in total.
+
+  **Corrected 2026-09-19 22:02Z — my first reading of these two numbers was wrong, and
+  in the flattering direction.** `linkedDocumentsVerified` is incremented by *two*
+  different branches: the path-linked branch (`docPath.includes(via)` → admitted with
+  **no read at all**) and the live-content branch (read the stored document, confirm it
+  references `via`). The counter cannot tell them apart, so a non-zero `VERIFIED` never
+  meant what I claimed it meant.
+
+  What run 30 actually exercised, reconstructed from the smoke's own `trackLinked` calls
+  and forced by the arithmetic:
+
+  | linked document | `via` | branch |
+  | --- | --- | --- |
+  | `wsfCombinedGoals/{setupId}` | `groupId` | read |
+  | `wsfKioskPairings/{pairingId}` ×2 | `activityA` | read |
+  | `wsfKioskStations/{stationId}` ×2 | `activityA` | read |
+  | `wsfTurnEntries/{entryId}` ×3 | `activityA` | read |
+  | `wsfTurnLines/setup__{setupId}` | `groupId` | read |
+  | `wsfTurnMembers/{lineId}__{uid}` | `uid` | **path** |
+  | `wsfTurnReceipts/{lineId}__{uid}` | `uid` | **path** |
+
+  Exactly two paths contain their own `via`, and `ALREADY_ABSENT=9` accounts for every
+  one of the nine read-branch documents — all 404, already deleted in-smoke. So
+  `VERIFIED=2` is **the two path-linked documents, admitted without a read**, and the
+  live-content branch ran **zero** times.
+
+  Run 30 therefore establishes the **uid/path-linked admission branch** on staging. It
+  does **not** establish live-content verification. The criterion I carried since run 28
+  was itself badly specified: "non-zero `VERIFIED`" cannot distinguish the two branches,
+  which is how I came to claim the wrong one.
 
 ---
 
@@ -70,6 +97,16 @@ only the thing it asserts, on the run it asserted it.
   row does not cover them. That gate is separate and open.
 - **The turn row has never fully passed.** Runs 28, 29 and 30 each failed later than the
   last; none reached its PASS row.
-- **The uid/path-linked cleanup branch** (`wsfTurnMembers`, `wsfTurnReceipts` admitted by
-  the member uid in their own path) has still not been observed, because the row has not
-  yet created those documents on a run that reached the verifier with them present.
+- **The live-document-content verification branch** — reading a stored document and
+  confirming it references its declared owner before admitting it — has **not** run on
+  hosted staging. On runs 28 and 29 nothing reached it; on run 30 all nine read-branch
+  documents were already gone (404) before the verifier looked. It is covered locally
+  (`tests/cleanup-synthetic.test.mjs` proves eight of nine by content and one by path),
+  and local coverage is not hosted proof.
+  *(The uid/path-linked branch is established — run 30, two documents. This entry was
+  the wrong way round until 2026-09-19 22:02Z.)*
+
+- **A counter that separates the two admission branches.** `LINKED_DOCUMENTS_VERIFIED`
+  conflates the path-linked branch with the live-content branch, so no hosted receipt
+  can currently evidence one rather than the other. Proposed, not implemented: emit
+  `CLEANUP_LINKED_PATH_ADMITTED` and `CLEANUP_LINKED_CONTENT_VERIFIED` separately.
