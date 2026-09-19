@@ -330,10 +330,11 @@ test('the D-5 verdict is isolated: its failure is its own row and cannot stop th
   assert.deepStrictEqual(isolatedNames, [
     'station callable transport',
     'public dynamic route reload',
+    'hosted turn-service contract',
     'membership status rules (D-5)',
     'recent public additions (W2)', 'repeat policy (W3)', 'target-crossing event (W5)', 'durable history (W6)',
     'guided rules, share + momentum, join QR (W4/W7/W8)', 'kiosk mode (W9)',
-  ], 'only the station transport row, the route-reload row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
+  ], 'only the station transport row, the route-reload row, the turn-contract row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
   assert.ok(main.indexOf("isolated('recent public additions (W2)'") > main.indexOf('await caseVisualProof(browser);'), 'the candidate B rows run after the Package E, D-5, D-1 and visual rows');
 });
 
@@ -477,11 +478,23 @@ test('the station verdict names the service and status, and the only 403 it forg
   assert.ok(body.indexOf('assert(refused.length === 0') < body.indexOf("check('station callable transport', 'PASS'"), 'the PASS row must come after the assertion');
 });
 
+/**
+ * One case's source, and only that case's.
+ *
+ * Slicing to a fixed later function (`isolated`) made each case's assertions
+ * depend on nothing being inserted between the two — so adding a case made a
+ * DIFFERENT case's test fail, on an assertion about code that was not its own.
+ * Ending at the next top-level async function keeps each slice to its subject.
+ */
+function caseSource(name) {
+  const start = SMOKE.indexOf(`async function ${name}(`);
+  if (start < 0) return '';
+  const next = SMOKE.indexOf('\nasync function ', start + 1);
+  return next < 0 ? SMOKE.slice(start) : SMOKE.slice(start, next);
+}
+
 test('the public dynamic route reload proves the ROUTE resolved, on absent ids, without writing anything', () => {
-  const body = SMOKE.slice(
-    SMOKE.indexOf('async function caseDynamicRouteReload('),
-    SMOKE.indexOf('async function isolated(')
-  );
+  const body = caseSource('caseDynamicRouteReload');
   assert.ok(body, 'there is no caseDynamicRouteReload');
 
   // The two routes nothing else in this suite loads. Named, so quietly
@@ -528,13 +541,260 @@ test('the public dynamic route reload proves the ROUTE resolved, on absent ids, 
   );
 });
 
+test('the hosted turn-service row drives the real journey with real identities, and separates transport from refusal', () => {
+  const body = caseSource('caseTurnContract');
+  assert.ok(body, 'there is no caseTurnContract');
+
+  // Every callable the journey needs. Named individually, because a row that
+  // quietly stopped exercising one of these would still look like a pass.
+  for (const name of [
+    'wsfCreateCombinedGoal', 'wsfStationRequestPairing', 'wsfApproveStation',
+    'wsfStationClaimPairing', 'wsfStationState', 'wsfEventContext',
+    'wsfMyTurn', 'wsfJoinTurnLine', 'wsfLeaveTurnLine', 'wsfCallNext', 'wsfTurnReady',
+    'wsfStartTurn', 'wsfCompleteMyTurn', 'wsfCompleteTurn', 'wsfGoalPulse',
+    'wsfCombinedGoalPulse',
+  ]) {
+    assert.ok(body.includes(`'${name}'`), `the turn row never calls ${name}`);
+  }
+
+  // TWO stations, and an approval step between asking and claiming.
+  assert.ok(/for \(const slot of \[1, 2\]\)/.test(body), 'the row does not enrol two stations');
+  assert.ok(body.includes('two stations were handed the same turn'), 'the row does not test claim exclusion');
+
+  // The participant is a DIFFERENT identity from the Champion, and a third
+  // identity proves the ready gate. Three tokens, three people.
+  assert.ok(body.includes('championToken'), 'no Champion identity');
+  assert.ok(body.includes('memberToken'), 'no participant identity');
+  // Not merely that the token EXISTS — mutation-testing caught that: deleting
+  // the call that uses it left the declaration behind and this passed. What
+  // must be true is that the outsider is actually pointed at the ready gate.
+  assert.ok(
+    /wsfTurnReady'[^;]*outsiderToken/.test(body),
+    'the ready gate is never exercised with an identity that is not the assigned participant'
+  );
+  // AND that the refusal is the product's INTENDED one. Any handler-shaped
+  // error would pass before: an invalid-argument, a failed-precondition, a
+  // rate limit. Only the generic not-found proves an entryId does not reveal
+  // whose place it is.
+  assert.match(SMOKE, /const TURN_GENERIC_REFUSAL = 'This link is not valid\.';/);
+  assert.ok(
+    body.includes("error?.status === 'NOT_FOUND'"),
+    'the outsider refusal is not pinned to the generic not-found verdict'
+  );
+  assert.ok(
+    body.includes('=== TURN_GENERIC_REFUSAL'),
+    'the outsider refusal is not pinned to the generic sentence'
+  );
+
+  // LOOKING IS NOT JOINING, asserted before the join rather than after.
+  assert.ok(
+    body.indexOf('a scan must never enqueue') < body.indexOf("'join the line'"),
+    'the row must prove the line is empty BEFORE it joins, or it proves nothing'
+  );
+
+  // SWITCH TO PHONE frees the event place, proven by the rejoin that follows.
+  assert.ok(
+    body.includes('switchingToPhone: true'),
+    'the row never exercises switching to your own phone'
+  );
+  assert.ok(
+    body.includes('the place was not freed when the participant switched to their own phone'),
+    'the row does not prove that leaving actually frees the place'
+  );
+
+  // THE 45-SECOND LEASE IS WAITED OUT. A lease cannot be proven from a
+  // response shape, so this row spends the real time.
+  assert.match(SMOKE, /const TURN_LEASE_MS = 45_000;/);
+  assert.ok(
+    /setTimeout\(resolve, TURN_LEASE_MS \+ /.test(body),
+    'the row never waits past the ready lease, so it cannot prove the lease expires'
+  );
+  assert.ok(
+    body.includes('the 45-second lease expired and the phone is still holding a live turn'),
+    'the row does not assert the turn is gone after the lease'
+  );
+  assert.ok(
+    body.includes('a lapsed turn was handed back instead of recovering the place'),
+    'the row does not prove the place is RECOVERED, only that the turn vanished'
+  );
+
+  // THE TEN-SECOND RESULT IS WAITED OUT TOO, and proven to disappear.
+  assert.match(SMOKE, /const TURN_RESULT_MS = 10_000;/);
+  assert.ok(
+    /setTimeout\(resolve, TURN_RESULT_MS \+ /.test(body),
+    'the row reads the result immediately and never waits past the window'
+  );
+  assert.ok(
+    body.includes('the ten-second result is still on the screen after the window closed'),
+    'the row does not prove the result expires'
+  );
+
+  // PHONE COMPLETION, and idempotency on BOTH surfaces.
+  //
+  // Each step is pinned to the callable it must actually use. Asserting on
+  // the failure message alone was not enough — mutation-testing swapped the
+  // retry's callable for wsfMyTurn and the message, and the name's presence
+  // elsewhere in the row, both survived. This is the second time that exact
+  // shape of weak assertion has turned up here.
+  for (const [step, name] of [
+    ['record the turn from the phone', 'wsfCompleteMyTurn'],
+    ['retry from the phone', 'wsfCompleteMyTurn'],
+    ['retry at the screen', 'wsfCompleteTurn'],
+    ['leave the line for my own phone', 'wsfLeaveTurnLine'],
+  ]) {
+    assert.ok(
+      body.includes(`'${step}', '${name}'`),
+      `the "${step}" step does not call ${name}`
+    );
+  }
+  assert.ok(body.includes('a phone retry recorded a second time'), 'phone idempotency is not asserted');
+  assert.ok(
+    body.includes('the screen recorded a second time what the phone had already recorded'),
+    'cross-surface idempotency is not asserted'
+  );
+
+  // The arithmetic, including the activity nobody chose.
+  assert.ok(body.includes('the activity nobody chose moved to'), 'the unchosen child is not asserted unchanged');
+  assert.ok(body.includes('the combined parent holds'), 'the combined parent is not asserted');
+
+  // Privacy: a count, never a list, and no identifier of a real person.
+  assert.ok(body.includes('waitingCount'), 'the row does not check the waiting count');
+  assert.ok(body.includes("the hall disclosed a participant's email"), 'the row does not check for identity disclosure');
+
+  // A closed door and an application refusal are different failures, and the
+  // row must say which it hit — otherwise a transport block reads as a bug in
+  // the product, which is the exact confusion this suite exists to prevent.
+  const verdict = SMOKE.slice(SMOKE.indexOf('function turnCallFailure('), SMOKE.indexOf('async function turnCall('));
+  assert.ok(verdict.includes('TRANSPORT'), 'the row cannot name a transport refusal');
+  assert.ok(verdict.includes('application'), 'the row cannot name an application refusal');
+
+  // And the PASS row comes last, after every assertion.
+  assert.ok(
+    body.lastIndexOf('assert(') < body.indexOf("check('hosted turn-service contract', 'PASS'"),
+    'the PASS row must come after every assertion'
+  );
+});
+
+/**
+ * Cleanup, which is the half that can leave staging dirty.
+ *
+ * The turn journey writes documents the SERVER names — Firestore auto-ids and
+ * the lineId derived from one. Under cleanup's tag-in-path provenance rule a
+ * single untagged path is fatal to the WHOLE manifest: nothing is deleted, for
+ * any case in the run. So these documents cannot simply be trackDoc()'d, and
+ * a row that tracked none of them was not merely incomplete — it disabled
+ * cleanup for the entire suite.
+ */
+test('every document the turn journey creates is tracked, by the route its id allows', () => {
+  const body = caseSource('caseTurnContract');
+
+  // Server-minted: claimed through an identifier this run has already proven.
+  for (const [docPath, via] of [
+    ['wsfCombinedGoals/${setupId}', 'fx.groupId'],
+    ['wsfKioskPairings/${pairing.pairingId}', 'activityA'],
+    ['wsfKioskStations/${approved.stationId}', 'activityA'],
+    ['wsfTurnEntries/${joined.entryId}', 'activityA'],
+    ['wsfTurnLines/${lineId}', 'fx.groupId'],
+    ['wsfTurnMembers/${lineId}__${uid}', 'uid'],
+    ['wsfTurnReceipts/${lineId}__${uid}', 'uid'],
+  ]) {
+    assert.ok(
+      body.includes('trackLinked(`' + docPath + '`, ' + via + ')'),
+      `${docPath} is created but never linked for cleanup`
+    );
+  }
+
+  // Run-tagged, because they are keyed by the run-tagged goal id.
+  for (const docPath of [
+    'wsfCombinedGoalClaims/${child}',
+    'wsfContributions/${activityA}_${uid}_${attemptId}',
+    'wsfGoalMemberTotals/${activityA}_${uid}',
+    'wsfGoals/${activityA}/recentAdditions/${attemptId}',
+    'wsfCombinedCredits/${activityA}_${uid}_${attemptId}',
+    'wsfCombinedCounters/${setupId}/shards/${child}_${shard}',
+  ]) {
+    assert.ok(body.includes('trackDoc(`' + docPath + '`)'), `${docPath} is created but never tracked for cleanup`);
+  }
+
+  // The combined shard index is random, so the row cannot know which one it
+  // wrote and must carry all ten — for BOTH children, exactly as seedFixture
+  // already does for wsfGoalCounters.
+  assert.ok(
+    /for \(const child of \[activityA, activityB\]\)/.test(body),
+    'the claims and parent shards are not tracked for both children'
+  );
+  assert.ok(
+    /for \(let shard = 0; shard < 10; shard \+= 1\)/.test(body),
+    'the parent counter shards are not tracked across all ten indexes'
+  );
+
+  // EVERY entry, not just the last: this row joins three times.
+  assert.ok(
+    body.indexOf('trackLinked(`wsfTurnEntries/') < body.indexOf('return joined;'),
+    'entries must be tracked by the shared join helper, so a rejoin cannot go untracked'
+  );
+  assert.ok((body.match(/await joinLine\(/g) || []).length >= 3, 'the row no longer joins more than once');
+
+  // lineId and attemptId are in NO callable response. They are read off the
+  // stored entry — which is also the only honest way to know what to clean.
+  assert.ok(
+    body.includes('getDoc(`wsfTurnEntries/${first.entryId}`)'),
+    'the line is not discovered from the stored entry'
+  );
+  assert.ok(
+    body.includes('fields?.attemptId?.stringValue'),
+    'the attempt is not discovered from the stored entry'
+  );
+  assert.ok(
+    body.includes('the entry carries no lineId, so its line cannot be tracked'),
+    'a missing lineId must fail the row rather than silently skip its documents'
+  );
+
+  // The manifest must actually carry them, or none of the above reaches cleanup.
+  assert.match(SMOKE, /function trackLinked\(docPath, via\)/);
+  assert.match(SMOKE, /linkedDocs: \[\.\.\.cleanup\.linked\]\.map\(\(\[docPath, via\]\) => \(\{ path: docPath, via \}\)\)/);
+});
+
+test('the in-smoke cleanup deletes BOTH registers, not just the tagged one', () => {
+  // cleanup.linked is a second register. A cleanupAll() that walked only
+  // cleanup.docs would delete the run's own fixtures, leave every
+  // server-named document behind, and still print its PASS row — while the
+  // always-run recovery cleanup silently did the rest.
+  const fn = SMOKE.slice(SMOKE.indexOf('async function cleanupAll('), SMOKE.indexOf('\nlet browser;'));
+  assert.ok(fn, 'there is no cleanupAll');
+  assert.ok(
+    /\[\.\.\.cleanup\.docs, \.\.\.cleanup\.linked\.keys\(\)\]/.test(fn),
+    'cleanupAll does not iterate the linked documents, so it cannot have removed them'
+  );
+  // Deepest first, so a subcollection document goes before its parent.
+  assert.match(fn, /\.sort\(\(a, b\) => b\.split\('\/'\)\.length - a\.split\('\/'\)\.length\)/);
+  assert.ok(fn.includes('await deleteUsers()'), 'cleanupAll no longer deletes the synthetic accounts');
+  // The accounts go AFTER the documents: a uid-linked document is proven by
+  // the manifest, not by a live account, but deleting the records first
+  // keeps the in-smoke pass honest about what it removed.
+  assert.ok(fn.indexOf('await deleteDoc(docPath)') < fn.indexOf('await deleteUsers()'));
+});
+
+test('the row and the receipt no longer claim to be end to end', () => {
+  assert.equal(/turn contract end to end/.test(SMOKE), false, 'the old end-to-end row name survives');
+  assert.ok(SMOKE.includes("check('hosted turn-service contract', 'PASS'"), 'the renamed row has no PASS row');
+  assert.ok(
+    SMOKE.includes('The hosted turn-service row is a SERVICE contract, not an end-to-end one.'),
+    'the receipt does not say what kind of contract this row is'
+  );
+  assert.ok(
+    SMOKE.includes('Independent browser and player proof of the expo journey is a SEPARATE gate'),
+    'the receipt does not state that browser and player proof remains a separate gate'
+  );
+});
+
 test('the green-run row count is pinned, and every row name is distinct', () => {
   const rows = [...SMOKE.matchAll(/check\('([^']+)', 'PASS'/g)].map((m) => m[1]);
-  assert.equal(rows.length, 23, `a fully green run emits one row per PASS site; expected 23, found ${rows.length}`);
+  assert.equal(rows.length, 24, `a fully green run emits one row per PASS site; expected 24, found ${rows.length}`);
   assert.equal(new Set(rows).size, rows.length, 'two rows share a name, so RESULTS could not be read back per row');
   assert.ok(rows.includes('station callable transport'), 'the station transport row is not among the green rows');
   assert.match(SMOKE, /console\.log\(`RESULTS=\$\{results\.length\}`\);/);
-  assert.match(SMOKE, /A fully green run emits 23 rows/, 'the script must pin the same count the harness does');
+  assert.match(SMOKE, /A fully green run emits 24 rows/, 'the script must pin the same count the harness does');
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);

@@ -33,12 +33,18 @@ if (sdk?.projectId !== PROJECT_ID || typeof sdk?.apiKey !== 'string') throw new 
 const API_KEY = sdk.apiKey;
 
 const runTag = `e5h-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
-const cleanup = { users: new Set(), docs: new Set() };
+const cleanup = { users: new Set(), docs: new Set(), linked: new Map() };
 function persistCleanup() {
   fs.mkdirSync(path.dirname(CLEANUP_MANIFEST), { recursive: true, mode: 0o700 });
   fs.writeFileSync(
     CLEANUP_MANIFEST,
-    JSON.stringify({ project: PROJECT_ID, runTag, users: [...cleanup.users], docs: [...cleanup.docs] }, null, 2) + '\n',
+    JSON.stringify({
+      project: PROJECT_ID,
+      runTag,
+      users: [...cleanup.users],
+      docs: [...cleanup.docs],
+      linkedDocs: [...cleanup.linked].map(([docPath, via]) => ({ path: docPath, via })),
+    }, null, 2) + '\n',
     { mode: 0o600 }
   );
   fs.chmodSync(CLEANUP_MANIFEST, 0o600);
@@ -49,6 +55,22 @@ function trackUser(uid) {
 }
 function trackDoc(docPath) {
   cleanup.docs.add(docPath);
+  persistCleanup();
+}
+/**
+ * A document the SERVER named, which therefore cannot carry the run tag.
+ *
+ * Firestore auto-ids and the lineIds derived from them (`setup__{setupId}`)
+ * are unpredictable, so cleanup's tag-in-path rule can never admit them — and
+ * under that rule ONE such path made the whole manifest unusable and the run
+ * deleted nothing at all. `via` is an identifier this run has already proven
+ * is its own: a run-tagged id, or an Auth uid whose synthetic email cleanup
+ * checks. Cleanup admits the path only if that identifier is in the path or
+ * in the stored document, so this is a narrower claim than a tagged path, not
+ * a broader one.
+ */
+function trackLinked(docPath, via) {
+  cleanup.linked.set(docPath, via);
   persistCleanup();
 }
 const results = [];
@@ -1492,6 +1514,339 @@ async function caseDynamicRouteReload() {
   return null;
 }
 
+/**
+ * THE TURN CONTRACT, HOSTED.
+ *
+ * Until this row existed the hosted suite had NOTHING for the turn journey —
+ * not one reference to wsfEventContext, wsfJoinTurnLine, wsfTurnReady,
+ * wsfMyTurn, wsfCallNext, wsfStartTurn, wsfCompleteTurn or wsfApproveStation.
+ * Every claim about the queue rested on emulator evidence, which this harness
+ * does not accept as hosted evidence, so "the queue works on staging" could
+ * not be said truthfully either way.
+ *
+ * WHAT IT PROVES, in the order a room meets it: a Champion enrols TWO screens
+ * on one event; a participant on an INDEPENDENT identity gets the event's
+ * activities, is NOT in the line merely for having looked, joins explicitly,
+ * is called, is the only one who may say ready, runs the turn on the screen,
+ * and is recorded exactly once against the activity they chose and once
+ * against the combined parent — with the activity they did NOT choose left
+ * alone. Then the screen clears.
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO. It never asserts a service is reachable by
+ * probing it with an invalid payload; every call here is a real one with a
+ * real identity. A transport failure and an application refusal are different
+ * things and this row reports which it hit.
+ *
+ * WHILE THE TWELVE PARTICIPANT/CHAMPION CALLABLES ARE TRANSPORT-BLOCKED THIS
+ * ROW FAILS, and that is the point: it turns "the queue is blocked" from a
+ * sentence somebody has to remember into a row the board prints. It is
+ * isolated, so its failure is its own row and every other case still runs.
+ */
+const TURN_COUNT = 12;
+/** functions-westayfit/src/index.ts: TURN_READY_LEASE_MS and
+ * TURN_RESULT_VISIBLE_MS. Both are waited out for real below — a lease and a
+ * display window cannot be proven from a response shape. */
+const TURN_LEASE_MS = 45_000;
+const TURN_RESULT_MS = 10_000;
+/** NOT_FOUND_MESSAGE. The same sentence an unknown id gets, which is the
+ * point: an entryId must not reveal whose place it is. */
+const TURN_GENERIC_REFUSAL = 'This link is not valid.';
+
+/** Names what a call hit, so a closed door is never read as a refusal. */
+function turnCallFailure(step, response) {
+  if (response.ok) return null;
+  const error = response.body?.error;
+  const status = typeof error?.status === 'string' ? error.status : `HTTP ${response.status}`;
+  const answeredByHandler = !!error && typeof error === 'object' && typeof error.status === 'string';
+  const kind = answeredByHandler ? 'application' : 'TRANSPORT';
+  return `${step}: ${kind} refusal (${status})`;
+}
+
+async function turnCall(step, name, data, idToken = null) {
+  const response = await callFunction(name, data, idToken);
+  const failure = turnCallFailure(step, response);
+  if (failure) throw new Error(failure);
+  return callableData(response);
+}
+
+async function caseTurnContract() {
+  // Two activities, because the combined parent needs two children and the
+  // whole point of one assertion below is that the UNCHOSEN one stays still.
+  const fx = await seedFixture('turn', 2);
+  const [activityA, activityB] = fx.goalIds;
+  const championToken = await signInToken(fx.champion);
+  const memberToken = await signInToken(fx.member);
+  const outsiderToken = await signInToken(fx.outsider);
+  const uid = fx.member.uid;
+
+  // ── THE COMBINED EVENT ────────────────────────────────────────────────────
+  const now = Date.now();
+  const combined = await turnCall('create combined goal', 'wsfCreateCombinedGoal', {
+    communityGroupId: fx.groupId,
+    title: `Hosted turn ${runTag}`,
+    unit: 'movements',
+    target: 2000,
+    startsAt: new Date(now - 60_000).toISOString(),
+    endsAt: new Date(now + 3_600_000).toISOString(),
+    timezone: 'UTC',
+    childGoalIds: [activityA, activityB],
+  }, championToken);
+  assert(typeof combined?.setupId === 'string' && combined.setupId, 'combined setup id missing');
+  const setupId = combined.setupId;
+  // Minted by the server, so it can never carry the run tag: it is claimed
+  // through the run-tagged community it names. Every id below is handled the
+  // same way — see trackLinked().
+  trackLinked(`wsfCombinedGoals/${setupId}`, fx.groupId);
+  // The claim the contribution path reads to decide a credit, one per child,
+  // and the parent's counter shards. The shard index is random
+  // (COMBINED_SHARD_COUNT = 10), so the row cannot know which one it wrote.
+  for (const child of [activityA, activityB]) {
+    trackDoc(`wsfCombinedGoalClaims/${child}`);
+    for (let shard = 0; shard < 10; shard += 1) {
+      trackDoc(`wsfCombinedCounters/${setupId}/shards/${child}_${shard}`);
+    }
+  }
+
+  // ── TWO SCREENS, ENROLLED THE WAY A CHAMPION ENROLS THEM ──────────────────
+  const stations = [];
+  for (const slot of [1, 2]) {
+    const pairing = await turnCall(`station ${slot} pairing`, 'wsfStationRequestPairing', { goalId: activityA });
+    assert(typeof pairing?.code === 'string', `station ${slot} pairing returned no code`);
+    trackLinked(`wsfKioskPairings/${pairing.pairingId}`, activityA);
+    // The Champion approves. This is wsfApproveStation — one of the twelve.
+    const approved = await turnCall(`station ${slot} approval`, 'wsfApproveStation', {
+      goalId: activityA, code: pairing.code, slot,
+    }, championToken);
+    assert(approved?.slot === slot, `station ${slot} approved into the wrong slot`);
+    trackLinked(`wsfKioskStations/${approved.stationId}`, activityA);
+    // Only the screen that asked may claim, and only it receives the secret.
+    const claimed = await turnCall(`station ${slot} claim`, 'wsfStationClaimPairing', {
+      pairingId: pairing.pairingId,
+    });
+    assert(typeof claimed?.secret === 'string' && claimed.secret, `station ${slot} got no secret`);
+    assert(claimed.stationId === approved.stationId, `station ${slot} claimed a different station`);
+    stations.push({ slot, stationId: claimed.stationId, secret: claimed.secret });
+  }
+  const [stationOne, stationTwo] = stations;
+
+  // The enrolled screen knows its event without being told who is waiting.
+  const enrolled = await turnCall('station state', 'wsfStationState', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(enrolled?.goalId === activityA, 'the enrolled station is on the wrong goal');
+
+  // ── THE PARTICIPANT, ON AN IDENTITY OF THEIR OWN ──────────────────────────
+  const context = await turnCall('event context', 'wsfEventContext', { goalId: activityA }, memberToken);
+  const offered = (context?.activities || []).map((a) => a.goalId).sort();
+  assert(offered.length === 2, `a combined event must offer both activities; it offered ${offered.length}`);
+  assert(offered.includes(activityA) && offered.includes(activityB), 'the event did not offer both activities');
+
+  // LOOKING IS NOT JOINING. Reading the event must leave the line untouched.
+  const beforeJoin = await turnCall('my turn before joining', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(!beforeJoin?.turn, 'reading the event put somebody in the line; a scan must never enqueue');
+
+  // Joining is the only way in, and every entry it mints is tracked — this
+  // row joins three times, and a row that tracked only the last one would
+  // leave the first two behind.
+  async function joinLine(step) {
+    const joined = await turnCall(step, 'wsfJoinTurnLine', {
+      goalId: activityA, calledName: 'A.L.',
+    }, memberToken);
+    assert(typeof joined?.entryId === 'string' && joined.entryId, `${step} returned no entry`);
+    trackLinked(`wsfTurnEntries/${joined.entryId}`, activityA);
+    return joined;
+  }
+
+  const first = await joinLine('join the line');
+  assert(first.alreadyInLine === false, 'the first join reported an existing place');
+
+  // THE LINE, THE PLACE AND THE RECEIPT. lineId and attemptId are not in any
+  // callable response, so they are DISCOVERED from the entry the server just
+  // wrote — which is also the only honest way to know what to clean up.
+  const firstEntry = await getDoc(`wsfTurnEntries/${first.entryId}`);
+  const lineId = firstEntry.body?.fields?.lineId?.stringValue;
+  assert(typeof lineId === 'string' && lineId, 'the entry carries no lineId, so its line cannot be tracked');
+  assert(lineId === `setup__${setupId}`, `a combined event's line is setup__{setupId}; this one is ${lineId}`);
+  trackLinked(`wsfTurnLines/${lineId}`, fx.groupId);
+  trackLinked(`wsfTurnMembers/${lineId}__${uid}`, uid);
+  trackLinked(`wsfTurnReceipts/${lineId}__${uid}`, uid);
+
+  const afterJoin = await turnCall('my turn after joining', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(afterJoin?.turn?.entryId === first.entryId, 'the phone cannot see the place it just took');
+
+  // ── SWITCHING TO YOUR OWN PHONE GIVES THE PLACE BACK ──────────────────────
+  // wsfLeaveTurnLine is unilateral and frees the event place. If it did not,
+  // the rejoin below would report an existing place instead of a new one.
+  const left = await turnCall('leave the line for my own phone', 'wsfLeaveTurnLine', {
+    entryId: first.entryId, switchingToPhone: true,
+  }, memberToken);
+  assert(left?.status === 'left', `leaving left the turn in ${left?.status}`);
+  const afterLeaving = await turnCall('my turn after leaving', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(!afterLeaving?.turn, 'the place was not freed when the participant switched to their own phone');
+
+  // ── THE 45-SECOND READY LEASE ACTUALLY EXPIRES ────────────────────────────
+  // A call is an offer, not a summons. The participant is called and says
+  // NOTHING; the place must come back on its own. This waits real time —
+  // there is no way to prove a lease from a response shape.
+  const lapsing = await joinLine('rejoin before the lease test');
+  assert(lapsing.alreadyInLine === false, 'leaving did not free the place: the rejoin found one');
+  const offering = await turnCall('call next (lease test)', 'wsfCallNext', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(offering?.called === true, 'the station called next and nobody was assigned');
+  assert(offering.assigned?.code === lapsing.code, 'the screen is showing a different code');
+  const assigned = await turnCall('my turn while assigned', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(assigned?.turn?.status === 'assigned', `being called left the turn in ${assigned?.turn?.status}`);
+  assert(
+    typeof assigned.turn.readySecondsLeft === 'number' && assigned.turn.readySecondsLeft > 0,
+    'an assigned turn reports no ready countdown, so there is no lease to expire'
+  );
+  assert(
+    assigned.turn.readySecondsLeft <= 45,
+    `the ready lease is 45 seconds; the phone was offered ${assigned.turn.readySecondsLeft}`
+  );
+  await new Promise((resolve) => setTimeout(resolve, TURN_LEASE_MS + 5_000));
+  const lapsed = await turnCall('my turn after the lease', 'wsfMyTurn', { goalId: activityA }, memberToken);
+  assert(!lapsed?.turn, 'the 45-second lease expired and the phone is still holding a live turn');
+  // And the place is genuinely recovered, not merely hidden: a rejoin mints a
+  // NEW entry rather than handing back the abandoned one.
+  const rejoined = await joinLine('rejoin after the no-show');
+  assert(
+    rejoined.alreadyInLine === false && rejoined.entryId !== lapsing.entryId,
+    'a lapsed turn was handed back instead of recovering the place'
+  );
+
+  // ── THE CALL, AND WHO MAY ANSWER IT ───────────────────────────────────────
+  const called = await turnCall('call next', 'wsfCallNext', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(called?.called === true, 'the station called next and nobody was assigned');
+  assert(called.assigned?.code === rejoined.code, 'the screen is showing a different code');
+
+  // PRIVACY. A number of people waiting, never a list, at any depth.
+  assert(typeof called.waitingCount === 'number', 'the hall did not report a waiting count');
+  const hallJson = JSON.stringify(called);
+  assert(!hallJson.includes(fx.member.email), "the hall disclosed a participant's email");
+  assert(!hallJson.includes(uid), "the hall disclosed a participant's uid");
+
+  // TWO STATIONS CANNOT CLAIM THE SAME TURN. The second screen calls into the
+  // same event and must not be handed the person already assigned.
+  const second = await turnCall('second station calls next', 'wsfCallNext', {
+    stationId: stationTwo.stationId, secret: stationTwo.secret,
+  });
+  assert(
+    second?.assigned?.code !== rejoined.code,
+    'two stations were handed the same turn'
+  );
+  assert(
+    second?.called === false,
+    'the second screen reported calling somebody when the only participant was already assigned'
+  );
+
+  // ONLY THE ASSIGNED PARTICIPANT MAY SAY READY, and the refusal is the
+  // product's own generic not-found — NOT merely "some application error".
+  // An entryId must not become a way to learn whose place it is, so the
+  // sentence a stranger gets is the sentence an unknown id gets.
+  const outsiderReady = await callFunction('wsfTurnReady', { entryId: rejoined.entryId }, outsiderToken);
+  const outsiderTransport = turnCallFailure('outsider ready', outsiderReady);
+  assert(
+    outsiderTransport !== null,
+    'somebody who is not the assigned participant was allowed to say ready'
+  );
+  assert(outsiderTransport.includes('application'), outsiderTransport);
+  assert(
+    outsiderReady.body?.error?.status === 'NOT_FOUND',
+    `the outsider refusal must be the generic not-found; it was ${outsiderReady.body?.error?.status}`
+  );
+  assert(
+    outsiderReady.body?.error?.message === TURN_GENERIC_REFUSAL,
+    'the outsider refusal does not use the generic sentence, so an entryId leaks whether it exists'
+  );
+
+  const ready = await turnCall('ready', 'wsfTurnReady', { entryId: rejoined.entryId }, memberToken);
+  assert(ready?.status === 'ready', `ready left the turn in ${ready?.status}`);
+
+  // ── THE TURN ITSELF: STARTED AT THE SCREEN, FINISHED ON THE PHONE ─────────
+  const started = await turnCall('start the turn', 'wsfStartTurn', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(started?.started === true, 'the station could not start the ready turn');
+  assert(started.activity?.goalId === activityA, 'the screen started the wrong activity');
+
+  // The attempt the station minted is on the entry. Discovering it is what
+  // makes the contribution, the member total, the recent addition and the
+  // combined credit nameable — and therefore cleanable.
+  const startedEntry = await getDoc(`wsfTurnEntries/${rejoined.entryId}`);
+  const attemptId = startedEntry.body?.fields?.attemptId?.stringValue;
+  assert(typeof attemptId === 'string' && attemptId, 'starting the turn minted no attempt id on the entry');
+  trackDoc(`wsfContributions/${activityA}_${uid}_${attemptId}`);
+  trackDoc(`wsfGoalMemberTotals/${activityA}_${uid}`);
+  trackDoc(`wsfGoals/${activityA}/recentAdditions/${attemptId}`);
+  trackDoc(`wsfCombinedCredits/${activityA}_${uid}_${attemptId}`);
+
+  // THE PHONE RECORDS IT. Same canonical attempt, from the person's own
+  // identity rather than the station secret.
+  const recorded = await turnCall('record the turn from the phone', 'wsfCompleteMyTurn', {
+    entryId: rejoined.entryId, count: TURN_COUNT,
+  }, memberToken);
+  assert(
+    recorded?.receipt?.addedCount === TURN_COUNT,
+    `the phone recorded ${recorded?.receipt?.addedCount}, expected ${TURN_COUNT}`
+  );
+  assert(recorded.receipt.alreadyRecorded !== true, 'the first record claimed it had already happened');
+
+  // IDEMPOTENT ON THE PHONE. A lost response, tapped again.
+  const retried = await turnCall('retry from the phone', 'wsfCompleteMyTurn', {
+    entryId: rejoined.entryId, count: TURN_COUNT,
+  }, memberToken);
+  assert(retried?.receipt?.alreadyRecorded === true, 'a phone retry recorded a second time');
+
+  // AND IDEMPOTENT ACROSS THE TWO SURFACES. The screen that started the turn
+  // presses its own button after the phone already finished: it is the same
+  // attempt, so it must add nothing.
+  const atStation = await turnCall('retry at the screen', 'wsfCompleteTurn', {
+    stationId: stationOne.stationId, secret: stationOne.secret, count: TURN_COUNT,
+  });
+  assert(
+    atStation?.recorded?.alreadyRecorded === true,
+    'the screen recorded a second time what the phone had already recorded'
+  );
+
+  // ── THE ARITHMETIC: ONE CHILD, ONE PARENT, THE OTHER CHILD UNTOUCHED ──────
+  // Read as the member. These goals are not display-authorized, so an
+  // anonymous read would be refused for a reason that has nothing to do with
+  // the arithmetic this row is checking.
+  const chosen = await turnCall('chosen activity pulse', 'wsfGoalPulse', { goalId: activityA }, memberToken);
+  const untouched = await turnCall('unchosen activity pulse', 'wsfGoalPulse', { goalId: activityB }, memberToken);
+  const parent = await turnCall('combined pulse', 'wsfCombinedGoalPulse', { setupId }, memberToken);
+  assert(chosen?.sharedTotal === TURN_COUNT, `the chosen activity holds ${chosen?.sharedTotal}, expected ${TURN_COUNT}`);
+  assert(untouched?.sharedTotal === 0, `the activity nobody chose moved to ${untouched?.sharedTotal}`);
+  assert(parent?.sharedTotal === TURN_COUNT, `the combined parent holds ${parent?.sharedTotal}, expected ${TURN_COUNT}`);
+
+  // ── THE SCREEN CLEARS, AND THE RESULT IS NOT PERMANENT ────────────────────
+  const afterRecord = await turnCall('station state after recording', 'wsfStationState', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(!afterRecord?.assigned, 'the screen is still showing somebody after recording');
+  assert(afterRecord?.result, 'the screen shows no result at all in the ten seconds after recording');
+  assert(afterRecord.result.code === rejoined.code, 'the ten-second result names a different turn');
+  assert(afterRecord.result.amount === TURN_COUNT, `the ten-second result shows ${afterRecord.result.amount}`);
+  assert(!JSON.stringify(afterRecord.result).includes('A.L.'), 'the ten-second result shows a name');
+
+  // TEN SECONDS, PROVEN BY WAITING PAST THEM. A result that never expired
+  // would leave a code on a public screen for the rest of the event.
+  await new Promise((resolve) => setTimeout(resolve, TURN_RESULT_MS + 3_000));
+  const afterWindow = await turnCall('station state after the result window', 'wsfStationState', {
+    stationId: stationOne.stationId, secret: stationOne.secret,
+  });
+  assert(
+    !afterWindow?.result,
+    'the ten-second result is still on the screen after the window closed'
+  );
+
+  check('hosted turn-service contract', 'PASS', `two stations enrolled and approved; an independent participant read the event without joining, joined explicitly, gave the place back by switching to their own phone, was called and let the 45-second lease expire and recovered their place, rejoined, was called, refused an outsider at the ready gate with the generic not-found, readied, started at the screen and recorded ${TURN_COUNT} from their phone once — a phone retry and a screen retry both added nothing; the chosen activity and the combined parent each hold ${TURN_COUNT}, the unchosen activity 0; the screen cleared and the ten-second result expired`);
+  return null;
+}
 async function isolated(name, run) {
   try {
     return await run();
@@ -1518,7 +1873,11 @@ async function cleanupAll() {
   for (const challengeId of synthetic.challenges) {
     for (let shard = 0; shard < 10; shard += 1) trackDoc(`wsfChallengeCounters/${challengeId}/shards/${shard}`);
   }
-  const ordered = [...cleanup.docs].sort((a, b) => b.split('/').length - a.split('/').length);
+  // BOTH registers, or the run deletes its own fixtures and leaves the
+  // server-named ones behind — and the always-run recovery cleanup then has
+  // to do it, which is not what the PASS row below claims.
+  const ordered = [...cleanup.docs, ...cleanup.linked.keys()]
+    .sort((a, b) => b.split('/').length - a.split('/').length);
   for (const docPath of ordered) {
     try { await deleteDoc(docPath); } catch (error) { errors.push(`${docPath}: ${sanitize(error.message)}`); }
   }
@@ -1540,6 +1899,11 @@ try {
   // Same reasons as the row above: no browser, no fixture, and a failure
   // that must still be reported when a later case aborts the suite.
   await isolated('public dynamic route reload', () => caseDynamicRouteReload());
+  // Isolated for the same reason, and for one more: while the twelve
+  // participant/Champion callables are transport-blocked this row FAILS, and
+  // that failure is the measurement. It must not take the rest of the suite
+  // down with it.
+  await isolated('hosted turn-service contract', () => caseTurnContract());
   await caseRoundTrip(browser);
   await caseProtectedReads();
   await caseUncertainAndPerGoal(browser);
@@ -1596,6 +1960,8 @@ const receipt = {
     'The D-5 case is isolated: its failure is its own row and the cases after it still run, because the ruleset it asserts is not deployed by this workflow.',
     'The visual-proof captures show a run-tagged synthetic community, goal and members only; the one contribution they record is removed by cleanup.',
     'The candidate B cases (W2, W3, W5, W6, W4/W7/W8, W9) each run on an isolated row; every contribution they record (and its recent-additions entry) is removed by cleanup.',
+    'The hosted turn-service row is a SERVICE contract, not an end-to-end one. It drives the real callables with real identities — a Champion token, an independent participant token, an outsider token and two station secrets — and it waits out the 45-second ready lease and the ten-second result window rather than inferring them from a response shape. It records one genuine contribution, which cleanup removes with everything else it creates. It reports whether a refusal came from Cloud Run transport or from the application, because those are different failures and only one of them is a product defect.',
+    'What the hosted turn-service row does NOT establish: nothing about a browser, a phone, a station screen, a scanned QR or anything a person sees or taps. It never opens a page. Independent browser and player proof of the expo journey is a SEPARATE gate and is not covered by this row passing.',
     'The public dynamic route reload row proves only that Hosting resolves /combined/** and /station/** to their own exported documents on a direct GET. It asserts nothing about the ids in those addresses, which are deliberately absent, and nothing about whether the screens behind them work.',
     "The station transport row proves only that the four callables declared invoker:'public' (wsfStationRequestPairing, wsfStationPairingStatus, wsfStationClaimPairing, wsfStationState) are reachable anonymously. It asserts nothing about their application-level answers, and it exercises no station end to end.",
     'The three Champion-only station callables (wsfApproveStation, wsfListStations, wsfRevokeStation) are NOT probed: they are not declared invoker:\'public\', so a transport denial and the refusal an anonymous caller is supposed to get are the same 403 from outside, and a check that passes either way could not fail for the right reason. Their transport remains unverified by this suite.',
@@ -1604,7 +1970,7 @@ const receipt = {
   diagnostics,
 };
 fs.writeFileSync(path.join(RESULT_DIR, 'wsf-package-e-hosted-result.json'), JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
-// A fully green run emits 23 rows — one per check(..., 'PASS') site in this
+// A fully green run emits 24 rows — one per check(..., 'PASS') site in this
 // file. hosted-smoke-contract.test.mjs pins that number and the row names, so
 // a row added or removed here has to be accounted for there in the same change.
 console.log(`RESULTS=${results.length}`);
