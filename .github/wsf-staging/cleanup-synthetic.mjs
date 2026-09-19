@@ -187,6 +187,7 @@ try {
 }
 let usersVerifiedByEmail = 0;
 let usersAlreadyAbsent = 0;
+const verifiedUids = new Set();
 for (const uid of users) {
   const account = presentBefore.get(uid);
   if (!account) { usersAlreadyAbsent += 1; continue; }
@@ -197,6 +198,66 @@ for (const uid of users) {
     continue;
   }
   usersVerifiedByEmail += 1;
+  verifiedUids.add(uid);
+}
+
+// ---- linked documents: server-minted ids, proven by what they point AT ----
+//
+// The turn journey's documents are named by Firestore auto-ids and by lineIds
+// derived from them (`setup__{setupId}`), so NONE of them can ever carry the
+// run tag. Under the tag-in-path rule above, tracking them did not merely fail
+// to delete them — a single untagged path made the WHOLE manifest unusable and
+// the run deleted nothing at all, including every other case's fixtures.
+//
+// A linked entry names an `via` identifier that this run has ALREADY proven is
+// its own: a string carrying the run tag, or an Auth uid whose synthetic email
+// was checked above. The path is admitted only when that identifier actually
+// appears — in the path itself, or in the LIVE document. That is stricter than
+// the tag-in-path rule, not looser: it reads the record before claiming it.
+// A document that is already gone is admitted too; it has nothing to clear.
+const linked = Array.isArray(manifest.linkedDocs) ? manifest.linkedDocs : [];
+let linkedDocumentsVerified = 0;
+let linkedDocumentsAlreadyAbsent = 0;
+for (const entry of linked) {
+  const docPath = typeof entry?.path === 'string' ? entry.path : '';
+  const via = typeof entry?.via === 'string' ? entry.via : '';
+  if (!docPath || !via) { unsafe.push('linked document: entry is missing a path or a via'); continue; }
+  if (docs.includes(docPath)) { unsafe.push(`linked document ${docPath}: already claimed as a tagged path`); continue; }
+  // A uid is email-verifiable only while its account still EXISTS, and the
+  // smoke deletes the accounts before this script runs — so leaning on the
+  // email check alone would reject every successful run. The manifest ties
+  // the uid to this run independently, through its own run-tagged membership
+  // path, which is the same linkage a member profile is admitted on.
+  const uidOfThisRun = verifiedUids.has(via) || membershipUids.has(via);
+  if (!via.includes(runTag) && !uidOfThisRun) {
+    unsafe.push(`linked document ${docPath}: via is neither ${runTag}-tagged nor a uid this run owns`);
+    continue;
+  }
+  if (docPath.includes(via)) {
+    docs.push(docPath);
+    linkedDocumentsVerified += 1;
+    continue;
+  }
+  let record;
+  try {
+    record = await api(`${firestoreBase}/${docPath}`, { allowStatus: [404] });
+  } catch (e) {
+    unsafe.push(`linked document ${docPath}: could not be read to establish provenance`);
+    continue;
+  }
+  if (record.status === 404) {
+    docs.push(docPath);
+    linkedDocumentsAlreadyAbsent += 1;
+    continue;
+  }
+  // Compare against the stored document only. Never echo it: these records
+  // carry a called name and a turn code.
+  if (!JSON.stringify(record.parsed?.fields ?? {}).includes(via)) {
+    unsafe.push(`linked document ${docPath}: the stored document does not reference ${via.includes(runTag) ? via : 'its declared uid'}`);
+    continue;
+  }
+  docs.push(docPath);
+  linkedDocumentsVerified += 1;
 }
 
 if (unsafe.length) {
@@ -284,6 +345,8 @@ const counts = {
   documentsDeleted: docsDeleted,
   documentsAlreadyAbsent: docsAlreadyGone,
   profileDocumentsLinked,
+  linkedDocumentsVerified,
+  linkedDocumentsAlreadyAbsent,
   requestedUsers: users.length,
   usersVerifiedByEmail,
   usersAlreadyAbsent,
