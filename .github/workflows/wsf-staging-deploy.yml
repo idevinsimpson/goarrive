@@ -327,6 +327,8 @@ jobs:
             ../ops/.github/wsf-staging/approved-candidate.json
 
       - name: Deploy WSF functions
+        id: deploy-functions
+        continue-on-error: true
         working-directory: app
         run: |
           set -euo pipefail
@@ -389,6 +391,15 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      # Hosting is a safe, useful staging increment even when the deployer
+      # cannot set public invoker IAM on newly created services. Preserve that
+      # failure after publishing and verifying the reviewed web artifact.
+      - name: Preserve an incomplete functions deployment as a failed release
+        if: ${{ always() && steps.deploy-functions.outcome == 'failure' }}
+        run: |
+          echo "::error::WSF functions were not fully deployed; hosting may be visible but callable transport remains blocked."
+          exit 1
+
   # ------------------------------------------------------- hosted-verify ----
   # The assignment is reviewed source -> deployment -> HOSTED verification ->
   # evidence. A green deploy with the behaviour unassigned is not the deliverable.
@@ -399,6 +410,7 @@ jobs:
   # the Web App's API key and act as themselves in a real browser.
   hosted-verify:
     needs: [gate, deploy]
+    if: ${{ always() && needs.gate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: wsf-staging
