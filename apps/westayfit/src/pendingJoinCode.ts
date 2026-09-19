@@ -15,6 +15,8 @@
  * private-browsing quota reject.
  */
 
+import { kioskContributeRoute, readKioskReturnGoal } from './kioskSession';
+
 const KEY = 'wsf.pendingJoinCode';
 
 /**
@@ -71,9 +73,19 @@ export function clearPendingJoinCode(): void {
  * the next gate; otherwise `wsfJoinCommunity` fires before the profile exists
  * and the visitor dead-ends. The pending code survives sessionStorage across
  * the gate hops and is consumed here on the last step.
+ *
+ * A KIOSK RETURN is the second destination that can claim this hop, and it is
+ * strictly second: a visitor who scanned a join code is mid-way through
+ * joining a community, and that has to finish before anything else. Only when
+ * no code is pending does a kiosk hand-off apply, which sends the visitor
+ * back to the contribution screen on the device they walked up to instead of
+ * dropping them on a home page they did not ask for
+ * (src/kioskSession.ts).
  */
 export function nextRouteAfterAuth(fallback: string): string {
   const pending = readPendingJoinCode();
   if (pending) return `/join/${pending}`;
+  const kioskGoalId = readKioskReturnGoal();
+  if (kioskGoalId) return kioskContributeRoute(kioskGoalId);
   return fallback;
 }

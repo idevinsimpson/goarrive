@@ -87,6 +87,27 @@ beforeEach(async () => {
     // Alice's completed profile.
     await setDoc(doc(db, 'wsfMemberProfiles', ALICE_UID), validProfile);
 
+    // Former members keep their rows with a non-active status (the server
+    // never deletes a membership document); they must not read the group.
+    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_removed-uid`), {
+      groupId: GROUP_ID,
+      userId: 'removed-uid',
+      role: 'member',
+      membershipStatus: 'removed',
+    });
+    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_departed-uid`), {
+      groupId: GROUP_ID,
+      userId: 'departed-uid',
+      role: 'member',
+      membershipStatus: 'departed',
+    });
+    // A row with no status at all is not membership either.
+    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_nostatus-uid`), {
+      groupId: GROUP_ID,
+      userId: 'nostatus-uid',
+      role: 'member',
+    });
+
     // An orphan group (no members) used for negative read test.
     await setDoc(doc(db, 'wsfCommunityGroups', OTHER_GROUP_ID), {
       displayName: 'Bob Private',
@@ -195,6 +216,33 @@ describe('wsfCommunityGroups', () => {
     await assertFails(getDoc(doc(bob, 'wsfCommunityGroups', GROUP_ID)));
   });
 
+  test('a REMOVED member cannot read the group (row kept, status changed)', async () => {
+    const removed = testEnv.authenticatedContext('removed-uid', verifiedEmail).firestore();
+    // Positive control: the seeded membership row exists and belongs to this
+    // uid (readable under the unchanged wsfMemberships owner rule), so the
+    // denial below is about membershipStatus, not about a missing row.
+    await assertSucceeds(getDoc(doc(removed, 'wsfMemberships', `${GROUP_ID}_removed-uid`)));
+    await assertFails(getDoc(doc(removed, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('a DEPARTED member cannot read the group', async () => {
+    const departed = testEnv.authenticatedContext('departed-uid', verifiedEmail).firestore();
+    await assertSucceeds(getDoc(doc(departed, 'wsfMemberships', `${GROUP_ID}_departed-uid`)));
+    await assertFails(getDoc(doc(departed, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('a membership row with no membershipStatus does not grant the group read', async () => {
+    const nostatus = testEnv.authenticatedContext('nostatus-uid', verifiedEmail).firestore();
+    await assertSucceeds(getDoc(doc(nostatus, 'wsfMemberships', `${GROUP_ID}_nostatus-uid`)));
+    await assertFails(getDoc(doc(nostatus, 'wsfCommunityGroups', GROUP_ID)));
+  });
+
+  test('membership is scoped to its own group: an active member of one group cannot read another', async () => {
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertSucceeds(getDoc(doc(alice, 'wsfCommunityGroups', GROUP_ID)));
+    await assertFails(getDoc(doc(alice, 'wsfCommunityGroups', OTHER_GROUP_ID)));
+  });
+
   test('platform admin can read any group', async () => {
     const admin = testEnv
       .authenticatedContext(ADMIN_UID, { ...verifiedEmail, role: 'platformAdmin' })
@@ -288,6 +336,62 @@ describe('wsfMemberships', () => {
       })
     );
     await assertFails(deleteDoc(doc(alice, 'wsfMemberships', `${GROUP_ID}_${ALICE_UID}`)));
+  });
+});
+
+// ─── wsfGoals and its subcollections ─────────────────────────────────────────
+
+describe('wsfGoals', () => {
+  /**
+   * wsfGoals has no `match` block of its own, so it falls to the closing
+   * `match /{document=**} { allow read, write: if false; }`. That recursive
+   * wildcard covers SUBCOLLECTIONS as well as documents, which is what makes
+   * the recent-additions tail safe to store at
+   * `wsfGoals/{goalId}/recentAdditions/{attemptId}` with no rules change: it
+   * is reachable only through the gated callable, never by a client.
+   *
+   * Asserted rather than assumed, because the whole privacy argument for that
+   * tail rests on it. A future `match /wsfGoals/{goalId}` block that opened
+   * reads would silently open the tail too unless it stopped at the document —
+   * and this test would fail.
+   */
+  test('no client can read a goal, or its recentAdditions tail', async () => {
+    const goalId = 'wsfGoal1';
+    const attemptId = 'wsfAttempt00000001';
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'wsfGoals', goalId), {
+        communityGroupId: GROUP_ID,
+        title: 'Rules fixture goal',
+        aggregateDisplayAuthorized: true,
+      });
+      await setDoc(doc(db, 'wsfGoals', goalId, 'recentAdditions', attemptId), {
+        amount: 20,
+        at: '2026-09-18T13:04:00.000Z',
+      });
+    });
+
+    // An ACTIVE MEMBER of the goal's community — the most-entitled client
+    // there is — still cannot read either one directly.
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(getDoc(doc(alice, 'wsfGoals', goalId)));
+    await assertFails(getDoc(doc(alice, 'wsfGoals', goalId, 'recentAdditions', attemptId)));
+
+    // And an anonymous caller — the public display's own identity — cannot
+    // either. Its access comes from the callable, never from Firestore.
+    const anon = testEnv.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(anon, 'wsfGoals', goalId)));
+    await assertFails(getDoc(doc(anon, 'wsfGoals', goalId, 'recentAdditions', attemptId)));
+  });
+
+  test('no client can write the recentAdditions tail', async () => {
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(
+      setDoc(doc(alice, 'wsfGoals', 'wsfGoal1', 'recentAdditions', 'wsfAttempt00000002'), {
+        amount: 999,
+        at: '2026-09-18T13:04:00.000Z',
+      })
+    );
   });
 });
 

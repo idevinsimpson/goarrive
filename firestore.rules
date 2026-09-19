@@ -1208,9 +1208,11 @@ service cloud.firestore {
     }
 
     function wsfIsGroupMember(groupId) {
-      return isAuthenticated() && exists(
-        /databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid)
-      );
+      // Current members only: a membership row survives removal and departure
+      // with its status changed, so existence alone is not membership.
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid))
+        && get(/databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid)).data.membershipStatus == 'active';
     }
 
     // wsfMemberProfiles/{uid} — owner-only; platform admin read-only.

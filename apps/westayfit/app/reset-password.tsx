@@ -37,9 +37,9 @@ export default function ResetPassword() {
       setSent(true);
     } catch (e) {
       // The callable throws failed-precondition when WSF_EMAIL_* env vars are
-      // missing. Surface that as the honest "not set up yet" message instead
-      // of the generic authErrorMessage fallback so a stray build lands users
-      // in a clear place rather than chasing a Firebase code.
+      // missing. Surface that as its own plain sentence (wsf-reset-unconfigured)
+      // instead of the generic authErrorMessage fallback, so a stray build
+      // lands users in a clear place rather than chasing a Firebase code.
       const code = authErrorCode(e);
       if (code === 'functions/failed-precondition') {
         setUnconfigured(true);
@@ -53,7 +53,6 @@ export default function ResetPassword() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Reset your password"
       intro="Enter your email and we will send a link to set a new one."
       testID="wsf-reset-screen"
@@ -83,7 +82,7 @@ export default function ResetPassword() {
       ) : null}
       {unconfigured ? (
         <ErrorText testID="wsf-reset-unconfigured">
-          Password reset email is not set up yet on this build.
+          Email isn't switched on for this test build yet, so no reset link was sent.
         </ErrorText>
       ) : null}
       {error ? <ErrorText testID="wsf-reset-error">{error}</ErrorText> : null}

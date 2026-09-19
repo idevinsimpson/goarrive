@@ -11,11 +11,22 @@ export function groupTypeLabel(groupType: string | null | undefined): string {
   switch (groupType) {
     case 'familyFriends':
       return 'Family and friends';
+    // `custom` is the stored value for "none of the offered types". A member
+    // never reads that back as a category: the honest label is the plain one.
     case 'custom':
-      return 'Something else';
+      return 'Community';
     default:
       return 'Community';
   }
+}
+
+/**
+ * The type as a card's meta fact, or nothing. A `custom` community has no
+ * type worth printing next to its name, so the card leaves the slot out
+ * rather than filling it with a placeholder.
+ */
+export function groupTypeCardLabel(groupType: string | null | undefined): string | null {
+  return groupType === 'custom' ? null : groupTypeLabel(groupType);
 }
 
 export function joinPolicyLabel(joinPolicy: string | null | undefined): string {
@@ -42,6 +53,15 @@ export function roleLabel(role: string | null | undefined): string {
     default:
       return 'Member';
   }
+}
+
+/**
+ * The role as a card's meta fact, or nothing. Only the founding Champion's
+ * role says something a member acts on (they can start a goal); "Member" is
+ * what everyone else already knows about themselves and is not printed.
+ */
+export function roleCardLabel(role: string | null | undefined): string | null {
+  return role === 'foundingChampion' ? roleLabel(role) : null;
 }
 
 export function statusLabel(status: string | null | undefined): string {

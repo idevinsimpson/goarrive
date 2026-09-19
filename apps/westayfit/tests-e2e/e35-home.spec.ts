@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * E3.5 supplementary — pins surfaces `mu2-flow.spec.ts` does not touch:
@@ -39,6 +39,29 @@ const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 // E4-A1-R4 lockstep: must match the emulators:exec --project flag in gate1.sh
 // and the id the flagged client selects on a loopback host (selectProjectId).
 const PROJECT_ID = 'demo-wsf-local';
+
+/**
+ * The administrative rows (type, joining, status, your role) are Champion
+ * administration, so they live inside the Manage sheet behind the "Show all
+ * details" disclosure rather than in every member's journey. Opening Manage
+ * and then the disclosure is the real interaction; the assertions on those
+ * rows are unchanged.
+ */
+async function openChampionDetails(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  const toggle = page.getByTestId('wsf-community-details-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
+async function closeManage(page: Page): Promise<void> {
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+}
 
 async function markEmailVerified(email: string): Promise<void> {
   const headers = { authorization: 'Bearer owner', 'content-type': 'application/json' };
@@ -116,9 +139,18 @@ test('A4: the terms accordion opens inline and shows the pending-approval versio
   await page.getByTestId('wsf-signup-displayName').fill('Terms Reader');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
+  // Signup navigates once, from the auth listener (D-1, fixed 2026-09-18:
+  // the submit handler no longer navigates after its best-effort
+  // wsfSendVerificationEmail round trip — pinned by
+  // d1-signup-single-navigation.spec.ts). Waiting for that round trip to
+  // settle before verifying keeps this flow deterministic across cold starts
+  // and keeps the emulator console quiet. Registered before the click so the
+  // response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
@@ -145,9 +177,18 @@ test('A4: the privacy accordion carries the same version marker', async ({ page 
   await page.getByTestId('wsf-signup-displayName').fill('Privacy Reader');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
+  // Signup navigates once, from the auth listener (D-1, fixed 2026-09-18:
+  // the submit handler no longer navigates after its best-effort
+  // wsfSendVerificationEmail round trip — pinned by
+  // d1-signup-single-navigation.spec.ts). Waiting for that round trip to
+  // settle before verifying keeps this flow deterministic across cold starts
+  // and keeps the emulator console quiet. Registered before the click so the
+  // response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
@@ -209,9 +250,18 @@ test('§6.2: re-saving the profile via ?edit=1 preserves createdAt', async ({ pa
   await page.getByTestId('wsf-signup-displayName').fill('Edit Me');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
+  // Signup navigates once, from the auth listener (D-1, fixed 2026-09-18:
+  // the submit handler no longer navigates after its best-effort
+  // wsfSendVerificationEmail round trip — pinned by
+  // d1-signup-single-navigation.spec.ts). Waiting for that round trip to
+  // settle before verifying keeps this flow deterministic across cold starts
+  // and keeps the emulator console quiet. Registered before the click so the
+  // response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
@@ -309,9 +359,18 @@ test('F9: a Private community shows Private + type label + members count', async
   await page.getByTestId('wsf-signup-displayName').fill('F9 Owner');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
+  // Signup navigates once, from the auth listener (D-1, fixed 2026-09-18:
+  // the submit handler no longer navigates after its best-effort
+  // wsfSendVerificationEmail round trip — pinned by
+  // d1-signup-single-navigation.spec.ts). Waiting for that round trip to
+  // settle before verifying keeps this flow deterministic across cold starts
+  // and keeps the emulator console quiet. Registered before the click so the
+  // response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
@@ -333,9 +392,15 @@ test('F9: a Private community shows Private + type label + members count', async
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(communityName)).toBeVisible();
   // Human labels, not raw enums.
+  await openChampionDetails(page);
   await expect(page.getByTestId('wsf-community-policy')).toContainText('Private');
   await expect(page.getByTestId('wsf-community-type')).toContainText('Family and friends');
+  await closeManage(page);
   await expect(page.getByTestId('wsf-community-member-count')).toContainText('1 member');
-  // Private communities do not render the public invite URL.
-  await expect(page.getByTestId('wsf-community-invite-url')).toHaveCount(0);
+  // Private communities carry no joinable link anywhere: not as body copy,
+  // not as the string the Copy/Share controls and the QR would use.
+  expect(
+    await page.getByTestId('wsf-community-invite').getAttribute('data-invite-url')
+  ).toBeNull();
+  await expect(page.getByTestId('wsf-community-invite-copy')).toHaveCount(0);
 });

@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 // react-native-web accepts a `dataSet` prop on Pressable / View that maps
 // to `data-*` attributes on the DOM element, but react-native's TypeScript
@@ -17,10 +17,13 @@ declare module 'react-native' {
 
 import { useWsfAuth } from '../../../src/auth';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../../src/callableErrors';
 import { FormShell, SecondaryLink, TextField } from '../../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseFunctions } from '../../../src/firebase';
-import { wsfTheme } from '../../../src/theme';
+import { CARD_BORDER, CREAM, SURFACE, TEXT_MUTED, kit } from '../../../src/ui/kit';
+import { ButtonLink } from '../../../src/ui/ButtonLink';
+import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 // Response shapes mirror wsfListChallenge / wsfCheckIn in functions-westayfit.
 // Kept narrow on purpose: the whitelist here is what a member is allowed to
@@ -95,7 +98,7 @@ export default function ChallengePage() {
       return;
     }
     if (!groupId) {
-      setState({ kind: 'error', message: 'Missing group id.' });
+      setState({ kind: 'error', message: 'This community could not be found.' });
       return;
     }
 
@@ -132,7 +135,7 @@ export default function ChallengePage() {
         }
         setState({
           kind: 'error',
-          message: e instanceof Error ? e.message : 'Failed to load challenge.',
+          message: describeCallableError(e, 'We couldn’t load this challenge. Try again.'),
         });
       }
     })();
@@ -219,9 +222,7 @@ export default function ChallengePage() {
         const message =
           e instanceof FirebaseError && e.code === 'functions/failed-precondition'
             ? 'Cannot check in right now.'
-            : e instanceof Error
-              ? e.message
-              : 'Check-in failed.';
+            : describeCallableError(e, 'We couldn’t count that check-in. Try again.');
         setMoveErrors((errs) => ({ ...errs, [moveId]: message }));
       } finally {
         setPendingMoveIds((prev) => {
@@ -242,7 +243,7 @@ export default function ChallengePage() {
   if (state.kind === 'loading' || !ready) {
     return (
       <FormShell heading="Challenge" testID="wsf-challenge-loading">
-        <Text style={styles.body}>Loading…</Text>
+        <Text style={kit.statusText}>Loading…</Text>
       </FormShell>
     );
   }
@@ -286,7 +287,7 @@ export default function ChallengePage() {
   if (state.kind === 'error') {
     return (
       <FormShell heading="Something went wrong" testID="wsf-challenge-error">
-        <Text style={styles.error}>{state.message}</Text>
+        <Text style={kit.errorText}>{state.message}</Text>
         <SecondaryLink href={`/community/${groupId}` as never} label="Back to community" />
       </FormShell>
     );
@@ -297,17 +298,33 @@ export default function ChallengePage() {
   const participantLabel = `${totals.participantCount} members moving`;
 
   return (
-    <View style={styles.container} testID="wsf-challenge">
-      <View style={styles.inner}>
-        <Text style={styles.eyebrow}>Challenge</Text>
-        <Text style={styles.heading}>{challenge.title}</Text>
-        <Text style={styles.count} testID="wsf-challenge-count">
-          {totals.completedCount}
-          {goalSuffix}
-        </Text>
-        <Text style={styles.participants} testID="wsf-challenge-participants">
-          {participantLabel}
-        </Text>
+    <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      <View style={kit.column} testID="wsf-challenge">
+        {/* Product chrome: the wordmark, compact, same as Community Home. */}
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-challenge-wordmark" />
+          <ButtonLink
+            href={`/community/${groupId}`}
+            style={kit.chromeLink}
+            textStyle={kit.chromeLinkText}
+            testID="wsf-challenge-back"
+            label="Back to community"
+          />
+        </View>
+
+        {/* The hero: what the challenge is and where the shared number stands. */}
+        <View style={kit.hero}>
+          <Text style={kit.eyebrowOnNavy}>Challenge</Text>
+          <Text style={kit.heroTitle}>{challenge.title}</Text>
+          <Text style={styles.count} testID="wsf-challenge-count">
+            {totals.completedCount}
+            {goalSuffix}
+          </Text>
+          <Text style={kit.heroMeta} testID="wsf-challenge-participants">
+            {participantLabel}
+          </Text>
+        </View>
+
         <View style={styles.moves}>
           {moves.map((move) => (
             <MoveRow
@@ -321,7 +338,7 @@ export default function ChallengePage() {
           ))}
         </View>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -348,7 +365,7 @@ function MoveRow({
   const label = checkedIn
     ? 'Already counted'
     : pending
-      ? 'Counting\u2026'
+      ? 'Counting…'
       : 'I did this';
   const disabled = codeMissing || pending;
 
@@ -358,13 +375,13 @@ function MoveRow({
   };
 
   return (
-    <View style={styles.move} testID={`wsf-challenge-move-${move.id}`}>
-      <Text style={styles.moveTitle}>{move.title}</Text>
+    <View style={kit.card} testID={`wsf-challenge-move-${move.id}`}>
+      <Text style={kit.cardTitle}>{move.title}</Text>
       {move.instructions ? (
-        <Text style={styles.moveInstructions}>{move.instructions}</Text>
+        <Text style={kit.body}>{move.instructions}</Text>
       ) : null}
       {move.locationLabel ? (
-        <Text style={styles.moveLocation}>{move.locationLabel}</Text>
+        <Text style={kit.cardMeta}>{move.locationLabel}</Text>
       ) : null}
       {move.requiresCode && !checkedIn ? (
         <TextField
@@ -380,16 +397,17 @@ function MoveRow({
         disabled={disabled}
         dataSet={{ state: dataState }}
         style={[
+          kit.primaryButton,
           styles.moveButton,
           checkedIn ? styles.moveButtonDone : null,
-          disabled ? styles.moveButtonDisabled : null,
+          disabled ? kit.primaryButtonDisabled : null,
         ]}
         testID={`wsf-challenge-move-${move.id}-submit`}
         accessibilityRole="button"
       >
         <Text
           style={[
-            styles.moveButtonText,
+            kit.primaryButtonText,
             checkedIn ? styles.moveButtonTextDone : null,
           ]}
         >
@@ -397,7 +415,7 @@ function MoveRow({
         </Text>
       </Pressable>
       {error ? (
-        <Text style={styles.error} testID={`wsf-challenge-move-${move.id}-error`}>
+        <Text style={kit.errorText} testID={`wsf-challenge-move-${move.id}-error`}>
           {error}
         </Text>
       ) : null}
@@ -405,103 +423,33 @@ function MoveRow({
   );
 }
 
+// Layout that only this screen needs; every colour, shape and type style
+// above comes from the kit.
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: wsfTheme.colors.background,
-    padding: wsfTheme.spacing.xl,
-  },
-  inner: {
-    maxWidth: 640,
-    width: '100%',
-  },
-  eyebrow: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '700',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: wsfTheme.spacing.md,
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.heading.fontSize,
-    fontWeight: wsfTheme.typography.heading.fontWeight,
-    lineHeight: wsfTheme.typography.heading.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
+  // The shared number: the biggest thing on the hero, cream on navy.
   count: {
-    color: wsfTheme.colors.primary,
-    fontSize: 56,
-    fontWeight: '700',
-    lineHeight: 62,
-    marginBottom: wsfTheme.spacing.xs,
-  },
-  participants: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginBottom: wsfTheme.spacing.xl,
+    color: CREAM,
+    fontSize: 44,
+    fontWeight: '800',
+    lineHeight: 50,
+    letterSpacing: -0.5,
   },
   moves: {
     flexDirection: 'column',
-    gap: wsfTheme.spacing.md,
+    gap: 12,
   },
-  move: {
-    backgroundColor: wsfTheme.colors.surface,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.md,
-    padding: wsfTheme.spacing.lg,
-  },
-  moveTitle: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize,
-    fontWeight: wsfTheme.typography.subheading.fontWeight,
-    lineHeight: wsfTheme.typography.subheading.lineHeight,
-    marginBottom: wsfTheme.spacing.xs,
-  },
-  moveInstructions: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  moveLocation: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    marginBottom: wsfTheme.spacing.sm,
-  },
+  // A move's action is a primary button at the card's compact height.
   moveButton: {
-    backgroundColor: wsfTheme.colors.primary,
-    borderRadius: wsfTheme.radius.pill,
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    alignItems: 'center',
-    marginTop: wsfTheme.spacing.sm,
+    minHeight: 48,
+    marginTop: 4,
   },
+  // Done: the button settles into the card, no longer asking for a tap.
   moveButtonDone: {
-    backgroundColor: wsfTheme.colors.surface,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-  },
-  moveButtonDisabled: {
-    opacity: 0.6,
-  },
-  moveButtonText: {
-    color: wsfTheme.colors.surface,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '700',
+    backgroundColor: SURFACE,
+    borderWidth: 1.5,
+    borderColor: CARD_BORDER,
   },
   moveButtonTextDone: {
-    color: wsfTheme.colors.textMuted,
-  },
-  body: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-  },
-  error: {
-    color: '#B4232C',
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginTop: wsfTheme.spacing.sm,
+    color: TEXT_MUTED,
   },
 });

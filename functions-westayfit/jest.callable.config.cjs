@@ -7,6 +7,11 @@ module.exports = {
   setupFiles: ['<rootDir>/tests/emulator-isolation.setup.ts'],
   testMatch: ['<rootDir>/tests/callable/**/*.test.ts'],
   moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
+  // Multi-step callable cases (seed a community, several callables, replay)
+  // already carry a 30 s ceiling where they set one; the same ceiling for the
+  // rest, so a 4-core sandbox running 18 suites in parallel does not turn a
+  // slow emulator round trip into a failure. A real hang still fails.
+  testTimeout: 30_000,
   globals: {
     'ts-jest': {
       diagnostics: false,

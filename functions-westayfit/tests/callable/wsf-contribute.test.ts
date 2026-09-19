@@ -663,7 +663,7 @@ describe('wsfContribute', () => {
       .set({ status: 'closed', closedAt: new Date() }, { merge: true });
 
     const mine = await wsfMyContribution.run(makeRequest(uid, { goalId }) as any);
-    expect(mine).toEqual({ ownCredit: 20, unit: 'squats' });
+    expect(mine).toEqual({ ownCredit: 20, unit: 'squats', repeatPolicy: 'multiple' });
 
     // New attempts are refused after closure; the recorded one replays.
     const late = await tryRun(uid, { goalId, attemptId: 'attempt-late', count: 1 });
@@ -695,4 +695,54 @@ describe('wsfContribute', () => {
     const mine = await wsfMyContribution.run(makeRequest(uid, { goalId }) as any);
     expect(mine.ownCredit).toBe(15);
   });
+});
+
+/**
+ * Overnight 2026-09-18, Task 3 (R2) — two calls with the SAME attemptId issued
+ * CONCURRENTLY.
+ *
+ * The existing double-submit test runs them one after the other, so the
+ * second read always sees a committed contribution. This is the harder shape
+ * the client actually produces: a double tap, or a retry raced against the
+ * original, where both transactions can read "no contribution yet" before
+ * either commits. The contribution doc is keyed on goal + uid + attemptId, so
+ * the two transactions contend on the same document and Firestore serializes
+ * them — one records, the other replays. Neither caller may be told less than
+ * the truth about their own effort.
+ */
+describe('wsfContribute — concurrent replay of one attempt', () => {
+  test('two concurrent calls with the same attemptId count once and both report the caller’s own 25', async () => {
+    const { goalId, communityGroupId } = await seedGoal();
+    const uid = uniq('r2ConcurrentSame');
+    await seedMembership(communityGroupId, uid);
+    const attemptId = 'attempt-r2-concurrent-same';
+
+    const [first, second] = await Promise.all([
+      wsfContribute.run(makeRequest(uid, { goalId, attemptId, count: 25 })),
+      wsfContribute.run(makeRequest(uid, { goalId, attemptId, count: 25 })),
+    ]);
+
+    // One contribution, one increment — whichever of the two won the race.
+    expect(await directShardSum(goalId)).toBe(25);
+    expect(await directContributionCount(goalId)).toBe(1);
+
+    // At most one of the two is a replay: the other is the call that recorded
+    // it. Which one is not deterministic and is not asserted.
+    const replays = [first.alreadyRecorded, second.alreadyRecorded].filter(Boolean).length;
+    expect(replays).toBeLessThanOrEqual(1);
+
+    // Both callers are the same member, and both are told the same truth
+    // about their own effort: it was 25, and their credit on this goal is 25.
+    expect(first.addedCount).toBe(25);
+    expect(second.addedCount).toBe(25);
+    expect(first.ownCredit).toBe(25);
+    expect(second.ownCredit).toBe(25);
+
+    // And the same shared state: the loser of the race writes nothing, so
+    // neither response can carry a doubled total.
+    expect(first.sharedTotal).toBe(25);
+    expect(second.sharedTotal).toBe(25);
+    expect(first.unit).toBe('squats');
+    expect(second.status).toBe('active');
+  }, 30_000);
 });

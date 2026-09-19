@@ -20,7 +20,9 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static"
+      "output": "static",
+      "name": "WE STAY FIT",
+      "themeColor": "#0B1F3A"
     },
     "plugins": [
       "expo-router"

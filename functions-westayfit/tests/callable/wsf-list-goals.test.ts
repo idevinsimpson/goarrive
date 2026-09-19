@@ -118,11 +118,18 @@ describe('wsfListGoals', () => {
     // minimal in the way that matters — no member identity, no individual
     // credit, no shared total.
     expect(goal.aggregateDisplayAuthorized).toBe(false);
+    // The one-time target-crossing event adds reachedAt: the DAY the shared
+    // total first crossed the target, null for a goal that never has. Same
+    // minimality — it names no member, carries no attempt id, and is not a
+    // shared total. A goal that has not crossed reports null rather than
+    // omitting the key, so a member surface never has to guess.
+    expect(goal.reachedAt).toBeNull();
     expect(Object.keys(goal).sort()).toEqual(
       [
         'aggregateDisplayAuthorized',
         'endsAt',
         'goalId',
+        'reachedAt',
         'startsAt',
         'status',
         'target',

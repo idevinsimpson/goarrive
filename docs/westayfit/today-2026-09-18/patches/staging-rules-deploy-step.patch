@@ -1,0 +1,96 @@
+diff --git a/.github/workflows/wsf-staging-deploy.yml b/.github/workflows/wsf-staging-deploy.yml
+index 2fa6f50..97f2fed 100644
+--- a/.github/workflows/wsf-staging-deploy.yml
++++ b/.github/workflows/wsf-staging-deploy.yml
+@@ -44,6 +44,11 @@ on:
+         description: "Optional confirmation. Must equal the approved candidate in .github/wsf-staging/approved-candidate.json. Leave blank to deploy the approved commit."
+         required: false
+         type: string
++      deploy_rules:
++        description: "Deploy the candidate's firestore.rules to westayfit-staging (D-5 status-aware membership). Switch off only if the rules were deployed by hand and the deployer identity lacks the Rules permission."
++        required: false
++        type: boolean
++        default: true
+ 
+ # Nothing is granted at workflow level. Each job takes only what it needs.
+ permissions: {}
+@@ -327,6 +332,24 @@ jobs:
+             --no-authorized-domains \
+             --non-interactive
+ 
++      # D-5 (2026-09-18): the candidate's ruleset must be live on staging for the
++      # hosted D-5 proof (a removed member's direct read is denied). The rules file
++      # comes from the approved candidate checkout; the staging config declares it.
++      # Last of the deploy steps so a permission failure here leaves the site and
++      # functions up for inspection while still failing the run. Opt out with
++      # deploy_rules=false only after a hand deploy of the same ruleset.
++      - name: Deploy the candidate's Firestore rules (D-5)
++        if: ${{ inputs.deploy_rules }}
++        working-directory: app
++        run: |
++          set -euo pipefail
++          test -f firestore.rules
++          ../node_modules/.bin/firebase deploy \
++            --project "$STAGING_PROJECT" \
++            --config firebase.westayfit.staging.json \
++            --only firestore:rules \
++            --non-interactive
++
+       # Re-auth: the federated token lasts an hour and the deploy above can
+       # consume most of it.
+       - name: Re-authenticate before verification
+diff --git a/.github/wsf-staging/tests/workflow-contract.test.mjs b/.github/wsf-staging/tests/workflow-contract.test.mjs
+index aaa3e33..143984f 100644
+--- a/.github/wsf-staging/tests/workflow-contract.test.mjs
++++ b/.github/wsf-staging/tests/workflow-contract.test.mjs
+@@ -121,6 +121,22 @@ test('deployment targets staging explicitly and never --force', () => {
+   assert.ok(deployCalls.length >= 2, 'expected both a functions and a hosting deploy');
+ });
+ 
++test('the D-5 rules deploy is its own last deploy step, targets firestore:rules only, and is switchable', () => {
++  assert.match(jobs.deploy, /--only firestore:rules/);
++  assert.match(jobs.deploy, /if: \$\{\{ inputs\.deploy_rules \}\}/, 'the rules step must be gated on the deploy_rules input');
++  assert.match(text, /deploy_rules:\n\s+description:[^\n]*\n\s+required: false\n\s+type: boolean\n\s+default: true/, 'deploy_rules must be a boolean input defaulting to true');
++  const deployLines = jobs.deploy.split('\n').filter((l) => /firebase (deploy|hosting:channel:deploy)/.test(l) || /--only /.test(l));
++  const order = deployLines.map((l) => l.trim());
++  const rulesIdx = order.findIndex((l) => l.includes('firestore:rules'));
++  const hostingIdx = order.findIndex((l) => l.includes('hosting:channel:deploy'));
++  const functionsIdx = order.findIndex((l) => l.includes('functions:westayfit'));
++  assert.ok(functionsIdx < hostingIdx && hostingIdx < rulesIdx, `rules must deploy last: ${order.join(' | ')}`);
++  assert.equal(/--only firestore:rules,|--only firestore\b(?!:rules)|firestore:indexes/.test(code), false, 'only rules, never indexes or the whole firestore target');
++  const staging = JSON.parse(fs.readFileSync(path.resolve('firebase.westayfit.staging.json'), 'utf8'));
++  assert.equal(staging.firestore?.rules, 'firestore.rules', 'the staging config must declare the rules file the step deploys');
++  assert.equal('indexes' in (staging.firestore || {}), false, 'indexes must not be declared for staging');
++});
++
+ test('all third-party actions are pinned to 40-char commit SHAs', () => {
+   const uses = [...text.matchAll(/uses: (\S+)/g)].map((m) => m[1]);
+   assert.ok(uses.length > 0);
+diff --git a/firebase.westayfit.staging.json b/firebase.westayfit.staging.json
+index f711671..95cc16e 100644
+--- a/firebase.westayfit.staging.json
++++ b/firebase.westayfit.staging.json
+@@ -10,8 +10,11 @@
+     "repository-default shortcut this workflow must never take.",
+     "",
+     "Only the westayfit codebase is declared here, so `--only functions:westayfit`",
+-    "cannot reach GoArrive's functions even by mistake. firestore and storage are",
+-    "deliberately absent: rules and indexes are not part of any WSF deploy.",
++    "cannot reach GoArrive's functions even by mistake. storage and indexes are",
++    "deliberately absent. firestore.rules IS declared (2026-09-18, D-5): the",
++    "staging project holds WSF data only, and the workflow deploys the candidate's",
++    "ruleset with `--only firestore:rules` in its own step, which the dispatcher",
++    "can switch off with the deploy_rules input. Indexes are never deployed.",
+     "",
+     "hosting mirrors firebase.westayfit.json exactly except for the site. Keep the",
+     "two in sync; a rewrite that differs here is a staging build that does not test",
+@@ -21,6 +24,9 @@
+     "writes its credentials file into GITHUB_WORKSPACE. Neither upload path should",
+     "reach the workspace root, and this makes that structural rather than incidental."
+   ],
++  "firestore": {
++    "rules": "firestore.rules"
++  },
+   "functions": [
+     {
+       "source": "functions-westayfit",

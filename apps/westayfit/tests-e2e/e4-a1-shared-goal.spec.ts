@@ -242,6 +242,8 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await snap(pageA, '01-A-contribute-empty');
 
   await pageA.getByTestId('wsf-contribute-entry').fill('20');
+  // The real flow: review first, then the explicit Record confirmation.
+  await pageA.getByTestId('wsf-contribute-review').click();
   await pageA.getByTestId('wsf-contribute-submit').click();
   await expect(pageA.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 15_000 });
 
@@ -268,6 +270,7 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await snap(pageB, '03-B-sees-shared-20-own-0');
 
   await pageB.getByTestId('wsf-contribute-entry').fill('15');
+  await pageB.getByTestId('wsf-contribute-review').click();
   await pageB.getByTestId('wsf-contribute-submit').click();
   await expect(pageB.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 15_000 });
 
@@ -324,8 +327,10 @@ test('member A + member B contribute in independent browser contexts; unauthed d
   await pageC.reload();
   await expect(pageC.getByTestId('wsf-display-screen')).toBeVisible({ timeout: 15_000 });
   await expect(pageC.getByTestId('wsf-display-shared-total')).toContainText('35');
-  // Percentage floors: 35 / 5000 = 0.7% → floor = 0. Assert 0% shows, never 1%.
-  await expect(pageC.getByTestId('wsf-display-percent')).toContainText('0%');
+  // Percentage is one decimal, rounded down: 35 / 5000 reads 0.7%, never 1%.
+  await expect(pageC.getByTestId('wsf-display-percent')).toContainText('0.7%');
+  // The authorized context rides with the aggregate (owner decision, 2026-09-18).
+  await expect(pageC.getByTestId('wsf-display-goal-title')).toHaveText('E4-A1 synthetic goal');
   // The authorized display still never receives individual credit, member
   // identities, or a contributor count.
   await expect(pageC.getByTestId('wsf-contribute-own-credit')).toHaveCount(0);

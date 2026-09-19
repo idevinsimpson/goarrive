@@ -115,6 +115,14 @@ async function firestoreWrite(
   }
 }
 
+async function firestoreRead(docPath: string): Promise<Record<string, any> | null> {
+  const url = `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}`;
+  const res = await fetch(url, { headers: { authorization: 'Bearer owner' } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`emulator read ${docPath} failed: ${res.status}`);
+  return ((await res.json()) as { fields?: Record<string, any> }).fields ?? null;
+}
+
 function tsField(d: Date): { timestampValue: string } {
   return { timestampValue: d.toISOString() };
 }
@@ -182,6 +190,30 @@ async function seedCommunityWithRoles(opts: {
 }
 
 /** Real sign-out through the interface, so the account switch is the product's own. */
+/**
+ * The administrative rows (type, joining, status, your role) sit behind the
+ * "Community details" control inside the Champion's Manage sheet. Opening
+ * both is the real interaction; the assertions on those rows are unchanged.
+ * Only a Champion has the sheet, so reaching the rows is itself proof of the
+ * role the row then states.
+ */
+async function openCommunityDetails(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  const toggle = page.getByTestId('wsf-community-details-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
+/** Put the sheet away so the page's own controls are clickable again. */
+async function closeManage(page: Page): Promise<void> {
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+}
+
 async function signOutVia(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.getByTestId('wsf-home-signout')).toBeVisible({ timeout: 20_000 });
@@ -239,18 +271,22 @@ test.describe('community goal seam', () => {
       await pageA.getByTestId('wsf-community-start-goal').click();
       await pageA.waitForURL(/\/goals\/new/, { timeout: 20_000 });
       await expect(pageA.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
-      // The community page passed the group it already knows.
-      await expect(pageA.getByTestId('wsf-new-goal-group-id-input')).toHaveValue(groupId);
+      // The community page passed the group it already knows. The form carries
+      // it as data-group-id on its container; nothing on the page prints it or
+      // asks for it.
+      expect(await pageA.getByTestId('wsf-new-goal-form').getAttribute('data-group-id')).toBe(
+        groupId
+      );
 
       await pageA.getByTestId('wsf-new-goal-title').fill('E5 created via the interface');
       await pageA.getByTestId('wsf-new-goal-target').fill('500');
       await pageA.getByTestId('wsf-new-goal-unit').fill('squats');
       await pageA.getByTestId('wsf-new-goal-submit').click();
       await expect(pageA.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
-      // Renders as "goalId: <id>".
-      const goalId = (await pageA.getByTestId('wsf-new-goal-id').innerText())
-        .replace(/^goalId:\s*/, '')
-        .trim();
+      // The created screen carries the id as data-goal-id on its container;
+      // nothing on the page prints it.
+      const goalId =
+        (await pageA.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id')) ?? '';
       expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
 
       // ---- B, an ordinary member, DISCOVERS it on the community page ----
@@ -262,31 +298,38 @@ test.describe('community goal seam', () => {
 
       await pageB.getByTestId(`wsf-community-goal-link-${goalId}`).click();
       await pageB.waitForURL(new RegExp(`/contribute/${goalId}`), { timeout: 20_000 });
+      // "Start moving" enters the movement screen; finishing it opens entry.
+      await pageB.getByTestId('wsf-contribute-done').click();
       await pageB.getByTestId('wsf-contribute-entry').fill('30');
+      await pageB.getByTestId('wsf-contribute-review').click();
       await pageB.getByTestId('wsf-contribute-submit').click();
-      // Exact: "Your confirmed credit: 30 squats" — not a substring that 130 would satisfy.
+      // Exact: "Your total on this goal: 30 squats" — not a substring that 130 would satisfy.
       await expect(pageB.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed credit: 30 squats',
+        'Your total on this goal: 30 squats',
         { timeout: 20_000 }
       );
 
       // ---- A contributes too; each sees only their own credit ----
       await pageA.goto(`/contribute/${goalId}`);
       await pageA.getByTestId('wsf-contribute-entry').fill('20');
+      await pageA.getByTestId('wsf-contribute-review').click();
       await pageA.getByTestId('wsf-contribute-submit').click();
       await expect(pageA.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed credit: 20 squats',
+        'Your total on this goal: 20 squats',
         { timeout: 20_000 }
       );
-      await expect(pageA.getByTestId('wsf-contribute-shared-total')).toHaveText('50 squats', {
-        timeout: 20_000,
-      });
+      await expect(pageA.getByTestId('wsf-contribute-shared-total')).toHaveText(
+        '50 of 500 squats',
+        { timeout: 20_000 }
+      );
       await pageB.reload();
       await expect(pageB.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed credit: 30 squats',
+        'Your total on this goal: 30 squats',
         { timeout: 20_000 }
       );
-      await expect(pageB.getByTestId('wsf-contribute-shared-total')).toHaveText('50 squats');
+      await expect(pageB.getByTestId('wsf-contribute-shared-total')).toHaveText(
+        '50 of 500 squats'
+      );
 
       // ---- Direct navigation and reload through local Hosting ----
       const cold = await pageA.goto(`/contribute/${goalId}`);
@@ -338,7 +381,9 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
 
       // The signed-in account really is the Champion — asserted, not assumed.
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
+      await closeManage(page);
 
       (release as unknown as () => void)();
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
@@ -353,10 +398,12 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-community-no-goal')).toHaveCount(0);
       // Still the Champion — so the control being absent is a deliberate
       // withholding while the state is unknown, not a missing role.
+      await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
       // The rest of the community page is still usable.
       await expect(page.getByTestId('wsf-community-type')).toBeVisible();
+      await closeManage(page);
 
       // ---- Retry recovers, and the control returns ----
       await page.unroute(callableUrl('wsfListGoals'));
@@ -369,8 +416,12 @@ test.describe('community goal seam', () => {
       await signOutVia(page);
       await signInVia(page, emailMember, pwMember);
       await page.goto(`/community/${groupId}`);
-      await expect(page.getByTestId('wsf-community-role')).toContainText('Member');
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
+      // A member, asserted by what only a member has and what only a Champion
+      // has: the membership disclosure is theirs, Manage and its rows are not.
+      await expect(page.getByTestId('wsf-community-membership-toggle')).toBeVisible();
+      await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
     } finally {
       await ctx.close();
@@ -400,11 +451,16 @@ test.describe('community goal seam', () => {
       await page.getByTestId('wsf-new-goal-title').fill('E5 delayed-response goal');
       await page.getByTestId('wsf-new-goal-target').fill('500');
       await page.getByTestId('wsf-new-goal-unit').fill('squats');
+      // This seam records TWICE from the same member, so the goal has to take
+      // more than one contribution from each. The new-goal form defaults to
+      // 'once' (app/goals/new.tsx), and wsfContribute refuses the second one
+      // under that policy, so the choice is made explicitly here.
+      await page.getByTestId('wsf-new-goal-repeat-multiple').click();
       await page.getByTestId('wsf-new-goal-submit').click();
       await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
-      const goalId = (await page.getByTestId('wsf-new-goal-id').innerText())
-        .replace(/^goalId:\s*/, '')
-        .trim();
+      const goalId =
+        (await page.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id')) ?? '';
+      expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
 
       // ---- A starts attempt 1 and its response never resolves ----
       let failAttemptOne: (() => void) | null = null;
@@ -424,6 +480,7 @@ test.describe('community goal seam', () => {
 
       await page.goto(`/contribute/${goalId}`);
       await page.getByTestId('wsf-contribute-entry').fill('11');
+      await page.getByTestId('wsf-contribute-review').click();
       await page.getByTestId('wsf-contribute-submit').click();
       // Attempt 1 is persisted while in flight.
       const pendingKeyA = `wsf.pendingContribution.${goalId}.${uidA}`;
@@ -454,14 +511,18 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible({ timeout: 20_000 });
       await page.getByTestId('wsf-contribute-reconcile').click();
       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed credit: 11 squats',
+        'Your total on this goal: 11 squats',
         { timeout: 20_000 }
       );
 
+      // A fresh attempt through the route: new entry, review, record.
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
       await page.getByTestId('wsf-contribute-entry').fill('7');
+      await page.getByTestId('wsf-contribute-review').click();
       await page.getByTestId('wsf-contribute-submit').click();
       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed credit: 18 squats',
+        'Your total on this goal: 18 squats',
         { timeout: 20_000 }
       );
 
@@ -472,7 +533,7 @@ test.describe('community goal seam', () => {
       // Attempt 2's work stands. Attempt 1 is not resurrected over it, and the
       // confirmed credit does not move.
       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
-        'Your confirmed credit: 18 squats'
+        'Your total on this goal: 18 squats'
       );
       await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
       const stored = await page.evaluate(
@@ -481,6 +542,157 @@ test.describe('community goal seam', () => {
       );
       expect(stored, 'an old failure must not resurrect a reconciled attempt').toBeNull();
       expect(attemptOneId, 'attempt 1 had its own identity').toMatch(/^\S+$/);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('a delayed contribution SUCCESS cannot double-count or flip a settled receipt', async ({
+    browser,
+  }) => {
+    // The sibling of the test above, with the outcome the member fears more.
+    // The same attempt goes quiet, the member switches accounts on the shared
+    // device and back, reconciles it, then records a second contribution —
+    // and only THEN does the original request reach the server and succeed.
+    // Nothing about it may reopen: not the credit, not the receipt, not the
+    // reminder. The attempt id is what makes that safe, and it is the same id
+    // the reconcile already used, so the server counts it once.
+    const stamp = Date.now().toString(36);
+    const pwA = `Ff1!${randomBytes(6).toString('hex')}`;
+    const pwB = `Gg1!${randomBytes(6).toString('hex')}`;
+    const emailA = `e5sa-${stamp}@example.com`;
+    const emailB = `e5sb-${stamp}@example.com`;
+    const uidA = await seedVerifiedUser(emailA, pwA);
+    const uidB = await seedVerifiedUser(emailB, pwB);
+    const { groupId } = await seedCommunityWithRoles({ championUid: uidA, memberUid: uidB });
+
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    try {
+      await signInVia(page, emailA, pwA);
+      await page.goto(`/community/${groupId}`);
+      await page.getByTestId('wsf-community-start-goal').click();
+      await expect(page.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-new-goal-title').fill('E5 delayed-success goal');
+      await page.getByTestId('wsf-new-goal-target').fill('500');
+      await page.getByTestId('wsf-new-goal-unit').fill('squats');
+      // This seam records TWICE from the same member, so the goal has to take
+      // more than one contribution from each. The new-goal form defaults to
+      // 'once' (app/goals/new.tsx), and wsfContribute refuses the second one
+      // under that policy, so the choice is made explicitly here.
+      await page.getByTestId('wsf-new-goal-repeat-multiple').click();
+      await page.getByTestId('wsf-new-goal-submit').click();
+      await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 20_000 });
+      const goalId =
+        (await page.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id')) ?? '';
+      expect(goalId, 'the goal id created through the interface').toMatch(/^\S+$/);
+
+      // ---- A starts attempt 1 and its response never resolves ----
+      let landAttemptOne: (() => void) | null = null;
+      const attemptOneHeld = new Promise<void>((resolve) => {
+        landAttemptOne = resolve;
+      });
+      let intercepted = 0;
+      // The paused request's own payload and credentials, kept so the late
+      // success can be delivered for real. Releasing the route is not enough
+      // on its own: the account switch below is a full page load, and the
+      // browser drops the pending request when the document goes away.
+      let heldBody: string | null = null;
+      let heldAuth: string | undefined;
+      await page.route(callableUrl('wsfContribute'), async (route) => {
+        intercepted += 1;
+        if (intercepted === 1) {
+          heldBody = route.request().postData();
+          heldAuth = route.request().headers()['authorization'];
+          await attemptOneHeld;
+          await route.continue().catch(() => undefined);
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.goto(`/contribute/${goalId}`);
+      await page.getByTestId('wsf-contribute-entry').fill('11');
+      await page.getByTestId('wsf-contribute-review').click();
+      await page.getByTestId('wsf-contribute-submit').click();
+      const pendingKeyA = `wsf.pendingContribution.${goalId}.${uidA}`;
+      await expect
+        .poll(async () => page.evaluate((k) => window.localStorage.getItem(k) !== null, pendingKeyA), {
+          timeout: 20_000,
+        })
+        .toBe(true);
+      const attemptOneId = await page.evaluate(
+        (k) => JSON.parse(window.localStorage.getItem(k) as string).attemptId,
+        pendingKeyA
+      );
+
+      // ---- A -> B -> A, with attempt 1 still outstanding ----
+      await signOutVia(page);
+      await signInVia(page, emailB, pwB);
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-contribute-receipt')).toHaveCount(0);
+      await signOutVia(page);
+      await signInVia(page, emailA, pwA);
+      await page.goto(`/contribute/${goalId}`);
+
+      // ---- A reconciles attempt 1, then records attempt 2 ----
+      await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-contribute-reconcile').click();
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your total on this goal: 11 squats',
+        { timeout: 20_000 }
+      );
+
+      await page.goto(`/contribute/${goalId}`);
+      await expect(page.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-contribute-entry').fill('7');
+      await page.getByTestId('wsf-contribute-review').click();
+      await page.getByTestId('wsf-contribute-submit').click();
+      await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText(
+        'You added 7 squats.',
+        { timeout: 20_000 }
+      );
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your total on this goal: 18 squats'
+      );
+
+      // ---- NOW attempt 1's original request finally reaches the server ----
+      (landAttemptOne as unknown as () => void)();
+      expect(heldBody, 'attempt 1 really was captured in flight').not.toBeNull();
+      const late = await fetch(callableUrl('wsfContribute'), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(heldAuth ? { authorization: heldAuth } : {}),
+        },
+        body: heldBody as unknown as string,
+      });
+      expect(late.ok, 'the late request succeeded — this is the success case').toBe(true);
+      const lateResult = ((await late.json()) as { result: Record<string, unknown> }).result;
+      // Same goal, same account, same attempt id: the server replays the
+      // original receipt rather than booking a second contribution.
+      expect(lateResult.alreadyRecorded, 'the late success is a replay, not a new booking').toBe(true);
+      expect(lateResult.addedCount).toBe(11);
+      expect(lateResult.ownCredit).toBe(18);
+      await page.waitForTimeout(1_500);
+
+      // The settled receipt for attempt 2 does not flip to attempt 1's story,
+      // the credit does not move, and no reminder comes back.
+      await expect(page.getByTestId('wsf-contribute-result-headline')).toHaveText(
+        'You added 7 squats.'
+      );
+      await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText(
+        'Your total on this goal: 18 squats'
+      );
+      await expect(page.getByTestId('wsf-contribute-pending')).toHaveCount(0);
+      const stored = await page.evaluate((k) => window.localStorage.getItem(k), pendingKeyA);
+      expect(stored, 'a late success must not resurrect a reconciled attempt').toBeNull();
+
+      // The ledger itself: 11 + 7, with attempt 1 counted exactly once.
+      const memberTotal = await firestoreRead(`wsfGoalMemberTotals/${goalId}_${uidA}`);
+      expect(Number(memberTotal?.total?.integerValue)).toBe(18);
+      expect(attemptOneId, 'attempt 1 kept its own identity throughout').toMatch(/^\S+$/);
     } finally {
       await ctx.close();
     }

@@ -1,0 +1,62 @@
+diff --git a/firestore.rules b/firestore.rules
+index 34645f0..478ed8c 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -1208,9 +1208,11 @@ service cloud.firestore {
+     }
+ 
+     function wsfIsGroupMember(groupId) {
+-      return isAuthenticated() && exists(
+-        /databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid)
+-      );
++      // Current members only: a membership row survives removal and departure
++      // with its status changed, so existence alone is not membership.
++      return isAuthenticated()
++        && exists(/databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid))
++        && get(/databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid)).data.membershipStatus == 'active';
+     }
+ 
+     // wsfMemberProfiles/{uid} — owner-only; platform admin read-only.
+diff --git a/functions-westayfit/tests/rules/wsf-rules.test.ts b/functions-westayfit/tests/rules/wsf-rules.test.ts
+index 128a3b9..07c3558 100644
+--- a/functions-westayfit/tests/rules/wsf-rules.test.ts
++++ b/functions-westayfit/tests/rules/wsf-rules.test.ts
+@@ -87,6 +87,21 @@ beforeEach(async () => {
+     // Alice's completed profile.
+     await setDoc(doc(db, 'wsfMemberProfiles', ALICE_UID), validProfile);
+ 
++    // Former members keep their rows with a non-active status (the server
++    // never deletes a membership document); they must not read the group.
++    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_removed-uid`), {
++      groupId: GROUP_ID,
++      userId: 'removed-uid',
++      role: 'member',
++      membershipStatus: 'removed',
++    });
++    await setDoc(doc(db, 'wsfMemberships', `${GROUP_ID}_departed-uid`), {
++      groupId: GROUP_ID,
++      userId: 'departed-uid',
++      role: 'member',
++      membershipStatus: 'departed',
++    });
++
+     // An orphan group (no members) used for negative read test.
+     await setDoc(doc(db, 'wsfCommunityGroups', OTHER_GROUP_ID), {
+       displayName: 'Bob Private',
+@@ -195,6 +210,16 @@ describe('wsfCommunityGroups', () => {
+     await assertFails(getDoc(doc(bob, 'wsfCommunityGroups', GROUP_ID)));
+   });
+ 
++  test('a REMOVED member cannot read the group (row kept, status changed)', async () => {
++    const removed = testEnv.authenticatedContext('removed-uid', verifiedEmail).firestore();
++    await assertFails(getDoc(doc(removed, 'wsfCommunityGroups', GROUP_ID)));
++  });
++
++  test('a DEPARTED member cannot read the group', async () => {
++    const departed = testEnv.authenticatedContext('departed-uid', verifiedEmail).firestore();
++    await assertFails(getDoc(doc(departed, 'wsfCommunityGroups', GROUP_ID)));
++  });
++
+   test('platform admin can read any group', async () => {
+     const admin = testEnv
+       .authenticatedContext(ADMIN_UID, { ...verifiedEmail, role: 'platformAdmin' })

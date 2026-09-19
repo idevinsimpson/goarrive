@@ -1,27 +1,45 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { WSF_BUILD_STAMP } from '../src/buildStamp';
-import { wsfTheme } from '../src/theme';
+import { wsfIsStaging } from '../src/firebase';
+import { kit } from '../src/ui/kit';
+import { WsfWordmark } from '../src/ui/WsfWordmark';
 
 export default function Health() {
   return (
-    <View style={styles.container} testID="wsf-health">
-      <View style={styles.inner}>
-        <Text style={styles.heading}>Health</Text>
-        <Row label="App" value={WSF_BUILD_STAMP.appName} />
-        <Row label="Version" value={WSF_BUILD_STAMP.version} />
-        <Row label="Commit" value={WSF_BUILD_STAMP.commitSha} testID="wsf-health-commit" />
-        <Row label="Built at" value={WSF_BUILD_STAMP.builtAt} testID="wsf-health-builtAt" />
+    <ScrollView style={kit.scroll} contentContainerStyle={kit.page}>
+      <View style={kit.column} testID="wsf-health">
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-health-wordmark" />
+        </View>
+        <Text style={kit.heading}>Health</Text>
+        <View style={kit.card}>
+          <Row label="App" value={WSF_BUILD_STAMP.appName} />
+          <Row label="Version" value={WSF_BUILD_STAMP.version} />
+          <Row label="Commit" value={WSF_BUILD_STAMP.commitSha} testID="wsf-health-commit" />
+          <Row label="Built at" value={WSF_BUILD_STAMP.builtAt} testID="wsf-health-builtAt" />
+        </View>
+        {wsfIsStaging ? (
+          <>
+            <Text style={kit.eyebrow}>Environment</Text>
+            <View style={kit.card} testID="wsf-health-environment">
+              <Text style={kit.body}>
+                STAGING — TEST DATA ONLY. Not the live We Stay Fit service. Accounts, communities and totals here
+                are not real and may be deleted at any time.
+              </Text>
+            </View>
+          </>
+        ) : null}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 function Row({ label, value, testID }: { label: string; value: string; testID?: string }) {
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue} testID={testID}>
+    <View style={kit.row}>
+      <Text style={kit.rowLabel}>{label}</Text>
+      <Text style={[kit.rowValue, styles.stamp]} testID={testID}>
         {value}
       </Text>
     </View>
@@ -29,36 +47,6 @@ function Row({ label, value, testID }: { label: string; value: string; testID?: 
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: wsfTheme.colors.background,
-    padding: wsfTheme.spacing.xl,
-  },
-  inner: {
-    maxWidth: 640,
-    width: '100%',
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.heading.fontSize,
-    fontWeight: wsfTheme.typography.heading.fontWeight,
-    marginBottom: wsfTheme.spacing.lg,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: wsfTheme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: wsfTheme.colors.border,
-  },
-  rowLabel: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-  },
-  rowValue: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontFamily: 'monospace',
-  },
+  // Build stamps are identifiers, read character by character.
+  stamp: { fontFamily: 'monospace' },
 });

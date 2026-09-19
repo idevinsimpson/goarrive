@@ -2,10 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
+import { describeCallableError } from '../src/callableErrors';
 import {
   authFormStyles,
   ErrorText,
@@ -67,7 +68,7 @@ export default function ProfileSetup() {
         setProfileLoaded(true);
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : 'Could not load profile.');
+        setError(describeCallableError(e, 'We couldn’t load your profile. Try again.'));
         setExistenceReadFailed(true);
         setProfileLoaded(true);
       }
@@ -147,7 +148,7 @@ export default function ProfileSetup() {
       // pending code falls through to the signed-in home.
       router.replace(nextRouteAfterAuth('/') as never);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed.');
+      setError(describeCallableError(e, 'We couldn’t save your profile. Try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -155,7 +156,6 @@ export default function ProfileSetup() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading={existing ? 'Update your profile' : 'Complete your profile'}
       intro={
         existing
@@ -172,7 +172,7 @@ export default function ProfileSetup() {
         testID="wsf-profile-displayName"
       />
 
-      <View style={{ marginTop: 8 }}>
+      <View style={styles.legal}>
         <LegalAccordion
           triggerLabel="Terms of Service"
           markdown={WSF_TERMS_MARKDOWN}
@@ -212,3 +212,9 @@ export default function ProfileSetup() {
     </FormShell>
   );
 }
+
+const styles = StyleSheet.create({
+  // Layout only this screen needs: the two legal panels sit a little apart
+  // from the name field above them. Everything else on the page is the kit.
+  legal: { marginTop: 8, gap: 4 },
+});

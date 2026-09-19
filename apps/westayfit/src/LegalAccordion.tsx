@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { wsfTheme } from './theme';
+import { kit } from './ui/kit';
 
 type MarkdownBlock =
   | { type: 'heading'; text: string }
@@ -58,6 +58,7 @@ export function LegalAccordion({
   const blocks = parseMarkdown(markdown);
   return (
     <View style={styles.wrap}>
+      {/* The trigger is a tertiary control: 44 px tall, underlined navy text. */}
       <Pressable
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
@@ -66,25 +67,25 @@ export function LegalAccordion({
         // attribute too for browsers that only read the DOM.
         {...({ 'aria-expanded': open } as Record<string, unknown>)}
         testID={testID}
-        style={styles.trigger}
+        style={kit.tertiaryButton}
       >
-        <Text style={styles.triggerText}>
-          {triggerLabel} {open ? '\u25B2' : '\u25BC'}
+        <Text style={kit.tertiaryButtonText}>
+          {triggerLabel} {open ? '▲' : '▼'}
         </Text>
       </Pressable>
       {open ? (
         <View
-          style={styles.panel}
+          style={kit.card}
           testID={`${testID}-panel`}
           {...({ role: 'region' } as Record<string, unknown>)}
         >
           {blocks.map((block, idx) =>
             block.type === 'heading' ? (
-              <Text key={idx} style={styles.heading}>
+              <Text key={idx} style={kit.cardTitle}>
                 {block.text}
               </Text>
             ) : (
-              <Text key={idx} style={styles.paragraph}>
+              <Text key={idx} style={kit.body}>
                 {block.text}
               </Text>
             )
@@ -96,37 +97,7 @@ export function LegalAccordion({
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  trigger: {
-    paddingVertical: wsfTheme.spacing.xs,
-  },
-  triggerText: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  panel: {
-    marginTop: wsfTheme.spacing.sm,
-    padding: wsfTheme.spacing.md,
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    borderRadius: wsfTheme.radius.sm,
-    backgroundColor: wsfTheme.colors.surface,
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.subheading.fontSize,
-    fontWeight: wsfTheme.typography.subheading.fontWeight,
-    lineHeight: wsfTheme.typography.subheading.lineHeight,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  paragraph: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.sm,
-  },
+  // The open panel sits a little under its trigger; the card's own gap
+  // spaces the headings and paragraphs inside it.
+  wrap: { gap: 4 },
 });

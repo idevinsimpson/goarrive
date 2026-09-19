@@ -123,7 +123,7 @@ describe('wsfMyContribution', () => {
     await seedMembership(communityGroupId, uid);
     const r = await tryMine(uid, { goalId });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual({ ownCredit: 0, unit: 'squats' });
+    if (r.ok) expect(r.value).toEqual({ ownCredit: 0, unit: 'squats', repeatPolicy: 'multiple' });
   });
 
   test('(d) member who contributed 20 reads 20', async () => {
@@ -133,7 +133,7 @@ describe('wsfMyContribution', () => {
     await contribute(uid, goalId, 'attempt-mine-20', 20);
     const r = await tryMine(uid, { goalId });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual({ ownCredit: 20, unit: 'squats' });
+    if (r.ok) expect(r.value).toEqual({ ownCredit: 20, unit: 'squats', repeatPolicy: 'multiple' });
   });
 
   test("(e) another member's 20 is not visible: the reader sees only their own row", async () => {

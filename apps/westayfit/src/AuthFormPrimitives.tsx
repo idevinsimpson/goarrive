@@ -1,8 +1,8 @@
-import { Link } from 'expo-router';
 import { forwardRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -11,7 +11,20 @@ import {
 } from 'react-native';
 
 import { wsfTheme } from './theme';
+import { ButtonLink } from './ui/ButtonLink';
+import { CREAM, NAVY, SURFACE, kit } from './ui/kit';
+import { WsfWordmark } from './ui/WsfWordmark';
 
+/**
+ * The form page: a scrolling cream page, the wordmark chrome at the top, the
+ * heading and intro, then the form itself in a card. Same language as
+ * Community Home and Contribute. It scrolls so long content (profile setup
+ * with both legal panels open) is never clipped, and nothing is centred in a
+ * flex box any more.
+ *
+ * `testID` stays on the column View, a visible element, exactly where the
+ * old shell carried it.
+ */
 export function FormShell({
   eyebrow,
   heading,
@@ -26,19 +39,24 @@ export function FormShell({
   testID: string;
 }) {
   return (
-    <View style={styles.container} testID={testID}>
-      <View style={styles.inner}>
-        {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-        <Text style={styles.heading}>{heading}</Text>
-        {intro ? <Text style={styles.intro}>{intro}</Text> : null}
-        {children}
+    <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      <View style={kit.columnNarrow} testID={testID}>
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-form-wordmark" />
+        </View>
+        <View style={styles.titleBlock}>
+          {eyebrow ? <Text style={kit.eyebrow}>{eyebrow}</Text> : null}
+          <Text style={kit.heading}>{heading}</Text>
+          {intro ? <Text style={kit.intro}>{intro}</Text> : null}
+        </View>
+        <View style={kit.card}>{children}</View>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 export function FieldLabel({ children }: { children: ReactNode }) {
-  return <Text style={styles.label}>{children}</Text>;
+  return <Text style={[kit.fieldLabel, styles.labelSpacing]}>{children}</Text>;
 }
 
 // forwardRef so the parent can hold a ref to the underlying TextInput and
@@ -54,7 +72,7 @@ export const TextField = forwardRef<TextInput, TextInputProps>(function TextFiel
       ref={ref}
       {...props}
       placeholderTextColor={wsfTheme.colors.textMuted}
-      style={[styles.input, props.style]}
+      style={[kit.input, props.style]}
     />
   );
 });
@@ -88,7 +106,7 @@ export const PasswordField = forwardRef<
         spellCheck={false}
         autoCapitalize="none"
         placeholderTextColor={wsfTheme.colors.textMuted}
-        style={[styles.input, styles.passwordInput, props.style]}
+        style={[kit.input, styles.passwordInput, props.style]}
       />
       <Pressable
         onPress={() => setHidden((h) => !h)}
@@ -103,32 +121,54 @@ export const PasswordField = forwardRef<
   );
 });
 
+export type SubmitButtonVariant = 'primary' | 'secondary' | 'tertiary';
+
+/**
+ * A form action. `primary` is the green fill (one per screen); `secondary`
+ * the navy outline; `tertiary` the underlined text control. All three are at
+ * least 44 px tall and dim to 0.6 while disabled or submitting; the spinner
+ * is navy on every variant.
+ */
 export function SubmitButton({
   label,
   onPress,
   submitting,
   disabled,
   testID,
+  variant = 'primary',
 }: {
   label: string;
   onPress: () => void;
   submitting: boolean;
   disabled?: boolean;
   testID: string;
+  variant?: SubmitButtonVariant;
 }) {
   const isDisabled = submitting || disabled;
+  const buttonStyle =
+    variant === 'secondary'
+      ? kit.secondaryButton
+      : variant === 'tertiary'
+        ? kit.tertiaryButton
+        : [kit.primaryButton, styles.submitPrimary];
+  const textStyle =
+    variant === 'secondary'
+      ? kit.secondaryButtonText
+      : variant === 'tertiary'
+        ? kit.tertiaryButtonText
+        : kit.primaryButtonText;
   return (
     <Pressable
       onPress={onPress}
       disabled={isDisabled}
-      style={[styles.button, isDisabled ? styles.buttonDisabled : null]}
+      style={[buttonStyle, isDisabled ? kit.primaryButtonDisabled : null]}
       testID={testID}
       accessibilityRole="button"
     >
       {submitting ? (
-        <ActivityIndicator color={wsfTheme.colors.surface} />
+        <ActivityIndicator color={NAVY} />
       ) : (
-        <Text style={styles.buttonText}>{label}</Text>
+        <Text style={textStyle}>{label}</Text>
       )}
     </Pressable>
   );
@@ -136,7 +176,7 @@ export function SubmitButton({
 
 export function ErrorText({ children, testID }: { children: ReactNode; testID?: string }) {
   return (
-    <Text style={styles.error} testID={testID}>
+    <Text style={kit.errorText} testID={testID}>
       {children}
     </Text>
   );
@@ -144,7 +184,7 @@ export function ErrorText({ children, testID }: { children: ReactNode; testID?: 
 
 export function StatusText({ children, testID }: { children: ReactNode; testID?: string }) {
   return (
-    <Text style={styles.status} testID={testID}>
+    <Text style={kit.statusText} testID={testID}>
       {children}
     </Text>
   );
@@ -159,12 +199,18 @@ export function StatusText({ children, testID }: { children: ReactNode; testID?:
  */
 export function FieldHint({ children, testID }: { children: ReactNode; testID?: string }) {
   return (
-    <Text style={styles.hint} testID={testID}>
+    <Text style={kit.caption} testID={testID}>
       {children}
     </Text>
   );
 }
 
+/**
+ * The quiet link under a form: a tertiary control, 44 px tall. Expo Router's
+ * Link is a text anchor on web, so it goes through ButtonLink, which hands
+ * the href to a Pressable that can carry the minimum height and keeps the
+ * testID on the anchor the tests click.
+ */
 export function SecondaryLink({
   href,
   label,
@@ -175,9 +221,15 @@ export function SecondaryLink({
   testID?: string;
 }) {
   return (
-    <Link href={href as never} style={styles.link} testID={testID}>
-      {label}
-    </Link>
+    <ButtonLink
+      href={href}
+      style={kit.tertiaryButton}
+      textStyle={kit.tertiaryButtonText}
+      // ButtonLink types the testID as required; callers without one get no
+      // data-testid attribute, exactly as before.
+      testID={testID as string}
+      label={label}
+    />
   );
 }
 
@@ -185,146 +237,66 @@ export const authFormStyles = StyleSheet.create({
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: wsfTheme.spacing.md,
+    gap: 12,
+    minHeight: 44,
+    paddingVertical: 4,
   },
   checkbox: {
     width: 24,
     height: 24,
     borderWidth: 2,
-    borderColor: wsfTheme.colors.primary,
-    borderRadius: wsfTheme.radius.sm,
-    marginRight: wsfTheme.spacing.md,
-    marginTop: 2,
+    borderColor: NAVY,
+    borderRadius: 6,
+    backgroundColor: SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkboxChecked: {
-    backgroundColor: wsfTheme.colors.primary,
+    backgroundColor: NAVY,
   },
   checkboxCheck: {
-    color: wsfTheme.colors.surface,
+    color: CREAM,
     fontSize: 16,
     fontWeight: '700',
+    lineHeight: 20,
   },
   checkboxLabel: {
+    ...StyleSheet.flatten(kit.body),
     flex: 1,
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
+    minWidth: 0,
   },
 });
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: wsfTheme.colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: wsfTheme.spacing.xl,
-  },
-  inner: {
-    maxWidth: 480,
-    width: '100%',
-  },
-  eyebrow: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '700',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: wsfTheme.spacing.md,
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.heading.fontSize,
-    fontWeight: wsfTheme.typography.heading.fontWeight,
-    lineHeight: wsfTheme.typography.heading.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
-  intro: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.lg,
-  },
-  label: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '600',
-    marginBottom: wsfTheme.spacing.xs,
-    marginTop: wsfTheme.spacing.sm,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    backgroundColor: wsfTheme.colors.surface,
-    borderRadius: wsfTheme.radius.sm,
-    paddingHorizontal: wsfTheme.spacing.md,
-    paddingVertical: wsfTheme.spacing.sm,
-    fontSize: wsfTheme.typography.body.fontSize,
-    color: wsfTheme.colors.text,
-    marginBottom: wsfTheme.spacing.sm,
-  },
+  titleBlock: { gap: 6 },
+  // Fields are grouped label-over-input; the label's top margin opens the
+  // gap between one group and the next inside the card.
+  labelSpacing: { marginTop: 6 },
+  // The primary action sits a little apart from the fields above it; the
+  // quieter variants stack directly under it.
+  submitPrimary: { marginTop: 8 },
   passwordRow: {
     position: 'relative',
     justifyContent: 'center',
   },
   passwordInput: {
     // Room for the Show/Hide toggle so a long password does not tuck under it.
-    paddingRight: wsfTheme.spacing.xl * 2.4,
+    paddingRight: 84,
   },
   passwordToggle: {
     position: 'absolute',
-    right: wsfTheme.spacing.sm,
+    right: 4,
     top: 0,
-    bottom: wsfTheme.spacing.sm,
+    bottom: 0,
+    minHeight: 44,
+    minWidth: 44,
     justifyContent: 'center',
-    paddingHorizontal: wsfTheme.spacing.sm,
+    alignItems: 'center',
+    paddingHorizontal: 12,
   },
   passwordToggleText: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-  },
-  button: {
-    backgroundColor: wsfTheme.colors.primary,
-    borderRadius: wsfTheme.radius.sm,
-    paddingVertical: wsfTheme.spacing.md,
-    alignItems: 'center',
-    marginTop: wsfTheme.spacing.md,
-    marginBottom: wsfTheme.spacing.md,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: wsfTheme.colors.surface,
-    fontSize: wsfTheme.typography.body.fontSize,
+    color: NAVY,
+    fontSize: 15,
     fontWeight: '700',
-  },
-  error: {
-    color: '#B4232C',
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginTop: wsfTheme.spacing.sm,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  status: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginTop: wsfTheme.spacing.sm,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  hint: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    marginTop: -wsfTheme.spacing.xs,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  link: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-    marginTop: wsfTheme.spacing.md,
   },
 });

@@ -1,0 +1,145 @@
+# We Stay Fit — overnight run 2026-09-18 (PR #327)
+
+Canonical status page for the autonomous overnight hardening run on `claude/wsf-ui-member-experience`.
+PR #327 stays a **draft**. Nothing merged, deployed, or changed on `main`, IAM/WIF, `approved-candidate.json`, rules/indexes, or production.
+
+Base: `claude/wsf-package-e-display-auth` @ `3560936b37900591d41240adf98ea82b1b8f0c72`.
+Head at handoff: `5af29f48df73745e500f99cfbf26a64e8d0cd085`.
+
+Review channel: ChatGPT inspects the PR hourly and may leave `[CHATGPT HOURLY REVIEW]` comments; each task comment below states whether one was found and incorporated.
+
+## Task status
+
+| # | Task | Status | Head after task | Doc |
+|---|---|---|---|---|
+| 1 | Baseline freeze + Gate 1 investigation | done | `4852371` | [01-BASELINE-AND-GATE1.md](01-BASELINE-AND-GATE1.md) |
+| 2 | Security + privacy adversarial audit | done | `f721350` | [02-SECURITY-PRIVACY-AUDIT.md](02-SECURITY-PRIVACY-AUDIT.md) |
+| 3 | Contribution resilience torture | done | `e531433` | [03-CONTRIBUTION-RESILIENCE.md](03-CONTRIBUTION-RESILIENCE.md) |
+| 4 | Display + authorization race torture | done | `0b0797c` | [04-DISPLAY-AUTH-RESILIENCE.md](04-DISPLAY-AUTH-RESILIENCE.md) |
+| 5 | Accessibility + responsive QA | done | `963d0df` (+ index 9669c53) | [05-ACCESSIBILITY-RESPONSIVE-QA.md](05-ACCESSIBILITY-RESPONSIVE-QA.md) |
+| 6 | Performance + operational quality | done | `6a0a776` | [06-PERFORMANCE-OPERATIONS.md](06-PERFORMANCE-OPERATIONS.md) |
+| 7 | Cross-surface product quality audit | done | `97e84ab` | [07-CROSS-SURFACE-QUALITY.md](07-CROSS-SURFACE-QUALITY.md) |
+| 8 | Final candidate hardening + evidence pack | done | `96d0380` (code) | [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md) |
+
+Visual evidence: `OVERNIGHT-VISUAL-BOARD.png` (the matrix of six states × three surfaces, the journey strip, the honest states, reflow thumbnails) and `OVERNIGHT-VISUAL-BOARD-WIDE.png` (1440×900 display states). Both rendered from the local emulator build with synthetic fixtures.
+
+## Task 1 — Baseline freeze + Gate 1 investigation
+
+- **Baseline** recorded: clean tree at `5af29f4`, 47 changed files vs base grouped by category, all suites green except `gate1.sh`.
+- **Gate 1 failure root-caused** with a Playwright trace: a pre-existing race in `app/signup.tsx` (present on the base commit, file untouched by this PR). Signup navigates to `/verify-email` twice; the second navigation fires after the best-effort `wsfSendVerificationEmail` round trip and pulls the member back if they already tapped **I have verified**. A test can do that within a second; a person cannot.
+- **Harness correction** (test files only, no assertion weakened, nothing skipped): the four signup-driving specs wait for the send round trip before verifying. Seven sites.
+- **Regression evidence**: Gate 1's 7-spec browser command 3/3 green after the fix (31 passed each); full `gate1.sh` result: **GATE 1 CLEAR** (exit 0; unit 205, callable 204, browser step 31/31).
+- **Product fix deliberately not made** (authentication screen outside this PR's scope); one-file plan recorded in the task doc.
+- ChatGPT review instruction: none present at task start.
+
+## Task 2 — Security + privacy adversarial audit
+
+- **Operating model from this task on:** Fable is the integrator; Opus workers (explicit `opus` model selection is available here) do isolated analysis and adversarial review; every worker result is verified and integrated by Fable; workers never push.
+- **New adversarial callable suite** (33 cases): malformed ids, request-field trust, non-active membership statuses, cross-community rows, cache isolation across goals and decisions, sample suppression through a member-warmed cache, membership loss inside the TTL, unusable community references, the Champion control as oracle, role escalation, unapproved document fields. All green.
+- **Independent Opus review**: 3 attack lenses, every finding verified by a refuter; 6 confirmed, 5 refuted.
+- **Fixed** (narrow, no contract change): D-2 empty community reference returned `internal` → generic not-found; D-3 malformed display URL polled for ever → terminal refusal; D-4 malformed contribution link showed the server message → not-found card; D-6 contribute poll kept painting after membership loss → terminal not-found; D-8 contribute poll ordering guard. Plus `unauthenticated` on the contribution load → sign-in screen.
+- **Owner boundary, not applied:** D-5 Firestore rule `wsfIsGroupMember` is existence-only (removed members can read the community document incl. join code directly). Proposed fix and rules test in the task doc.
+- **Deferred:** D-7 (Champion notice hidden when the goals reload fails) → Task 4. **Gap recorded:** D-9 legacy orphan never surfaced (product copy decision). **Accepted:** D-10 timing side channel (no enumerable id space).
+- Harness: callable Jest ceiling 30 s (matches the per-test convention already used by the multi-step suites).
+- ChatGPT review instruction: none present (checked at task start and mid-task).
+
+## Task 3 — Contribution resilience torture
+
+- Opus design pass mapped all 18 owner scenarios to existing coverage or deterministic recipes; one Opus implementer (exclusive emulators) fixed the reproducible defects and wrote the P0 tests; a second Opus worker authored the remaining tests as code; Fable integrated, added D-12 and its test, ran the battery.
+- **New tests**: `ui-contribute-torture.spec.ts` (double tap, goal A→B late success, leave during sending, stale before-total), `ui-contribute-torture-2.spec.ts` (leave/return while unknown, no poll while unknown, closure on Review, closure while unknown both branches, wsfAdjustGoal reflected, keyboard through pending and refusal, unresolved attempt after membership loss), a late-SUCCESS A→B→A case in the seam spec, and a concurrent same-attemptId callable case.
+- **Fixed**: D-11 double tap could render a first success as "already recorded" (synchronous in-flight ref); D-12 "Goal not found" hid an unresolved attempt from a removed member returning on a fresh load (render order; unit-less number when the goal has not loaded); D-13 replay passed a frozen before-total that could invert reached/overshoot copy (replay passes null → `reached`); D-14 context check compared the goal with itself (now reads the live context ref; defence in depth).
+- **Gaps recorded**: closure while on Review loses the typed number without a sentence; the reminder's durability sentence is not true when storage is unavailable; D-9 legacy orphan. All copy/product decisions.
+- Receipts: browser 22/22 across four contribution specs, callable 238/238 (18 files), Vitest 205, TS clean.
+- ChatGPT review instruction: none present (checked at task start, mid-task and at close).
+
+## Task 4 — Display + authorization race torture
+
+- Opus design pass (20 scenarios → coverage/recipes + 7 suspected defects), Opus implementer with exclusive emulators (5 fixes, each with a fails-before/passes-after test), Opus tests-only worker (device-zone, cache-window, recheck-while-down, sheet-closed-mid-request cases), Fable integration.
+- **Fixed**: D-7/D-7b Champion outcome notices survive a failed or in-flight goals reload (orphan outcome block, same copy/testIDs); D-15 a landed revoke on a closed goal is confirmed by its absence instead of "could not confirm"; D-16 sample-community Champion card carries "no public display will show it"; D-17 an active goal past its end reads "Ended …" instead of "Open · Ends …" on both surfaces (shared helper, label only, routes untouched); D-18 Check again shows the loading state at once.
+- **New tests**: `ui-champion-torture`, `ui-display-torture`, `ui-display-torture-2` (Tokyo/Kiritimati device zones, 3 flips inside one cache window, poll cadence 4–7/10 s, refusal → Check again while down), `ui-champion-torture-2` (sheet closed mid-request), 4 dates unit tests.
+- **Not fixed**: contribution routes stay offered on an ended window (product decision); server-side `wsfSetGoalDisplayAuthorization` ignores `isSample` (functions untouched); cache `now` capture → Task 6.
+- Receipts: browser 18/18 in one run + 12 across the implementer's per-spec runs; Vitest 209; TS clean.
+- ChatGPT review instruction: none present (checked at task start and mid-task).
+
+## Task 5 — Accessibility + responsive QA
+
+- Opus audit (coverage checklist, computed contrast for every pair in use, target inventory, screen-reader reading order), Opus implementer with fails-before/passes-after proof for 8 groups, Opus-authored standing contract spec (`ui-a11y`, 22 cases: widths 390/360/320/195 with server-maximum names, display containment, 44 px targets, Tab + focus rings, dialog contract, reduced motion, axe WCAG A/AA, alert/input contracts, greyscale artifacts).
+- **Fixed**: D-19 programmatic headings; D-20 status messages announced (alert + polite live regions); D-21 dialog name "Champion tools"; D-22 six targets under 44 px incl. the inline footer link; D-23 placeholder contrast 2.26 → 4.97:1; D-24 display clipping at long names (length-tiered type scale, approved sizes unchanged); D-25 enterKeyHint; D-26 duplicate accessible names. Plus ButtonLink array-style hardening.
+- **Skipped/recorded**: per-route page title (expo-router disables document titles on web; needs a new dependency — owner decision); Living WE fill 1.90:1 on navy (approved colourway, text carries meaning); manual checks listed in the doc.
+- Contract first run: 19/22 — two real findings (heading overflow at 195 px with an 80-char name; no h1 on the display's unavailable state) fixed in Task 6's commit.
+- Receipts: `ui-a11y-fixes` 8/8; regression runs `ui-qa` 5, `ui-display` 4, `ui-community-home` 2, `ui-contribute` 7, `e5-display-authorization` 5, `d-admission-controls` 5, `ui-journey` 1, `ui-champion-torture` 5, `mu2-flow` 4; Vitest 219; TS clean.
+- ChatGPT review instruction: none present (checked at task start and mid-task).
+
+## Task 6 — Performance + operational quality
+
+- Numbers: dist 3.1 MB, bundle 1.96 MB raw / 489 KB gzip, no new dependencies, brand PNGs 427 KB all referenced, originals not shipped; display 30 pulses/min (12–13 server reads per miss, lone-poller cache hit rate 0% by TTL/poll alignment); contribute 0 polls while an attempt is unresolved; Community Home never polls; display cold load is one round trip.
+- **Applied (measured, tested)**: P-1 display idle re-renders suppressed (same nine fields + same minute → React bails out; cadence unchanged); P-2 contribute poll in-flight guard (15 → ≤ 6 requests behind a 6 s backend); P-3 copy-link timer held/cleared; P-4 lazy `Animated.Value`; P-5 pulse caches delete-before-set (LRU) and the goal pulse stamps its cache after the access reads. Plus D-27 (h1 wrap at 195 px, display generic h1) and the contract spec's exact-name match.
+- **Reverted after measurement**: display in-flight guard (overlapping polls are what let a refusal overtake a held response — `e5` CASE 3/4 proved it); single `wsfListGoals` per read-back (makes the D-7 covenant test unreachable). Skipped: parallelising Community Home reads (ordering change). Recorded: TTL/poll alignment, asset oversizing, post-hydration image load, orphan keys, background tabs.
+- Receipts: `ui-perf` 3/3; 16 regression specs green; callable 238; Vitest 232; TS + functions build clean.
+- ChatGPT review instruction: none present (checked at task start and at close).
+
+## Task 7 — Cross-surface product quality audit
+
+- Opus audit derived every surface's strings for every state from the shared helpers and checked the owner's consistency list; Opus implementer fixed the objective inconsistencies and built `ui-matrix` (the same synthetic goal captured on all three surfaces, asserted on exact strings and fill ratio before each capture); boards composed with PIL; Fable integrated.
+- **Matrix**: 0 / 48.2 / 90 / overshoot-open / closed-reached / closed-unreached / stale agree on percent, total, status and fill across Community Home, contribute and the display, except where designed (no percent on closed goals on the member surfaces; the closed-reached display's achievement wording; display-only headlines; no status line in the compact context).
+- **Fixed** (A1–A10): raw SDK error text replaced by fixed member copy on both member surfaces; duplicated `ButtonLink` removed; Community Home shows `Goal reached` at reached-open; near-goal emphasis on the receipt; no percent on contribute's closed hero (Community Home's rule); freshness line on the polled contribute context; `postTarget` subline names the community; periods outside the current year carry the year; the phone display no longer flips navy → cream while loading; dead style removed.
+- **Recorded**: token/typography drift (refactor), closed-marker differences and the display's larger WE (approved), "Past goals" heading wording (owner copy decision), the intentional gaps all confirmed un-claimed.
+- Receipts: `ui-matrix` 2/2 + 12 regression specs green; Vitest 233; TS + build clean.
+- ChatGPT review instruction: none present (checked at task start and at close).
+
+## Task 8 — Final candidate hardening + evidence pack
+
+- Complete battery from a clean state on the final code head `96d0380`: app TS clean; Vitest 233/16 files; complete browser suite 33 specs **122/122**; functions build clean; callable 238/18 files; rules 22; deploy-config 8; **`gate1.sh` CLEAR** (31/31 browser step).
+- The first battery pass on `bafef52` caught one real defect through the e4-a1 console-error assertion: **D-31** the display reported a React hydration mismatch (#418) on wide clients because the static export carries the phone loading tree; fixed by choosing the wide layout only after hydration. One transient 30 s timeout (community goal seam) under full parallel load passed on the re-run and in every per-spec run; recorded.
+- Diff audit vs base: 79 files, all under `apps/westayfit`, `functions-westayfit`, `scripts/westayfit/brand`, the overnight docs folder, plus one `.gitignore` line. Nothing under `apps/goarrive`, `functions/`, rules/indexes, `.github`, the staging workflow, IAM/WIF, `approved-candidate.json` or production config.
+- Receipt: [08-FINAL-CANDIDATE-RECEIPT.md](08-FINAL-CANDIDATE-RECEIPT.md); harness delta: [hosted-harness-compat-delta.md](hosted-harness-compat-delta.md).
+- ChatGPT review instruction: none appeared during the entire run (checked at the start and close of every task).
+- **PR #327 remains a DRAFT. Nothing merged or deployed.**
+
+## Post-overnight follow-up (morning of 2026-09-18, after the ChatGPT audits)
+
+Standing scope unchanged: nothing merged, deployed, or changed on `main`, rules, `approved-candidate.json`, IAM/WIF or production; PR still a draft. Work done in response to the `[CHATGPT MORNING AUDIT]` (08:08 / 08:10 ET) and `[CHATGPT HOURLY REVIEW 8:15]` comments:
+
+| Item | State | Where |
+|---|---|---|
+| D-5 status-aware `wsfIsGroupMember` + two rules tests | patch prepared, verified 24/24 in a scratch copy, **not applied** (owner boundary) | `patches/d5-firestore-rules-status-aware.patch`, `patches/README.md` |
+| D-5 delivery path | **release blocker recorded**: the keyless staging workflow deploys `functions:westayfit` + hosting only, never Firestore rules | `patches/README.md` |
+| D-1 single signup navigation + regression spec | patch prepared, typechecked; **fails-before proven** on the unpatched head build (spec alone: 1 failed at the post-release assertion); product change **not applied** pending the owner's session prompt | `patches/d1-signup-single-navigation.patch`, `patches/README.md` |
+| Hosted-harness compatibility for `main`'s `hosted-package-e-smoke.mjs` | see the entry below once filed | `patches/` |
+
+## Defect ledger (running)
+
+| # | Found in | Defect | Class | Status |
+|---|---|---|---|---|
+| D-1 | Task 1 | `signup.tsx` double `router.replace('/verify-email')`; late replace after slow send callable pulls a member back from profile-setup | product, pre-existing, out of PR scope | documented, not fixed; harness made deterministic |
+| D-2 | Task 2 | empty `communityGroupId` on an authorized goal answered `internal` instead of the generic not-found | backend, corrupt-document edge | fixed + test |
+| D-3 | Task 2 | malformed display URL treated as transient; polled for ever | frontend honesty / ops | fixed + test |
+| D-4 | Task 2 | malformed contribution link showed the server's argument message | frontend honesty | fixed + test |
+| D-5 | Task 2 | Firestore rule `wsfIsGroupMember` existence-only; removed members read the community doc incl. join code via SDK | rules, pre-existing | **owner boundary — not applied**; proposed fix + rules test documented |
+| D-6 | Task 2 | contribute poll swallowed `not-found`; screen kept the total after membership loss | frontend honesty | fixed + test |
+| D-7 | Task 2 | Champion display-auth outcome notice unreachable when the goals reload fails | frontend | deferred to Task 4 |
+| D-8 | Task 2 | contribute poll without ordering guard | frontend | fixed |
+| D-9 | Task 2 | quarantined legacy pending row never surfaced | product copy | gap recorded, not fixed |
+| D-10 | Task 2 | pulse refusal timing differs by one read for existing vs unknown goal | backend, low | accepted, not fixed (no enumerable id space) |
+| D-11 | Task 3 | double tap on Record could render a first success as "already recorded" | frontend truth | fixed + test (R1) |
+| D-12 | Task 3 | "Goal not found" rendered above an unresolved attempt after membership loss on a fresh load; attempt unreachable | frontend, invariant (unknown outcome never discarded) | fixed + test (R15) |
+| D-13 | Task 3 | replay used a frozen before-total; could invert reached vs overshoot copy | frontend truth | fixed + test (R11) |
+| D-14 | Task 3 | context check compared the goal id with itself | frontend, latent | fixed (regression guards R3/R6) |
+| D-7b | Task 4 | successful authorize whose reload fails left no confirmation on screen | frontend truth | fixed + test |
+| D-15 | Task 4 | landed revoke on a closed goal reported as "could not confirm" | frontend truth | fixed + test |
+| D-16 | Task 4 | sample-community Champion card claimed a publication the server refuses | frontend truth | fixed (qualifier) + test |
+| D-17 | Task 4 | active goal past its end labelled "Open · Ends <past date>" on both surfaces | frontend truth | fixed (label only) + unit + browser tests |
+| D-18 | Task 4 | Check again gave no feedback for a full round trip | frontend | fixed + test |
+| D-19 | Task 5 | no programmatic headings on any surface | a11y (1.3.1) | fixed + test |
+| D-20 | Task 5 | status messages not announced (validation error, receipt, pending, refusal, stale pill) | a11y (4.1.3) | fixed + test |
+| D-21 | Task 5 | Manage sheet dialog unnamed | a11y (4.1.2) | fixed + test |
+| D-22 | Task 5 | six touch targets under 44 px | a11y / phone | fixed + test |
+| D-23 | Task 5 | entry placeholder contrast 2.26:1 | a11y (1.4.3) | fixed + test |
+| D-24 | Task 5 | display clipped at server-maximum names (wide and phone) | responsive | fixed (type scale) + tests |
+| D-25 | Task 5 | no enterKeyHint on the entry field | a11y / phone | fixed + test |
+| D-26 | Task 5 | duplicate accessible names for per-goal controls | a11y (2.4.6) | fixed + test |
+| D-27 | Task 5 | h1 overflows at 195 px with an 80-char community name; display unavailable state has no h1 | a11y / responsive | fixed in Task 6 commit |
+| D-28 | Task 7 | raw SDK error sentence rendered to members on Community Home and contribute | copy / honesty | fixed |
+| D-29 | Task 7 | Community Home had no reached signal; receipt lacked near-goal emphasis; closed hero printed the percent twice; polled context had no freshness line; postTarget subline wording; phone display chrome flip on load | cross-surface consistency | fixed + tests |
+| D-30 | Task 7 | `formatPeriod` dropped the year for windows in another year | dates truth | fixed + unit tests |
+| D-31 | Task 8 | display hydration mismatch (React #418) on wide clients: static export carries the phone loading tree | frontend / ops | fixed (wide layout chosen after hydration) + caught by e4-a1's console assertion |

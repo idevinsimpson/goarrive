@@ -17,11 +17,12 @@ import {
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
-import { authErrorMessage, isEmailAlreadyInUse } from '../src/authErrors';
+import { authErrorCode, authErrorMessage, isEmailAlreadyInUse } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 import { requestVerificationEmail } from '../src/verificationEmail';
+import { beginVerificationSend, recordVerificationSend } from '../src/verificationSendState';
 
 export default function SignUp() {
   const { ready, user } = useWsfAuth();
@@ -92,16 +93,31 @@ export default function SignUp() {
       );
       await updateProfile(cred.user, { displayName: displayName.trim() });
 
-      // Best-effort. The account already exists by this point, so a send
-      // failure must not strand the member on the signup screen with no way
-      // forward — /verify-email has a Resend button that surfaces the real
-      // error when they actively ask for one.
+      // Best-effort for NAVIGATION — a send failure must not strand the member
+      // on the signup screen — but never silent. /verify-email has already
+      // been reached by the auth effect above, and it describes whatever
+      // happens here. Swallowing the failure into a console warning is what
+      // made that screen claim "We sent a verification link" to members for
+      // whom nothing was sent and nothing could be.
+      const attempt = beginVerificationSend(cred.user.uid);
       try {
-        await requestVerificationEmail();
+        const sendResult = await requestVerificationEmail();
+        recordVerificationSend(
+          cred.user.uid,
+          sendResult.sent ? 'sent' : 'already-verified',
+          attempt
+        );
       } catch (sendError) {
-        console.warn('[signup] verification email not sent', sendError);
+        recordVerificationSend(
+          cred.user.uid,
+          authErrorCode(sendError) === 'functions/failed-precondition' ? 'unconfigured' : 'failed',
+          attempt
+        );
       }
-      router.replace('/verify-email');
+      // No navigation here. The signed-in effect above already moved the
+      // member to /verify-email the moment the account existed (before this
+      // send round trip). A second replace at this point would pull a member
+      // who has since tapped "I have verified" back off profile-setup.
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-up failed.'));
       setOfferSignIn(isEmailAlreadyInUse(e));
@@ -112,7 +128,6 @@ export default function SignUp() {
 
   return (
     <FormShell
-      eyebrow="We Stay Fit"
       heading="Create your account"
       intro="We will send a verification email before you can join a community."
       testID="wsf-signup"

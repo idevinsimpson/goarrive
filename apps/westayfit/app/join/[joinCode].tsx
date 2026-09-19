@@ -1,11 +1,12 @@
-import { Link, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../src/callableErrors';
 import {
   ErrorText,
   FormShell,
@@ -13,13 +14,35 @@ import {
   StatusText,
   SubmitButton,
 } from '../../src/AuthFormPrimitives';
+import {
+  clearDeviceMode,
+  decideDeviceEntry,
+  readDeviceMode,
+  saveDeviceMode,
+  type DeviceMode,
+} from '../../src/deviceMode';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
+import { groupTypeCardLabel, groupTypeLabel } from '../../src/labels';
 import {
   clearPendingJoinCode,
   setPendingJoinCode,
 } from '../../src/pendingJoinCode';
-import { wsfTheme } from '../../src/theme';
+import { readActivityLabel } from '../../src/eventActivity';
+import {
+  clearPendingEventActivity,
+  clearPendingEventGoal,
+  readPendingEventActivity,
+  readPendingEventGoal,
+  routeAfterJoin,
+  setPendingEventActivity,
+  setPendingEventGoal,
+} from '../../src/stationSession';
+import { readEventParam } from '../../src/ui/eventLinks';
+import { ButtonLink } from '../../src/ui/ButtonLink';
+import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
+import { kit } from '../../src/ui/kit';
+import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 type Preview = {
   displayName: string;
@@ -40,8 +63,25 @@ type JoinState =
   | { kind: 'error'; message: string };
 
 export default function JoinPage() {
-  const params = useLocalSearchParams<{ joinCode: string }>();
+  const params = useLocalSearchParams<{ joinCode: string; event?: string; activity?: string }>();
   const joinCode = typeof params.joinCode === 'string' ? params.joinCode.trim() : '';
+  /**
+   * `?event=<goalId>` — set only by the QR on the screen at an event. It names
+   * a goal and nothing else: no token, no authority, and nothing that changes
+   * who may be admitted. A join that arrives with it finishes at that event's
+   * page instead of the community page, which is the difference between
+   * someone standing in a hall being shown where to add their part and being
+   * dropped somewhere they have to navigate out of.
+   */
+  const eventGoalId = readEventParam(params.event);
+  /**
+   * `?activity=<label>` — the second half of the same context, set by the same
+   * QR. It names what that screen was running, in the event's own published
+   * word for it. It is not a token, not an id, not routed to and not a fact
+   * about anybody; it is the selection this journey is carrying, and it is let
+   * go the moment the journey ends.
+   */
+  const eventActivity = readActivityLabel(params.activity);
   const { ready, user } = useWsfAuth();
 
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: 'loading' });
@@ -53,6 +93,63 @@ export default function JoinPage() {
   useEffect(() => {
     if (joinCode) setPendingJoinCode(joinCode);
   }, [joinCode]);
+
+  // The event rides sessionStorage for the same reason the join code does:
+  // signup -> verify -> profile-setup replace this screen, and the round trip
+  // returns to `/join/<code>` without the query string it left with.
+  useEffect(() => {
+    if (eventGoalId) setPendingEventGoal(eventGoalId);
+  }, [eventGoalId]);
+
+  // THE ACTIVITY RIDES WITH IT, by the same mechanism and for the same reason.
+  // It is stored only alongside a usable event: an activity with no event to
+  // finish at names nothing and would be a value kept for its own sake.
+  useEffect(() => {
+    if (eventGoalId && eventActivity) setPendingEventActivity(eventActivity);
+  }, [eventGoalId, eventActivity]);
+
+  /**
+   * WHOSE SCREEN IS THIS — asked on THIS page only when the visitor arrived
+   * from an event QR (`?event=<goalId>`) and is signed out, which is the one
+   * situation where the next tap would create an account.
+   *
+   * A join that did not come from an event is byte-for-byte the flow it always
+   * was: `eventGoalId` is null, `deviceEntry` is null, and nothing below
+   * changes. So is every join by someone already signed in — they already have
+   * an account, and the device question is put to them on the event screen
+   * they land on afterwards (src/stationSession.ts `routeAfterJoin`).
+   *
+   * `undefined` until storage has been read, for the same hydration reason as
+   * the event screen.
+   */
+  const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
+  useEffect(() => {
+    setDeviceMode(readDeviceMode());
+  }, []);
+  const deviceEntry =
+    !eventGoalId || deviceMode === undefined
+      ? null
+      : decideDeviceEntry({ mode: deviceMode, goalId: eventGoalId });
+
+  const onChoosePersonal = useCallback(() => {
+    saveDeviceMode('personal');
+    setDeviceMode('personal');
+  }, []);
+
+  const onChooseShared = useCallback(() => {
+    // NO ACCOUNT IS CREATED ON A SHARED SCREEN. The device is handed to the
+    // existing kiosk start screen for this event's goal instead, which is
+    // where a shared device belongs and the only shared session this app has.
+    const decided = decideDeviceEntry({ mode: 'shared', goalId: eventGoalId });
+    if (decided.kind !== 'shared') return;
+    saveDeviceMode('shared');
+    router.replace(decided.route as never);
+  }, [eventGoalId]);
+
+  const onUseOwnPhoneInstead = useCallback(() => {
+    clearDeviceMode();
+    setDeviceMode(null);
+  }, []);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -88,7 +185,7 @@ export default function JoinPage() {
         }
         setPreviewState({
           kind: 'error',
-          message: e instanceof Error ? e.message : 'Failed to load community.',
+          message: describeCallableError(e, 'We couldn’t load this community. Try again.'),
         });
       }
     })();
@@ -108,11 +205,26 @@ export default function JoinPage() {
       );
       const result = await fn({ joinCode });
       clearPendingJoinCode();
-      router.replace(`/community/${result.data.groupId}`);
+      // Where a finished join lands: the event this visitor scanned into, or —
+      // for every join that did not come from an event — exactly where it
+      // landed before.
+      //
+      // And the END of the carrying: the event and
+      // the activity are read out of session storage, handed to the address,
+      // and both entries are dropped in the same breath. Read BEFORE either is
+      // cleared, so the two cannot get out of step.
+      const destination = routeAfterJoin(
+        result.data.groupId,
+        readPendingEventGoal(),
+        readPendingEventActivity()
+      );
+      clearPendingEventGoal();
+      clearPendingEventActivity();
+      router.replace(destination as never);
     } catch (e) {
       setJoinState({
         kind: 'error',
-        message: e instanceof Error ? e.message : 'Join failed.',
+        message: describeCallableError(e, 'We couldn’t join this community. Try again.'),
       });
     }
   }, [joinCode, user]);
@@ -124,7 +236,7 @@ export default function JoinPage() {
   if (!joinCode || previewState.kind === 'invalid') {
     return (
       <FormShell heading="This link is not valid" testID="wsf-join-invalid">
-        <Text style={styles.body}>
+        <Text style={kit.body}>
           The link you followed is not valid or is no longer active. Ask the person who shared it
           to send you a new one.
         </Text>
@@ -136,8 +248,8 @@ export default function JoinPage() {
   if (previewState.kind === 'rateLimited') {
     return (
       <FormShell heading="Too many requests" testID="wsf-join-rate-limited">
-        <Text style={styles.body}>
-          The join preview is rate-limited right now. Wait a moment and try again.
+        <Text style={kit.body}>
+          This link is being opened a lot right now. Wait a moment and try again.
         </Text>
         <SecondaryLink href="/" label="Back to home" />
       </FormShell>
@@ -162,24 +274,97 @@ export default function JoinPage() {
   }
 
   const { preview } = previewState;
-  const typeLabel = preview.groupType === 'familyFriends' ? 'Family and friends' : 'Community';
-  // D6: the preview shows the minimum needed to explain what someone is
-  // joining — name, supported type, and the joining conditions. The member
-  // count that used to appear here is deliberately gone: a count is
-  // information about the community's members, and an invitation preview is
-  // not the place to disclose it.
-  //
-  // Each supported policy states its own condition, and an unrecognised value
-  // states none. The two-branch form would have described any unexpected
-  // policy as link-only, which understates who can get in — the wrong
-  // direction to be wrong in on the screen where someone decides to join.
+
+  // The hero meta line is built only from what the preview returns: the type
+  // as a card fact (nothing for a plain community, never a placeholder) and
+  // the joining condition the callable and rules enforce for that stored
+  // policy today. Both sentences are the admission-semantics report's
+  // supported wording, read from the joiner's side: a link admits to
+  // 'public' and 'inviteOnly' alike, nothing lists or searches communities,
+  // and a reset retires the old link for everyone who has not joined yet.
+  // An unrecognised policy states no condition rather than guessing one.
   const joiningConditions =
     preview.joinPolicy === 'public'
-      ? 'Anyone can find and join this community.'
+      ? 'Anyone with the invite link can join. The community is not listed or searchable anywhere, so people need the link.'
       : preview.joinPolicy === 'inviteOnly'
-        ? 'Anyone with this link can join. It keeps working until a Champion resets it.'
+        ? 'Anyone with the invite link can join, including anyone it is forwarded to, until a new invite link is created.'
         : '';
-  const metaLine = joiningConditions ? `${typeLabel} · ${joiningConditions}` : typeLabel;
+  const typeFact = groupTypeCardLabel(preview.groupType);
+  const metaParts = [typeFact, joiningConditions].filter((part): part is string => Boolean(part));
+  const metaLine = metaParts.length > 0 ? metaParts.join(' · ') : groupTypeLabel(preview.groupType);
+
+  // The invitation itself: the community's name on the navy hero, with the
+  // eyebrow and the joining conditions around it, then what joining means.
+  // Same on both sides of sign-in; only the actions under it differ.
+  const invitation = (
+    <>
+      <View style={kit.hero}>
+        <Text style={kit.eyebrowOnNavy}>Join a community</Text>
+        <Text style={kit.heroTitle}>{preview.displayName}</Text>
+        <Text style={kit.heroMeta} testID="wsf-join-meta">
+          {metaLine}
+        </Text>
+      </View>
+      <View style={kit.card} testID="wsf-join-meaning">
+        <Text style={kit.cardTitle}>What joining means</Text>
+        <Text style={kit.body}>See the community’s goals and its shared progress.</Text>
+        <Text style={kit.body}>Add your own contributions to the shared total.</Text>
+        <Text style={kit.body}>Leave whenever you like.</Text>
+      </View>
+    </>
+  );
+
+  // ── the device question, before the account ──────────────────────────────
+  //
+  // Only on the event path, only while signed out, and only after the preview
+  // succeeded — a link that is not valid says so first; a device question
+  // about a dead link would be asking about nothing.
+  if (!user && eventGoalId) {
+    const gatePage = (testID: string, children: React.ReactNode) => (
+      <ScrollView
+        style={kit.scroll}
+        contentContainerStyle={kit.page}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={kit.column} testID={testID}>
+          <View style={kit.chrome}>
+            <WsfWordmark variant="navy" height={22} testID="wsf-join-wordmark" />
+          </View>
+          {children}
+        </View>
+      </ScrollView>
+    );
+
+    if (deviceEntry === null) {
+      // Storage not read yet: the state this screen was already in.
+      return (
+        <FormShell heading="Loading community" testID="wsf-join-loading">
+          <StatusText>Loading…</StatusText>
+        </FormShell>
+      );
+    }
+    if (deviceEntry.kind === 'ask') {
+      return gatePage(
+        'wsf-join-device-choice',
+        <DeviceChoice
+          onChoosePersonal={onChoosePersonal}
+          onChooseShared={onChooseShared}
+          signupAhead
+          testID="wsf-device-choice"
+        />
+      );
+    }
+    if (deviceEntry.kind === 'shared') {
+      return gatePage(
+        'wsf-join-device-shared',
+        <SharedScreenNotice
+          onContinue={() => router.replace(deviceEntry.route as never)}
+          onUseOwnPhone={onUseOwnPhoneInstead}
+          testID="wsf-device-shared"
+        />
+      );
+    }
+  }
 
   // Signed out — preview is safe (D4: only shown for link-joinable active
   // groups, i.e. public or inviteOnly; private never previews) so we
@@ -187,12 +372,15 @@ export default function JoinPage() {
   // sessionStorage; the auth chain reads it and routes back here on success.
   if (!user) {
     return (
-      <View style={styles.container} testID="wsf-join-signed-out">
-        <View style={styles.inner}>
-          <Text style={styles.eyebrow}>Join a community</Text>
-          <Text style={styles.heading}>{preview.displayName}</Text>
-          <Text style={styles.meta} testID="wsf-join-meta">{metaLine}</Text>
+      <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+        <View style={kit.column} testID="wsf-join-signed-out">
+          <View style={kit.chrome}>
+            <WsfWordmark variant="navy" height={22} testID="wsf-join-wordmark" />
+          </View>
+          {invitation}
           <View style={styles.actions}>
+            {/* No account surprise after the tap: say it before the button. */}
+            <Text style={kit.body}>You’ll need a free account first.</Text>
             {/*
               `replace`, not push. If these Links pushed, the join screen would
               stay at the bottom of the stack while signup -> verify-email ->
@@ -204,112 +392,65 @@ export default function JoinPage() {
               pending code across, and the return trip lands on a single join
               instance. Back-button behaviour also stays sane — no one lands
               on a stale signed-out join page after signing up.
+
+              ButtonLink, not a bare Link: on web a Link is a text anchor, so
+              the button shape and the 44 px minimum have to live on a
+              Pressable. The testID stays on the anchor the spec clicks.
             */}
-            <Link
+            <ButtonLink
               href="/signup"
               replace
-              style={styles.primaryAction}
+              style={kit.primaryButton}
+              textStyle={kit.primaryButtonText}
               testID="wsf-join-signup"
-            >
-              Sign up to join
-            </Link>
-            <Link
+              label="Sign up to join"
+            />
+            <ButtonLink
               href="/signin"
               replace
-              style={styles.secondaryAction}
+              style={kit.secondaryButton}
+              textStyle={kit.secondaryButtonText}
               testID="wsf-join-signin"
-            >
-              Already have an account? Sign in
-            </Link>
+              label="Already have an account? Sign in"
+            />
+            {/*
+              A visitor who does not want an account still needs a way off
+              this screen. Same control, same words as the signed-in branch
+              below, so the decision reads the same on both sides of sign-in.
+            */}
+            <SecondaryLink href="/" label="Not now — back to home" />
           </View>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
   return (
-    <View style={styles.container} testID="wsf-join-signed-in">
-      <View style={styles.inner}>
-        <Text style={styles.eyebrow}>Join a community</Text>
-        <Text style={styles.heading}>{preview.displayName}</Text>
-        <Text style={styles.meta} testID="wsf-join-meta">{metaLine}</Text>
-        {joinState.kind === 'error' ? (
-          <ErrorText testID="wsf-join-submit-error">{joinState.message}</ErrorText>
-        ) : null}
-        <SubmitButton
-          label="Join this community"
-          onPress={onJoin}
-          submitting={joinState.kind === 'joining'}
-          testID="wsf-join-submit"
-        />
-        <SecondaryLink href="/" label="Not now" />
+    <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      <View style={kit.column} testID="wsf-join-signed-in">
+        <View style={kit.chrome}>
+          <WsfWordmark variant="navy" height={22} testID="wsf-join-wordmark" />
+        </View>
+        {invitation}
+        <View style={styles.actions}>
+          {joinState.kind === 'error' ? (
+            <ErrorText testID="wsf-join-submit-error">{joinState.message}</ErrorText>
+          ) : null}
+          <SubmitButton
+            label={`Join ${preview.displayName}`}
+            onPress={onJoin}
+            submitting={joinState.kind === 'joining'}
+            testID="wsf-join-submit"
+          />
+          <SecondaryLink href="/" label="Not now — back to home" />
+        </View>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
+// Layout only this screen needs: the actions sit a little closer to each
+// other than the page's sections do.
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: wsfTheme.colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: wsfTheme.spacing.xl,
-  },
-  inner: {
-    maxWidth: 640,
-    width: '100%',
-  },
-  eyebrow: {
-    color: wsfTheme.colors.primary,
-    fontSize: wsfTheme.typography.caption.fontSize,
-    fontWeight: '700',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: wsfTheme.spacing.md,
-  },
-  heading: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.heading.fontSize,
-    fontWeight: wsfTheme.typography.heading.fontWeight,
-    lineHeight: wsfTheme.typography.heading.lineHeight,
-    marginBottom: wsfTheme.spacing.sm,
-  },
-  meta: {
-    color: wsfTheme.colors.textMuted,
-    fontSize: wsfTheme.typography.body.fontSize,
-    marginBottom: wsfTheme.spacing.xl,
-  },
-  body: {
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    lineHeight: wsfTheme.typography.body.lineHeight,
-    marginBottom: wsfTheme.spacing.md,
-  },
-  actions: {
-    flexDirection: 'column',
-    gap: wsfTheme.spacing.sm,
-    marginTop: wsfTheme.spacing.md,
-  },
-  primaryAction: {
-    backgroundColor: wsfTheme.colors.primary,
-    color: wsfTheme.colors.surface,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '700',
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    borderRadius: wsfTheme.radius.pill,
-    textAlign: 'center',
-  },
-  secondaryAction: {
-    borderWidth: 1,
-    borderColor: wsfTheme.colors.border,
-    color: wsfTheme.colors.text,
-    fontSize: wsfTheme.typography.body.fontSize,
-    fontWeight: '600',
-    paddingVertical: wsfTheme.spacing.md,
-    paddingHorizontal: wsfTheme.spacing.xl,
-    borderRadius: wsfTheme.radius.pill,
-    textAlign: 'center',
-  },
+  actions: { gap: 10 },
 });

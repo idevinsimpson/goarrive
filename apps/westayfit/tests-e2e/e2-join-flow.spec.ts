@@ -162,6 +162,16 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await expect(page.getByTestId('wsf-join-signed-out')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(displayName)).toBeVisible();
 
+  // Candidate D clause 6 — no hidden account surprise and no dead zone. The
+  // account requirement is stated BEFORE the primary is tapped, and a visitor
+  // who does not want an account has a way off this screen, the same control
+  // and the same words the signed-in branch carries.
+  const signedOut = page.getByTestId('wsf-join-signed-out');
+  await expect(signedOut).toContainText('You\u2019ll need a free account first.');
+  const notNow = signedOut.getByRole('link', { name: 'Not now \u2014 back to home' });
+  await expect(notNow).toBeVisible();
+  await expect(notNow).toHaveAttribute('href', '/');
+
   // Every WSF page is noindex, the join route included.
   const robots = await page
     .locator('meta[name="robots"]')
@@ -181,12 +191,21 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await page.getByTestId('wsf-signup-password').fill(password);
   // E3.5 A4 (extended to signup): the 18+ checkbox is gone from signup too.
   await expect(page.getByTestId('wsf-signup-adultCheckbox')).toHaveCount(0);
+  // Signup navigates once, from the auth listener (D-1, fixed 2026-09-18:
+  // the submit handler no longer navigates after its best-effort
+  // wsfSendVerificationEmail round trip — pinned by
+  // d1-signup-single-navigation.spec.ts). Waiting for that round trip to
+  // settle before verifying keeps this flow deterministic across cold starts
+  // and keeps the emulator console quiet. Registered before the click so the
+  // response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   // Signup ships forward to verify-email even when the emulator's mail send
   // returns failed-precondition (no WSF_EMAIL_API_KEY on the emulator, by
   // design). See mu2-flow.spec.ts for the full reasoning.
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
@@ -205,7 +224,10 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   expect(page.url(), 'round-trip should land back on /join/<code>').toContain(
     `/join/${encodeURIComponent(joinCode)}`
   );
-  await expect(page.getByText(displayName)).toBeVisible();
+  // The name is the hero title (exact match: the primary action below also
+  // carries it, as "Join <name>", and is asserted on its own).
+  await expect(page.getByText(displayName, { exact: true })).toBeVisible();
+  await expect(page.getByTestId('wsf-join-submit')).toHaveText(`Join ${displayName}`);
 
   // ---- §3.1: join succeeds, lands on /community/<groupId> -----------------
   await page.getByTestId('wsf-join-submit').click();

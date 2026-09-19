@@ -69,9 +69,18 @@ async function signUpVerifyAndSetupProfile(
   await page.getByTestId('wsf-signup-displayName').fill('Polish Test');
   await page.getByTestId('wsf-signup-email').fill(email);
   await page.getByTestId('wsf-signup-password').fill(password);
+  // Signup navigates once, from the auth listener (D-1, fixed 2026-09-18:
+  // the submit handler no longer navigates after its best-effort
+  // wsfSendVerificationEmail round trip — pinned by
+  // d1-signup-single-navigation.spec.ts). Waiting for that round trip to
+  // settle before verifying keeps this flow deterministic across cold starts
+  // and keeps the emulator console quiet. Registered before the click so the
+  // response is never missed.
+  const sendSettled = page.waitForResponse((r) => r.url().includes('wsfSendVerificationEmail'));
   await page.getByTestId('wsf-signup-submit').click();
 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
+  await sendSettled;
   await markEmailVerified(email);
   await page.getByTestId('wsf-verify-check').click();
 
@@ -181,7 +190,7 @@ test('C3: /reset-password renders the honest not-set-up line when the callable i
 
   await expect(page.getByTestId('wsf-reset-unconfigured')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('wsf-reset-unconfigured')).toContainText(
-    'Password reset email is not set up yet on this build.'
+    "Email isn't switched on for this test build yet, so no reset link was sent."
   );
 });
 
