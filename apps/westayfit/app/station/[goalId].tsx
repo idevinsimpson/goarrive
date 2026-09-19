@@ -2,7 +2,15 @@ import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import {
@@ -72,6 +80,16 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  * ScrollView, because a screen at an event is a fixed surface nobody scrolls,
  * and a hydration-gated wide breakpoint, because the static export renders the
  * phone layout and the first client render has to match it.
+ *
+ * WITH ONE CORRECTION, found by looking at a screenshot rather than by
+ * reasoning. "A fixed surface nobody scrolls" is true of the venue screen and
+ * false of a phone. At 390x640 the fixed surface had the wordmark, the station
+ * label, the total, the Call next button and the caption drawn ON TOP OF ONE
+ * ANOTHER — flex children shrinking below their content and overflowing, with
+ * nowhere to go. So the WIDE canvas stays exactly as it was, and the narrow
+ * one scrolls: `flexGrow: 1` keeps it centred when there is room and lets it
+ * extend when there is not. A Champion checking a station on their phone is a
+ * real person, and overlapping text is not a layout.
  */
 
 /** Same 2 s cadence, and the same reason, as the kiosk and the public display:
@@ -474,15 +492,15 @@ export default function StationScreen() {
   ) : null;
 
   const frame = (testID: string, children: ReactNode, key: string) => (
-    <View
+    <StationSurface
       key={key}
-      style={[styles.canvas, styles.canvasNavy]}
+      wide={wide}
       testID={testID}
-      {...({ dataSet: { layout: wide ? 'wide' : 'phone' } } as Record<string, unknown>)}
+      dataSet={{ layout: wide ? 'wide' : 'phone' }}
     >
       {children}
       {testNote}
-    </View>
+    </StationSurface>
   );
 
   if (!hydrated || !goalId) {
@@ -633,19 +651,30 @@ export default function StationScreen() {
   const origin = typeof window === 'undefined' ? null : (window.location?.origin ?? null);
   // The newcomer link exists only when the server handed this screen a code,
   // and it only does that for a community whose policy admits by link at all.
-  const joinUrl = buildEventJoinUrlFromScreenedCode({ origin, joinCode, goalId });
+  //
+  // THE NEWCOMER LINK NAMES THE ACTIVITY THIS SCREEN IS RUNNING. A newcomer's
+  // phone is about to leave for four routes and a mail round trip — signup,
+  // verification, profile, join — and come back with nothing in its URL. The
+  // unit rides along so that when it comes back it can still say what the
+  // room was doing. `unit` is what `wsfGoalPulse` already publishes to an
+  // unauthenticated screen, so the code carries nothing this screen is not
+  // already printing in letters a hall can read; it is still a link, still
+  // grants nothing, and still enrols nobody.
+  //
+  // THE MEMBER LINK STAYS BARE, deliberately: a member is already signed in,
+  // makes no round trip, and is asked which activity they are here to do on
+  // the page itself. There is nothing for it to carry.
+  const joinUrl = buildEventJoinUrlFromScreenedCode({ origin, joinCode, goalId, activity: unit });
   const eventUrl = buildEventUrl({ origin, goalId });
   const joinQr = qrUri(joinUrl);
   const eventQr = qrUri(eventUrl);
 
   return (
-    <View
+    <StationSurface
       key="ready"
-      style={[styles.canvas, styles.canvasNavy]}
+      wide={wide}
       testID="wsf-station-screen"
-      {...({
-        dataSet: { layout: wide ? 'wide' : 'phone', stale: stale ? 'true' : 'false' },
-      } as Record<string, unknown>)}
+      dataSet={{ layout: wide ? 'wide' : 'phone', stale: stale ? 'true' : 'false' }}
     >
       <View style={styles.header}>
         <WsfWordmark variant="white" height={wide ? 40 : 22} testID="wsf-station-wordmark" />
@@ -859,7 +888,50 @@ export default function StationScreen() {
         counted yourself. This screen records nothing and knows nobody.
       </Text>
       {testNote}
-    </View>
+    </StationSurface>
+  );
+}
+
+/**
+ * The surface a station draws on.
+ *
+ * Wide is the venue screen and is unchanged: one flex:1 View, no scrolling,
+ * because nobody walks up to a hall display and swipes it. Narrow is a phone,
+ * where the same content does not fit and a fixed surface makes its children
+ * overlap rather than overflow. `flexGrow: 1` on the content keeps it centred
+ * while there is room and lets it extend once there is not.
+ */
+function StationSurface({
+  wide,
+  testID,
+  dataSet,
+  children,
+}: {
+  wide: boolean;
+  testID: string;
+  dataSet: Record<string, string>;
+  children: ReactNode;
+}) {
+  if (wide) {
+    return (
+      <View
+        style={[styles.canvas, styles.canvasNavy]}
+        testID={testID}
+        {...({ dataSet } as Record<string, unknown>)}
+      >
+        {children}
+      </View>
+    );
+  }
+  return (
+    <ScrollView
+      style={[styles.canvas, styles.canvasScroll]}
+      contentContainerStyle={styles.canvasScrollContent}
+      testID={testID}
+      {...({ dataSet } as Record<string, unknown>)}
+    >
+      {children}
+    </ScrollView>
   );
 }
 
@@ -874,6 +946,20 @@ const HERO_MUTED = 'rgba(247,245,240,0.78)';
 
 const styles = StyleSheet.create({
   canvas: { flex: 1 },
+  // The narrow surface. The ground colour belongs to the scroll view so it
+  // covers the whole viewport; the spacing belongs to the content, or a
+  // ScrollView's own padding would clip what it is meant to let through.
+  canvasScroll: { backgroundColor: NAVY },
+  // Centred while it fits, extending once it does not. These four values are
+  // canvasNavy's, on purpose: the narrow surface must look identical to the
+  // fixed one right up to the moment it has to scroll.
+  canvasScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    justifyContent: 'space-between',
+    gap: 16,
+  },
   canvasNavy: {
     backgroundColor: NAVY,
     paddingHorizontal: 24,

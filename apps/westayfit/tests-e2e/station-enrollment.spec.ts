@@ -16,16 +16,87 @@
  *      refused, it clears its own storage, and it falls back to asking again.
  *   5. A goal that is not authorized for public display refuses a station with
  *      the same words, byte for byte, that the kiosk refuses with.
+ *
+ * CAPTURES — the same shape as tests-e2e/move-follow-along.spec.ts, written to
+ * tests-e2e/artifacts/station-enrollment/. A station is a venue display, so
+ * every station state is shot at 1280x720, the composition the screen is
+ * actually designed for, AND at the three phone widths plus a short phone, so
+ * the narrow fallback is visible too. Nothing below asserts on an image: a
+ * capture is evidence, never a reason to pass.
+ *
+ * WHAT IS DELIBERATELY NOT IN FRAME. The station's secret lives in
+ * localStorage and is never rendered, so it cannot be photographed. The
+ * Champion's Manage sheet DOES render this community's live invite link and
+ * its QR (`wsf-community-invite-link`), so the "Screens at this event" capture
+ * is scoped to that card's own element rather than to the page — a full-page
+ * shot of Manage would put a join code in the picture. The pairing code is on
+ * screen by design and expires in ten minutes, which is why capturing the
+ * pairing state is fine.
  */
 import { randomBytes } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 
+
+// This journey was already long — two browser contexts, an enrolment, a
+// revocation — and it now also writes eighteen captures across four
+// viewports, each of which is a real re-layout. The default 30s budget is
+// shorter than the work the test legitimately does, and when it expires it
+// reports whichever line it happened to be on rather than a real failure.
+// Raising the budget changes no assertion; both tests passed at 16-30s
+// before the captures were added.
+test.describe.configure({ timeout: 180_000 });
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
 const PASSWORD = 'station-secret-1';
+const ARTIFACTS_DIR = path.resolve(__dirname, 'artifacts', 'station-enrollment');
+
+/**
+ * The phone sizes the Director asked to see, plus a deliberately SHORT phone:
+ * a state that only fits on a tall screen looks fine at 390x844 and is cut off
+ * here, which is the whole point of shooting it.
+ */
+const PHONE_WIDTHS = [
+  { label: 'phone-360', width: 360, height: 844 },
+  { label: 'phone-390', width: 390, height: 844 },
+  { label: 'phone-430', width: 430, height: 932 },
+];
+const SHORT_PHONE = { label: 'phone-390x640', width: 390, height: 640 };
+const PHONE_VIEWPORTS = [...PHONE_WIDTHS, SHORT_PHONE];
 
 const unique = (label: string) => `${label}-${randomBytes(6).toString('hex')}@example.com`;
+
+/** The same one-liner move-follow-along.spec.ts uses, pointed at this spec's
+ * own folder. Viewport only: a full-page shot of a flex-filling screen is a
+ * misleading picture of what a screen in a room shows. */
+async function snap(page: Page, name: string): Promise<void> {
+  mkdirSync(ARTIFACTS_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(ARTIFACTS_DIR, `${name}.png`), fullPage: false });
+}
+
+/**
+ * One state at every phone width, then the viewport put back EXACTLY as it was.
+ * Restoring matters more than the pictures do: the station page re-lays itself
+ * out at 900px, and a test that carried on at 390 would be asserting against a
+ * layout it never asked for.
+ */
+async function snapPhoneWidths(page: Page, name: string): Promise<void> {
+  const before = page.viewportSize();
+  for (const v of PHONE_VIEWPORTS) {
+    await page.setViewportSize({ width: v.width, height: v.height });
+    await snap(page, `${v.label}-${name}`);
+  }
+  if (before) await page.setViewportSize(before);
+}
+
+/** One card, not the page around it — see the header note about the invite
+ * link that shares the Manage sheet with it. */
+async function snapElement(locator: Locator, name: string): Promise<void> {
+  mkdirSync(ARTIFACTS_DIR, { recursive: true });
+  await locator.screenshot({ path: path.join(ARTIFACTS_DIR, `${name}.png`) });
+}
 
 async function markEmailVerified(email: string): Promise<void> {
   const base = `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1`;
@@ -167,6 +238,15 @@ test('a Champion enrols a screen, the attendee codes grant nothing, and revoking
   );
   expect(beforeApproval).toBeNull();
 
+  // WHAT THE SCREEN LOOKS LIKE WHILE IT WAITS. The pairing code is the only
+  // thing on it that is not fixed copy, it is on screen by design, it expires
+  // in ten minutes, and it is spent by the approval just below — so it is safe
+  // to photograph.
+  // Nothing else is in frame: no credential exists yet (asserted above), and
+  // this state renders no QR, no community name and no join code.
+  await snap(station.page, 'landscape-1280-pairing');
+  await snapPhoneWidths(station.page, 'pairing');
+
   // 2. THE CHAMPION APPROVES IT, AS STATION 2.
   await page.getByTestId(`wsf-kiosk-stations-code-${goalId}`).fill(code);
   await page.getByTestId(`wsf-kiosk-stations-slot-2-${goalId}`).click();
@@ -220,6 +300,20 @@ test('a Champion enrols a screen, the attendee codes grant nothing, and revoking
     expect(url).not.toContain(secret);
   }
 
+  // THE ENROLLED SCREEN WITH ITS QR PANEL. Shot here rather than earlier
+  // because the assertions directly above have just proved both symbols are
+  // present and that NEITHER encodes the station secret — so the capture needs
+  // no wait of its own and adds no reason for this test to pass.
+  //
+  // In frame: the community name, the goal title, the shared total, the queue
+  // block (empty — nobody is in line in this test) and the two attendee QRs.
+  // The "New here?" symbol encodes this run's join URL, which is a
+  // 127.0.0.1 address for a community that exists only inside the emulator for
+  // the length of the run; no real community's code is photographed. The
+  // station secret is in localStorage and is never drawn.
+  await snap(station.page, 'landscape-1280-enrolled');
+  await snapPhoneWidths(station.page, 'enrolled');
+
   // SCANNING THE MEMBER CODE: an ordinary page on an attendee's own phone. No
   // station, no credential, no Champion control.
   //
@@ -258,6 +352,27 @@ test('a Champion enrols a screen, the attendee codes grant nothing, and revoking
   await expect(page.getByTestId(`wsf-kiosk-stations-list-${goalId}`)).toContainText('Station 2', {
     timeout: 25_000,
   });
+
+  // THE CHAMPION'S "Screens at this event" CARD, with a screen actually in it,
+  // photographed before the revoke below empties it again.
+  //
+  // ELEMENT-SCOPED, NOT PAGE-SCOPED, and that is the whole reason this is three
+  // lines rather than one: the Manage sheet this card sits in also renders this
+  // community's invite link and its QR, so a page shot would publish a live
+  // join code. Inside the card there is no join code, no email, no uid and no
+  // station secret — only the slot label the server derived, its status, and
+  // the controls. The code box still holds the pairing code typed further up;
+  // that code was spent by the approval and is already dead.
+  //
+  // No short-height viewport here: an element capture is not clipped to the
+  // viewport, so only the width changes anything.
+  const championViewport = page.viewportSize();
+  for (const v of PHONE_WIDTHS) {
+    await page.setViewportSize({ width: v.width, height: v.height });
+    await snapElement(card, `${v.label}-manage-screens-card`);
+  }
+  if (championViewport) await page.setViewportSize(championViewport);
+
   const revoke = page.locator('[data-testid^="wsf-kiosk-stations-revoke-"]').first();
   await revoke.click();
   await expect(page.getByTestId(`wsf-kiosk-stations-notice-${goalId}`)).toContainText('revoked', {
@@ -321,6 +436,14 @@ test('a station on a goal that is not authorized for display refuses in the kios
   await expect(refusal).toBeVisible({ timeout: 30_000 });
   await expect(refusal).toContainText('Nothing to show here');
   await expect(refusal).toContainText('This display isn’t currently available.');
+
+  // WHAT A REFUSED SCREEN LOOKS LIKE IN A ROOM. The assertions above have
+  // already established which state this is, so the capture proves nothing and
+  // only shows it. This state draws the generic frame — wordmark, headline,
+  // body and "Check again" — and nothing else, so no community name, no goal
+  // title, no QR and no code is in the picture.
+  await snap(station.page, 'landscape-1280-not-available');
+  await snapPhoneWidths(station.page, 'not-available');
 
   // Byte-identical to the kiosk's refusal for the same goal, on the same build.
   const kiosk = await browser.newContext();

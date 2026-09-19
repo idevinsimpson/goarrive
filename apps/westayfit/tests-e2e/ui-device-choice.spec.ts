@@ -41,6 +41,12 @@ import { expect, test, type Page } from '@playwright/test';
  * mints its own accounts, its own community and its own goal, so no two tests
  * share a total, a membership or a browser profile.
  *
+ * CAPTURES, written to tests-e2e/artifacts/ui-device-choice/: the numbered
+ * `NN-state.png` files at this file's own PHONE viewport, and — for the three
+ * states a reviewer actually asked to see — `<viewport>-<state>.png` at 360,
+ * 390, 430 and a short 390x640, in the shape move-follow-along.spec.ts
+ * established. Nothing here asserts on an image.
+ *
  * Every name, total and credit below is fixture data seeded for the run.
  */
 
@@ -49,6 +55,25 @@ const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 const PROJECT_ID = 'demo-wsf-local';
 const ARTIFACTS_DIR = path.resolve(__dirname, 'artifacts', 'ui-device-choice');
 const PHONE = { width: 390, height: 844 };
+
+/**
+ * THE RESPONSIVE CAPTURES, in the shape tests-e2e/move-follow-along.spec.ts
+ * established: `<viewport-label>-<state>.png`, alongside the numbered
+ * single-viewport captures this file already writes at PHONE.
+ *
+ * The three widths are the Director's. The short phone is the one that earns
+ * its place on this screen in particular: "Whose screen is this?" is two large
+ * answer cards stacked under a heading, and a state that reads fine on a tall
+ * phone is exactly the kind that pushes its second answer below the fold on a
+ * small one.
+ */
+const PHONE_WIDTHS = [
+  { label: 'phone-360', width: 360, height: 844 },
+  { label: 'phone-390', width: 390, height: 844 },
+  { label: 'phone-430', width: 430, height: 932 },
+];
+const SHORT_PHONE = { label: 'phone-390x640', width: 390, height: 640 };
+const PHONE_VIEWPORTS = [...PHONE_WIDTHS, SHORT_PHONE];
 
 /** The literals src/deviceMode.ts exports; tests/device-mode.test.ts pins the
  * same strings on the other side, so the two cannot drift silently. */
@@ -184,6 +209,25 @@ async function snap(page: Page, name: string): Promise<void> {
 }
 
 /**
+ * One state at every phone size, then the viewport put back EXACTLY as it was.
+ * Restoring is the part that matters: `test.use` sets PHONE for the whole file
+ * and the touch-target assertions are measured against it, so a capture must
+ * never leave a test reading a layout it did not ask for.
+ *
+ * No assertion is made about any of these images. They are evidence of what
+ * the states look like and nothing in this file passes or fails because of
+ * them.
+ */
+async function snapPhoneWidths(page: Page, name: string): Promise<void> {
+  const before = page.viewportSize();
+  for (const v of PHONE_VIEWPORTS) {
+    await page.setViewportSize({ width: v.width, height: v.height });
+    await snap(page, `${v.label}-${name}`);
+  }
+  if (before) await page.setViewportSize(before);
+}
+
+/**
  * The keys Firebase Auth has persisted for this origin — the same reader, and
  * the same reasoning, as tests-e2e/ui-kiosk.spec.ts. The web SDK's default
  * persistence is IndexedDB (`firebaseLocalStorageDb` / `firebaseLocalStorage`),
@@ -292,6 +336,11 @@ test('“My own phone”: the ordinary path, and still signed in at the end', as
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
   await snap(page, '01-question');
+  // THE QUESTION ITSELF, across phone sizes. The assertion four lines above has
+  // just read this block's full text and established there is no join code and
+  // no invitation anywhere in it; nobody is signed in, so no address and no uid
+  // can be on screen either.
+  await snapPhoneWidths(page, 'question');
 
   // ---- the answer ---------------------------------------------------------
   await page.getByTestId('wsf-device-choice-personal').click();
@@ -302,6 +351,11 @@ test('“My own phone”: the ordinary path, and still signed in at the end', as
   await expect(page.getByTestId('wsf-event-signup')).toBeVisible();
   await expect(page.getByTestId('wsf-event-signin')).toBeVisible();
   await snap(page, '02-own-phone-signpost');
+  // THE ORDINARY SIGNED-OUT EVENT PAGE, reached by answering "my own phone".
+  // Still signed out — the sign-in happens on the next line — so this is the
+  // page's own copy, its goal title and its two signposts, with no address and
+  // no join code: app/event/[goalId].tsx renders neither.
+  await snapPhoneWidths(page, 'own-phone-signpost');
 
   // ---- the ORDINARY sign-in ----------------------------------------------
   await page.getByTestId('wsf-event-signin').click();
@@ -475,6 +529,12 @@ test('“A shared screen here”: the existing kiosk session, and an empty devic
   await expect(page.getByTestId('wsf-device-shared-continue')).toBeVisible();
   expect(await signedIn(page)).toBe(false);
   await snap(page, '13-standing-answer');
+  // THE STANDING ANSWER on a device that already said "shared": the card a
+  // second scan meets instead of a personal sign-in. The block above has just
+  // read the device clean — nobody signed in, and the only `wsf.` key left
+  // anywhere is the word "shared" — so there is nothing on this screen that
+  // could name the person who just walked away.
+  await snapPhoneWidths(page, 'standing-answer');
 
   // ---- the way back for a phone that answered by mistake ------------------
   await page.getByTestId('wsf-device-shared-reset').click();
