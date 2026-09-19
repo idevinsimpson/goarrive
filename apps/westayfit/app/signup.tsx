@@ -22,7 +22,7 @@ import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 import { requestVerificationEmail } from '../src/verificationEmail';
-import { recordVerificationSend } from '../src/verificationSendState';
+import { beginVerificationSend, recordVerificationSend } from '../src/verificationSendState';
 
 export default function SignUp() {
   const { ready, user } = useWsfAuth();
@@ -99,14 +99,19 @@ export default function SignUp() {
       // happens here. Swallowing the failure into a console warning is what
       // made that screen claim "We sent a verification link" to members for
       // whom nothing was sent and nothing could be.
-      recordVerificationSend(cred.user.uid, 'sending');
+      const attempt = beginVerificationSend(cred.user.uid);
       try {
         const sendResult = await requestVerificationEmail();
-        recordVerificationSend(cred.user.uid, sendResult.sent ? 'sent' : 'already-verified');
+        recordVerificationSend(
+          cred.user.uid,
+          sendResult.sent ? 'sent' : 'already-verified',
+          attempt
+        );
       } catch (sendError) {
         recordVerificationSend(
           cred.user.uid,
-          authErrorCode(sendError) === 'functions/failed-precondition' ? 'unconfigured' : 'failed'
+          authErrorCode(sendError) === 'functions/failed-precondition' ? 'unconfigured' : 'failed',
+          attempt
         );
       }
       // No navigation here. The signed-in effect above already moved the

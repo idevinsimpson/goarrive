@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { reload, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -18,9 +18,12 @@ import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
+  beginVerificationSend,
   forgetVerificationSend,
   readVerificationSend,
   recordVerificationSend,
+  subscribeVerificationSend,
+  verificationSendSnapshot,
   type VerificationSendOutcome,
 } from '../src/verificationSendState';
 
@@ -31,6 +34,25 @@ export default function VerifyEmail() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unconfigured, setUnconfigured] = useState(false);
+  // The sign-up send finishes AFTER this screen is mounted, so the outcome has
+  // to arrive as a notification. Reading a module variable during render would
+  // leave "Sending" on screen until some unrelated render happened to pick the
+  // answer up.
+  useSyncExternalStore(subscribeVerificationSend, verificationSendSnapshot, verificationSendSnapshot);
+
+  // Whose screen this is. When the account changes underneath — a sign-out, or
+  // a different account signing in — every local claim on screen belonged to
+  // the previous one and must go with it.
+  const uid = user?.uid ?? null;
+  const lastUidRef = useRef<string | null>(uid);
+  useEffect(() => {
+    if (lastUidRef.current === uid) return;
+    lastUidRef.current = uid;
+    setStatus(null);
+    setError(null);
+    setUnconfigured(false);
+    forgetVerificationSend();
+  }, [uid]);
 
   const onCheck = useCallback(async () => {
     if (!user) return;
@@ -75,12 +97,15 @@ export default function VerifyEmail() {
     setError(null);
     setStatus(null);
     setUnconfigured(false);
+    // This tap owns the reported outcome from here on: a slower send still in
+    // the air from sign-up must not overwrite the answer to this one.
+    const attempt = beginVerificationSend(user.uid);
     try {
       // WSF's own delivery path — the client SDK's sendEmailVerification routes
       // through mail that does not arrive and mints a link that does not
       // resolve. See wsfSendVerificationEmail.
       const result = await requestVerificationEmail();
-      recordVerificationSend(user.uid, result.sent ? 'sent' : 'already-verified');
+      recordVerificationSend(user.uid, result.sent ? 'sent' : 'already-verified', attempt);
       setStatus(
         result.sent
           ? 'Verification email sent.'
@@ -94,10 +119,10 @@ export default function VerifyEmail() {
       // a plain sentence a member can act on instead (the testID keeps the
       // state distinguishable for the specs).
       if (authErrorCode(e) === 'functions/failed-precondition') {
-        recordVerificationSend(user.uid, 'unconfigured');
+        recordVerificationSend(user.uid, 'unconfigured', attempt);
         setUnconfigured(true);
       } else {
-        recordVerificationSend(user.uid, 'failed');
+        recordVerificationSend(user.uid, 'failed', attempt);
         setError(authErrorMessage(e, 'Send failed.'));
       }
     } finally {
