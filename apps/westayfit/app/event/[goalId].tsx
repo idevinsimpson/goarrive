@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
@@ -18,9 +18,11 @@ import {
 import type { GoalPulse } from '../../src/displayPulse';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
+import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
 import { kit } from '../../src/ui/kit';
+import { wsfTheme } from '../../src/theme';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 /**
@@ -55,6 +57,15 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *     this feature's to change. Only the Champion's own surfaces carry an
  *     invite link, exactly as before.
  *
+ * AND ONE MORE WAY ON, FOR A MEMBER: "Get in line". It opens the name choice —
+ * and the name choice is the whole point of it, not a formality on the way to a
+ * queue. A queue puts a person's name on a screen in a room full of strangers,
+ * so what that screen will say is decided HERE, by them, before they are in it:
+ * their profile's first name is offered pre-filled, initials are one tap away,
+ * the box is theirs to overwrite, and nothing is sent until they say so. What
+ * they choose is stored on their place in the line and nowhere else — it never
+ * joins the member profile — and it leaves when their place does.
+ *
  * MEMBERSHIP IS DECIDED BY THE SERVER, not by this page: `wsfMyContribution`
  * answers an active member (or someone with their own record on this goal) and
  * gives everyone else the same non-enumerating not-found an unknown goal gives.
@@ -74,6 +85,15 @@ export default function EventScreen() {
   const goalId = typeof params.goalId === 'string' ? params.goalId.trim() : '';
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<EventState>({ kind: 'loading' });
+
+  /**
+   * The name choice, which is closed until somebody asks for it. `null` means
+   * the control has not been opened; a string is what is currently in the box.
+   */
+  const [callName, setCallName] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const suggestions = callNameSuggestions(user?.displayName ?? null);
 
   /**
    * `undefined` until this browser's storage has actually been read.
@@ -119,6 +139,46 @@ export default function EventScreen() {
     clearDeviceMode();
     setDeviceMode(null);
   }, []);
+
+  const onOpenNameChoice = useCallback(() => {
+    setQueueError(null);
+    // Pre-filled with the FIRST name and never a surname. An account whose
+    // display name is an address yields '' here, and the box simply starts
+    // empty rather than handing somebody something the next check refuses.
+    setCallName(suggestions.first);
+  }, [suggestions.first]);
+
+  const onCloseNameChoice = useCallback(() => {
+    setCallName(null);
+    setQueueError(null);
+  }, []);
+
+  const onJoinQueue = useCallback(async () => {
+    if (joining) return;
+    const chosen = (callName ?? '').trim();
+    if (!isUsableCallName(chosen)) {
+      setQueueError(
+        'Choose a name for the screen — up to 24 characters, and not an email address.'
+      );
+      return;
+    }
+    setJoining(true);
+    setQueueError(null);
+    try {
+      const fn = httpsCallable<{ goalId: string; calledName: string }, { entryId: string }>(
+        getFirebaseFunctions(),
+        'wsfJoinQueue'
+      );
+      await fn({ goalId, calledName: chosen });
+      // Their own view of the line. `push`, not `replace`: the event page is a
+      // reasonable place to come back to.
+      router.push(`/queue/${goalId}` as never);
+    } catch (e) {
+      setQueueError(describeCallableError(e, 'We couldn’t put you in the line. Try again.'));
+    } finally {
+      setJoining(false);
+    }
+  }, [callName, goalId, joining]);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -341,12 +401,139 @@ export default function EventScreen() {
           testID="wsf-event-add"
           label="Add your part"
         />
+        {callName === null ? (
+          <Pressable
+            onPress={onOpenNameChoice}
+            style={kit.secondaryButton}
+            testID="wsf-event-queue-start"
+            accessibilityRole="button"
+          >
+            <Text style={kit.secondaryButtonText}>Get in line</Text>
+          </Pressable>
+        ) : null}
         <SecondaryLink href="/" label="Back to home" />
       </View>
+
+      {/*
+        THE NAME CHOICE. Not a formality on the way to a queue: it IS the
+        feature's one real decision, made by the person it is about, before
+        anything of theirs reaches a screen in a room. Nothing is sent until
+        they tap.
+      */}
+      {callName !== null ? (
+        <View style={kit.card} testID="wsf-event-queue-panel">
+          <Text
+            style={kit.cardTitle}
+            accessibilityRole="header"
+            {...({ 'aria-level': 2 } as Record<string, unknown>)}
+          >
+            What should the screen call you?
+          </Text>
+          <Text style={kit.body}>
+            This goes on the screen in the room, where everybody can read it. Pick whatever you are
+            happy for strangers to see.
+          </Text>
+          <Text style={kit.fieldLabel}>Name on the screen</Text>
+          <TextInput
+            value={callName}
+            onChangeText={(next) => {
+              setCallName(next);
+              setQueueError(null);
+            }}
+            style={kit.input}
+            testID="wsf-event-queue-name"
+            placeholder="Your first name"
+            placeholderTextColor={wsfTheme.colors.textMuted}
+            maxLength={CALL_NAME_MAX}
+            autoCapitalize="words"
+            autoCorrect={false}
+            accessibilityLabel="Name on the screen"
+          />
+          <View style={styles.namePills}>
+            {suggestions.first ? (
+              <Pressable
+                onPress={() => {
+                  setCallName(suggestions.first);
+                  setQueueError(null);
+                }}
+                style={[kit.pill, callName === suggestions.first ? kit.pillSelected : null]}
+                testID="wsf-event-queue-name-first"
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[
+                    kit.pillText,
+                    callName === suggestions.first ? kit.pillTextSelected : null,
+                  ]}
+                >
+                  {suggestions.first}
+                </Text>
+              </Pressable>
+            ) : null}
+            {/*
+              INITIALS ARE ONE TAP AND NOT BURIED. A screen that offers an
+              empty choice is worse than one that offers none, so this appears
+              only when there is something to abbreviate.
+            */}
+            {suggestions.initials ? (
+              <Pressable
+                onPress={() => {
+                  setCallName(suggestions.initials);
+                  setQueueError(null);
+                }}
+                style={[kit.pill, callName === suggestions.initials ? kit.pillSelected : null]}
+                testID="wsf-event-queue-name-initials"
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[
+                    kit.pillText,
+                    callName === suggestions.initials ? kit.pillTextSelected : null,
+                  ]}
+                >
+                  {`Initials only (${suggestions.initials})`}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <Text style={kit.caption}>
+            It is kept with your place in the line and nowhere else. It never joins your profile,
+            and it goes when your place does.
+          </Text>
+          {queueError ? (
+            <Text style={kit.errorText} testID="wsf-event-queue-error" aria-live="polite">
+              {queueError}
+            </Text>
+          ) : null}
+          <Pressable
+            onPress={() => void onJoinQueue()}
+            disabled={joining}
+            style={[kit.primaryButton, joining ? kit.primaryButtonDisabled : null]}
+            testID="wsf-event-queue-join"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: joining }}
+          >
+            <Text style={kit.primaryButtonText}>
+              {joining ? 'Getting in line…' : 'Get in line'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={onCloseNameChoice}
+            style={kit.tertiaryButton}
+            testID="wsf-event-queue-cancel"
+            accessibilityRole="button"
+          >
+            <Text style={kit.tertiaryButtonText}>Not now</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
   actions: { gap: 10 },
+  // Wraps rather than squeezes: a chosen name and an initials label are both
+  // variable-length strings, and neither may push the other off a 195 px page.
+  namePills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 });

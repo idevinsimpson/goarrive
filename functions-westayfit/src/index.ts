@@ -4374,11 +4374,29 @@ async function enforceStationRateLimit(ip: string, now: number): Promise<void> {
 }
 
 /**
+ * What a screen is currently showing as "up now": the SAME three fields
+ * wsfQueueState publishes, plus when the call was made. A uid does not reach
+ * this document either — see publicQueueEntry in the queue section.
+ *
+ * It is a cached pointer, not the truth. The queue entry is the truth, and
+ * every reader re-reads it before showing anybody.
+ */
+type StationServing = {
+  entryId: string;
+  calledName: string;
+  position: number;
+  calledAt: FirebaseFirestore.Timestamp;
+};
+
+/**
  * wsfKioskStations/{stationId} — one enrolled screen.
  *
- * `serving` is null for this slice and stays null: calling a participant by
- * name is the queue, and the queue is not this slice. The field exists so the
- * document shape does not change under a live station when it arrives.
+ * `serving` starts null and is written only by the queue section at the bottom
+ * of this file (wsfCallNext / wsfFinishServing). It was declared as `null` by
+ * the station slice precisely so the document's shape would not change under a
+ * live station when the queue arrived; widening the TYPE here changes no
+ * stored document and no existing callable — nothing above this line reads or
+ * writes the field.
  */
 type StationDoc = {
   goalId: string;
@@ -4399,7 +4417,7 @@ type StationDoc = {
   pairingId?: string;
   secretVersion: number;
   status: StationStatus;
-  serving: null;
+  serving: StationServing | null;
   createdAt?: FirebaseFirestore.Timestamp;
   createdBy: string;
   claimedAt?: FirebaseFirestore.Timestamp | null;
@@ -5713,5 +5731,865 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
     };
     combinedPulseCacheSet(setupId, now, pulse);
     return pulse;
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// QUEUE — a real line, and a screen that calls a person by a name THEY chose.
+//
+// THE ONE DECISION THIS FEATURE IS REALLY MAKING: a queue puts a person's name
+// on a screen in a room full of strangers. That is a disclosure, and it is the
+// whole design problem; the rest is plumbing. So:
+//
+//   * the label on the screen is CHOSEN at the moment of joining and never
+//     inferred. The client offers the profile's FIRST name, with initials one
+//     tap away, and the box is the person's to overwrite. The server takes
+//     whatever arrives and stores only that.
+//   * it is stored ONLY on the queue entry. It is not written to the member
+//     profile, not to the membership row, not to a contribution, not to a log.
+//     It leaves when the entry leaves.
+//   * `wsfQueueState` publishes `{entryId, calledName, position}` and NOTHING
+//     else. There is exactly ONE function below that turns an entry into
+//     something a caller may see — `publicQueueEntry` — and it is the only
+//     place a queue entry is ever projected. No uid, ever, for any caller.
+//
+// COLLECTIONS, all Admin-SDK-only. None of them appears in firestore.rules, so
+// all three fall to the catch-all deny at the bottom of the WSF section, the
+// same position wsfKioskStations and wsfCombinedGoals hold. No rules change.
+//
+//   * wsfQueues/{queueId}                  — the queue's own document. Holds
+//     the POSITION COUNTER, and is the single point two concurrent writers
+//     contend on (see below). `queueId` equals `goalId`, as the station slice
+//     already writes.
+//   * wsfQueueEntries/{entryId}            — one place in line. Random id, so
+//     the entryId a screen is handed cannot be read back into a uid.
+//   * wsfQueueMembers/{queueId}__{uid}     — ONE PLACE PER PERSON, addressed by
+//     id. It exists so "already in line" is a document read rather than a
+//     query: a by-id read inside a transaction is unambiguously in the read
+//     set, so two taps at the same instant cannot become two places in line.
+//
+// EVERY QUERY IS A SINGLE-FIELD EQUALITY, so Firestore serves it from its
+// automatic index and firestore.indexes.json is untouched. The waiting list is
+// found by equality on `queueStatusKey` — a denormalized `${queueId}#${status}`
+// written by the same helper that writes `status`, so the two cannot diverge —
+// which also means a `done` or `left` entry drops out of the query entirely
+// rather than accumulating in front of it.
+//
+// WHAT THIS FEATURE DOES NOT DO. It records no contribution. Being called is
+// not recording. Nothing below writes wsfContributions, wsfGoalCounters or
+// wsfGoalMemberTotals, and wsfContribute, wsfGoalPulse, wsfAdjustGoal,
+// wsfListGoals, wsfCreateGoal, wsfCreateCombinedGoal and wsfCombinedGoalPulse
+// are not reached into by any line of it. A queue admits nobody to anything
+// either: LINK_JOINABLE is untouched and joining a line requires an ACTIVE
+// membership that already existed.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Long enough for a real name, short enough to read from the back of a hall.
+ * Mirrored — deliberately, as a copy — by CALL_NAME_MAX in
+ * apps/westayfit/src/queueName.ts. Both are pinned by tests. */
+const QUEUE_CALL_NAME_MAX = 24;
+
+/**
+ * The most waiting entries one read will carry. A single-field equality with
+ * no orderBy is ordered by document name, so the limit has to sit above any
+ * real line rather than act as a page: the list is sorted by `position` in
+ * memory afterwards. A line of two hundred people at one station is not a
+ * queue, it is a fire marshal's problem.
+ */
+const QUEUE_WAITING_LIMIT = 200;
+
+/**
+ * Ten minutes. A `called` entry that is never finished expires, so a queue
+ * cannot wedge on somebody who was called and walked out: the screen stops
+ * showing them, and — this is the half that actually matters to a person —
+ * their own place is freed so they can get back in line.
+ */
+const QUEUE_CALL_EXPIRY_MS = 10 * 60 * 1000;
+
+type QueueStatus = 'waiting' | 'called' | 'done' | 'left';
+
+/** wsfQueueEntries/{entryId} — one place in line. */
+type QueueEntryDoc = {
+  /** Equal to goalId, as the station already writes. Written explicitly so the
+   * two can part company later without a migration of meaning. */
+  queueId: string;
+  goalId: string;
+  communityGroupId: string;
+  /** Who is in the line. Never published — see publicQueueEntry. */
+  uid: string;
+  /** What THEY chose to be called. 1..24 characters. Stored here and nowhere
+   * else in this system, and deleted with this document's status. */
+  calledName: string;
+  status: QueueStatus;
+  /**
+   * `${queueId}#${status}`, written by queueStatusKey() alongside every status
+   * change. It is what makes "the waiting list" a single-field equality.
+   */
+  queueStatusKey: string;
+  joinedAt: FirebaseFirestore.Timestamp;
+  calledAt: FirebaseFirestore.Timestamp | null;
+  calledByStationId: string | null;
+  /** Monotonic within the queue, allocated from the queue document's counter,
+   * and never reused. NOT a count of existing entries. */
+  position: number;
+  /** Set when a call was never finished and the ten minutes ran out. */
+  expiredAt?: FirebaseFirestore.Timestamp | null;
+  leftAt?: FirebaseFirestore.Timestamp | null;
+  doneAt?: FirebaseFirestore.Timestamp | null;
+};
+
+/** wsfQueues/{queueId} — the queue's own document. */
+type QueueDoc = {
+  queueId: string;
+  goalId: string;
+  communityGroupId: string;
+  /** The next position to hand out. Read and written inside a transaction, so
+   * two people tapping at the same instant cannot receive the same number. */
+  nextPosition: number;
+  /**
+   * Incremented by every wsfCallNext. It has no meaning on its own: it exists
+   * so that two stations calling at the same moment ALWAYS contend on this one
+   * document and Firestore serializes them, whatever the waiting query
+   * returned to each of them.
+   */
+  callSeq?: number;
+};
+
+/** wsfQueueMembers/{queueId}__{uid} — one place per person, by id. */
+type QueueMemberDoc = { entryId: string };
+
+function queueStatusKey(queueId: string, status: QueueStatus): string {
+  return `${queueId}#${status}`;
+}
+
+function queueMemberDocId(queueId: string, uid: string): string {
+  return `${queueId}__${uid}`;
+}
+
+/**
+ * The label a screen may show, normalized here and refused here.
+ *
+ * Mirrors normalizeCallName + isUsableCallName in
+ * apps/westayfit/src/queueName.ts, deliberately as a copy: the client cannot
+ * be the only place this is enforced, because the client is not the only
+ * possible caller. Both are pinned by tests.
+ *
+ * An address is refused wholesale — not because '@' is magic, but because the
+ * single likeliest way somebody's email ends up projected on a wall is that
+ * they pasted it into a name box without thinking. A bare URL is the same
+ * mistake wearing a different coat.
+ */
+function normalizeQueueCallName(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const cleaned = v.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return null;
+  const cut = cleaned.slice(0, QUEUE_CALL_NAME_MAX).trim();
+  if (!cut) return null;
+  if (cut.includes('@')) return null;
+  if (/https?:\/\//i.test(cut)) return null;
+  return cut;
+}
+
+/**
+ * THE DISCLOSURE BOUNDARY, in one function.
+ *
+ * Everything any caller is ever shown about somebody else's place in line goes
+ * through here, and it returns three fields. There is no uid in the return
+ * type, none is read into it, and there is no second projection anywhere in
+ * this file. If this function is right, the feature's central promise is kept
+ * for every caller; if a field is added here, it is disclosed to a room.
+ */
+type QueueEntryPublic = { entryId: string; calledName: string; position: number };
+
+function publicQueueEntry(entryId: string, entry: QueueEntryDoc): QueueEntryPublic {
+  return {
+    entryId,
+    calledName: typeof entry.calledName === 'string' ? entry.calledName : '',
+    position: typeof entry.position === 'number' ? entry.position : 0,
+  };
+}
+
+function queueEntryMillis(v: unknown): number | null {
+  const ts = v as { toMillis?: () => number } | null | undefined;
+  const ms = ts?.toMillis?.();
+  return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Whether a `called` entry has run out its ten minutes. A `waiting` entry
+ * never expires: somebody standing in a line is still in the line.
+ */
+function isQueueCallExpired(entry: QueueEntryDoc, now: number): boolean {
+  if (entry.status !== 'called') return false;
+  const at = queueEntryMillis(entry.calledAt);
+  if (at === null) return false;
+  return now - at >= QUEUE_CALL_EXPIRY_MS;
+}
+
+/** Whether this entry still holds its owner's one place in the line. */
+function isQueueEntryLive(entry: QueueEntryDoc, now: number): boolean {
+  if (entry.status === 'waiting') return true;
+  if (entry.status === 'called') return !isQueueCallExpired(entry, now);
+  return false;
+}
+
+/** Oldest first, by the allocated position — never by joinedAt, which two
+ * writes a millisecond apart can report identically, and never by document
+ * name, which is random. */
+function sortQueueEntries<T extends { position: number }>(entries: T[]): T[] {
+  return entries.sort((a, b) => a.position - b.position);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The station credential, for the two callables a SCREEN makes.
+//
+// Deliberately its own function rather than a refactor of wsfStationState: that
+// callable is live, it is on a two-second polling path, and its refusal
+// ordering is load-bearing. This duplicates the check — sha256 + timingSafeEqual,
+// never `===` — and charges the per-IP bucket on refusals only, for the same
+// reason wsfStationState does: a screen doing its job must not put a
+// transactional write on one document per venue NAT address every two seconds.
+//
+// ONE ANSWER for every way a credential can fail to be a live one: an unknown
+// station, a revoked one, a wrong secret and a malformed request are all the
+// same sentence and the same code, so none of them tells a caller which it was.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type AuthorizedStation = {
+  stationId: string;
+  station: StationDoc;
+  stationRef: FirebaseFirestore.DocumentReference;
+  queueId: string;
+};
+
+async function authorizeStationForQueue(
+  data: { stationId?: unknown; secret?: unknown } | undefined,
+  rawRequest: { ip?: string; headers?: Record<string, unknown> } | undefined,
+  now: number
+): Promise<AuthorizedStation> {
+  const ip = extractIp(rawRequest ?? {});
+  const refuse = async (): Promise<HttpsError> => {
+    await enforceStationRateLimit(ip, now);
+    return new HttpsError('permission-denied', STATION_REJECTED_MESSAGE);
+  };
+
+  const stationId = normalizeStringId(data?.stationId);
+  const secret = normalizeStationSecret(data?.secret);
+  if (!stationId || !secret) throw await refuse();
+
+  const db = getFirestore();
+  const stationRef = db.doc(`wsfKioskStations/${stationId}`);
+  const snap = await stationRef.get();
+  if (!snap.exists) throw await refuse();
+  const station = snap.data() as StationDoc;
+  if (station.status !== 'active') throw await refuse();
+  if (!constantTimeHexEqual(station.secretHash, sha256Hex(secret))) throw await refuse();
+
+  const queueId = normalizeStringId(station.queueId) ?? normalizeStringId(station.goalId);
+  if (!queueId) throw await refuse();
+
+  return { stationId, station, stationRef, queueId };
+}
+
+/**
+ * The same station, re-read after this request's own transaction committed, so
+ * the state a screen is handed back reflects the write that just happened. The
+ * credential has already been proved; this re-reads a document, and never
+ * re-decides authorization.
+ */
+async function refreshStation(authorized: AuthorizedStation): Promise<AuthorizedStation> {
+  const snap = await authorized.stationRef.get();
+  if (!snap.exists) return authorized;
+  return { ...authorized, station: snap.data() as StationDoc };
+}
+
+/**
+ * What a screen is told about the line. Both fields carry the three-field
+ * projection and nothing else.
+ */
+type QueueStateResponse = {
+  /** Who is up now at THIS station, re-derived from the entry itself rather
+   * than trusted from the station's cached pointer. Null when nobody is. */
+  serving: QueueEntryPublic | null;
+  /** Oldest first. The screen shows the first few; the count is the whole line. */
+  waiting: QueueEntryPublic[];
+  waitingCount: number;
+};
+
+/**
+ * The line as it stands, read OUTSIDE any transaction.
+ *
+ * `station.serving` is a cached pointer, kept so a screen does not have to
+ * query for the person in front of it. The ENTRY is the truth: it is read back
+ * by id and shown only while it is still `called`, still called by THIS
+ * station, and still inside its ten minutes. That is what makes "leaving
+ * removes the person from what the station shows, on the next read" true even
+ * for somebody who had already been called.
+ */
+async function readQueueState(
+  authorized: AuthorizedStation,
+  now: number
+): Promise<QueueStateResponse> {
+  const db = getFirestore();
+
+  const servingId = normalizeStringId(
+    (authorized.station.serving as { entryId?: unknown } | null | undefined)?.entryId
+  );
+  let serving: QueueEntryPublic | null = null;
+  if (servingId) {
+    const snap = await db.doc(`wsfQueueEntries/${servingId}`).get();
+    if (snap.exists) {
+      const entry = snap.data() as QueueEntryDoc;
+      if (
+        entry.queueId === authorized.queueId &&
+        entry.status === 'called' &&
+        entry.calledByStationId === authorized.stationId &&
+        !isQueueCallExpired(entry, now)
+      ) {
+        serving = publicQueueEntry(snap.id, entry);
+      }
+    }
+  }
+
+  const waitingSnap = await db
+    .collection('wsfQueueEntries')
+    .where('queueStatusKey', '==', queueStatusKey(authorized.queueId, 'waiting'))
+    .limit(QUEUE_WAITING_LIMIT)
+    .get();
+  const waiting = sortQueueEntries(
+    waitingSnap.docs.map((d) => publicQueueEntry(d.id, d.data() as QueueEntryDoc))
+  );
+
+  return { serving, waiting, waitingCount: waiting.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfJoinQueue — a person puts their name down.
+//
+// AUTHORIZATION: an ACTIVE member of the goal's community. Anyone else — a
+// stranger, a removed member, a member of another community — gets the same
+// generic not-found an unknown goal gives, so this callable is no more of an
+// existence oracle than the join page is.
+//
+// IDEMPOTENT PER UID PER QUEUE. Joining twice while already `waiting` or
+// `called` returns the EXISTING entry, at its existing position, and writes
+// nothing: a second tap is a second tap, not a second place in line. The check
+// is a by-id read of wsfQueueMembers/{queueId}__{uid} inside the transaction,
+// so two taps at the same instant contend on one document and one of them is
+// retried into seeing the other's entry.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type JoinQueueRequest = { goalId?: unknown; calledName?: unknown };
+type JoinQueueResponse = {
+  entryId: string;
+  calledName: string;
+  position: number;
+  status: QueueStatus;
+  /** True when this call found the caller already in line and wrote nothing. */
+  alreadyInLine: boolean;
+};
+
+/** The one sentence a name that cannot go on a screen gets. It names no field
+ * and no function: it is written for the person holding the phone. */
+const QUEUE_NAME_REFUSED =
+  'Choose a name for the screen — up to 24 characters, and not an email address.';
+
+export const wsfJoinQueue = onCall<JoinQueueRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<JoinQueueResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+
+    // Shape first, and before anything is read: a refusal here depends on the
+    // request alone, so it tells a caller nothing about which goals exist.
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+    const calledName = normalizeQueueCallName(request.data?.calledName);
+    if (!calledName) {
+      throw new HttpsError('invalid-argument', QUEUE_NAME_REFUSED);
+    }
+
+    const db = getFirestore();
+    const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+    if (!goalSnap.exists) notFound();
+    const goal = goalSnap.data() as GoalDoc;
+    const groupId = normalizeStringId(goal.communityGroupId);
+    if (!groupId) notFound();
+
+    const queueId = goalId;
+    const now = Date.now();
+    const queueRef = db.doc(`wsfQueues/${queueId}`);
+    const memberRef = db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, uid)}`);
+
+    return db.runTransaction(async (tx) => {
+      // AUTHORIZATION BEFORE ANYTHING IS SAID. A non-member is refused with
+      // the same words and the same code an unknown goal is refused with.
+      const membership = await readActiveMembership(tx, groupId, uid);
+      if (!membership) notFound();
+
+      const memberSnap = await tx.get(memberRef);
+      const heldEntryId = normalizeStringId((memberSnap.data() as QueueMemberDoc | undefined)?.entryId);
+      const heldRef = heldEntryId ? db.doc(`wsfQueueEntries/${heldEntryId}`) : null;
+      const heldSnap = heldRef ? await tx.get(heldRef) : null;
+      // EVERY READ FIRST. A Firestore transaction refuses a read after a write,
+      // and the expiry cleanup below is a write — so the counter is read here,
+      // before any branch can write, rather than where it is used.
+      const queueSnap = await tx.get(queueRef);
+
+      if (heldRef && heldSnap?.exists) {
+        const held = heldSnap.data() as QueueEntryDoc;
+        if (held.queueId === queueId && held.uid === uid && isQueueEntryLive(held, now)) {
+          // ALREADY IN LINE. Their place, unchanged, and no write at all —
+          // including no rewrite of calledName, because a second tap must not
+          // silently relabel somebody who is already on a screen.
+          return {
+            entryId: heldSnap.id,
+            calledName: held.calledName,
+            position: held.position,
+            status: held.status,
+            alreadyInLine: true,
+          };
+        }
+        if (held.queueId === queueId && held.uid === uid && held.status === 'called') {
+          // Called, and the ten minutes ran out. Close it honestly rather than
+          // leaving a stale `called` row holding this person's place forever.
+          tx.update(heldRef, {
+            status: 'done' satisfies QueueStatus,
+            queueStatusKey: queueStatusKey(queueId, 'done'),
+            expiredAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      const queue = queueSnap.data() as QueueDoc | undefined;
+      // THE POSITION COUNTER. Read and written inside this transaction, so two
+      // people tapping at once cannot get the same number — and never derived
+      // by counting existing entries, which would reuse a number the moment
+      // somebody left.
+      const rawNext = typeof queue?.nextPosition === 'number' ? queue.nextPosition : 1;
+      const position = Number.isFinite(rawNext) && rawNext >= 1 ? Math.floor(rawNext) : 1;
+
+      const entryRef = db.collection('wsfQueueEntries').doc();
+      const entry: QueueEntryDoc = {
+        queueId,
+        goalId,
+        communityGroupId: groupId,
+        uid,
+        calledName,
+        status: 'waiting',
+        queueStatusKey: queueStatusKey(queueId, 'waiting'),
+        joinedAt: Timestamp.fromMillis(now),
+        calledAt: null,
+        calledByStationId: null,
+        position,
+      };
+      tx.set(entryRef, entry);
+      tx.set(memberRef, { entryId: entryRef.id } satisfies QueueMemberDoc);
+      tx.set(
+        queueRef,
+        {
+          queueId,
+          goalId,
+          communityGroupId: groupId,
+          nextPosition: position + 1,
+        },
+        { merge: true }
+      );
+
+      return {
+        entryId: entryRef.id,
+        calledName,
+        position,
+        status: 'waiting' as QueueStatus,
+        alreadyInLine: false,
+      };
+    });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfLeaveQueue — a person takes their name back off a screen.
+//
+// AUTHORIZATION: the ENTRY'S OWN UID, and nobody else. Not a Champion, not a
+// station, not the person who called them. A queue puts a name on a wall, so
+// taking it down has to be immediate, unilateral and unconditional — including
+// while they are the one being called.
+//
+// Everyone who is not that uid gets the generic not-found, so an entryId
+// cannot be probed for whose it is.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type LeaveQueueRequest = { entryId?: unknown };
+type LeaveQueueResponse = { entryId: string; status: QueueStatus };
+
+export const wsfLeaveQueue = onCall<LeaveQueueRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<LeaveQueueResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const entryId = normalizeStringId(request.data?.entryId);
+    if (!entryId) {
+      throw new HttpsError('invalid-argument', 'entryId is required.');
+    }
+
+    const db = getFirestore();
+    const entryRef = db.doc(`wsfQueueEntries/${entryId}`);
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(entryRef);
+      if (!snap.exists) notFound();
+      const entry = snap.data() as QueueEntryDoc;
+      // The authorization, and the same answer for "not yours" as for "not
+      // there": an entryId is not a way to learn whose place it is.
+      if (entry.uid !== uid) notFound();
+
+      const queueId = normalizeStringId(entry.queueId);
+      if (!queueId) notFound();
+      const memberRef = db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, uid)}`);
+      const memberSnap = await tx.get(memberRef);
+
+      if (entry.status === 'waiting' || entry.status === 'called') {
+        tx.update(entryRef, {
+          status: 'left' satisfies QueueStatus,
+          queueStatusKey: queueStatusKey(queueId, 'left'),
+          leftAt: FieldValue.serverTimestamp(),
+        });
+      }
+      // The place is freed whether or not the status needed changing, so a
+      // second tap on Leave cannot strand somebody out of the line and unable
+      // to rejoin.
+      if (
+        memberSnap.exists &&
+        normalizeStringId((memberSnap.data() as QueueMemberDoc).entryId) === entryId
+      ) {
+        tx.delete(memberRef);
+      }
+    });
+
+    return { entryId, status: 'left' };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfMyQueueEntry — the person's own phone, telling them where they are.
+//
+// AUTHORIZATION: the caller, about themselves. It reads the caller's own place
+// by document id and returns nothing about anybody else — not a name, not a
+// count of who is in front by name, not an id. `ahead` is a NUMBER.
+//
+// It writes nothing. It is on a polling path, and a poll that writes is a poll
+// that costs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type MyQueueEntryRequest = { goalId?: unknown };
+type MyQueueEntryResponse = {
+  entry: {
+    entryId: string;
+    calledName: string;
+    position: number;
+    status: QueueStatus;
+    /** How many people are in front of them. A count, never a list. */
+    ahead: number;
+    /** Which screen called them, by its visible label ("Station 2"), so they
+     * know where to walk. Null until they are called. */
+    calledByLabel: string | null;
+  } | null;
+};
+
+export const wsfMyQueueEntry = onCall<MyQueueEntryRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MyQueueEntryResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    const uid = request.auth.uid;
+    const goalId = normalizeStringId(request.data?.goalId);
+    if (!goalId) {
+      throw new HttpsError('invalid-argument', 'goalId is required.');
+    }
+
+    const db = getFirestore();
+    const queueId = goalId;
+    const now = Date.now();
+
+    const memberSnap = await db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, uid)}`).get();
+    const entryId = normalizeStringId((memberSnap.data() as QueueMemberDoc | undefined)?.entryId);
+    if (!entryId) return { entry: null };
+
+    const entrySnap = await db.doc(`wsfQueueEntries/${entryId}`).get();
+    if (!entrySnap.exists) return { entry: null };
+    const entry = entrySnap.data() as QueueEntryDoc;
+    // Somebody else's entry could only be here through a hand-edit, and the
+    // answer for it is the answer for no entry at all.
+    if (entry.uid !== uid || entry.queueId !== queueId) return { entry: null };
+    if (!isQueueEntryLive(entry, now)) return { entry: null };
+
+    let ahead = 0;
+    if (entry.status === 'waiting') {
+      const waitingSnap = await db
+        .collection('wsfQueueEntries')
+        .where('queueStatusKey', '==', queueStatusKey(queueId, 'waiting'))
+        .limit(QUEUE_WAITING_LIMIT)
+        .get();
+      for (const d of waitingSnap.docs) {
+        const other = d.data() as QueueEntryDoc;
+        if (typeof other.position === 'number' && other.position < entry.position) ahead += 1;
+      }
+    }
+
+    let calledByLabel: string | null = null;
+    const stationId = normalizeStringId(entry.calledByStationId);
+    if (entry.status === 'called' && stationId) {
+      const stationSnap = await db.doc(`wsfKioskStations/${stationId}`).get();
+      if (stationSnap.exists) {
+        const station = stationSnap.data() as StationDoc;
+        const slot = normalizeStationSlot(station.slot);
+        calledByLabel =
+          typeof station.label === 'string' && station.label !== ''
+            ? station.label
+            : slot
+              ? stationLabelForSlot(slot)
+              : null;
+      }
+    }
+
+    return {
+      entry: {
+        entryId: entrySnap.id,
+        calledName: entry.calledName,
+        position: entry.position,
+        status: entry.status,
+        ahead,
+        calledByLabel,
+      },
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfQueueState — what the screen at the event may show.
+//
+// AUTHORIZATION: the station secret, exactly as wsfStationState authenticates —
+// sha256 + timingSafeEqual, never `===` — and the same one answer for every way
+// a credential can fail to be a live one.
+//
+// IT RETURNS {entryId, calledName, position} AND NOTHING ELSE, per entry, for
+// every caller, through publicQueueEntry and through no other path. No uid,
+// ever. The entryId is a random Firestore id, so it is not a uid wearing a hat
+// either.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type QueueStateRequest = { stationId?: unknown; secret?: unknown };
+
+export const wsfQueueState = onCall<QueueStateRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<QueueStateResponse> => {
+    const now = Date.now();
+    const authorized = await authorizeStationForQueue(request.data, request.rawRequest, now);
+    return readQueueState(authorized, now);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfCallNext — the screen calls the next person by the name they chose.
+//
+// AUTHORIZATION: the station secret, as above.
+//
+// HOW TWO STATIONS CANNOT CALL THE SAME PERSON. One transaction does all of it,
+// and it touches wsfQueues/{queueId} — a single document — on every call, whose
+// `callSeq` it increments. Two stations calling at the same instant therefore
+// always overlap on that document's read set, so Firestore aborts and retries
+// the loser; the retry re-runs the waiting query and sees the entry the winner
+// has just marked `called`. The chosen entry itself is also read and re-checked
+// as `waiting` inside the same transaction, so even without the counter the
+// second writer's read set is invalidated. Both guarantees are deliberate: the
+// counter makes the contention unconditional rather than dependent on the two
+// stations happening to pick the same row.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CallNextRequest = { stationId?: unknown; secret?: unknown };
+type CallNextResponse = QueueStateResponse & {
+  /** False when the line was empty. Not an error: an empty line is a normal
+   * state at an event, not a failure to report. */
+  called: boolean;
+};
+
+export const wsfCallNext = onCall<CallNextRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<CallNextResponse> => {
+    const now = Date.now();
+    const authorized = await authorizeStationForQueue(request.data, request.rawRequest, now);
+    const db = getFirestore();
+    const { queueId, stationId, stationRef } = authorized;
+    const queueRef = db.doc(`wsfQueues/${queueId}`);
+
+    const called = await db.runTransaction(async (tx) => {
+      // ── every read first, as a Firestore transaction requires ──
+      const stationSnap = await tx.get(stationRef);
+      if (!stationSnap.exists) return false;
+      const station = stationSnap.data() as StationDoc;
+      // Re-checked inside the transaction: a Champion may have revoked this
+      // screen between the credential check and here, and a revoked screen
+      // must not be able to call anybody.
+      if (station.status !== 'active') return false;
+
+      // Read for its own sake: it puts the queue document in this transaction's
+      // read set, which is half of the two-stations guarantee (the other half
+      // is the unconditional callSeq write below).
+      await tx.get(queueRef);
+
+      const waitingSnap = await tx.get(
+        db
+          .collection('wsfQueueEntries')
+          .where('queueStatusKey', '==', queueStatusKey(queueId, 'waiting'))
+          .limit(QUEUE_WAITING_LIMIT)
+      );
+      const candidates = sortQueueEntries(
+        waitingSnap.docs.map((d) => ({
+          id: d.id,
+          position: (d.data() as QueueEntryDoc).position ?? 0,
+        }))
+      );
+
+      const previousId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      const previousRef = previousId ? db.doc(`wsfQueueEntries/${previousId}`) : null;
+      const previousSnap = previousRef ? await tx.get(previousRef) : null;
+
+      const chosen = candidates[0] ?? null;
+      const chosenRef = chosen ? db.doc(`wsfQueueEntries/${chosen.id}`) : null;
+      const chosenSnap = chosenRef ? await tx.get(chosenRef) : null;
+      const chosenEntry =
+        chosenSnap && chosenSnap.exists ? (chosenSnap.data() as QueueEntryDoc) : null;
+
+      // ── and only then the writes ──
+
+      // THE SERIALIZATION POINT. Unconditional, so two stations always contend.
+      tx.set(
+        queueRef,
+        { queueId, goalId: queueId, callSeq: FieldValue.increment(1) },
+        { merge: true }
+      );
+
+      // The person this screen was serving is finished by the act of calling
+      // the next one — but only if this screen is still the one that called
+      // them. A station never closes another station's call.
+      if (previousRef && previousSnap?.exists) {
+        const previous = previousSnap.data() as QueueEntryDoc;
+        if (
+          previous.queueId === queueId &&
+          previous.status === 'called' &&
+          previous.calledByStationId === stationId
+        ) {
+          tx.update(previousRef, {
+            status: 'done' satisfies QueueStatus,
+            queueStatusKey: queueStatusKey(queueId, 'done'),
+            doneAt: FieldValue.serverTimestamp(),
+          });
+          const previousUid = normalizeStringId(previous.uid);
+          if (previousUid) {
+            tx.delete(db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, previousUid)}`));
+          }
+        }
+      }
+
+      if (!chosenRef || !chosenEntry || chosenEntry.status !== 'waiting') {
+        // Nobody to call — either an empty line, or the entry this transaction
+        // picked was taken by the other station and this is the retry that saw
+        // an empty line afterwards. Clearing `serving` is correct either way:
+        // the screen has moved on from whoever it was showing.
+        tx.update(stationRef, { serving: null });
+        return false;
+      }
+
+      tx.update(chosenRef, {
+        status: 'called' satisfies QueueStatus,
+        queueStatusKey: queueStatusKey(queueId, 'called'),
+        calledAt: FieldValue.serverTimestamp(),
+        calledByStationId: stationId,
+      });
+      // The cached pointer the screen reads. It carries the SAME three fields
+      // a caller may see and no others — a uid must not reach a station
+      // document either.
+      tx.update(stationRef, {
+        serving: {
+          entryId: chosenRef.id,
+          calledName: chosenEntry.calledName,
+          position: chosenEntry.position,
+          calledAt: Timestamp.fromMillis(now),
+        },
+      });
+      return true;
+    });
+
+    // Read back afterwards, so what the screen paints is what the queue says,
+    // not what this call believed it would say. The credential was already
+    // proved above; this only re-reads the station document for its new
+    // `serving` pointer.
+    const state = await readQueueState(await refreshStation(authorized), Date.now());
+    return { ...state, called };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfFinishServing — the turn is over.
+//
+// AUTHORIZATION: the station secret, as above. It closes only a call THIS
+// station made; a station cannot finish another station's person.
+//
+// It marks the entry `done` and clears `serving`. It records NO contribution:
+// being called is not recording, and nothing here touches wsfContributions,
+// wsfGoalCounters or wsfGoalMemberTotals.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type FinishServingRequest = { stationId?: unknown; secret?: unknown };
+
+export const wsfFinishServing = onCall<FinishServingRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<QueueStateResponse> => {
+    const now = Date.now();
+    const authorized = await authorizeStationForQueue(request.data, request.rawRequest, now);
+    const db = getFirestore();
+    const { queueId, stationId, stationRef } = authorized;
+
+    await db.runTransaction(async (tx) => {
+      const stationSnap = await tx.get(stationRef);
+      if (!stationSnap.exists) return;
+      const station = stationSnap.data() as StationDoc;
+      const servingId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      const servingRef = servingId ? db.doc(`wsfQueueEntries/${servingId}`) : null;
+      const servingSnap = servingRef ? await tx.get(servingRef) : null;
+
+      if (servingRef && servingSnap?.exists) {
+        const entry = servingSnap.data() as QueueEntryDoc;
+        if (
+          entry.queueId === queueId &&
+          entry.status === 'called' &&
+          entry.calledByStationId === stationId
+        ) {
+          tx.update(servingRef, {
+            status: 'done' satisfies QueueStatus,
+            queueStatusKey: queueStatusKey(queueId, 'done'),
+            doneAt: FieldValue.serverTimestamp(),
+          });
+          const servingUid = normalizeStringId(entry.uid);
+          if (servingUid) {
+            tx.delete(db.doc(`wsfQueueMembers/${queueMemberDocId(queueId, servingUid)}`));
+          }
+        }
+      }
+      tx.update(stationRef, { serving: null });
+    });
+
+    return readQueueState(await refreshStation(authorized), Date.now());
   }
 );

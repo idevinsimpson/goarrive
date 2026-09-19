@@ -5,6 +5,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
+import {
+  announceCall,
+  describeLineLength,
+  nextUp,
+  type QueueEntryPublic,
+} from '../../src/queueLine';
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE } from '../../src/kioskSession';
 import {
@@ -39,6 +45,13 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *   3. A REJECTED CREDENTIAL. Revoked by the Champion, or no longer a station
  *      at all. The screen empties its own storage and falls back to mode 1.
  *
+ * AND, SINCE THE QUEUE, IT CALLS PEOPLE. "Call next" takes the oldest place in
+ * the line and prints the name THAT PERSON CHOSE — never their account name,
+ * never a surname, never a uid, because `wsfQueueState` publishes exactly
+ * {entryId, calledName, position} and this screen has no way to ask for more.
+ * The call is announced through an ARIA live region as well as printed, and
+ * nothing about a turn depends on an animation: there is none on this screen.
+ *
  * WHAT THIS SCREEN CANNOT DO, BY CONSTRUCTION. It cannot record a
  * contribution: it does not know who is standing in front of it, so it records
  * nothing about them and calls nothing that writes a total. It cannot see more
@@ -68,6 +81,12 @@ const STATE_POLL_MS = 2_000;
  * is a quick enough answer and a tenth of the state poll's traffic. */
 const PAIRING_POLL_MS = 3_000;
 
+type QueueState = {
+  serving: QueueEntryPublic | null;
+  waiting: QueueEntryPublic[];
+  waitingCount: number;
+};
+
 type PairingPhase =
   | { kind: 'requesting' }
   | { kind: 'waiting'; pairingId: string; code: string }
@@ -88,6 +107,8 @@ type EnrolledPhase =
       confirmedAt: Date;
       stale: boolean;
     };
+
+type QueueStateResponse = QueueState;
 
 type StationStateResponse = {
   stationId: string;
@@ -139,6 +160,15 @@ export default function StationScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hydrated, goalId, credentialToken]
   );
+
+  /**
+   * The line, as this screen last saw it. `null` until the first answer, which
+   * is not the same as an empty line: a screen must not print "nobody is
+   * waiting" before it has asked.
+   */
+  const [queue, setQueue] = useState<QueueState | null>(null);
+  const [queueBusy, setQueueBusy] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
 
   const [pairing, setPairing] = useState<PairingPhase>({ kind: 'requesting' });
   const [enrolled, setEnrolled] = useState<EnrolledPhase>({ kind: 'loading' });
@@ -356,6 +386,82 @@ export default function StationScreen() {
     };
   }, [hydrated, goalId, credential]);
 
+  // ── THE LINE ──────────────────────────────────────────────────────────────
+  //
+  // Its own poll, deliberately: the goal's pulse and the queue answer different
+  // questions at different rates, and a failure to read one must not blank the
+  // other. A credential refusal is handled by the state effect above, which is
+  // the one place this screen decides it is no longer enrolled.
+  useEffect(() => {
+    if (!hydrated || !goalId) return;
+    if (!credential) {
+      setQueue(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let issued = 0;
+    let applied = 0;
+
+    const tick = async () => {
+      const seq = ++issued;
+      try {
+        const fn = httpsCallable<{ stationId: string; secret: string }, QueueStateResponse>(
+          getFirebaseFunctions(),
+          'wsfQueueState'
+        );
+        const result = await fn({ stationId: credential.stationId, secret: credential.secret });
+        if (cancelled) return;
+        if (seq <= applied) return;
+        applied = seq;
+        setQueue(result.data);
+      } catch {
+        // A single failed poll says nothing about the line, and a screen in a
+        // hall that blanks the person it is calling is the worst thing this
+        // route can do. It keeps showing what it last confirmed.
+      }
+    };
+
+    void tick();
+    timer = setInterval(() => void tick(), STATE_POLL_MS);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [hydrated, goalId, credential]);
+
+  const runQueueAction = useCallback(
+    async (name: 'wsfCallNext' | 'wsfFinishServing') => {
+      if (!credential || queueBusy) return;
+      setQueueBusy(true);
+      setQueueError(null);
+      try {
+        const fn = httpsCallable<{ stationId: string; secret: string }, QueueStateResponse>(
+          getFirebaseFunctions(),
+          name
+        );
+        const result = await fn({ stationId: credential.stationId, secret: credential.secret });
+        setQueue({
+          serving: result.data.serving,
+          waiting: result.data.waiting,
+          waitingCount: result.data.waitingCount,
+        });
+      } catch {
+        // No code, no identifier and no vendor string on a screen in a room.
+        setQueueError('That didn’t go through. Try again.');
+      } finally {
+        setQueueBusy(false);
+      }
+    },
+    [credential, queueBusy]
+  );
+
+  const onCallNext = useCallback(() => void runQueueAction('wsfCallNext'), [runQueueAction]);
+  const onFinishServing = useCallback(
+    () => void runQueueAction('wsfFinishServing'),
+    [runQueueAction]
+  );
+
   const onNewCode = useCallback(() => {
     setPairing({ kind: 'requesting' });
     setPairingSession((n) => n + 1);
@@ -521,6 +627,9 @@ export default function StationScreen() {
     : Math.max(96, Math.min(260, windowWidth - 2 * 24 - 2 * 22));
   const qrSize = wide ? QR_SIZE_WIDE : QR_SIZE_PHONE;
 
+  const upNext = nextUp(queue?.waiting ?? []);
+  const callSentence = announceCall(queue?.serving ?? null, label);
+
   const origin = typeof window === 'undefined' ? null : (window.location?.origin ?? null);
   // The newcomer link exists only when the server handed this screen a code,
   // and it only does that for a community whose policy admits by link at all.
@@ -590,6 +699,109 @@ export default function StationScreen() {
           <Text style={styles.status} testID="wsf-station-status">
             {statusLine(sharedTotal, target, status)}
           </Text>
+        </View>
+
+        {/*
+          THE CALLING HALF.
+
+          The name in the largest type on this screen is the one the person
+          CHOSE as they got in line. `wsfQueueState` publishes {entryId,
+          calledName, position} and nothing else, so there is no surname, no
+          email and no uid for this screen to print even by accident.
+
+          BEING CALLED WORKS WITHOUT SEEING THE SCREEN. The block below is an
+          assertive live region that is always mounted — a region created at the
+          moment its text appears is frequently never announced — and it carries
+          the full sentence once. The huge name beside it is `aria-hidden` so a
+          screen reader says the call once rather than twice.
+
+          AND WITHOUT HEARING THE ROOM: the call is printed, not shouted. There
+          is no animation anywhere on this screen, so nothing about a turn
+          depends on motion and `prefers-reduced-motion` has nothing to turn
+          off.
+        */}
+        <View
+          style={[styles.queue, wide ? styles.queueWide : styles.queuePhone]}
+          testID="wsf-station-queue"
+        >
+          <Text style={styles.queueEyebrow}>Now serving</Text>
+          <View
+            style={styles.queueServing}
+            testID="wsf-station-queue-announce"
+            aria-live="assertive"
+            {...({ 'aria-atomic': 'true' } as Record<string, unknown>)}
+          >
+            {queue?.serving ? (
+              <>
+                <Text
+                  style={[styles.servingName, wide ? styles.servingNameWide : null]}
+                  testID="wsf-station-queue-serving"
+                  {...({ 'aria-hidden': 'true' } as Record<string, unknown>)}
+                >
+                  {queue.serving.calledName}
+                </Text>
+                <Text style={styles.servingSentence} testID="wsf-station-queue-sentence">
+                  {callSentence}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.queueEmpty} testID="wsf-station-queue-serving-empty">
+                {queue === null ? 'Reading the line…' : 'Nobody is being called.'}
+              </Text>
+            )}
+          </View>
+
+          <Text style={styles.queueEyebrow}>Next up</Text>
+          {upNext.length ? (
+            <View style={styles.queueNext} testID="wsf-station-queue-next">
+              {upNext.map((waiting, index) => (
+                <Text
+                  key={waiting.entryId}
+                  style={styles.queueNextName}
+                  testID={`wsf-station-queue-next-${index}`}
+                >
+                  {waiting.calledName}
+                </Text>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.queueEmpty} testID="wsf-station-queue-next-empty">
+              Nobody is waiting.
+            </Text>
+          )}
+          <Text style={styles.queueCount} testID="wsf-station-queue-count">
+            {describeLineLength(queue?.waitingCount ?? 0)}
+          </Text>
+
+          <View style={styles.queueActions}>
+            <Pressable
+              onPress={onCallNext}
+              disabled={queueBusy}
+              style={[styles.secondaryButton, queueBusy ? styles.buttonDisabled : null]}
+              testID="wsf-station-call-next"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: queueBusy }}
+            >
+              <Text style={styles.secondaryButtonText}>Call next</Text>
+            </Pressable>
+            {queue?.serving ? (
+              <Pressable
+                onPress={onFinishServing}
+                disabled={queueBusy}
+                style={[styles.outlineButton, queueBusy ? styles.buttonDisabled : null]}
+                testID="wsf-station-finish-serving"
+                accessibilityRole="button"
+                accessibilityState={{ disabled: queueBusy }}
+              >
+                <Text style={styles.outlineButtonText}>Finish</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {queueError ? (
+            <Text style={styles.queueError} testID="wsf-station-queue-error" aria-live="polite">
+              {queueError}
+            </Text>
+          ) : null}
         </View>
 
         {/*
@@ -711,6 +923,65 @@ const styles = StyleSheet.create({
   totalWide: { fontSize: 48, lineHeight: 56 },
   percent: { color: PROGRESS_GREEN, fontSize: 20, fontWeight: '700', textAlign: 'center' },
   status: { color: HERO_MUTED, fontSize: 17, lineHeight: 22, textAlign: 'center' },
+
+  // The calling half. No fixed widths, everything wraps: a chosen name is a
+  // variable-length string and must never push anything off the screen.
+  queue: { gap: 8, alignItems: 'center', minWidth: 0 },
+  // In the wide layout the line is a column of the body row; on a phone it is
+  // a block in the body column. Neither may be given a width of its own.
+  queueWide: { flex: 1 },
+  queuePhone: { alignSelf: 'stretch' },
+  queueEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+  },
+  queueServing: { alignItems: 'center', gap: 4, alignSelf: 'stretch', minWidth: 0 },
+  servingName: {
+    color: CREAM,
+    fontSize: 44,
+    lineHeight: 52,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    textAlign: 'center',
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  servingNameWide: { fontSize: 88, lineHeight: 100, letterSpacing: -1.5 },
+  servingSentence: { color: HERO_MUTED, fontSize: 16, lineHeight: 22, textAlign: 'center' },
+  queueNext: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  queueNextName: {
+    color: CREAM,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: '700',
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  queueEmpty: { color: HERO_MUTED, fontSize: 16, lineHeight: 22, textAlign: 'center' },
+  queueCount: { color: HERO_MUTED, fontSize: 14, lineHeight: 19, textAlign: 'center' },
+  queueActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
+  queueError: { color: CREAM, fontSize: 15, lineHeight: 21, textAlign: 'center' },
+  outlineButton: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(247,245,240,0.35)',
+    paddingHorizontal: 24,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  outlineButtonText: { color: CREAM, fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  buttonDisabled: { opacity: 0.6 },
 
   qrRow: { flexDirection: 'row', gap: 20, justifyContent: 'center', flexWrap: 'wrap' },
   qrBlock: { alignItems: 'center', gap: 6, maxWidth: 280 },
