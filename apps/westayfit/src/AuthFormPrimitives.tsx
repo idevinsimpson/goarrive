@@ -1,0 +1,228 @@
+import { Link } from 'expo-router';
+import type { ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  type TextInputProps,
+  View,
+} from 'react-native';
+
+import { wsfTheme } from './theme';
+
+export function FormShell({
+  eyebrow,
+  heading,
+  intro,
+  children,
+  testID,
+}: {
+  eyebrow?: string;
+  heading: string;
+  intro?: string;
+  children: ReactNode;
+  testID: string;
+}) {
+  return (
+    <View style={styles.container} testID={testID}>
+      <View style={styles.inner}>
+        {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
+        <Text style={styles.heading}>{heading}</Text>
+        {intro ? <Text style={styles.intro}>{intro}</Text> : null}
+        {children}
+      </View>
+    </View>
+  );
+}
+
+export function FieldLabel({ children }: { children: ReactNode }) {
+  return <Text style={styles.label}>{children}</Text>;
+}
+
+export function TextField(props: TextInputProps) {
+  return (
+    <TextInput
+      {...props}
+      placeholderTextColor={wsfTheme.colors.textMuted}
+      style={[styles.input, props.style]}
+    />
+  );
+}
+
+export function SubmitButton({
+  label,
+  onPress,
+  submitting,
+  disabled,
+  testID,
+}: {
+  label: string;
+  onPress: () => void;
+  submitting: boolean;
+  disabled?: boolean;
+  testID: string;
+}) {
+  const isDisabled = submitting || disabled;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isDisabled}
+      style={[styles.button, isDisabled ? styles.buttonDisabled : null]}
+      testID={testID}
+      accessibilityRole="button"
+    >
+      {submitting ? (
+        <ActivityIndicator color={wsfTheme.colors.surface} />
+      ) : (
+        <Text style={styles.buttonText}>{label}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+export function ErrorText({ children, testID }: { children: ReactNode; testID?: string }) {
+  return (
+    <Text style={styles.error} testID={testID}>
+      {children}
+    </Text>
+  );
+}
+
+export function StatusText({ children, testID }: { children: ReactNode; testID?: string }) {
+  return (
+    <Text style={styles.status} testID={testID}>
+      {children}
+    </Text>
+  );
+}
+
+export function SecondaryLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link href={href as never} style={styles.link}>
+      {label}
+    </Link>
+  );
+}
+
+export const authFormStyles = StyleSheet.create({
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: wsfTheme.spacing.md,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderColor: wsfTheme.colors.primary,
+    borderRadius: wsfTheme.radius.sm,
+    marginRight: wsfTheme.spacing.md,
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: wsfTheme.colors.primary,
+  },
+  checkboxCheck: {
+    color: wsfTheme.colors.surface,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  checkboxLabel: {
+    flex: 1,
+    color: wsfTheme.colors.text,
+    fontSize: wsfTheme.typography.body.fontSize,
+    lineHeight: wsfTheme.typography.body.lineHeight,
+  },
+});
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: wsfTheme.colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: wsfTheme.spacing.xl,
+  },
+  inner: {
+    maxWidth: 480,
+    width: '100%',
+  },
+  eyebrow: {
+    color: wsfTheme.colors.primary,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: wsfTheme.spacing.md,
+  },
+  heading: {
+    color: wsfTheme.colors.text,
+    fontSize: wsfTheme.typography.heading.fontSize,
+    fontWeight: wsfTheme.typography.heading.fontWeight,
+    lineHeight: wsfTheme.typography.heading.lineHeight,
+    marginBottom: wsfTheme.spacing.md,
+  },
+  intro: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.body.fontSize,
+    lineHeight: wsfTheme.typography.body.lineHeight,
+    marginBottom: wsfTheme.spacing.lg,
+  },
+  label: {
+    color: wsfTheme.colors.text,
+    fontSize: wsfTheme.typography.caption.fontSize,
+    fontWeight: '600',
+    marginBottom: wsfTheme.spacing.xs,
+    marginTop: wsfTheme.spacing.sm,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: wsfTheme.colors.border,
+    backgroundColor: wsfTheme.colors.surface,
+    borderRadius: wsfTheme.radius.sm,
+    paddingHorizontal: wsfTheme.spacing.md,
+    paddingVertical: wsfTheme.spacing.sm,
+    fontSize: wsfTheme.typography.body.fontSize,
+    color: wsfTheme.colors.text,
+    marginBottom: wsfTheme.spacing.sm,
+  },
+  button: {
+    backgroundColor: wsfTheme.colors.primary,
+    borderRadius: wsfTheme.radius.sm,
+    paddingVertical: wsfTheme.spacing.md,
+    alignItems: 'center',
+    marginTop: wsfTheme.spacing.md,
+    marginBottom: wsfTheme.spacing.md,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: wsfTheme.colors.surface,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '700',
+  },
+  error: {
+    color: '#B4232C',
+    fontSize: wsfTheme.typography.body.fontSize,
+    marginTop: wsfTheme.spacing.sm,
+    marginBottom: wsfTheme.spacing.sm,
+  },
+  status: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: wsfTheme.typography.body.fontSize,
+    marginTop: wsfTheme.spacing.sm,
+    marginBottom: wsfTheme.spacing.sm,
+  },
+  link: {
+    color: wsfTheme.colors.primary,
+    fontSize: wsfTheme.typography.body.fontSize,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+    marginTop: wsfTheme.spacing.md,
+  },
+});

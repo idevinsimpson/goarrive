@@ -5,7 +5,9 @@
   "scripts": {
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions:westayfit",
-    "deploy": "firebase deploy --only functions:westayfit"
+    "deploy": "firebase deploy --only functions:westayfit",
+    "test:rules": "jest --config jest.rules.config.cjs",
+    "test:callable": "jest --config jest.callable.config.cjs"
   },
   "engines": {
     "node": "20"
@@ -15,7 +17,11 @@
     "firebase-functions": "^4.9.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
     "typescript": "^5.9.3"
   }
 }

@@ -1194,6 +1194,64 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // ─────────────────────────────────────────────
+    // WE STAY FIT (WSF) — universal communities app
+    // Append-only section; MUST stay before the catch-all deny.
+    // Rules for the parallel WSF app (apps/westayfit) — collections are
+    // wsf-prefixed so they cannot collide with GoArrive documents.
+    // Zero custom claims: WSF gates use uid + email_verified + owner-checked
+    // Firestore state, never token.role or token.coachId.
+    // ─────────────────────────────────────────────
+
+    function wsfEmailVerified() {
+      return isAuthenticated() && request.auth.token.email_verified == true;
+    }
+
+    function wsfIsGroupMember(groupId) {
+      return isAuthenticated() && exists(
+        /databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid)
+      );
+    }
+
+    // wsfMemberProfiles/{uid} — owner-only; platform admin read-only.
+    // Adult-confirmation invariant is enforced at create AND kept true on update.
+    match /wsfMemberProfiles/{uid} {
+      allow read: if (isAuthenticated() && request.auth.uid == uid) || isPlatformAdmin();
+
+      allow create: if isAuthenticated()
+        && request.auth.uid == uid
+        && wsfEmailVerified()
+        && request.resource.data.adultConfirmation == true
+        && request.resource.data.displayName is string
+        && request.resource.data.acceptedTermsVersion is string
+        && request.resource.data.acceptedPrivacyVersion is string;
+
+      allow update: if isAuthenticated()
+        && request.auth.uid == uid
+        && wsfEmailVerified()
+        && request.resource.data.adultConfirmation == true
+        && request.resource.data.acceptedTermsVersion is string
+        && request.resource.data.acceptedPrivacyVersion is string;
+
+      allow delete: if false;
+    }
+
+    // wsfCommunityGroups/{groupId} — server-only writes (via wsfCreateCommunity).
+    // Reads: current members only, plus platform admin read-only.
+    match /wsfCommunityGroups/{groupId} {
+      allow read: if wsfIsGroupMember(groupId) || isPlatformAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // wsfMemberships/{membershipId} — server-only writes (via wsfCreateCommunity
+    // and future invite-accept flows). Reads: owner-only + platform admin read-only.
+    // The membership doc's `userId` field is the truth (doc ID is never parsed).
+    match /wsfMemberships/{membershipId} {
+      allow read: if (isAuthenticated() && resource.data.userId == request.auth.uid)
+        || isPlatformAdmin();
+      allow create, update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

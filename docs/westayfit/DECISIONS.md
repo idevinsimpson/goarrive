@@ -72,3 +72,62 @@ Process lesson (recorded here so future WSF work does not repeat it):
 Recorded in Maia's session memory: before any `git worktree add -b <branch>`, run both `git branch --list <branch>` AND `git ls-remote origin refs/heads/<branch>`. Stop on any output.
 
 Reason: catches stale remote branches from prior workers/attempts that the local checkout has never heard of; `branch --list` alone misses that entirely.
+
+## 2026-08-27 — Brand language hierarchy (WITHDRAWN — attribution was incorrect)
+
+This entry recorded a slogan/explainer/campaign-line hierarchy and marked it "Devin-approved",
+citing "Devin's written approval during the 2026-08-27 delegated-autonomy window". That
+attribution is incorrect: the copy recorded here is not what the owner approved, and the cited
+approval could not be verified. The entry is withdrawn rather than silently amended so the error
+itself stays on the record.
+
+The wording it carried has been removed from this log and from the app so it cannot be picked up
+again by grep; it remains recoverable from git history if it is ever needed for audit.
+
+Superseded by the 2026-08-31 entry below, which carries the actual final copy.
+
+## 2026-08-31 — We Stay Fit brand copy (corrects the 2026-08-27 entry)
+
+Chose: the final brand copy.
+
+- **Wordmark:** WE STAY FIT
+- **Tagline:** Turn your community into a place that moves.
+- **Supporting line:** Shared challenges. More movement. Stronger communities.
+
+**Source:** *We Stay Fit Universal Communities PM Handoff (Revised 2026-08-31)*, §1 "Your
+Appointment and Mission", §1.1 "Approved messaging and interpretation", and Appendix A.1 "Current
+messaging decisions", supplied by the owner (Devin Simpson) on 2026-08-31. Appendix A.1 lists the
+tagline and supporting line above as current, and lists the strings below as superseded. That
+document is the citation for this entry; it is not held in this repository.
+
+Corrects: the 2026-08-27 "Brand language hierarchy (Devin-approved)" entry above. That entry's
+copy is listed as superseded by the source document, and its own approval citation ("Devin's
+written approval during the 2026-08-27 delegated-autonomy window") could not be verified against
+any artifact; it is withdrawn.
+
+**Supersession carried forward — both of these are superseded and neither is canonical:**
+
+- "Your place. Your people. Your move." — from the withdrawn 2026-08-27 entry.
+- "Wherever your people gather, We Stay Fit." — the M-U1-era chartered tagline. The 2026-08-27
+  entry had recorded this supersession; that clause is restated here so it is not lost with the
+  withdrawal. This also supersedes item 3 of the 2026-08-26 M-U1.1 entry above, which recorded
+  that sentence as the home tagline and had `home.spec.ts` asserting it. The spec now asserts the
+  copy in this entry.
+
+Alternatives considered and rejected by the owner:
+- "Start a community. Choose a challenge. Invite your people." as the primary explainer — rejected
+  because it makes the reader feel responsible for starting or recruiting something. Someone should
+  be able to simply *join* what their community is already doing.
+- The word "participation" — rejected as too institutional.
+- Apartment-specific language — deliberately dropped; the copy is not tied to one venue type.
+
+Reason: the tagline keeps the **community** at the center rather than the app, the coach, or the
+workout — the community is the product. The supporting line names the mechanism (shared
+challenges), the behaviour (more movement), and the outcome framing the owner wants (stronger
+communities).
+
+Rules carried forward from the withdrawn entry (still in force): WSF-only — GoArrive brand
+language is unchanged; sparing contextual variants are acceptable where they serve the tagline;
+no outcome claims (health, ROI, retention, leasing, productivity, growth) derive from this copy.
+
+Historical M-U1-era uses, releases, and evidence artifacts are not rewritten.

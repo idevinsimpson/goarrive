@@ -23,6 +23,22 @@ WSF communities do not consume GoArrive coaches, workouts, movements, or program
 - M-U3 (Interest → App Bridge) will lean on principle 2 (low-friction join).
 - M-U4 (Champion Campaigns Landing Surface) will lean on principle 3 (champion-led).
 
+## Brand Language
+
+Canonical brand copy for We Stay Fit. Source: *We Stay Fit Universal Communities PM Handoff (Revised 2026-08-31)*, §1.1 and Appendix A.1, supplied by the owner (Devin Simpson) on 2026-08-31; recorded in `DECISIONS.md`:
+
+- **Wordmark:** WE STAY FIT
+- **Tagline:** "Turn your community into a place that moves." — exact punctuation.
+- **Supporting line:** "Shared challenges. More movement. Stronger communities." — supporting use only, not a substitute for the tagline.
+
+The tagline keeps the community at the center rather than the app, the coach, or the workout — the community is the product. It is not required copy for every screen; sparing contextual variants are acceptable when they serve the tagline.
+
+Rejected by the owner, and not to be reintroduced: "Start a community. Choose a challenge. Invite your people." as the primary explainer (it makes the reader feel responsible for starting or recruiting, when someone should be able to simply *join* what their community is already doing); the word "participation" (too institutional); and apartment-specific language.
+
+Scope: WSF-only. GoArrive brand language is unchanged. No outcome claims (health, ROI, retention, leasing, productivity, growth) derive from this copy.
+
+Corrects: the hierarchy previously recorded here as "Devin-approved 2026-08-27" was not the copy the owner approved, and that approval citation could not be verified; it is withdrawn (see `DECISIONS.md`). The M-U1-era chartered tagline "Wherever your people gather, We Stay Fit." also remains superseded. Historical M-U1 uses, releases, and evidence artifacts are not rewritten.
+
 ## Ratification
 
 The charter itself is subject to change; every ratified change gets an entry in `DECISIONS.md`. This document tracks the currently-proposed principles until formally ratified.
