@@ -187,6 +187,9 @@ export default function EventScreen() {
    * `eventActivities` and this page behaves exactly as it did.
    */
   const [resolved, setResolved] = useState<ResolvedActivity[]>([]);
+  /** The event's own title when the server resolved one. Null on the legacy
+   * path, where the goal's title IS the event's title. */
+  const [resolvedTitle, setResolvedTitle] = useState<string | null>(null);
   const activities = useMemo(
     () =>
       resolved.length
@@ -347,12 +350,21 @@ export default function EventScreen() {
         try {
           const contextFn = httpsCallable<
             { goalId: string },
-            { activities: ResolvedActivity[] }
+            { title?: string; activities: ResolvedActivity[] }
           >(functions, 'wsfEventContext');
           const context = await contextFn({ goalId });
           if (!cancelled) {
             const list = Array.isArray(context.data?.activities) ? context.data.activities : [];
             setResolved(list.filter((a) => typeof a?.goalId === 'string' && a.goalId !== ''));
+            // THE EVENT'S OWN NAME. The address names a CHILD, so the pulse
+            // title is that child's — which is how a combined event called
+            // "Move together" introduced itself as "Expo Squats", one of the
+            // things it contains, above a list offering the other one too.
+            // The server already resolves the event's title; the screen was
+            // simply dropping it on the floor.
+            const eventTitle =
+              typeof context.data?.title === 'string' ? context.data.title.trim() : '';
+            if (eventTitle) setResolvedTitle(eventTitle);
           }
         } catch {
           // Nothing to say and nothing to fix: the activity list falls back to
@@ -538,8 +550,8 @@ export default function EventScreen() {
     <>
       <View style={kit.hero}>
         <Text style={kit.eyebrowOnNavy}>{state.communityDisplayName ?? 'At the event'}</Text>
-        <Text style={kit.heroTitle} accessibilityRole="header" {...({ 'aria-level': 1 } as Record<string, unknown>)}>
-          {state.goalTitle ?? 'Add your part'}
+        <Text testID="wsf-event-title" style={kit.heroTitle} accessibilityRole="header" {...({ 'aria-level': 1 } as Record<string, unknown>)}>
+          {resolvedTitle ?? state.goalTitle ?? 'Add your part'}
         </Text>
         <Text style={kit.heroMeta}>
           Two things, in order: what you’re here to do, then where you’ll do it. Whatever you add,

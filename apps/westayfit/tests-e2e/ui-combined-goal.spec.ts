@@ -49,6 +49,23 @@ async function snap(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(ARTIFACTS_DIR, `${name}.png`), fullPage: false });
 }
 
+/** The phone sizes an expo actually brings, plus the short one that finds what
+ * a tall viewport hides. No assertion is made about any of these images. */
+const PHONE_SIZES: { label: string; width: number; height: number }[] = [
+  { label: '360', width: 360, height: 844 },
+  { label: '430', width: 430, height: 932 },
+  { label: 'short-390x640', width: 390, height: 640 },
+];
+
+async function snapWidths(page: Page, name: string): Promise<void> {
+  const restore = page.viewportSize() ?? { width: 390, height: 844 };
+  for (const size of PHONE_SIZES) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await snap(page, `${name}-${size.label}`);
+  }
+  await page.setViewportSize(restore);
+}
+
 const unique = (label: string) => `${label}-${randomBytes(6).toString('hex')}@example.com`;
 
 /** `YYYY-MM-DDTHH:mm` in the browser's own local time — the only shape the
@@ -400,4 +417,101 @@ test('an unknown combined address says the same nothing an unauthorized one says
   );
   await expect(screen.getByTestId('wsf-combined-recheck')).toBeVisible();
   await fresh.close();
+});
+
+/**
+ * THE MULTI-ACTIVITY CHOICE, which only exists on a combined event.
+ *
+ * A lone goal offers one activity, and a single radio beside a heading reads
+ * as a form to fill in. A COMBINED event is the case the control exists for:
+ * several activities behind one address, where the person genuinely has to
+ * pick, and where the thing they are picking between must read as a thing —
+ * the goal's own title, with what it counts underneath — rather than as a
+ * repeated unit word.
+ *
+ * The two ways on still do not exist until an activity is selected, and
+ * selecting one still puts nobody in a line. That rule is asserted here on the
+ * combined path as well as the single-goal one, because it is the rule a
+ * combined QR is most likely to break.
+ */
+test('a combined event offers every frozen activity by name, and the ways on appear only after one is chosen', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // A phone, because this is a phone screen. The Champion tools above are
+  // driven at whatever width this spec's other tests use; the captures below
+  // are taken at the width the choice will be met at.
+  const { groupId, goalA, goalB } = await championWithTwoGoals(page);
+
+  await openManage(page);
+  await authorizeDisplay(page, goalA);
+  await authorizeDisplay(page, goalB);
+  await page.getByTestId('wsf-community-manage-close').click();
+
+  await page.goto(`/community/${groupId}`);
+  await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+  await openManage(page);
+  await page.getByTestId('wsf-kiosk-mode-combined').click();
+  await expect(page.getByTestId('wsf-combined-setup')).toBeVisible();
+  await page.getByTestId('wsf-combined-title').fill('Move together');
+  await page.getByTestId('wsf-combined-unit').fill('movements');
+  await page.getByTestId('wsf-combined-target').fill('2000');
+  await page.getByTestId('wsf-combined-start').fill(localValue(-1));
+  await page.getByTestId('wsf-combined-end').fill(localValue(30));
+  await page.getByTestId(`wsf-combined-pick-${goalA}`).click();
+  await page.getByTestId(`wsf-combined-pick-${goalB}`).click();
+  await page.getByTestId('wsf-combined-submit').click();
+  await expect(page.getByTestId('wsf-combined-created')).toBeVisible({ timeout: 25_000 });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  // ---- THE EVENT, ENTERED THROUGH ONE OF ITS CHILDREN ---------------------
+  // The address names a child; the event behind it is the combined setup, and
+  // what it offers is EVERY frozen child rather than the one in the URL.
+  await page.goto(`/event/${goalA}`);
+  await expect(page.getByTestId('wsf-event-device-choice')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-device-choice-personal').click();
+  await expect(page.getByTestId('wsf-event-member')).toBeVisible({ timeout: 25_000 });
+
+  // THE EVENT INTRODUCES ITSELF AS THE EVENT. The address names a child, so
+  // the goal pulse's title is that child's — which had a combined event called
+  // "Move together" heading itself "Expo Squats", one of the two things it was
+  // about to offer.
+  // Asserted on the TITLE, not the page: "Expo Squats" belongs on this screen
+  // — as one of the two activities on offer — just not as the event's name.
+  await expect(page.getByTestId('wsf-event-title')).toHaveText('Move together');
+
+  // BOTH ACTIVITIES, EACH BY ITS OWN NAME, each saying what it counts.
+  const squats = page.getByTestId('wsf-event-activity-squats');
+  const pushups = page.getByTestId('wsf-event-activity-push-ups');
+  await expect(squats).toBeVisible({ timeout: 20_000 });
+  await expect(pushups).toBeVisible();
+  await expect(page.getByTestId('wsf-event-activity-squats-label')).toHaveText('Expo Squats');
+  await expect(page.getByTestId('wsf-event-activity-push-ups-label')).toHaveText('Expo Push-ups');
+  await expect(page.getByTestId('wsf-event-activity-squats-description')).toContainText(
+    'Counted in squats.'
+  );
+  await expect(page.getByTestId('wsf-event-activity-push-ups-description')).toContainText(
+    'Counted in push-ups.'
+  );
+
+  // NOTHING IS CHOSEN FOR THEM, and the ways on do not exist yet.
+  await expect(page.getByTestId('wsf-event-activity-squats-indicator-dot')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-event-activity-push-ups-indicator-dot')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-event-choice')).toHaveCount(0);
+  await snap(page, 'combined-390-activity-choice');
+  await snapWidths(page, 'combined-activity-choice');
+
+  // ---- ONE IS CHOSEN, AND ONLY THEN THE TWO WAYS ON ----------------------
+  await pushups.click();
+  await expect(page.getByTestId('wsf-event-activity-push-ups-indicator-dot')).toBeVisible();
+  await expect(page.getByTestId('wsf-event-activity-squats-indicator-dot')).toHaveCount(0);
+  const choice = page.getByTestId('wsf-event-choice');
+  await expect(choice).toBeVisible({ timeout: 10_000 });
+  // The choice says back WHICH activity, so the queue somebody joins is the
+  // one they picked and not the one the address happened to name.
+  await expect(page.getByTestId('wsf-event-choice-activity')).toHaveText('push-ups');
+  await snap(page, 'combined-390-two-choices');
+  await snapWidths(page, 'combined-two-choices');
 });

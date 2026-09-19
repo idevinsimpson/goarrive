@@ -112,4 +112,32 @@ contribution commits.
 Produced in a run where the affected cycle passed with zero failures, on the
 commit this file is committed in.
 
-Still missing, and not claimed: the combined multi-activity journey end to end.
+## `combined-activity-choice/` — the multi-activity choice, which only a combined event has
+
+A lone goal offers one activity, and a single radio under a heading reads as a
+form to fill in. A COMBINED event is the case the control exists for: several
+activities behind one address, where the person genuinely has to pick.
+
+Eight files, 390 plus 360, 430 and short 390x640.
+
+| file | the moment |
+|---|---|
+| `combined-390-activity-choice` | both frozen children offered **by their own names**, each saying what it counts, neither preselected and no way on yet |
+| `combined-390-two-choices` | one chosen, and only then "Use my phone" / "Join the kiosk queue", with the chosen activity echoed back |
+
+Two things these captures fixed rather than merely recorded:
+
+- The options used to be the raw unit word, repeated — "squats", under a heading
+  about squats, on a page titled squats. They are now the goal's own title with
+  the unit as a counting cue beneath it ("Expo Push-ups" / "Counted in
+  push-ups."). The unit still keys the option and is still what the journey
+  carries, so nothing downstream changed.
+- **The event introduced itself as one of its own children.** The address names
+  a child goal, so the page took its title from that child's pulse: a combined
+  event called "Move together" headed itself "Expo Squats" — above a list
+  offering Expo Squats and Expo Push-ups. The server already resolved the
+  event's real title and the screen was dropping it. It now names the event.
+
+Still missing, and not claimed: the combined event driven all the way through a
+station turn. What is proved here is the choice; the turn itself is proved on
+the single-goal path in `queue-call-by-name/`.
