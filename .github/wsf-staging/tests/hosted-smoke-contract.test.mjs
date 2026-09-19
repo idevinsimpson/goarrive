@@ -329,10 +329,11 @@ test('the D-5 verdict is isolated: its failure is its own row and cannot stop th
   const isolatedNames = [...main.matchAll(/await isolated\('([^']+)'/g)].map((m) => m[1]);
   assert.deepStrictEqual(isolatedNames, [
     'station callable transport',
+    'public dynamic route reload',
     'membership status rules (D-5)',
     'recent public additions (W2)', 'repeat policy (W3)', 'target-crossing event (W5)', 'durable history (W6)',
     'guided rules, share + momentum, join QR (W4/W7/W8)', 'kiosk mode (W9)',
-  ], 'only the station transport row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
+  ], 'only the station transport row, the route-reload row, D-5 and the candidate B rows are isolated; every Package E case still aborts the suite');
   assert.ok(main.indexOf("isolated('recent public additions (W2)'") > main.indexOf('await caseVisualProof(browser);'), 'the candidate B rows run after the Package E, D-5, D-1 and visual rows');
 });
 
@@ -476,13 +477,64 @@ test('the station verdict names the service and status, and the only 403 it forg
   assert.ok(body.indexOf('assert(refused.length === 0') < body.indexOf("check('station callable transport', 'PASS'"), 'the PASS row must come after the assertion');
 });
 
+test('the public dynamic route reload proves the ROUTE resolved, on absent ids, without writing anything', () => {
+  const body = SMOKE.slice(
+    SMOKE.indexOf('async function caseDynamicRouteReload('),
+    SMOKE.indexOf('async function isolated(')
+  );
+  assert.ok(body, 'there is no caseDynamicRouteReload');
+
+  // The two routes nothing else in this suite loads. Named, so quietly
+  // dropping one is a failure rather than a smaller probe list.
+  const probes = SMOKE.slice(
+    SMOKE.indexOf('const DYNAMIC_ROUTE_PROBES'),
+    SMOKE.indexOf('async function caseDynamicRouteReload(')
+  );
+  assert.ok(probes.includes("route: '/combined'"), '/combined is not probed');
+  assert.ok(probes.includes("route: '/station'"), '/station is not probed');
+  assert.ok(probes.includes("title: 'Combined goal'"), 'the combined probe has no expected title');
+  assert.ok(probes.includes("title: 'Station'"), 'the station probe has no expected title');
+
+  // A 200 is not the assertion. Firebase Hosting answers an unmatched path
+  // with a document of its own, so a status-only check would pass on a 404
+  // page and on a neighbouring route's document alike.
+  assert.ok(body.includes('status !== 200'), 'the row does not check the status at all');
+  assert.ok(body.includes('<title>'), 'the row does not read the served document title, so it cannot tell which route answered');
+  assert.ok(
+    body.includes('!title.includes(probe.title)'),
+    'the row does not compare the served title against the route it asked for'
+  );
+
+  // Absent, run-tagged ids: this must neither depend on real data existing
+  // nor be able to create any.
+  assert.ok(body.includes('wsfsmoke-absent-'), 'the probe ids are not absent and run-tagged');
+  assert.ok(!/method:\s*'POST'/.test(body), 'a route reload must not POST');
+  assert.ok(!body.includes('trackDoc('), 'the route reload must create nothing to clean up');
+  assert.ok(!body.includes('callFunction('), 'the route reload must not call a callable; it is a Hosting check');
+
+  // Every probe runs, and the PASS row comes after the assertion — the same
+  // two properties the station transport row is held to.
+  assert.match(body, /assert\(refused\.length === 0, refused\.join\('; '\)\)/, 'every unresolved route must be named, not just the first');
+  assert.ok(
+    body.indexOf('assert(refused.length === 0') < body.indexOf("check('public dynamic route reload', 'PASS'"),
+    'the PASS row must come after the assertion'
+  );
+  assert.ok(body.includes('continue;'), 'one unreachable route must not hide the other');
+
+  // And the receipt bounds what the row establishes.
+  assert.ok(
+    SMOKE.includes('The public dynamic route reload row proves only that Hosting resolves'),
+    'the receipt does not bound what the route-reload row establishes'
+  );
+});
+
 test('the green-run row count is pinned, and every row name is distinct', () => {
   const rows = [...SMOKE.matchAll(/check\('([^']+)', 'PASS'/g)].map((m) => m[1]);
-  assert.equal(rows.length, 22, `a fully green run emits one row per PASS site; expected 22, found ${rows.length}`);
+  assert.equal(rows.length, 23, `a fully green run emits one row per PASS site; expected 23, found ${rows.length}`);
   assert.equal(new Set(rows).size, rows.length, 'two rows share a name, so RESULTS could not be read back per row');
   assert.ok(rows.includes('station callable transport'), 'the station transport row is not among the green rows');
   assert.match(SMOKE, /console\.log\(`RESULTS=\$\{results\.length\}`\);/);
-  assert.match(SMOKE, /A fully green run emits 22 rows/, 'the script must pin the same count the harness does');
+  assert.match(SMOKE, /A fully green run emits 23 rows/, 'the script must pin the same count the harness does');
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);
