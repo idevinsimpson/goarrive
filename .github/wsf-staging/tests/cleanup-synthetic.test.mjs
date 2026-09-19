@@ -40,7 +40,7 @@ const syntheticEmail = (tag, label) => `wsf-${tag}-${label}-${crypto.randomBytes
  * set of existing Firestore paths. `calls` records every mutating request so
  * a test can prove nothing was deleted. `behave` overrides specific endpoints.
  */
-function startFake({ accounts = new Map(), docs = new Set(), behave = {} } = {}) {
+function startFake({ accounts = new Map(), docs = new Set(), docFields = new Map(), behave = {} } = {}) {
   const calls = [];
   const server = http.createServer((req, res) => {
     let raw = '';
@@ -69,7 +69,7 @@ function startFake({ accounts = new Map(), docs = new Set(), behave = {} } = {})
         return json(200, {});
       }
       if (req.method === 'GET') {
-        if (docs.has(docPath)) return json(200, { name: docPath, fields: {} });
+        if (docs.has(docPath)) return json(200, { name: docPath, fields: docFields.get(docPath) ?? {} });
         return json(404, { error: { status: 'NOT_FOUND' } });
       }
       json(404, { error: { status: 'NOT_FOUND' } });
@@ -491,6 +491,172 @@ await test('early smoke failure: no evidence dir, no manifest → a real MANIFES
   assert.equal(/CLEANUP_STATUS=(COMPLETE|NO_FIXTURES)/.test(r.out), false);
   assert.equal(fs.statSync(evidence).mode & 0o777, 0o700, 'the created directory is restrictive');
   assert.equal(fs.statSync(receiptPath).mode & 0o777, 0o600);
+});
+
+/**
+ * Server-minted documents, and why they cannot simply be tracked.
+ *
+ * The turn journey names its records with Firestore auto-ids, and its lineId
+ * is derived from one (`setup__{setupId}`). None of them can ever carry the
+ * run tag. Tracking them as ordinary paths does not merely fail to delete
+ * them: ONE untagged path fails provenance, and a failed provenance check
+ * deletes NOTHING — so the turn row would have taken every other case's
+ * fixtures down with it. These rows pin both halves: the refusal, and the
+ * linked-document route that replaces it.
+ */
+const S = (v) => ({ stringValue: v });
+
+/** The turn journey's writes, split into the tag-safe ones and the minted
+ * ones, laid out exactly as caseTurnContract creates them. */
+function turnShape(tag = RUN_TAG) {
+  const base = fixture(tag, 'turn', { goals: 2 });
+  const [goalA] = base.goalIds;
+  const member = base.users.member;
+  const setupId = firebaseUid().slice(0, 20);
+  const lineId = `setup__${setupId}`;
+  const ids = { p1: firebaseUid().slice(0, 20), p2: firebaseUid().slice(0, 20), s1: firebaseUid().slice(0, 20), s2: firebaseUid().slice(0, 20), entry: firebaseUid().slice(0, 20), attempt: firebaseUid().slice(0, 20) };
+
+  // Keyed by the run-tagged goal id, so these stay ordinary tagged paths.
+  const tagged = [...base.docs];
+  for (const g of base.goalIds) tagged.push(`wsfCombinedGoalClaims/${g}`);
+  tagged.push(`wsfContributions/${goalA}_${member}_${ids.attempt}`);
+  tagged.push(`wsfGoalMemberTotals/${goalA}_${member}`);
+  tagged.push(`wsfGoals/${goalA}/recentAdditions/${ids.attempt}`);
+  tagged.push(`wsfCombinedCredits/${goalA}_${member}_${ids.attempt}`);
+  for (let i = 0; i < 10; i += 1) tagged.push(`wsfCombinedCounters/${setupId}/shards/${goalA}_${i}`);
+
+  // Minted by the server. The content is what each record really carries.
+  const fields = new Map([
+    [`wsfCombinedGoals/${setupId}`, { communityGroupId: S(base.groupId) }],
+    [`wsfKioskPairings/${ids.p1}`, { goalId: S(goalA) }],
+    [`wsfKioskPairings/${ids.p2}`, { goalId: S(goalA) }],
+    [`wsfKioskStations/${ids.s1}`, { goalId: S(goalA) }],
+    [`wsfKioskStations/${ids.s2}`, { goalId: S(goalA) }],
+    [`wsfTurnEntries/${ids.entry}`, { goalId: S(goalA), uid: S(member), lineId: S(lineId) }],
+    [`wsfTurnLines/${lineId}`, { communityGroupId: S(base.groupId) }],
+    [`wsfTurnMembers/${lineId}__${member}`, { entryId: S(ids.entry) }],
+    [`wsfTurnReceipts/${lineId}__${member}`, { goalId: S(goalA) }],
+  ]);
+  const linkedDocs = [
+    { path: `wsfCombinedGoals/${setupId}`, via: base.groupId },
+    { path: `wsfKioskPairings/${ids.p1}`, via: goalA },
+    { path: `wsfKioskPairings/${ids.p2}`, via: goalA },
+    { path: `wsfKioskStations/${ids.s1}`, via: goalA },
+    { path: `wsfKioskStations/${ids.s2}`, via: goalA },
+    { path: `wsfTurnEntries/${ids.entry}`, via: goalA },
+    { path: `wsfTurnLines/${lineId}`, via: base.groupId },
+    { path: `wsfTurnMembers/${lineId}__${member}`, via: member },
+    { path: `wsfTurnReceipts/${lineId}__${member}`, via: goalA },
+  ];
+  return { base, tagged, fields, linkedDocs, member, goalA, lineId, setupId };
+}
+
+async function runTurn({ tagged, fields, linkedDocs, base }, tweak = {}) {
+  const manifest = {
+    project: 'westayfit-staging',
+    runTag: RUN_TAG,
+    users: Object.values(base.users),
+    docs: tweak.docs ?? tagged,
+    ...(tweak.omitLinked ? {} : { linkedDocs: tweak.linkedDocs ?? linkedDocs }),
+  };
+  const present = new Set([...manifest.docs, ...fields.keys()]);
+  for (const p of tweak.absent ?? []) present.delete(p);
+  const fake = await startFake({
+    accounts: new Map([...base.emails]),
+    docs: present,
+    docFields: tweak.fields ?? fields,
+  });
+  const d = tmp();
+  const r = await runCleanup(fake.base, writeManifest(d, manifest), path.join(d, 'receipt.json'));
+  fake.server.close();
+  return { r, fake, present };
+}
+
+await test('a server-minted path tracked as an ordinary doc fails provenance and deletes NOTHING', async () => {
+  const shape = turnShape();
+  // Exactly the manifest caseTurnContract built before this correction: the
+  // minted paths sitting in `docs` alongside the tagged ones.
+  const { r, fake } = await runTurn(shape, { docs: [...shape.tagged, ...shape.fields.keys()], omitLinked: true });
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(r.code, 1);
+  assert.equal(mutations(fake.calls).length, 0, 'a failed provenance check must delete nothing at all');
+  // The point that makes this release-blocking: the OTHER cases' fixtures die too.
+  assert.match(r.receipt.reason, /failed provenance validation/);
+  assert.ok(r.receipt.unsafeIdentifiers >= 9, `expected every minted path to be named, saw ${r.receipt.unsafeIdentifiers}`);
+  assert.ok(r.receipt.unsafeDetails.some((d) => /wsfTurnEntries\/.*not tagged/.test(d)));
+});
+
+await test('the same documents, declared as linked, are verified and removed — and the run completes', async () => {
+  const shape = turnShape();
+  const { r, fake, present } = await runTurn(shape);
+  assert.equal(r.receipt.status, 'COMPLETE', r.receipt.reason || '');
+  assert.equal(r.code, 0);
+  assert.equal(r.receipt.linkedDocumentsVerified, 9);
+  assert.equal(r.receipt.linkedDocumentsAlreadyAbsent, 0);
+  assert.equal(present.size, 0, 'every document must be gone');
+  for (const p of shape.fields.keys()) {
+    assert.ok(fake.calls.some((c) => c.kind === 'deleteDoc' && c.path === p), `${p} was never deleted`);
+  }
+});
+
+await test('a linked document whose stored record does not reference its declared owner is refused', async () => {
+  const shape = turnShape();
+  const fields = new Map(shape.fields);
+  // The same path, but the record belongs to somebody else's run.
+  fields.set(`wsfTurnLines/${shape.lineId}`, { communityGroupId: S(`e5grp-${OTHER_TAG}-turn`) });
+  const { r, fake } = await runTurn(shape, { fields });
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0, 'one unproven link must stop the whole run');
+  assert.ok(r.receipt.unsafeDetails.some((d) => /does not reference/.test(d)));
+});
+
+await test('a linked owner that is neither run-tagged nor an email-verified uid is refused', async () => {
+  const shape = turnShape();
+  const linkedDocs = shape.linkedDocs.map((l, i) => (i === 0 ? { path: l.path, via: 'wsfCombinedGoals' } : l));
+  const { r, fake } = await runTurn(shape, { linkedDocs });
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0);
+  assert.ok(r.receipt.unsafeDetails.some((d) => /neither .*-tagged nor an email-verified uid/.test(d)));
+  // A uid that IS in the manifest but failed its email check must not qualify either.
+  const stranger = firebaseUid();
+  const withStranger = shape.linkedDocs.map((l, i) => (i === 0 ? { path: l.path, via: stranger } : l));
+  const bad = await runTurn(shape, { linkedDocs: withStranger });
+  assert.equal(bad.r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(bad.fake.calls).length, 0);
+});
+
+await test('linkage by path needs no read, and a linked document already gone is not an obstacle', async () => {
+  const shape = turnShape();
+  // wsfTurnMembers carries only an entryId, so it is proven by the member uid
+  // in its own path. Delete it from the backend first: an absent record must
+  // still be admitted, or a row that failed late could never clean up.
+  const memberDoc = `wsfTurnMembers/${shape.lineId}__${shape.member}`;
+  const lineDoc = `wsfTurnLines/${shape.lineId}`;
+  const { r, fake } = await runTurn(shape, { absent: [memberDoc, lineDoc] });
+  assert.equal(r.receipt.status, 'COMPLETE', r.receipt.reason || '');
+  // Eight of the nine are proven by content and one by its own path. The
+  // path-proven one is admitted WITHOUT a read, so its absence is invisible
+  // here; the content-proven one that is gone is counted as already absent.
+  assert.equal(r.receipt.linkedDocumentsVerified, 8);
+  assert.equal(r.receipt.linkedDocumentsAlreadyAbsent, 1);
+  const reads = fake.calls.filter((c) => c.kind === 'deleteDoc');
+  assert.ok(reads.some((c) => c.path === memberDoc), 'the path-linked document is still offered for deletion');
+});
+
+await test('a path already claimed as a tagged doc may not ALSO be declared linked', async () => {
+  // Not a safety hole but a counting one: without the guard the path is
+  // queued twice, deleted twice, and reported as both a tagged document and
+  // a verified link. The first mutation of this test did not exercise the
+  // guard at all — it used a foreign path, which the tag rule rejects on its
+  // own, so the test passed with the guard deleted.
+  const shape = turnShape();
+  const doubled = shape.tagged[0];
+  const { r, fake } = await runTurn(shape, {
+    linkedDocs: [...shape.linkedDocs, { path: doubled, via: shape.goalA }],
+  });
+  assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE');
+  assert.equal(mutations(fake.calls).length, 0);
+  assert.ok(r.receipt.unsafeDetails.some((d) => /already claimed as a tagged path/.test(d)));
 });
 
 console.log(`\ncleanup-synthetic: ${passed} passed`);
