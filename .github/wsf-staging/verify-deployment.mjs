@@ -56,6 +56,16 @@ const EXPECTED = [
   'wsfstationrequestpairing', 'wsfstationpairingstatus', 'wsfapprovestation',
   'wsfstationclaimpairing', 'wsfstationstate', 'wsfliststations',
   'wsfrevokestation',
+  // The combined movement goal, its release path, and the queue.
+  'wsfcallnext',
+  'wsfclosecombinedgoal',
+  'wsfcombinedgoalpulse',
+  'wsfcreatecombinedgoal',
+  'wsffinishserving',
+  'wsfjoinqueue',
+  'wsfleavequeue',
+  'wsfmyqueueentry',
+  'wsfqueuestate',
 ].sort();
 const CREATED_BY_PACKAGE_E = 'wsfsetgoaldisplayauthorization';
 /**
@@ -64,13 +74,15 @@ const CREATED_BY_PACKAGE_E = 'wsfsetgoaldisplayauthorization';
  * nor unexpected.
  */
 const CREATED_BY_CANDIDATE = [
-  'wsfstationrequestpairing',
-  'wsfstationpairingstatus',
-  'wsfapprovestation',
-  'wsfstationclaimpairing',
-  'wsfstationstate',
-  'wsfliststations',
-  'wsfrevokestation',
+  'wsfcallnext',
+  'wsfclosecombinedgoal',
+  'wsfcombinedgoalpulse',
+  'wsfcreatecombinedgoal',
+  'wsffinishserving',
+  'wsfjoinqueue',
+  'wsfleavequeue',
+  'wsfmyqueueentry',
+  'wsfqueuestate',
 ];
 /**
  * wsfGoalRecentAdditions came in with the PREVIOUS candidate, so by the letter
@@ -80,7 +92,21 @@ const CREATED_BY_CANDIDATE = [
  * guess would fail a deploy for a fact nobody checked. Its transport stays
  * reported until a run's notes show what it actually is, and then it moves.
  */
-const RECENTLY_CREATED = ['wsfgoalrecentadditions'];
+const RECENTLY_CREATED = [
+  'wsfgoalrecentadditions',
+  // The seven station services, created by run 35420410645 and still reported
+  // invoker_iam_check_enabled by run 35421156377's own receipt. Not this
+  // candidate's to create, and emphatically not pre-existing: the pre-existing
+  // set is asserted to carry invokerIamDisabled and these demonstrably do not.
+  // They move when a run's notes show the transport fixed, and not before.
+  'wsfstationrequestpairing',
+  'wsfstationpairingstatus',
+  'wsfapprovestation',
+  'wsfstationclaimpairing',
+  'wsfstationstate',
+  'wsfliststations',
+  'wsfrevokestation',
+];
 const NEW_SERVICES = [CREATED_BY_PACKAGE_E, ...RECENTLY_CREATED, ...CREATED_BY_CANDIDATE];
 const PRE_EXISTING = EXPECTED.filter((n) => !NEW_SERVICES.includes(n));
 
