@@ -394,21 +394,28 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId(`wsf-community-goal-period-${closed}`)).toHaveText('Aug 1 – 15');
   await expect(page.getByTestId('wsf-community-progress-updated')).toContainText('Confirmed');
   await expect(page.getByTestId('wsf-community-history')).not.toContainText('public display');
-  // No empty challenge card under an active goal, and no invite placeholder
-  // for a viewer who has no working link.
+  // No empty challenge card under an active goal, and no invite card for a
+  // member of a private community: there is no working link to share.
   await expect(page.getByTestId('wsf-community-challenge-card')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-invite')).toHaveCount(0);
-  // No Champion tools for a member.
+  // No Champion tools for a member: no Manage, no link rotation, and none of
+  // the administrative rows — a member's page carries no role label.
   await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
-  await expect(page.getByTestId('wsf-community-invite-reset')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-reset')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
+  // The two quiet facts sit at the foot of the page, not in the identity.
   await expect(page.getByTestId('wsf-community-member-count')).toContainText('2 members');
-  // Administrative rows are folded away until asked for; the state is intact.
-  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
-  await page.getByTestId('wsf-community-details-toggle').click();
-  await expect(page.getByTestId('wsf-community-role')).toContainText('Member');
-  await expect(page.getByTestId('wsf-community-status')).toContainText('Active');
-  await page.getByTestId('wsf-community-details-toggle').click();
-  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
+  const identityBox = await page.getByTestId('wsf-community-name').boundingBox();
+  const footBox = await page.getByTestId('wsf-community-member-count').boundingBox();
+  expect(footBox!.y).toBeGreaterThan(identityBox!.y + identityBox!.height);
+  // The only destructive action is disclosed, never displayed: Leave is
+  // behind "Membership options", and closing it puts it away again.
+  await expect(page.getByTestId('wsf-community-leave')).toHaveCount(0);
+  await page.getByTestId('wsf-community-membership-toggle').click();
+  await expect(page.getByTestId('wsf-community-leave')).toBeVisible();
+  await page.getByTestId('wsf-community-membership-toggle').click();
+  await expect(page.getByTestId('wsf-community-leave')).toHaveCount(0);
 
   await scrollTo(page, 0);
   await snapViewport(page, 'member-01-top');
@@ -459,11 +466,23 @@ test('Community Home at phone size — member view, Champion view, full page', a
   // Management is a surface over the page: the hero has not moved.
   const heroBoxAfter = await page.getByTestId('wsf-community-goal-hero').boundingBox();
   expect(heroBoxAfter?.y).toBe(heroBoxBefore?.y);
+  // Administrative rows live inside Manage, folded away until asked for; the
+  // state is intact. The Champion's own membership control is here too.
+  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
+  await page.getByTestId('wsf-community-details-toggle').click();
+  await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
+  await expect(page.getByTestId('wsf-community-status')).toContainText('Active');
+  await page.getByTestId('wsf-community-details-toggle').click();
+  await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-leave')).toBeVisible();
   await page.waitForTimeout(300);
   await snapViewport(page, 'champion-02-top-manage-open');
   await snapFull(page, 'champion-full-page-manage-open');
   await page.getByTestId('wsf-community-manage-close').click();
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+  // No Champion-only administration on the page itself.
+  await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-leave')).toHaveCount(0);
 
   // "Start another goal" from inside the sheet leaves for the new-goal
   // screen and takes the sheet with it: nothing stays overlaid on the form.

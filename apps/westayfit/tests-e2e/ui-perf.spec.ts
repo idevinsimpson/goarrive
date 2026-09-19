@@ -322,7 +322,7 @@ test('Community Home: a second copy one second later does not lose its own "Copi
   await page.goto(`/community/${fx.groupId}`);
   await expect(page.getByTestId('wsf-community-invite')).toBeVisible({ timeout: 30_000 });
   const copy = page.getByTestId('wsf-community-invite-copy');
-  await expect(copy).toHaveText('Copy link');
+  await expect(copy).toHaveText('Copy invite');
 
   // t≈0.0 — the first copy arms a 2s return to rest.
   await copy.click();
@@ -343,5 +343,5 @@ test('Community Home: a second copy one second later does not lose its own "Copi
   ).toBe('Copied');
 
   // It still returns to rest on its own — the timer is cancelled, not removed.
-  await expect(copy).toHaveText('Copy link', { timeout: 6_000 });
+  await expect(copy).toHaveText('Copy invite', { timeout: 6_000 });
 });

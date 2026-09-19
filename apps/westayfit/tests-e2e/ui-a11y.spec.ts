@@ -542,6 +542,56 @@ for (const fixture of R1_FIXTURES) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// R1b — the Champion's Manage sheet at the same widths. R1 signs in as a
+//       member, so nothing above ever measures Manage; the "Yes, create a new
+//       link" confirmation overflowed a 195 px viewport unseen because of it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+for (const width of [390, 195]) {
+  test(`R1b Manage: no overflow at ${width}px, confirmation open`, async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await seedCommunity(`r1mgr${width}`, NAME_80);
+    const goalId = await seedGoal(fx, mainGoal(TITLE_120, UNIT_40));
+    const ctx = await browser.newContext({
+      viewport: { width, height: 844 },
+      deviceScaleFactor: 2,
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await ctx.newPage();
+    try {
+      await signInVia(page, fx.championEmail, fx.password);
+      await page.goto(`/community/${fx.groupId}`);
+      await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toBeVisible({
+        timeout: 30_000,
+      });
+
+      // The Invite card's symbol is a fixed-size picture; it must still fit.
+      await page.getByTestId('wsf-community-invite-qr-toggle').click();
+      await expect(page.getByTestId('wsf-community-invite-qr-symbol')).toBeVisible();
+      await noOverflow(page, width, 'Community Home, invite QR open');
+
+      await page.getByTestId('wsf-community-manage').click();
+      await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+      await page.getByTestId('wsf-community-details-toggle').click();
+      await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+      await page.getByTestId('wsf-community-qr-toggle').click();
+      await expect(page.getByTestId('wsf-community-qr-symbol')).toBeVisible();
+      await noOverflow(page, width, 'Manage sheet, expanded');
+
+      // The state the capture stage found overflowing by 30 px at 195.
+      await page.getByTestId('wsf-community-reset').click();
+      await expect(page.getByTestId('wsf-community-reset-confirm')).toBeVisible();
+      await noOverflow(page, width, 'Manage sheet, new-link confirmation');
+    } finally {
+      await ctx.close();
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // R2 — the distant display is a screen, not a page: every element it renders
 //      has to be ON it. Checked with the longest storable names, wide and
 //      phone, in the four states that change the layout.
@@ -681,14 +731,21 @@ test('R3 every control is at least 44×44 across Community Home, the sheet, the 
     await expect(page.getByTestId(`wsf-community-goal-percent-${goalA}`)).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByTestId('wsf-community-details-toggle').click();
-    await expect(page.getByTestId('wsf-community-details')).toBeVisible();
     await expect(page.getByTestId('wsf-community-invite')).toBeVisible();
+    // Everything the page can disclose, disclosed: the Invite card's QR.
+    await page.getByTestId('wsf-community-invite-qr-toggle').click();
+    await expect(page.getByTestId('wsf-community-invite-qr-symbol')).toBeVisible();
     await record('Community Home');
 
-    // ---- the Manage sheet ----------------------------------------------------
+    // ---- the Manage sheet, fully expanded --------------------------------------
     await page.getByTestId('wsf-community-manage').click();
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+    await page.getByTestId('wsf-community-details-toggle').click();
+    await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+    await page.getByTestId('wsf-community-qr-toggle').click();
+    await expect(page.getByTestId('wsf-community-qr-symbol')).toBeVisible();
+    await page.getByTestId('wsf-community-reset').click();
+    await expect(page.getByTestId('wsf-community-reset-confirm')).toBeVisible();
     await record('Manage sheet');
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
@@ -813,8 +870,9 @@ test('R4 every Tab stop shows a focus ring, and the controls that matter are on 
     });
     // Nothing is clicked first: a click would move the sequential focus
     // starting point and the walk would silently begin halfway down the page.
-    // The details rows carry no controls, so the collapsed page still holds
-    // every control this walk expects.
+    // Every control this walk expects is on the collapsed page: the invite
+    // controls sit on the Invite card, and the administrative rows are in
+    // Manage, which is a separate walk (R5).
     const homeStops = await tabStops(page, 40);
     const homeIds = homeStops.map((s) => s.id);
     expect(homeStops.length, `Community Home has Tab stops; saw ${homeIds.join(' → ')}`).toBeGreaterThan(0);
@@ -828,7 +886,9 @@ test('R4 every Tab stop shows a focus ring, and the controls that matter are on 
       `wsf-community-goal-record-${goalA}`,
       `wsf-community-goal-link-${goalB}`,
       'wsf-community-progress-refresh',
-      'wsf-community-details-toggle',
+      'wsf-community-invite-copy',
+      'wsf-community-invite-qr-toggle',
+      'wsf-community-home-link',
     ]) {
       expect(homeIds, `${expected} is reachable by Tab; order was ${homeIds.join(' → ')}`).toContain(
         expected

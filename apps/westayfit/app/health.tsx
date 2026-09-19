@@ -1,6 +1,7 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { WSF_BUILD_STAMP } from '../src/buildStamp';
+import { wsfIsStaging } from '../src/firebase';
 import { kit } from '../src/ui/kit';
 import { WsfWordmark } from '../src/ui/WsfWordmark';
 
@@ -18,6 +19,17 @@ export default function Health() {
           <Row label="Commit" value={WSF_BUILD_STAMP.commitSha} testID="wsf-health-commit" />
           <Row label="Built at" value={WSF_BUILD_STAMP.builtAt} testID="wsf-health-builtAt" />
         </View>
+        {wsfIsStaging ? (
+          <>
+            <Text style={kit.eyebrow}>Environment</Text>
+            <View style={kit.card} testID="wsf-health-environment">
+              <Text style={kit.body}>
+                STAGING — TEST DATA ONLY. Not the live We Stay Fit service. Accounts, communities and totals here
+                are not real and may be deleted at any time.
+              </Text>
+            </View>
+          </>
+        ) : null}
       </View>
     </ScrollView>
   );

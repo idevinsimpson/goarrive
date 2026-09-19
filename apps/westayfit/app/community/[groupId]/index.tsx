@@ -63,6 +63,7 @@ import {
   formatReachedOn,
 } from '../../../src/ui/dates';
 import { kit } from '../../../src/ui/kit';
+import { LIVING_WE_ASPECT } from '../../../src/ui/livingWeCalibration';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -264,6 +265,11 @@ export default function CommunityPage() {
   const [progressReloadToken, setProgressReloadToken] = useState(0);
   const [manageOpen, setManageOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // The ask-first step in front of link rotation, and the member's disclosure
+  // of their membership options. Both are presentation state: nothing is sent
+  // until the confirmation is accepted.
+  const [resetConfirming, setResetConfirming] = useState(false);
+  const [membershipOpen, setMembershipOpen] = useState(false);
   const router = useRouter();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [resetting, setResetting] = useState(false);
@@ -319,15 +325,22 @@ export default function CommunityPage() {
     // goes with it, and the generation advances so nothing still outstanding
     // from the old one can write here again.
     setDisplayAuth((prev) => beginContext(prev));
-    // The same rule for the invite link: a join code minted by "Reset link"
+    // The same rule for the invite link: a join code minted by "Create a new invite link"
     // belongs to the community it was minted for. It must never be rendered
     // as another community's link when the screen is reused for a different
     // community or account.
     setResetJoinCode(null);
     setResetOutcome('idle');
+    setResetConfirming(false);
+    setMembershipOpen(false);
     setCopyStatus('idle');
     setShareStatus('idle');
   }, [groupId, user?.uid]);
+  // Closing the sheet withdraws an unanswered confirmation with it: reopening
+  // Manage must never land on "will stop working for everyone" unasked.
+  useEffect(() => {
+    if (!manageOpen) setResetConfirming(false);
+  }, [manageOpen]);
 
   const [leaveState, setLeaveState] = useState<
     { kind: 'idle' } | { kind: 'confirming' } | { kind: 'leaving' } | { kind: 'failed'; message: string }
@@ -643,7 +656,7 @@ export default function CommunityPage() {
     } catch {
       // A failure here is NOT cosmetic and must never be swallowed. The reason
       // a Champion resets a link is usually that the old one got somewhere it
-      // should not have. Leaving the button to settle back to "Reset link"
+      // should not have. Leaving the button to settle back to its resting label
       // would let them walk away believing a live link is dead. The old link
       // is still working, and the screen has to say so.
       setResetOutcome('failed');
@@ -876,14 +889,21 @@ export default function CommunityPage() {
   if (state.kind === 'notSignedIn') {
     return (
       <FormShell
-        heading="Your community"
+        // Not "Your community": whoever is reading this is not signed in, so
+        // it is not theirs yet, and the heading should not say it is.
+        heading="This community"
         intro="Sign in to view this community."
         testID="wsf-community-signed-out"
       >
+        {/*
+          One state, one job, one obvious primary. An underlined text link
+          alone in a card gives a signed-out visitor nothing that looks like
+          the way forward (clause 12).
+        */}
         <ButtonLink
           href="/signin"
-          style={kit.tertiaryButton}
-          textStyle={kit.tertiaryButtonText}
+          style={kit.primaryButton}
+          textStyle={kit.primaryButtonText}
           testID="wsf-community-signin"
           label="Sign in"
         />
@@ -900,8 +920,8 @@ export default function CommunityPage() {
       >
         <ButtonLink
           href="/"
-          style={kit.tertiaryButton}
-          textStyle={kit.tertiaryButtonText}
+          style={kit.primaryButton}
+          textStyle={kit.primaryButtonText}
           testID="wsf-community-not-member-home"
           label="Back to home"
         />
@@ -976,6 +996,24 @@ export default function CommunityPage() {
   // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
   const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
   const smallWeWidth = 104;
+  // The hero's progress area reserves the room the We mark, its three facts
+  // and the freshness line will take, so a pulse that lands does not move
+  // the title above it or the actions below it.
+  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 118;
+  const linkJoinable = isLinkJoinable(group.joinPolicy);
+  // Champions always get the Invite card (on a private community it carries
+  // the honest no-link sentence); members get it only with a working link.
+  const showInviteCard = isChampion || (linkJoinable && inviteUrl != null);
+  // One human line under the name, and only once the goal list has answered:
+  // a claim about what the community is doing waits for the facts.
+  const humanLine =
+    goalsState.kind === 'loaded' ? (featured ? 'Moving together.' : 'Ready to get moving.') : null;
+  const footerLine = [
+    memberCount != null ? memberCountLabel(memberCount) : null,
+    createdLabel ? `since ${createdLabel}` : null,
+  ]
+    .filter((part): part is string => part != null)
+    .join(' · ');
 
   // W7. The display link for the featured goal, or null — which is the normal
   // case. Everything that has to be true is decided in src/shareGoalDisplay:
@@ -1139,12 +1177,14 @@ export default function CommunityPage() {
   const renderProgressFacts = (goal: ListedGoal, p: GoalProgress, variant: 'hero' | 'card') => {
     const onDark = variant === 'hero';
     if (p.kind === 'loading') {
+      // A quiet one-line status, never the surface's main content: the goal's
+      // title stays the headline while the numbers are on their way.
       return (
         <Text
-          style={onDark ? styles.heroBody : styles.body}
+          style={onDark ? styles.heroStatus : styles.cardMeta}
           testID={`wsf-community-goal-progress-loading-${goal.goalId}`}
         >
-          Loading progress…
+          Checking progress…
         </Text>
       );
     }
@@ -1214,9 +1254,77 @@ export default function CommunityPage() {
     );
   };
 
+  // The leave control and its confirmation, in one place. A member reaches it
+  // through the "Membership options" disclosure at the bottom of the page; a
+  // Champion reaches it inside Manage. Only one of the two ever renders, so
+  // every testID here exists exactly once on screen.
+  const renderLeaveControls = () => (
+    <View style={styles.leaveBlock}>
+      {leaveState.kind === 'idle' ? (
+        <Pressable
+          onPress={() => setLeaveState({ kind: 'confirming' })}
+          style={styles.tertiaryButton}
+          testID="wsf-community-leave"
+          accessibilityRole="button"
+        >
+          <Text style={styles.tertiaryButtonText}>Leave this community</Text>
+        </Pressable>
+      ) : null}
+      {leaveState.kind === 'confirming' ? (
+        <View style={styles.cardQuiet} testID="wsf-community-leave-confirm">
+          <Text style={styles.body}>
+            You will stop seeing this community&apos;s goals and can no longer contribute to
+            them. What you have already contributed stays counted toward the community&apos;s
+            totals. You can rejoin with a current invite link.
+          </Text>
+          <View style={styles.inviteActions}>
+            <Pressable
+              onPress={onLeave}
+              style={styles.secondaryButton}
+              testID="wsf-community-leave-confirm-yes"
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryButtonText}>Yes, leave</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setLeaveState({ kind: 'idle' })}
+              style={styles.tertiaryButton}
+              testID="wsf-community-leave-cancel"
+              accessibilityRole="button"
+            >
+              <Text style={styles.tertiaryButtonText}>Stay</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {leaveState.kind === 'leaving' ? (
+        <Text style={styles.body} testID="wsf-community-leave-pending">
+          Leaving…
+        </Text>
+      ) : null}
+      {leaveState.kind === 'failed' ? (
+        <View>
+          <Text style={styles.error} testID="wsf-community-leave-error">
+            {leaveState.message}
+          </Text>
+          <Pressable
+            onPress={() => setLeaveState({ kind: 'idle' })}
+            style={styles.tertiaryButton}
+            testID="wsf-community-leave-dismiss"
+            accessibilityRole="button"
+          >
+            <Text style={styles.tertiaryButtonText}>OK</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+
   // The management surface: a sheet over the page, so opening it never
   // pushes the community's own content down. Every Package E control lives
-  // here with its existing testID, copy and outcome handling.
+  // here with its existing testID, copy and outcome handling, and the
+  // administrative facts (community details, the invite QR, link rotation,
+  // leaving) live here too — out of the member journey, one tap away.
   const renderManageSheet = () => (
     <Modal
       visible={isChampion && manageOpen}
@@ -1260,6 +1368,7 @@ export default function CommunityPage() {
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
             {goalsState.kind === 'loaded' && loadedGoals.length ? (
               <View style={styles.sheetSection}>
+                <Text style={styles.sheetSectionTitle}>Public display</Text>
                 <Text style={styles.manageIntro}>
                   Public display is a permission you grant per goal. An authorized display can
                   show the community name, the goal and its period, and the shared progress —
@@ -1386,6 +1495,42 @@ export default function CommunityPage() {
                 }
                 return null;
               })}
+
+            {/*
+              Community details: the administrative facts about this community,
+              here for the person who administers it rather than in every
+              member's journey. The type/joining/status/role rows stay behind
+              their own disclosure with the same testIDs they have always had.
+            */}
+            <View style={styles.sheetSection}>
+              <Text style={styles.sheetSectionTitle}>Community details</Text>
+              {memberCount != null ? (
+                <Row label="Members" value={memberCountLabel(memberCount)} testID="wsf-community-members-row" />
+              ) : null}
+              {createdLabel ? (
+                <Row label="Community since" value={createdLabel} testID="wsf-community-created" />
+              ) : null}
+              <Pressable
+                onPress={() => setDetailsOpen((v) => !v)}
+                accessibilityRole="button"
+                aria-expanded={detailsOpen}
+                style={styles.detailsToggle}
+                testID="wsf-community-details-toggle"
+              >
+                <Text style={styles.detailsToggleText}>
+                  {detailsOpen ? 'Hide details' : 'Show all details'}
+                </Text>
+              </Pressable>
+              {detailsOpen ? (
+                <View style={styles.details} testID="wsf-community-details">
+                  <Row label="Type" value={groupTypeLabel(group.groupType)} testID="wsf-community-type" quiet />
+                  <Row label="Joining" value={joinPolicyLabel(group.joinPolicy)} testID="wsf-community-policy" quiet />
+                  <Row label="Status" value={statusLabel(group.lifecycleStatus)} testID="wsf-community-status" quiet />
+                  <Row label="Your role" value={roleLabel(role)} testID="wsf-community-role" quiet />
+                </View>
+              ) : null}
+            </View>
+
             {/*
               The join link as something a phone can scan. Champion-only by
               construction: this whole Modal is `visible={isChampion && ...}`,
@@ -1393,15 +1538,18 @@ export default function CommunityPage() {
               not hidden from them, it does not exist for them.
 
               It carries no authority of its own. It is the same `/join/<code>`
-              URL the invite card copies, and a scan lands on the same join
-              page with the same identity requirements behind it. Resetting the
-              link re-derives `inviteUrl`, which re-encodes the symbol.
+              URL the Invite card copies, and a scan lands on the same join
+              page with the same identity requirements behind it. Creating a
+              new invite link re-derives `inviteUrl`, which re-encodes the
+              symbol. This instance carries the hosted-harness testIDs
+              (wsf-community-qr, -toggle, -symbol); the Invite card's own
+              instance uses its own prefix so each id resolves to one element.
             */}
             <View style={styles.sheetSection} testID="wsf-community-qr-section">
-              <Text style={styles.sheetSectionTitle}>Invite by QR</Text>
-              {isLinkJoinable(group.joinPolicy) ? (
+              <Text style={styles.sheetSectionTitle}>Invite QR</Text>
+              {linkJoinable ? (
                 inviteUrl ? (
-                  <JoinQrCode url={inviteUrl} />
+                  <JoinQrCode url={inviteUrl} caveat={MANAGE_QR_CAVEAT} />
                 ) : (
                   <Text style={styles.manageIntro} testID="wsf-community-qr-pending">
                     This community&apos;s invite link is not ready yet, so there is nothing to
@@ -1412,6 +1560,89 @@ export default function CommunityPage() {
                 <JoinQrCode url={null} />
               )}
             </View>
+
+            {/*
+              D1: retire the current link. A confirmation first, because the
+              consequence is for everyone who holds the old link, not only for
+              the Champion tapping it. The callable and its outcome handling
+              are unchanged; only the ask-first step is new.
+            */}
+            {linkJoinable ? (
+              <View style={styles.sheetSection} testID="wsf-community-invite-link">
+                <Text style={styles.sheetSectionTitle}>Invite link</Text>
+                <Text style={styles.manageIntro} testID="wsf-community-invite-caveat">
+                  {/*
+                    Clause 9. Both sentences state what the join callable and
+                    the rules actually enforce for the stored value. A link
+                    admits to 'public' and 'inviteOnly' alike, and nothing in
+                    this product lists, searches or otherwise discovers a
+                    community — so the public branch says what Start your
+                    community and the join preview already say, word for word,
+                    instead of claiming a discovery feature that does not exist.
+                  */}
+                  {group.joinPolicy === 'inviteOnly'
+                    ? 'Anyone with this link can join, including someone it is forwarded to. It keeps working until you create a new one.'
+                    : 'Anyone with the invite link can join. The community is not listed or searchable anywhere, so people need the link.'}
+                </Text>
+                {resetOutcome === 'done' ? (
+                  <Text style={styles.body} testID="wsf-community-invite-reset-done">
+                    The old link no longer works. Copy invite, Share invite and the QR code now use
+                    the new one.
+                  </Text>
+                ) : null}
+                {resetOutcome === 'failed' ? (
+                  <Text style={styles.error} testID="wsf-community-invite-reset-error">
+                    A new link could not be created. The current link is still the live one and
+                    still lets people join. Try again.
+                  </Text>
+                ) : null}
+                {resetConfirming ? (
+                  <View style={styles.cardQuiet} testID="wsf-community-reset-confirm">
+                    <Text style={styles.body}>
+                      The current invite link will stop working for everyone who has it.
+                    </Text>
+                    <View style={styles.inviteActions}>
+                      <Pressable
+                        onPress={() => {
+                          setResetConfirming(false);
+                          void onResetInvite();
+                        }}
+                        style={[styles.secondaryButton, styles.rowButton]}
+                        testID="wsf-community-reset-confirm-yes"
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
+                          Yes, create a new link
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setResetConfirming(false)}
+                        style={[styles.tertiaryButton, styles.rowButton]}
+                        testID="wsf-community-reset-cancel"
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.tertiaryButtonText, styles.rowButtonText]}>
+                          Keep the current link
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => setResetConfirming(true)}
+                    disabled={resetting}
+                    style={styles.secondaryButton}
+                    testID="wsf-community-reset"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {resetting ? 'Creating a new link…' : 'Create a new invite link'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : null}
+
             {goalsState.kind === 'loaded' && activeGoals.length ? (
               <ButtonLink
                 href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
@@ -1422,6 +1653,12 @@ export default function CommunityPage() {
                 onPress={() => setManageOpen(false)}
               />
             ) : null}
+
+            {/* Destructive, and last: leaving, with the sole-Champion refusal surfaced verbatim. */}
+            <View style={styles.sheetSection} testID="wsf-community-membership">
+              <Text style={styles.sheetSectionTitle}>Membership</Text>
+              {renderLeaveControls()}
+            </View>
           </ScrollView>
         </View>
       </View>
@@ -1454,7 +1691,7 @@ export default function CommunityPage() {
         </View>
         {renderManageSheet()}
 
-        {/* Community identity: the main character. */}
+        {/* Community identity: the main character. The name and one human line — the count and the founding month wait at the foot of the page. */}
         <View style={styles.identity}>
           <View style={styles.headingRow}>
             {/*
@@ -1471,14 +1708,9 @@ export default function CommunityPage() {
               </Text>
             ) : null}
           </View>
-          {featured ? (
+          {humanLine ? (
             <Text style={styles.humanLine} testID="wsf-community-human-line">
-              Moving together.
-            </Text>
-          ) : null}
-          {memberCount != null ? (
-            <Text style={styles.identityMeta} testID="wsf-community-member-count">
-              {memberCountLabel(memberCount)}
+              {humanLine}
             </Text>
           ) : null}
         </View>
@@ -1487,12 +1719,12 @@ export default function CommunityPage() {
         <View style={styles.section} testID="wsf-community-goals">
           {goalsState.kind === 'loading' ? (
             <View
-              style={styles.hero}
+              style={styles.compactCard}
               testID="wsf-community-goals-loading"
               {...({ 'data-state': 'loading' } as Record<string, unknown>)}
             >
-              <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.heroBody}>Loading goals…</Text>
+              <Text style={styles.sectionEyebrow}>What we&apos;re doing</Text>
+              <Text style={styles.cardMeta}>Loading goals…</Text>
             </View>
           ) : goalsState.kind === 'failed' ? (
             <View
@@ -1539,7 +1771,7 @@ export default function CommunityPage() {
                     {p.kind === 'ok' &&
                     progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen'
                       ? 'Goal reached'
-                      : 'What we\u2019re doing'}
+                      : 'What we’re doing'}
                   </Text>
                   <Text
                     style={styles.heroTitle}
@@ -1551,20 +1783,29 @@ export default function CommunityPage() {
                   <Text style={styles.heroMeta} testID={`wsf-community-goal-period-${featured.goalId}`}>
                     {windowLabel}
                   </Text>
-                  {p.kind === 'ok' ? (
-                    <View style={styles.weWrap}>
-                      <LivingWeProgress
-                        completed={p.pulse.sharedTotal}
-                        target={p.pulse.target}
-                        unit={p.pulse.unit}
-                        width={heroWeWidth}
-                        surface="dark"
-                        testID={`wsf-community-goal-we-${featured.goalId}`}
-                      />
-                    </View>
-                  ) : null}
-                  {renderProgressFacts(featured, p, 'hero')}
-                  {renderFreshness(p)}
+                  {/*
+                    The progress area keeps its height while the pulse is on
+                    its way, so the title above and the actions below do not
+                    move when it lands: a freshly created goal reads as the
+                    hero from the first paint, with one quiet line where the
+                    numbers will be.
+                  */}
+                  <View style={[styles.progressArea, { minHeight: progressAreaMinHeight }]}>
+                    {p.kind === 'ok' ? (
+                      <View style={styles.weWrap}>
+                        <LivingWeProgress
+                          completed={p.pulse.sharedTotal}
+                          target={p.pulse.target}
+                          unit={p.pulse.unit}
+                          width={heroWeWidth}
+                          surface="dark"
+                          testID={`wsf-community-goal-we-${featured.goalId}`}
+                        />
+                      </View>
+                    ) : null}
+                    {renderProgressFacts(featured, p, 'hero')}
+                    {renderFreshness(p)}
+                  </View>
                   <View style={styles.actions}>
                     <ButtonLink
                       href={contributeHref(featured.goalId, 'move')}
@@ -1615,14 +1856,16 @@ export default function CommunityPage() {
               );
             })()
           ) : (
+            // No goal: an honest, compact statement — not a tall empty hero.
+            // The Champion's one action is here; a member gets no fake one.
             <View
-              style={styles.hero}
+              style={styles.compactCard}
               testID="wsf-community-no-goal"
               {...({ 'data-state': 'empty' } as Record<string, unknown>)}
             >
-              <Text style={styles.heroEyebrow}>What we&apos;re doing</Text>
-              <Text style={styles.heroTitle} {...HEADING_2}>No goal running yet</Text>
-              <Text style={styles.heroBody}>
+              <Text style={styles.sectionEyebrow}>What we&apos;re doing</Text>
+              <Text style={styles.cardTitle} {...HEADING_2}>No goal running yet</Text>
+              <Text style={styles.cardMeta}>
                 {isChampion
                   ? 'Start one and your community can begin contributing.'
                   : 'Your Champion can start one for this community.'}
@@ -1757,255 +2000,180 @@ export default function CommunityPage() {
         ) : null}
 
         {/*
+          Invite people. An invitation, not URL administration: the link itself
+          is never printed as body copy anywhere on this card, symbol included
+          (JoinQrCode showUrl={false}) — it rides on the card as
+          `data-invite-url` for the tests that assert which link is shared —
+          and the working ways to pass it on are the controls. A Champion
+          always has this card; a member has it when the policy admits by link
+          (public or inviteOnly). On a private community a member sees nothing
+          here, and the Champion sees the honest sentence in place of a QR.
+
+          D4: public AND inviteOnly are link-joinable, private is not; the rule
+          lives in src/ui/joinLink so the QR encodes exactly the copied string.
+        */}
+        {showInviteCard ? (
+          <View
+            style={styles.card}
+            testID="wsf-community-invite"
+            dataSet={inviteUrl ? { inviteUrl } : undefined}
+          >
+            <Text style={styles.cardTitle} {...HEADING_2}>Invite people</Text>
+            {linkJoinable ? (
+              inviteUrl ? (
+                <>
+                  <Text style={styles.body}>
+                    Share this community with people you want to move with.
+                  </Text>
+                  <View style={styles.inviteActions}>
+                    <Pressable
+                      onPress={onCopyInvite}
+                      style={[styles.secondaryButton, styles.rowButton]}
+                      testID="wsf-community-invite-copy"
+                      accessibilityRole="button"
+                    >
+                      <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
+                        {copyStatus === 'copied'
+                          ? 'Copied'
+                          : copyStatus === 'failed'
+                            ? 'Copy failed — use the QR code'
+                            : 'Copy invite'}
+                      </Text>
+                    </Pressable>
+                    {hasShareApi ? (
+                      <Pressable
+                        onPress={onShareInvite}
+                        style={[styles.secondaryButton, styles.rowButton]}
+                        testID="wsf-community-invite-share"
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
+                          Share invite
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  {/*
+                    showUrl={false}: clause 5. On the member-facing card the
+                    link moves by Copy invite / Share invite / the symbol, and
+                    is never printed as body copy. `data-qr-url` still rides
+                    on the symbol, so ui-join-qr keeps asserting exactly which
+                    URL was encoded.
+                  */}
+                  <JoinQrCode
+                    url={inviteUrl}
+                    testIDPrefix="wsf-community-invite-qr"
+                    caveat={INVITE_QR_CAVEAT}
+                    showUrl={false}
+                  />
+                </>
+              ) : (
+                <Text style={styles.cardMeta} testID="wsf-community-invite-pending">
+                  Your invite link isn&apos;t ready yet. Reload the page to try again.
+                </Text>
+              )
+            ) : (
+              <JoinQrCode url={null} testIDPrefix="wsf-community-invite-qr" />
+            )}
+          </View>
+        ) : null}
+
+        {/*
           History — the community's complete record of its closed goals,
           reached and unreached, from wsfListGoals({ includeHistory: true }).
-
-          It replaces the old "Past goals" section, which showed only the
-          closed goals that were still authorized for public display. That made
-          a publication decision decide what the community was allowed to
-          remember: a goal closed without authorization, or with its
-          authorization revoked, was simply gone. `includeHistory` closes that;
-          the list is member-only, never public, and does not consult display
-          authorization at all.
-
-          Always rendered, because an absent section cannot say whether the
-          history is empty or failed to load. Each row states its own result
-          with the shared helpers — "Reached", or "Closed at N%" — and the
-          exact total beside it, so a reached goal's overshoot is still
+          Rendered only when there is something to record: an empty History
+          under a brand-new goal is page furniture, and a failed load is
+          already reported by the goals card above. Each row states its own
+          result with the shared helpers — "Reached", or "Closed at N%" — and
+          the exact total beside it, so a reached goal's overshoot is still
           visible in "515 of 500 squats". Open goals stay in the active
           section above; nothing is listed twice.
         */}
-        <View style={styles.section} testID="wsf-community-history">
-          <Text style={styles.sectionEyebrow} {...HEADING_2}>
-            History
-          </Text>
-          {goalsState.kind === 'loading' ? (
-            <Text style={styles.body} testID="wsf-community-history-loading">
-              Loading history…
+        {closedHistory.length ? (
+          <View style={styles.section} testID="wsf-community-history">
+            <Text style={styles.sectionEyebrow} {...HEADING_2}>
+              History
             </Text>
-          ) : null}
-          {goalsState.kind === 'failed' ? (
-            <View testID="wsf-community-history-error">
-              <Text style={styles.body}>Something went wrong</Text>
-              <Pressable
-                onPress={() => setGoalsReloadToken((n) => n + 1)}
-                accessibilityRole="button"
-                style={styles.secondaryButton}
-                testID="wsf-community-history-retry"
-                accessibilityLabel="Try again: community history"
-              >
-                <Text style={styles.secondaryButtonText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          {goalsState.kind === 'loaded' && closedHistory.length === 0 ? (
-            <Text style={styles.body} testID="wsf-community-history-empty">
-              No closed goals yet.
-            </Text>
-          ) : null}
-          {closedHistory.map((goal) => {
-            const phase = progressPhase(goal.sharedTotal, goal.target, goal.status);
-            // "Reached" and "Closed at N%" are the two honest results a closed
-            // goal can have, and statusLine already produces the second.
-            const result = phase === 'closedReached' ? 'Reached' : statusLine(goal.sharedTotal, goal.target, goal.status);
-            const period = formatPeriod(goal.startsAt, goal.endsAt, { timeZone: goal.timezone });
-            return (
-              <View
-                key={goal.goalId}
-                style={styles.card}
-                testID={`wsf-community-goal-closed-${goal.goalId}`}
-                {...({ 'data-state': 'closed' } as Record<string, unknown>)}
-              >
-                <View style={styles.smallGoalRow}>
-                  <LivingWeProgress
-                    completed={goal.sharedTotal}
-                    target={goal.target}
-                    unit={goal.unit}
-                    width={smallWeWidth}
-                    surface="light"
-                    testID={`wsf-community-goal-we-${goal.goalId}`}
-                  />
-                  <View style={styles.smallGoalText}>
-                    <Text style={styles.cardTitle}>{goal.title}</Text>
-                    <View style={styles.factsSmall}>
-                      <Text style={styles.totalSmall} testID={`wsf-community-goal-total-${goal.goalId}`}>
-                        {totalOfTargetLabel(goal.sharedTotal, goal.target, goal.unit)}
-                      </Text>
-                      <Text style={styles.closedResult} testID={`wsf-community-goal-status-${goal.goalId}`}>
-                        {result}
-                      </Text>
+            {closedHistory.map((goal) => {
+              const phase = progressPhase(goal.sharedTotal, goal.target, goal.status);
+              // "Reached" and "Closed at N%" are the two honest results a closed
+              // goal can have, and statusLine already produces the second.
+              const result = phase === 'closedReached' ? 'Reached' : statusLine(goal.sharedTotal, goal.target, goal.status);
+              const period = formatPeriod(goal.startsAt, goal.endsAt, { timeZone: goal.timezone });
+              return (
+                <View
+                  key={goal.goalId}
+                  style={styles.card}
+                  testID={`wsf-community-goal-closed-${goal.goalId}`}
+                  {...({ 'data-state': 'closed' } as Record<string, unknown>)}
+                >
+                  <View style={styles.smallGoalRow}>
+                    <LivingWeProgress
+                      completed={goal.sharedTotal}
+                      target={goal.target}
+                      unit={goal.unit}
+                      width={smallWeWidth}
+                      surface="light"
+                      testID={`wsf-community-goal-we-${goal.goalId}`}
+                    />
+                    <View style={styles.smallGoalText}>
+                      <Text style={styles.cardTitle}>{goal.title}</Text>
+                      <View style={styles.factsSmall}>
+                        <Text style={styles.totalSmall} testID={`wsf-community-goal-total-${goal.goalId}`}>
+                          {totalOfTargetLabel(goal.sharedTotal, goal.target, goal.unit)}
+                        </Text>
+                        <Text style={styles.closedResult} testID={`wsf-community-goal-status-${goal.goalId}`}>
+                          {result}
+                        </Text>
+                      </View>
+                      {period ? (
+                        <Text style={styles.cardMeta} testID={`wsf-community-goal-period-${goal.goalId}`}>
+                          {period}
+                        </Text>
+                      ) : null}
                     </View>
-                    {period ? (
-                      <Text style={styles.cardMeta} testID={`wsf-community-goal-period-${goal.goalId}`}>
-                        {period}
-                      </Text>
-                    ) : null}
                   </View>
                 </View>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* About the community: the human facts, with the administrative rows folded away. */}
-        <View style={styles.section} testID="wsf-community-about">
-          <Text style={styles.sectionEyebrow}>About this community</Text>
-          <View style={styles.cardQuiet}>
-            {memberCount != null ? (
-              <Row label="Members" value={memberCountLabel(memberCount)} testID="wsf-community-members-row" />
-            ) : null}
-            {createdLabel ? (
-              <Row label="Community since" value={createdLabel} testID="wsf-community-created" />
-            ) : null}
-            <Pressable
-              onPress={() => setDetailsOpen((v) => !v)}
-              accessibilityRole="button"
-              aria-expanded={detailsOpen}
-              style={styles.detailsToggle}
-              testID="wsf-community-details-toggle"
-            >
-              <Text style={styles.detailsToggleText}>
-                {detailsOpen ? 'Hide community details' : 'Community details'}
-              </Text>
-            </Pressable>
-            {detailsOpen ? (
-              <View style={styles.details} testID="wsf-community-details">
-                <Row label="Type" value={groupTypeLabel(group.groupType)} testID="wsf-community-type" quiet />
-                <Row label="Joining" value={joinPolicyLabel(group.joinPolicy)} testID="wsf-community-policy" quiet />
-                <Row label="Status" value={statusLabel(group.lifecycleStatus)} testID="wsf-community-status" quiet />
-                <Row label="Your role" value={roleLabel(role)} testID="wsf-community-role" quiet />
-              </View>
-            ) : null}
+              );
+            })}
           </View>
+        ) : null}
 
-          {/* Invite: only when this viewer actually has a working link to share. */}
-          {inviteUrl ? (
-            <View style={styles.cardQuiet} testID="wsf-community-invite">
-              <Text style={styles.cardTitle}>Invite your people</Text>
-              <View>
-                <Text style={styles.inviteUrl} selectable testID="wsf-community-invite-url">
-                  {inviteUrl}
-                </Text>
-                <Text style={styles.body} testID="wsf-community-invite-caveat">
-                  {group.joinPolicy === 'inviteOnly'
-                    ? 'Anyone with this link can join, including someone it is forwarded to. It keeps working until you reset it.'
-                    : 'This community can be found and joined by anyone.'}
-                </Text>
-                {resetOutcome === 'done' ? (
-                  <Text style={styles.body} testID="wsf-community-invite-reset-done">
-                    The old link no longer works. Share the new one above.
-                  </Text>
-                ) : null}
-                {resetOutcome === 'failed' ? (
-                  <Text style={styles.error} testID="wsf-community-invite-reset-error">
-                    The link could not be reset. The link above is still the live one and still
-                    lets people join. Try again.
-                  </Text>
-                ) : null}
-                <View style={styles.inviteActions}>
-                  <Pressable
-                    onPress={onCopyInvite}
-                    style={styles.secondaryButton}
-                    testID="wsf-community-invite-copy"
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {copyStatus === 'copied'
-                        ? 'Copied'
-                        : copyStatus === 'failed'
-                          ? 'Copy failed — long-press the link'
-                          : 'Copy link'}
-                    </Text>
-                  </Pressable>
-                  {hasShareApi ? (
-                    <Pressable
-                      onPress={onShareInvite}
-                      style={styles.secondaryButton}
-                      testID="wsf-community-invite-share"
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.secondaryButtonText}>Share</Text>
-                    </Pressable>
-                  ) : null}
-                  {isChampion ? (
-                    <Pressable
-                      onPress={onResetInvite}
-                      disabled={resetting}
-                      style={styles.tertiaryButton}
-                      testID="wsf-community-invite-reset"
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.tertiaryButtonText}>
-                        {resetting ? 'Resetting…' : 'Reset link'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </View>
-            </View>
-          ) : null}
-        </View>
+        {/*
+          The foot of the page, as one block behind a hairline: the two quiet
+          community facts, the member's membership disclosure and the way
+          back. Three separately-spaced quiet lines read as leftovers; one
+          utility block reads as the end of the page.
+        */}
+        <View style={styles.utility}>
+        {footerLine ? (
+          <Text style={[kit.caption, styles.footerLine]} testID="wsf-community-member-count">
+            {footerLine}
+          </Text>
+        ) : null}
 
-        <View style={styles.section} testID="wsf-community-membership">
-          <Text style={styles.sectionEyebrow}>Your membership</Text>
-          {leaveState.kind === 'idle' ? (
+        {/*
+          A member's membership options, disclosed rather than displayed: the
+          only action here is destructive, and it should never sit in the
+          journey as if it were the next thing to do. A Champion's copy of the
+          same control is inside Manage.
+        */}
+        {!isChampion ? (
+          <View style={styles.membership} testID="wsf-community-membership">
             <Pressable
-              onPress={() => setLeaveState({ kind: 'confirming' })}
-              style={styles.tertiaryButton}
-              testID="wsf-community-leave"
+              onPress={() => setMembershipOpen((v) => !v)}
               accessibilityRole="button"
+              aria-expanded={membershipOpen}
+              style={styles.tertiaryButton}
+              testID="wsf-community-membership-toggle"
             >
-              <Text style={styles.tertiaryButtonText}>Leave this community</Text>
+              <Text style={styles.tertiaryButtonText}>
+                {membershipOpen ? 'Hide membership options' : 'Membership options'}
+              </Text>
             </Pressable>
-          ) : null}
-          {leaveState.kind === 'confirming' ? (
-            <View style={styles.cardQuiet} testID="wsf-community-leave-confirm">
-              <Text style={styles.body}>
-                You will stop seeing this community&apos;s goals and can no longer contribute to
-                them. What you have already contributed stays counted toward the community&apos;s
-                totals. You can rejoin with a current invite link.
-              </Text>
-              <View style={styles.inviteActions}>
-                <Pressable
-                  onPress={onLeave}
-                  style={styles.secondaryButton}
-                  testID="wsf-community-leave-confirm-yes"
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.secondaryButtonText}>Yes, leave</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setLeaveState({ kind: 'idle' })}
-                  style={styles.tertiaryButton}
-                  testID="wsf-community-leave-cancel"
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.tertiaryButtonText}>Stay</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-          {leaveState.kind === 'leaving' ? (
-            <Text style={styles.body} testID="wsf-community-leave-pending">
-              Leaving…
-            </Text>
-          ) : null}
-          {leaveState.kind === 'failed' ? (
-            <View>
-              <Text style={styles.error} testID="wsf-community-leave-error">
-                {leaveState.message}
-              </Text>
-              <Pressable
-                onPress={() => setLeaveState({ kind: 'idle' })}
-                style={styles.tertiaryButton}
-                testID="wsf-community-leave-dismiss"
-                accessibilityRole="button"
-              >
-                <Text style={styles.tertiaryButtonText}>OK</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
+            {membershipOpen ? renderLeaveControls() : null}
+          </View>
+        ) : null}
 
         <View style={styles.footer}>
           <ButtonLink
@@ -2015,6 +2183,7 @@ export default function CommunityPage() {
             testID="wsf-community-home-link"
             label="Back to home"
           />
+        </View>
         </View>
       </View>
     </ScrollView>
@@ -2048,6 +2217,14 @@ const CREAM = wsfTheme.colors.background;
 // React Native prop types, hence the casts.
 const HEADING_1 = { accessibilityRole: 'header', 'aria-level': 1 } as Record<string, unknown>;
 const HEADING_2 = { accessibilityRole: 'header', 'aria-level': 2 } as Record<string, unknown>;
+
+// The QR's honest note, worded for where it sits. Inside Manage the control
+// that retires the link is in the section below the symbol; on the Invite
+// card there is no such control, so the note stops at what scanning does.
+const MANAGE_QR_CAVEAT =
+  'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join. Create a new invite link below and this code stops working; show this one again for the new link.';
+const INVITE_QR_CAVEAT =
+  'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join.';
 
 const CARD_BORDER = '#E3E7E1';
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
@@ -2113,7 +2290,6 @@ const styles = StyleSheet.create({
   // W7. One quiet line between the hero and "Your part": a fact about the
   // community's goals, not a leaderboard and not a nudge.
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
-  identityMeta: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
   section: { gap: 12 },
   sectionEyebrow: {
     color: wsfTheme.colors.textMuted,
@@ -2149,6 +2325,9 @@ const styles = StyleSheet.create({
   heroMeta: { color: HERO_MUTED, fontSize: 15, lineHeight: 20 },
   heroBody: { color: CREAM, fontSize: 16, lineHeight: 22 },
   heroCentered: { alignItems: 'center', gap: 8 },
+  // Reserved room for the mark and the facts; the loading line sits centred
+  // in it rather than at the top of a hole.
+  progressArea: { justifyContent: 'center', gap: 2 },
   weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
   factsLarge: { alignItems: 'center', gap: 2 },
   factsSmall: { gap: 2 },
@@ -2246,6 +2425,19 @@ const styles = StyleSheet.create({
   },
   cardTitle: { color: wsfTheme.colors.text, fontSize: 18, fontWeight: '700', lineHeight: 24 },
   cardMeta: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
+  // The goal slot when there is no goal to be a hero: a quiet card the height
+  // of its sentence, not a navy surface with nothing to say.
+  compactCard: {
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderRadius: 16,
+    padding: 16,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+  },
+  footerLine: { textAlign: 'center' },
+  membership: { alignItems: 'center', gap: 8 },
+  leaveBlock: { gap: 8, alignSelf: 'stretch' },
   smallGoalRow: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   smallGoalText: { flex: 1, gap: 4 },
 
@@ -2304,9 +2496,25 @@ const styles = StyleSheet.create({
   details: { borderTopWidth: 1, borderTopColor: CARD_BORDER, paddingTop: 4 },
   body: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22 },
   error: { color: '#B4232C', fontSize: 15, lineHeight: 21 },
-  inviteUrl: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '600' },
   inviteActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
-  footer: { alignItems: 'center', paddingTop: 8 },
+  // A control that shares a wrapping row with other controls: it gives way
+  // before the viewport does, and its label wraps inside it. Without these a
+  // long label ("Yes, create a new link") keeps its intrinsic width and
+  // pushes past a 195 px viewport — invariant 4.
+  rowButton: { flexShrink: 1, minWidth: 0 },
+  rowButtonText: { flexShrink: 1, minWidth: 0 },
+  // The quiet things at the foot of the page, below a hairline: the two
+  // community facts, the membership disclosure and the way back, one block
+  // with one rhythm instead of three separately-spaced lines.
+  utility: {
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 16,
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: CARD_BORDER,
+  },
+  footer: { alignItems: 'center', paddingTop: 0 },
 });
 
 // expo-router's `Link asChild` merges the child's style into the link's by

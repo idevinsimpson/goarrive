@@ -10,7 +10,7 @@ test('renders the brand shell at /', async ({ page }) => {
   expect(response, 'GET / must return a response').not.toBeNull();
   expect(response!.status(), 'GET / must be 2xx').toBeLessThan(400);
 
-  await expect(page).toHaveTitle('We Stay Fit');
+  await expect(page).toHaveTitle('WE STAY FIT');
 
   const robots = await page.locator('meta[name="robots"]').getAttribute('content');
   expect(robots, 'brand shell must be noindex,nofollow').toContain('noindex');

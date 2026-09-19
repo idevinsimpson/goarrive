@@ -1,25 +1,34 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
+import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { createRef, useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import { SecondaryLink, TextField } from '../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions, wsfIsStaging, wsfUsingEmulators } from '../../src/firebase';
+import {
+  getFirebaseFirestore,
+  getFirebaseFunctions,
+  wsfIsStaging,
+  wsfUsingEmulators,
+} from '../../src/firebase';
 import { type RepeatPolicy } from '../../src/contributionFlow';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { isValidTimeZone } from '../../src/ui/dates';
-import { kit } from '../../src/ui/kit';
+import { DateTimeField, type DateTimeFieldHandle } from '../../src/ui/DateTimeField';
+import { kit, NAVY } from '../../src/ui/kit';
+import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
+import { formatCount } from '../../src/ui/progressFormat';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 // Where a community Champion starts a shared goal. The community page sends
-// them here with the group it already knows (`?groupId=…`); they name the
-// goal, set the target, pick how long it runs, choose how often one member
-// may take part, and land on a "your goal is live" screen with the two links
-// to share (the phone contribute page and the big-screen display).
+// them here with the group it already knows (`?groupId=…`); they define the
+// goal in one breath (name, target, what is counted), pick how long it runs,
+// choose how often one member may take part, check the summary, and land on
+// a "your goal is live" screen whose first action is the contribute page.
 //
 // This screen is HARD-GATED to the emulator + loopback host and to a staging
 // build via `wsfUsingEmulators` / `wsfIsStaging` (double-gated inside
@@ -39,52 +48,56 @@ type CreatedGoal = {
   target: number;
   unit: string;
   communityGroupId: string;
+  startsAt: Date;
+  endsAt: Date;
+  timezone: string;
+  repeatPolicy: RepeatPolicy;
 };
 
 type Duration = '1w' | '2w' | '1m' | 'custom';
 
-const DURATIONS: ReadonlyArray<{ key: Duration; label: string }> = [
-  { key: '1w', label: '1 week' },
-  { key: '2w', label: '2 weeks' },
-  { key: '1m', label: '1 month' },
-  { key: 'custom', label: 'Custom' },
+const DURATIONS: ReadonlyArray<{ key: Duration; label: string; description: string }> = [
+  { key: '1w', label: '1 week', description: 'Seven days from the start.' },
+  { key: '2w', label: '2 weeks', description: 'Fourteen days from the start.' },
+  { key: '1m', label: '1 month', description: 'The same day next month.' },
+  { key: 'custom', label: 'Custom', description: 'Choose the exact start and end.' },
+];
+
+const REPEAT_OPTIONS: ReadonlyArray<{ key: RepeatPolicy; label: string; description: string }> = [
+  {
+    key: 'once',
+    label: 'One contribution per member',
+    description: 'Each member records one contribution toward this goal.',
+  },
+  {
+    key: 'multiple',
+    label: 'Members can contribute again',
+    description: 'Each member can record as many contributions as they like while the goal is open.',
+  },
 ];
 
 // Names the environment this screen is actually writing into. Machine-readable
 // only (a data attribute on the form); it never renders as text.
 const SYNTHETIC_LABEL = wsfIsStaging ? 'STAGING SYNTHETIC TEST' : 'LOCAL SYNTHETIC TEST';
 
-const DATE_HINT = 'Write the day as year-month-day, then the time, like 2026-09-25 2:00 PM.';
-const DATE_ERROR = 'Write the day as year-month-day, then the time, like 2026-09-25 2:00 PM.';
+const FALLBACK_COMMUNITY_NAME = 'Your community';
 const FALLBACK_TIME_ZONE = 'America/New_York';
 
-// Time zones a Champion can pick with one tap. Each is shown in words (via
-// Intl), never as its identifier; the identifier is what the callable gets.
-// Arizona keeps standard time all year, which Intl names "Mountain Standard
-// Time" — beside "Mountain Time" that reads as a duplicate, so it is named
-// for the place instead.
+// A zone Intl names awkwardly reads better as its place. Arizona keeps
+// standard time all year, which Intl calls "Mountain Standard Time"; beside
+// "Mountain Time" that reads as a duplicate, so it is named for the place.
 const ZONE_LABELS: Readonly<Record<string, string>> = { 'America/Phoenix': 'Arizona Time' };
-const COMMON_TIME_ZONES: ReadonlyArray<string> = [
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Phoenix',
-  'America/Los_Angeles',
-  'America/Anchorage',
-  'Pacific/Honolulu',
-  'Europe/London',
-];
 
-// ---- dates: typed as "2026-09-25 2:00 PM" (or 14:00), read in local time ----
+// ---- dates: the datetime-local shape "2026-09-25T14:00", read in local time ----
 
 const LOCAL_DATE_TIME =
   /^\s*(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp])\.?\s*[Mm]\.?)?\s*$/;
 
 /**
- * Reads a typed date and time in the device's local time. Accepts the day as
- * year-month-day followed by a clock time, 12-hour ("2:00 PM") or 24-hour
- * ("14:00"); anything else — including a calendar day that does not exist —
- * comes back null.
+ * Reads a date-time control's value in the device's local time. The web
+ * control always gives `YYYY-MM-DDTHH:mm`; the off-web fallback is typed, so
+ * a space, seconds and a 12-hour clock are read too. Anything else —
+ * including a calendar day that does not exist — comes back null.
  */
 function parseLocalDateTime(text: string): Date | null {
   const m = LOCAL_DATE_TIME.exec(text);
@@ -124,13 +137,11 @@ function pad(n: number): string {
   return n.toString().padStart(2, '0');
 }
 
-/** "2026-09-25 2:00 PM" — the shape the custom inputs show and accept. */
+/** "2026-09-25T14:00" — the value a datetime-local control holds. */
 function formatLocalDateTime(d: Date): string {
-  const hours24 = d.getHours();
-  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    ` ${hours12}:${pad(d.getMinutes())} ${hours24 < 12 ? 'AM' : 'PM'}`
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
   );
 }
 
@@ -171,7 +182,7 @@ function sameLocalDay(a: Date, b: Date): boolean {
 
 /**
  * "today at 3:15 PM", "tomorrow at 3:15 PM", "Friday, Sep 25 at 3:15 PM" —
- * in the device's own time, which is how the typed values are read.
+ * in the device's own time, which is how the chosen values are read.
  */
 function describeMoment(d: Date, now: Date): string {
   const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(d);
@@ -187,7 +198,11 @@ function describeMoment(d: Date, now: Date): string {
   return `${day} at ${time}`;
 }
 
-/** The device's zone, when the platform can name it; otherwise the product default. */
+/**
+ * The device's zone, when the platform can name it; otherwise the product
+ * default. This is the creation zone: a Champion is never defaulted to a zone
+ * their device does not report.
+ */
 function deviceTimeZone(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -229,6 +244,23 @@ function zoneInWords(tz: string): string {
   return nameOf('long') ?? generic ?? plain;
 }
 
+/** "5,000 squats" — the goal as one phrase, numbers grouped for reading. */
+function definitionPhrase(target: number, unit: string): string {
+  return `${formatCount(target)} ${unit}`;
+}
+
+/** The whole number a target field holds, or null when it is not one yet. */
+function wholeNumber(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^[0-9]+$/.test(trimmed)) return null;
+  const n = Number.parseInt(trimmed, 10);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+function repeatLabel(policy: RepeatPolicy): string {
+  return REPEAT_OPTIONS.find((o) => o.key === policy)?.label ?? '';
+}
+
 /**
  * A plain sentence for whatever the callable refused with. The known codes
  * wsfCreateGoal raises are named; nothing here ever shows a raw code.
@@ -258,14 +290,11 @@ function describeServerError(e: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
-type FieldErrors = Partial<{
-  title: string;
-  target: string;
-  unit: string;
-  starts: string;
-  ends: string;
-  timezone: string;
-}>;
+// The fields a submit can refuse, in the order they sit on the page: the
+// first one refused is the one the page focuses and scrolls to.
+const FIELD_ORDER = ['title', 'target', 'unit', 'starts', 'ends', 'timezone'] as const;
+type FieldKey = (typeof FIELD_ORDER)[number];
+type FieldErrors = Partial<Record<FieldKey, string>>;
 
 export default function NewGoalPage() {
   const { ready, user } = useWsfAuth();
@@ -278,35 +307,75 @@ export default function NewGoalPage() {
   // The only way a community reaches this screen: the route the community
   // page opened. Nothing on the page asks for or prints an id.
   const groupIdParam = typeof params.groupId === 'string' ? params.groupId.trim() : '';
+  const userId = user?.uid ?? null;
 
   const [title, setTitle] = useState('');
   const [target, setTarget] = useState('');
   const [unit, setUnit] = useState('');
   // The start is "now" on the quarter hour, fixed when the page opens so the
   // line the Champion reads is the instant that is sent. Custom lets them
-  // type both ends; a preset derives the end from the start.
+  // choose both ends; a preset derives the end from the start.
   const [startsAt, setStartsAt] = useState(() => formatLocalDateTime(quarterHourFloor(new Date())));
   const [endsAt, setEndsAt] = useState('');
   const [duration, setDuration] = useState<Duration>('1w');
-  const [deviceZone] = useState(deviceTimeZone);
-  const [timezone, setTimezone] = useState(deviceZone);
-  const [timezoneOpen, setTimezoneOpen] = useState(false);
+  // The times a Champion chooses are read in their device's zone, so that is
+  // the zone the goal is created in: the words on this page, the instants sent
+  // to the server and the stored zone can never disagree. There is nothing to
+  // pick, so there is no picker.
+  const [timezone] = useState(deviceTimeZone);
   // The Champion's decision about how often one member may contribute. 'once'
   // is the default here for the same reason it is the default on the server:
   // it is the conservative answer, and a goal that takes repeat contributions
   // should be a choice somebody made.
   const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>('once');
+  // The community's name, read from the document Community Home already
+  // reads. Until it arrives (or if it never does) the page says "Your
+  // community" — never an id.
+  const [communityName, setCommunityName] = useState<string | null>(null);
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedGoal | null>(null);
 
+  // What a refused submit focuses and scrolls to: the input itself, and the
+  // block (label, input, message) around it.
+  const scrollRef = useRef<ScrollView>(null);
+
+  const titleRef = useRef<TextInput>(null);
+  const targetRef = useRef<TextInput>(null);
+  const unitRef = useRef<TextInput>(null);
+  const startsRef = useRef<DateTimeFieldHandle>(null);
+  const endsRef = useRef<DateTimeFieldHandle>(null);
+  const anchorRefs = useRef({
+    title: createRef<View>(),
+    target: createRef<View>(),
+    unit: createRef<View>(),
+    starts: createRef<View>(),
+    ends: createRef<View>(),
+    timezone: createRef<View>(),
+  }).current;
+
+  useEffect(() => {
+    if (!wsfAuthEnabled || !userId || !groupIdParam) return;
+    if (!wsfUsingEmulators && !wsfIsStaging) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(getFirebaseFirestore(), 'wsfCommunityGroups', groupIdParam));
+        if (cancelled || !snap.exists()) return;
+        const name = (snap.data() as { displayName?: unknown }).displayName;
+        if (typeof name === 'string' && name.trim()) setCommunityName(name.trim());
+      } catch {
+        // The page reads "Your community"; the callable still knows the group.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, groupIdParam]);
+
   const now = new Date();
-  // The device's own zone leads the list when it is not already a common one.
-  const zoneChoices = COMMON_TIME_ZONES.includes(deviceZone)
-    ? COMMON_TIME_ZONES
-    : [deviceZone, ...COMMON_TIME_ZONES];
   const startsDate = parseLocalDateTime(startsAt);
   const endsDate =
     duration === 'custom'
@@ -314,8 +383,17 @@ export default function NewGoalPage() {
       : startsDate
         ? addDuration(startsDate, duration)
         : null;
+  // The one refused window that still reads as a date: an end at or before
+  // the start. Derived, so the summary below can never disagree with the
+  // check onSubmit runs.
+  const windowInvalid =
+    startsDate != null && endsDate != null && endsDate.getTime() <= startsDate.getTime();
+  const targetNumber = wholeNumber(target);
+  const trimmedUnit = unit.trim();
+  const definition = targetNumber !== null && trimmedUnit ? definitionPhrase(targetNumber, trimmedUnit) : null;
+  const communityLabel = communityName ?? FALLBACK_COMMUNITY_NAME;
 
-  const clearFieldError = useCallback((key: keyof FieldErrors) => {
+  const clearFieldError = useCallback((key: FieldKey) => {
     setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
   }, []);
 
@@ -325,9 +403,9 @@ export default function NewGoalPage() {
       clearFieldError('starts');
       clearFieldError('ends');
       if (next !== 'custom' && !parseLocalDateTime(startsAt)) {
-        // A start typed under Custom that never parsed would otherwise ride
-        // along invisibly under a preset and stop the submit with no message.
-        // A preset starts now.
+        // A start cleared under Custom would otherwise ride along invisibly
+        // under a preset and stop the submit with no message. A preset
+        // starts now.
         setStartsAt(formatLocalDateTime(quarterHourFloor(new Date())));
       }
       if (next === 'custom') {
@@ -341,6 +419,32 @@ export default function NewGoalPage() {
       }
     },
     [clearFieldError, duration, startsAt]
+  );
+
+  /** Focus the first refused field and bring its block to the top of the view. */
+  const revealField = useCallback(
+    (key: FieldKey) => {
+      const focusable = {
+        title: titleRef,
+        target: targetRef,
+        unit: unitRef,
+        starts: startsRef,
+        ends: endsRef,
+        timezone: null,
+      }[key];
+      focusable?.current?.focus();
+      const anchor = anchorRefs[key].current;
+      const scroll = scrollRef.current;
+      if (!anchor || !scroll) return;
+      const content = scroll.getInnerViewNode();
+      if (!content) return;
+      anchor.measureLayout(
+        content,
+        (_x, y) => scroll.scrollTo({ y: Math.max(0, y - 12), animated: true }),
+        () => {}
+      );
+    },
+    [anchorRefs]
   );
 
   const onSubmit = useCallback(async () => {
@@ -380,26 +484,27 @@ export default function NewGoalPage() {
 
     const start = parseLocalDateTime(startsAt);
     if (!start) {
-      errors.starts = DATE_ERROR;
+      errors.starts = 'Choose when the goal starts.';
     }
     const end =
       duration === 'custom' ? parseLocalDateTime(endsAt) : start ? addDuration(start, duration) : null;
     if (duration === 'custom' && !end) {
-      errors.ends = DATE_ERROR;
+      errors.ends = 'Choose when the goal ends.';
     } else if (start && end && end.getTime() <= start.getTime()) {
       errors.ends = 'The end must be after the start.';
     }
 
+    // Nothing in the UI can change the zone, so this only guards against a
+    // device that names a zone the platform itself cannot read back.
     const trimmedTz = timezone.trim();
-    if (!trimmedTz) {
-      errors.timezone = 'Choose a time zone.';
-    } else if (!isValidTimeZone(trimmedTz)) {
-      errors.timezone =
-        "We don't recognise that time zone. Pick one above, or type the region and city, like Europe/London.";
+    if (!trimmedTz || !isValidTimeZone(trimmedTz)) {
+      errors.timezone = "We can't read your device's time zone, so this goal can't be started here.";
     }
 
     if (Object.keys(errors).length > 0 || !start || !end) {
       setFieldErrors(errors);
+      const first = FIELD_ORDER.find((key) => errors[key]);
+      if (first) revealField(first);
       return;
     }
     setFieldErrors({});
@@ -435,6 +540,10 @@ export default function NewGoalPage() {
         target: targetNum,
         unit: trimmedUnit,
         communityGroupId: trimmedGroupId,
+        startsAt: start,
+        endsAt: end,
+        timezone: trimmedTz,
+        repeatPolicy,
       });
     } catch (e) {
       setError(describeServerError(e));
@@ -452,6 +561,7 @@ export default function NewGoalPage() {
     timezone,
     repeatPolicy,
     submitting,
+    revealField,
   ]);
 
   // Hard gate. Production bundles that somehow route here render a refusal
@@ -516,6 +626,11 @@ export default function NewGoalPage() {
     const communityHref = `/community/${created.communityGroupId}`;
     return (
       <Page
+        // A key of its own, so this is a NEW scrolling element rather than the
+        // form's reused one. Without it the browser keeps the offset the form
+        // was scrolled to, and on a 360 px phone the Champion lands below
+        // "Your goal is live" instead of on it.
+        key="goal-created"
         testID="wsf-new-goal-created"
         // The ids the browser specs read, as data attributes on the container
         // (react-native-web renders dataSet as data-goal-id / data-group-id).
@@ -523,46 +638,54 @@ export default function NewGoalPage() {
         dataSet={{ 'goal-id': created.goalId, 'group-id': created.communityGroupId }}
       >
         <View>
-          <Text style={kit.heading}>Your goal is live</Text>
+          <Text style={kit.eyebrow}>{communityLabel}</Text>
+          <Text style={[kit.heading, styles.headingAfterEyebrow]}>Your goal is live</Text>
           <Text style={[kit.intro, styles.intro]}>
-            Share it with your community and put it on a screen.
+            Send it to your members and put it on a screen.
           </Text>
         </View>
         <View style={kit.card}>
           <Text style={kit.cardTitle}>{created.title}</Text>
-          <Text style={kit.body}>
-            Goal: {created.target} {created.unit}
+          <Text style={styles.definition}>{definitionPhrase(created.target, created.unit)}</Text>
+          <Text style={kit.cardMeta}>
+            Starts {describeMoment(created.startsAt, now)} · Ends {describeMoment(created.endsAt, now)}
+          </Text>
+          <Text style={kit.cardMeta}>
+            {zoneInWords(created.timezone)} · {repeatLabel(created.repeatPolicy)}
           </Text>
         </View>
-        <Pressable
+        {/*
+          The one next useful action, and the only control on this screen that
+          opens the contribute page. It used to be a button that navigated
+          there in code, with a second, differently-labelled secondary
+          ("Contribute on a phone") pointing at the same route — two controls,
+          one job, and no way for a Champion to tell them apart. It is a
+          ButtonLink now, so the primary itself carries the href.
+        */}
+        <ButtonLink
+          href={contributeHref}
           style={kit.primaryButton}
-          onPress={() =>
-            router.push({
-              pathname: '/contribute/[goalId]',
-              params: { goalId: created.goalId },
-            })
-          }
-          accessibilityRole="button"
+          textStyle={kit.primaryButtonText}
           testID="wsf-new-goal-goto-contribute"
-        >
-          <Text style={kit.primaryButtonText}>Open the contribute page</Text>
-        </Pressable>
+          label="Open the contribute page"
+        />
+        <Text style={kit.caption}>
+          Where members record what they did and watch the shared total grow.
+        </Text>
         <View style={kit.card}>
-          <Text style={kit.cardTitle}>Share this goal</Text>
-          <ButtonLink
-            href={contributeHref}
-            style={kit.tertiaryButton}
-            textStyle={kit.tertiaryButtonText}
-            testID="wsf-new-goal-contribute-link"
-            label="Contribute on a phone"
-          />
-          <ButtonLink
-            href={displayHref}
-            style={kit.tertiaryButton}
-            textStyle={kit.tertiaryButtonText}
-            testID="wsf-new-goal-display-link"
-            label="Show on a big screen"
-          />
+          <Text style={kit.cardTitle}>Put it to work</Text>
+          <View style={styles.action}>
+            <ButtonLink
+              href={displayHref}
+              style={kit.secondaryButton}
+              textStyle={kit.secondaryButtonText}
+              testID="wsf-new-goal-display-link"
+              label="Show on a big screen"
+            />
+            <Text style={kit.cardMeta}>
+              A live view of the total for a TV or projector where everyone can see it.
+            </Text>
+          </View>
         </View>
         <ButtonLink
           href={communityHref}
@@ -580,25 +703,18 @@ export default function NewGoalPage() {
     // nothing to type here — the community page is the way in.
     return (
       <Page testID="wsf-new-goal-form" dataSet={{ environment: SYNTHETIC_LABEL, 'group-id': '' }}>
-        <View>
-          <Text style={kit.heading}>Start a goal</Text>
+        <View testID="wsf-new-goal-no-community">
+          <Text style={kit.headingCompact}>Choose a community before starting a goal.</Text>
           <Text style={[kit.intro, styles.intro]}>
-            Goals belong to a community, so they start from one.
-          </Text>
-        </View>
-        <View style={kit.card} testID="wsf-new-goal-no-community">
-          <Text style={kit.cardTitle}>Start this from your community</Text>
-          <Text style={kit.body}>
-            Open your community page and tap Start a goal. We'll know which
-            community the goal is for.
+            Open the community the goal is for, then tap Start a goal there.
           </Text>
         </View>
         <ButtonLink
           href="/"
-          style={kit.secondaryButton}
-          textStyle={kit.secondaryButtonText}
+          style={kit.primaryButton}
+          textStyle={kit.primaryButtonText}
           testID="wsf-new-goal-home"
-          label="Back to home"
+          label="Go to your communities"
         />
       </Page>
     );
@@ -608,228 +724,200 @@ export default function NewGoalPage() {
     <Page
       testID="wsf-new-goal-form"
       groupId={groupIdParam}
+      scrollRef={scrollRef}
       // The community this goal is for, as data-group-id on the form (the
-      // specs read it there); the Champion reads one plain line.
+      // specs read it there); the Champion reads its name.
       dataSet={{ environment: SYNTHETIC_LABEL, 'group-id': groupIdParam }}
     >
       <View>
-        <Text style={kit.heading}>Start a goal</Text>
+        <Text style={kit.eyebrow} testID="wsf-new-goal-community">
+          {communityLabel}
+        </Text>
+        <Text style={[kit.heading, styles.headingAfterEyebrow]}>Start a goal</Text>
         <Text style={[kit.intro, styles.intro]}>
-          Set what your community will do together. Every contribution adds to
-          one shared total.
+          Set what your community will do together. Every contribution adds to one shared total.
         </Text>
       </View>
 
-      <Text style={kit.body}>This goal belongs to your community.</Text>
-
       <View style={kit.card}>
-        <Text style={kit.cardTitle}>What we'll do</Text>
-        <Text style={[kit.fieldLabel, styles.label]}>Goal name</Text>
-        <TextField
-          value={title}
-          onChangeText={(v) => {
-            setTitle(v);
-            clearFieldError('title');
-          }}
-          placeholder="e.g. 5,000 squats together"
-          editable={!submitting}
-          testID="wsf-new-goal-title"
-        />
-        <FieldError message={fieldErrors.title} testID="wsf-new-goal-title-error" />
-        <Text style={[kit.fieldLabel, styles.label]}>Target</Text>
-        <TextField
-          value={target}
-          onChangeText={(v) => {
-            setTarget(v);
-            clearFieldError('target');
-          }}
-          placeholder="e.g. 5000"
-          keyboardType="number-pad"
-          inputMode="numeric"
-          editable={!submitting}
-          testID="wsf-new-goal-target"
-        />
-        <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
-        <Text style={[kit.fieldLabel, styles.label]}>What you're counting</Text>
-        <TextField
-          value={unit}
-          onChangeText={(v) => {
-            setUnit(v);
-            clearFieldError('unit');
-          }}
-          placeholder="e.g. squats"
-          editable={!submitting}
-          testID="wsf-new-goal-unit"
-        />
-        <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
+        <Text style={kit.cardTitle}>The goal</Text>
+        <Text style={kit.cardMeta}>
+          Name it, set the total, and say what you're counting — together they read like
+          "5,000 squats" or "300 miles".
+        </Text>
+        <View ref={anchorRefs.title}>
+          <Text style={[kit.fieldLabel, styles.label]}>Goal name</Text>
+          <TextField
+            ref={titleRef}
+            value={title}
+            onChangeText={(v) => {
+              setTitle(v);
+              clearFieldError('title');
+            }}
+            placeholder="e.g. September squat challenge"
+            editable={!submitting}
+            testID="wsf-new-goal-title"
+          />
+          <FieldError message={fieldErrors.title} testID="wsf-new-goal-title-error" />
+        </View>
+        <View ref={anchorRefs.target}>
+          <Text style={[kit.fieldLabel, styles.label]}>Target</Text>
+          <TextField
+            ref={targetRef}
+            value={target}
+            onChangeText={(v) => {
+              setTarget(v);
+              clearFieldError('target');
+            }}
+            placeholder="e.g. 5000"
+            keyboardType="number-pad"
+            inputMode="numeric"
+            editable={!submitting}
+            testID="wsf-new-goal-target"
+          />
+          <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
+        </View>
+        <View ref={anchorRefs.unit}>
+          <Text style={[kit.fieldLabel, styles.label]}>What you're counting</Text>
+          <TextField
+            ref={unitRef}
+            value={unit}
+            onChangeText={(v) => {
+              setUnit(v);
+              clearFieldError('unit');
+            }}
+            placeholder="e.g. squats"
+            editable={!submitting}
+            testID="wsf-new-goal-unit"
+          />
+          <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
+        </View>
+        {definition ? (
+          <Text style={[styles.definition, styles.label]} testID="wsf-new-goal-definition">
+            {definition}
+          </Text>
+        ) : null}
       </View>
 
       <View style={kit.card}>
         <Text style={kit.cardTitle}>When</Text>
-        {duration !== 'custom' && startsDate ? (
-          <Text style={kit.body} testID="wsf-new-goal-starts-line">
-            Starts {describeMoment(startsDate, now)}
-          </Text>
-        ) : null}
         <Text style={[kit.fieldLabel, styles.label]}>How long</Text>
-        <View style={styles.choiceRow}>
+        <OptionGroup accessibilityLabel="How long" testID="wsf-new-goal-duration">
           {DURATIONS.map((d) => (
-            <Pressable
+            <OptionRow
               key={d.key}
-              style={[kit.pill, styles.choice, duration === d.key && kit.pillSelected]}
+              label={d.label}
+              description={d.description}
+              selected={duration === d.key}
               onPress={() => chooseDuration(d.key)}
               disabled={submitting}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: duration === d.key }}
-              // accessibilityState carries it on native; the raw attribute is
-              // for browsers, which only read the DOM.
-              {...({ 'aria-selected': duration === d.key } as Record<string, unknown>)}
               testID={`wsf-new-goal-duration-${d.key}`}
-            >
-              <Text style={[kit.pillText, duration === d.key && kit.pillTextSelected]}>
-                {d.label}
-              </Text>
-            </Pressable>
+            />
           ))}
-        </View>
+        </OptionGroup>
         {duration === 'custom' ? (
           <>
-            <Text style={[kit.fieldLabel, styles.label]}>Starts</Text>
-            <TextField
-              value={startsAt}
-              onChangeText={(v) => {
-                setStartsAt(v);
-                clearFieldError('starts');
-                clearFieldError('ends');
-              }}
-              editable={!submitting}
-              testID="wsf-new-goal-starts-at"
-            />
-            <Text style={kit.caption}>{DATE_HINT}</Text>
-            <FieldError message={fieldErrors.starts} testID="wsf-new-goal-starts-error" />
-            <Text style={[kit.fieldLabel, styles.label]}>Ends</Text>
-            <TextField
-              value={endsAt}
-              onChangeText={(v) => {
-                setEndsAt(v);
-                clearFieldError('ends');
-              }}
-              editable={!submitting}
-              testID="wsf-new-goal-ends-at"
-            />
-            <Text style={kit.caption}>{DATE_HINT}</Text>
-          </>
-        ) : null}
-        {endsDate ? (
-          <Text style={kit.body} testID="wsf-new-goal-ends-line">
-            Ends {describeMoment(endsDate, now)}
-          </Text>
-        ) : null}
-        <FieldError message={fieldErrors.ends} testID="wsf-new-goal-ends-error" />
-        <View style={styles.zoneRow}>
-          <Text style={[kit.caption, styles.zoneText]} testID="wsf-new-goal-timezone-line">
-            Times are in {zoneInWords(timezone.trim() || FALLBACK_TIME_ZONE)}
-          </Text>
-          {timezoneOpen ? null : (
-            <Pressable
-              style={kit.tertiaryButton}
-              onPress={() => setTimezoneOpen(true)}
-              disabled={submitting}
-              accessibilityRole="button"
-              testID="wsf-new-goal-timezone-change"
-            >
-              <Text style={kit.tertiaryButtonText}>Change</Text>
-            </Pressable>
-          )}
-        </View>
-        {timezoneOpen ? (
-          <>
-            <Text style={[kit.fieldLabel, styles.label]}>Time zone</Text>
-            <View style={styles.choiceRow}>
-              {zoneChoices.map((tz) => (
-                <Pressable
-                  key={tz}
-                  style={[kit.pill, styles.choice, timezone.trim() === tz && kit.pillSelected]}
-                  onPress={() => {
-                    setTimezone(tz);
-                    clearFieldError('timezone');
-                  }}
-                  disabled={submitting}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: timezone.trim() === tz }}
-                  {...({ 'aria-selected': timezone.trim() === tz } as Record<string, unknown>)}
-                  testID={`wsf-new-goal-timezone-option-${tz.replace(/[^A-Za-z0-9]+/g, '-')}`}
-                >
-                  <Text style={[kit.pillText, timezone.trim() === tz && kit.pillTextSelected]}>
-                    {zoneInWords(tz)}
-                  </Text>
-                </Pressable>
-              ))}
+            <View ref={anchorRefs.starts}>
+              <Text style={[kit.fieldLabel, styles.label]}>Starts</Text>
+              <DateTimeField
+                ref={startsRef}
+                value={startsAt}
+                onChange={(v) => {
+                  setStartsAt(v);
+                  clearFieldError('starts');
+                  clearFieldError('ends');
+                }}
+                editable={!submitting}
+                accessibilityLabel="Starts"
+                testID="wsf-new-goal-starts-at"
+              />
+              <FieldError message={fieldErrors.starts} testID="wsf-new-goal-starts-error" />
             </View>
-            <Text style={[kit.fieldLabel, styles.label]}>Somewhere else?</Text>
-            <TextField
-              value={timezone}
-              onChangeText={(v) => {
-                setTimezone(v);
-                clearFieldError('timezone');
-              }}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!submitting}
-              testID="wsf-new-goal-timezone"
-            />
-            <Text style={kit.caption}>Type the region and city, like Europe/London.</Text>
+            <View ref={anchorRefs.ends}>
+              <Text style={[kit.fieldLabel, styles.label]}>Ends</Text>
+              <DateTimeField
+                ref={endsRef}
+                value={endsAt}
+                onChange={(v) => {
+                  setEndsAt(v);
+                  clearFieldError('ends');
+                }}
+                editable={!submitting}
+                accessibilityLabel="Ends"
+                testID="wsf-new-goal-ends-at"
+              />
+            </View>
           </>
         ) : null}
-        <FieldError message={fieldErrors.timezone} testID="wsf-new-goal-timezone-error" />
+        <View style={styles.window}>
+          {duration !== 'custom' && startsDate ? (
+            <Text style={kit.body} testID="wsf-new-goal-starts-line">
+              Starts {describeMoment(startsDate, now)}
+            </Text>
+          ) : null}
+          {endsDate ? (
+            <Text style={kit.body} testID="wsf-new-goal-ends-line">
+              Ends {describeMoment(endsDate, now)}
+            </Text>
+          ) : null}
+          <FieldError message={fieldErrors.ends} testID="wsf-new-goal-ends-error" />
+        </View>
+        <View ref={anchorRefs.timezone}>
+          <Text style={[kit.caption, styles.zoneText]} testID="wsf-new-goal-timezone-line">
+            Times are in {zoneInWords(timezone)}
+          </Text>
+          <FieldError message={fieldErrors.timezone} testID="wsf-new-goal-timezone-error" />
+        </View>
       </View>
 
       <View style={kit.card}>
         <Text style={kit.cardTitle}>How members take part</Text>
         <Text style={[kit.fieldLabel, styles.label]}>How often can one member contribute?</Text>
-        <View style={styles.choiceRow}>
-          <Pressable
-            style={[kit.pill, styles.choice, repeatPolicy === 'once' && kit.pillSelected]}
-            onPress={() => setRepeatPolicy('once')}
-            disabled={submitting}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: repeatPolicy === 'once' }}
-            {...({ 'aria-selected': repeatPolicy === 'once' } as Record<string, unknown>)}
-            testID="wsf-new-goal-repeat-once"
-          >
-            <Text
-              style={[
-                kit.pillText,
-                repeatPolicy === 'once' && kit.pillTextSelected,
-              ]}
-            >
-              Once
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[kit.pill, styles.choice, repeatPolicy === 'multiple' && kit.pillSelected]}
-            onPress={() => setRepeatPolicy('multiple')}
-            disabled={submitting}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: repeatPolicy === 'multiple' }}
-            {...({ 'aria-selected': repeatPolicy === 'multiple' } as Record<string, unknown>)}
-            testID="wsf-new-goal-repeat-multiple"
-          >
-            <Text
-              style={[
-                kit.pillText,
-                repeatPolicy === 'multiple' && kit.pillTextSelected,
-              ]}
-            >
-              More than once
-            </Text>
-          </Pressable>
-        </View>
-        <Text style={kit.caption} testID="wsf-new-goal-repeat-caption">
-          {repeatPolicy === 'multiple'
-            ? 'Each member can record as many contributions as they like while the goal is open.'
-            : 'Each member records one contribution toward this goal.'}
-        </Text>
+        <OptionGroup accessibilityLabel="How often can one member contribute?" testID="wsf-new-goal-repeat">
+          {REPEAT_OPTIONS.map((o) => (
+            <OptionRow
+              key={o.key}
+              label={o.label}
+              description={o.description}
+              selected={repeatPolicy === o.key}
+              onPress={() => setRepeatPolicy(o.key)}
+              disabled={submitting}
+              testID={`wsf-new-goal-repeat-${o.key}`}
+            />
+          ))}
+        </OptionGroup>
+      </View>
+
+      <View style={kit.cardQuiet} testID="wsf-new-goal-summary">
+        <Text style={kit.cardTitle}>Check it over</Text>
+        <Text style={kit.cardMeta}>This is what your community will see.</Text>
+        <SummaryRow label="Community" value={communityLabel} />
+        <SummaryRow label="Goal" value={title.trim() || 'Not named yet'} />
+        <SummaryRow label="Target" value={definition ?? 'Not set yet'} />
+        <SummaryRow
+          label="Starts"
+          value={startsDate ? describeMoment(startsDate, now) : 'Choose a start'}
+        />
+        {/*
+          An end at or before the start is the one configuration the form
+          refuses that still produces a readable date. Saying it back under
+          "This is what your community will see" would confirm a goal that
+          cannot be created, so the row states the problem instead. It stays
+          in the row's own voice, not red: the red message belongs under the
+          field, after a submit attempt.
+        */}
+        <SummaryRow
+          label="Ends"
+          value={
+            endsDate
+              ? windowInvalid
+                ? `${describeMoment(endsDate, now)} — must be after the start`
+                : describeMoment(endsDate, now)
+              : 'Choose an end'
+          }
+        />
+        <SummaryRow label="Time zone" value={zoneInWords(timezone)} />
+        <SummaryRow label="Members" value={repeatLabel(repeatPolicy)} />
       </View>
 
       {error ? (
@@ -862,6 +950,16 @@ function FieldError({ message, testID }: { message?: string; testID: string }) {
   );
 }
 
+/** One label/value line of the summary; the value wraps under the label when narrow. */
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={kit.row}>
+      <Text style={kit.rowLabel}>{label}</Text>
+      <Text style={kit.rowValue}>{value}</Text>
+    </View>
+  );
+}
+
 /**
  * The page every state of this screen sits on: the scrolling cream page,
  * the wordmark chrome (with a quiet way back to the community when we know
@@ -876,14 +974,21 @@ function Page({
   testID,
   groupId,
   dataSet,
+  scrollRef,
 }: {
   children: ReactNode;
   testID?: string;
   groupId?: string;
   dataSet?: Record<string, string>;
+  scrollRef?: Ref<ScrollView>;
 }) {
   return (
-    <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      ref={scrollRef}
+      style={kit.scroll}
+      contentContainerStyle={kit.page}
+      keyboardShouldPersistTaps="handled"
+    >
       <View
         style={kit.column}
         testID={testID}
@@ -913,17 +1018,19 @@ function Page({
 const chromeBackStyle = StyleSheet.flatten([kit.chromeLink, { flexShrink: 1, minWidth: 0 }]);
 
 const styles = StyleSheet.create({
-  // Heading and intro sit close together as one block.
+  // Eyebrow, heading and intro sit close together as one block.
+  headingAfterEyebrow: { marginTop: 6 },
   intro: { marginTop: 8 },
   // Fields are grouped label-over-input; the label's top margin opens the
   // gap between one group and the next inside the card.
   label: { marginTop: 6 },
-  // Choice pills share a wrapping row; each may shrink so its text wraps
-  // inside the pill rather than pushing past the column.
-  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  choice: { flexShrink: 1, minWidth: 0 },
+  // The goal as one phrase: "5,000 squats".
+  definition: { color: NAVY, fontSize: 20, fontWeight: '800', lineHeight: 26 },
+  // The start and end in words, one under the other.
+  window: { gap: 4, marginTop: 4 },
   // The quiet time-zone line with its "Change" control beside it; the line
   // wraps under the control when the column is narrow.
-  zoneRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   zoneText: { flexShrink: 1, minWidth: 0 },
+  // A secondary action with its one-line purpose under it.
+  action: { gap: 6, marginTop: 4 },
 });

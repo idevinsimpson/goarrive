@@ -192,14 +192,26 @@ async function seedCommunityWithRoles(opts: {
 /** Real sign-out through the interface, so the account switch is the product's own. */
 /**
  * The administrative rows (type, joining, status, your role) sit behind the
- * "Community details" control on Community Home. Opening it is the real
- * interaction; the assertions on those rows are unchanged.
+ * "Community details" control inside the Champion's Manage sheet. Opening
+ * both is the real interaction; the assertions on those rows are unchanged.
+ * Only a Champion has the sheet, so reaching the rows is itself proof of the
+ * role the row then states.
  */
 async function openCommunityDetails(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
+/** Put the sheet away so the page's own controls are clickable again. */
+async function closeManage(page: Page): Promise<void> {
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
 }
 
 async function signOutVia(page: Page): Promise<void> {
@@ -371,6 +383,7 @@ test.describe('community goal seam', () => {
       // The signed-in account really is the Champion — asserted, not assumed.
       await openCommunityDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
+      await closeManage(page);
 
       (release as unknown as () => void)();
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
@@ -390,6 +403,7 @@ test.describe('community goal seam', () => {
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
       // The rest of the community page is still usable.
       await expect(page.getByTestId('wsf-community-type')).toBeVisible();
+      await closeManage(page);
 
       // ---- Retry recovers, and the control returns ----
       await page.unroute(callableUrl('wsfListGoals'));
@@ -402,9 +416,12 @@ test.describe('community goal seam', () => {
       await signOutVia(page);
       await signInVia(page, emailMember, pwMember);
       await page.goto(`/community/${groupId}`);
-      await openCommunityDetails(page);
-      await expect(page.getByTestId('wsf-community-role')).toContainText('Member');
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
+      // A member, asserted by what only a member has and what only a Champion
+      // has: the membership disclosure is theirs, Manage and its rows are not.
+      await expect(page.getByTestId('wsf-community-membership-toggle')).toBeVisible();
+      await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
       await expect(page.getByTestId('wsf-community-start-goal')).toHaveCount(0);
     } finally {
       await ctx.close();

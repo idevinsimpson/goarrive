@@ -50,9 +50,14 @@ export const JOIN_QR_COPY = {
    */
   caveat:
     'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join. Reset the link above and this code stops working; show this one again for the new link.',
-  /** Shown in place of the symbol when the policy admits no one by link. */
+  /**
+   * Shown in place of the symbol when the policy admits no one by link.
+   * It states the enforced fact and stops there: there is no control in this
+   * product that changes how people join, so the sentence must not send a
+   * Champion looking for one (clause 12, and clause 9 on unsupported copy).
+   */
   notJoinable:
-    'This community cannot be joined from a link, so there is no code to scan. Change how people join to share one.',
+    'This community cannot be joined from a link, so there is no invite link or QR code to share.',
   failed:
     'This link could not be turned into a QR code. The link above still works — copy or share it instead.',
 } as const;
@@ -60,10 +65,29 @@ export const JOIN_QR_COPY = {
 export function JoinQrCode({
   url,
   testIDPrefix = 'wsf-community-qr',
+  caveat = JOIN_QR_COPY.caveat,
+  showUrl = true,
 }: {
   /** The join URL, or null when this community admits no one by link. */
   url: string | null;
   testIDPrefix?: string;
+  /**
+   * The note under the symbol. The default names the link-rotation control;
+   * a surface that carries no such control passes a note that stops at what
+   * scanning does, so the sentence never points at something that is not there.
+   */
+  caveat?: string;
+  /**
+   * Whether the URL is printed under the symbol.
+   *
+   * Contract clause 5 — invitation, not URL administration — forbids the raw
+   * join URL as body copy on a member-facing surface, so the page's Invite
+   * card passes `false`: Copy invite and Share invite are the ways the link
+   * moves. `data-qr-url` on the symbol is unaffected either way, so a test
+   * can still assert WHICH URL the symbol carries. The Champion's Manage
+   * sheet, where the link is the administered object, keeps it printed.
+   */
+  showUrl?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -98,9 +122,11 @@ export function JoinQrCode({
   }, [url]);
 
   if (!url) {
+    // No toggle and no symbol here, so no leading gap either: the sentence is
+    // the whole of this block and sits on its card's own rhythm.
     return (
-      <View style={styles.block} testID={`${testIDPrefix}-unavailable`}>
-        <Text style={styles.caveat}>{JOIN_QR_COPY.notJoinable}</Text>
+      <View testID={`${testIDPrefix}-unavailable`}>
+        <Text style={[styles.caveat, styles.caveatAlone]}>{JOIN_QR_COPY.notJoinable}</Text>
       </View>
     );
   }
@@ -132,14 +158,17 @@ export function JoinQrCode({
               source={{ uri: encoded.uri }}
               style={styles.symbol}
               resizeMode="contain"
-              // The symbol is a picture of the URL printed directly beneath
-              // it, so announcing it again would read the same string twice.
+              // It is a picture of the community's join link; the link
+              // itself is never read out here (and, on the member-facing
+              // card, never printed either).
               accessibilityLabel="QR code for this community's join link"
               testID={`${testIDPrefix}-image`}
             />
-            <Text style={styles.url} selectable testID={`${testIDPrefix}-url`}>
-              {url}
-            </Text>
+            {showUrl ? (
+              <Text style={styles.url} selectable testID={`${testIDPrefix}-url`}>
+                {url}
+              </Text>
+            ) : null}
           </View>
         ) : (
           <Text style={styles.error} testID={`${testIDPrefix}-error`}>
@@ -149,7 +178,7 @@ export function JoinQrCode({
       ) : null}
       {open ? (
         <Text style={styles.caveat} testID={`${testIDPrefix}-caveat`}>
-          {JOIN_QR_COPY.caveat}
+          {caveat}
         </Text>
       ) : null}
     </View>
@@ -176,10 +205,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  symbolBlock: { marginTop: wsfTheme.spacing.md, alignSelf: 'flex-start' },
+  symbolBlock: {
+    marginTop: wsfTheme.spacing.md,
+    alignSelf: 'stretch',
+    maxWidth: QR_PIXEL_SIZE,
+  },
+  // Square, and never wider than the column it sits in: a fixed 220 px box
+  // extends past a 195 px viewport (invariant 4).
   symbol: {
-    width: QR_PIXEL_SIZE,
-    height: QR_PIXEL_SIZE,
+    width: '100%',
+    maxWidth: QR_PIXEL_SIZE,
+    aspectRatio: 1,
     backgroundColor: '#FFFFFF',
     borderRadius: wsfTheme.radius.sm,
   },
@@ -197,7 +233,11 @@ const styles = StyleSheet.create({
     lineHeight: wsfTheme.typography.caption.lineHeight,
     marginTop: wsfTheme.spacing.sm,
     maxWidth: 420,
+    flexShrink: 1,
+    minWidth: 0,
   },
+  /** The sentence is the only thing in its block; it needs no leading gap. */
+  caveatAlone: { marginTop: 0 },
   error: {
     color: '#B3261E',
     fontSize: wsfTheme.typography.caption.fontSize,

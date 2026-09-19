@@ -24,6 +24,8 @@ export { PROGRESS_GREEN };
 export const TEXT_MUTED = wsfTheme.colors.textMuted;
 export const ERROR_RED = '#B4232C';
 export const SAMPLE_TINT = '#FBF1D3';
+// Faint navy wash behind a selected option row; navy text stays readable on it.
+export const OPTION_SELECTED_TINT = '#EEF2F6';
 
 export const kit = StyleSheet.create({
   // ---- page ----
@@ -173,6 +175,36 @@ export const kit = StyleSheet.create({
   pillSelected: { borderColor: NAVY, backgroundColor: NAVY },
   pillText: { color: NAVY, fontSize: 15, fontWeight: '700' },
   pillTextSelected: { color: CREAM },
+
+  // ---- option rows: one decision per row (see src/ui/OptionRow.tsx) ----
+  // The selected look is a navy border on a faint navy tint, never a navy
+  // fill: the label stays navy-on-light in both states and the leading radio
+  // indicator carries the selection for anyone who cannot rely on colour.
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    width: '100%',
+    backgroundColor: SURFACE,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: CARD_BORDER,
+    minHeight: 56,
+    padding: 14,
+  },
+  optionRowSelected: { borderColor: NAVY, backgroundColor: OPTION_SELECTED_TINT },
+  optionIndicator: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: NAVY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionIndicatorDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: NAVY },
+  optionLabel: { color: NAVY, fontSize: 16, fontWeight: '700', lineHeight: 22 },
+  optionDescription: { color: TEXT_MUTED, fontSize: 14, lineHeight: 20 },
 
   // ---- fields ----
   fieldLabel: { color: NAVY, fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },

@@ -16,6 +16,7 @@ import {
 } from '../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
+import { groupTypeCardLabel, groupTypeLabel } from '../../src/labels';
 import {
   clearPendingJoinCode,
   setPendingJoinCode,
@@ -165,36 +166,44 @@ export default function JoinPage() {
   }
 
   const { preview } = previewState;
-  const typeLabel = preview.groupType === 'familyFriends' ? 'Family and friends' : 'Community';
-  // D6: the preview shows the minimum needed to explain what someone is
-  // joining — name, supported type, and the joining conditions. The member
-  // count that used to appear here is deliberately gone: a count is
-  // information about the community's members, and an invitation preview is
-  // not the place to disclose it.
-  //
-  // Each supported policy states its own condition, and an unrecognised value
-  // states none. The two-branch form would have described any unexpected
-  // policy as link-only, which understates who can get in — the wrong
-  // direction to be wrong in on the screen where someone decides to join.
+
+  // The hero meta line is built only from what the preview returns: the type
+  // as a card fact (nothing for a plain community, never a placeholder) and
+  // the joining condition the callable and rules enforce for that stored
+  // policy today. Both sentences are the admission-semantics report's
+  // supported wording, read from the joiner's side: a link admits to
+  // 'public' and 'inviteOnly' alike, nothing lists or searches communities,
+  // and a reset retires the old link for everyone who has not joined yet.
+  // An unrecognised policy states no condition rather than guessing one.
   const joiningConditions =
     preview.joinPolicy === 'public'
-      ? 'Anyone can find and join this community.'
+      ? 'Anyone with the invite link can join. The community is not listed or searchable anywhere, so people need the link.'
       : preview.joinPolicy === 'inviteOnly'
-        ? 'Anyone with this link can join. It keeps working until a Champion resets it.'
+        ? 'Anyone with the invite link can join, including anyone it is forwarded to, until a new invite link is created.'
         : '';
-  const metaLine = joiningConditions ? `${typeLabel} · ${joiningConditions}` : typeLabel;
+  const typeFact = groupTypeCardLabel(preview.groupType);
+  const metaParts = [typeFact, joiningConditions].filter((part): part is string => Boolean(part));
+  const metaLine = metaParts.length > 0 ? metaParts.join(' · ') : groupTypeLabel(preview.groupType);
 
   // The invitation itself: the community's name on the navy hero, with the
-  // eyebrow and the joining conditions around it. Same hero on both sides of
-  // sign-in; only the actions under it differ.
+  // eyebrow and the joining conditions around it, then what joining means.
+  // Same on both sides of sign-in; only the actions under it differ.
   const invitation = (
-    <View style={kit.hero}>
-      <Text style={kit.eyebrowOnNavy}>Join a community</Text>
-      <Text style={kit.heroTitle}>{preview.displayName}</Text>
-      <Text style={kit.heroMeta} testID="wsf-join-meta">
-        {metaLine}
-      </Text>
-    </View>
+    <>
+      <View style={kit.hero}>
+        <Text style={kit.eyebrowOnNavy}>Join a community</Text>
+        <Text style={kit.heroTitle}>{preview.displayName}</Text>
+        <Text style={kit.heroMeta} testID="wsf-join-meta">
+          {metaLine}
+        </Text>
+      </View>
+      <View style={kit.card} testID="wsf-join-meaning">
+        <Text style={kit.cardTitle}>What joining means</Text>
+        <Text style={kit.body}>See the community’s goals and its shared progress.</Text>
+        <Text style={kit.body}>Add your own contributions to the shared total.</Text>
+        <Text style={kit.body}>Leave whenever you like.</Text>
+      </View>
+    </>
   );
 
   // Signed out — preview is safe (D4: only shown for link-joinable active
@@ -210,6 +219,8 @@ export default function JoinPage() {
           </View>
           {invitation}
           <View style={styles.actions}>
+            {/* No account surprise after the tap: say it before the button. */}
+            <Text style={kit.body}>You’ll need a free account first.</Text>
             {/*
               `replace`, not push. If these Links pushed, the join screen would
               stay at the bottom of the stack while signup -> verify-email ->
@@ -242,6 +253,12 @@ export default function JoinPage() {
               testID="wsf-join-signin"
               label="Already have an account? Sign in"
             />
+            {/*
+              A visitor who does not want an account still needs a way off
+              this screen. Same control, same words as the signed-in branch
+              below, so the decision reads the same on both sides of sign-in.
+            */}
+            <SecondaryLink href="/" label="Not now — back to home" />
           </View>
         </View>
       </ScrollView>
@@ -260,12 +277,12 @@ export default function JoinPage() {
             <ErrorText testID="wsf-join-submit-error">{joinState.message}</ErrorText>
           ) : null}
           <SubmitButton
-            label="Join this community"
+            label={`Join ${preview.displayName}`}
             onPress={onJoin}
             submitting={joinState.kind === 'joining'}
             testID="wsf-join-submit"
           />
-          <SecondaryLink href="/" label="Not now" />
+          <SecondaryLink href="/" label="Not now — back to home" />
         </View>
       </View>
     </ScrollView>

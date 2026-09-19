@@ -10,13 +10,14 @@ import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFunctions } from '../src/firebase';
 import {
   challengeParticipationLabel,
-  groupTypeLabel,
+  groupTypeCardLabel,
   memberCountLabel,
-  roleLabel,
+  roleCardLabel,
 } from '../src/labels';
 import { wsfTheme } from '../src/theme';
 import { ButtonLink } from '../src/ui/ButtonLink';
-import { NAVY, kit } from '../src/ui/kit';
+import { CARD_BORDER, NAVY, kit } from '../src/ui/kit';
+import { formatCount, totalOfTargetLabel } from '../src/ui/progressFormat';
 import { WsfWordmark } from '../src/ui/WsfWordmark';
 
 type MyCommunityItem = {
@@ -42,12 +43,39 @@ type MyCommunitiesState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; items: MyCommunityItem[] };
 
+// The subset of wsfListGoals' row this screen reads. `sharedTotal` is only
+// present when the call asked for history (it does), and is still checked
+// before it is printed: a fabricated 0 is worse than no number.
+type ListedGoal = {
+  goalId: string;
+  title: string;
+  target: number;
+  unit: string;
+  status: string;
+  endsAt: string;
+  sharedTotal?: number;
+};
+
+type ListGoalsResponse = { goals: ListedGoal[] };
+
+/**
+ * What a community card knows about its current goal. Three states, kept
+ * apart on purpose: a read that has not returned, one that returned (with or
+ * without an open goal), and one that failed. "We could not check" and "there
+ * is no goal" are different facts and get different lines.
+ */
+type CardGoalState =
+  | { kind: 'loading' }
+  | { kind: 'ok'; goal: ListedGoal | null }
+  | { kind: 'failed' };
+
 // Same validator shape as pendingJoinCode.ts / wsfPreviewCommunity.
 const JOIN_CODE_SHAPE = /^[A-Za-z0-9_-]{16,128}$/;
 
 export default function BrandShell() {
   const { ready, user } = useWsfAuth();
   const [myCommunities, setMyCommunities] = useState<MyCommunitiesState>({ kind: 'idle' });
+  const [goalsByGroup, setGoalsByGroup] = useState<Record<string, CardGoalState>>({});
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinFieldError, setJoinFieldError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -79,6 +107,43 @@ export default function BrandShell() {
       cancelled = true;
     };
   }, [ready, user]);
+
+  // The open goal of each community, so a card can say what is happening and
+  // what the next action is. One wsfListGoals read per community (the same
+  // member-authorized read Community Home makes, with history so the row
+  // carries its confirmed total), in parallel; each card settles on its own
+  // so one slow or failed read never blanks the others. A failed read falls
+  // back to the challenge line the list already carries.
+  useEffect(() => {
+    if (myCommunities.kind !== 'ready') {
+      setGoalsByGroup({});
+      return;
+    }
+    let cancelled = false;
+    const ids = myCommunities.items.map((item) => item.groupId);
+    setGoalsByGroup(Object.fromEntries(ids.map((id) => [id, { kind: 'loading' } as CardGoalState])));
+    for (const groupId of ids) {
+      (async () => {
+        let next: CardGoalState;
+        try {
+          const fn = httpsCallable<{ groupId: string; includeHistory: boolean }, ListGoalsResponse>(
+            getFirebaseFunctions(),
+            'wsfListGoals'
+          );
+          const result = await fn({ groupId, includeHistory: true });
+          next = { kind: 'ok', goal: featuredOpenGoal(result.data.goals ?? []) };
+        } catch (e) {
+          console.warn('[wsf] home goal read failed', e);
+          next = { kind: 'failed' };
+        }
+        if (cancelled) return;
+        setGoalsByGroup((prev) => ({ ...prev, [groupId]: next }));
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [myCommunities]);
 
   const onJoinCodeSubmit = useCallback(() => {
     const trimmed = joinCodeInput.trim();
@@ -127,22 +192,19 @@ export default function BrandShell() {
             </View>
           </>
         ) : !ready ? (
-          <>
-            <HomeHero />
-            <View testID="wsf-home-loading" data-state="loading">
-              <Text style={kit.statusText}>Loading…</Text>
-            </View>
-          </>
+          // No hero while auth settles: a returning member must not watch a
+          // marketing hero appear and vanish before their communities show.
+          <View testID="wsf-home-loading" data-state="loading">
+            <Text style={kit.statusText}>Loading…</Text>
+          </View>
         ) : showSignedIn ? (
           <SignedInHome
-            user={user!}
             state={myCommunities}
+            goalsByGroup={goalsByGroup}
             joinCodeInput={joinCodeInput}
             setJoinCodeInput={setJoinCodeInput}
             joinFieldError={joinFieldError}
             onJoinCodeSubmit={onJoinCodeSubmit}
-            onSignOut={onSignOut}
-            signingOut={signingOut}
           />
         ) : (
           <SignedOutHome
@@ -153,14 +215,36 @@ export default function BrandShell() {
           />
         )}
 
-        <View style={kit.footer}>
-          <ButtonLink
-            href="/health"
-            style={FOOTER_LINK}
-            textStyle={kit.tertiaryButtonText}
-            testID="wsf-home-build-details"
-            label="Build details"
-          />
+        {/* Utility footer: who is signed in, the way out, and the build — each
+            once, at the very bottom, out of the centre of the page. */}
+        <View style={styles.utility}>
+          {showSignedIn ? (
+            <Text style={kit.caption} testID="wsf-home-identity">
+              {identityLine(user!)}
+            </Text>
+          ) : null}
+          <View style={styles.utilityRow}>
+            {showSignedIn ? (
+              <Pressable
+                onPress={onSignOut}
+                disabled={signingOut}
+                style={[UTILITY_CONTROL, signingOut ? kit.primaryButtonDisabled : null]}
+                testID="wsf-home-signout"
+                accessibilityRole="button"
+              >
+                <Text style={kit.tertiaryButtonText}>
+                  {signingOut ? 'Signing out…' : 'Sign out'}
+                </Text>
+              </Pressable>
+            ) : null}
+            <ButtonLink
+              href="/health"
+              style={UTILITY_CONTROL}
+              textStyle={kit.tertiaryButtonText}
+              testID="wsf-home-build-details"
+              label="Build details"
+            />
+          </View>
         </View>
       </View>
     </ScrollView>
@@ -168,8 +252,26 @@ export default function BrandShell() {
 }
 
 /**
- * The navy hero every state of the home opens with: the tagline and the
- * subline, and (signed out) the two ways in, stacked inside it.
+ * The open goal a card features: the one that ends soonest, as Community
+ * Home features it. Several open goals stay several on Community Home; the
+ * card names one so its line stays one line.
+ */
+function featuredOpenGoal(goals: ListedGoal[]): ListedGoal | null {
+  const open = goals
+    .filter((g) => g.status === 'active')
+    .slice()
+    .sort((a, b) => (a.endsAt === b.endsAt ? a.goalId.localeCompare(b.goalId) : a.endsAt.localeCompare(b.endsAt)));
+  return open[0] ?? null;
+}
+
+function identityLine(user: { displayName?: string | null; email?: string | null }): string {
+  const who = user.displayName || user.email;
+  return who ? `Signed in as ${who}` : 'Signed in';
+}
+
+/**
+ * The navy hero a visitor opens with: the tagline and the subline, and the
+ * two ways in, stacked inside it. A signed-in member never sees it again.
  */
 function HomeHero({ children }: { children?: ReactNode }) {
   return (
@@ -217,6 +319,7 @@ function SignedOutHome({
         </View>
       </HomeHero>
       <JoinWithCodeField
+        title="Join with a code"
         value={joinCodeInput}
         onChange={setJoinCodeInput}
         onSubmit={onJoinCodeSubmit}
@@ -226,71 +329,82 @@ function SignedOutHome({
   );
 }
 
+/**
+ * Signed in, the page is the member's communities and nothing above them.
+ * With at least one community the card is the primary action and the two
+ * ways to add another sit below it as secondaries; with none, starting one
+ * is the primary and the join card stays.
+ */
 function SignedInHome({
-  user,
   state,
+  goalsByGroup,
   joinCodeInput,
   setJoinCodeInput,
   joinFieldError,
   onJoinCodeSubmit,
-  onSignOut,
-  signingOut,
 }: {
-  user: { displayName?: string | null; email?: string | null };
   state: MyCommunitiesState;
+  goalsByGroup: Record<string, CardGoalState>;
   joinCodeInput: string;
   setJoinCodeInput: (v: string) => void;
   joinFieldError: string | null;
   onJoinCodeSubmit: () => void;
-  onSignOut: () => void;
-  signingOut: boolean;
 }) {
-  const identity = user.displayName || user.email || 'Signed in';
+  const noCommunityYet = state.kind === 'ready' && state.items.length === 0;
+  const joinField = (
+    <JoinWithCodeField
+      title={noCommunityYet ? 'Join with a code' : 'Join another community'}
+      value={joinCodeInput}
+      onChange={setJoinCodeInput}
+      onSubmit={onJoinCodeSubmit}
+      error={joinFieldError}
+    />
+  );
   return (
     <View
       style={styles.stack}
       testID="wsf-home-signed-in"
       {...({ 'data-state': 'signed-in' } as Record<string, unknown>)}
     >
-      <HomeHero />
-      <Text style={[kit.statusText, styles.identity]} testID="wsf-home-identity">
-        {identity}
-      </Text>
-
       <View style={styles.section}>
         <Text style={kit.eyebrow}>Your communities</Text>
-        <MyCommunitiesList state={state} />
+        <MyCommunitiesList state={state} goalsByGroup={goalsByGroup} />
       </View>
 
-      <ButtonLink
-        href="/start-community"
-        style={kit.primaryButton}
-        textStyle={kit.primaryButtonText}
-        testID="wsf-home-start"
-        label="Start a community"
-      />
-
-      <JoinWithCodeField
-        value={joinCodeInput}
-        onChange={setJoinCodeInput}
-        onSubmit={onJoinCodeSubmit}
-        error={joinFieldError}
-      />
-
-      <Pressable
-        onPress={onSignOut}
-        disabled={signingOut}
-        style={[kit.tertiaryButton, signingOut ? kit.primaryButtonDisabled : null]}
-        testID="wsf-home-signout"
-        accessibilityRole="button"
-      >
-        <Text style={kit.tertiaryButtonText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text>
-      </Pressable>
+      {noCommunityYet ? (
+        <>
+          <ButtonLink
+            href="/start-community"
+            style={kit.primaryButton}
+            textStyle={kit.primaryButtonText}
+            testID="wsf-home-start"
+            label="Start a community"
+          />
+          {joinField}
+        </>
+      ) : (
+        <>
+          {joinField}
+          <ButtonLink
+            href="/start-community"
+            style={kit.secondaryButton}
+            textStyle={kit.secondaryButtonText}
+            testID="wsf-home-start"
+            label="Start a community"
+          />
+        </>
+      )}
     </View>
   );
 }
 
-function MyCommunitiesList({ state }: { state: MyCommunitiesState }) {
+function MyCommunitiesList({
+  state,
+  goalsByGroup,
+}: {
+  state: MyCommunitiesState;
+  goalsByGroup: Record<string, CardGoalState>;
+}) {
   if (state.kind === 'idle' || state.kind === 'loading') {
     return (
       <View
@@ -328,45 +442,131 @@ function MyCommunitiesList({ state }: { state: MyCommunitiesState }) {
       testID="wsf-home-my-list"
       {...({ 'data-state': 'ready' } as Record<string, unknown>)}
     >
-      {state.items.map((item) => (
-        <Link
+      {orderByUserValue(state.items, goalsByGroup).map((item) => (
+        <CommunityCard
           key={item.groupId}
-          href={`/community/${item.groupId}` as never}
-          style={COMMUNITY_CARD}
-          testID={`wsf-home-community-${item.groupId}`}
-        >
-          <View style={styles.cardBody}>
-            <Text style={kit.cardTitle}>
-              {item.displayName}
-              {item.isSample ? (
-                <>
-                  {' · '}
-                  <Text style={kit.badge}>Sample</Text>
-                </>
-              ) : null}
-            </Text>
-            <Text style={kit.cardMeta}>
-              {groupTypeLabel(item.groupType)} · {roleLabel(item.role)} ·{' '}
-              {memberCountLabel(item.memberCount)}
-            </Text>
-            <Text style={kit.body}>
-              {item.activeChallenge
-                ? `${item.activeChallenge.title} — ${challengeParticipationLabel(item.activeChallenge.participantCount, item.activeChallenge.completedCount)}`
-                : 'No active challenge yet'}
-            </Text>
-          </View>
-        </Link>
+          item={item}
+          goalState={goalsByGroup[item.groupId] ?? { kind: 'loading' }}
+        />
       ))}
     </View>
   );
 }
 
+/**
+ * The order the member reads the list in, not the order the server returned
+ * it in: a community with an open goal has something to do in it today, so it
+ * comes first, soonest-ending first among those. Everything else keeps the
+ * server's order exactly, which is the tiebreak — the sort is stable, so two
+ * communities that rank the same never swap.
+ *
+ * It re-sorts once, when the per-community goal reads land; before that every
+ * card is still `loading` and the order is the server's.
+ */
+function orderByUserValue(
+  items: MyCommunityItem[],
+  goalsByGroup: Record<string, CardGoalState>
+): MyCommunityItem[] {
+  const openGoalOf = (item: MyCommunityItem) => {
+    const s = goalsByGroup[item.groupId];
+    return s && s.kind === 'ok' && s.goal ? s.goal : null;
+  };
+  return items
+    .map((item, index) => ({ item, index, goal: openGoalOf(item) }))
+    .sort((a, b) => {
+      if (!!a.goal !== !!b.goal) return a.goal ? -1 : 1;
+      if (a.goal && b.goal && a.goal.endsAt !== b.goal.endsAt) {
+        return a.goal.endsAt < b.goal.endsAt ? -1 : 1;
+      }
+      return a.index - b.index;
+    })
+    .map((entry) => entry.item);
+}
+
+/**
+ * One community, one card, one link. The card answers "what is happening
+ * here" in a line and names the next action inside it; the whole card is the
+ * way in, so there is nothing else to tap.
+ */
+function CommunityCard({ item, goalState }: { item: MyCommunityItem; goalState: CardGoalState }) {
+  const meta = [
+    groupTypeCardLabel(item.groupType),
+    roleCardLabel(item.role),
+    memberCountLabel(item.memberCount),
+  ]
+    .filter((part): part is string => !!part)
+    .join(' · ');
+  const { status, action } = cardStatusAndAction(item, goalState);
+  return (
+    <Link
+      href={`/community/${item.groupId}` as never}
+      style={COMMUNITY_CARD}
+      testID={`wsf-home-community-${item.groupId}`}
+    >
+      <View style={styles.cardBody}>
+        <Text style={kit.cardTitle}>
+          {item.displayName}
+          {item.isSample ? (
+            <>
+              {' · '}
+              <Text style={kit.badge}>Sample</Text>
+            </>
+          ) : null}
+        </Text>
+        {meta ? <Text style={kit.cardMeta}>{meta}</Text> : null}
+        <Text style={kit.body}>{status}</Text>
+        <Text style={styles.cardAction}>{action}</Text>
+      </View>
+    </Link>
+  );
+}
+
+/**
+ * The honest one-line status and the one contextual action of a card.
+ *   open goal            → "<title> · <total> of <target> <unit>", Contribute
+ *   no open goal         → "No goal running yet", Start a goal (Champion) / Open
+ *   read failed          → the challenge line the list carries, Open
+ *   read not yet settled → a quiet checking line, Open
+ * A goal that reached its target stays open and stays "Contribute": the
+ * people still contributing to it are the point.
+ */
+function cardStatusAndAction(
+  item: MyCommunityItem,
+  goalState: CardGoalState
+): { status: string; action: string } {
+  if (goalState.kind === 'ok' && goalState.goal) {
+    const goal = goalState.goal;
+    const progress =
+      typeof goal.sharedTotal === 'number'
+        ? totalOfTargetLabel(goal.sharedTotal, goal.target, goal.unit)
+        : `goal of ${formatCount(goal.target)} ${goal.unit}`;
+    return { status: `${goal.title} · ${progress}`, action: 'Contribute' };
+  }
+  if (goalState.kind === 'ok') {
+    // Community Home's Champion is the founding Champion; the same person is
+    // offered the same next step here.
+    const isChampion = item.role === 'foundingChampion';
+    return { status: 'No goal running yet', action: isChampion ? 'Start a goal' : 'Open' };
+  }
+  if (goalState.kind === 'failed') {
+    return {
+      status: item.activeChallenge
+        ? `${item.activeChallenge.title} — ${challengeParticipationLabel(item.activeChallenge.participantCount, item.activeChallenge.completedCount)}`
+        : 'No active challenge yet',
+      action: 'Open',
+    };
+  }
+  return { status: 'Checking for an open goal…', action: 'Open' };
+}
+
 function JoinWithCodeField({
+  title,
   value,
   onChange,
   onSubmit,
   error,
 }: {
+  title: string;
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
@@ -374,7 +574,7 @@ function JoinWithCodeField({
 }) {
   return (
     <View style={kit.card} testID="wsf-home-join-field">
-      <Text style={kit.cardTitle}>Join with a code</Text>
+      <Text style={kit.cardTitle}>{title}</Text>
       <View style={styles.joinRow}>
         <TextInput
           value={value}
@@ -411,17 +611,44 @@ function JoinWithCodeField({
 const styles = StyleSheet.create({
   // A state's contents stack with the same rhythm as the page column.
   stack: { gap: 18 },
-  identity: { fontWeight: '600' },
   section: { gap: 12 },
   // Consecutive cards in a list: the same rhythm as the challenge page.
   list: { gap: 12 },
   // The two ways in sit inside the hero, under the subline.
   heroActions: { gap: 10, marginTop: 8 },
   cardBody: { gap: 4 },
+  // The card's one action, named at the foot of the card. The whole card is
+  // the link, so this is a label on it, not a second control.
+  // Not underlined: an underlined navy line is this product's tertiary LINK
+  // control, and this is not a link — the whole card is the link, and it goes
+  // to Community Home whatever this line says. It names the next step waiting
+  // there; it must not look like a second destination.
+  cardAction: {
+    color: NAVY,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 4,
+  },
   // The field and Go share a row; the field gives way first so the row can
   // never push past a 195 px viewport.
   joinRow: { flexDirection: 'row', gap: 10 },
   joinInput: { flex: 1, minWidth: 0 },
+  // The utility footer: a hairline, then the quiet controls, centred and
+  // wrapping so nothing pushes past a narrow viewport.
+  utility: {
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 16,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: CARD_BORDER,
+  },
+  utilityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 16,
+  },
 });
 
 // A community card is a Link (a text anchor on web) wearing the card look.
@@ -440,5 +667,6 @@ const COMMUNITY_CARD = StyleSheet.flatten([
     textDecorationLine: 'none' as const,
   },
 ]);
-// The tertiary control sits left by default; the footer centres it.
-const FOOTER_LINK = StyleSheet.flatten([kit.tertiaryButton, { alignSelf: 'center' as const }]);
+// The tertiary control sits left by default; the footer centres it. Flat
+// (never an array) because ButtonLink passes it straight to the anchor.
+const UTILITY_CONTROL = StyleSheet.flatten([kit.tertiaryButton, { alignSelf: 'center' as const }]);

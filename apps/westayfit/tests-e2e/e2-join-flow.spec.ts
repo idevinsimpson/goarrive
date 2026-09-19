@@ -162,6 +162,16 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await expect(page.getByTestId('wsf-join-signed-out')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(displayName)).toBeVisible();
 
+  // Candidate D clause 6 — no hidden account surprise and no dead zone. The
+  // account requirement is stated BEFORE the primary is tapped, and a visitor
+  // who does not want an account has a way off this screen, the same control
+  // and the same words the signed-in branch carries.
+  const signedOut = page.getByTestId('wsf-join-signed-out');
+  await expect(signedOut).toContainText('You\u2019ll need a free account first.');
+  const notNow = signedOut.getByRole('link', { name: 'Not now \u2014 back to home' });
+  await expect(notNow).toBeVisible();
+  await expect(notNow).toHaveAttribute('href', '/');
+
   // Every WSF page is noindex, the join route included.
   const robots = await page
     .locator('meta[name="robots"]')
@@ -214,7 +224,10 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   expect(page.url(), 'round-trip should land back on /join/<code>').toContain(
     `/join/${encodeURIComponent(joinCode)}`
   );
-  await expect(page.getByText(displayName)).toBeVisible();
+  // The name is the hero title (exact match: the primary action below also
+  // carries it, as "Join <name>", and is asserted on its own).
+  await expect(page.getByText(displayName, { exact: true })).toBeVisible();
+  await expect(page.getByTestId('wsf-join-submit')).toHaveText(`Join ${displayName}`);
 
   // ---- §3.1: join succeeds, lands on /community/<groupId> -----------------
   await page.getByTestId('wsf-join-submit').click();

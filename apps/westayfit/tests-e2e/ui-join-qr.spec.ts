@@ -12,20 +12,25 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
  *   Q-1  a Champion of a link-joinable community sees a QR and the URL it
  *        encodes, and the encoded URL is EXACTLY the invite link the Copy
  *        control produces — not a variant, not a shortener, not a new scheme.
- *   Q-2  an ordinary member never sees it. The QR lives inside the Champion
- *        tools sheet, which a member cannot open at all.
+ *   Q-2  an ordinary member has the Invite card and its own QR (candidate D:
+ *        inviting is not a Champion privilege), but never the Champion's
+ *        Manage QR section, which lives inside a sheet a member cannot open.
  *   Q-3  a signed-in non-member never sees it — they never reach the screen.
- *   Q-4  resetting the join code changes the encoded URL. A printed code that
- *        outlives its reset is the failure that matters here: the Champion
- *        would believe the old flyer is dead.
+ *   Q-4  creating a new invite link changes the encoded URL, and only after
+ *        the Champion confirms it. A printed code that outlives its reset is
+ *        the failure that matters here: the Champion would believe the old
+ *        flyer is dead.
  *   Q-5  a private community renders no QR — it renders the sentence saying
- *        why. A private group must not acquire a working invite link because
- *        the UI happened to have a joinCode in hand.
+ *        why, on the Invite card and inside Manage. A private group must not
+ *        acquire a working invite link because the UI happened to have a
+ *        joinCode in hand.
  *
  * `data-qr-url` on the symbol carries the string the encoder was handed. That
  * is deliberately an attribute and not an image comparison: what matters is
  * WHICH URL got encoded, and a pixel diff of a QR answers a different, weaker
- * question.
+ * question. The invite link itself is never printed as body copy any more; the
+ * Invite card carries it as `data-invite-url`, and that attribute is what the
+ * QR's encoded string is compared against.
  *
  * Helpers are copied from ui-champion-torture.spec.ts rather than imported —
  * a spec file that imports another spec file runs it.
@@ -195,9 +200,13 @@ test('Q-1: a Champion sees the QR and the URL it encodes, and it is the invite l
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
 
-  // The link the Copy control shows, on the page itself.
-  const copied = await champion.getByTestId('wsf-community-invite-url').innerText();
+  // The link the Copy control puts on the clipboard, carried by the Invite
+  // card as a data attribute — never printed as body copy.
+  const inviteCard = champion.getByTestId('wsf-community-invite');
+  await expect(inviteCard).toBeVisible({ timeout: 20_000 });
+  const copied = (await inviteCard.getAttribute('data-invite-url')) ?? '';
   expect(copied.trim()).toBe(`${new URL(champion.url()).origin}/join/${fx.joinCode}`);
+  await expect(inviteCard).not.toContainText(`/join/${fx.joinCode}`);
 
   // The control starts closed: the symbol is drawn on demand, after hydration.
   await openManage(champion);
@@ -226,7 +235,7 @@ test('Q-1: a Champion sees the QR and the URL it encodes, and it is the invite l
 
   // The honest note: scanning is not joining.
   await expect(champion.getByTestId('wsf-community-qr-caveat')).toContainText('has to sign in');
-  await expect(champion.getByTestId('wsf-community-qr-caveat')).toContainText('Reset the link');
+  await expect(champion.getByTestId('wsf-community-qr-caveat')).toContainText('new invite link');
 
   // The toggle is a real 44px control with an accessible name in both states.
   const toggle = champion.getByTestId('wsf-community-qr-toggle');
@@ -246,7 +255,9 @@ test('Q-1: a Champion sees the QR and the URL it encodes, and it is the invite l
   await ctx.close();
 });
 
-test('Q-2: an ordinary member never sees the QR', async ({ browser }) => {
+test('Q-2: an ordinary member has the Invite card and its QR, never the Champion QR section', async ({
+  browser,
+}) => {
   test.setTimeout(120_000);
   const fx = await seedFixture('q2', 'inviteOnly');
 
@@ -256,9 +267,14 @@ test('Q-2: an ordinary member never sees the QR', async ({ browser }) => {
   await member.goto(`/community/${fx.groupId}`);
   await expect(member.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
 
-  // The member DOES have the invite link — that is existing behaviour and not
-  // what this asserts.
-  await expect(member.getByTestId('wsf-community-invite-url')).toBeVisible();
+  // The member DOES have the invite: the card, with the link as data and the
+  // working controls — and never the link printed as body copy.
+  const inviteCard = member.getByTestId('wsf-community-invite');
+  await expect(inviteCard).toBeVisible();
+  const inviteUrl = (await inviteCard.getAttribute('data-invite-url')) ?? '';
+  expect(inviteUrl).toBe(`${new URL(member.url()).origin}/join/${fx.joinCode}`);
+  await expect(inviteCard).not.toContainText(`/join/${fx.joinCode}`);
+  await expect(member.getByTestId('wsf-community-invite-copy')).toHaveText('Copy invite');
 
   // The Champion tools entry point is not rendered for them, so the sheet and
   // everything in it is unreachable — not merely hidden.
@@ -267,8 +283,21 @@ test('Q-2: an ordinary member never sees the QR', async ({ browser }) => {
   await expect(member.getByTestId('wsf-community-qr-section')).toHaveCount(0);
   await expect(member.getByTestId('wsf-community-qr-toggle')).toHaveCount(0);
   await expect(member.getByTestId('wsf-community-qr-symbol')).toHaveCount(0);
-  // And nothing on the page carries an encoded URL at all.
+  // Nothing carries an encoded URL until the member asks for the symbol…
   expect(await member.locator('[data-qr-url]').count()).toBe(0);
+  // …and then exactly one does, on the Invite card, encoding the same link.
+  await member.getByTestId('wsf-community-invite-qr-toggle').click();
+  const symbol = member.getByTestId('wsf-community-invite-qr-symbol');
+  await expect(symbol).toBeVisible({ timeout: 20_000 });
+  expect(await member.locator('[data-qr-url]').count()).toBe(1);
+  expect(await symbol.getAttribute('data-qr-url')).toBe(inviteUrl);
+  // Clause 5: opening the symbol still does not print the link as body copy.
+  // The URL rides on the element as data, and Copy/Share move it.
+  await expect(inviteCard).not.toContainText(`/join/${fx.joinCode}`);
+  await expect(member.getByTestId('wsf-community-invite-qr-url')).toHaveCount(0);
+  // The Champion's ids still resolve to nothing for a member.
+  await expect(member.getByTestId('wsf-community-qr-symbol')).toHaveCount(0);
+  await expect(member.getByTestId('wsf-community-qr-section')).toHaveCount(0);
 
   await ctx.close();
 });
@@ -295,7 +324,9 @@ test('Q-3: a signed-in non-member never sees the QR', async ({ browser }) => {
   await ctx.close();
 });
 
-test('Q-4: resetting the join code changes the URL the QR encodes', async ({ browser }) => {
+test('Q-4: creating a new invite link changes the URL the QR encodes, after a confirmation', async ({
+  browser,
+}) => {
   test.setTimeout(180_000);
   const fx = await seedFixture('q4', 'inviteOnly');
 
@@ -307,18 +338,36 @@ test('Q-4: resetting the join code changes the URL the QR encodes', async ({ bro
   const before = await revealQrUrl(champion);
   expect(before).toContain(`/join/${fx.joinCode}`);
 
-  // The reset control lives on the page under the sheet, so close first.
-  await champion.getByTestId('wsf-community-manage-close').click();
-  await expect(champion.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+  // The control lives inside Manage, and it asks first. Backing out really
+  // backs out: the stored code is untouched and the symbol still encodes it.
+  await champion.getByTestId('wsf-community-reset').click();
+  await expect(champion.getByTestId('wsf-community-reset-confirm')).toContainText(
+    'will stop working for everyone who has it'
+  );
+  await champion.getByTestId('wsf-community-reset-cancel').click();
+  await expect(champion.getByTestId('wsf-community-reset-confirm')).toHaveCount(0);
+  expect(await readJoinCode(fx.groupId)).toBe(fx.joinCode);
+  await expect(champion.getByTestId('wsf-community-qr-symbol')).toHaveAttribute('data-qr-url', before);
 
-  await champion.getByTestId('wsf-community-invite-reset').click();
+  await champion.getByTestId('wsf-community-reset').click();
+  await champion.getByTestId('wsf-community-reset-confirm-yes').click();
   await expect(champion.getByTestId('wsf-community-invite-reset-done')).toBeVisible({
     timeout: 30_000,
   });
+  await expect(champion.getByTestId('wsf-community-invite-reset-error')).toHaveCount(0);
 
   // The code that is actually stored now — read from the emulator, not the UI.
   const rotated = await readJoinCode(fx.groupId);
   expect(rotated).not.toBe(fx.joinCode);
+
+  // Close and reopen: the symbol the Champion sees next must be the new one.
+  await champion.getByTestId('wsf-community-manage-close').click();
+  await expect(champion.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+  // The Invite card on the page moved with it — the two can never disagree.
+  await expect(champion.getByTestId('wsf-community-invite')).toHaveAttribute(
+    'data-invite-url',
+    `${new URL(champion.url()).origin}/join/${rotated}`
+  );
 
   const after = await revealQrUrl(champion);
   expect(after).not.toBe(before);
@@ -339,10 +388,22 @@ test('Q-5: a private community renders the reason instead of a QR', async ({ bro
   await signInVia(champion, fx.championEmail, fx.password);
   await champion.goto(`/community/${fx.groupId}`);
 
-  // No invite card at all on the page — a private group has no link to share.
-  await expect(champion.getByTestId('wsf-community-invite')).toHaveCount(0);
+  // The Champion's Invite card says why there is no link, and offers no
+  // control that could not work: no link to copy, no link to share, no
+  // encoded URL, no data attribute carrying one.
+  const inviteCard = champion.getByTestId('wsf-community-invite');
+  await expect(inviteCard).toBeVisible({ timeout: 20_000 });
+  await expect(champion.getByTestId('wsf-community-invite-qr-unavailable')).toContainText(
+    'cannot be joined from a link'
+  );
+  await expect(champion.getByTestId('wsf-community-invite-copy')).toHaveCount(0);
+  await expect(champion.getByTestId('wsf-community-invite-share')).toHaveCount(0);
+  await expect(champion.getByTestId('wsf-community-invite-qr-toggle')).toHaveCount(0);
+  expect(await inviteCard.getAttribute('data-invite-url')).toBeNull();
 
   await openManage(champion);
+  // No link, so nothing to rotate either.
+  await expect(champion.getByTestId('wsf-community-reset')).toHaveCount(0);
   await expect(champion.getByTestId('wsf-community-qr-section')).toBeVisible();
   // The sentence, not a symbol and not silence.
   await expect(champion.getByTestId('wsf-community-qr-unavailable')).toContainText(

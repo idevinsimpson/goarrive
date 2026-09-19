@@ -56,15 +56,26 @@ const KNOWN_GAPS = [
  * Marks an address verified through the Auth emulator's admin API.
  */
 /**
- * The administrative rows (type, joining, status, your role) sit behind the
- * "Community details" control on Community Home. Opening it is the real
- * interaction; the assertions on those rows are unchanged.
+ * The administrative rows (type, joining, status, your role) are Champion
+ * administration, so they live inside the Manage sheet behind the "Show all
+ * details" disclosure rather than in every member's journey. Opening Manage
+ * and then the disclosure is the real interaction; the assertions on those
+ * rows are unchanged.
  */
-async function openCommunityDetails(page: Page): Promise<void> {
+async function openChampionDetails(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
+async function closeManage(page: Page): Promise<void> {
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
 }
 
 async function markEmailVerified(email: string): Promise<void> {
@@ -184,14 +195,19 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(communityName)).toBeVisible();
   // E3.5 A6: raw enums are gone.
-  await openCommunityDetails(page);
+  await openChampionDetails(page);
   await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
   await expect(page.getByTestId('wsf-community-status')).toContainText('Active');
-  // F9 — the pill I clicked and the stored policy match: I picked Public,
+  // F9 — the row I chose and the stored policy match: I picked Public,
   // so joinPolicyLabel('public') → "Public" is what renders.
   await expect(page.getByTestId('wsf-community-policy')).toContainText('Public');
-  // Public → invite section renders with a URL and Copy button.
-  await expect(page.getByTestId('wsf-community-invite-url')).toBeVisible();
+  await closeManage(page);
+  // Public → the Invite card offers the link as an action and carries the
+  // exact URL those actions use, instead of printing it as body copy.
+  await expect(page.getByTestId('wsf-community-invite')).toHaveAttribute(
+    'data-invite-url',
+    /\/join\/\S+$/
+  );
   await expect(page.getByTestId('wsf-community-invite-copy')).toBeVisible();
 
   const communityUrl = page.url();

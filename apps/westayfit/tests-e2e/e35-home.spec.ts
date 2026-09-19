@@ -41,15 +41,26 @@ const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
 const PROJECT_ID = 'demo-wsf-local';
 
 /**
- * The administrative rows (type, joining, status, your role) sit behind the
- * "Community details" control on Community Home. Opening it is the real
- * interaction; the assertions on those rows are unchanged.
+ * The administrative rows (type, joining, status, your role) are Champion
+ * administration, so they live inside the Manage sheet behind the "Show all
+ * details" disclosure rather than in every member's journey. Opening Manage
+ * and then the disclosure is the real interaction; the assertions on those
+ * rows are unchanged.
  */
-async function openCommunityDetails(page: Page): Promise<void> {
+async function openChampionDetails(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
+async function closeManage(page: Page): Promise<void> {
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
 }
 
 async function markEmailVerified(email: string): Promise<void> {
@@ -381,10 +392,15 @@ test('F9: a Private community shows Private + type label + members count', async
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(communityName)).toBeVisible();
   // Human labels, not raw enums.
-  await openCommunityDetails(page);
+  await openChampionDetails(page);
   await expect(page.getByTestId('wsf-community-policy')).toContainText('Private');
   await expect(page.getByTestId('wsf-community-type')).toContainText('Family and friends');
+  await closeManage(page);
   await expect(page.getByTestId('wsf-community-member-count')).toContainText('1 member');
-  // Private communities do not render the public invite URL.
-  await expect(page.getByTestId('wsf-community-invite-url')).toHaveCount(0);
+  // Private communities carry no joinable link anywhere: not as body copy,
+  // not as the string the Copy/Share controls and the QR would use.
+  expect(
+    await page.getByTestId('wsf-community-invite').getAttribute('data-invite-url')
+  ).toBeNull();
+  await expect(page.getByTestId('wsf-community-invite-copy')).toHaveCount(0);
 });

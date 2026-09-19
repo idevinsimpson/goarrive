@@ -307,13 +307,16 @@ test('(d) no interactive target is under 44 px', async ({ browser }) => {
 
     await page.goto(`/community/${fx.groupId}`);
     await expect(page.getByTestId(`wsf-community-goal-percent-${fx.goals.main}`)).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('wsf-community-details-toggle').click();
-    await expect(page.getByTestId('wsf-community-details')).toBeVisible();
-    expect(await undersizedTargets(page, MIN_TARGET_PX), 'Community Home, details expanded').toEqual([]);
+    // A private community: the Champion's Invite card carries the honest
+    // no-link sentence and no control, so the page is already fully expanded.
+    await expect(page.getByTestId('wsf-community-invite')).toBeVisible();
+    expect(await undersizedTargets(page, MIN_TARGET_PX), 'Community Home').toEqual([]);
 
     await page.getByTestId('wsf-community-manage').click();
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
-    expect(await undersizedTargets(page, MIN_TARGET_PX), 'Champion tools sheet open').toEqual([]);
+    await page.getByTestId('wsf-community-details-toggle').click();
+    await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+    expect(await undersizedTargets(page, MIN_TARGET_PX), 'Champion tools sheet open, details expanded').toEqual([]);
     await page.keyboard.press('Escape');
 
     await page.goto(`/contribute/${fx.goals.main}?groupId=${fx.groupId}&mode=record`);

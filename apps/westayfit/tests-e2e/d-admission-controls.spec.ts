@@ -156,15 +156,63 @@ async function callAs(
 }
 
 /**
- * The administrative rows (type, joining, status, your role) sit behind the
- * "Community details" control on Community Home. Opening it is the real
- * interaction; the assertions on those rows are unchanged.
+ * The administrative rows (type, joining, status, your role) are Champion
+ * administration, so they live inside the Manage sheet behind the "Show all
+ * details" control rather than in every member's journey. Opening Manage and
+ * then the disclosure is the real interaction; the assertions on those rows
+ * are unchanged.
  */
-async function openCommunityDetails(page: Page): Promise<void> {
+async function openChampionDetails(page: Page): Promise<void> {
+  const manage = page.getByTestId('wsf-community-manage');
+  await expect(manage).toBeVisible({ timeout: 20_000 });
+  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(page.getByTestId('wsf-community-details')).toBeVisible();
+}
+
+async function closeManage(page: Page): Promise<void> {
+  await page.getByTestId('wsf-community-manage-close').click();
+  await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
+}
+
+/**
+ * What an ordinary member's own Community Home says about their standing.
+ * There is no role row for a member any more — role labels are Champion
+ * administration — so membership is read off the controls the screen offers:
+ * a member has their own "Membership options" disclosure and has no Champion
+ * administration at all. That is the same fact the "Member" role row carried,
+ * asserted positively AND negatively.
+ */
+async function expectMemberStanding(page: Page): Promise<void> {
+  await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('wsf-community-membership-toggle')).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
+}
+
+/**
+ * The invite link a Champion would pass on. It is no longer printed as body
+ * copy (URL administration is not a member-facing job); the Invite card
+ * carries the exact string the Copy/Share controls and the QR use, as
+ * `data-invite-url`.
+ */
+async function inviteUrlOf(page: Page): Promise<string> {
+  const card = page.getByTestId('wsf-community-invite');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(card).toHaveAttribute('data-invite-url', /\/join\/\S+$/, { timeout: 20_000 });
+  return (await card.getAttribute('data-invite-url'))!;
+}
+
+/** A member's own "Membership options" disclosure, opened. */
+async function openMembershipOptions(page: Page): Promise<void> {
+  const toggle = page.getByTestId('wsf-community-membership-toggle');
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
 async function signInVia(page: Page, account: Account): Promise<void> {
@@ -208,17 +256,18 @@ test.describe('D — admission controls in the interface', () => {
       await signInVia(pageChampion, champion);
       await pageChampion.goto(`/community/${groupId}`);
       await expect(pageChampion.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
-      await openCommunityDetails(pageChampion);
+      await openChampionDetails(pageChampion);
       await expect(pageChampion.getByTestId('wsf-community-role')).toContainText(
         'Founding Champion'
       );
-      const originalLink = await pageChampion.getByTestId('wsf-community-invite-url').innerText();
-      expect(originalLink).toContain(`/join/${joinCode}`);
       // The caveat states forwardability — the thing a person needs to know
       // before sharing a link that admits whoever holds it.
       await expect(pageChampion.getByTestId('wsf-community-invite-caveat')).toContainText(
         'forwarded'
       );
+      await closeManage(pageChampion);
+      const originalLink = await inviteUrlOf(pageChampion);
+      expect(originalLink).toContain(`/join/${joinCode}`);
 
       // ---- the early member joins on that link, through the interface ----
       await signInVia(pageEarly, early);
@@ -226,20 +275,35 @@ test.describe('D — admission controls in the interface', () => {
       await expect(pageEarly.getByTestId('wsf-join-signed-in')).toBeVisible({ timeout: 20_000 });
       // D6: the preview states the joining conditions and NOT a head count.
       const meta = await pageEarly.getByTestId('wsf-join-meta').innerText();
-      expect(meta).toContain('Anyone with this link can join');
+      expect(meta).toContain('Anyone with the invite link can join');
       expect(meta).not.toMatch(/\d+\s+members?/);
       await pageEarly.getByTestId('wsf-join-submit').click();
       await pageEarly.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
-      await openCommunityDetails(pageEarly);
-      await expect(pageEarly.getByTestId('wsf-community-role')).toContainText('Member');
+      await expectMemberStanding(pageEarly);
 
       // ---- D1: the Champion resets the link ----
-      await pageChampion.getByTestId('wsf-community-invite-reset').click();
+      // Rotation is administration, so it lives in Manage and asks first: the
+      // consequence falls on everyone holding the old link.
+      await pageChampion.getByTestId('wsf-community-manage').click();
+      await expect(pageChampion.getByTestId('wsf-community-manage-panel')).toBeVisible({
+        timeout: 20_000,
+      });
+      await pageChampion.getByTestId('wsf-community-reset').click();
+      await expect(pageChampion.getByTestId('wsf-community-reset-confirm')).toContainText(
+        'stop working'
+      );
+      await pageChampion.getByTestId('wsf-community-reset-confirm-yes').click();
       await expect(pageChampion.getByTestId('wsf-community-invite-reset-done')).toBeVisible({
         timeout: 20_000,
       });
       await expect(pageChampion.getByTestId('wsf-community-invite-reset-error')).toHaveCount(0);
-      const newLink = await pageChampion.getByTestId('wsf-community-invite-url').innerText();
+      await closeManage(pageChampion);
+      await expect(pageChampion.getByTestId('wsf-community-invite')).not.toHaveAttribute(
+        'data-invite-url',
+        originalLink,
+        { timeout: 20_000 }
+      );
+      const newLink = await inviteUrlOf(pageChampion);
       expect(newLink).not.toBe(originalLink);
 
       // ---- the OLD link is now indistinguishable from an unknown one ----
@@ -259,10 +323,7 @@ test.describe('D — admission controls in the interface', () => {
       // ---- and the early member, who joined on the RETIRED link, is still in ----
       // A reset retires a link. It does not evict anybody.
       await pageEarly.reload();
-      await openCommunityDetails(pageEarly);
-      await expect(pageEarly.getByTestId('wsf-community-role')).toContainText('Member', {
-        timeout: 20_000,
-      });
+      await expectMemberStanding(pageEarly);
       expect(await readMembershipStatus(groupId, early.uid)).toBe('active');
     } finally {
       await ctxChampion.close();
@@ -346,6 +407,10 @@ test.describe('D — admission controls in the interface', () => {
       // Leaving is the one membership action that can be finished in this
       // package, because it acts on the caller themselves and needs no way to
       // identify anybody else.
+      // Leaving is destructive, so it is disclosed rather than displayed: a
+      // member opens "Membership options" at the foot of their own page.
+      await expect(pageMember.getByTestId('wsf-community-leave')).toHaveCount(0);
+      await openMembershipOptions(pageMember);
       await expect(pageMember.getByTestId('wsf-community-leave')).toBeVisible({ timeout: 20_000 });
       await pageMember.getByTestId('wsf-community-leave').click();
       // It asks first, and the confirmation states what leaving does and does
@@ -376,10 +441,7 @@ test.describe('D — admission controls in the interface', () => {
       await expect(pageMember.getByTestId('wsf-join-signed-in')).toBeVisible({ timeout: 20_000 });
       await pageMember.getByTestId('wsf-join-submit').click();
       await pageMember.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
-      await openCommunityDetails(pageMember);
-      await expect(pageMember.getByTestId('wsf-community-role')).toContainText('Member', {
-        timeout: 20_000,
-      });
+      await expectMemberStanding(pageMember);
       expect(await readMembershipStatus(groupId, member.uid)).toBe('active');
     } finally {
       await ctxMember.close();
@@ -412,7 +474,7 @@ test.describe('D — admission controls in the interface', () => {
 
       await signInVia(page, champion);
       await page.goto(`/community/${groupId}`);
-      await openCommunityDetails(page);
+      await openChampionDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
       await page.getByTestId('wsf-community-leave').click();
       await page.getByTestId('wsf-community-leave-confirm-yes').click();
@@ -466,15 +528,22 @@ test.describe('D — admission controls in the interface', () => {
       await signInVia(page, champion);
       await page.goto(`/community/${groupId}`);
       await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
-      await openCommunityDetails(page);
+      await openChampionDetails(page);
       await expect(page.getByTestId('wsf-community-role')).toContainText('Founding Champion');
 
       // No link — a general link never admits to a private community…
-      await expect(page.getByTestId('wsf-community-invite-url')).toHaveCount(0);
-      await expect(page.getByTestId('wsf-community-invite-reset')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-invite-link')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-reset')).toHaveCount(0);
       // …and no individual-invitation control exists to take its place.
       await expect(page.getByTestId('wsf-community-invite-member')).toHaveCount(0);
       await expect(page.getByTestId('wsf-community-add-member')).toHaveCount(0);
+      await closeManage(page);
+      // Nothing on the page carries a joinable link for this community either.
+      expect(
+        await page.getByTestId('wsf-community-invite').getAttribute('data-invite-url')
+      ).toBeNull();
+      await expect(page.getByTestId('wsf-community-invite-copy')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-community-invite-share')).toHaveCount(0);
 
       // Even holding the stored code, an outsider is refused, and learns
       // nothing about whether the community exists.
