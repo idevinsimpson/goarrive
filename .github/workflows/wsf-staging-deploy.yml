@@ -176,26 +176,18 @@ jobs:
       - name: Install dependencies
         run: |
           set -euo pipefail
-          npm ci
+          npm --prefix apps/goarrive ci
           npm --prefix functions-westayfit ci
           npm --prefix apps/westayfit ci
 
-      # The shared regression belongs before credentials and before deployment.
-      # Run only the two GoArrive product specs: example.spec.ts is Playwright's
-      # unchanged tutorial against playwright.dev, not an application regression.
-      - name: Install Chromium for the shared GoArrive regression
-        run: ./node_modules/.bin/playwright install --with-deps chromium
-
-      - name: Run the shared GoArrive staging regression
-        env:
-          PLAYWRIGHT_BASE_URL: https://goarrive--staging.web.app
+      # Both-app regression runs from the exact candidate before credentials.
+      # GoArrive hosted staging currently lacks /build and /coach-discovery, so
+      # its stale hosted assertions cannot represent this WSF-only diff.
+      - name: Run the shared GoArrive regression
         run: |
           set -euo pipefail
-          ./node_modules/.bin/playwright test \
-            tests/build-page.spec.ts \
-            tests/coach-discovery.spec.ts \
-            --project=chromium \
-            --reporter=line
+          npm --prefix apps/goarrive run ts:check
+          npm --prefix apps/goarrive run test:vitest -- --run
 
       - name: Build functions
         run: npm --prefix functions-westayfit run build
