@@ -671,4 +671,36 @@ test('the modes are gated by equality, so a fourth mode cannot silently start bu
   }
 });
 
+test('the failure reprint is diagnostic only and can never become a gate', () => {
+  // Runs 37, 38 and 39 were each diagnosed from which capture was MISSING and
+  // how long the step ran, because the assertion message sat in a step the log
+  // tail could not reach. This step reprints the receipt's failing rows in the
+  // LAST step of the job, where the tail always reaches.
+  //
+  // It must stay diagnostic. A step that can fail a run is a gate, and this one
+  // exists precisely so that nobody has to guess — it must not itself become
+  // something new to guess about.
+  const wf = fs.readFileSync(path.join(WORKFLOW_DIR, 'wsf-staging-deploy.yml'), 'utf8');
+  const at = wf.indexOf("- name: Reprint the journey's failing rows");
+  assert.notEqual(at, -1, 'the failure reprint step is gone');
+  const step = wf.slice(at, wf.indexOf('- name:', at + 10));
+
+  assert.match(step, /continue-on-error:\s*true/,
+    'the reprint step can fail the job, so it is a gate and not a diagnostic');
+  assert.match(step, /steps\.journey\.outcome != 'success'/,
+    'the reprint step runs on a passing journey too, adding noise to green runs');
+
+  // The real gate is untouched and still fails the run.
+  const gateAt = wf.indexOf('- name: Require the journey and the scan to have passed');
+  assert.notEqual(gateAt, -1, 'the journey gate is gone');
+  const gate = wf.slice(gateAt, gateAt + 700);
+  assert.match(gate, /the browser\/player journey did not pass"; exit 1/,
+    'the journey gate no longer fails the run');
+  assert.match(gate, /the evidence scan rejected this run's evidence"; exit 1/,
+    'the evidence-scan gate no longer fails the run');
+  assert.equal(/continue-on-error/.test(gate), false,
+    'the real gate became continue-on-error, so a failed journey could pass');
+  assert.ok(at < gateAt, 'the reprint must come before the gate that exits');
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);
