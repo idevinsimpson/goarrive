@@ -6,6 +6,7 @@ Two kinds of image live here, and they must never be confused with one another.
 | --- | --- | --- |
 | `before/` | **Real screenshots of the product as served today.** | Captured from the running app at `0dd6cdd`, the merge of `claude/wsf-ui-member-experience` @ `6b257c3` onto the app shell. |
 | `targets/` | **Concept mockups. Not implemented, not shipped, not scheduled.** | Rendered from `src/targets.html`, a standalone HTML file. No product code was involved. |
+| `after/` | **Real screenshots of the product once a page has shipped.** | Captured the same way `before/` was, from the running app. One file per page implemented so far. |
 | `CONTACT-SHEET-before-to-targets.png` | The two sets side by side. | Rendered from `src/contact.html`. |
 
 ## The rule these files exist to keep
@@ -16,8 +17,9 @@ An *after* is a screenshot of the product once a change has shipped. Nothing in
 `targets/` is that, so every one of those images carries the words
 `TARGET / CONCEPT — NOT IMPLEMENTED` across the top and again across the bottom,
 burnt into the image rather than written in a caption that can be cropped away.
-When real after-screenshots exist, they go in an `after/` folder beside these
-and are captured the same way `before/` was — from the running app.
+Real after-screenshots go in `after/`, captured the same way `before/` was —
+from the running app. `after/` currently holds Page 1 (Home) only; the other
+pages have targets and no after, because they have not been built.
 
 ## The Living WE in these targets is the real one
 

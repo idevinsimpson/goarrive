@@ -97,6 +97,7 @@ import {
   progressPhase,
   statusLine,
   totalOfTargetLabel,
+  totalOfTargetParts,
 } from '../../../src/ui/progressFormat';
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
@@ -1511,7 +1512,16 @@ export default function CommunityPage() {
     }
   })();
   // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
-  const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
+  const shortViewport = windowHeight < 700;
+  // PAGE 1. The hero bleeds to the screen edge and pads itself by 20, so the
+  // mark is no longer inset twice. 280 -> 320 spends what that returns on the
+  // instrument the north star names, rather than on margin.
+  //
+  // EXCEPT ON A SHORT PHONE, where 320 pushed "Start moving" clean off a
+  // 390x640 screen. The gate asks for an app-like FIRST viewport at that size,
+  // and a primary action below the fold is not one. 210 is what leaves the
+  // action on screen with the mark still the largest thing above it.
+  const heroWeWidth = Math.max(96, Math.min(shortViewport ? 210 : 320, windowWidth - 2 * 20));
   /**
    * THE GOAL TITLE SHRINKS BEFORE IT BREAKS A WORD.
    *
@@ -1532,7 +1542,6 @@ export default function CommunityPage() {
    * padding and rhythm when the viewport is short. Nothing changes above
    * ~700px tall.
    */
-  const shortViewport = windowHeight < 700;
   const heroCompact = shortViewport
     ? { paddingTop: 14, paddingBottom: 14, gap: 6 }
     : null;
@@ -1547,14 +1556,25 @@ export default function CommunityPage() {
       ? { fontSize: 20, lineHeight: 25 }
       : windowWidth < 300
         ? { fontSize: 23, lineHeight: 29 }
-        : null;
+        : shortViewport
+          ? // PAGE 1. The display tier is for the total, not for the title, and
+            // on a short phone the title is what the action can afford to lose.
+            { fontSize: 27, lineHeight: 32 }
+          : null;
+  // PAGE 1. Same reason: the count leads on every viewport, but a short one
+  // cannot spend 52px of line box on it and keep the action above the fold.
+  const heroTotalType = shortViewport ? { fontSize: 36, lineHeight: 40 } : null;
   const smallWeWidth = 104;
   // The hero's progress area reserves the room the We mark, its three facts
   // and the freshness line will take, so a pulse that lands does not move
   // the title above it or the actions below it.
   // SLICE 1. 118 -> 74: the freshness row (44px) moved below the actions, so
   // the space reserved for it inside the progress area moves with it.
-  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 74;
+  // PAGE 1. 74 -> 96: the shared total is display type now, so the three facts
+  // under the mark reserve more room and a landing pulse still moves nothing.
+  // A short phone gets the smaller display tier, so it reserves less.
+  const progressAreaMinHeight =
+    Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + (shortViewport ? 76 : 96);
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
@@ -2118,7 +2138,27 @@ export default function CommunityPage() {
           style={onDark ? styles.heroTotal : styles.totalSmall}
           testID={`wsf-community-goal-total-${goal.goalId}`}
         >
-          {totalOfTargetLabel(sharedTotal, target, unit)}
+          {/*
+            PAGE 1. On the hero the confirmed total is display type and what
+            it is out of is not, so the line breaks between them rather than
+            wrapping mid-phrase. Both halves stay inside ONE Text node with a
+            newline between them: the element's text is still
+            "1,847 of 5,000 squats", which is what the journey and a11y specs
+            assert, and both halves come from one helper so they cannot drift.
+          */}
+          {onDark ? (
+            <>
+              <Text style={[styles.heroTotalCount, heroTotalType]}>
+                {totalOfTargetParts(sharedTotal, target, unit).count}
+              </Text>
+              {'\n'}
+              <Text style={styles.heroTotalRest}>
+                {totalOfTargetParts(sharedTotal, target, unit).rest}
+              </Text>
+            </>
+          ) : (
+            totalOfTargetLabel(sharedTotal, target, unit)
+          )}
         </Text>
         <Text
           style={onDark ? styles.heroPercent : styles.percentSmall}
@@ -3047,7 +3087,9 @@ export default function CommunityPage() {
             // The padding makes the touchable 44 without moving the mark.
             style={styles.wordmarkTouch}
           >
-            <WsfWordmark variant="navy" height={22} testID="wsf-community-wordmark" />
+            {/* PAGE 1. The ground is navy now, so the mark takes the owner's
+                white colourway. The navy one was about to be invisible. */}
+            <WsfWordmark variant="white" height={22} testID="wsf-community-wordmark" />
           </Pressable>
           {isChampion ? (
             <Pressable
@@ -3771,17 +3813,38 @@ const CARD_BORDER = '#E3E7E1';
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 const HERO_RULE = 'rgba(247,245,240,0.35)';
+/*
+  PAGE 1. THE GROUND IS NAVY, AND THE HERO RUNS EDGE TO EDGE.
+
+  This screen was a navy goal card floating on cream inside a 640px column —
+  the grammar that made every surface read "heading, one quiet card, a lot of
+  empty". The ground is now the product's deepest navy, the hero is a band
+  rather than a card, and the surfaces below it are raised off that ground
+  instead of cut out of a lighter one.
+
+  GROUND is deeper than the hero's NAVY on purpose: it lets the hero read as a
+  band without a border or a shadow, which is depth the token set did not have.
+*/
+const GROUND = '#050F1E';
+const SURFACE = '#0A1B30';
+const SURFACE_LINE = 'rgba(255,255,255,0.09)';
+const ON_GROUND = '#FFFFFF';
+const ON_GROUND_MUTED = '#8FA3BF';
+const ON_GROUND_QUIET = '#63799A';
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: wsfTheme.colors.background },
+  scroll: { flex: 1, backgroundColor: GROUND },
   container: {
     alignItems: 'center',
-    paddingHorizontal: 20,
+    // PAGE 1. The gutter moves from the container to `inner`, so a child can
+    // give it back with a negative margin and reach the screen edge. The hero
+    // is the one child that does.
+    paddingHorizontal: 0,
     paddingTop: 16,
     paddingBottom: 48,
-    backgroundColor: wsfTheme.colors.background,
+    backgroundColor: GROUND,
   },
-  inner: { maxWidth: 640, width: '100%', gap: 18 },
+  inner: { maxWidth: 640, width: '100%', gap: 18, paddingHorizontal: 20 },
   productHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3797,13 +3860,13 @@ const styles = StyleSheet.create({
   },
   manageButton: {
     borderWidth: 1,
-    borderColor: NAVY,
+    borderColor: 'rgba(255,255,255,0.28)',
     borderRadius: wsfTheme.radius.pill,
     paddingHorizontal: 14,
     minHeight: 44,
     justifyContent: 'center',
   },
-  manageButtonText: { color: NAVY, fontWeight: '600', fontSize: 15 },
+  manageButtonText: { color: ON_GROUND, fontWeight: '600', fontSize: 15 },
   identity: { gap: 4 },
   headingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   heading: {
@@ -3811,7 +3874,7 @@ const styles = StyleSheet.create({
     // community's own name was the loudest thing on a screen whose job is the
     // goal. Demoted to context. At this size the two-line names that were
     // costing 76px of a 640px phone fit on one line.
-    color: wsfTheme.colors.text,
+    color: ON_GROUND,
     fontSize: 20,
     fontWeight: '700',
     lineHeight: 26,
@@ -3827,8 +3890,8 @@ const styles = StyleSheet.create({
   // which Text already allows (react-native-web sets word-wrap: break-word).
   headingName: { flexShrink: 1, minWidth: 0 },
   sampleBadge: {
-    color: NAVY,
-    backgroundColor: '#FBF1D3',
+    color: '#06230A',
+    backgroundColor: PROGRESS_GREEN,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1,
@@ -3838,13 +3901,13 @@ const styles = StyleSheet.create({
     borderRadius: wsfTheme.radius.pill,
     overflow: 'hidden',
   },
-  humanLine: { color: wsfTheme.colors.textMuted, fontSize: 17, lineHeight: 24 },
+  humanLine: { color: ON_GROUND_MUTED, fontSize: 17, lineHeight: 24 },
   // W7. One quiet line between the hero and "Your part": a fact about the
   // community's goals, not a leaderboard and not a nudge.
-  momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  momentumLine: { color: ON_GROUND, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   section: { gap: 12 },
   sectionEyebrow: {
-    color: wsfTheme.colors.textMuted,
+    color: PROGRESS_GREEN,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1.5,
@@ -3854,10 +3917,13 @@ const styles = StyleSheet.create({
   // ---- the hero: navy surface, cream type, green for confirmed progress ----
   hero: {
     backgroundColor: NAVY,
-    borderRadius: 24,
-    paddingHorizontal: 22,
-    paddingTop: 22,
-    paddingBottom: 22,
+    // PAGE 1. A band, not a card: no radius, and a negative gutter that
+    // cancels `inner`'s padding so it reaches both screen edges.
+    borderRadius: 0,
+    marginHorizontal: -20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 26,
     gap: 10,
   },
   heroEyebrow: {
@@ -3868,11 +3934,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   heroTitle: {
+    // PAGE 1. 27 -> 34. The goal is the dominant story on this screen and the
+    // type scale had no tier that could say so.
     color: CREAM,
-    fontSize: 27,
+    fontSize: 34,
     fontWeight: '800',
-    lineHeight: 33,
-    letterSpacing: -0.3,
+    lineHeight: 38,
+    letterSpacing: -0.9,
   },
   heroMeta: { color: HERO_MUTED, fontSize: 15, lineHeight: 20 },
   heroBody: { color: CREAM, fontSize: 16, lineHeight: 22 },
@@ -3883,8 +3951,20 @@ const styles = StyleSheet.create({
   weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
   factsLarge: { alignItems: 'center', gap: 2 },
   factsSmall: { gap: 2 },
-  heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
-  heroPercent: { color: PROGRESS_GREEN, fontSize: 19, fontWeight: '700', textAlign: 'center' },
+  // PAGE 1. The line that carries the confirmed total. The count inside it is
+  // the display tier -- 24 -> 46 -- because what the community has done
+  // together is the number this screen exists to show, and it used to be
+  // smaller than the community's own name.
+  heroTotal: { textAlign: 'center' },
+  heroTotalCount: {
+    color: CREAM,
+    fontSize: 46,
+    fontWeight: '900',
+    lineHeight: 52,
+    letterSpacing: -1.6,
+  },
+  heroTotalRest: { color: HERO_MUTED, fontSize: 15, fontWeight: '600', lineHeight: 22 },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
@@ -3895,9 +3975,9 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 10,
   },
-  freshnessUtilityText: { color: wsfTheme.colors.textMuted, fontSize: 13 },
+  freshnessUtilityText: { color: ON_GROUND_QUIET, fontSize: 13 },
   freshnessUtilityLink: {
-    color: wsfTheme.colors.text,
+    color: ON_GROUND_MUTED,
     fontSize: 13,
     fontWeight: '700',
     textDecorationLine: 'underline',
@@ -3928,7 +4008,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(247,245,240,0.22)',
   },
-  heroCommunity: { color: '#FFFFFF', fontSize: 17, lineHeight: 23, fontWeight: '800' },
+  heroCommunity: { color: '#FFFFFF', fontSize: 20, lineHeight: 26, fontWeight: '800', letterSpacing: -0.3 },
   heroIdentityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
   heroSwitch: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(247,245,240,0.45)' },
   heroSwitchText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '700' },
@@ -3990,15 +4070,15 @@ const styles = StyleSheet.create({
   heroShareNote: { color: HERO_MUTED, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
   // ---- light cards, quieter than the hero ----
-  totalSmall: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
-  percentSmall: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
-  statusLine: { color: wsfTheme.colors.textMuted, fontSize: 15, lineHeight: 20 },
-  statusLineNear: { color: wsfTheme.colors.text, fontWeight: '700' },
-  closedResult: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
+  totalSmall: { color: ON_GROUND, fontSize: 16, fontWeight: '700' },
+  percentSmall: { color: PROGRESS_GREEN, fontSize: 14, fontWeight: '700' },
+  statusLine: { color: ON_GROUND_MUTED, fontSize: 15, lineHeight: 20 },
+  statusLineNear: { color: ON_GROUND, fontWeight: '700' },
+  closedResult: { color: PROGRESS_GREEN, fontSize: 14, fontWeight: '700' },
   secondaryButtonWide: {
-    backgroundColor: wsfTheme.colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1.5,
-    borderColor: NAVY,
+    borderColor: 'rgba(255,255,255,0.32)',
     borderRadius: 14,
     minHeight: 48,
     paddingHorizontal: 20,
@@ -4007,48 +4087,48 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignSelf: 'flex-start',
-    backgroundColor: wsfTheme.colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1.5,
-    borderColor: NAVY,
+    borderColor: 'rgba(255,255,255,0.32)',
     borderRadius: wsfTheme.radius.pill,
     minHeight: 44,
     paddingHorizontal: 16,
     justifyContent: 'center',
     marginTop: 6,
   },
-  secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  secondaryButtonText: { color: ON_GROUND, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   tertiaryButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   footerLink: { alignSelf: 'center' },
-  tertiaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
+  tertiaryButtonText: { color: ON_GROUND_MUTED, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
   inlineLink: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
-  inlineLinkText: { color: NAVY, fontSize: 15, fontWeight: '700' },
+  inlineLinkText: { color: PROGRESS_GREEN, fontSize: 15, fontWeight: '700' },
   card: {
-    backgroundColor: wsfTheme.colors.surface,
+    backgroundColor: SURFACE,
     borderRadius: 16,
     padding: 16,
     gap: 8,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
+    borderColor: SURFACE_LINE,
   },
   cardQuiet: {
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
     padding: 16,
     gap: 6,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
+    borderColor: SURFACE_LINE,
   },
-  cardTitle: { color: wsfTheme.colors.text, fontSize: 18, fontWeight: '700', lineHeight: 24 },
-  cardMeta: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
+  cardTitle: { color: ON_GROUND, fontSize: 18, fontWeight: '700', lineHeight: 24 },
+  cardMeta: { color: ON_GROUND_MUTED, fontSize: 14, lineHeight: 20 },
   // The goal slot when there is no goal to be a hero: a quiet card the height
   // of its sentence, not a navy surface with nothing to say.
   compactCard: {
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
     padding: 16,
     gap: 6,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
+    borderColor: SURFACE_LINE,
   },
   footerLine: { textAlign: 'center' },
   membership: { alignItems: 'center', gap: 8 },
@@ -4060,7 +4140,11 @@ const styles = StyleSheet.create({
   sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(11,31,58,0.55)' },
   sheetScrim: { ...StyleSheet.absoluteFillObject },
   sheet: {
-    backgroundColor: CREAM,
+    // PAGE 1. The sheet shares this screen's row, body and button styles, so
+    // when they took the dark colourway a cream sheet went white-on-white in
+    // places -- which is what axe caught. It takes the page's own raised
+    // surface instead, and reads as the same application.
+    backgroundColor: SURFACE,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: 20,
@@ -4077,7 +4161,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#C9CFD8',
+    backgroundColor: 'rgba(255,255,255,0.28)',
     marginTop: 10,
     marginBottom: 6,
   },
@@ -4091,38 +4175,38 @@ const styles = StyleSheet.create({
   // community name wraps inside the sheet instead of pushing Close off it.
   sheetHeading: { flex: 1, gap: 2, paddingRight: 12 },
   sheetEyebrow: {
-    color: NAVY,
+    color: PROGRESS_GREEN,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  sheetTitle: { color: wsfTheme.colors.text, fontSize: 20, fontWeight: '800' },
-  sheetStory: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20, marginBottom: 2 },
+  sheetTitle: { color: ON_GROUND, fontSize: 20, fontWeight: '800' },
+  sheetStory: { color: ON_GROUND_MUTED, fontSize: 14, lineHeight: 20, marginBottom: 2 },
   sheetClose: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'flex-end' },
-  sheetCloseText: { color: NAVY, fontSize: 16, fontWeight: '700', textDecorationLine: 'underline' },
+  sheetCloseText: { color: ON_GROUND, fontSize: 16, fontWeight: '700', textDecorationLine: 'underline' },
   sheetScroll: { flexGrow: 0 },
   sheetContent: { gap: 12, paddingBottom: 8 },
   sheetSection: { gap: 10 },
   // A section label is the loudest thing between cards, so it is the navy
   // green-adjacent voice of the sheet; a subsection sits under it, quieter,
   // and never competes with the section it belongs to.
-  sheetSectionTitle: { color: NAVY, fontSize: 17, fontWeight: '800' },
+  sheetSectionTitle: { color: PROGRESS_GREEN, fontSize: 17, fontWeight: '800' },
   // Same size and weight, warned colour. The word "Advanced" carries the
   // meaning; the colour only agrees with it, so it is never colour alone.
-  sheetSectionTitleDanger: { color: '#8A2F2F', fontSize: 17, fontWeight: '800' },
+  sheetSectionTitleDanger: { color: '#FF9AA2', fontSize: 17, fontWeight: '800' },
   sheetSubsection: { gap: 8 },
-  sheetSubsectionTitle: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '700' },
+  sheetSubsectionTitle: { color: ON_GROUND, fontSize: 15, fontWeight: '700' },
   // One running goal's whole event block: its address and its screens, kept
   // visibly together and separated from the next goal's.
   eventGoal: {
     gap: 4,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#D5DCE5',
+    borderTopColor: SURFACE_LINE,
   },
-  manageIntro: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
-  manageGoal: { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#D5DCE5' },
+  manageIntro: { color: ON_GROUND_MUTED, fontSize: 14, lineHeight: 20 },
+  manageGoal: { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: SURFACE_LINE },
   // Two controls side by side that drop to one column when the sheet is
   // narrow, rather than a fixed row that would push a label off a 195 px
   // screen.
@@ -4132,12 +4216,12 @@ const styles = StyleSheet.create({
   // 16 px radius, same border), so the white option rows and inputs inside it
   // separate from their ground without a new token of any kind.
   setupCard: {
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
     padding: 16,
     gap: 12,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
+    borderColor: SURFACE_LINE,
   },
   setupBody: { gap: 10 },
   // One action above its utility, never two buttons of equal weight side by
@@ -4151,18 +4235,18 @@ const styles = StyleSheet.create({
   // The text column of a combined-activity pick row. Shrinks and wraps so a
   // long activity name cannot push the row past a 195 px viewport.
   combinedPickText: { flex: 1, minWidth: 0, gap: 4 },
-  manageGoalTitle: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
+  manageGoalTitle: { color: ON_GROUND, fontSize: 16, fontWeight: '700' },
   stationCodeInput: {
     borderWidth: 1.5,
-    borderColor: '#D5DCE5',
+    borderColor: 'rgba(255,255,255,0.28)',
     borderRadius: 12,
     minHeight: 44,
     paddingHorizontal: 12,
-    color: wsfTheme.colors.text,
+    color: ON_GROUND,
     fontSize: 18,
     letterSpacing: 4,
     fontWeight: '700',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   stationSlotChosen: { backgroundColor: wsfTheme.colors.primary, borderColor: wsfTheme.colors.primary },
   stationSlotChosenText: { color: wsfTheme.colors.background },
@@ -4178,15 +4262,16 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 6,
   },
-  rowLabel: { color: wsfTheme.colors.textMuted, fontSize: 15, flexShrink: 1, minWidth: 0 },
-  rowValue: { color: wsfTheme.colors.text, fontSize: 15, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
-  rowLabelQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, flexShrink: 1, minWidth: 0 },
-  rowValueQuiet: { color: wsfTheme.colors.textMuted, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
+  rowLabel: { color: ON_GROUND_MUTED, fontSize: 15, flexShrink: 1, minWidth: 0 },
+  rowValue: { color: ON_GROUND, fontSize: 15, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
+  rowLabelQuiet: { color: ON_GROUND_QUIET, fontSize: 13, flexShrink: 1, minWidth: 0 },
+  rowValueQuiet: { color: ON_GROUND_QUIET, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 1, minWidth: 0, marginLeft: 'auto' },
   detailsToggle: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', marginTop: 2 },
   detailsToggleText: { color: NAVY, fontSize: 14, fontWeight: '700', textDecorationLine: 'underline' },
-  details: { borderTopWidth: 1, borderTopColor: CARD_BORDER, paddingTop: 4 },
-  body: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22 },
-  error: { color: '#B4232C', fontSize: 15, lineHeight: 21 },
+  details: { borderTopWidth: 1, borderTopColor: SURFACE_LINE, paddingTop: 4 },
+  body: { color: ON_GROUND, fontSize: 16, lineHeight: 22 },
+  // A red that stays legible on the navy ground; #B4232C did not.
+  error: { color: '#FF9AA2', fontSize: 15, lineHeight: 21 },
   inviteActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
   // A control that shares a wrapping row with other controls: it gives way
   // before the viewport does, and its label wraps inside it. Without these a

@@ -100,7 +100,9 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
               rule this replaces carried it in colour alone.
             */}
             <View style={[styles.glyphWrap, active ? styles.glyphWrapActive : null]}>
-              <TabGlyph name={tab.key} color={active ? NAVY : TEXT_MUTED} />
+              {/* Active sits on the green pill, so it stays navy. Inactive sits
+                  on the navy ground, where TEXT_MUTED was all but invisible. */}
+              <TabGlyph name={tab.key} color={active ? NAVY : '#8FA3BF'} />
             </View>
             <Text style={[styles.label, active ? styles.labelActive : null]}>{tab.label}</Text>
           </Pressable>
@@ -114,8 +116,13 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: CARD_BORDER,
-    backgroundColor: CREAM,
+    // PAGE 1. The member surfaces have a navy ground now, and a cream bar
+    // under them read as a different application bolted to the bottom of the
+    // screen. The bar takes the deepest navy, so it sits UNDER the page
+    // rather than beside it, and the active tab keeps the green pill that
+    // already carried the state.
+    borderTopColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: '#050F1E',
     paddingTop: 6,
     paddingHorizontal: 4,
   },
@@ -133,6 +140,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   glyphWrapActive: { backgroundColor: PROGRESS_GREEN },
-  label: { fontSize: 12, lineHeight: 16, color: TEXT_MUTED, fontWeight: '600' },
-  labelActive: { color: NAVY, fontWeight: '700' },
+  label: { fontSize: 12, lineHeight: 16, color: '#8FA3BF', fontWeight: '600' },
+  labelActive: { color: '#FFFFFF', fontWeight: '700' },
 });
