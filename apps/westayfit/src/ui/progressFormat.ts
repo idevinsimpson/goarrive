@@ -124,22 +124,7 @@ export function formatCount(n: number): string {
 
 /** "241 of 500 squats" */
 export function totalOfTargetLabel(completed: number, target: number, unit: string): string {
-  const { count, rest } = totalOfTargetParts(completed, target, unit);
-  return `${count} ${rest}`;
-}
-
-/**
- * The same line, split where a hero wants to break it: the confirmed total
- * alone, then what it is out of. `totalOfTargetLabel` is composed from these,
- * so the one-line and two-line renderings can never drift apart, and a
- * surface that joins them back with a space gets the label byte for byte.
- */
-export function totalOfTargetParts(
-  completed: number,
-  target: number,
-  unit: string,
-): { count: string; rest: string } {
-  return { count: formatCount(completed), rest: `of ${formatCount(target)} ${unit}` };
+  return `${formatCount(completed)} of ${formatCount(target)} ${unit}`;
 }
 
 /**
