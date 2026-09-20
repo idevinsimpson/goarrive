@@ -384,6 +384,61 @@ in.** The identical boundary is what made this easy to misread.
   wrong: the fix worked and uncovered the next defect. Two different bugs can share a
   boundary.
 
+## Runs 39 and 40 — `35527785403` and `35531288900`, app `6b257c3`
+
+Run 39 failed at the same capture as 37 and 38. Run 40 was dispatched only to prove the
+new tail diagnostic works, and it did.
+
+**THE CAUSE, READ RATHER THAN INFERRED.** Run 40's last job step printed:
+
+```
+--- journey FAIL rows (reprinted from player-journey-receipt.json) ---
+FAIL player journey — expected text containing "Squats round", found "squats"
+CAPTURES_IN_RECEIPT=10
+```
+
+**The product is correct; the harness was wrong.** The last line of
+`chooseActivityByTitle` asserts the event's *title* in `wsf-event-choice-activity`. That
+element renders `{selectedActivity}` → `activityLabelFor()` → `.label` →
+`readActivityLabel(activity.unit)` = the **unit**, `"squats"`. The option *row* renders
+`label={activity.title ?? activity.label}` = `"Squats round"`. Two different strings in
+two different elements, three lines apart. The confirmation panel is meant to say what
+the contribution is counted in, and it does.
+
+### Open harness debt — recorded, deliberately NOT fixed
+
+Per the 2026-09-20 owner reset, the player track stops here rather than absorbing more
+product cycles. This is **harness debt, not a product-blocking defect.**
+
+- **The title-vs-unit assertion.** `chooseActivityByTitle`'s final `contains()` should
+  assert the **unit** where the unit is rendered (or assert the title against the option
+  row, where the title actually is). One line. Known, available, unapplied.
+- **Everything past activity selection is still unproven on hosted staging:** the queue
+  join, waiting place, leave, rejoin, the second phone, ready/start, the 60-second
+  player, review, receipt and cleared station. Those captures do not exist, so their
+  **visual** acceptance is equally unestablished.
+- `CLEANUP_LINKED_DOCUMENTS_VERIFIED` still cannot separate the path-admitted branch from
+  the live-content branch, so it does not evidence read-back for linked records.
+
+### What four runs at one boundary actually cost, and why
+
+Runs 37, 38 and 39 stopped at the *same capture*, and three fixes shipped against it —
+the visible title (#375), member-root scoping (#376), radio rows (#377). Each corrected a
+real defect. None advanced the run. Every diagnosis came from which screenshot was
+missing and how long the step ran, because the assertion message sat in a step a
+size-capped log tail cannot reach.
+
+The bottleneck was never the bug. It was that the error was unreadable. #379 reprints the
+receipt's failing rows in the job's last step, and the very next run named the cause
+outright. **Instrument before iterating**: three speculative rounds bought less than one
+diagnostic did.
+
+Cleanup on runs 39 and 40: `COMPLETE`, `56/56` documents, `3/3` users,
+`MANIFEST_PRESERVED=false`, `EVIDENCE_SCAN=clean` — which still only means the scanner
+found no readable text to reject, since every PNG is listed `UNSCANNABLE`. Nothing is
+stranded on staging. Served build remains `6b257c3`; no product, function, rule, IAM or
+production resource changed.
+
 ## Still not established by any run — CURRENT
 
 - **The player journey end to end.** Runs 33 and 36 both failed before the queue. What
