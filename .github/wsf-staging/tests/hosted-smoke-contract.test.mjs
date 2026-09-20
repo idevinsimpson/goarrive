@@ -422,14 +422,14 @@ test('the station transport row exists, runs first, and is isolated rather than 
   assert.ok(!/\n\s*await caseStationTransport\(\);/.test(main), 'the station row is still run bare somewhere');
 });
 
-test('exactly the four invoker:public station callables are probed, and the three Champion-only ones are not', () => {
+test('exactly the four invoker:public station callables are probed ANONYMOUSLY, and the Champion-only ones are not probed anonymously', () => {
   const probed = [...STATION_PROBE_BLOCK.matchAll(/name: '(wsf[A-Za-z]+)'/g)].map((m) => m[1]);
   assert.deepStrictEqual(probed, PUBLIC_STATIONS, 'the probe list is not exactly the four unauthenticated-by-design callables');
   for (const name of CHAMPION_ONLY_STATIONS) {
     assert.equal(
       new RegExp(`callFunction\\('${name}'|name: '${name}'`).test(SMOKE),
       false,
-      `${name} is not invoker:'public'; an anonymous refusal of it cannot fail for the right reason, so it must not be probed`
+      `${name} is not invoker:'public'; an anonymous refusal of it cannot fail for the right reason, so it must not be probed ANONYMOUSLY. (This forbids a direct anonymous callFunction('${name}') only. wsfApproveStation IS called by the turn row with a Champion's own ID token, which is a different and stronger check.)`
     );
   }
   // WHAT THE LOOP ABOVE ACTUALLY FORBIDS: a DIRECT, anonymous probe of these
