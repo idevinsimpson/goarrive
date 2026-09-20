@@ -54,6 +54,31 @@ It reports, every time, that it establishes **neither** runtime binding **nor**
 key validity. An ENABLED version is the thing most likely to be mistaken for
 "mail works". No payload is ever read.
 
+## Two boundary gaps found in this wiring, and closed
+
+**"Does not exist" is not an answer.** The diagnostic's first version matched
+that phrase anywhere in an error, and gcloud's own permission failure reads
+`PERMISSION_DENIED: caller lacks secretmanager.secrets.get; resource does not
+exist or caller lacks access`. A permission problem was therefore reported as
+`absent`, telling an operator to create a secret that already exists. Google
+writes that sentence deliberately — it does not disclose existence to a caller
+who may not see it — so it must decide nothing. Permission, authentication and
+ambiguity now always win as `unknown`, even when NOT_FOUND appears alongside.
+
+**A correctly named file in the wrong directory is not configuration.** The
+writer pinned only the basename, so `/tmp/.env.westayfit-staging` exited 0 and
+wrote successfully. firebase-tools reads the dotenv from beside the functions
+source, so anything elsewhere is ignored: a green step, a green deploy, and
+mail still refusing to send. The exact relative target
+`functions-westayfit/.env.westayfit-staging` is now pinned, with absolute
+paths, traversal and sibling directories refused, and the workflow asserted to
+write that exact path.
+
+A third thing surfaced from mutation-testing the first fix: a clause added for
+the hedge phrase turned out to change no outcome, because the absent matcher
+was already narrow enough to ignore it. A rule no test can fail is not a rule,
+so it was removed and the invariant is pinned by a test instead.
+
 ## Read from evidence, not assumed
 
 Run `35474881609`'s deploy log shows firebase-tools enabling
@@ -74,6 +99,15 @@ sending works. Tests pin that guard, and pin that no hosted row triggers a
 password-reset send.
 
 ---
+
+## One consequence of this change, stated plainly
+
+The deploy **hard-fails** when `WSF_EMAIL_FROM` is unset. That is deliberate —
+a half-configured build must not deploy as if it were configured — but it
+means merging this before the variable exists would break every WSF staging
+deployment, including ones that have nothing to do with mail. Merge order is
+therefore: the operator supplies the sender and the secret first, then this
+merges.
 
 ## Not established
 
