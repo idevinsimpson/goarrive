@@ -182,22 +182,81 @@ only the thing it asserts, on the run it asserted it.
   `tests/workflow-contract.test.mjs` (the plan's `workflow_ref` must name this file, no
   other workflow may request `id-token`, player mode must reach neither build nor deploy
   nor the 24-row suite, deploy mode must still reach all three, and a failed or skipped
-  journey must still clean up, scan, and fail the run). **No hosted run has been made in
-  the new mode.**
+  journey must still clean up, scan, and fail the run).
+  **Run 33 (`35495928362`, `main` `aa66869`, `mode=player-journey`, app `42dd32a`) then
+  ran in the new mode and FAILED.** What it did establish, from its own log: the trust
+  path is correct — `gate` and `config` succeeded and `Authenticate to Google Cloud`
+  passed at 07:05:57Z, the exact step that had failed before — and the mode gating is
+  real, with `build`, `deploy` and `hosted-verify` all recorded `skipped`. Nothing about
+  the player flow was established. The journey step failed after 73 seconds, waiting for
+  `wsf-event-title` on the first cold QR open; on the served build a fresh browser is
+  shown `wsf-device-choice` first, and a signed-out visitor then lands on
+  `wsf-event-signed-out`. That ordering error is the harness's, not the product's, and is
+  **uncorrected as of this entry**. Five captures were taken, all station surfaces, not
+  28; `EVIDENCE_SCAN=clean` over 8 files.
+  **The run also left fixtures on staging.** Cleanup reported
+  `CLEANUP_STATUS=MANIFEST_UNUSABLE`, `CLEANUP_REASON=manifest identity check failed`,
+  `CLEANUP_MANIFEST_PRESERVED=true` — **zero deletions**. The journey mints `e5j-…` run
+  tags and `cleanup-synthetic.mjs` accepted `^e5h-` alone, so *every* player run would
+  have ended this way. The manifest survives in that run's `wsf-player-evidence`
+  artifact, which is the record recovery works from. Fixed by moving the predicate into
+  `run-tag.mjs`, where each prefix is declared beside the harness that mints it, and by a
+  regression that evaluates **each harness's own tag expression** and requires the
+  cleaner to accept it — the cross-check that never existed is what let this ship.
+  **Those fixtures are now gone — run 34 (`35498461701`), the cleanup recovery.**
+  `mode=cleanup-recovery`, `recover_run_id=35495928362`, on `main` `09bb39e`. Every other
+  job was `skipped`: no gate, no config, no build, no deploy, no 24-row suite, no browser,
+  and no fixture of its own. From its log:
+
+  | | |
+  | --- | --- |
+  | `CLEANUP_STATUS` | `COMPLETE` |
+  | documents requested / deleted / already absent | 56 / 56 / **0** |
+  | profile documents linked | 3 |
+  | linked documents verified / already absent | 5 / **0** |
+  | users requested / verified by email / deleted / already absent | 3 / 3 / 3 / **0** |
+  | manifest preserved | `false` — removed only because the run completed |
+  | `EVIDENCE_SCAN` | clean, 1 file |
+
+  **Both `ALREADY_ABSENT` figures are zero**, which is the part worth reading twice: all
+  56 documents and all 3 accounts were still present, an hour after run 33 created them.
+  Nothing had been cleaned up, so the leak was exactly as large as the manifest said, and
+  the recovery removed all of it — confirmed by read-back, not assumed.
+
+  These counts are read from the run's own log. The evidence artifact could not be
+  downloaded from the environment this entry was written in (the blob host is refused by
+  its egress proxy), so nothing here is taken from the receipt file itself.
   Scan, explicit activity selection, the shared follow-along player, rep review, the hall
   clearing and the station session ending are **not covered**, and a green turn-service
   row does not cover them. That gate is separate and open.
 - ~~**The turn row has never fully passed.**~~ **Closed by run 32**, which reached its PASS
   row. Runs 28, 29, 30 and 31 each failed later than the last; run 31 died on the
   ten-second result read, which was the row spending the window it was measuring.
-- **The live-document-content verification branch** — reading a stored document and
+- ~~**The live-document-content verification branch** — reading a stored document and
   confirming it references its declared owner before admitting it — has **not** run on
-  hosted staging. On runs 28 and 29 nothing reached it; on run 30 all nine read-branch
-  documents were already gone (404) before the verifier looked. It is covered locally
-  (`tests/cleanup-synthetic.test.mjs` proves eight of nine by content and one by path),
-  and local coverage is not hosted proof.
-  *(The uid/path-linked branch is established — run 30, two documents. This entry was
-  the wrong way round until 2026-09-19 22:02Z.)*
+  hosted staging.~~ **Closed by run 34** (`35498461701`), the cleanup recovery. Runs 28
+  and 29 never reached it; on run 30 all nine read-branch documents were already gone
+  (404) before the verifier looked, so `VERIFIED=2` there was the two **path**-admitted
+  documents.
+  Run 34 reported `CLEANUP_LINKED_DOCUMENTS_VERIFIED=5` with
+  `CLEANUP_LINKED_DOCUMENTS_ALREADY_ABSENT=0` — every linked document was still present
+  when the verifier read it, because run 33 died before its in-run deletions and the
+  recovery was the first thing to touch them.
+  All five went through the **read** branch, established from the journey's own
+  `trackLinked` call sites rather than from the counter (which still cannot tell the two
+  branches apart):
+
+  | linked document | `via` | branch |
+  | --- | --- | --- |
+  | `wsfCombinedGoals/{setupId}` | `groupId` | read — `setupId` is server-minted and contains no `e5jgrp-` |
+  | `wsfKioskStations/{stationId}` ×2 | `activityA goalId` | read — station ids are server-minted |
+  | `wsfKioskPairings/{pairingId}` ×2 | `activityA goalId` | read — pairing ids are server-minted |
+
+  Run 33 failed in the cold scan, after `seedEvent` and both screen enrolments and
+  before any phone reached the line, so those five are exactly the set that existed —
+  which is why the count is 5 and why none of them is path-linked.
+  *(The uid/path-linked branch was established earlier — run 30, two documents. That
+  entry was the wrong way round until 2026-09-19 22:02Z.)*
 
 - **A counter that separates the two admission branches.** `LINKED_DOCUMENTS_VERIFIED`
   conflates the path-linked branch with the live-content branch, so no hosted receipt
