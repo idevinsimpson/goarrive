@@ -68,8 +68,15 @@ async function expectNoHorizontalOverflow(page: import('@playwright/test').Page,
   expect(report.offenders, `${where}: content runs past ${report.width}px — ${report.offenders.join('; ')}`).toEqual([]);
 }
 
-test('the shell carries four destinations on every member surface, and Home is the community', async ({ browser }: { browser: Browser }) => {
-  test.setTimeout(240_000);
+/*
+  RE-POINTED, NOT RELAXED. This test encoded the four-destination bar. The
+  approved shell is four destinations AND one raised action between them:
+  Home | Community | MOVE | Progress | You. It now proves strictly more than
+  it did — the same four destinations, plus that MOVE resolves to somewhere a
+  member can actually move.
+*/
+test('the shell carries four destinations and the MOVE action, and Home is the community', async ({ browser }: { browser: Browser }) => {
+  test.setTimeout(360_000);
   const fx = await seedMember('a');
 
   for (const w of WIDTHS) {
@@ -93,6 +100,13 @@ test('the shell carries four destinations on every member surface, and Home is t
     for (const key of ['home', 'activity', 'community', 'you']) {
       await expect(page.getByTestId(`wsf-member-tab-${key}`)).toBeVisible();
     }
+    // The raised action is present at every width that is not the two-row
+    // fallback, where it steps aside rather than overlapping the tabs.
+    if (w.width >= 260) {
+      await expect(page.getByTestId('wsf-member-tab-move')).toBeVisible();
+    }
+    // PROGRESS, NOT ACTIVITY. The destination is renamed; the route is not.
+    await expect(page.getByTestId('wsf-member-tab-activity')).toContainText('Progress');
     await expect(page.getByTestId('wsf-member-tab-home')).toHaveAttribute('data-current', 'true');
     await expectNoHorizontalOverflow(page, `Home at ${w.key}`);
     await page.screenshot({ path: path.join(OUT, `home-${w.key}.png`) });
@@ -134,6 +148,33 @@ test('the shell carries four destinations on every member surface, and Home is t
     await page.getByTestId('wsf-you-wordmark-home').click();
     await expect(page.getByTestId(`wsf-community-goal-title-${fx.goalId}`)).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('wsf-member-tab-home')).toHaveAttribute('data-current', 'true');
+
+    /*
+      MOVE RESOLVES TO SOMEWHERE A MEMBER CAN ACTUALLY MOVE.
+
+      The bar cannot know which goal without two authorized reads, so /move
+      does them. This fixture's community has exactly one open goal, so the
+      resolver must land on that goal's contribution flow — not on a chooser,
+      and not back where it started. A control in permanent chrome that goes
+      nowhere is the thing this assertion exists to catch.
+    */
+    if (w.width >= 260) {
+      await page.getByTestId('wsf-member-tab-move').click();
+      await expect
+        .poll(() => page.url(), {
+          timeout: 40_000,
+          message: `MOVE did not resolve to a contribution at ${w.key}`,
+        })
+        .toContain(`/contribute/${fx.goalId}`);
+      // Back does NOT return Home, and should not: /move replaces rather
+      // than pushes, so MOVE never leaves a trail of itself in the history.
+      // The way back to Home is Home.
+      await page.goto('/');
+      await expect(page.getByTestId(`wsf-community-goal-title-${fx.goalId}`)).toBeVisible({
+        timeout: 40_000,
+      });
+    }
+
 
     await context.close();
   }

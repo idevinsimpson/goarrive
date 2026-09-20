@@ -1538,7 +1538,18 @@ export default function CommunityPage() {
     comes from at full height.
   */
   const heroContentWidth = Math.max(60, windowWidth - 2 * 20 - 2 * 16);
-  const heroWeWidth = Math.max(96, Math.min(shortViewport ? 150 : 300, heroContentWidth));
+  /*
+    THE TARGET'S OWN PROPORTION, NOT THE WIDEST THE CARD ALLOWS.
+
+    Letting the mark take the full content width made it larger than the
+    approved target's and pushed "Your part" out of the first 390x844
+    viewport, which cost the denser command-centre rhythm the target
+    establishes. These are the target's three numbers.
+  */
+  const heroWeWidth = Math.max(
+    96,
+    Math.min(shortViewport ? 136 : windowWidth >= 420 ? 232 : 198, heroContentWidth),
+  );
   /*
     THE BLOOM NEVER EXCEEDS THE CARD IT SITS IN.
 
@@ -1571,7 +1582,7 @@ export default function CommunityPage() {
    * ~700px tall.
    */
   const heroCompact = shortViewport
-    ? { paddingTop: 11, paddingBottom: 11, gap: 3 }
+    ? { paddingTop: 8, paddingBottom: 9, gap: 3 }
     : null;
   // The identity block above the hero, not the band that used to be inside it.
   const identityCompact = shortViewport ? { gap: 0 } : null;
@@ -1580,15 +1591,21 @@ export default function CommunityPage() {
     : null;
   // The display tier steps down rather than the mark disappearing.
   const heroTotalCompact = shortViewport ? { fontSize: 27, lineHeight: 31 } : null;
-  const factsCompact = shortViewport ? { gap: 4, paddingTop: 8, paddingBottom: 8, marginTop: 2 } : null;
+  const factsCompact = shortViewport ? { gap: 3, paddingTop: 6, paddingBottom: 7, marginTop: 2 } : null;
   // The presence line is the cheapest thing in the band to shrink, and the
   // only one whose meaning survives at 12px.
   const presenceCompact = shortViewport ? { fontSize: 12, lineHeight: 16 } : null;
+  /*
+    THE NARROW STEPS MUST ONLY EVER SHRINK. They were 20 and 23, written when
+    the hero title was 27. The title is 22 now, so the 23 step had quietly
+    become an ENLARGEMENT on a narrower screen — the opposite of what it is
+    for, and invisible unless you compare it with the base.
+  */
   const heroTitleType =
     windowWidth < 240
-      ? { fontSize: 20, lineHeight: 25 }
+      ? { fontSize: 18, lineHeight: 23 }
       : windowWidth < 300
-        ? { fontSize: 23, lineHeight: 29 }
+        ? { fontSize: 20, lineHeight: 25 }
         : null;
   const smallWeWidth = 104;
   // The hero's progress area reserves the room the We mark, its three facts
@@ -3118,7 +3135,7 @@ export default function CommunityPage() {
             // The padding makes the touchable 44 without moving the mark.
             style={styles.wordmarkTouch}
           >
-            <WsfWordmark variant="navy" height={22} testID="wsf-community-wordmark" />
+            <WsfWordmark variant="navy" height={17} testID="wsf-community-wordmark" />
           </Pressable>
           {isChampion ? (
             <Pressable
@@ -3284,12 +3301,23 @@ export default function CommunityPage() {
                     expensive point on a phone. "Goal reached" is real news and
                     keeps the slot; the label does not.
                   */}
-                  {p.kind === 'ok' &&
-                  progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) === 'reachedOpen' ? (
-                    <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
-                      Goal reached
-                    </Text>
-                  ) : null}
+                  {/*
+                    THE COMMUNAL LINE. The hero opened straight onto the goal's
+                    own title, which made it a progress meter with a name on
+                    it. One short line says whose effort this is before it says
+                    what the effort is — and it is a statement about the
+                    community, not a claim about anybody in it.
+
+                    "Goal reached" still takes the slot when it is true,
+                    because that is real news and outranks a standing line.
+                  */}
+                  <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
+                    {p.kind === 'ok' &&
+                    progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
+                      'reachedOpen'
+                      ? 'Goal reached'
+                      : 'Together we go further'}
+                  </Text>
                   <Text
                     style={[styles.heroTitle, heroTitleType]}
                     testID={`wsf-community-goal-title-${featured.goalId}`}
@@ -3375,7 +3403,7 @@ export default function CommunityPage() {
                     </Text>
                   </View>
                 ) : (
-                <View style={styles.actions}>
+                <View style={[styles.actions, shortViewport ? styles.actionsShort : null]}>
                   <ButtonLink
                     href={contributeHref(featured.goalId, 'move')}
                     style={styles.primaryButton}
@@ -3388,11 +3416,17 @@ export default function CommunityPage() {
                     style={styles.heroSecondaryAction}
                     textStyle={styles.heroSecondaryActionText}
                     testID={`wsf-community-goal-record-${featured.goalId}`}
-                    // SLICE 1. Was "Already moved? Record <unit>" — a question
-                    // plus a verb plus a unit, set as wide as the primary, so
-                    // it competed with it. The destination screen names the
-                    // unit; this only has to name the situation.
-                    label="I already moved"
+                    // THE UNIT IS BACK IN THE LABEL. Slice 1 cut it to
+                    // "I already moved" because the control was as wide and as
+                    // loud as the primary and competed with it. It is quiet
+                    // now — an outline on cream under a filled green button —
+                    // so it can afford to say what it records, which is what
+                    // the approved target asks for. Where the pulse has not
+                    // landed the unit is unknown, so the shorter sentence is
+                    // used rather than a guessed noun.
+                    label={
+                      p.kind === 'ok' ? `Already moved? Record ${p.pulse.unit}` : 'I already moved'
+                    }
                   />
                 </View>
                 )}
@@ -3451,7 +3485,7 @@ export default function CommunityPage() {
                   : 'Your Champion can start one for this community.'}
               </Text>
               {isChampion ? (
-                <View style={styles.actions}>
+                <View style={[styles.actions, shortViewport ? styles.actionsShort : null]}>
                   <ButtonLink
                     href={`/goals/new?groupId=${encodeURIComponent(groupId)}`}
                     style={styles.primaryButton}
@@ -3846,12 +3880,17 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
     backgroundColor: wsfTheme.colors.background,
   },
-  inner: { maxWidth: 640, width: '100%', gap: 18 },
+  // 18 -> 14. The command-centre rhythm the target sets is denser than the
+  // page had; four sections at 18 spent most of what the shorter hero freed.
+  inner: { maxWidth: 640, width: '100%', gap: 14 },
   productHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 44,
+    // The row still offers a 44px target — the wordmark's own Pressable does
+    // that — but the row no longer reserves 44px of the first viewport for a
+    // mark that is not what the member came for.
+    minHeight: 34,
     // SLICE 2. The wordmark became a tappable way Home, and a Pressable does
     // not shrink the way a bare mark did: at 200% text zoom the Manage
     // control was pushed past the right edge. The row wraps and both children
@@ -3991,9 +4030,10 @@ const styles = StyleSheet.create({
   },
   heroEyebrow: {
     color: PROGRESS_GREEN,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.5,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    letterSpacing: 1.6,
     textTransform: 'uppercase',
   },
   heroTitle: {
@@ -4043,8 +4083,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    // Closes up under the actions rather than floating in the gap a missing
+    // momentum row would otherwise leave. Was 10.
+    marginTop: 2,
     gap: 12,
-    marginTop: 10,
   },
   freshnessUtilityText: { color: wsfTheme.colors.textMuted, fontSize: 13 },
   freshnessUtilityLink: {
@@ -4060,7 +4102,11 @@ const styles = StyleSheet.create({
   // breathing room with it and the button sat too close to "to go". 20 read
   // better still, but it cost the worst-case long name its clearance on a
   // 390x640 phone (15px left); 14 keeps the air and returns the margin.
-  actions: { gap: 10, marginTop: 14 },
+  actions: { gap: 10, marginTop: 2 },
+  // A short phone's fold lands just under the secondary control. Without this
+  // the pair sat flush against the fixed navigation, which reads as the screen
+  // running out rather than as a composition ending.
+  actionsShort: { marginBottom: 14 },
   // ONE FLOWING SECTION, NOT A TILE. The member's own part leads with a green
   // edge; anything that belongs with it continues under a hairline rather than
   // starting a second box of equal weight beside it.
@@ -4074,7 +4120,7 @@ const styles = StyleSheet.create({
     borderLeftColor: PROGRESS_GREEN,
     ...elevation.card,
   },
-  wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1 },
+  wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1, marginVertical: -5 },
   // SLICE 2. The identity band: the community's name, then the one presence
   // fact, separated from the goal below by a hairline rather than a gap, so
   // the hero reads as one object and not two stacked cards.

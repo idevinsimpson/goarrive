@@ -1,8 +1,9 @@
 import { usePathname, useRouter } from 'expo-router';
+import { Fragment } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CARD_BORDER, CREAM, NAVY, PROGRESS_GREEN, TEXT_MUTED } from './kit';
+import { ACTION_GREEN, CARD_BORDER, CREAM, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
 import { TabGlyph } from './TabGlyph';
 
 /**
@@ -22,24 +23,52 @@ import { TabGlyph } from './TabGlyph';
  * somebody's account. Signed-out and identity surfaces have no shell either:
  * there is nothing to navigate between until there is an account.
  *
- * THE FOUR. Home is the community the member is in right now and what it is
- * doing. Activity is their own recorded movement. Community is the people
- * side — who is moving, and the communities they belong to. You is identity.
+ * THE FOUR DESTINATIONS, AND THE ONE ACTION BETWEEN THEM.
+ *
+ * Home is the community the member is in right now and what it is doing.
+ * Community is the people side — who is moving, and the communities they
+ * belong to. Progress is their own recorded movement, private to them. You is
+ * identity.
+ *
+ * MOVE IS NOT A DESTINATION AND IS NOT IN THIS LIST. It is the product's one
+ * action, raised into the middle of the bar because a member opens this app to
+ * move, and everything else is somewhere they go afterwards. It resolves
+ * through /move rather than linking anywhere directly: the bar is on every
+ * surface and cannot know which goal a member would be moving toward without
+ * two authorized reads, and a control in permanent chrome that guesses is a
+ * control that lies.
+ *
+ * PROGRESS KEEPS THE /activity ROUTE. The destination is renamed, not rebuilt;
+ * renaming the route as well would be a redirect and a migration for a label.
  */
 export const MEMBER_TABS = [
   { key: 'home', label: 'Home', href: '/', match: (p: string) => p === '/' || p.startsWith('/community/') },
-  { key: 'activity', label: 'Activity', href: '/activity', match: (p: string) => p.startsWith('/activity') },
   { key: 'community', label: 'Community', href: '/community', match: (p: string) => p === '/community' },
+  { key: 'activity', label: 'Progress', href: '/activity', match: (p: string) => p.startsWith('/activity') },
   { key: 'you', label: 'You', href: '/you', match: (p: string) => p.startsWith('/you') },
 ] as const;
+
+/** Where the raised control in the middle of the bar goes. */
+export const MOVE_HREF = '/move';
 
 /**
  * The surfaces the shell belongs on. Everything else is either an event
  * surface, a public screen, or a step on the way to having an account.
  */
 const SHELL_PREFIXES = ['/community', '/contribute', '/goals', '/activity', '/you', '/start-community', '/join'];
+/**
+ * `/move` EXACTLY, AND NEVER `/move/<goalId>`.
+ *
+ * The resolver at /move is a member surface and wears the shell. The player at
+ * /move/<goalId> is an event surface and must not: a tab bar over the player
+ * puts four ways to leave under a person's thumb in the middle of a round.
+ * Adding '/move' to the prefix list would have covered both, which is why it
+ * is an exact match instead.
+ */
+const SHELL_EXACT = ['/move'];
 export function shellAppliesTo(pathname: string): boolean {
   if (pathname === '/') return true;
+  if (SHELL_EXACT.includes(pathname)) return true;
   return SHELL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
@@ -71,11 +100,11 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
       accessibilityRole={Platform.OS === 'web' ? ('navigation' as 'none') : undefined}
       accessibilityLabel="Main"
     >
-      {MEMBER_TABS.map((tab) => {
+      {MEMBER_TABS.map((tab, index) => {
         const active = tab.match(pathname);
         return (
+          <Fragment key={tab.key}>
           <Pressable
-            key={tab.key}
             // `replace`, not `push`: a tab bar that stacks history gives the
             // back button a trail of tab presses instead of the way home.
             onPress={() => router.replace(tab.href)}
@@ -104,6 +133,27 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
             </View>
             <Text style={[styles.label, active ? styles.labelActive : null]}>{tab.label}</Text>
           </Pressable>
+          {/*
+            The raised control's slot. Without it the circle overlapped the
+            destinations either side of the middle, because four tabs spread
+            evenly leave a gap narrower than the control. An empty View of the
+            control's width holds the space open and keeps the four tabs
+            evenly weighted.
+          */}
+          {!narrow && index === 1 ? (
+            <View style={styles.moveSlot}>
+              <Pressable
+                onPress={() => router.replace(MOVE_HREF)}
+                style={styles.move}
+                testID="wsf-member-tab-move"
+                accessibilityRole="link"
+                accessibilityLabel="Move: record what you did"
+              >
+                <Text style={styles.moveText}>MOVE</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          </Fragment>
         );
       })}
     </View>
@@ -112,6 +162,7 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
 
 const styles = StyleSheet.create({
   bar: {
+    position: 'relative',
     flexDirection: 'row',
     borderTopWidth: 1,
     borderTopColor: CARD_BORDER,
@@ -135,4 +186,22 @@ const styles = StyleSheet.create({
   glyphWrapActive: { backgroundColor: PROGRESS_GREEN },
   label: { fontSize: 12, lineHeight: 16, color: TEXT_MUTED, fontWeight: '600' },
   labelActive: { color: NAVY, fontWeight: '700' },
+  move: {
+    // Raised ABOVE the bar's top edge, which is what makes it read as the
+    // product's one action rather than a fifth destination.
+    marginTop: -24,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: ACTION_GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // The ring is the bar's own ground, so the control reads as sitting in
+    // front of the bar rather than punched through it.
+    borderWidth: 5,
+    borderColor: CREAM,
+    ...elevation.action,
+  },
+  moveText: { color: ON_ACTION, fontSize: 11, lineHeight: 14, fontWeight: '900', letterSpacing: 0.5 },
+  moveSlot: { width: 72, alignItems: 'center' },
 });
