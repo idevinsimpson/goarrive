@@ -13,9 +13,9 @@ boards first, and they are not present yet (see `owner-north-star/README.md`).
 | | |
 | --- | --- |
 | User-facing routes | **22** |
-| Routes with a target | **5** |
-| Routes with no target | **17** |
-| Target boards that are not a whole route | 4 |
+| Routes with a real-RN target | **1** |
+| Routes with no target | **21** |
+| Superseded HTML concepts, kept as a record | 9 |
 
 ## The routes
 
@@ -23,11 +23,11 @@ boards first, and they are not present yet (see `owner-north-star/README.md`).
 
 | Route | Target | Notes |
 | --- | --- | --- |
-| `/community/[groupId]` | `targets/TARGET-01-home-390x844.png`, `targets/TARGET-02-home-short-390x640.png` | Community Home. This is where `/` lands a member who has a current community, so it is the real Home. Ordinary-progress state ONLY — the other twelve Home states in the atlas §B have no target. |
-| `/contribute/[goalId]` | `targets/TARGET-03-move-390x844.png` | Record an amount. The target shows the amount-entry state only. |
-| `/community` | `targets/TARGET-05-community-390x844.png` | Partial: the target is a community *story* surface; this route is currently the switcher. |
-| `/activity` | `targets/TARGET-06-progress-390x844.png` | The atlas renames this destination Progress. |
-| `/you` | `targets/TARGET-07-you-390x844.png` | |
+| `/community/[groupId]` | `targets/TARGET-home-390x844.png`, `targets/TARGET-home-390x640.png`, `targets/TARGET-home-430x932.png` | Community Home. This is where `/` lands a member who has a current community, so it is the real Home. **Real RN**, three device classes. Ordinary-progress state ONLY — the other twelve Home states in the atlas §B have no target. |
+| `/contribute/[goalId]` | none | **Next up.** The superseded HTML concept is not a target. |
+| `/community` | none | The superseded HTML concept is not a target. |
+| `/activity` | none | The atlas renames this destination Progress. The superseded HTML concept is not a target. |
+| `/you` | none | The superseded HTML concept is not a target. |
 
 ### Not covered
 
@@ -65,12 +65,12 @@ requirements.
 
 ## Device classes
 
-Every target so far is 390×844 or 390×640. The atlas requires four more classes,
-and **none of them has a single target**:
+Home is captured at 390×844, 390×640 and 430×932. The three larger classes have
+no target at all:
 
 | Class | Surfaces that need it | Targets |
 | --- | --- | --- |
-| 430×932 large phone | every member surface | none |
+| 430×932 large phone | every member surface | Home only |
 | 800×1280 tablet portrait | kiosk, picture-frame display | none |
 | 1280×800 tablet landscape | station, booth display | none |
 | 1920×1080 collective display | shared display | none |
