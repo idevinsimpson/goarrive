@@ -15,14 +15,16 @@
  *     here is a preverified synthetic fixture account. What is proven is that
  *     a person can sign in from the scanned event and reach it as a member,
  *     not that a real person could receive and follow a verification mail.
- *   - It is not proof that the scanned event SURVIVES sign-in, and it no
- *     longer says it is. An earlier version claimed exactly that. On the
- *     served build the event's sign-in link is a plain `href="/signin"` and
- *     sign-in finishes with `router.replace(nextRouteAfterAuth('/'))`, which
- *     carries a pending JOIN code or a kiosk return goal and nothing else —
- *     so the phone lands on the app's home and this journey navigates back to
- *     the event itself. That return is the harness's, not the product's, and
- *     the receipt says so.
+ *   - It DOES assert that the scanned event survives sign-in, and it asserts
+ *     it of the PRODUCT. The build this was first written against dropped the
+ *     event: its sign-in link was a plain `href="/signin"` and sign-in ended
+ *     with `router.replace(nextRouteAfterAuth('/'))`, which carried a pending
+ *     JOIN code or a kiosk return goal and nothing else. An interim version of
+ *     this file navigated back with `page.goto` and said so honestly — but a
+ *     green run then proved only that the harness could find the event, which
+ *     is not something anyone standing at one can do. It now waits for the
+ *     address to become the scanned event on its own, and a build without the
+ *     return fails here rather than passing quietly.
  *   - It is not proof of an authorized movement VIDEO. The product's default
  *     is its own poster/fallback drawing; a poster pass is a poster pass.
  *   - It is Chromium. Playwright's WebKit is an automated engine, not Safari,
@@ -389,20 +391,35 @@ async function reachMemberEvent(page, qrUrl, user, { captures = {} } = {}) {
   await page.getByTestId('wsf-event-signin').click();
   await signInOnPage(page, user);
 
-  // Sign-in lands wherever nextRouteAfterAuth sends it, which for this path is
-  // the app's own home. Waiting for the event here would be waiting for a
-  // navigation the product never makes.
-  await page.waitForURL((url) => !url.pathname.startsWith('/signin'), { timeout: 60_000 });
+  // THE PRODUCT BRINGS THEM BACK. This journey does not.
+  //
+  // An earlier version of this function navigated back with `page.goto(qrUrl)`
+  // and asserted that the product had NOT returned. That encoded the defect:
+  // a green run proved the harness could find its way to the event, which is
+  // not a thing anyone at an event can do. The contract is that scanning,
+  // signing in and arriving is ONE journey, so the only honest assertion is
+  // that the address changes to the scanned event on its own.
+  //
+  // Nothing here touches the address bar between the sign-in submit and this
+  // wait, so a pass cannot be the harness's own navigation.
+  const expectedPath = new URL(qrUrl).pathname;
+  await page.waitForURL(
+    (url) => url.pathname === expectedPath,
+    { timeout: 60_000 }
+  );
   const landed = new URL(page.url()).pathname;
   assert(
-    landed !== `/event/${new URL(qrUrl).pathname.split('/').pop()}`,
-    'sign-in returned to the event by itself; this journey’s navigation back is now hiding a product behaviour it should be asserting'
+    landed === expectedPath,
+    `sign-in did not come back to the scanned event: landed on ${landed}, expected ${expectedPath}`
   );
 
-  await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
   // The device answer is remembered per browser, so the question is not asked
   // again — and the member view is what a signed-in member sees.
   await visible(page.getByTestId('wsf-event-title'), 60_000);
+  assert(
+    (await page.getByTestId('wsf-event-device-choice').count()) === 0,
+    'the device question was asked again after sign-in, in a browser that already answered it'
+  );
   return landed;
 }
 
@@ -586,10 +603,11 @@ async function caseQrLink(browser, fx, screenOne) {
 // → where. Every one of those is a step the served build puts in the way, in
 // that order, and this case walks it.
 //
-// IT DOES NOT CLAIM THE EVENT SURVIVES SIGN-IN. The previous version did, and
-// it was never true on this path: the sign-in link carries no return, so the
-// phone lands on the app's home and this file navigates back. The return is
-// the harness's and the receipt says which one it was.
+// THE RETURN IS THE PRODUCT'S, AND THAT IS THE POINT. Scanning, signing in
+// and arriving is one journey to the person doing it, so this case asserts the
+// address becomes the scanned event by itself. It does not navigate back: a
+// harness that walks itself to the destination proves nothing about whether
+// anybody else could get there.
 //
 // PREVERIFIED-FIXTURE PROOF. The account is created already verified, so this
 // proves nothing about verification-email delivery — a separate dependency,
@@ -599,9 +617,8 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   const context = await browser.newContext(PHONE);
   const page = await context.newPage();
 
-  // Device question → signed-out landing → sign in → back to the event. The
-  // journey navigates back itself, because the product does not: see
-  // reachMemberEvent.
+  // Device question → signed-out landing → sign in → and the product brings
+  // them back to the event by itself: see reachMemberEvent.
   const landedAfterSignIn = await reachMemberEvent(page, qrUrl, fx.phoneOne, {
     captures: { deviceChoice: '03-device-choice', signedOut: '04-signed-out-landing' },
   });
@@ -703,7 +720,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   trackLinked(`wsfTurnReceipts/${lineId}__${fx.phoneOne.uid}`, fx.phoneOne.uid);
 
   check('player journey — the phone chooses the queue', 'PASS',
-    `preverified fixture account (NOT proof of verification-email delivery); asked whose screen this is before anything else and answered "my own phone"; the signed-out landing offered an account, not the event; after signing in the app returned to ${landedAfterSignIn} and this journey navigated back to the scanned event itself — the event path carries NO retained goal or activity across sign-in and none is claimed; an activity was then chosen explicitly, and only then did the where-panel appear; recording on the phone was offered and the queue was chosen explicitly; a real position and count were shown; leaving emptied the place, and rejoining required choosing the activity again and took a new place`);
+    `preverified fixture account (NOT proof of verification-email delivery); asked whose screen this is before anything else and answered "my own phone"; the signed-out landing offered an account, not the event; after signing in the app returned to ${landedAfterSignIn} BY ITSELF, which is the scanned event's own address and not a navigation this journey performed; an activity was then chosen explicitly, and only then did the where-panel appear; recording on the phone was offered and the queue was chosen explicitly; a real position and count were shown; leaving emptied the place, and rejoining required choosing the activity again and took a new place`);
   return { context, page, lineId, entryId: mine.turn.entryId, code: mine.turn.code ?? null };
 }
 

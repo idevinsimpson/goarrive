@@ -388,6 +388,23 @@ test('no capture can carry a working enrolment code', () => {
 const sliceFn = (name, end) =>
   JOURNEY.slice(JOURNEY.indexOf(`async function ${name}(`), end ? JOURNEY.indexOf(end) : undefined);
 
+/**
+ * The same slice with comments removed.
+ *
+ * Comments in this file quote the defects these checks look for — the
+ * reachMemberEvent banner says in prose that an earlier version "navigated
+ * back with `page.goto(qrUrl)`" — so a check that counts occurrences must
+ * count CODE. Three separate checks in this suite have been written against
+ * prose by accident and had to be fixed after the fact; a named helper is
+ * cheaper than remembering.
+ */
+const codeOfFn = (name, end) =>
+  sliceFn(name, end)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join('\n');
+
 test('the cold scan answers the device question and lands signed OUT, never on the member view', () => {
   const body = sliceFn('caseQrLink', '// 2. THE PHONE GETS');
   const deviceAt = body.indexOf('answerOwnPhone(coldPage');
@@ -472,27 +489,48 @@ test('the rejoin chooses an activity again, because nothing is preselected on a 
     'the rejoin does not prove the remembered device answer was honoured');
 });
 
-test('the journey does not claim the event survives sign-in, because on this build it does not', () => {
-  // The sign-in link is a plain href="/signin" and nextRouteAfterAuth carries
-  // a pending JOIN code or a kiosk return goal — never an event goal. The
-  // return is the harness's own navigation and must be described as such.
+test('the PRODUCT brings the visitor back to the event — the harness must not do it for them', () => {
+  // The defect this replaced: an interim version navigated back with
+  // page.goto and asserted the product had NOT returned. A green run then
+  // proved the harness could find the event, which is not something anybody
+  // standing at one can do. Scanning, signing in and arriving is one journey
+  // to the person doing it, so the address has to become the scanned event on
+  // its own.
+  // CODE, not prose: the banner above this helper quotes the page.goto the
+  // old version used, and counting that would read the comment as a defect.
+  const reach = codeOfFn('reachMemberEvent', 'async function chooseActivityByTitle(');
+  const signInAt = reach.indexOf('signInOnPage(');
+  assert.notEqual(signInAt, -1, 'reachMemberEvent never signs in');
+
+  // Exactly ONE navigation in this helper, and it is the cold open BEFORE the
+  // device question. Anything after the sign-in would be the harness walking
+  // itself to the destination it is supposed to be testing.
+  const navigations = [...reach.matchAll(/page\.goto\(/g)].map((m) => m.index);
+  assert.equal(
+    navigations.length,
+    1,
+    `reachMemberEvent navigates ${navigations.length} times; the cold open is the only one allowed`
+  );
+  assert.ok(navigations[0] < reach.indexOf('answerOwnPhone('), 'the one navigation must be the cold open');
+  assert.ok(navigations[0] < signInAt, 'nothing may navigate after sign-in');
+
+  // And it waits for the product's own arrival at the scanned path.
+  assert.match(reach, /waitForURL/, 'the journey must wait for the product to arrive');
+  assert.ok(reach.indexOf('waitForURL') > signInAt, 'the wait must come after sign-in');
+  assert.match(reach, /url\.pathname === expectedPath/,
+    'the wait must be for the scanned event’s own path, not merely for leaving /signin');
+  assert.match(reach, /landed === expectedPath/, 'the landing must be asserted, not just awaited');
+  // The device answer is remembered per browser, so arriving back must NOT be
+  // asked the question again. Without this, a build that forgot the answer on
+  // every navigation would still pass everything above.
+  assert.match(reach, /wsf-event-device-choice'\)\.count\(\)\) === 0/,
+    'the return does not prove the remembered device answer survived the auth round trip');
+
+  // No receipt may describe the return as the harness's any more.
   const claims = JOURNEY.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  assert.equal(/survived sign-in|survive the sign-in|context retained/i.test(claims), false,
-    'a receipt still claims the scanned context survived sign-in');
-  const reach = sliceFn('reachMemberEvent', 'async function chooseActivityByTitle(');
-  assert.match(reach, /waitForURL/, 'the journey must observe where sign-in actually landed');
-  // lastIndexOf: reachMemberEvent opens the link once at the top too, so the
-  // FIRST page.goto is the cold open, not the return.
-  assert.ok(
-    reach.indexOf('signInOnPage(') < reach.lastIndexOf('page.goto(qrUrl'),
-    'the navigation back to the event must come after sign-in, and be the harness doing it'
-  );
-  assert.ok(
-    reach.indexOf('page.goto(qrUrl') < reach.indexOf('answerOwnPhone('),
-    'the cold open must come before the device question is answered'
-  );
-  // The PASS line has to say whose navigation that was.
+  assert.equal(/this journey navigated back|navigates back itself/i.test(claims), false,
+    'a receipt still describes the return as the harness’s own');
   const pass = JOURNEY.slice(JOURNEY.indexOf("check('player journey — the phone chooses the queue'"));
-  assert.match(pass.slice(0, 1200), /navigated back to the scanned event itself|NO retained goal/,
-    'the receipt does not disclose that the return was the harness’s own');
+  assert.match(pass.slice(0, 1400), /BY ITSELF/,
+    'the receipt does not say the return was the product’s own');
 });
