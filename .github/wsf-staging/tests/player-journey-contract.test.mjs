@@ -489,6 +489,37 @@ test('the rejoin chooses an activity again, because nothing is preselected on a 
     'the rejoin does not prove the remembered device answer was honoured');
 });
 
+test('no COMMENT contradicts what the code now asserts about the return', () => {
+  // The check above reads code with comments stripped, which is exactly how a
+  // stale comment survived: the file waited for the product's return while a
+  // banner above it still said sign-in does not come back and "the journey
+  // navigates back itself". Durable evidence that contradicts itself is worse
+  // than none, so the prose gets its own check.
+  //
+  // Deliberately asymmetric: it bans PRESENT-TENSE claims that the product
+  // loses the event. Past-tense history ("on the build this was first written
+  // against it did not") is how the file explains why the assertion exists,
+  // and must stay sayable.
+  const comments = JOURNEY.split('\n')
+    .filter((line) => /^\s*(\/\/|\*|\/\*)/.test(line))
+    .join('\n');
+  const contradictions = [
+    /does NOT come back to the event/,
+    /so the journey navigates back itself/,
+    /this file navigates back/,
+    /a navigation the product never makes/,
+    /the return is the harness's/i,
+  ];
+  for (const pattern of contradictions) {
+    const hit = pattern.exec(comments);
+    assert.equal(hit, null,
+      `a comment still claims the product does not return: ${JSON.stringify(hit?.[0])}`);
+  }
+  // And it must say, somewhere, that the product does the returning.
+  assert.match(comments, /COMES BACK to it, and the product does that|THE RETURN IS THE PRODUCT'S/,
+    'no comment states that the return is the product\u2019s own');
+});
+
 test('the PRODUCT brings the visitor back to the event — the harness must not do it for them', () => {
   // The defect this replaced: an interim version navigated back with
   // page.goto and asserted the product had NOT returned. A green run then

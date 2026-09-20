@@ -353,11 +353,16 @@ async function signInOnPage(page, user) {
 //     WHERE panel — `wsf-event-choice`, and so `wsf-event-queue-start` — is
 //     rendered ONLY once an activity is selected. That applies on every fresh
 //     load, including the one after leaving the line.
-//   - Signing in from the event does NOT come back to the event. The link is a
-//     plain `href="/signin"`, and sign-in finishes with
-//     `router.replace(nextRouteAfterAuth('/'))`, which carries a pending JOIN
-//     code or a kiosk return goal and nothing else. So the journey navigates
-//     back itself, and claims only what that proves.
+//   - Signing in from the event COMES BACK to it, and the product does that
+//     itself. On the build this file was first written against it did not:
+//     the link was a plain `href="/signin"` and sign-in ended with
+//     `router.replace(nextRouteAfterAuth('/'))`, which carried a pending JOIN
+//     code or a kiosk return goal and nothing else, so the phone landed on the
+//     app's home with the scanned event lost. That is fixed in the product
+//     (`src/eventReturn.ts`, merged as 6b257c3): a validated goal id is stored,
+//     never a route, and the terminal outcome spends it. This journey asserts
+//     that return and performs no navigation of its own after sign-in — see
+//     reachMemberEvent.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The device question, answered as somebody's own phone. */
