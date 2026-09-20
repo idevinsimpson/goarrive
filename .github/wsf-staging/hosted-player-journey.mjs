@@ -13,8 +13,18 @@
  * to find out:
  *   - It is not proof of verification-EMAIL delivery. Every phone identity
  *     here is a preverified synthetic fixture account. What is proven is that
- *     event and activity context SURVIVES the sign-in round trip, not that a
- *     real person could receive and follow a verification mail.
+ *     a person can sign in from the scanned event and reach it as a member,
+ *     not that a real person could receive and follow a verification mail.
+ *   - It DOES assert that the scanned event survives sign-in, and it asserts
+ *     it of the PRODUCT. The build this was first written against dropped the
+ *     event: its sign-in link was a plain `href="/signin"` and sign-in ended
+ *     with `router.replace(nextRouteAfterAuth('/'))`, which carried a pending
+ *     JOIN code or a kiosk return goal and nothing else. An interim version of
+ *     this file navigated back with `page.goto` and said so honestly — but a
+ *     green run then proved only that the harness could find the event, which
+ *     is not something anyone standing at one can do. It now waits for the
+ *     address to become the scanned event on its own, and a build without the
+ *     return fails here rather than passing quietly.
  *   - It is not proof of an authorized movement VIDEO. The product's default
  *     is its own poster/fallback drawing; a poster pass is a poster pass.
  *   - It is Chromium. Playwright's WebKit is an automated engine, not Safari,
@@ -309,12 +319,140 @@ async function contains(locator, expected, timeout = 30_000) {
   assert(actual.includes(expected), `expected text containing "${expected}", found "${sanitize(actual)}"`);
   return actual;
 }
-/** Sign in on a page that is already sitting on the event, and come back. */
 async function signInOnPage(page, user) {
   await visible(page.getByTestId('wsf-signin-email'));
   await page.getByTestId('wsf-signin-email').fill(user.email);
   await page.getByTestId('wsf-signin-password').fill(user.password);
   await page.getByTestId('wsf-signin-submit').click();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ORDER THE SERVED BUILD ACTUALLY PUTS ON SCREEN.
+//
+// Run 33 (35495928362) timed out after 73 seconds waiting for
+// `wsf-event-title` on the first cold open of the scanned link. That screen
+// cannot appear there, and never could: this file asserted an order the
+// product does not have. Read out of the candidate's own source at the SHA
+// staging serves (app/event/[goalId].tsx, src/deviceMode.ts,
+// src/eventActivity.ts, src/pendingJoinCode.ts), the order is:
+//
+//   1. `wsf-event-loading`        storage has not been read yet
+//   2. `wsf-event-device-choice`  the device question, BEFORE any membership
+//                                 call, any sign-in and any account — the
+//                                 component inside it is `wsf-device-choice`,
+//                                 its answers `-personal` and `-shared`
+//   3. `wsf-event-signed-out`     a visitor with no session: an account
+//                                 invitation, not the event
+//   4. `wsf-event-title`          the member view, and only here
+//
+// Two further facts, established the same way, each of which would have
+// failed a later step of this journey even with the device question handled:
+//
+//   - The activity is NOT preselected for a two-activity event
+//     (`initialSelection` returns null unless exactly one is offered), and the
+//     WHERE panel — `wsf-event-choice`, and so `wsf-event-queue-start` — is
+//     rendered ONLY once an activity is selected. That applies on every fresh
+//     load, including the one after leaving the line.
+//   - Signing in from the event COMES BACK to it, and the product does that
+//     itself. On the build this file was first written against it did not:
+//     the link was a plain `href="/signin"` and sign-in ended with
+//     `router.replace(nextRouteAfterAuth('/'))`, which carried a pending JOIN
+//     code or a kiosk return goal and nothing else, so the phone landed on the
+//     app's home with the scanned event lost. That is fixed in the product
+//     (`src/eventReturn.ts`, merged as 6b257c3): a validated goal id is stored,
+//     never a route, and the terminal outcome spends it. This journey asserts
+//     that return and performs no navigation of its own after sign-in — see
+//     reachMemberEvent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The device question, answered as somebody's own phone. */
+async function answerOwnPhone(page, { capture = null } = {}) {
+  await visible(page.getByTestId('wsf-event-device-choice'), 45_000);
+  await visible(page.getByTestId('wsf-device-choice'));
+  // Both answers are offered. A screen that only ever showed one would make
+  // "chose personal" meaningless.
+  await visible(page.getByTestId('wsf-device-choice-personal'));
+  await visible(page.getByTestId('wsf-device-choice-shared'));
+  if (capture) await snap(page, 'phone', 390, capture);
+  await page.getByTestId('wsf-device-choice-personal').click();
+}
+
+/**
+ * Open the scanned link on a phone that has never seen the app, answer the
+ * device question, sign in, and come back to the event as a member.
+ *
+ * The return is explicit because the product does not do it: see above.
+ */
+async function reachMemberEvent(page, qrUrl, user, { captures = {} } = {}) {
+  await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
+  await answerOwnPhone(page, { capture: captures.deviceChoice ?? null });
+
+  // A visitor with no session is invited to make an account. This is the
+  // scanned event's real landing, and it is NOT the member view.
+  await visible(page.getByTestId('wsf-event-signed-out'), 45_000);
+  await visible(page.getByTestId('wsf-event-signup'));
+  if (captures.signedOut) await snap(page, 'phone', 390, captures.signedOut);
+
+  await page.getByTestId('wsf-event-signin').click();
+  await signInOnPage(page, user);
+
+  // THE PRODUCT BRINGS THEM BACK. This journey does not.
+  //
+  // An earlier version of this function navigated back with `page.goto(qrUrl)`
+  // and asserted that the product had NOT returned. That encoded the defect:
+  // a green run proved the harness could find its way to the event, which is
+  // not a thing anyone at an event can do. The contract is that scanning,
+  // signing in and arriving is ONE journey, so the only honest assertion is
+  // that the address changes to the scanned event on its own.
+  //
+  // Nothing here touches the address bar between the sign-in submit and this
+  // wait, so a pass cannot be the harness's own navigation.
+  const expectedPath = new URL(qrUrl).pathname;
+  await page.waitForURL(
+    (url) => url.pathname === expectedPath,
+    { timeout: 60_000 }
+  );
+  const landed = new URL(page.url()).pathname;
+  assert(
+    landed === expectedPath,
+    `sign-in did not come back to the scanned event: landed on ${landed}, expected ${expectedPath}`
+  );
+
+  // The device answer is remembered per browser, so the question is not asked
+  // again — and the member view is what a signed-in member sees.
+  await visible(page.getByTestId('wsf-event-title'), 60_000);
+  assert(
+    (await page.getByTestId('wsf-event-device-choice').count()) === 0,
+    'the device question was asked again after sign-in, in a browser that already answered it'
+  );
+  return landed;
+}
+
+/**
+ * Choose an activity BY THE TITLE A PERSON READS, never by a guessed testID:
+ * the option ids are slugs of labels. The WHERE panel does not exist until
+ * this has happened.
+ */
+async function chooseActivityByTitle(page, title) {
+  await visible(page.getByTestId('wsf-event-activity'), 45_000);
+  const optionIds = (await testIdsWithPrefix(page, 'wsf-event-activity-'))
+    .filter((id) => id !== 'wsf-event-activity-options' && id !== 'wsf-event-activity-none');
+  assert(optionIds.length === 2, `a two-activity event offered ${optionIds.length} options`);
+  // Nothing is chosen for a two-activity event, so the WHERE panel must be
+  // absent right now. If it were already there, "choosing" would prove nothing.
+  assert(
+    (await page.getByTestId('wsf-event-choice').count()) === 0,
+    'the where-panel is on screen before any activity was chosen'
+  );
+  let chosenId = null;
+  for (const id of optionIds) {
+    if ((await textOf(page.getByTestId(id))).includes(title)) chosenId = id;
+  }
+  assert(chosenId, `no option named "${title}"`);
+  await page.getByTestId(chosenId).click();
+  await visible(page.getByTestId('wsf-event-choice'));
+  await contains(page.getByTestId('wsf-event-choice-activity'), title);
+  return chosenId;
 }
 /**
  * A SECOND INDEPENDENT PARTICIPANT, on their own account and their own phone.
@@ -328,11 +466,13 @@ async function signInOnPage(page, user) {
 async function joinSecondPhone(browser, fx, qrUrl) {
   const context = await browser.newContext(PHONE);
   const page = await context.newPage();
-  await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
-  await visible(page.getByTestId('wsf-event-title'), 45_000);
-  await page.getByTestId('wsf-event-signin').click();
-  await signInOnPage(page, fx.phoneTwo);
-  await visible(page.getByTestId('wsf-event-title'), 60_000);
+  // A SEPARATE BROWSER, so this phone answers the device question on its own
+  // account — the first phone's answer is stored per browser and cannot carry.
+  await reachMemberEvent(page, qrUrl, fx.phoneTwo);
+  // AND IT CHOOSES ITS OWN ACTIVITY. The earlier version went straight for
+  // the queue button, which is not rendered until an activity is selected —
+  // so this participant could never have reached the line at all.
+  await chooseActivityByTitle(page, fx.activities[0].title);
   await page.getByTestId('wsf-event-queue-start').click();
   await visible(page.getByTestId('wsf-event-queue-panel'));
   await page.getByTestId('wsf-event-queue-name-first').click();
@@ -441,63 +581,77 @@ async function caseQrLink(browser, fx, screenOne) {
   const cold = await browser.newContext(PHONE);
   const coldPage = await cold.newPage();
   await coldPage.goto(url, { waitUntil: 'domcontentloaded' });
-  await visible(coldPage.getByTestId('wsf-event-title'), 45_000);
-  await snap(coldPage, 'phone', 390, '01-scanned-event');
+  // WHAT A COLD SCAN ACTUALLY REACHES. The device question first — before any
+  // membership call, any sign-in and any account — then, once this phone says
+  // it is somebody's own, the signed-out event landing. Run 33 waited here for
+  // the member view, which a visitor with no session can never be shown.
+  await answerOwnPhone(coldPage, { capture: '01-scanned-device-choice' });
+  await visible(coldPage.getByTestId('wsf-event-signed-out'), 45_000);
+  await snap(coldPage, 'phone', 390, '02-scanned-event-signed-out');
+  // Nothing on that landing is the member view.
+  assert(
+    (await coldPage.getByTestId('wsf-event-title').count()) === 0,
+    'the signed-out landing is showing the member view'
+  );
   const after = await call('line after the scan', 'wsfMyTurn', { goalId: fx.activities[0].goalId }, await signInToken(fx.phoneOne));
   assert(!after?.turn, 'opening the scanned link enqueued somebody; looking is not joining');
   await cold.close();
   check('player journey — the scanned link', 'PASS',
-    `read from the served screen; staging origin; /event/{goalId}; no secret, token, station id or code in it; reloads cold in a context that has never seen the app; the line was empty before and after`);
+    `read from the served screen; staging origin; /event/{goalId}; no secret, token, station id or code in it; reloads cold in a context that has never seen the app, which is asked whose screen it is BEFORE anything else and then shown the signed-out landing, never the member view; the line was empty before and after`);
   return url;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. THE PHONE KEEPS ITS PLACE IN THE STORY THROUGH SIGN-IN.
+// 2. THE PHONE GETS FROM A SCANNED LINK TO A PLACE IN THE LINE.
 //
-// PREVERIFIED-FIXTURE PROOF. The account is created already verified. This
-// case proves the event and the chosen activity SURVIVE the sign-in round
-// trip. It proves nothing about verification-email delivery, which is a
-// separate dependency and is not claimed anywhere in this file.
+// Whose screen is this → an account → the event as a member → which activity
+// → where. Every one of those is a step the served build puts in the way, in
+// that order, and this case walks it.
+//
+// THE RETURN IS THE PRODUCT'S, AND THAT IS THE POINT. Scanning, signing in
+// and arriving is one journey to the person doing it, so this case asserts the
+// address becomes the scanned event by itself. It does not navigate back: a
+// harness that walks itself to the destination proves nothing about whether
+// anybody else could get there.
+//
+// PREVERIFIED-FIXTURE PROOF. The account is created already verified, so this
+// proves nothing about verification-email delivery — a separate dependency,
+// claimed nowhere in this file.
 // ─────────────────────────────────────────────────────────────────────────────
 async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   const context = await browser.newContext(PHONE);
   const page = await context.newPage();
-  await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
-  await visible(page.getByTestId('wsf-event-title'), 45_000);
 
-  // The activity options are keyed by a slug of their label, so the option is
-  // chosen by the title a person reads, never by a guessed testID.
-  const optionIds = (await testIdsWithPrefix(page, 'wsf-event-activity-'))
-    .filter((id) => id !== 'wsf-event-activity-options' && id !== 'wsf-event-activity-none');
-  assert(optionIds.length === 2, `a two-activity event offered ${optionIds.length} options`);
-  let chosenId = null;
-  for (const id of optionIds) {
-    if ((await textOf(page.getByTestId(id))).includes(fx.activities[0].title)) chosenId = id;
-  }
-  assert(chosenId, `no option named "${fx.activities[0].title}"`);
-  await page.getByTestId(chosenId).click();
-  await contains(page.getByTestId('wsf-event-choice-activity'), fx.activities[0].title);
-  await snap(page, 'phone', 390, '02-activity-chosen');
+  // Device question → signed-out landing → sign in → and the product brings
+  // them back to the event by itself: see reachMemberEvent.
+  const landedAfterSignIn = await reachMemberEvent(page, qrUrl, fx.phoneOne, {
+    captures: { deviceChoice: '03-device-choice', signedOut: '04-signed-out-landing' },
+  });
+  await snap(page, 'phone', 390, '05-member-event');
 
-  // SIGN IN FROM HERE, and come back to the same event with the same activity.
-  await page.getByTestId('wsf-event-signin').click();
-  await signInOnPage(page, fx.phoneOne);
-  await visible(page.getByTestId('wsf-event-title'), 60_000);
-  await contains(page.getByTestId('wsf-event-choice-activity'), fx.activities[0].title);
+  // THE ACTIVITY IS CHOSEN HERE, AFTER SIGN-IN, because the signed-out
+  // landing does not offer one. The earlier version of this file chose an
+  // activity before signing in and then claimed the choice survived the round
+  // trip — a claim about a screen that was never on screen.
+  await chooseActivityByTitle(page, fx.activities[0].title);
+  await snap(page, 'phone', 390, '06-activity-chosen');
+
+  // WHAT IS AND IS NOT CARRIED. Reported, not assumed: the event path writes
+  // neither retained key (only /join/{code} does), so these are expected to be
+  // null, and the assertion is that nothing points at a DIFFERENT goal.
   const carried = await page.evaluate(() => ({
     goalId: window.localStorage.getItem('wsf.pendingEventGoalId'),
     activity: window.localStorage.getItem('wsf.pendingEventActivity'),
   }));
   assert(carried.goalId === fx.activities[0].goalId || carried.goalId === null,
     'the retained event points at a different goal than the one scanned');
-  await snap(page, 'phone', 390, '03-signed-in-context-retained');
 
   // EXPLICITLY CHOOSING THE QUEUE. The event offers recording on the phone as
   // well; this is the choice, not a default.
   await visible(page.getByTestId('wsf-event-add'));
   await page.getByTestId('wsf-event-queue-start').click();
   await visible(page.getByTestId('wsf-event-queue-panel'));
-  await snap(page, 'phone', 390, '04-queue-name-choice');
+  await snap(page, 'phone', 390, '07-queue-name-choice');
   // A public screen shows this name, so the person picks which form of it.
   await page.getByTestId('wsf-event-queue-name-first').click();
   await page.getByTestId('wsf-event-queue-join').click();
@@ -507,7 +661,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   const count = await textOf(page.getByTestId('wsf-queue-count'));
   assert(/\d/.test(place), `the waiting screen shows no real position: "${sanitize(place)}"`);
   assert(/\d/.test(count), `the waiting screen shows no real count: "${sanitize(count)}"`);
-  await snap(page, 'phone', 390, '05-waiting-with-place');
+  await snap(page, 'phone', 390, '08-waiting-with-place');
 
   // CANCELLING IS AVAILABLE AND REAL, and rejoining restores a place.
   //
@@ -527,16 +681,26 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   await visible(page.getByTestId('wsf-queue-leave'));
   await page.getByTestId('wsf-queue-leave').click();
   await visible(page.getByTestId('wsf-queue-not-in-line-reason'), 45_000);
-  await snap(page, 'phone', 390, '06-left-the-line');
+  await snap(page, 'phone', 390, '09-left-the-line');
   await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
+  // Signed in, and this browser has already said whose screen it is, so the
+  // device question is not asked again — but the activity IS asked again: the
+  // selection is component state, and nothing is preselected for a
+  // two-activity event. Rejoining without choosing one would find no
+  // where-panel and no queue button.
   await visible(page.getByTestId('wsf-event-title'), 45_000);
+  assert(
+    (await page.getByTestId('wsf-event-device-choice').count()) === 0,
+    'the device question was asked again in a browser that already answered it'
+  );
+  await chooseActivityByTitle(page, fx.activities[0].title);
   await page.getByTestId('wsf-event-queue-start').click();
   await page.getByTestId('wsf-event-queue-name-first').click();
   await page.getByTestId('wsf-event-queue-join').click();
   await visible(page.getByTestId('wsf-queue-standing'), 60_000);
   // SWITCHING TO THE PHONE is offered as a way out that keeps the movement.
   await visible(page.getByTestId('wsf-queue-switch-to-phone'));
-  await snap(page, 'phone', 390, '07-rejoined');
+  await snap(page, 'phone', 390, '10-rejoined');
 
   // Every entry the server minted for this phone, tracked through the goal
   // this run created. Two joins means two entries; tracking only the last
@@ -561,7 +725,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   trackLinked(`wsfTurnReceipts/${lineId}__${fx.phoneOne.uid}`, fx.phoneOne.uid);
 
   check('player journey — the phone chooses the queue', 'PASS',
-    `preverified fixture account (NOT proof of verification-email delivery); the scanned event and the chosen activity survived sign-in; recording on the phone was offered and the queue was chosen explicitly; a real position and count were shown; leaving emptied the place and rejoining took a new one`);
+    `preverified fixture account (NOT proof of verification-email delivery); asked whose screen this is before anything else and answered "my own phone"; the signed-out landing offered an account, not the event; after signing in the app returned to ${landedAfterSignIn} BY ITSELF, which is the scanned event's own address and not a navigation this journey performed; an activity was then chosen explicitly, and only then did the where-panel appear; recording on the phone was offered and the queue was chosen explicitly; a real position and count were shown; leaving emptied the place, and rejoining required choosing the activity again and took a new place`);
   return { context, page, lineId, entryId: mine.turn.entryId, code: mine.turn.code ?? null };
 }
 
@@ -625,11 +789,11 @@ async function caseTwoScreens(fx, screenOne, screenTwo, phone, secondPhone) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function casePlayer(fx, screenOne, phone) {
   await visible(phone.page.getByTestId('wsf-queue-called'), 60_000);
-  await snap(phone.page, 'phone', 390, '08-called');
+  await snap(phone.page, 'phone', 390, '11-called');
   // The person says they are ready; only then can the screen start them.
   await visible(phone.page.getByTestId('wsf-queue-ready-panel'));
   await phone.page.getByTestId('wsf-queue-ready').click();
-  await snap(phone.page, 'phone', 390, '09-ready');
+  await snap(phone.page, 'phone', 390, '12-ready');
 
   await screenOne.page.getByTestId('wsf-station-turn-action').click();
   // BOTH SURFACES SHOW THE SAME ROUND. The player is one component with two
@@ -686,7 +850,7 @@ async function casePlayer(fx, screenOne, phone) {
     highest === EXPECTED_COUNTDOWN_SECONDS,
     `the countdown began at ${highest}, expected ${EXPECTED_COUNTDOWN_SECONDS} — saw ${sanitize(seen.join(','))}`
   );
-  await snap(phone.page, 'phone', 390, '11-countdown');
+  await snap(phone.page, 'phone', 390, '13-countdown');
 
   // THE ROUND THE COUNTDOWN ENTERS IS THE SIXTY-SECOND ONE. Waiting past the
   // count, the timer must be a second count no greater than the default and
@@ -701,7 +865,7 @@ async function casePlayer(fx, screenOne, phone) {
     remaining <= EXPECTED_ROUND_SECONDS && remaining >= EXPECTED_ROUND_SECONDS - 15,
     `the running round has ${remaining}s left, which is not a ${EXPECTED_ROUND_SECONDS}-second round a moment after it started`
   );
-  await snap(phone.page, 'phone', 390, '12-round-running');
+  await snap(phone.page, 'phone', 390, '14-round-running');
 
   // THE QR STAYS UP *DURING* MOVEMENT — asserted here, inside the running
   // round, not before Start. Somebody walking up mid-round can still join.
@@ -751,7 +915,7 @@ async function casePlayer(fx, screenOne, phone) {
   await visible(phone.page.getByTestId('wsf-queue-move-pause'));
   await visible(phone.page.getByTestId('wsf-queue-move-stop'));
   await phone.page.getByTestId('wsf-queue-move-stop').click();
-  await snap(phone.page, 'phone', 390, '13-stopped');
+  await snap(phone.page, 'phone', 390, '15-stopped');
 
   // PHONE AND SCREEN ARE ON THE SAME ATTEMPT. Read from the entry the server
   // wrote, not from either surface's own account of itself.
@@ -789,15 +953,15 @@ const EXPECTED_COUNTDOWN_SECONDS = 3;
 async function caseReceiptAndClear(fx, screenOne, phone) {
   await visible(phone.page.getByTestId('wsf-queue-record-panel'), 45_000);
   await contains(phone.page.getByTestId('wsf-queue-turn-activity'), fx.activities[0].title);
-  await snap(phone.page, 'phone', 390, '14-review');
+  await snap(phone.page, 'phone', 390, '16-review');
   await phone.page.getByTestId('wsf-queue-record').fill(String(RECORDED));
-  await snap(phone.page, 'phone', 390, '15-review-entered');
+  await snap(phone.page, 'phone', 390, '17-review-entered');
   await phone.page.getByTestId('wsf-queue-record').press('Enter');
 
   const amount = await textOf(phone.page.getByTestId('wsf-queue-receipt-amount'), 60_000);
   assert(amount.includes(String(RECORDED)), `the receipt reads "${sanitize(amount)}", expected ${RECORDED}`);
   await visible(phone.page.getByTestId('wsf-queue-receipt-scope'));
-  await snap(phone.page, 'phone', 390, '16-receipt');
+  await snap(phone.page, 'phone', 390, '18-receipt');
 
   // THE SCREEN SHOWS A RESULT AND NOTHING ELSE ABOUT THE PERSON.
   await visible(screenOne.page.getByTestId('wsf-station-queue-result'), 30_000);
@@ -822,7 +986,7 @@ async function caseReceiptAndClear(fx, screenOne, phone) {
   // The phone keeps its receipt after the screen has forgotten the person.
   const stillThere = await textOf(phone.page.getByTestId('wsf-queue-receipt-amount'));
   assert(stillThere.includes(String(RECORDED)), 'the phone lost its own receipt when the screen cleared');
-  await snap(phone.page, 'phone', 390, '17-receipt-retained');
+  await snap(phone.page, 'phone', 390, '19-receipt-retained');
 
   check('player journey — review, receipt and the cleared screen', 'PASS',
     `the review named the activity the person chose; ${RECORDED} was entered and the phone showed its own receipt; the screen showed the amount with no name, email or uid; after the real ten-second window the screen no longer carried the result, and the phone still did`);
