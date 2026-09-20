@@ -15,6 +15,7 @@
  * private-browsing quota reject.
  */
 
+import { eventRoute, readEventReturn } from './eventReturn';
 import { kioskContributeRoute, readKioskReturnGoal } from './kioskSession';
 
 const KEY = 'wsf.pendingJoinCode';
@@ -74,17 +75,29 @@ export function clearPendingJoinCode(): void {
  * and the visitor dead-ends. The pending code survives sessionStorage across
  * the gate hops and is consumed here on the last step.
  *
- * A KIOSK RETURN is the second destination that can claim this hop, and it is
- * strictly second: a visitor who scanned a join code is mid-way through
- * joining a community, and that has to finish before anything else. Only when
- * no code is pending does a kiosk hand-off apply, which sends the visitor
- * back to the contribution screen on the device they walked up to instead of
- * dropping them on a home page they did not ask for
- * (src/kioskSession.ts).
+ * THREE DESTINATIONS CAN CLAIM THIS HOP, in this order:
+ *
+ *   1. A PENDING JOIN CODE. A visitor mid-way through joining a community has
+ *      to finish that before anything else.
+ *   2. AN EVENT RETURN. Somebody scanned the QR at an event, was told they
+ *      needed an account, and signed in. Before this existed they landed on
+ *      home and the event they were standing in front of was simply gone —
+ *      they had to find the QR and scan it again. The route is CONSTRUCTED
+ *      from a validated goal id (src/eventReturn.ts); nothing stores a URL, so
+ *      there is no return target for anything to tamper with.
+ *   3. A KIOSK RETURN, which sends the visitor back to the contribution screen
+ *      on the device they walked up to (src/kioskSession.ts).
+ *
+ * An event return and a kiosk return should not coexist: the event screen asks
+ * whose screen this is FIRST, and a device that answers "shared" is handed to
+ * the kiosk and never offered a personal sign-in. The order is written down
+ * anyway, because "should not happen" is not a rule.
  */
 export function nextRouteAfterAuth(fallback: string): string {
   const pending = readPendingJoinCode();
   if (pending) return `/join/${pending}`;
+  const eventGoalId = readEventReturn();
+  if (eventGoalId) return eventRoute(eventGoalId);
   const kioskGoalId = readKioskReturnGoal();
   if (kioskGoalId) return kioskContributeRoute(kioskGoalId);
   return fallback;

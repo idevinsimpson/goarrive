@@ -215,10 +215,14 @@ export function SecondaryLink({
   href,
   label,
   testID,
+  onPress,
 }: {
   href: string;
   label: string;
   testID?: string;
+  /** Runs before the navigation, exactly as ButtonLink's does. A caller that
+   * passes none behaves as it always has. */
+  onPress?: () => void;
 }) {
   return (
     <ButtonLink
@@ -229,6 +233,7 @@ export function SecondaryLink({
       // data-testid attribute, exactly as before.
       testID={testID as string}
       label={label}
+      onPress={onPress}
     />
   );
 }
