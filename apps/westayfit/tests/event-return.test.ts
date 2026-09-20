@@ -3,12 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   EVENT_RETURN_MAX_AGE_MS,
   clearEventReturn,
-  clearEventReturnGoal,
   eventRoute,
   readEventReturn,
-  readEventReturnActivity,
   setEventReturn,
-  setEventReturnActivity,
 } from '../src/eventReturn';
 import { nextRouteAfterAuth, setPendingJoinCode } from '../src/pendingJoinCode';
 import { setKioskReturnGoal } from '../src/kioskSession';
@@ -109,56 +106,18 @@ describe('what a read refuses', () => {
   });
 });
 
-describe('the activity belongs to its goal, and to no other', () => {
-  it('reads back for the goal it was stored with', () => {
-    setEventReturnActivity(GOAL, 'push-ups');
-    expect(readEventReturnActivity(GOAL)).toBe('push-ups');
-  });
-
-  it('reads NULL for any other goal — cross-goal isolation', () => {
-    setEventReturnActivity(GOAL, 'push-ups');
-    expect(readEventReturnActivity(OTHER_GOAL)).toBeNull();
-  });
-
-  it('cannot be separated from its goal in storage', () => {
-    setEventReturnActivity(GOAL, 'push-ups');
-    const raw = window.sessionStorage.getItem('wsf.eventReturnActivity') ?? '';
-    // One value carrying both. If these were two keys, a later write to one
-    // would silently re-point the other at the wrong event.
-    expect(JSON.parse(raw)).toEqual({ goalId: GOAL, activity: 'push-ups' });
-  });
-
-  it('a second event replaces the first, rather than accumulating', () => {
-    setEventReturnActivity(GOAL, 'push-ups');
-    setEventReturnActivity(OTHER_GOAL, 'sit-ups');
-    expect(readEventReturnActivity(GOAL)).toBeNull();
-    expect(readEventReturnActivity(OTHER_GOAL)).toBe('sit-ups');
-  });
-
-  it('refuses a malformed activity key or goal', () => {
-    setEventReturnActivity(GOAL, 'a/b');
-    expect(readEventReturnActivity(GOAL)).toBeNull();
-    setEventReturnActivity('../x', 'push-ups');
-    expect(readEventReturnActivity('../x')).toBeNull();
-  });
-
-  it('refuses a hand-written record whose halves disagree', () => {
-    window.sessionStorage.setItem(
-      'wsf.eventReturnActivity',
-      JSON.stringify({ goalId: OTHER_GOAL, activity: 'push-ups' })
-    );
-    expect(readEventReturnActivity(GOAL)).toBeNull();
-  });
-});
-
 describe('clearing', () => {
-  it('forgets both halves together', () => {
+  it('forgets the handoff', () => {
     setEventReturn(GOAL, NOW);
-    setEventReturnActivity(GOAL, 'push-ups');
     clearEventReturn();
     expect(readEventReturn(NOW)).toBeNull();
-    expect(readEventReturnActivity(GOAL)).toBeNull();
     expect(window.sessionStorage.getItem('wsf.eventReturn')).toBeNull();
+  });
+
+  it('stores no activity key at all — that journey is /join/<code>\u2019s, not this one', () => {
+    setEventReturn(GOAL, NOW);
+    // A duplicate activity handoff here would fight the scanned join flow,
+    // which already carries event AND activity through a real round trip.
     expect(window.sessionStorage.getItem('wsf.eventReturnActivity')).toBeNull();
   });
 
@@ -179,7 +138,6 @@ describe('storage that is unavailable', () => {
     try {
       expect(() => setEventReturn(GOAL, NOW)).not.toThrow();
       expect(readEventReturn(NOW)).toBeNull();
-      expect(readEventReturnActivity(GOAL)).toBeNull();
       expect(() => clearEventReturn()).not.toThrow();
     } finally {
       if (original) Object.defineProperty(window, 'sessionStorage', original);
@@ -187,25 +145,6 @@ describe('storage that is unavailable', () => {
   });
 });
 
-describe('consuming the return without forgetting the activity', () => {
-  it('clearEventReturnGoal drops the return and keeps the activity', () => {
-    setEventReturn(GOAL, NOW);
-    setEventReturnActivity(GOAL, 'push-ups');
-    clearEventReturnGoal();
-    // The return has fired; it must not fire again on a later auth hop.
-    expect(readEventReturn(NOW)).toBeNull();
-    // But it is still true that this is the activity they picked for this event.
-    expect(readEventReturnActivity(GOAL)).toBe('push-ups');
-  });
-
-  it('and the full clear still takes both', () => {
-    setEventReturn(GOAL, NOW);
-    setEventReturnActivity(GOAL, 'push-ups');
-    clearEventReturn();
-    expect(readEventReturn(NOW)).toBeNull();
-    expect(readEventReturnActivity(GOAL)).toBeNull();
-  });
-});
 
 describe('nextRouteAfterAuth — which destination claims the terminal hop', () => {
   it('sends a scanned event back to its own address', () => {

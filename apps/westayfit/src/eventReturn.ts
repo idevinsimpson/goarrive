@@ -21,10 +21,16 @@
  *   - No token, no station id, no pairing code, no membership claim. Nothing
  *     stored here grants anything: it names where the visitor was, and the
  *     server decides everything else when they get back.
- *   - A chosen activity is stored ONLY as a pair with the goal it belongs to,
- *     in one value, so the two cannot drift apart. A reader asks for the
- *     activity OF a specific goal and gets null for any other — cross-goal
- *     contamination is structural here, not a check someone has to remember.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO: carry a chosen ACTIVITY.
+ * An earlier version of this module did, and it was wrong twice over. A
+ * signed-out visitor cannot choose an activity — the control exists only
+ * after auth — so the value was written on an ordinary member tap and had
+ * nothing to do with an auth handoff; and the scanned journey that really
+ * does carry both halves already exists, through
+ * `/join/<code>?event=…&activity=…`, `src/stationSession.ts` and its browser
+ * proof `tests-e2e/ui-event-activity-choice.spec.ts`. Selecting the activity
+ * stays an explicit decision, made once the visitor is back on the event.
  *
  * LIFETIME. sessionStorage, like its two siblings: it survives the auth hops
  * and a same-tab reload, and dies with the tab so a stale event cannot greet
@@ -36,8 +42,6 @@
 
 /** The goal whose event screen sent the visitor into the auth flow. */
 const EVENT_RETURN_KEY = 'wsf.eventReturn';
-/** The activity chosen on that event, stored WITH the goal it belongs to. */
-const EVENT_RETURN_ACTIVITY_KEY = 'wsf.eventReturnActivity';
 
 /**
  * Two hours. Long enough for a slow signup with a verification mail in the
@@ -53,11 +57,6 @@ export const EVENT_RETURN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
  */
 function isGoalIdShape(goalId: unknown): goalId is string {
   return typeof goalId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(goalId);
-}
-
-/** Activity keys are slugs of their labels; the same character class holds. */
-function isActivityKeyShape(key: unknown): key is string {
-  return typeof key === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(key);
 }
 
 function storage(): Storage | null {
@@ -117,76 +116,17 @@ export function readEventReturn(now: number = Date.now()): string | null {
   }
 }
 
-type StoredActivity = { goalId: string; activity: string };
-
 /**
- * Remember the chosen activity, bound to its goal. Storing the two together
- * is the point: an activity belongs to one event's set of options and means
- * nothing on another.
- */
-export function setEventReturnActivity(goalId: string, activity: string): void {
-  try {
-    const store = storage();
-    if (!store) return;
-    if (!isGoalIdShape(goalId) || !isActivityKeyShape(activity)) return;
-    const record: StoredActivity = { goalId, activity };
-    store.setItem(EVENT_RETURN_ACTIVITY_KEY, JSON.stringify(record));
-  } catch {
-    // ignore — see storage()
-  }
-}
-
-/**
- * The activity chosen FOR THIS GOAL, or null. A stored activity belonging to
- * any other goal is not returned and is not an error — it simply is not this
- * event's.
- */
-export function readEventReturnActivity(goalId: string): string | null {
-  try {
-    const store = storage();
-    if (!store) return null;
-    if (!isGoalIdShape(goalId)) return null;
-    const raw = store.getItem(EVENT_RETURN_ACTIVITY_KEY);
-    if (raw == null) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    const record = parsed as Partial<StoredActivity>;
-    if (!isGoalIdShape(record.goalId) || !isActivityKeyShape(record.activity)) return null;
-    if (record.goalId !== goalId) return null;
-    return record.activity;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Forget the RETURN, keeping the activity.
+ * Forget the handoff.
  *
- * Called the moment the visitor is standing on the event again as a member:
- * the return has done its job and must not fire a second time on a later auth
- * hop. The chosen activity is a different thing with a different lifetime —
- * it is still true that this is the activity they picked for this event — so
- * it stays until they leave or cancel.
- */
-export function clearEventReturnGoal(): void {
-  try {
-    storage()?.removeItem(EVENT_RETURN_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Forget the whole handoff — both halves, together. Called at a terminal or
- * cancel boundary, so a visitor who walked away is not carried back to an
- * event they left, and the next person on a shared phone inherits nothing.
+ * Called when the visitor is standing on the event again as a member — the
+ * return has done its job and must not fire a second time on some later,
+ * unrelated sign-in — and at the cancel boundary, so somebody who said "not
+ * now" is not carried back to an event they walked away from.
  */
 export function clearEventReturn(): void {
   try {
-    const store = storage();
-    if (!store) return;
-    store.removeItem(EVENT_RETURN_KEY);
-    store.removeItem(EVENT_RETURN_ACTIVITY_KEY);
+    storage()?.removeItem(EVENT_RETURN_KEY);
   } catch {
     // ignore
   }

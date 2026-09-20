@@ -35,13 +35,7 @@ import {
   EVENT_CHOICE_QUEUE_DESCRIPTION,
   EVENT_CHOICE_QUEUE_LABEL,
 } from '../../src/eventActivity';
-import {
-  clearEventReturn,
-  clearEventReturnGoal,
-  readEventReturnActivity,
-  setEventReturn,
-  setEventReturnActivity,
-} from '../../src/eventReturn';
+import { clearEventReturn, setEventReturn } from '../../src/eventReturn';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
 import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
@@ -197,20 +191,6 @@ export default function EventScreen() {
   /** The event's own title when the server resolved one. Null on the legacy
    * path, where the goal's title IS the event's title. */
   const [resolvedTitle, setResolvedTitle] = useState<string | null>(null);
-  /**
-   * THE RETAINED ACTIVITY, read the same way the device answer is: never
-   * during render.
-   *
-   * The static export renders this route with no storage, so reading it
-   * inline would make the first client render disagree with the served HTML —
-   * the hydration rule this file already keeps for `deviceMode` (#418). It is
-   * null until read, which is exactly the state the screen showed before this
-   * existed.
-   */
-  const [retainedActivity, setRetainedActivity] = useState<string | null>(null);
-  useEffect(() => {
-    setRetainedActivity(readEventReturnActivity(goalId));
-  }, [goalId]);
 
   const activities = useMemo(
     () =>
@@ -219,19 +199,7 @@ export default function EventScreen() {
         : eventActivities({ unit: memberUnit, carried: carriedActivity }),
     [resolved, memberUnit, carriedActivity]
   );
-  /**
-   * The rule, in one statement, unchanged in order of precedence: what the
-   * person TAPPED, then what `initialSelection` says (a carried label, or the
-   * sole option of a one-activity event), and only then an activity they
-   * already chose FOR THIS GOAL and were carried away from by an auth gate.
-   * The retained value has to name an option this event actually offers —
-   * otherwise it is somebody else's event's answer and is ignored.
-   */
-  const retainedSelection =
-    retainedActivity && activities.some((a) => a.key === retainedActivity) ? retainedActivity : null;
-  const selectedActivityKey = picked
-    ? pickedKey
-    : initialSelection(activities, carriedActivity) ?? retainedSelection;
+  const selectedActivityKey = picked ? pickedKey : initialSelection(activities, carriedActivity);
   const selectedActivity = activityLabelFor(activities, selectedActivityKey);
   /**
    * THE GOAL THE CHOICE LANDS ON. For a combined event it is the child the
@@ -244,9 +212,6 @@ export default function EventScreen() {
     (key: string) => {
       setPicked(true);
       setPickedKey(key);
-      // Bound to THIS goal, so it can survive an auth gate without ever
-      // meaning something on another event (src/eventReturn.ts).
-      setEventReturnActivity(goalId, key);
       // A different activity is a different decision; anything half-typed into
       // the name control belonged to the old one.
       setCallName(null);
@@ -260,12 +225,10 @@ export default function EventScreen() {
    * ARRIVING AS A MEMBER CONSUMES THE RETURN.
    *
    * It has done its job; leaving it in place would send the visitor here again
-   * on some later, unrelated sign-in. The activity is deliberately NOT cleared
-   * with it: it is still true that this is the activity they chose for this
-   * event, and it is bound to this goal so it can mean nothing anywhere else.
+   * on some later, unrelated sign-in.
    */
   useEffect(() => {
-    if (state.kind === 'member') clearEventReturnGoal();
+    if (state.kind === 'member') clearEventReturn();
   }, [state.kind]);
 
   /**
