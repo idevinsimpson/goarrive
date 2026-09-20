@@ -113,7 +113,44 @@ test('the player is asserted on BOTH surfaces, and the binding is read from the 
   for (const control of ['move-start', 'move-pause', 'move-stop']) {
     assert.ok(body.includes(control), `the player's ${control} is never exercised`);
   }
-  assert.ok(/wsf-station-qr/.test(body), 'the journey does not prove the join QR stays up during movement');
+  // THE DEFAULT ROUND IS PINNED TO A NUMBER, NOT SAMPLED.
+  //
+  // The first version of the journey waited four seconds and checked the
+  // timer contained a digit, which a 30-, 45- or arbitrary-length round would
+  // all have passed. The ready-state timer renders the round's own length, so
+  // the number is read exactly — and this assertion exists so that a later
+  // edit cannot quietly go back to sampling.
+  assert.ok(
+    /const EXPECTED_ROUND_SECONDS = 60;/.test(JOURNEY),
+    'the journey no longer names the expected default round length'
+  );
+  assert.ok(
+    /readyTimer === `\$\{EXPECTED_ROUND_SECONDS\}s`/.test(body),
+    'the default round length must be compared exactly against the rendered ready-state timer'
+  );
+  assert.ok(
+    /remaining <= EXPECTED_ROUND_SECONDS && remaining >= EXPECTED_ROUND_SECONDS - 15/.test(body),
+    'the running round must be checked against the expected length, not merely for a digit'
+  );
+  assert.equal(
+    /\/\\d\/\.test\(running\)/.test(body),
+    false,
+    'a "the timer contains a digit" check cannot stand in for the round length'
+  );
+
+  // THE QR CLAIM IS ABOUT MOVEMENT, SO IT IS ASSERTED DURING MOVEMENT.
+  const startAt = body.indexOf("'wsf-queue-move-start'");
+  const qrAt = body.indexOf("'wsf-station-qr'");
+  assert.notEqual(startAt, -1, 'the journey no longer starts the round');
+  assert.ok(qrAt > startAt, 'the join QR must be asserted AFTER the round starts, not before it');
+  // And continuity during the round comes from the server's entry, not from
+  // whatever the pre-start screen happened to show.
+  const midAt = body.indexOf('mid-round the entry is');
+  assert.ok(midAt > startAt, 'the journey does not check the attempt is still active DURING the round');
+  assert.ok(
+    /midRound\.body\?\.fields\?\.attemptStationId/.test(body),
+    'mid-round station binding is not read from the server-written entry'
+  );
   // The binding claim must come from the entry the server wrote, because each
   // surface's own account of itself is not evidence about the other.
   assert.ok(/getDoc\(`wsfTurnEntries\//.test(body) && /attemptStationId/.test(body),

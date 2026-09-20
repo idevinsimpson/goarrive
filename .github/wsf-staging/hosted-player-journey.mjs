@@ -539,25 +539,64 @@ async function casePlayer(fx, screenOne, phone) {
     await visible(page.getByTestId(`${prefix}-figure`));
     const mediaLabel = await textOf(page.getByTestId(`${prefix}-media-label`));
     assert(mediaLabel.length > 0, `${surface}: the player shows no media label`);
-    // The round and its timer.
-    await visible(page.getByTestId(`${prefix}-timer`));
     await visible(page.getByTestId(`${prefix}-round`));
+
+    // THE DEFAULT ROUND IS SIXTY SECONDS, READ EXACTLY, NOT SAMPLED.
+    //
+    // The first version of this waited four seconds and checked the timer
+    // contained a digit. A 30-second round, a 45-second round or an arbitrary
+    // one would all have passed that. At `ready` the player renders the
+    // round's own length (`${plan.roundSeconds}s`), so the default can be
+    // read off the screen before anything starts and compared to the number.
+    const readyTimer = (await textOf(page.getByTestId(`${prefix}-timer`))).trim();
+    assert(
+      readyTimer === `${EXPECTED_ROUND_SECONDS}s`,
+      `${surface}: the default round reads "${sanitize(readyTimer)}", expected "${EXPECTED_ROUND_SECONDS}s"`
+    );
     await snap(page, surface, width, '10-player-ready');
   }
-  // THE QR STAYS UP WHILE PEOPLE MOVE, so somebody arriving mid-round can join.
-  await visible(screenOne.page.getByTestId('wsf-station-qr'), 30_000);
 
-  // The countdown is 3 and the round is 60 — the product's own constants
-  // (src/followAlong.ts COUNTDOWN_SECONDS / ROUND_SECONDS), read off the
-  // screen rather than assumed.
+  // The countdown is three, and it is the count itself that says so.
   await phone.page.getByTestId('wsf-queue-move-start').click();
-  const counting = await textOf(phone.page.getByTestId('wsf-queue-move-timer'));
-  assert(/\b[0-3]\b/.test(counting), `the countdown does not read as a count of three: "${sanitize(counting)}"`);
+  const counting = (await textOf(phone.page.getByTestId('wsf-queue-move-timer'))).trim();
+  const countValue = Number(counting);
+  assert(
+    Number.isInteger(countValue) && countValue >= 1 && countValue <= EXPECTED_COUNTDOWN_SECONDS,
+    `the countdown reads "${sanitize(counting)}", expected a count of ${EXPECTED_COUNTDOWN_SECONDS} or fewer`
+  );
   await snap(phone.page, 'phone', 390, '11-countdown');
-  await phone.page.waitForTimeout(4_000);
-  const running = await textOf(phone.page.getByTestId('wsf-queue-move-timer'));
-  assert(/\d/.test(running), `the round timer shows no time: "${sanitize(running)}"`);
+
+  // THE ROUND THE COUNTDOWN ENTERS IS THE SIXTY-SECOND ONE. Waiting past the
+  // count, the timer must be a second count no greater than the default and
+  // close to it — a 30-second round entered here would read 30s or less and
+  // fail, which is exactly what the old "contains a digit" check allowed.
+  await phone.page.waitForTimeout((EXPECTED_COUNTDOWN_SECONDS + 1) * 1_000);
+  const running = (await textOf(phone.page.getByTestId('wsf-queue-move-timer'))).trim();
+  const runningMatch = /^(\d+)s$/.exec(running);
+  assert(runningMatch, `the running round timer reads "${sanitize(running)}", expected a seconds count`);
+  const remaining = Number(runningMatch[1]);
+  assert(
+    remaining <= EXPECTED_ROUND_SECONDS && remaining >= EXPECTED_ROUND_SECONDS - 15,
+    `the running round has ${remaining}s left, which is not a ${EXPECTED_ROUND_SECONDS}-second round a moment after it started`
+  );
   await snap(phone.page, 'phone', 390, '12-round-running');
+
+  // THE QR STAYS UP *DURING* MOVEMENT — asserted here, inside the running
+  // round, not before Start. Somebody walking up mid-round can still join.
+  await visible(screenOne.page.getByTestId('wsf-station-qr'), 30_000);
+  // AND THE SCREEN IS STILL ON THIS ATTEMPT WHILE IT RUNS. Read from the
+  // entry the server wrote rather than inferred from the pre-start screen:
+  // continuity during the round is the claim, so it is checked during it.
+  const midRound = await getDoc(`wsfTurnEntries/${phone.entryId}`);
+  assert(
+    midRound.body?.fields?.status?.stringValue === 'active',
+    `mid-round the entry is ${midRound.body?.fields?.status?.stringValue}, not active`
+  );
+  assert(
+    midRound.body?.fields?.attemptStationId?.stringValue === screenOne.stationId,
+    'mid-round the attempt is bound to a different screen than the one running it'
+  );
+  await snap(screenOne.page, 'station', 1280, '04b-qr-during-movement');
   // Pause, resume, stop — the three controls a person needs mid-round.
   await visible(phone.page.getByTestId('wsf-queue-move-pause'));
   await phone.page.getByTestId('wsf-queue-move-pause').click();
@@ -591,6 +630,15 @@ async function casePlayer(fx, screenOne, phone) {
 // ─────────────────────────────────────────────────────────────────────────────
 const RECORDED = 12;
 const RESULT_WINDOW_MS = 10_000;
+/**
+ * The product's own default, and the number this proof exists to pin.
+ * `src/followAlong.ts` exports ROUND_SECONDS = 60, and the player renders it
+ * as the timer's READY-state value (`${plan.roundSeconds}s`) — so the default
+ * can be read off the rendered screen exactly, before anything starts, rather
+ * than inferred from a stopwatch.
+ */
+const EXPECTED_ROUND_SECONDS = 60;
+const EXPECTED_COUNTDOWN_SECONDS = 3;
 
 async function caseReceiptAndClear(fx, screenOne, phone) {
   await visible(phone.page.getByTestId('wsf-queue-record-panel'), 45_000);
