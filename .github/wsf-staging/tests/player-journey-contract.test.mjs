@@ -436,7 +436,10 @@ test('the device question is answered before anything else on every phone that o
   );
 
   const reach = sliceFn('reachMemberEvent', 'async function chooseActivityByTitle(');
-  const order = ['answerOwnPhone(', "'wsf-event-signed-out'", "'wsf-event-signin'", 'signInOnPage(', "'wsf-event-title'"];
+  // The last marker is the helper, not the raw testID: run 36's fix moved the
+  // event-title wait behind visibleEventTitle(). The ORDER is what this checks,
+  // and it is unchanged.
+  const order = ['answerOwnPhone(', "'wsf-event-signed-out'", "'wsf-event-signin'", 'signInOnPage(', 'visibleEventTitle('];
   let previous = -1;
   for (const marker of order) {
     const at = reach.indexOf(marker);
@@ -564,4 +567,67 @@ test('the PRODUCT brings the visitor back to the event — the harness must not 
   const pass = JOURNEY.slice(JOURNEY.indexOf("check('player journey — the phone chooses the queue'"));
   assert.match(pass.slice(0, 1400), /BY ITSELF/,
     'the receipt does not say the return was the product’s own');
+});
+
+test('the event title is waited for by VISIBLE locator only, and asserted to be the only one', () => {
+  // RUN 36 (35515986745). The journey died in 20 seconds — immediately, not on
+  // a timeout — because `getByTestId('wsf-event-title')` matched the visible
+  // route AND the copy expo-router keeps mounted under it, and Playwright
+  // strict mode refuses two. `waitForURL` had already passed, so the product's
+  // sign-in return had happened: the locator was wrong, not the build.
+  //
+  // CODE ONLY. The banner this test protects quotes the bad locator in prose,
+  // and three earlier checks in this suite were written against prose by
+  // accident. Strip comments before counting anything.
+  const code = JOURNEY.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // 1. No wait may go through the strict locator again.
+  assert.equal(
+    /visible\(\s*page\.getByTestId\('wsf-event-title'\)/.test(code), false,
+    'an event-title wait is back on the strict getByTestId locator that run 36 died on'
+  );
+
+  // 2. Every surviving raw use must be an ABSENCE check, which cannot
+  //    strict-violate (count() is not a strict matcher) and means the opposite.
+  for (const m of [...code.matchAll(/getByTestId\('wsf-event-title'\)/g)]) {
+    const line = code.slice(code.lastIndexOf('\n', m.index) + 1, code.indexOf('\n', m.index));
+    assert.match(line, /count\(\)/,
+      `a raw event-title locator is used for something other than an absence check: ${line.trim()}`);
+  }
+
+  // 3. The helper selects only what a person can see.
+  const helper = codeOfFn('visibleEventTitle', 'async function signInOnPage');
+  assert.match(helper, /\[data-testid="wsf-event-title"\]:visible/,
+    'the event-title helper does not restrict itself to the visible title');
+
+  // 4. The count assertion is the point, and must not be dropped. Without it
+  //    the helper would silently accept a screen that really rendered two
+  //    titles — the defect the strict locator was accidentally catching.
+  assert.match(helper, /count === 1/,
+    'the helper no longer asserts that exactly ONE title is visible');
+
+  // 5. And it must check the title is the event's own, not merely present.
+  assert.match(helper, /actual === expectedTitle/,
+    'the helper no longer asserts the title text');
+
+  // 6. Both waits go through it, and the event title comes from the fixture
+  //    rather than being spelled out twice.
+  const uses = [...code.matchAll(/await visibleEventTitle\(page,/g)];
+  assert.equal(uses.length, 2, `expected exactly two event-title waits, found ${uses.length}`);
+  assert.match(code, /eventTitle,\s*$/m, 'the fixture does not expose the event’s own title');
+});
+
+test('no comment still claims the product does not return, or that approve-station is unprobed', () => {
+  assert.equal(
+    /the product does not do it/i.test(JOURNEY), false,
+    'the reachMemberEvent docstring still says the product does not perform the return'
+  );
+  const SMOKE = fs.readFileSync('.github/wsf-staging/hosted-package-e-smoke.mjs', 'utf8');
+  // wsfApproveStation IS exercised: the turn row calls it with a Champion's
+  // own ID token. Only wsfListStations and wsfRevokeStation are unprobed.
+  assert.match(SMOKE, /wsfApproveStation'/, 'the turn row no longer calls wsfApproveStation');
+  assert.equal(
+    /\(wsfApproveStation, wsfListStations, wsfRevokeStation\) are NOT probed/.test(SMOKE), false,
+    'the receipt still claims wsfApproveStation is not probed'
+  );
 });

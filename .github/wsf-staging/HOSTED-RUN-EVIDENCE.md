@@ -262,3 +262,66 @@ only the thing it asserts, on the run it asserted it.
   conflates the path-linked branch with the live-content branch, so no hosted receipt
   can currently evidence one rather than the other. Proposed, not implemented: emit
   `CLEANUP_LINKED_PATH_ADMITTED` and `CLEANUP_LINKED_CONTENT_VERIFIED` separately.
+
+---
+
+## Run 35 — `35515299057`, main `cabd11f`, app `6b257c3` (mode=deploy)
+
+The promotion. `approved-candidate.json` on `main` was moved to
+`6b257c398737e88ff399ba132166533ff3504523` by #374, and this run deployed it.
+
+- **All five deploy-mode jobs green**, and `player-journey` and `cleanup-recovery` were
+  both **skipped at 14:03:44 without taking a runner** — the `inputs.mode == 'deploy'`
+  equality gating from #368, behaving in production rather than only in the contract test.
+- **`VERIFY=pass`**, `INVENTORY_BEFORE=46`, `INVENTORY_AFTER=46`,
+  `CREATED_THIS_DEPLOY=none`, `PREEXISTING_TRANSPORT_VERIFIED=22/22`,
+  `HOSTED_MARKER_MATCHES=true`. The functions deploy was a no-op on function code, as
+  the UI-only measurement predicted.
+- The **"Preserve an incomplete functions deployment" guard was skipped**, which is the
+  independent signal that the deploy completed rather than a `continue-on-error` step
+  reading green.
+- Staging now serves `6b257c3`. **This is the first hosted build that returns to the
+  scanned event after sign-in.**
+
+## Run 36 — `35515986745`, main `cabd11f`, app `6b257c3` (mode=player-journey)
+
+FAILED, and **the failure was the harness's locator, not the product.**
+
+- **The fixture leak is closed.** `CLEANUP_STATUS=COMPLETE`,
+  `REQUESTED_DOCUMENTS=56` / `DOCUMENTS_DELETED=56` / `ALREADY_ABSENT=0`,
+  `REQUESTED_USERS=3` / `USERS_DELETED=3`, `MANIFEST_PRESERVED=false`. Run 33 stranded
+  exactly these 56 documents and 3 users behind `MANIFEST_UNUSABLE` because the journey
+  mints `e5j-` tags and the cleaner accepted `^e5h-` alone; #369's shared `run-tag.mjs`
+  fixes it, and this is its **first live exercise**.
+- **`CLEANUP_USERS_DELETED=3` with `USERS_ALREADY_ABSENT=0`** — the cleaner's *own*
+  user-deletion path ran for the first time. Runs 30–32 all reported `DELETED=0` against
+  a large `ALREADY_ABSENT`, because the smoke removed its accounts before the cleaner
+  looked. **`LINKED_DOCUMENTS_VERIFIED=5` still does not separate the two admission
+  branches**, so it remains no evidence for the live-content branch.
+- **How far it got, which is much further than run 33:** both screens enrolled and
+  approved, both pairing codes captured redacted, the member QR read off the screen, and
+  the cold scan proved device-question-then-signed-out-landing with the line empty before
+  and after. `EVIDENCE_SCAN=clean` over 11 files — which, as always, means the scanner
+  read no text it could reject and **not** that the nine PNGs are safe; it lists every
+  one `UNSCANNABLE`.
+- **Where it died:** inside `reachMemberEvent`, after `04-signed-out-landing` and before
+  `05-member-event`, which was never taken. The step ran **20 seconds** while every wait
+  in that region has a 30–60s timeout, so this was an **immediate throw, not a timeout**.
+  `getByTestId('wsf-event-title')` matched the visible route *and* the copy expo-router
+  keeps mounted underneath it, and Playwright strict mode refuses two.
+  **`waitForURL` had already passed**, so the product's sign-in return had happened.
+  Fixed by `visibleEventTitle()`: `[data-testid="wsf-event-title"]:visible`, plus an
+  assertion that exactly one is visible and that it carries the event's own title.
+  The count assertion is load-bearing and pinned by a regression — without it the helper
+  would paper over a screen that genuinely rendered two titles.
+
+## Still not established by any run
+
+- **The player journey end to end.** Runs 33 and 36 both failed before the queue. What
+  run 36 newly establishes is the front half only: the scanned link, the device question,
+  the signed-out landing, two enrolled screens, and complete cleanup. The activity
+  choice, the queue, the ready/start handoff, the shared player, the receipt and the
+  cleared station remain unproven on hosted staging, and the later-state captures do not
+  exist yet — so **visual acceptance of those screens is also still pending.**
+- **`wsfCloseCombinedGoal`, `wsfRepairCombinedGoal`, `wsfListStations`, `wsfRevokeStation`**
+  are transport-open (run 32's receipt) but are called by **no hosted suite at all**.

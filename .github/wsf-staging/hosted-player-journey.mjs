@@ -262,9 +262,13 @@ async function seedEvent() {
   // THE PARENT'S WINDOW IS THE CHILDREN'S. wsfCreateCombinedGoal refuses a
   // parent that starts after its own children (index.ts COMBINED_WINDOW_MESSAGE),
   // and run 28 died on exactly that because the row re-read the clock.
+  // The EVENT's own title, which is what the event screen shows: the server
+  // resolves it through wsfEventContext and app/event/[goalId].tsx renders
+  // `resolvedTitle` in preference to the child goal's title.
+  const eventTitle = `Player journey ${runTag}`;
   const combined = await call('create combined event', 'wsfCreateCombinedGoal', {
     communityGroupId: groupId,
-    title: `Player journey ${runTag}`,
+    title: eventTitle,
     unit: 'movements',
     target: 4000,
     startsAt: started.toISOString(),
@@ -290,7 +294,7 @@ async function seedEvent() {
     goalId: activities[0].goalId, authorized: true,
   }, championToken);
 
-  return { groupId, activities, setupId, champion, championToken, phoneOne, phoneTwo, startedIso: started.toISOString(), endsIso: ends.toISOString() };
+  return { groupId, activities, setupId, eventTitle, champion, championToken, phoneOne, phoneTwo, startedIso: started.toISOString(), endsIso: ends.toISOString() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,6 +321,32 @@ async function textOf(locator, timeout = 30_000) {
 async function contains(locator, expected, timeout = 30_000) {
   const actual = await textOf(locator, timeout);
   assert(actual.includes(expected), `expected text containing "${expected}", found "${sanitize(actual)}"`);
+  return actual;
+}
+/**
+ * THE EVENT TITLE, THE ONLY ONE ON SCREEN.
+ *
+ * Run 36 (35515986745) died here in 20 seconds, immediately rather than on a
+ * timeout: `getByTestId('wsf-event-title')` matched the visible route AND the
+ * copy expo-router keeps mounted underneath it, and Playwright strict mode
+ * refuses two. The product was right — `waitForURL` had already passed, so the
+ * sign-in return had happened; the locator was wrong.
+ *
+ * `:visible` selects only what a person can see. The count assertion is the
+ * point and must not be dropped: without it this helper would paper over a
+ * screen that really did render two titles, which is the defect the strict
+ * locator was accidentally catching.
+ */
+async function visibleEventTitle(page, expectedTitle, timeout = 60_000) {
+  const titles = page.locator('[data-testid="wsf-event-title"]:visible');
+  await titles.first().waitFor({ state: 'visible', timeout });
+  const count = await titles.count();
+  assert(count === 1, `expected exactly one VISIBLE event title, found ${count}`);
+  const actual = ((await titles.first().innerText()) || '').trim();
+  assert(
+    actual === expectedTitle,
+    `the event title is "${sanitize(actual)}", expected the event's own title "${sanitize(expectedTitle)}"`
+  );
   return actual;
 }
 async function signInOnPage(page, user) {
@@ -381,9 +411,12 @@ async function answerOwnPhone(page, { capture = null } = {}) {
  * Open the scanned link on a phone that has never seen the app, answer the
  * device question, sign in, and come back to the event as a member.
  *
- * The return is explicit because the product does not do it: see above.
+ * THE PRODUCT DOES THE RETURN. This function asserts it and navigates nowhere
+ * after the sign-in submit. (An earlier revision of this comment said the
+ * opposite; that was true of the build this file was first written against,
+ * and stopped being true at 6b257c3.)
  */
-async function reachMemberEvent(page, qrUrl, user, { captures = {} } = {}) {
+async function reachMemberEvent(page, qrUrl, user, expectedTitle, { captures = {} } = {}) {
   await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
   await answerOwnPhone(page, { capture: captures.deviceChoice ?? null });
 
@@ -420,7 +453,7 @@ async function reachMemberEvent(page, qrUrl, user, { captures = {} } = {}) {
 
   // The device answer is remembered per browser, so the question is not asked
   // again — and the member view is what a signed-in member sees.
-  await visible(page.getByTestId('wsf-event-title'), 60_000);
+  await visibleEventTitle(page, expectedTitle, 60_000);
   assert(
     (await page.getByTestId('wsf-event-device-choice').count()) === 0,
     'the device question was asked again after sign-in, in a browser that already answered it'
@@ -624,7 +657,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
 
   // Device question → signed-out landing → sign in → and the product brings
   // them back to the event by itself: see reachMemberEvent.
-  const landedAfterSignIn = await reachMemberEvent(page, qrUrl, fx.phoneOne, {
+  const landedAfterSignIn = await reachMemberEvent(page, qrUrl, fx.phoneOne, fx.eventTitle, {
     captures: { deviceChoice: '03-device-choice', signedOut: '04-signed-out-landing' },
   });
   await snap(page, 'phone', 390, '05-member-event');
@@ -688,7 +721,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   // selection is component state, and nothing is preselected for a
   // two-activity event. Rejoining without choosing one would find no
   // where-panel and no queue button.
-  await visible(page.getByTestId('wsf-event-title'), 45_000);
+  await visibleEventTitle(page, fx.eventTitle, 45_000);
   assert(
     (await page.getByTestId('wsf-event-device-choice').count()) === 0,
     'the device question was asked again in a browser that already answered it'

@@ -1365,7 +1365,11 @@ async function caseW9Kiosk(browser) {
 // 'permission-denied' or an 'expired' status is the right answer to a
 // synthetic request and is not a failure here.
 //
-// THE THREE CHAMPION-ONLY CALLABLES ARE DELIBERATELY NOT PROBED.
+// THE THREE CHAMPION-ONLY CALLABLES ARE NOT PROBED *ANONYMOUSLY*, HERE.
+// (wsfApproveStation is exercised elsewhere in this file: the turn row calls
+// it with a Champion's own ID token, which is a different and stronger check
+// than this anonymous transport probe. wsfListStations and wsfRevokeStation
+// are called nowhere in this suite at all.)
 // wsfApproveStation, wsfListStations and wsfRevokeStation are not declared
 // `invoker: 'public'`, so from outside, the refusal an anonymous caller is
 // SUPPOSED to get and the refusal a broken transport produces are the same
@@ -2024,7 +2028,7 @@ const receipt = {
     'What the hosted turn-service row does NOT establish: nothing about a browser, a phone, a station screen, a scanned QR or anything a person sees or taps. It never opens a page. Independent browser and player proof of the expo journey is a SEPARATE gate and is not covered by this row passing.',
     'The public dynamic route reload row proves only that Hosting resolves /combined/** and /station/** to their own exported documents on a direct GET. It asserts nothing about the ids in those addresses, which are deliberately absent, and nothing about whether the screens behind them work.',
     "The station transport row proves only that the four callables declared invoker:'public' (wsfStationRequestPairing, wsfStationPairingStatus, wsfStationClaimPairing, wsfStationState) are reachable anonymously. It asserts nothing about their application-level answers, and it exercises no station end to end.",
-    'The three Champion-only station callables (wsfApproveStation, wsfListStations, wsfRevokeStation) are NOT probed: they are not declared invoker:\'public\', so a transport denial and the refusal an anonymous caller is supposed to get are the same 403 from outside, and a check that passes either way could not fail for the right reason. Their transport remains unverified by this suite.',
+    'The Champion-only station callables are not probed ANONYMOUSLY: they are not declared invoker:\'public\', so a transport denial and the refusal an anonymous caller is supposed to get are the same 403 from outside, and a check that passes either way could not fail for the right reason. What each one IS worth: wsfApproveStation is exercised by the turn row with a Champion\'s own ID token, so its transport and its answer are both established; wsfListStations and wsfRevokeStation are called nowhere in this suite, so nothing here establishes either.',
     'The station probes create no pairing, station or fixture document: each is refused before it writes or reads nothing. They do cause the callables\' own per-IP rate-limit counter (wsfStationRateLimits/<salted daily IP hash>) to be written, which is the function\'s own bookkeeping, is not run-scoped, and cannot be addressed by this script.',
   ],
   diagnostics,

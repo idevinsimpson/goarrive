@@ -422,18 +422,36 @@ test('the station transport row exists, runs first, and is isolated rather than 
   assert.ok(!/\n\s*await caseStationTransport\(\);/.test(main), 'the station row is still run bare somewhere');
 });
 
-test('exactly the four invoker:public station callables are probed, and the three Champion-only ones are not', () => {
+test('exactly the four invoker:public station callables are probed ANONYMOUSLY, and the Champion-only ones are not probed anonymously', () => {
   const probed = [...STATION_PROBE_BLOCK.matchAll(/name: '(wsf[A-Za-z]+)'/g)].map((m) => m[1]);
   assert.deepStrictEqual(probed, PUBLIC_STATIONS, 'the probe list is not exactly the four unauthenticated-by-design callables');
   for (const name of CHAMPION_ONLY_STATIONS) {
     assert.equal(
       new RegExp(`callFunction\\('${name}'|name: '${name}'`).test(SMOKE),
       false,
-      `${name} is not invoker:'public'; an anonymous refusal of it cannot fail for the right reason, so it must not be probed`
+      `${name} is not invoker:'public'; an anonymous refusal of it cannot fail for the right reason, so it must not be probed ANONYMOUSLY. (This forbids a direct anonymous callFunction('${name}') only. wsfApproveStation IS called by the turn row with a Champion's own ID token, which is a different and stronger check.)`
     );
   }
-  // The omission is stated in the receipt, not silently carried.
-  assert.match(SMOKE, /The three Champion-only station callables \(wsfApproveStation, wsfListStations, wsfRevokeStation\) are NOT probed/);
+  // WHAT THE LOOP ABOVE ACTUALLY FORBIDS: a DIRECT, anonymous probe of these
+  // three. It does not forbid an authenticated call through turnCall, and it
+  // must not: the turn row calls wsfApproveStation with a Champion's own ID
+  // token, which establishes that callable's transport AND its answer, and is
+  // strictly stronger than the anonymous probe this row is about.
+  //
+  // The receipt used to say all three were unprobed and their transport
+  // unverified. That was false for wsfApproveStation from the moment the turn
+  // row was added, and run 36's review caught it. Pin the corrected claim.
+  assert.match(SMOKE, /not probed ANONYMOUSLY/);
+  assert.match(SMOKE, /wsfApproveStation is exercised by the turn row/);
+  assert.equal(
+    /\(wsfApproveStation, wsfListStations, wsfRevokeStation\) are NOT probed/.test(SMOKE),
+    false,
+    'the receipt still claims wsfApproveStation is unprobed'
+  );
+  // And the turn row really does call it, so the claim above is not itself a
+  // new piece of prose nobody checks.
+  assert.match(SMOKE, /turnCall\([^)]*'wsfApproveStation'/,
+    'the receipt claims the turn row probes wsfApproveStation, but it does not');
 });
 
 test('no station probe can create anything on staging, and none carries a credential-shaped value', () => {
