@@ -182,8 +182,33 @@ only the thing it asserts, on the run it asserted it.
   `tests/workflow-contract.test.mjs` (the plan's `workflow_ref` must name this file, no
   other workflow may request `id-token`, player mode must reach neither build nor deploy
   nor the 24-row suite, deploy mode must still reach all three, and a failed or skipped
-  journey must still clean up, scan, and fail the run). **No hosted run has been made in
-  the new mode.**
+  journey must still clean up, scan, and fail the run).
+  **Run 33 (`35495928362`, `main` `aa66869`, `mode=player-journey`, app `42dd32a`) then
+  ran in the new mode and FAILED.** What it did establish, from its own log: the trust
+  path is correct — `gate` and `config` succeeded and `Authenticate to Google Cloud`
+  passed at 07:05:57Z, the exact step that had failed before — and the mode gating is
+  real, with `build`, `deploy` and `hosted-verify` all recorded `skipped`. Nothing about
+  the player flow was established. The journey step failed after 73 seconds, waiting for
+  `wsf-event-title` on the first cold QR open; on the served build a fresh browser is
+  shown `wsf-device-choice` first, and a signed-out visitor then lands on
+  `wsf-event-signed-out`. That ordering error is the harness's, not the product's, and is
+  **uncorrected as of this entry**. Five captures were taken, all station surfaces, not
+  28; `EVIDENCE_SCAN=clean` over 8 files.
+  **The run also left fixtures on staging.** Cleanup reported
+  `CLEANUP_STATUS=MANIFEST_UNUSABLE`, `CLEANUP_REASON=manifest identity check failed`,
+  `CLEANUP_MANIFEST_PRESERVED=true` — **zero deletions**. The journey mints `e5j-…` run
+  tags and `cleanup-synthetic.mjs` accepted `^e5h-` alone, so *every* player run would
+  have ended this way. The manifest survives in that run's `wsf-player-evidence`
+  artifact, which is the record recovery works from. Fixed by moving the predicate into
+  `run-tag.mjs`, where each prefix is declared beside the harness that mints it, and by a
+  regression that evaluates **each harness's own tag expression** and requires the
+  cleaner to accept it — the cross-check that never existed is what let this ship.
+  **Not established: that those fixtures are gone.** Until a `cleanup-recovery` run
+  reports `CLEANUP_STATUS=COMPLETE` with read-back against that manifest, the synthetic
+  accounts and documents it names must be assumed present on staging. Their counts are
+  not restated here: the artifact host is unreachable from the environment this entry was
+  written in, so the recovery run's own `RECOVERY_MANIFEST_*` lines are what will
+  establish them.
   Scan, explicit activity selection, the shared follow-along player, rep review, the hall
   clearing and the station session ending are **not covered**, and a green turn-service
   row does not cover them. That gate is separate and open.
