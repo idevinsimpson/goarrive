@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WSF before and target</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap">
+<style>
+  :root{
+    --paper:#EFECE4; --panel:#FFFFFF; --ink:#0B1F3A; --ink-2:#5A6B85;
+    --rule:#D6D1C6; --green:#4FA85A; --green-soft:#8FE08A; --warn:#0B1F3A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#777;font-family:'Archivo',system-ui,sans-serif;}
+  .sheet{width:1420px;background:var(--paper);color:var(--ink);padding:40px 44px 46px;}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;
+    border-bottom:3px solid var(--ink);padding-bottom:16px;}
+  .kicker{font-size:12px;font-weight:900;letter-spacing:.22em;color:var(--green);text-transform:uppercase;}
+  h1{font-size:40px;font-weight:900;letter-spacing:-.03em;line-height:1.02;margin-top:8px;}
+  .sub{font-size:13px;color:var(--ink-2);margin-top:9px;max-width:620px;line-height:1.5;}
+  .stamp{text-align:right;font-size:11px;line-height:1.7;color:var(--ink-2);}
+  .stamp b{display:block;font-size:12px;font-weight:900;letter-spacing:.14em;color:var(--ink);}
+  .legend{display:flex;gap:26px;margin-top:18px;align-items:center;font-size:11px;font-weight:700;color:var(--ink-2);}
+  .key{display:flex;align-items:center;gap:8px;}
+  .sw{width:16px;height:16px;border-radius:4px;}
+  .sw.b{background:#FFFFFF;border:2px solid var(--ink);}
+  .sw.t{background:var(--green-soft);border:2px solid var(--green);}
+  .secttl{display:flex;align-items:baseline;gap:12px;margin:30px 0 4px;}
+  .secttl h2{font-size:17px;font-weight:900;letter-spacing:-.01em;}
+  .secttl span{font-size:11px;color:var(--ink-2);font-weight:600;}
+  .rule{height:1px;background:var(--rule);margin-bottom:16px;}
+  .cols{display:grid;grid-template-columns:repeat(5,1fr);gap:18px;}
+  .cols.four{grid-template-columns:repeat(4,1fr);max-width:1076px;}
+  .col{display:flex;flex-direction:column;}
+  .colhd{font-size:12px;font-weight:900;letter-spacing:-.01em;}
+  .colnote{font-size:10.5px;color:var(--ink-2);line-height:1.45;margin-top:3px;min-height:44px;}
+  .shot{position:relative;margin-top:8px;background:var(--panel);border:1px solid var(--rule);
+    border-radius:8px;overflow:hidden;box-shadow:0 2px 6px rgba(11,31,58,.10);}
+  .shot img{display:block;width:100%;}
+  .tag{font-size:9px;font-weight:900;letter-spacing:.14em;padding:5px 8px;text-align:center;}
+  .tag.b{background:var(--ink);color:#fff;}
+  .tag.t{background:var(--green-soft);color:#06230A;}
+  .cap{font-size:9.5px;color:var(--ink-2);margin-top:5px;font-weight:600;word-break:break-all;}
+  .arrow{display:flex;align-items:center;gap:8px;margin:14px 0 2px;}
+  .arrow i{flex:1;height:2px;background:var(--green);}
+  .arrow b{font-size:10px;font-weight:900;letter-spacing:.16em;color:var(--green);}
+  .foot{margin-top:28px;border-top:3px solid var(--ink);padding-top:14px;
+    display:flex;justify-content:space-between;gap:30px;}
+  .foot p{font-size:11px;color:var(--ink-2);line-height:1.55;max-width:600px;}
+  .foot p b{color:var(--ink);}
+  .banner{background:var(--green-soft);color:#06230A;font-size:12px;font-weight:900;
+    letter-spacing:.2em;text-align:center;padding:9px 0;margin-bottom:26px;border-radius:4px;}
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+  <div class="banner">EVERY GREEN-TAGGED IMAGE IS A TARGET / CONCEPT — NOT IMPLEMENTED</div>
+
+  <div class="top">
+    <div>
+      <div class="kicker">We Stay Fit · member product</div>
+      <h1>Actual current WSF <span style="color:var(--green)">before</span> → targets</h1>
+      <div class="sub">Top row: screenshots of the product as it is served today. Bottom row: standalone
+        concept mockups of where the member product is aimed. Nothing in the bottom two sections is built.</div>
+    </div>
+    <div class="stamp">
+      <b>CONTACT SHEET</b>
+      2026-09-20<br>
+      BEFORE captured from the running app<br>
+      TARGET rendered from a static mockup
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="key"><span class="sw b"></span>BEFORE — real screenshot, the product today</div>
+    <div class="key"><span class="sw t"></span>TARGET — concept only, never shipped, never an "after"</div>
+  </div>
+
+  <div class="secttl"><h2>Paired</h2><span>the same destination, today and aimed</span></div>
+  <div class="rule"></div>
+  <div class="cols">
+
+    <div class="col">
+      <div class="colhd">Home</div>
+      <div class="colnote">Hero card on cream; the WE logo lockup is the largest element on the
+        screen and the shared total reads smaller than it.</div>
+      <div class="shot"><div class="tag b">BEFORE · ACTUAL PRODUCT</div><img src="../before/BEFORE-home-390x844.png"></div>
+      <div class="cap">before/BEFORE-home-390x844.png</div>
+      <div class="arrow"><b>AIMED AT</b><i></i></div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-01-home-390x844.png"></div>
+      <div class="cap">targets/TARGET-01-home-390x844.png</div>
+    </div>
+
+    <div class="col">
+      <div class="colhd">Home · short viewport</div>
+      <div class="colnote">390×640. Today the hero card is cut off before the total is reached.</div>
+      <div class="shot"><div class="tag b">BEFORE · ACTUAL PRODUCT</div><img src="../before/BEFORE-home-short-390x640.png"></div>
+      <div class="cap">before/BEFORE-home-short-390x640.png</div>
+      <div class="arrow"><b>AIMED AT</b><i></i></div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-02-home-short-390x640.png"></div>
+      <div class="cap">targets/TARGET-02-home-short-390x640.png</div>
+    </div>
+
+    <div class="col">
+      <div class="colhd">Your activity → Progress</div>
+      <div class="colnote">One record, then roughly two thirds of the screen is empty cream.</div>
+      <div class="shot"><div class="tag b">BEFORE · ACTUAL PRODUCT</div><img src="../before/BEFORE-activity-390x844.png"></div>
+      <div class="cap">before/BEFORE-activity-390x844.png</div>
+      <div class="arrow"><b>AIMED AT</b><i></i></div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-06-progress-390x844.png"></div>
+      <div class="cap">targets/TARGET-06-progress-390x844.png</div>
+    </div>
+
+    <div class="col">
+      <div class="colhd">Community</div>
+      <div class="colnote">A heading and a single card; the rest of the screen is empty.</div>
+      <div class="shot"><div class="tag b">BEFORE · ACTUAL PRODUCT</div><img src="../before/BEFORE-community-390x844.png"></div>
+      <div class="cap">before/BEFORE-community-390x844.png</div>
+      <div class="arrow"><b>AIMED AT</b><i></i></div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-05-community-390x844.png"></div>
+      <div class="cap">targets/TARGET-05-community-390x844.png</div>
+    </div>
+
+    <div class="col">
+      <div class="colhd">You</div>
+      <div class="colnote">Account rows. The closest of the five to its target.</div>
+      <div class="shot"><div class="tag b">BEFORE · ACTUAL PRODUCT</div><img src="../before/BEFORE-you-390x844.png"></div>
+      <div class="cap">before/BEFORE-you-390x844.png</div>
+      <div class="arrow"><b>AIMED AT</b><i></i></div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-07-you-390x844.png"></div>
+      <div class="cap">targets/TARGET-07-you-390x844.png</div>
+    </div>
+
+  </div>
+
+  <div class="secttl"><h2>Target only</h2><span>no current screen was captured for these</span></div>
+  <div class="rule"></div>
+  <div class="cols four">
+    <div class="col">
+      <div class="colhd">Record a number</div>
+      <div class="colnote">Reached from the raised MOVE control, which the current tab bar does not have.</div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-03-move-390x844.png"></div>
+      <div class="cap">targets/TARGET-03-move-390x844.png</div>
+    </div>
+    <div class="col">
+      <div class="colhd">Confirmed</div>
+      <div class="colnote">The moment after recording: what the community total became, and what stays private.</div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-04-confirmed-celebration-390x844.png"></div>
+      <div class="cap">targets/TARGET-04-confirmed-celebration-390x844.png</div>
+    </div>
+    <div class="col">
+      <div class="colhd">Movement picker</div>
+      <div class="colnote">Setting up a goal that counts more than one movement, each in its own units.</div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-08-movement-picker-390x844.png"></div>
+      <div class="cap">targets/TARGET-08-movement-picker-390x844.png</div>
+    </div>
+    <div class="col">
+      <div class="colhd">Shell &amp; navigation</div>
+      <div class="colnote">The proposed tab bar and what deliberately opens without it.</div>
+      <div class="shot"><div class="tag t">TARGET · NOT IMPLEMENTED</div><img src="../targets/TARGET-09-shell-navigation-390x844.png"></div>
+      <div class="cap">targets/TARGET-09-shell-navigation-390x844.png</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <p><b>What the targets change.</b> The ground goes navy and full-bleed instead of cream with a floating
+    card. The community total becomes the hero at 46–92px, inside a ring, where the largest type token in the
+    shipped kit (src/ui/kit.ts) is 32px. The tab bar gains a fifth, raised MOVE control. The WE logo lockup leaves the hero and stays in
+    the chrome, so the number is what carries the screen.</p>
+    <p><b>What they deliberately do not change.</b> No names against contributions, no rankings, no
+    comparison between people, no invented faces and no unique-person counts. Every figure shown is sample
+    data. A member's own numbers stay private to them; only the community total is shared.</p>
+  </div>
+</div>
+</body>
+</html>
