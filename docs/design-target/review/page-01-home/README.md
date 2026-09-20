@@ -13,6 +13,7 @@ current community. This is the real Home.
 | `TARGET-home-390x844.png` | **TARGET / CONCEPT — NOT IMPLEMENTED.** Real React Native against the real design system, captured from a gated preview route. The words are burnt into the image. |
 | `TARGET-home-390x640.png` | TARGET / CONCEPT — NOT IMPLEMENTED, short phone. |
 | `TARGET-home-430x932.png` | TARGET / CONCEPT — NOT IMPLEMENTED, large phone. |
+| `TARGET-home-state-matrix.png` | TARGET / CONCEPT — NOT IMPLEMENTED. Twelve lifecycle states in one frame, each a full-size phone rendering of the same composition. |
 
 There is no AFTER for this page. An AFTER is the product once a change has
 shipped, and nothing has been implemented from this target.

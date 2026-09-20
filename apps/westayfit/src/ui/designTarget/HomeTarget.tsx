@@ -1,12 +1,13 @@
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useState } from 'react';
+import { type LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { LivingWeProgress } from '../LivingWeProgress';
+import { percentLabel, statusLine } from '../progressFormat';
 import { TabGlyph } from '../TabGlyph';
 import { WsfWordmark } from '../WsfWordmark';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
-  ACTION_GREEN_WASH,
   CREAM,
   HAIRLINE,
   INK,
@@ -24,34 +25,53 @@ import {
 } from './targetTokens';
 
 /**
- * TARGET, NOT AN IMPLEMENTED PAGE.
+ * TARGET, NOT AN IMPLEMENTED PAGE. Home / the community command centre.
  *
- * The Home / community command centre as OWNER-BOARD-2 asks for it, built in
- * real React Native against the real kit so it cannot promise something the
- * product could not render. It is rendered only by the gated preview route and
- * is not reachable from the member shell.
+ * Built in real React Native against the real kit, so it cannot promise
+ * something the product could not render, and captured through a preview route
+ * that is gated off in any deployed build.
  *
- * WHAT IT TAKES FROM THE BOARD
- *   - a cream ground with the goal hero as the ONE dominant navy object,
- *     rather than a navy page
- *   - the Living WE large and emotionally central inside that hero
- *   - the shared total as "241 / 500" with the percentage under the bar
- *   - real density: identity, hero, primary action, momentum and community all
- *     above the fold, instead of a heading and one card
- *   - a bright green primary action, the only filled control on the screen
- *   - persistent app navigation
+ * SECOND PASS. The first was approved in direction and refused for
+ * implementation. What changed and why:
  *
- * WHAT IT DELIBERATELY DOES NOT TAKE. Each of these is drawn on the board and
- * cannot ship; the substitute is the one recorded in
- * docs/design-target/owner-north-star/README.md.
- *   - no member face avatars anywhere, invented or otherwise
- *   - no named contributor: the board's "Morgan added 20" is "+20 squats"
- *   - no count of distinct people: no "12 people contributed today", no "+18"
- *   - no predicted shared total: the total shown is the confirmed one
- *   - no streak, no health claim, no Friends or Workouts destination
+ *   1. The mint privacy panel is gone. The behaviour is mandatory; narrating
+ *      the policy in a large panel on the home screen is compliance copy, not
+ *      a product. What survives is four words where they have context:
+ *      "private to you", on the member's own number.
+ *   2. "MOVING NOW" is "MOMENTUM". The chips are confirmed additions with
+ *      timestamps, which is not evidence anyone is moving at this instant.
+ *   3. The hero has depth of its own: a green bloom behind the mark, a top
+ *      light, and the progress area sunk into its own inset panel. Built from
+ *      layered views, so it needs no gradient dependency and no photography.
+ *   4. The community reads as people, not metrics: an eyebrow that says whose
+ *      community this is, and the percentage carried as a sentence rather than
+ *      two utility labels.
+ *   5. The two equal KPI tiles are one flowing section with hierarchy: the
+ *      member's own part leads, what the community has finished follows,
+ *      separated by a hairline rather than by a gap between two boxes.
  *
- * Every value is sample data for the target only.
+ * WHAT IT STILL DOES NOT TAKE FROM THE BOARD, each substitute recorded in
+ * docs/design-target/owner-north-star/README.md: no faces; no named
+ * contributor; no count of distinct people; no predicted shared total; no
+ * streak, health claim, Friends or Workouts.
+ *
+ * The Living WE keeps its semantics exactly: the owner-selected fill asset,
+ * filled to the true confirmed ratio by the shipped area calibration. The
+ * bloom sits BEHIND the mark and never touches it, and the bright action green
+ * is a separate token from confirmed-progress green, so a button can never
+ * restate what the mark says about the total.
  */
+
+export type HomePhase =
+  | 'zero'
+  | 'ordinary'
+  | 'near'
+  | 'reachedOpen'
+  | 'closedReached'
+  | 'closedUnfinished'
+  | 'noGoal'
+  | 'stale'
+  | 'unavailable';
 
 export type HomeTargetProps = {
   communityName: string;
@@ -65,18 +85,20 @@ export type HomeTargetProps = {
   unit: string;
   /** The member's own part, private to them. */
   yourPart: number;
+  /** Goals this community has already finished together. */
+  finishedGoals: number;
   /**
-   * Recent movement, where the Champion has authorized public display. Amount,
-   * unit and time only -- the service publishes no person, and this renders
-   * none. Empty where display is not authorized, which is its own target.
+   * Recent movement, where the Champion has authorized public display. Amount
+   * and time only -- the service publishes no person, and this renders none.
+   * Empty where display is not authorized.
    */
-  recent: { amount: number; unit: string; when: string }[];
+  recent: { amount: number; when: string }[];
+  phase?: HomePhase;
+  /** Champions get the management affordance. Members do not. */
+  isChampion?: boolean;
+  /** Other goals running in this community, when one is explicitly featured. */
+  otherGoals?: { title: string; completed: number; target: number; unit: string }[];
 };
-
-function percentText(completed: number, total: number): string {
-  if (!(total > 0)) return '0%';
-  return `${Math.round((completed / total) * 1000) / 10}%`;
-}
 
 export function HomeTarget({
   communityName,
@@ -87,144 +109,239 @@ export function HomeTarget({
   target,
   unit,
   yourPart,
+  finishedGoals,
   recent,
+  phase = 'ordinary',
+  isChampion = false,
+  otherGoals = [],
 }: HomeTargetProps) {
-  const ratio = target > 0 ? Math.min(1, Math.max(0, sharedTotal / target)) : 0;
-  const remaining = Math.max(0, target - sharedTotal);
-  const { height, width } = useWindowDimensions();
   /*
-    SHORT PHONE. On a 390x640 screen the full rhythm pushed the shared total
-    past the fold, and a first viewport that does not reach the number the
-    screen exists to show is not the app-like opening the board asks for. The
-    mark and the type step down; nothing is removed, because what scrolls off
-    is what a member scrolls to anyway.
+    SHORT PHONE. The first viewport keeps the three things that carry this
+    screen -- who the community is, the mark at meaningful progress, and the
+    movement action. It is the rhythm that gives, never the emotional core.
+
+    MEASURED, NOT ASKED FOR. useWindowDimensions reported a stale height here
+    and every viewport came back under the threshold, so the large phone and
+    the ordinary phone both silently rendered the SHORT phone's mark -- the
+    exact failure of shrinking the emotional core to solve a small screen, and
+    invisible unless you measure the rendered element. onLayout reports what
+    the container actually got. Until it has, the screen renders at its full
+    rhythm: a missing measurement must never be the one that shrinks the mark.
   */
-  const compact = height < 700;
-  // A large phone gets a larger mark rather than the same one in more cream.
-  const weWidth = compact ? 156 : width >= 420 ? 232 : 196;
+  const [box, setBox] = useState<{ width: number; height: number } | null>(null);
+  const onLayout = (e: LayoutChangeEvent) => {
+    const { width: w, height: h } = e.nativeEvent.layout;
+    if (w > 0 && h > 0 && (box === null || box.width !== w || box.height !== h)) {
+      setBox({ width: w, height: h });
+    }
+  };
+  const compact = box !== null && box.height < 700;
+  const weWidth = compact ? 158 : box !== null && box.width >= 420 ? 232 : 198;
+
+  const ratio = target > 0 ? Math.min(1, Math.max(0, sharedTotal / target)) : 0;
+  const closed = phase === 'closedReached' || phase === 'closedUnfinished';
+  const goalStatus = closed ? 'closed' : 'active';
+  const reached = phase === 'reachedOpen' || phase === 'closedReached';
+  const canMove = !closed && phase !== 'noGoal' && phase !== 'unavailable';
 
   return (
-    <View style={s.screen} testID="wsf-target-home">
-      {/* The body scrolls; the tab bar is chrome and stays put. Without this
-          it was pushed off the bottom of a short screen. */}
+    <View style={s.screen} onLayout={onLayout} testID="wsf-target-home">
       <ScrollView
         style={s.scroll}
         contentContainerStyle={[s.body, compact ? s.bodyCompact : null]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Chrome: compact, the wordmark small, one quiet control. */}
         <View style={s.chrome}>
           <WsfWordmark variant="navy" height={20} />
-          <View style={s.chromeRight}>
-            <Text style={s.chromeAction}>Manage</Text>
-          </View>
+          {isChampion ? (
+            <View style={s.chromeChip}>
+              <Text style={s.chromeChipText}>Manage</Text>
+            </View>
+          ) : null}
         </View>
 
-        {/* Community identity: alive and prominent, with no face and no
-            count of people who moved. */}
+        {/* Whose community this is, said as people rather than as a metric. */}
         <View style={s.identity}>
+          <Text style={[targetType.eyebrow, s.identityEyebrow]}>Your community</Text>
           <Text
             style={[targetType.h1, s.identityName, compact ? s.identityNameCompact : null]}
             numberOfLines={2}
           >
             {communityName}
           </Text>
-          <Text style={[targetType.body, s.identitySub]}>Moving together this week</Text>
-          <View style={s.presence}>
-            <View style={s.presenceDot} />
-            <Text style={[targetType.meta, s.presenceText]}>
-              {memberCount} members
-            </Text>
-          </View>
+          <Text style={[targetType.meta, s.identitySub]}>
+            {memberCount} members · moving together this week
+          </Text>
         </View>
 
-        {/* THE HERO: the one dominant navy object on a cream screen. */}
-        <View style={[s.hero, compact ? s.heroCompact : null]}>
-          <Text style={[targetType.eyebrow, s.heroEyebrow]}>Together we go further</Text>
-          <Text style={[targetType.h2, s.heroTitle]}>{goalTitle}</Text>
-          <Text style={[targetType.meta, s.heroWindow]}>{goalWindow}</Text>
-
-          <View style={s.weWrap}>
-            <LivingWeProgress
-              completed={sharedTotal}
-              target={target}
-              unit={unit}
-              width={weWidth}
-              surface="dark"
-            />
-          </View>
-
-          <View style={s.totalRow}>
-            <Text style={[targetType.display, s.total, compact ? s.totalCompact : null]}>
-              {sharedTotal.toLocaleString()}
-            </Text>
-            <Text style={[targetType.h3, s.totalOf]}>/ {target.toLocaleString()}</Text>
-          </View>
-          <Text style={[targetType.meta, s.totalUnit]}>{unit}</Text>
-
-          <View style={s.track}>
-            <View style={[s.trackFill, { width: `${ratio * 100}%` }]} />
-          </View>
-          <View style={s.trackLabels}>
-            <Text style={[targetType.meta, s.percent]}>
-              {percentText(sharedTotal, target)} complete
-            </Text>
-            <Text style={[targetType.meta, s.remaining]}>
-              {remaining.toLocaleString()} to go
+        {phase === 'noGoal' ? (
+          <View style={s.quietHero}>
+            <Text style={[targetType.h2, s.quietHeroTitle]}>Nothing running right now</Text>
+            <Text style={[targetType.body, s.quietHeroBody]}>
+              {isChampion
+                ? 'Start a goal and the community has something to move toward together.'
+                : 'When a Champion starts a goal, it appears here.'}
             </Text>
           </View>
+        ) : (
+          <View style={s.hero}>
+            {/* Top light. Depth without a gradient dependency. */}
+            <View pointerEvents="none" style={s.heroTopLight} />
 
-          {recent.length > 0 ? (
-            <View style={s.heroMomentum}>
-              <Text style={[targetType.eyebrow, s.heroMomentumLabel]}>Moving now</Text>
-              <View style={s.heroMomentumRow}>
-                {recent.slice(0, 3).map((r) => (
-                  <View key={`${r.amount}-${r.when}`} style={s.mchip}>
-                    <Text style={s.mchipAmount}>
-                      +{r.amount.toLocaleString()}
-                    </Text>
-                    <Text style={s.mchipWhen}>{r.when}</Text>
+            <Text style={[targetType.eyebrow, s.heroEyebrow]}>
+              {reached ? 'Goal reached' : 'Together we go further'}
+            </Text>
+            <Text style={[targetType.h2, s.heroTitle]}>{goalTitle}</Text>
+            <Text style={[targetType.meta, s.heroWindow]}>{goalWindow}</Text>
+
+            {phase === 'unavailable' ? (
+              <View style={s.heroUnavailable}>
+                <Text style={[targetType.body, s.heroUnavailableText]}>
+                  Progress couldn&apos;t be loaded just now.
+                </Text>
+                <View style={s.heroOutline}>
+                  <Text style={s.heroOutlineText}>Try again</Text>
+                </View>
+              </View>
+            ) : (
+              <>
+                <View style={s.weWrap}>
+                  {/* The bloom sits BEHIND the mark and never touches it. */}
+                  <View pointerEvents="none" style={s.glowLayer}>
+                    <View style={s.glow3}>
+                      <View style={s.glow2}>
+                        <View style={s.glow1} />
+                      </View>
+                    </View>
                   </View>
-                ))}
+                  <LivingWeProgress
+                    completed={sharedTotal}
+                    target={target}
+                    unit={unit}
+                    width={weWidth}
+                    surface="dark"
+                  />
+                </View>
+
+                <View style={s.progressPanel}>
+                  <View style={s.totalRow}>
+                    <Text style={[targetType.display, s.total, compact ? s.totalCompact : null]}>
+                      {sharedTotal.toLocaleString()}
+                    </Text>
+                    <Text style={[targetType.h3, s.totalOf]}>
+                      / {target.toLocaleString()} {unit}
+                    </Text>
+                  </View>
+
+                  <View style={s.track}>
+                    <View style={[s.trackFill, { width: `${ratio * 100}%` }]} />
+                  </View>
+
+                  {/*
+                    THE PRODUCT'S OWN FORMATTERS, NOT THE TARGET'S. A first
+                    draft rolled its own percentage here and printed "102.4%"
+                    for a goal that had been exceeded -- while the shipped
+                    percentLabel clamps at 100%. A target that disagrees with
+                    the product about a number is the drift a real-RN target
+                    exists to prevent, so the numbers come from the same
+                    helpers the product uses and the target only supplies the
+                    connective words.
+                  */}
+                  <Text style={[targetType.meta, s.story]}>
+                    {reached || closed
+                      ? statusLine(sharedTotal, target, goalStatus)
+                      : `${percentLabel(sharedTotal, target)} of the way there · ${statusLine(
+                          sharedTotal,
+                          target,
+                          goalStatus,
+                        )}`}
+                  </Text>
+
+                  {phase === 'stale' ? (
+                    <Text style={[targetType.meta, s.stale]}>
+                      Last confirmed 3:46 PM · Refresh
+                    </Text>
+                  ) : null}
+                </View>
+
+                {recent.length > 0 ? (
+                  <View style={s.heroMomentum}>
+                    <Text style={[targetType.eyebrow, s.heroMomentumLabel]}>Momentum</Text>
+                    <View style={s.heroMomentumRow}>
+                      {recent.slice(0, 3).map((r) => (
+                        <View key={`${r.amount}-${r.when}`} style={s.mchip}>
+                          <Text style={s.mchipAmount}>+{r.amount.toLocaleString()}</Text>
+                          <Text style={s.mchipWhen}>{r.when}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            )}
+          </View>
+        )}
+
+        {canMove ? (
+          <>
+            <View style={s.action}>
+              <Text style={s.actionText}>
+                {phase === 'zero' ? 'Be the first to move' : 'Start moving'}
+              </Text>
+            </View>
+            <View style={s.secondary}>
+              <Text style={s.secondaryText}>Already moved? Record {unit}</Text>
+            </View>
+          </>
+        ) : closed ? (
+          <View style={s.closedNote}>
+            <Text style={[targetType.h3, s.closedNoteLead]}>
+              {phase === 'closedReached'
+                ? `You reached ${target.toLocaleString()} ${unit} together.`
+                : `Closed at ${sharedTotal.toLocaleString()} of ${target.toLocaleString()} ${unit}.`}
+            </Text>
+            <Text style={[targetType.meta, s.closedNoteBody]}>
+              This goal is closed. Nothing more can be added to it.
+            </Text>
+          </View>
+        ) : null}
+
+        {otherGoals.length > 0 ? (
+          <View style={s.alsoWrap}>
+            <Text style={[targetType.eyebrow, s.alsoLabel]}>Also running here</Text>
+            {otherGoals.map((g) => (
+              <View key={g.title} style={s.alsoRow}>
+                <Text style={[targetType.h3, s.alsoTitle]} numberOfLines={1}>
+                  {g.title}
+                </Text>
+                <Text style={[targetType.meta, s.alsoMeta]}>
+                  {g.completed.toLocaleString()} of {g.target.toLocaleString()} {g.unit}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* One flowing section with hierarchy, not two equal KPI tiles. */}
+        <View style={s.strip}>
+          <View style={s.stripLead}>
+            <View style={s.stripAccent} />
+            <View style={s.stripLeadText}>
+              <Text style={[targetType.eyebrow, s.stripEyebrow]}>Your part</Text>
+              <View style={s.stripFigureRow}>
+                <Text style={[targetType.h2, s.stripFigure]}>{yourPart.toLocaleString()}</Text>
+                <Text style={[targetType.meta, s.stripFigureUnit]}>{unit} · private to you</Text>
               </View>
             </View>
-          ) : null}
-        </View>
-
-        {/* The one unmistakable action. The only filled control on the page. */}
-        <View style={s.action}>
-          <Text style={s.actionText}>Start moving</Text>
-        </View>
-        <View style={s.secondary}>
-          <Text style={s.secondaryText}>Already moved? Record {unit}</Text>
-        </View>
-
-        {/* Density below the fold line the board sets: your own part, kept
-            private, and what the community has done. */}
-        <View style={s.cards}>
-          <View style={s.card}>
-            <Text style={[targetType.eyebrow, s.cardEyebrow]}>Your part</Text>
-            <Text style={[targetType.h2, s.cardFigure]}>{yourPart.toLocaleString()}</Text>
-            <Text style={[targetType.meta, s.cardMeta]}>{unit} · private to you</Text>
           </View>
-          <View style={s.card}>
-            <Text style={[targetType.eyebrow, s.cardEyebrow]}>What we have done</Text>
-            <Text style={[targetType.h2, s.cardFigure]}>2</Text>
-            <Text style={[targetType.meta, s.cardMeta]}>goals finished together</Text>
-          </View>
-        </View>
-
-        <View style={s.note}>
-          <Text style={[targetType.meta, s.noteText]}>
-            Movement only — never a name. Your own numbers stay private to you.
+          <View style={s.stripRule} />
+          <Text style={[targetType.meta, s.stripFooter]}>
+            Together you have finished {finishedGoals} goals
           </Text>
         </View>
       </ScrollView>
 
-      {/* Persistent app navigation: five destinations, MOVE at the centre. */}
       <View style={s.tabs}>
-        {/* The product's own glyphs, not stand-ins. Progress takes the
-            activity glyph: it is the same destination, renamed. */}
         {([
           ['Home', 'home'],
           ['Community', 'community'],
@@ -258,29 +375,23 @@ export function HomeTarget({
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: CREAM },
   scroll: { flex: 1 },
-  body: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 14, gap: 10 },
-  bodyCompact: { paddingTop: 8, gap: 8 },
+  body: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 14, gap: 12 },
+  bodyCompact: { paddingTop: 8, gap: 9 },
 
-  chrome: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  chromeRight: { flexShrink: 1, minWidth: 0 },
-  chromeAction: {
-    color: INK,
-    fontSize: 12,
-    fontWeight: '700',
+  chrome: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 30 },
+  chromeChip: {
     backgroundColor: '#ECE8E0',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: targetRadius.pill,
-    overflow: 'hidden',
   },
+  chromeChipText: { color: INK, fontSize: 12, fontWeight: '700' },
 
-  identity: { gap: 3 },
-  identityName: { color: INK, fontSize: 26, lineHeight: 31, letterSpacing: -0.6 },
+  identity: { gap: 2 },
+  identityEyebrow: { color: ACTION_GREEN_DEEP },
+  identityName: { color: INK, fontSize: 26, lineHeight: 31, letterSpacing: -0.6, marginTop: 2 },
   identityNameCompact: { fontSize: 23, lineHeight: 28 },
-  identitySub: { color: INK_MUTED },
-  presence: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 },
-  presenceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: ACTION_GREEN },
-  presenceText: { color: INK_QUIET },
+  identitySub: { color: INK_QUIET, marginTop: 1 },
 
   hero: {
     backgroundColor: NAVY,
@@ -288,40 +399,95 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 14,
+    overflow: 'hidden',
     ...targetShadow.hero,
   },
-  heroCompact: { paddingTop: 12, paddingBottom: 12 },
+  // A light falling across the top of the card. A rectangle drew a hard seam
+  // straight through the mark -- an artifact, not depth. A very large, very
+  // faint circle anchored above the card has no edge inside it.
+  heroTopLight: {
+    position: 'absolute',
+    top: -280,
+    left: -60,
+    width: 520,
+    height: 420,
+    borderRadius: 260,
+    backgroundColor: 'rgba(143,224,138,0.06)',
+  },
   heroEyebrow: { color: PROGRESS_GREEN },
   heroTitle: { color: ON_NAVY, marginTop: 6 },
   heroWindow: { color: ON_NAVY_MUTED, marginTop: 3 },
-  weWrap: { alignItems: 'center', paddingTop: 6, paddingBottom: 2 },
-  totalRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 8 },
+
+  weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 8, paddingBottom: 4 },
+  // Three nested circles approximate a radial bloom without a gradient
+  // dependency, and without touching the mark itself.
+  glowLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  glow3: {
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: 'rgba(145,203,125,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glow2: {
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    backgroundColor: 'rgba(145,203,125,0.07)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glow1: {
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: 'rgba(145,203,125,0.09)',
+  },
+
+  // The numbers sink into their own panel, so the progress area reads as a
+  // recessed instrument rather than as text floating on the card.
+  progressPanel: {
+    backgroundColor: 'rgba(0,0,0,0.20)',
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingTop: 10,
+    paddingBottom: 11,
+    marginTop: 6,
+  },
+  totalRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 7 },
   total: { color: ON_NAVY, fontSize: 34, lineHeight: 38, letterSpacing: -1.2 },
   totalCompact: { fontSize: 29, lineHeight: 33, letterSpacing: -1 },
   totalOf: { color: ON_NAVY_MUTED },
-  totalUnit: { color: ON_NAVY_MUTED, textAlign: 'center', marginTop: 2 },
   track: {
     height: 8,
     borderRadius: targetRadius.pill,
-    backgroundColor: 'rgba(247,245,240,0.16)',
+    backgroundColor: 'rgba(247,245,240,0.14)',
     marginTop: 10,
     overflow: 'hidden',
   },
   trackFill: { height: '100%', borderRadius: targetRadius.pill, backgroundColor: PROGRESS_GREEN },
-  trackLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 7,
+  story: { color: ON_NAVY, marginTop: 8, textAlign: 'center', fontWeight: '600' },
+  stale: { color: ON_NAVY_MUTED, marginTop: 5, textAlign: 'center' },
+
+  heroUnavailable: { alignItems: 'center', gap: 10, paddingTop: 16, paddingBottom: 8 },
+  heroUnavailableText: { color: ON_NAVY, textAlign: 'center' },
+  heroOutline: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(247,245,240,0.45)',
+    borderRadius: targetRadius.pill,
+    paddingHorizontal: 18,
+    minHeight: 44,
+    justifyContent: 'center',
   },
-  percent: { color: PROGRESS_GREEN, fontWeight: '800' },
-  remaining: { color: ON_NAVY_MUTED },
+  heroOutlineText: { color: ON_NAVY, fontSize: 14, fontWeight: '700' },
+
   heroMomentum: {
-    marginTop: 11,
+    marginTop: 12,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: ON_NAVY_RULE,
-    gap: 8,
+    gap: 7,
   },
   heroMomentumLabel: { color: ON_NAVY_MUTED },
   heroMomentumRow: { flexDirection: 'row', gap: 7 },
@@ -334,6 +500,17 @@ const s = StyleSheet.create({
   },
   mchipAmount: { color: PROGRESS_GREEN, fontSize: 14, lineHeight: 18, fontWeight: '800' },
   mchipWhen: { color: ON_NAVY_MUTED, fontSize: 10, lineHeight: 14, marginTop: 1 },
+
+  quietHero: {
+    backgroundColor: SURFACE,
+    borderRadius: targetRadius.card,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    gap: 6,
+    ...targetShadow.card,
+  },
+  quietHeroTitle: { color: INK },
+  quietHeroBody: { color: INK_MUTED },
 
   action: {
     backgroundColor: ACTION_GREEN,
@@ -355,27 +532,39 @@ const s = StyleSheet.create({
   },
   secondaryText: { color: INK, fontSize: 14, lineHeight: 19, fontWeight: '700' },
 
-  cards: { flexDirection: 'row', gap: 10 },
-  card: {
-    flex: 1,
+  closedNote: { gap: 3, paddingHorizontal: 2 },
+  closedNoteLead: { color: INK },
+  closedNoteBody: { color: INK_QUIET },
+
+  alsoWrap: { gap: 5 },
+  alsoLabel: { color: INK_QUIET },
+  alsoRow: {
     backgroundColor: SURFACE,
-    borderRadius: targetRadius.card,
+    borderRadius: 14,
     paddingHorizontal: 13,
     paddingVertical: 10,
-    gap: 1,
     ...targetShadow.card,
   },
-  cardEyebrow: { color: ACTION_GREEN_DEEP },
-  cardFigure: { color: INK, marginTop: 2 },
-  cardMeta: { color: INK_QUIET },
+  alsoTitle: { color: INK },
+  alsoMeta: { color: INK_QUIET, marginTop: 2 },
 
-  note: {
-    backgroundColor: ACTION_GREEN_WASH,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  strip: {
+    backgroundColor: SURFACE,
+    borderRadius: targetRadius.card,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    ...targetShadow.card,
   },
-  noteText: { color: ACTION_GREEN_DEEP, fontWeight: '600' },
+  stripLead: { flexDirection: 'row', gap: 11 },
+  stripAccent: { width: 3, borderRadius: 2, backgroundColor: PROGRESS_GREEN },
+  stripLeadText: { flex: 1, gap: 2 },
+  stripEyebrow: { color: ACTION_GREEN_DEEP },
+  stripFigureRow: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
+  stripFigure: { color: INK },
+  stripFigureUnit: { color: INK_QUIET },
+  stripRule: { height: 1, backgroundColor: HAIRLINE, marginTop: 10, marginBottom: 8 },
+  stripFooter: { color: INK_MUTED },
 
   tabs: {
     flexDirection: 'row',

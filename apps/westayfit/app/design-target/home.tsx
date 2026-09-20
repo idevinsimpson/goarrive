@@ -60,10 +60,12 @@ export default function HomeTargetPreview() {
         target={500}
         unit="squats"
         yourPart={45}
+        finishedGoals={2}
+        isChampion
         recent={[
-          { amount: 20, unit: 'squats', when: '2h ago' },
-          { amount: 15, unit: 'squats', when: '5h ago' },
-          { amount: 30, unit: 'squats', when: '1d ago' },
+          { amount: 20, when: '2h ago' },
+          { amount: 15, when: '5h ago' },
+          { amount: 30, when: '1d ago' },
         ]}
       />
     </View>

@@ -44,3 +44,29 @@ test('design targets render at every device class the atlas requires', async ({
     }
   }
 });
+
+test('the Home lifecycle state matrix renders every state in one frame', async ({
+  browser,
+}: {
+  browser: Browser;
+}) => {
+  // Four cells across. Wide enough that each phone frame stays full size, which
+  // is the point: a state matrix nobody can read is not evidence.
+  const ctx = await browser.newContext({
+    viewport: { width: 1688, height: 1200 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    const page = await ctx.newPage();
+    await page.goto('/design-target/home-states');
+    const sheet = page.getByTestId('wsf-target-home-states');
+    await sheet.waitFor({ state: 'visible', timeout: 30_000 });
+    await page.waitForTimeout(1200);
+    await page.screenshot({
+      path: path.join(OUT, 'TARGET-home-state-matrix.png'),
+      fullPage: true,
+    });
+  } finally {
+    await ctx.close();
+  }
+});
