@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -222,14 +222,37 @@ export default function EventScreen() {
 
 
   /**
-   * ARRIVING AS A MEMBER CONSUMES THE RETURN.
+   * ARRIVING AT EITHER SIGNED-IN OUTCOME CONSUMES THE RETURN.
    *
-   * It has done its job; leaving it in place would send the visitor here again
-   * on some later, unrelated sign-in.
+   * `member` and `notMember` are both TERMINAL: the handoff has delivered the
+   * visitor to the event and has nothing left to do. Consuming only `member`
+   * left it live for exactly the case that ends at `notMember` — a brand-new
+   * account, which belongs to no community — so signing out and back in
+   * inside the two-hour window would replay it. A one-shot handoff that fires
+   * twice is not one-shot.
+   *
+   * `loading` and `error` deliberately keep it: those are not outcomes, and a
+   * retry from one of them still wants the return.
    */
+  const [focused, setFocused] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, [])
+  );
   useEffect(() => {
-    if (state.kind === 'member') clearEventReturn();
-  }, [state.kind]);
+    // ONLY WHILE THIS SCREEN IS THE ONE IN FRONT.
+    //
+    // The stack keeps this route MOUNTED underneath the next one, so without
+    // the focus guard the backgrounded copy keeps resolving during the auth
+    // round trip: the moment a new account verifies, it settles on
+    // `notMember` and consumes the handoff — before profile-setup's
+    // `nextRouteAfterAuth` has read it. Measured, not theorised: the record
+    // was present at verify-email and null at profile-setup.
+    if (!focused) return;
+    if (state.kind === 'member' || state.kind === 'notMember') clearEventReturn();
+  }, [focused, state.kind]);
 
   /**
    * `undefined` until this browser's storage has actually been read.

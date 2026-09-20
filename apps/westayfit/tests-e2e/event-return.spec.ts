@@ -212,6 +212,11 @@ test('a MEMBER who signs in from a scanned event is returned to it, and it is us
   await expect(shown(page, 'wsf-event-title')).toBeVisible();
   // The device answer is remembered per browser and must survive the trip.
   await expect(shown(page, 'wsf-device-choice')).toHaveCount(0);
+  // AND THE HANDOFF IS SPENT. It has delivered them; leaving it live would
+  // replay this event on some later, unrelated sign-in.
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('wsf.eventReturn')))
+    .toBeNull();
   // NOTE, because the obvious assertion here would be wrong: this fixture is a
   // ONE-activity event, and `initialSelection` deliberately picks the sole
   // option, so the where-panel is on screen immediately. The "no way on until
@@ -263,6 +268,13 @@ test('a NEW account is returned to the scanned event after verifying, and the sc
   // not claimed here.
   await expect(shown(page, 'wsf-event-not-member')).toBeVisible({ timeout: 30_000 });
   await expect(shown(page, 'wsf-event-member')).toHaveCount(0);
+  // NOT being a member is still a TERMINAL outcome: the handoff delivered
+  // them here and must be spent. This is the case that left it live — a
+  // brand-new account belongs to no community, so consuming only on `member`
+  // meant signing out and back in replayed the event.
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('wsf.eventReturn')))
+    .toBeNull();
 });
 
 test('a stored return that cannot be vouched for sends nobody anywhere', async ({ page }) => {

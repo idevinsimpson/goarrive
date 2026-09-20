@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -184,5 +187,69 @@ describe('nextRouteAfterAuth — which destination claims the terminal hop', () 
       JSON.stringify({ goalId: 'https://evil.example.com', at: Date.now() })
     );
     expect(nextRouteAfterAuth('/')).toBe('/');
+  });
+});
+
+describe('the handoff is one-shot: every signed-in outcome consumes it', () => {
+  /**
+   * A CONTRACT ASSERTION OVER THE SCREEN'S SOURCE, not over storage.
+   *
+   * The defect this exists for: the consume effect fired only on `member`, so
+   * the path that ends at `notMember` — a brand-new account, which belongs to
+   * no community — left the return live. Signing out and back in inside the
+   * two-hour window replayed it. A one-shot handoff that fires twice is not
+   * one-shot.
+   *
+   * It reads the effect's own condition rather than the rendered result
+   * because the alternative is mounting the whole event screen with Firebase,
+   * routing and auth stubbed, which would test the stubs.
+   */
+  // A path from the package root: vitest runs with jsdom, where
+  // import.meta.url is not a file: URL.
+  const screen = readFileSync(path.resolve('app/event/[goalId].tsx'), 'utf8');
+  const code = screen
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join('\n');
+
+  it('names both terminal outcomes in the consume effect', () => {
+    const effect = /if \(([^)]*)\) clearEventReturn\(\);/.exec(code);
+    expect(effect, 'no clearEventReturn effect found in the event screen').not.toBeNull();
+    const condition = effect![1]!;
+    expect(condition).toContain("state.kind === 'member'");
+    expect(condition).toContain("state.kind === 'notMember'");
+  });
+
+  it('does NOT consume it while loading, erroring, or signed out', () => {
+    const effect = /if \(([^)]*)\) clearEventReturn\(\);/.exec(code);
+    const condition = effect![1]!;
+    expect(condition).not.toContain("'loading'");
+    expect(condition).not.toContain("'error'");
+    // signedOut is where the handoff is CREATED — consuming there would erase
+    // it on the way to sign-in, which is the one moment it must survive.
+    expect(condition).not.toContain("'signedOut'");
+  });
+
+  it('every signed-in terminal state the screen can reach is covered', () => {
+    // Derived from the screen's own union, so a NEW terminal outcome added
+    // later fails here instead of quietly keeping the return alive.
+    const union = screen.slice(screen.indexOf('type EventState'), screen.indexOf('const EVENT_'));
+    const states = [...union.matchAll(/kind: '([a-zA-Z]+)'/g)].map((m) => m[1]!);
+    expect(new Set(states)).toEqual(
+      new Set(['loading', 'signedOut', 'member', 'notMember', 'error'])
+    );
+    // member and notMember are the two SIGNED-IN outcomes: the handoff has
+    // delivered the visitor and is spent. signedOut is the state that CREATES
+    // the handoff, so consuming there would erase it on the way out; loading
+    // and error are not outcomes at all and a retry still wants it.
+    const consumes = new Set(['member', 'notMember']);
+    const effect = /if \(([^)]*)\) clearEventReturn\(\);/.exec(code)![1]!;
+    for (const state of states) {
+      expect(
+        effect.includes(`'${state}'`),
+        `${state} ${consumes.has(state) ? 'is a signed-in outcome and must consume' : 'must NOT consume'} the return`
+      ).toBe(consumes.has(state));
+    }
   });
 });
