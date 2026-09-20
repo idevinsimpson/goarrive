@@ -316,6 +316,38 @@ async function signInOnPage(page, user) {
   await page.getByTestId('wsf-signin-password').fill(user.password);
   await page.getByTestId('wsf-signin-submit').click();
 }
+/**
+ * A SECOND INDEPENDENT PARTICIPANT, on their own account and their own phone.
+ *
+ * The acceptance asked for independent 390px phone accounts, and the first
+ * version seeded `phoneTwo` and never opened a browser for them. That left
+ * the two-screen assertion able to pass for the wrong reason: with one person
+ * in the line, the second screen shows nobody, and "the second screen is not
+ * showing the first person's code" is true of an empty screen.
+ */
+async function joinSecondPhone(browser, fx, qrUrl) {
+  const context = await browser.newContext(PHONE);
+  const page = await context.newPage();
+  await page.goto(qrUrl, { waitUntil: 'domcontentloaded' });
+  await visible(page.getByTestId('wsf-event-title'), 45_000);
+  await page.getByTestId('wsf-event-signin').click();
+  await signInOnPage(page, fx.phoneTwo);
+  await visible(page.getByTestId('wsf-event-title'), 60_000);
+  await page.getByTestId('wsf-event-queue-start').click();
+  await visible(page.getByTestId('wsf-event-queue-panel'));
+  await page.getByTestId('wsf-event-queue-name-first').click();
+  await page.getByTestId('wsf-event-queue-join').click();
+  await visible(page.getByTestId('wsf-queue-standing'), 60_000);
+  const token = await signInToken(fx.phoneTwo);
+  const mine = await call('second phone place', 'wsfMyTurn', { goalId: fx.activities[0].goalId }, token);
+  assert(mine?.turn?.entryId, 'the second phone joined and the server does not have it in the line');
+  trackLinked(`wsfTurnEntries/${mine.turn.entryId}`, fx.activities[0].goalId);
+  trackLinked(`wsfTurnMembers/${`setup__${fx.setupId}`}__${fx.phoneTwo.uid}`, fx.phoneTwo.uid);
+  trackLinked(`wsfTurnReceipts/${`setup__${fx.setupId}`}__${fx.phoneTwo.uid}`, fx.phoneTwo.uid);
+  await snap(page, 'phone', 390, '20-second-phone-waiting');
+  return { context, page, entryId: mine.turn.entryId, code: mine.turn.code ?? null };
+}
+
 /** Every element whose testID starts with a prefix, as ids. */
 async function testIdsWithPrefix(page, prefix) {
   return page.evaluate((p) => Array.from(document.querySelectorAll(`[data-testid^="${p}"]`))
@@ -483,7 +515,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
 // 3. TWO SCREENS CANNOT SURFACE THE SAME PERSON, AND NEITHER SHOWS A ROOM
 //    ANYTHING IT SHOULD NOT.
 // ─────────────────────────────────────────────────────────────────────────────
-async function caseTwoScreens(fx, screenOne, screenTwo, phone) {
+async function caseTwoScreens(fx, screenOne, screenTwo, phone, secondPhone) {
   await screenOne.page.getByTestId('wsf-station-call-next').click();
   await visible(screenOne.page.getByTestId('wsf-station-queue-serving'), 45_000);
   const servingOne = await textOf(screenOne.page.getByTestId('wsf-station-queue-serving'));
@@ -491,14 +523,34 @@ async function caseTwoScreens(fx, screenOne, screenTwo, phone) {
   assert(shortCode.trim().length > 0, 'the screen called somebody without showing a short code');
   await snap(screenOne.page, 'station', 1280, '03-called');
 
-  // The second screen calls into the same event and must not be handed the
-  // person the first screen already has.
+  // TWO REAL PEOPLE, ONE EACH.
+  //
+  // With only one participant in the line this assertion passed for the wrong
+  // reason: the second screen showed NOBODY, and "not showing the first
+  // person's code" is true of an empty screen. A second independent account
+  // is now waiting on its own phone, so the second screen must be handed that
+  // person — a different, non-empty code — and the two must never cross.
   await screenTwo.page.reload({ waitUntil: 'domcontentloaded' });
   await visible(screenTwo.page.getByTestId('wsf-station-hero'), 60_000);
   await screenTwo.page.getByTestId('wsf-station-call-next').click();
+  await visible(screenTwo.page.getByTestId('wsf-station-queue-serving'), 45_000);
+  const secondCode = (await textOf(screenTwo.page.getByTestId('wsf-station-queue-code'))).trim();
+  assert(secondCode.length > 0, 'the second screen called nobody, so this proves nothing about two screens');
+  assert(
+    secondCode !== shortCode.trim(),
+    'both screens are showing the same short code, so two screens claimed one person'
+  );
   const secondHall = await screenTwo.page.innerText('body');
-  assert(!secondHall.includes(shortCode.trim()),
-    'both screens are showing the same short code, so two screens claimed one person');
+  assert(!secondHall.includes(shortCode.trim()), "the second screen is showing the first screen's participant");
+  const firstHallAgain = await screenOne.page.innerText('body');
+  assert(!firstHallAgain.includes(secondCode), "the first screen is showing the second screen's participant");
+  // Neither screen may disclose either participant, whichever it is serving.
+  for (const [label, hall] of [['first', firstHallAgain], ['second', secondHall]]) {
+    for (const person of [fx.phoneOne, fx.phoneTwo]) {
+      assert(!hall.includes(person.email), `the ${label} screen shows an email address`);
+      assert(!hall.includes(person.uid), `the ${label} screen shows a uid`);
+    }
+  }
   await snap(screenTwo.page, 'station', 1280, '04-not-the-same-person');
 
   // WHAT A ROOM CAN READ. A first name or neutral alias and a short code —
@@ -556,13 +608,29 @@ async function casePlayer(fx, screenOne, phone) {
     await snap(page, surface, width, '10-player-ready');
   }
 
-  // The countdown is three, and it is the count itself that says so.
+  // THE COUNTDOWN BEGINS AT THREE, not merely somewhere at or below three.
+  //
+  // The previous version accepted any integer from 1 to 3, so a one-second
+  // countdown would have passed while the receipt said "a count of three".
+  // The count is sampled rapidly from the moment Start is pressed and the
+  // HIGHEST value seen must be exactly the expected three: a countdown that
+  // began at 1 never shows a 3, and one that began at 3 shows it within the
+  // first second.
   await phone.page.getByTestId('wsf-queue-move-start').click();
-  const counting = (await textOf(phone.page.getByTestId('wsf-queue-move-timer'))).trim();
-  const countValue = Number(counting);
+  const seen = [];
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const raw = (await phone.page.getByTestId('wsf-queue-move-timer').innerText().catch(() => '')).trim();
+    const value = Number(raw);
+    if (Number.isInteger(value) && value > 0 && value <= EXPECTED_COUNTDOWN_SECONDS) seen.push(value);
+    if (seen.includes(EXPECTED_COUNTDOWN_SECONDS)) break;
+    await phone.page.waitForTimeout(60);
+  }
+  assert(seen.length > 0, 'no countdown was rendered at all after Start');
+  const highest = Math.max(...seen);
   assert(
-    Number.isInteger(countValue) && countValue >= 1 && countValue <= EXPECTED_COUNTDOWN_SECONDS,
-    `the countdown reads "${sanitize(counting)}", expected a count of ${EXPECTED_COUNTDOWN_SECONDS} or fewer`
+    highest === EXPECTED_COUNTDOWN_SECONDS,
+    `the countdown began at ${highest}, expected ${EXPECTED_COUNTDOWN_SECONDS} — saw ${sanitize(seen.join(','))}`
   );
   await snap(phone.page, 'phone', 390, '11-countdown');
 
@@ -584,6 +652,30 @@ async function casePlayer(fx, screenOne, phone) {
   // THE QR STAYS UP *DURING* MOVEMENT — asserted here, inside the running
   // round, not before Start. Somebody walking up mid-round can still join.
   await visible(screenOne.page.getByTestId('wsf-station-qr'), 30_000);
+
+  // AND THE SCREEN IS RUNNING THE SAME ROUND, NOT PARKED ON ITS READY SCREEN.
+  //
+  // A station still showing its ready-state `60s` would have satisfied the
+  // previous version: a visible QR plus a server document said nothing about
+  // what the screen was actually displaying. A ready timer never moves, so
+  // the proof is that the station's own timer DECREASES, and that it agrees
+  // with the phone's remaining time — the same round, on both surfaces.
+  const stationFirst = (await textOf(screenOne.page.getByTestId('wsf-station-move-timer'))).trim();
+  const stationFirstMatch = /^(\d+)s$/.exec(stationFirst);
+  assert(stationFirstMatch, `the station player reads "${sanitize(stationFirst)}", expected a seconds count`);
+  const stationRemaining = Number(stationFirstMatch[1]);
+  assert(
+    Math.abs(stationRemaining - remaining) <= 5,
+    `the station has ${stationRemaining}s left and the phone ${remaining}s — not the same round`
+  );
+  await screenOne.page.waitForTimeout(2_500);
+  const stationSecond = (await textOf(screenOne.page.getByTestId('wsf-station-move-timer'))).trim();
+  const stationSecondMatch = /^(\d+)s$/.exec(stationSecond);
+  assert(stationSecondMatch, `the station player reads "${sanitize(stationSecond)}" a moment later`);
+  assert(
+    Number(stationSecondMatch[1]) < stationRemaining,
+    `the station timer did not move (${stationRemaining}s then ${stationSecondMatch[1]}s), so the screen is parked rather than running the round`
+  );
   // AND THE SCREEN IS STILL ON THIS ATTEMPT WHILE IT RUNS. Read from the
   // entry the server wrote rather than inferred from the pre-start screen:
   // continuity during the round is the claim, so it is checked during it.
@@ -710,7 +802,11 @@ async function main() {
     const qrUrl = await caseQrLink(browser, fx, screenOne);
     const phone = await casePhoneChoosesQueue(browser, fx, qrUrl);
     open.push(phone.context);
-    await caseTwoScreens(fx, screenOne, screenTwo, phone);
+    // A second independent participant, on their own account and phone, so the
+    // two-screen case has two people to keep apart.
+    const secondPhone = await joinSecondPhone(browser, fx, qrUrl);
+    open.push(secondPhone.context);
+    await caseTwoScreens(fx, screenOne, screenTwo, phone, secondPhone);
     await casePlayer(fx, screenOne, phone);
     await caseReceiptAndClear(fx, screenOne, phone);
   } catch (error) {

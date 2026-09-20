@@ -94,6 +94,39 @@ test('the scanned link is read off the screen and carries no authority', () => {
     'the journey does not prove the scan left the line untouched');
 });
 
+test('two independent participants are actually driven, not just seeded', () => {
+  // The acceptance asked for independent phone accounts. Seeding a second
+  // account and never opening a browser for it let the two-screen assertion
+  // pass for the wrong reason: with one person in the line, the second screen
+  // shows NOBODY, and "not showing the first person's code" is true of an
+  // empty screen.
+  assert.ok(/async function joinSecondPhone\(/.test(JOURNEY), 'the second phone is never driven as a participant');
+  // `await` on purpose: the DECLARATION reads `async function
+  // joinSecondPhone(browser, fx, qrUrl)`, so a bare name-and-arguments regex
+  // matched it and the first version of this check passed with the call site
+  // deleted. It is the call that has to exist.
+  assert.ok(/await joinSecondPhone\(/.test(JOURNEY), 'the second phone is defined but never called');
+  const mainBody = JOURNEY.slice(JOURNEY.indexOf('async function main('));
+  assert.ok(/await joinSecondPhone\(/.test(mainBody), 'the second phone is never driven from the run itself');
+  assert.ok(
+    /caseTwoScreens\(fx, screenOne, screenTwo, phone, secondPhone\)/.test(mainBody),
+    'the two-screen case is not given the second participant'
+  );
+  const body = JOURNEY.slice(JOURNEY.indexOf('async function caseTwoScreens('), JOURNEY.indexOf('// 4. READY ON THE PHONE'));
+  assert.ok(
+    /secondCode\.length > 0/.test(body),
+    'the second screen must be proven to have called SOMEBODY, or an empty screen passes'
+  );
+  assert.ok(
+    /secondCode !== shortCode\.trim\(\)/.test(body),
+    'the two screens must be proven to hold DIFFERENT participants'
+  );
+  assert.ok(
+    /firstHallAgain\.includes\(secondCode\)/.test(body),
+    'the first screen is never re-checked for the second participant, so a cross-surface leak would pass'
+  );
+});
+
 test('the hall is checked for what a room must never read', () => {
   const body = JOURNEY.slice(JOURNEY.indexOf('async function caseTwoScreens('), JOURNEY.indexOf('// 4. READY ON THE PHONE'));
   assert.ok(/\.email\)/.test(body), 'the hall is not checked for an email address');
@@ -136,6 +169,39 @@ test('the player is asserted on BOTH surfaces, and the binding is read from the 
     /\/\\d\/\.test\(running\)/.test(body),
     false,
     'a "the timer contains a digit" check cannot stand in for the round length'
+  );
+
+  // THE COUNTDOWN MUST BEGIN AT THREE, not merely be at-or-below three.
+  // Accepting 1..3 would have passed a one-second countdown while the receipt
+  // said "a count of three".
+  assert.ok(
+    /const EXPECTED_COUNTDOWN_SECONDS = 3;/.test(JOURNEY),
+    'the journey no longer names the expected countdown as three'
+  );
+  assert.ok(
+    /highest === EXPECTED_COUNTDOWN_SECONDS/.test(body),
+    'the countdown must be proven to BEGIN at the expected value, not merely to be at or below it'
+  );
+  assert.equal(
+    /countValue >= 1 && countValue <= EXPECTED_COUNTDOWN_SECONDS/.test(body),
+    false,
+    'a range check cannot stand in for proving where the countdown began'
+  );
+
+  // THE STATION MUST BE RUNNING THE ROUND, NOT PARKED ON ITS READY SCREEN.
+  // A ready-state timer never moves, so a decrease is the proof; agreement
+  // with the phone's remaining time is what makes it the SAME round.
+  assert.ok(
+    /wsf-station-move-timer/.test(body),
+    'the station player’s own timer is never read during the round'
+  );
+  assert.ok(
+    /Number\(stationSecondMatch\[1\]\) < stationRemaining/.test(body),
+    'the station timer must be shown to DECREASE, or a screen parked on its ready state passes'
+  );
+  assert.ok(
+    /Math\.abs\(stationRemaining - remaining\) <= 5/.test(body),
+    'the station and the phone must be checked against the same round'
   );
 
   // THE QR CLAIM IS ABOUT MOVEMENT, SO IT IS ASSERTED DURING MOVEMENT.
