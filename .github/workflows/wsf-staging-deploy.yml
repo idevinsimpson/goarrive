@@ -782,6 +782,37 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      # WHY THE FAILING ROWS ARE REPRINTED HERE. The journey already prints its
+      # FAIL rows, but in ITS OWN step — and a reader whose log access returns
+      # only the tail of a job (the case for the agent driving these runs, and
+      # for anyone reading a long job on a slow connection) cannot reach a step
+      # that finished several steps ago. Runs 37, 38 and 39 were each diagnosed
+      # from which CAPTURE was missing and how long the step took, because the
+      # actual assertion message was unreadable. That is a bad way to debug.
+      #
+      # This reprints the failing rows from the receipt in the LAST step of the
+      # job, where the tail always reaches. It changes no gate and no outcome:
+      # the exit codes below are exactly as before.
+      - name: Reprint the journey's failing rows where the log tail can reach them
+        if: always() && steps.journey.outcome != 'success'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          receipt="${{ github.workspace }}/wsf-player-evidence/player-journey-receipt.json"
+          if [ -f "$receipt" ]; then
+            echo "--- journey FAIL rows (reprinted from $(basename "$receipt")) ---"
+            node -e '
+              const fs = require("fs");
+              const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              const bad = (r.results || []).filter((x) => x.status !== "PASS");
+              if (!bad.length) { console.log("(receipt records no failing row)"); }
+              for (const row of bad) console.log(`${row.status} ${row.name} — ${row.detail}`);
+              console.log(`CAPTURES_IN_RECEIPT=${(r.captures || []).length}`);
+            ' "$receipt"
+          else
+            echo "(no receipt written — the journey died before it could record one)"
+          fi
+
       # An incomplete or failed journey must not leave a green run, and neither
       # must evidence the scanner rejected.
       - name: Require the journey and the scan to have passed
