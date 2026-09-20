@@ -12,6 +12,7 @@ const suites = [
   'hosted-smoke-contract.test.mjs',
   'player-journey-contract.test.mjs',
   'write-sdk-config.test.mjs',
+  'functions-env.test.mjs',
   'verify-deployment.test.mjs',
 ];
 let failed = 0;
