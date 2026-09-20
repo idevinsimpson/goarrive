@@ -73,15 +73,21 @@ function classify(result) {
   // Permission wins even when gcloud also says NOT_FOUND, because it answers
   // NOT_FOUND precisely when it will not disclose whether a resource exists.
   if (ambiguous) return 'unknown';
-  // NOTHING here matches the bare phrase "does not exist". That phrase only
-  // ever reaches this code inside Google's deliberate hedge — "resource does
-  // not exist OR caller lacks access" — which reveals nothing, so it must not
-  // decide anything. An earlier version of this fix carried a separate clause
-  // for that phrase; mutation testing showed removing it changed no outcome,
-  // because the absent matcher below is already narrow enough to ignore it.
-  // A rule no test can fail is not a rule, so it is gone and the invariant it
-  // was protecting is pinned by a test instead.
-  if (/\bNOT_FOUND\b|\b404\b|was not found/i.test(text)) return 'absent';
+  // ABSENT MEANS SECRET MANAGER SAID SO, ABOUT THIS SECRET.
+  //
+  // A bare `404` or a bare "was not found" is not that claim: an egress proxy
+  // answers 404, and a missing credentials file reports "was not found". Both
+  // would have been read as "the secret does not exist" and sent an operator
+  // to create one. So the match requires an unambiguous NOT_FOUND *and* that
+  // the message is about a secret — ideally the one that was asked for.
+  //
+  // Nothing here matches the bare phrase "does not exist" either: it reaches
+  // this code only inside Google's deliberate hedge, which reveals nothing.
+  const saysNotFound = /\bNOT_FOUND\b/i.test(text);
+  const aboutThisSecret =
+    new RegExp(`\\b${secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text) ||
+    /\bsecret\b/i.test(text);
+  if (saysNotFound && aboutThisSecret) return 'absent';
   return 'unknown';
 }
 

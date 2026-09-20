@@ -74,6 +74,24 @@ mail still refusing to send. The exact relative target
 paths, traversal and sibling directories refused, and the workflow asserted to
 write that exact path.
 
+**The suite's own green depended on `/tmp`.** The absolute-path probe asserted
+that no file existed at the shared fixed path `/tmp/.env.westayfit-staging`.
+A file left there by anything else — including an earlier manual reproduction
+of this very gap — made that assertion fail on a run where the writer had
+behaved perfectly, and, worse, made "all suites passed" a statement about the
+machine rather than the code. Every negative output path is now run-scoped
+under a freshly created temp parent, and a regression pre-creates a same-named
+external file and proves the rejected invocation leaves it byte-identical and
+untouched by mtime. No test deletes ambient files as setup: tidying the case
+away is hiding it.
+
+**`absent` was broader than the claim it printed.** A bare `404` or "was not
+found" matched, so an egress-proxy 404 or a missing credentials file would
+have been reported as the secret not existing. `absent` now requires an
+unambiguous `NOT_FOUND` *and* a message about this secret; a transport 404
+that happens to carry the secret's URL, and a `NOT_FOUND` about some other
+resource, both stay `unknown`.
+
 A third thing surfaced from mutation-testing the first fix: a clause added for
 the hedge phrase turned out to change no outcome, because the absent matcher
 was already narrow enough to ignore it. A rule no test can fail is not a rule,

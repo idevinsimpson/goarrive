@@ -122,19 +122,47 @@ test('a handler belonging to another project is refused', () => {
 });
 
 test('the file must land exactly where firebase-tools reads it', () => {
-  // Three ways to write a correctly named file firebase-tools will ignore —
+  // Four ways to write a correctly named file firebase-tools will ignore —
   // a green step, a green deploy, and mail still refusing to send.
+  //
+  // NO SHARED FIXED PATH. The absolute-path case used to point at
+  // /tmp/.env.westayfit-staging, so a file left there by anything else —
+  // including an earlier manual reproduction — made `exists` true and failed
+  // a run in which the writer had behaved perfectly. A suite whose result
+  // depends on the state of /tmp is not a suite; it reported "all passed"
+  // only because /tmp happened to be clean at that moment.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-abs-'));
   for (const [label, out] of [
     ['suffix form', 'functions-westayfit/anything.env.westayfit-staging'],
     ['right name, wrong directory', '.env.westayfit-staging'],
     ['a sibling directory', 'functions/.env.westayfit-staging'],
     ['traversal out of the checkout', '../functions-westayfit/.env.westayfit-staging'],
-    ['an absolute path', '/tmp/.env.westayfit-staging'],
+    ['an absolute path', path.join(scratch, '.env.westayfit-staging')],
   ]) {
     const r = run({ from: 'a@b.test', out });
     assert.equal(r.status, 1, `${label} was accepted`);
     assert.equal(r.exists, false, `${label} wrote a file`);
   }
+});
+
+test('a rejected invocation leaves an existing same-named file untouched', () => {
+  // The stronger claim, and the one the absence check was only approximating:
+  // not merely "no file appeared", but "the file that was already there is
+  // exactly as it was". Pre-created on purpose rather than deleted as setup —
+  // a test that tidies ambient files is hiding the case it should prove.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-pre-'));
+  const target = path.join(scratch, '.env.westayfit-staging');
+  const original = 'WSF_EMAIL_FROM=somebody-elses@example.test\n';
+  fs.writeFileSync(target, original);
+  const before = fs.statSync(target);
+
+  const r = run({ from: 'a@b.test', out: target });
+  assert.equal(r.status, 1, 'an absolute path was accepted');
+
+  const after = fs.statSync(target);
+  assert.equal(fs.readFileSync(target, 'utf8'), original, 'the rejected invocation rewrote an existing file');
+  assert.equal(after.size, before.size, 'the existing file changed size');
+  assert.equal(after.mtimeMs, before.mtimeMs, 'the existing file was touched');
 });
 
 test('a non-https app url is refused', () => {
@@ -246,6 +274,42 @@ test('when NOT_FOUND and a permission hint arrive together, permission wins', ()
   // resource. Isolates the precedence rule: with both signals present, the
   // order of the two checks is the only thing deciding the answer.
   const r = reportWith('#!/bin/sh\necho "ERROR: NOT_FOUND: Secret [WSF_EMAIL_API_KEY] not found; PERMISSION_DENIED on secretmanager.secrets.get" >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+});
+
+test('a generic proxy 404 is not secret absence', () => {
+  // An egress proxy answers 404 for reasons that have nothing to do with
+  // Secret Manager. Reading that as "the secret does not exist" would send an
+  // operator to create one that may already be there.
+  const r = reportWith('#!/bin/sh\necho "ERROR: (gcloud) HttpError 404: Not Found (proxy)" >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+});
+
+test('a missing credential or config file is not secret absence', () => {
+  const r = reportWith('#!/bin/sh\necho "ERROR: The file /path/creds.json was not found." >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+});
+
+test('a transport 404 on the secret URL is not secret absence', () => {
+  // The case that isolates the NOT_FOUND requirement itself. An egress proxy
+  // 404 comes back with the request URL still in it, so the message DOES name
+  // the secret — a widened matcher would read it as absence while Secret
+  // Manager never answered at all.
+  const r = reportWith('#!/bin/sh\necho "ERROR: (gcloud.secrets.describe) HttpError 404 on https://secretmanager.googleapis.com/v1/projects/x/secrets/WSF_EMAIL_API_KEY" >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+});
+
+test('a NOT_FOUND about something that is not this secret is UNKNOWN', () => {
+  // Isolates the "about this secret" requirement: gcloud can answer NOT_FOUND
+  // for a project, a region or a different resource entirely, and none of
+  // those says the secret is missing. Without this probe that requirement
+  // could be deleted and the suite would stay green, because every other
+  // NOT_FOUND probe happens to mention a secret.
+  const r = reportWith('#!/bin/sh\necho "ERROR: NOT_FOUND: Project [westayfit-typo] was not found or deleted." >&2\nexit 1\n');
   assert.equal(r.state, 'unknown');
   assert.notEqual(r.state, 'absent');
 });
