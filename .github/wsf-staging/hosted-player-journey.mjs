@@ -324,30 +324,53 @@ async function contains(locator, expected, timeout = 30_000) {
   return actual;
 }
 /**
- * THE EVENT TITLE, THE ONLY ONE ON SCREEN.
+ * THE MEMBER EVENT, THE ONLY ONE ON SCREEN — AND EVERY POSITIVE READ INSIDE IT.
  *
- * Run 36 (35515986745) died here in 20 seconds, immediately rather than on a
- * timeout: `getByTestId('wsf-event-title')` matched the visible route AND the
- * copy expo-router keeps mounted underneath it, and Playwright strict mode
- * refuses two. The product was right — `waitForURL` had already passed, so the
- * sign-in return had happened; the locator was wrong.
+ * Runs 36 and 37 both died on the same root cause, one control apart: expo-router
+ * keeps the OUTGOING route mounted underneath the incoming one, so the document
+ * holds two copies of the event. Run 36 hit it on `wsf-event-title` (Playwright
+ * strict mode refuses two matches); run 37 hit it one step later in
+ * chooseActivityByTitle, where a document-wide querySelectorAll saw both copies'
+ * activity options.
  *
- * `:visible` selects only what a person can see. The count assertion is the
- * point and must not be dropped: without it this helper would paper over a
- * screen that really did render two titles, which is the defect the strict
- * locator was accidentally catching.
+ * Patching testIDs one at a time loses that race — there are a dozen more. So
+ * this helper resolves the ONE VISIBLE member root, and every positive
+ * post-arrival read is scoped to it as a descendant. A contract regression
+ * forbids page-scoped positive `wsf-event-*` locators after arrival so the class
+ * cannot come back control by control.
+ *
+ * The count assertions are the point and must not be dropped: without them this
+ * would paper over a screen that really did render two roots or two titles,
+ * which is the defect strict mode was accidentally catching.
  */
-async function visibleEventTitle(page, expectedTitle, timeout = 60_000) {
-  const titles = page.locator('[data-testid="wsf-event-title"]:visible');
-  await titles.first().waitFor({ state: 'visible', timeout });
-  const count = await titles.count();
-  assert(count === 1, `expected exactly one VISIBLE event title, found ${count}`);
+async function memberRoot(page, expectedTitle, timeout = 60_000) {
+  const roots = page.locator('[data-testid="wsf-event-member"]:visible');
+  await roots.first().waitFor({ state: 'visible', timeout });
+  const rootCount = await roots.count();
+  assert(rootCount === 1, `expected exactly one VISIBLE member-event root, found ${rootCount}`);
+  const root = roots.first();
+  const titles = root.locator('[data-testid="wsf-event-title"]:visible');
+  const titleCount = await titles.count();
+  assert(titleCount === 1, `expected exactly one VISIBLE event title in the member root, found ${titleCount}`);
   const actual = ((await titles.first().innerText()) || '').trim();
   assert(
     actual === expectedTitle,
     `the event title is "${sanitize(actual)}", expected the event's own title "${sanitize(expectedTitle)}"`
   );
-  return actual;
+  return root;
+}
+
+/**
+ * How many of a testID a PERSON can see.
+ *
+ * An absence check after arrival must not count the retained route's hidden
+ * copy: `getByTestId(x).count() === 0` would fail for a control nobody can see.
+ * Scoping such a check to the member root instead would make it vacuous for
+ * anything outside that root (the device question, for one), so it is counted
+ * page-wide but visible-only.
+ */
+async function visibleCount(page, testId) {
+  return page.locator(`[data-testid="${testId}"]:visible`).count();
 }
 async function signInOnPage(page, user) {
   await visible(page.getByTestId('wsf-signin-email'));
@@ -453,12 +476,12 @@ async function reachMemberEvent(page, qrUrl, user, expectedTitle, { captures = {
 
   // The device answer is remembered per browser, so the question is not asked
   // again — and the member view is what a signed-in member sees.
-  await visibleEventTitle(page, expectedTitle, 60_000);
+  const root = await memberRoot(page, expectedTitle, 60_000);
   assert(
-    (await page.getByTestId('wsf-event-device-choice').count()) === 0,
+    (await visibleCount(page, 'wsf-event-device-choice')) === 0,
     'the device question was asked again after sign-in, in a browser that already answered it'
   );
-  return landed;
+  return { landed, root };
 }
 
 /**
@@ -466,25 +489,25 @@ async function reachMemberEvent(page, qrUrl, user, expectedTitle, { captures = {
  * the option ids are slugs of labels. The WHERE panel does not exist until
  * this has happened.
  */
-async function chooseActivityByTitle(page, title) {
-  await visible(page.getByTestId('wsf-event-activity'), 45_000);
-  const optionIds = (await testIdsWithPrefix(page, 'wsf-event-activity-'))
+async function chooseActivityByTitle(root, title) {
+  await visible(root.getByTestId('wsf-event-activity'), 45_000);
+  const optionIds = (await testIdsWithPrefix(root, 'wsf-event-activity-'))
     .filter((id) => id !== 'wsf-event-activity-options' && id !== 'wsf-event-activity-none');
   assert(optionIds.length === 2, `a two-activity event offered ${optionIds.length} options`);
   // Nothing is chosen for a two-activity event, so the WHERE panel must be
   // absent right now. If it were already there, "choosing" would prove nothing.
   assert(
-    (await page.getByTestId('wsf-event-choice').count()) === 0,
+    (await root.getByTestId('wsf-event-choice').count()) === 0,
     'the where-panel is on screen before any activity was chosen'
   );
   let chosenId = null;
   for (const id of optionIds) {
-    if ((await textOf(page.getByTestId(id))).includes(title)) chosenId = id;
+    if ((await textOf(root.getByTestId(id))).includes(title)) chosenId = id;
   }
   assert(chosenId, `no option named "${title}"`);
-  await page.getByTestId(chosenId).click();
-  await visible(page.getByTestId('wsf-event-choice'));
-  await contains(page.getByTestId('wsf-event-choice-activity'), title);
+  await root.getByTestId(chosenId).click();
+  await visible(root.getByTestId('wsf-event-choice'));
+  await contains(root.getByTestId('wsf-event-choice-activity'), title);
   return chosenId;
 }
 /**
@@ -501,15 +524,18 @@ async function joinSecondPhone(browser, fx, qrUrl) {
   const page = await context.newPage();
   // A SEPARATE BROWSER, so this phone answers the device question on its own
   // account — the first phone's answer is stored per browser and cannot carry.
-  await reachMemberEvent(page, qrUrl, fx.phoneTwo);
+  // The event title was missing from this call until run 37's correction, so
+  // this participant would have asserted the title against `undefined` and
+  // failed case 4 even once the member view was reachable.
+  const { root } = await reachMemberEvent(page, qrUrl, fx.phoneTwo, fx.eventTitle);
   // AND IT CHOOSES ITS OWN ACTIVITY. The earlier version went straight for
   // the queue button, which is not rendered until an activity is selected —
   // so this participant could never have reached the line at all.
-  await chooseActivityByTitle(page, fx.activities[0].title);
-  await page.getByTestId('wsf-event-queue-start').click();
-  await visible(page.getByTestId('wsf-event-queue-panel'));
-  await page.getByTestId('wsf-event-queue-name-first').click();
-  await page.getByTestId('wsf-event-queue-join').click();
+  await chooseActivityByTitle(root, fx.activities[0].title);
+  await root.getByTestId('wsf-event-queue-start').click();
+  await visible(root.getByTestId('wsf-event-queue-panel'));
+  await root.getByTestId('wsf-event-queue-name-first').click();
+  await root.getByTestId('wsf-event-queue-join').click();
   await visible(page.getByTestId('wsf-queue-standing'), 60_000);
   const token = await signInToken(fx.phoneTwo);
   const mine = await call('second phone place', 'wsfMyTurn', { goalId: fx.activities[0].goalId }, token);
@@ -522,9 +548,12 @@ async function joinSecondPhone(browser, fx, qrUrl) {
 }
 
 /** Every element whose testID starts with a prefix, as ids. */
-async function testIdsWithPrefix(page, prefix) {
-  return page.evaluate((p) => Array.from(document.querySelectorAll(`[data-testid^="${p}"]`))
-    .map((el) => el.getAttribute('data-testid')), prefix);
+async function testIdsWithPrefix(root, prefix) {
+  // WITHIN THE GIVEN ROOT, never the document. Run 37 died because a
+  // document-wide querySelectorAll counted the retained route's copies too, so
+  // a two-activity event looked like it offered four options.
+  return root.evaluate((el, p) => Array.from(el.querySelectorAll(`[data-testid^="${p}"]`))
+    .map((node) => node.getAttribute('data-testid')), prefix);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -657,7 +686,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
 
   // Device question → signed-out landing → sign in → and the product brings
   // them back to the event by itself: see reachMemberEvent.
-  const landedAfterSignIn = await reachMemberEvent(page, qrUrl, fx.phoneOne, fx.eventTitle, {
+  const { landed: landedAfterSignIn, root } = await reachMemberEvent(page, qrUrl, fx.phoneOne, fx.eventTitle, {
     captures: { deviceChoice: '03-device-choice', signedOut: '04-signed-out-landing' },
   });
   await snap(page, 'phone', 390, '05-member-event');
@@ -666,7 +695,7 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   // landing does not offer one. The earlier version of this file chose an
   // activity before signing in and then claimed the choice survived the round
   // trip — a claim about a screen that was never on screen.
-  await chooseActivityByTitle(page, fx.activities[0].title);
+  await chooseActivityByTitle(root, fx.activities[0].title);
   await snap(page, 'phone', 390, '06-activity-chosen');
 
   // WHAT IS AND IS NOT CARRIED. Reported, not assumed: the event path writes
@@ -681,13 +710,13 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
 
   // EXPLICITLY CHOOSING THE QUEUE. The event offers recording on the phone as
   // well; this is the choice, not a default.
-  await visible(page.getByTestId('wsf-event-add'));
-  await page.getByTestId('wsf-event-queue-start').click();
-  await visible(page.getByTestId('wsf-event-queue-panel'));
+  await visible(root.getByTestId('wsf-event-add'));
+  await root.getByTestId('wsf-event-queue-start').click();
+  await visible(root.getByTestId('wsf-event-queue-panel'));
   await snap(page, 'phone', 390, '07-queue-name-choice');
   // A public screen shows this name, so the person picks which form of it.
-  await page.getByTestId('wsf-event-queue-name-first').click();
-  await page.getByTestId('wsf-event-queue-join').click();
+  await root.getByTestId('wsf-event-queue-name-first').click();
+  await root.getByTestId('wsf-event-queue-join').click();
 
   await visible(page.getByTestId('wsf-queue-standing'), 60_000);
   const place = await textOf(page.getByTestId('wsf-queue-place'));
@@ -721,15 +750,18 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   // selection is component state, and nothing is preselected for a
   // two-activity event. Rejoining without choosing one would find no
   // where-panel and no queue button.
-  await visibleEventTitle(page, fx.eventTitle, 45_000);
+  // A FRESH NAVIGATION NEEDS A FRESHLY RESOLVED ROOT: this goto mounts a new
+  // copy of the route and retires the old one, so the locator captured before
+  // it can be the one that is now hidden.
+  const rejoinRoot = await memberRoot(page, fx.eventTitle, 45_000);
   assert(
-    (await page.getByTestId('wsf-event-device-choice').count()) === 0,
+    (await visibleCount(page, 'wsf-event-device-choice')) === 0,
     'the device question was asked again in a browser that already answered it'
   );
-  await chooseActivityByTitle(page, fx.activities[0].title);
-  await page.getByTestId('wsf-event-queue-start').click();
-  await page.getByTestId('wsf-event-queue-name-first').click();
-  await page.getByTestId('wsf-event-queue-join').click();
+  await chooseActivityByTitle(rejoinRoot, fx.activities[0].title);
+  await rejoinRoot.getByTestId('wsf-event-queue-start').click();
+  await rejoinRoot.getByTestId('wsf-event-queue-name-first').click();
+  await rejoinRoot.getByTestId('wsf-event-queue-join').click();
   await visible(page.getByTestId('wsf-queue-standing'), 60_000);
   // SWITCHING TO THE PHONE is offered as a way out that keeps the movement.
   await visible(page.getByTestId('wsf-queue-switch-to-phone'));

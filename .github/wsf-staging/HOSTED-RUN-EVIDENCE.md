@@ -154,7 +154,7 @@ only the thing it asserts, on the run it asserted it.
 
 ---
 
-## Still not established by any run
+## Still not established — the snapshot as of run 33 (SUPERSEDED; see the current section below)
 
 - **The browser/player journey.** No hosted row opens a browser against the turn flow.
   Three defects were found in the unrun proof before it was ever dispatched, and all
@@ -315,7 +315,37 @@ FAILED, and **the failure was the harness's locator, not the product.**
   The count assertion is load-bearing and pinned by a regression — without it the helper
   would paper over a screen that genuinely rendered two titles.
 
-## Still not established by any run
+## Run 37 — `35518446637`, main `6316030`, app `6b257c3` (mode=player-journey)
+
+FAILED, one control further on, and **the product is again not what failed.**
+
+- **`phone-390-05-member-event.png` EXISTS.** No previous run produced it. It is the
+  first evidence that a visitor who scans the QR, is told they need an account, and
+  signs in is landed back **on the event as a member by the product itself**. Runs 33
+  and 36 both died before this frame.
+- **Cleanup complete again**, identical to run 36: `COMPLETE`, `56/56` documents,
+  `3/3` users, `ALREADY_ABSENT=0`, `MANIFEST_PRESERVED=false`. The `e5j-` fix holds
+  across runs. `EVIDENCE_SCAN=clean` over 12 files, which as always means the scanner
+  found no text it could reject — all ten PNGs are listed `UNSCANNABLE`.
+- **Where it died:** `06-activity-chosen` is absent, so inside `chooseActivityByTitle`.
+  The step ran **38 seconds** against a 45s wait in that function: an **immediate throw,
+  not a timeout**.
+- **The same root cause as run 36, one control apart.** `testIdsWithPrefix` ran
+  `document.querySelectorAll`, so it counted the retained route's copies and a
+  two-activity event looked like four options. Run 36's fix addressed the title; the
+  defect was the **class**, not that control.
+- **The systematic correction:** one `memberRoot()` helper resolves the single visible
+  `wsf-event-member` root and asserts exactly one root, exactly one title inside it, and
+  the exact seeded title. Every positive post-arrival `wsf-event-*` read is scoped to
+  that root; `testIdsWithPrefix` scans within it; post-arrival absence checks count
+  **visible** copies; pre-arrival reads stay page-scoped because no member root exists
+  yet. A contract regression rejects page-scoped positive post-arrival locators by name.
+- **A defect found by enumeration, not by a run:** `joinSecondPhone` called
+  `reachMemberEvent` without the expected title, so the second participant would have
+  compared against `undefined` and failed case 4 even once the member view was
+  reachable. Introduced by run 36's fix; corrected before it could cost a run.
+
+## Still not established by any run — CURRENT
 
 - **The player journey end to end.** Runs 33 and 36 both failed before the queue. What
   run 36 newly establishes is the front half only: the scanned link, the device question,
