@@ -385,8 +385,20 @@ test('no capture can carry a working enrolment code', () => {
 // visitor with no session then gets `wsf-event-signed-out`. These pin the real
 // order so no edit can quietly assume the old one again.
 
-const sliceFn = (name, end) =>
-  JOURNEY.slice(JOURNEY.indexOf(`async function ${name}(`), end ? JOURNEY.indexOf(end) : undefined);
+const sliceFn = (name, end) => {
+  const start = JOURNEY.indexOf(`async function ${name}(`);
+  assert.notEqual(start, -1, `sliceFn: no such function in the journey: ${name}`);
+  if (!end) return JOURNEY.slice(start);
+  // A MISSING TERMINATOR MUST FAIL LOUDLY. `indexOf` returns -1 for a
+  // terminator that no longer exists, and `slice(start, -1)` then runs to the
+  // end of the FILE — so a "this function only" check silently becomes a
+  // whole-file check and can pass on a match somewhere else entirely. That
+  // happened: joinSecondPhone was sliced to `async function testIdsWithPrefix`,
+  // which this branch deleted.
+  const stop = JOURNEY.indexOf(end, start);
+  assert.notEqual(stop, -1, `sliceFn: terminator not found after ${name}: ${end}`);
+  return JOURNEY.slice(start, stop);
+};
 
 /**
  * The same slice with comments removed.
@@ -450,7 +462,7 @@ test('the device question is answered before anything else on every phone that o
 });
 
 test('every participant reaches the event through that helper — nobody shortcuts to the member view', () => {
-  for (const [fn, end] of [['casePhoneChoosesQueue', '// 3.'], ['joinSecondPhone', '/** Every element whose testID']]) {
+  for (const [fn, end] of [['casePhoneChoosesQueue', '// 3.'], ['joinSecondPhone', 'async function enrolScreen']]) {
     const body = sliceFn(fn, end);
     assert.match(body, /await reachMemberEvent\(/, `${fn} does not go through reachMemberEvent`);
     assert.equal(/getByTestId\('wsf-event-signin'\)\.click\(\)/.test(body), false,
@@ -462,7 +474,7 @@ test('BOTH participants choose an activity explicitly, and the where-panel is pr
   // The second phone never chose one. The where-panel — and so the queue
   // button it contains — is not rendered until an activity is selected, so
   // that participant could never have reached the line at all.
-  for (const [fn, end] of [['casePhoneChoosesQueue', '// 3.'], ['joinSecondPhone', '/** Every element whose testID']]) {
+  for (const [fn, end] of [['casePhoneChoosesQueue', '// 3.'], ['joinSecondPhone', 'async function enrolScreen']]) {
     const body = sliceFn(fn, end);
     const chooseAt = body.indexOf('chooseActivityByTitle(');
     const queueAt = body.indexOf("'wsf-event-queue-start'");
@@ -572,10 +584,11 @@ test('the PRODUCT brings the visitor back to the event — the harness must not 
 test('every positive post-arrival event read is scoped to the ONE visible member root', () => {
   // RUNS 36 AND 37, one control apart, same root cause: expo-router keeps the
   // OUTGOING route mounted under the incoming one, so the document holds two
-  // copies of the event. Run 36 hit it on the title (strict mode refuses two
-  // matches); run 37 hit it in chooseActivityByTitle, where a document-wide
-  // querySelectorAll counted BOTH copies' activity options and a two-activity
-  // event looked like four.
+  // copies of the event and Playwright strict mode refuses two matches. Run 36
+  // hit it on the title; run 37 hit it on the raw `wsf-event-activity` CARD, at
+  // the top of chooseActivityByTitle — it never reached the option scan. That
+  // scan first ran in run 38 and overcounted NESTED DESCENDANTS inside ONE
+  // correct root, which is a different bug (see the radio-row test below).
   //
   // This test exists so the class cannot come back one control at a time.
   //
@@ -629,7 +642,7 @@ test('every positive post-arrival event read is scoped to the ONE visible member
 
   // 6. The second phone asserts the real event title, not undefined. This was
   //    a live defect: the call omitted the argument entirely.
-  const second = codeOfFn('joinSecondPhone', 'async function testIdsWithPrefix');
+  const second = codeOfFn('joinSecondPhone', 'async function enrolScreen');
   assert.match(second, /reachMemberEvent\(page, qrUrl, fx\.phoneTwo, fx\.eventTitle\)/,
     'the second phone does not pass the expected event title');
 });
@@ -670,6 +683,35 @@ test('the activity choice is made by radio row, so nested option nodes cannot in
     'the chosen activity is no longer matched by its readable name');
   assert.match(fn, /chosenCount === 1/,
     'more than one row could match the title without failing');
+});
+
+test('the retired run-37 explanation cannot come back, in source or in tests', () => {
+  // The false story: "run 37's prefix scan counted both route copies, so a
+  // two-activity event looked like four options." Run 37 never reached the
+  // scan — it threw on the raw wsf-event-activity card, strict mode, exactly
+  // like run 36 on the title. The scan first ran in run 38, inside ONE correct
+  // visible root, and overcounted each row's own nested descendants.
+  //
+  // This claim was written into three places and corrected in three places. It
+  // is pinned here so a future edit cannot quietly restore it.
+  const SELF = fs.readFileSync('.github/wsf-staging/tests/player-journey-contract.test.mjs', 'utf8');
+  const EVIDENCE = fs.readFileSync('.github/wsf-staging/HOSTED-RUN-EVIDENCE.md', 'utf8');
+  // A paragraph may MENTION the false claim, but only while retracting it —
+  // the correction in HOSTED-RUN-EVIDENCE.md quotes it in order to withdraw
+  // it, and a rule that forbade the words outright would forbid the retraction
+  // along with the lie.
+  const FALSE_CLAIM = /(both route copies|both copies'|four options|document-wide)/i;
+  const RETRACTION = /(wrong|untrue|never ran|never reached|first said|corrected|superseded|not a figure)/i;
+  for (const [label, text] of [['the journey', JOURNEY], ['this suite', SELF], ['the evidence doc', EVIDENCE]]) {
+    for (const para of text.split(/\n\s*\n/)) {
+      if (!/run 3[78]/i.test(para) || !FALSE_CLAIM.test(para)) continue;
+      assert.ok(RETRACTION.test(para),
+        `${label} states the retired run-37 explanation without retracting it:\n${para.slice(0, 220)}`);
+    }
+  }
+  // And the true distinction is actually recorded, not merely un-said.
+  assert.match(EVIDENCE, /Run 37 threw at `visible\(page\.getByTestId\('wsf-event-activity'\)/,
+    'the evidence doc no longer records where run 37 actually threw');
 });
 
 test('no comment still claims the product does not return, or that approve-station is unprobed', () => {

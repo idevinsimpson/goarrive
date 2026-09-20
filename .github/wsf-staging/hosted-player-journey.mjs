@@ -328,10 +328,15 @@ async function contains(locator, expected, timeout = 30_000) {
  *
  * Runs 36 and 37 both died on the same root cause, one control apart: expo-router
  * keeps the OUTGOING route mounted underneath the incoming one, so the document
- * holds two copies of the event. Run 36 hit it on `wsf-event-title` (Playwright
- * strict mode refuses two matches); run 37 hit it one step later in
- * chooseActivityByTitle, where a document-wide querySelectorAll saw both copies'
- * activity options.
+ * holds two copies of the event, and Playwright strict mode refuses two matches.
+ * Run 36 hit it on `wsf-event-title`; run 37 hit it one step later on the raw
+ * `wsf-event-activity` CARD, at the top of chooseActivityByTitle.
+ *
+ * RUN 37 NEVER REACHED THE OPTION SCAN. An earlier version of this banner said
+ * it did. That was wrong: the scan first ran in run 38, inside ONE correct
+ * visible root, where it overcounted each row's own nested
+ * `-indicator`/`-label`/`-description` nodes. Two unrelated defects, one
+ * capture boundary apart.
  *
  * Patching testIDs one at a time loses that race — there are a dozen more. So
  * this helper resolves the ONE VISIBLE member root, and every positive
