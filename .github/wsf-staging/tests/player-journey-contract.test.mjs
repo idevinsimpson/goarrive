@@ -103,7 +103,7 @@ test('the redaction rules match the suite that already passes the scanner', () =
 });
 
 test('the scanned link is read off the screen and carries no authority', () => {
-  const body = JOURNEY.slice(JOURNEY.indexOf('async function caseQrLink('), JOURNEY.indexOf('// 2. THE PHONE KEEPS'));
+  const body = JOURNEY.slice(JOURNEY.indexOf('async function caseQrLink('), JOURNEY.indexOf('// 2. THE PHONE GETS'));
   assert.ok(/getAttribute\('data-qr-url'\)/.test(body),
     'the link must be read from the served screen, not constructed by the harness');
   for (const forbidden of ['secret', 'token', 'pairing', 'station']) {
@@ -364,4 +364,123 @@ test('no capture can carry a working enrolment code', () => {
     /pairing-code-redacted/.test(body),
     'the capture must be labelled as redacted, so no reader assumes the code is present and valid'
   );
+});
+
+// ---- the order the served build actually puts on screen ---------------------
+// Run 35495928362 timed out after 73 seconds waiting for `wsf-event-title` on
+// the first cold open of the scanned link. That screen cannot appear there:
+// a fresh browser is asked whose screen it is before anything else, and a
+// visitor with no session then gets `wsf-event-signed-out`. These pin the real
+// order so no edit can quietly assume the old one again.
+
+const sliceFn = (name, end) =>
+  JOURNEY.slice(JOURNEY.indexOf(`async function ${name}(`), end ? JOURNEY.indexOf(end) : undefined);
+
+test('the cold scan answers the device question and lands signed OUT, never on the member view', () => {
+  const body = sliceFn('caseQrLink', '// 2. THE PHONE GETS');
+  const deviceAt = body.indexOf('answerOwnPhone(coldPage');
+  const signedOutAt = body.indexOf("'wsf-event-signed-out'");
+  assert.notEqual(deviceAt, -1, 'the cold scan never answers the device question');
+  assert.notEqual(signedOutAt, -1, 'the cold scan never reaches the signed-out landing');
+  assert.ok(deviceAt < signedOutAt, 'the device question comes before the signed-out landing');
+  // The member view is what run 33 waited for here. It may only be asserted
+  // ABSENT in this case.
+  const titleUses = [...body.matchAll(/wsf-event-title/g)].map((m) => m.index);
+  for (const at of titleUses) {
+    const line = body.slice(body.lastIndexOf('\n', at) + 1, body.indexOf('\n', at));
+    assert.match(line, /count\(\)\) === 0|count\(\) === 0/,
+      `the cold scan waits for the member view: ${line.trim()}`);
+  }
+  assert.ok(body.indexOf('line before the scan') < body.indexOf('line after the scan'),
+    'the journey does not prove the scan left the line untouched');
+});
+
+test('the device question is answered before anything else on every phone that opens the link cold', () => {
+  const helper = sliceFn('answerOwnPhone', 'async function reachMemberEvent(');
+  // Both answers must be on screen: "chose personal" is meaningless if only
+  // one option was ever rendered.
+  assert.match(helper, /wsf-device-choice-personal/);
+  assert.match(helper, /wsf-device-choice-shared/);
+  assert.ok(
+    helper.indexOf("'wsf-device-choice-shared'") < helper.indexOf(".getByTestId('wsf-device-choice-personal').click()"),
+    'the shared option must be proven present before the personal one is clicked'
+  );
+
+  const reach = sliceFn('reachMemberEvent', 'async function chooseActivityByTitle(');
+  const order = ['answerOwnPhone(', "'wsf-event-signed-out'", "'wsf-event-signin'", 'signInOnPage(', "'wsf-event-title'"];
+  let previous = -1;
+  for (const marker of order) {
+    const at = reach.indexOf(marker);
+    assert.notEqual(at, -1, `reachMemberEvent never does: ${marker}`);
+    assert.ok(at > previous, `reachMemberEvent is out of order at ${marker}`);
+    previous = at;
+  }
+});
+
+test('every participant reaches the event through that helper — nobody shortcuts to the member view', () => {
+  for (const [fn, end] of [['casePhoneChoosesQueue', '// 3.'], ['joinSecondPhone', '/** Every element whose testID']]) {
+    const body = sliceFn(fn, end);
+    assert.match(body, /await reachMemberEvent\(/, `${fn} does not go through reachMemberEvent`);
+    assert.equal(/getByTestId\('wsf-event-signin'\)\.click\(\)/.test(body), false,
+      `${fn} drives sign-in itself instead of through the helper that pins the order`);
+  }
+});
+
+test('BOTH participants choose an activity explicitly, and the where-panel is proven absent until they do', () => {
+  // The second phone never chose one. The where-panel — and so the queue
+  // button it contains — is not rendered until an activity is selected, so
+  // that participant could never have reached the line at all.
+  for (const [fn, end] of [['casePhoneChoosesQueue', '// 3.'], ['joinSecondPhone', '/** Every element whose testID']]) {
+    const body = sliceFn(fn, end);
+    const chooseAt = body.indexOf('chooseActivityByTitle(');
+    const queueAt = body.indexOf("'wsf-event-queue-start'");
+    assert.notEqual(chooseAt, -1, `${fn} never chooses an activity`);
+    assert.notEqual(queueAt, -1, `${fn} never chooses the queue`);
+    assert.ok(chooseAt < queueAt, `${fn} reaches for the queue before choosing an activity`);
+  }
+  const helper = sliceFn('chooseActivityByTitle', 'async function joinSecondPhone(');
+  assert.match(helper, /wsf-event-choice'\)\.count\(\)\) === 0/,
+    'the where-panel must be proven absent before an activity is chosen, or "choosing" proves nothing');
+  assert.ok(
+    helper.indexOf('count()) === 0') < helper.indexOf('.click()'),
+    'the absence check must come before the click'
+  );
+});
+
+test('the rejoin chooses an activity again, because nothing is preselected on a fresh load', () => {
+  const body = sliceFn('casePhoneChoosesQueue', '// 3.');
+  const leaveAt = body.indexOf("'wsf-queue-leave'");
+  const rejoinChoose = body.indexOf('chooseActivityByTitle(', leaveAt);
+  const rejoinQueue = body.indexOf("'wsf-event-queue-start'", leaveAt);
+  assert.notEqual(leaveAt, -1, 'the phone never leaves the line');
+  assert.notEqual(rejoinChoose, -1, 'the rejoin never chooses an activity again');
+  assert.ok(rejoinChoose < rejoinQueue, 'the rejoin reaches for the queue before choosing an activity');
+  // And the device question must NOT be asked again in a browser that answered.
+  assert.match(body.slice(leaveAt), /wsf-event-device-choice'\)\.count\(\)\) === 0/,
+    'the rejoin does not prove the remembered device answer was honoured');
+});
+
+test('the journey does not claim the event survives sign-in, because on this build it does not', () => {
+  // The sign-in link is a plain href="/signin" and nextRouteAfterAuth carries
+  // a pending JOIN code or a kiosk return goal — never an event goal. The
+  // return is the harness's own navigation and must be described as such.
+  const claims = JOURNEY.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.equal(/survived sign-in|survive the sign-in|context retained/i.test(claims), false,
+    'a receipt still claims the scanned context survived sign-in');
+  const reach = sliceFn('reachMemberEvent', 'async function chooseActivityByTitle(');
+  assert.match(reach, /waitForURL/, 'the journey must observe where sign-in actually landed');
+  // lastIndexOf: reachMemberEvent opens the link once at the top too, so the
+  // FIRST page.goto is the cold open, not the return.
+  assert.ok(
+    reach.indexOf('signInOnPage(') < reach.lastIndexOf('page.goto(qrUrl'),
+    'the navigation back to the event must come after sign-in, and be the harness doing it'
+  );
+  assert.ok(
+    reach.indexOf('page.goto(qrUrl') < reach.indexOf('answerOwnPhone('),
+    'the cold open must come before the device question is answered'
+  );
+  // The PASS line has to say whose navigation that was.
+  const pass = JOURNEY.slice(JOURNEY.indexOf("check('player journey — the phone chooses the queue'"));
+  assert.match(pass.slice(0, 1200), /navigated back to the scanned event itself|NO retained goal/,
+    'the receipt does not disclose that the return was the harness’s own');
 });
