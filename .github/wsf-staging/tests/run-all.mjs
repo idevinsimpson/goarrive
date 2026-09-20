@@ -10,6 +10,7 @@ const suites = [
   'cleanup-synthetic.test.mjs',
   'hosted-smoke-contract.test.mjs',
   'write-sdk-config.test.mjs',
+  'functions-env.test.mjs',
   'verify-deployment.test.mjs',
 ];
 let failed = 0;
