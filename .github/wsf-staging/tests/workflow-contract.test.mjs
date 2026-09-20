@@ -49,6 +49,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
   const names = uploads.map((m) => m[2]);
   assert.ok(names.includes('wsf-deployment-evidence'), 'deployment evidence upload must be conditional');
   assert.ok(names.includes('wsf-hosted-evidence'), 'hosted evidence upload must be conditional');
+  assert.ok(names.includes('wsf-player-evidence'), 'player evidence upload must be conditional');
   for (const [, cond, name] of uploads) {
     assert.match(cond, /steps\.scan-[a-z-]+\.outcome == 'success'/, `${name} upload is not gated on a scan outcome`);
   }
@@ -58,7 +59,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
 });
 
 test('both scan steps carry the id their upload references', () => {
-  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence']) {
+  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence', 'scan-player-evidence']) {
     assert.ok(text.includes(`id: ${id}`), `scan step id ${id} is missing`);
     assert.ok(text.includes(`steps.${id}.outcome == 'success'`), `nothing references ${id}`);
   }
@@ -74,7 +75,7 @@ test('the gate job has no OIDC capability', () => {
 });
 
 test('privileged jobs declare the wsf-staging environment', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey']) {
     assert.match(jobs[j], /environment: wsf-staging/, `${j} must declare the environment the trust condition requires`);
   }
 });
@@ -93,13 +94,15 @@ test('no npx invocation exists in any job', () => {
   assert.deepEqual(invocations, [], `npx must not resolve packages in any job: ${invocations.join(' | ')}`);
 });
 
-test('the hosted job runs the candidate-local Playwright binary', () => {
-  assert.match(jobs['hosted-verify'], /apps\/westayfit\/node_modules\/\.bin\/playwright/);
-  assert.match(jobs['hosted-verify'], /install --with-deps chromium/);
+test('the browser jobs run the candidate-local Playwright binary', () => {
+  for (const j of ['hosted-verify', 'player-journey']) {
+    assert.match(jobs[j], /apps\/westayfit\/node_modules\/\.bin\/playwright/, `${j}: not the candidate's CLI`);
+    assert.match(jobs[j], /install --with-deps chromium/, `${j}: browsers not installed from that CLI`);
+  }
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -172,6 +175,8 @@ const WIRING = [
   ['hosted-verify', 'Run the Package E hosted authorization checks', '.github/wsf-staging/hosted-package-e-smoke.mjs'],
   ['hosted-verify', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
   ['deploy', 'Verify the deployed state', '.github/wsf-staging/verify-deployment.mjs'],
+  ['player-journey', 'Run the browser/player journey', '.github/wsf-staging/hosted-player-journey.mjs'],
+  ['player-journey', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
 ];
 for (const [job, step, script] of WIRING) {
   test(`${path.basename(script)}: every required WSF_* variable is supplied by its step`, () => {
@@ -211,9 +216,311 @@ test('the config job documents both consumers of the staging env artifact', () =
   assert.match(comment, /consumed by\s*\n?\s*#\s*the downstream build job[^\n]*\n?\s*#?[^\n]*hosted-verify/);
 });
 
-test('nothing in the hosted job prints the SDK config or the env artifact', () => {
-  const j = jobs['hosted-verify'].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-  assert.equal(/\b(cat|echo|printenv|env)\b[^\n]*(wsf-staging\.env|WSF_SDK_CONFIG_FILE|WSF_STAGING_API_KEY|EXPO_PUBLIC)/.test(j), false);
+test('nothing in the browser jobs prints the SDK config or the env artifact', () => {
+  for (const name of ['hosted-verify', 'player-journey']) {
+    const j = jobs[name].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    assert.equal(/\b(cat|echo|printenv|env)\b[^\n]*(wsf-staging\.env|WSF_SDK_CONFIG_FILE|WSF_STAGING_API_KEY|EXPO_PUBLIC)/.test(j), false, name);
+  }
+});
+
+// ---- the player-journey mode ----------------------------------------------
+// A standalone `wsf-player-journey.yml` was written first and could never
+// authenticate: the workload identity provider's attribute condition pins
+// assertion.workflow_ref to THIS file, so the run died at `config` with
+// "unauthorized_client: The given credential is rejected by the attribute
+// condition". The correction moved the proof into this workflow as a dispatch
+// mode. These regressions hold that correction in place.
+
+const WORKFLOW_DIR = path.resolve('.github/workflows');
+const PLAN = fs.readFileSync(path.resolve('.github/wsf-staging/FEDERATION-PLAN.md'), 'utf8');
+
+function planCondition() {
+  const m = /--attribute-condition="([^"]+)"/.exec(PLAN);
+  assert.notEqual(m, null, 'FEDERATION-PLAN.md no longer states an attribute condition');
+  return m[1];
+}
+function planValue(field) {
+  const m = new RegExp(`assertion\\.${field}\\s*==\\s*'([^']+)'`).exec(planCondition());
+  assert.notEqual(m, null, `the federation plan's condition does not pin ${field}`);
+  return m[1];
+}
+// Job blocks with comment lines removed: comments quote the defects these
+// checks look for, and must not satisfy or trip them.
+function jobCode(name) {
+  assert.ok(jobs[name], `job ${name} not found`);
+  return jobs[name].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+}
+function jobCondition(name) {
+  const m = /^ {4}if: (.*)$/m.exec(jobs[name]);
+  return m ? m[1] : null;
+}
+
+// A deliberately tiny evaluator for the `if:` expressions this workflow uses.
+// Comparing condition STRINGS would pass for a condition that is merely
+// present; evaluating them proves which jobs each mode actually reaches.
+function evaluate(expr, ctx) {
+  const src = expr.replace(/^\$\{\{/, '').replace(/\}\}$/, '').trim();
+  const tokens = src.match(/'[^']*'|[A-Za-z_][A-Za-z0-9_.]*\(\)|[A-Za-z_][A-Za-z0-9_.]*|==|!=|&&|\|\||\(|\)|!/g) || [];
+  let i = 0;
+  const peek = () => tokens[i];
+  const next = () => tokens[i++];
+  function primary() {
+    const t = next();
+    if (t === '(') { const v = orExpr(); assert.equal(next(), ')', `unbalanced parens in: ${src}`); return v; }
+    if (t === '!') return !primary();
+    if (t === 'always()') return true;
+    if (t === 'success()') return ctx.__success !== false;
+    if (/^'/.test(t)) return t.slice(1, -1);
+    assert.ok(Object.prototype.hasOwnProperty.call(ctx, t), `unknown reference "${t}" in: ${src}`);
+    return ctx[t];
+  }
+  function comparison() {
+    let left = primary();
+    while (peek() === '==' || peek() === '!=') {
+      const op = next();
+      const right = primary();
+      left = op === '==' ? left === right : left !== right;
+    }
+    return left;
+  }
+  function andExpr() {
+    let left = comparison();
+    while (peek() === '&&') { next(); const right = comparison(); left = left && right; }
+    return left;
+  }
+  function orExpr() {
+    let left = andExpr();
+    while (peek() === '||') { next(); const right = andExpr(); left = left || right; }
+    return left;
+  }
+  const value = orExpr();
+  assert.equal(i, tokens.length, `trailing tokens in: ${src}`);
+  return value;
+}
+
+// The evaluator is itself test material: if it silently returned true for
+// everything, every mode assertion below would pass vacuously.
+test('the condition evaluator distinguishes true from false', () => {
+  const ctx = { 'inputs.mode': 'deploy', 'needs.gate.result': 'success' };
+  assert.equal(evaluate("${{ inputs.mode != 'player-journey' }}", ctx), true);
+  assert.equal(evaluate("${{ inputs.mode == 'player-journey' }}", ctx), false);
+  assert.equal(evaluate("${{ always() && needs.gate.result == 'success' && inputs.mode != 'player-journey' }}", ctx), true);
+  assert.equal(evaluate("${{ always() && needs.gate.result == 'failure' && inputs.mode != 'player-journey' }}", ctx), false);
+  assert.throws(() => evaluate('${{ needs.typo.result }}', ctx), /unknown reference/);
+});
+
+// A job is reached when every job it needs was reached AND its own condition
+// holds. `always()` in a condition releases the needs requirement, which is
+// exactly how hosted-verify stays reachable after a soft deploy failure.
+function reachedJobs(mode) {
+  const ctx = {
+    'inputs.mode': mode,
+    'needs.gate.result': 'success',
+    'needs.config.result': 'success',
+    'needs.build.result': 'success',
+    'needs.deploy.result': 'success',
+  };
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey'];
+  const reached = {};
+  for (const name of order) {
+    const cond = jobCondition(name);
+    const needsMatch = /^ {4}needs: (.*)$/m.exec(jobs[name]);
+    const raw = needsMatch ? needsMatch[1].trim() : '';
+    const needed = raw === ''
+      ? []
+      : (raw.startsWith('[') ? raw.replace(/[[\]\s]/g, '').split(',') : [raw]);
+    const needsOk = needed.every((n) => reached[n]);
+    const alwaysRuns = cond ? /always\(\)/.test(cond) : false;
+    reached[name] = (needsOk || alwaysRuns) && (cond === null || evaluate(cond, ctx) === true);
+  }
+  return reached;
+}
+
+// 1. The privileged player work is pinned to the trusted workflow file.
+test('the federation plan pins THIS workflow file, and this is that file', () => {
+  const ref = planValue('workflow_ref');
+  const m = /^[^/]+\/[^/]+\/(\.github\/workflows\/[^@]+)@(refs\/heads\/[^']+)$/.exec(ref);
+  assert.notEqual(m, null, `workflow_ref is not a repo-qualified workflow path: ${ref}`);
+  const [, pinnedPath, pinnedRef] = m;
+  assert.equal(pinnedRef, 'refs/heads/main', 'the plan must still pin the default branch');
+  assert.equal(path.resolve(pinnedPath), WF, `the plan pins ${pinnedPath}; the player jobs live in ${path.relative(process.cwd(), WF)}`);
+  assert.ok(fs.existsSync(path.resolve(pinnedPath)), 'the pinned workflow file does not exist');
+});
+
+test('no OTHER workflow file asks for an OIDC token — one cannot authenticate', () => {
+  const files = fs.readdirSync(WORKFLOW_DIR).filter((f) => /\.ya?ml$/.test(f));
+  const privileged = files.filter((f) => /id-token/.test(fs.readFileSync(path.join(WORKFLOW_DIR, f), 'utf8')));
+  assert.deepEqual(privileged, [path.basename(WF)],
+    `only the workflow the provider pins can authenticate; these also request a token: ${privileged.join(', ')}`);
+});
+
+test('the retired standalone player workflow is gone', () => {
+  assert.equal(fs.existsSync(path.join(WORKFLOW_DIR, 'wsf-player-journey.yml')), false,
+    'the standalone workflow can never satisfy the attribute condition and must not come back');
+});
+
+test('every job that takes a token declares the environment the plan pins', () => {
+  const required = planValue('environment');
+  for (const [name, body] of Object.entries(jobs)) {
+    if (!/id-token: write/.test(body)) continue;
+    assert.match(body, new RegExp(`environment: ${required}$`, 'm'),
+      `${name} takes a token but does not declare environment ${required}`);
+  }
+  assert.ok(/id-token: write/.test(jobs['player-journey']), 'the player job needs a token to seed and clean up');
+});
+
+// 2. Player mode builds nothing, deploys nothing, runs no 24-row suite.
+test('player mode reaches only gate, config and the player journey', () => {
+  const reached = reachedJobs('player-journey');
+  assert.deepEqual(reached, {
+    gate: true,
+    config: true,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': true,
+  });
+});
+
+test('the player job itself contains no build, deploy or 24-row execution', () => {
+  const body = jobCode('player-journey');
+  const forbidden = [
+    [/firebase deploy/, 'a functions/hosting deploy'],
+    [/hosting:channel:deploy/, 'a hosting channel deploy'],
+    [/--only functions/, 'a functions deployment target'],
+    [/hosted-package-e-smoke\.mjs/, 'the 24-row authorization suite'],
+    [/verify-deployment\.mjs/, 'deployment verification'],
+    [/read-inventory\.mjs/, 'the pre-deploy inventory read'],
+    [/check-build-stamp\.mjs/, 'the build stamp check'],
+    [/expo export/, 'a web bundle build'],
+  ];
+  for (const [re, what] of forbidden) {
+    assert.equal(re.test(body), false, `player mode must not perform ${what}`);
+  }
+  assert.match(body, /hosted-player-journey\.mjs/, 'the player job must run the reviewed journey');
+});
+
+test('the player job depends on no build or deploy job', () => {
+  const needs = /^ {4}needs: (.*)$/m.exec(jobs['player-journey'])[1];
+  assert.equal(needs.replace(/[[\]\s]/g, ''), 'gate,config',
+    'the player proof must depend only on the shared gate/config boundary');
+});
+
+// 3. Deploy mode is unchanged: it still reaches build, deploy and the suite.
+test('deploy mode still reaches build, deploy and hosted verification', () => {
+  const reached = reachedJobs('deploy');
+  assert.deepEqual(reached, {
+    gate: true,
+    config: true,
+    build: true,
+    deploy: true,
+    'hosted-verify': true,
+    'player-journey': false,
+  });
+});
+
+test('deploy is the default mode, so an unset input runs the normal path', () => {
+  const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\n# Nothing is granted'));
+  const modeBlock = onBlock.slice(onBlock.indexOf('      mode:'));
+  assert.match(modeBlock, /^\s+default: deploy$/m, 'the default must remain the deployment path');
+  assert.match(modeBlock, /^\s+type: choice$/m, 'the mode must be a closed choice, not free text');
+  const options = [...modeBlock.matchAll(/^\s+- ([a-z-]+)$/gm)].map((m) => m[1]);
+  assert.deepEqual(options, ['deploy', 'player-journey'], 'exactly these two modes exist');
+});
+
+test('the deploy path still carries the steps it carried before the mode existed', () => {
+  assert.match(jobCode('build'), /scripts\/westayfit\/build-staging\.sh/, 'the build job must still build the staging web artifact');
+  assert.match(jobCode('build'), /npm --prefix functions-westayfit run build/, 'the build job must still compile the functions');
+  assert.match(jobCode('deploy'), /firebase deploy/, 'the deploy job must still deploy');
+  assert.match(jobCode('hosted-verify'), /hosted-package-e-smoke\.mjs/, 'the 24-row suite must still run in deploy mode');
+  // The mode gate is a condition on those jobs, never a rewrite of their work.
+  for (const j of ['build', 'deploy']) {
+    assert.equal(/inputs\.mode/.test(jobCode(j).replace(/^ {4}if: .*$/m, '')), false,
+      `${j}: mode must gate the job, not branch inside its steps`);
+  }
+});
+
+// 4. A failed or skipped journey cannot leave a green run.
+test('the player job fails the run when the journey or the scan did not pass', () => {
+  const gateStep = stepBlock('player-journey', 'Require the journey and the scan to have passed');
+  assert.match(gateStep, /if: always\(\)/, 'the final gate must run even after a failed journey');
+  for (const id of ['journey', 'scan-player-evidence']) {
+    assert.match(gateStep, new RegExp(`steps\\.${id}\\.outcome[^\n]*=[^\n]*["']success["']`),
+      `the gate must require ${id} to have succeeded`);
+  }
+  assert.match(gateStep, /exit 1/, 'the gate must actually fail the step');
+  assert.match(gateStep, /set -euo pipefail/);
+});
+
+test('every step outcome the player job gates on belongs to a step that exists', () => {
+  const body = jobs['player-journey'];
+  const referenced = new Set([...body.matchAll(/steps\.([a-z0-9-]+)\.outcome/g)].map((m) => m[1]));
+  const declared = new Set([...body.matchAll(/^\s+id: ([a-z0-9-]+)$/gm)].map((m) => m[1]));
+  assert.ok(referenced.size >= 2, `expected the journey and the scan to be gated on, saw ${[...referenced]}`);
+  for (const id of referenced) {
+    assert.ok(declared.has(id), `steps.${id}.outcome is referenced but no step carries id: ${id} — it would read as empty and the gate would never fire`);
+  }
+});
+
+test('cleanup and its re-authentication run whatever the journey did', () => {
+  for (const name of ['Re-authenticate before cleanup', 'Remove synthetic fixtures', 'Scan evidence before upload']) {
+    const step = stepBlock('player-journey', name);
+    assert.match(step, /if: always\(\)/, `${name}: must run after a failed journey too`);
+  }
+  // Cleanup must come after the journey and before the scan, or it would tidy
+  // up nothing and the scan would inspect a directory still being written.
+  const body = jobs['player-journey'];
+  const order = ['id: journey', 'Remove synthetic fixtures', 'id: scan-player-evidence', 'name: wsf-player-evidence'];
+  let previous = -1;
+  for (const marker of order) {
+    const at = body.indexOf(marker);
+    assert.notEqual(at, -1, `missing ${marker}`);
+    assert.ok(at > previous, `out of order: ${marker}`);
+    previous = at;
+  }
+});
+
+test('the player evidence upload is gated on the player scan, not on any other', () => {
+  const upload = /if: \$\{\{([^}]*)\}\}\n\s+with:\n\s+name: wsf-player-evidence/.exec(text);
+  assert.notEqual(upload, null, 'the player evidence upload was not found');
+  assert.match(upload[1], /steps\.scan-player-evidence\.outcome == 'success'/);
+  assert.equal(/scan-hosted-evidence|scan-deployment-evidence/.test(upload[1]), false,
+    'the player upload must not be gated on another job’s scan');
+});
+
+test('the player job keeps its own manifest, evidence directory and artifact name', () => {
+  const player = jobCode('player-journey');
+  const hosted = jobCode('hosted-verify');
+  const manifestsOf = (body) => new Set([...body.matchAll(/WSF_CLEANUP_MANIFEST: \$\{\{ github\.workspace \}\}\/([a-z-]+)\//g)].map((m) => m[1]));
+  const playerDirs = manifestsOf(player);
+  const hostedDirs = manifestsOf(hosted);
+  assert.deepEqual([...playerDirs], ['wsf-player-evidence'], 'the player manifest must live in the player evidence directory');
+  assert.deepEqual([...hostedDirs], ['wsf-evidence'], 'the hosted manifest must stay where it was');
+  for (const d of playerDirs) {
+    assert.equal(hostedDirs.has(d), false, `both jobs write a manifest into ${d}; one run's cleanup could adopt the other's record`);
+  }
+  // Every manifest and receipt the player job names sits under its own directory.
+  for (const m of player.matchAll(/WSF_CLEANUP_(?:MANIFEST|RECEIPT): \$\{\{ github\.workspace \}\}\/([a-z-]+)\//g)) {
+    assert.equal(m[1], 'wsf-player-evidence');
+  }
+  assert.match(player, /WSF_RESULT_DIR: \$\{\{ github\.workspace \}\}\/wsf-player-evidence$/m);
+  // No two UPLOADS share a name: a second upload of an existing name would
+  // merge or clobber the first job's evidence. Downloads reuse names on
+  // purpose, so only the upload steps are counted.
+  const uploaded = text
+    .split('uses: actions/upload-artifact')
+    .slice(1)
+    .map((chunk) => /^\s+name: (\S+)$/m.exec(chunk))
+    .map((m) => { assert.notEqual(m, null, 'an upload-artifact step names no artifact'); return m[1]; });
+  assert.equal(new Set(uploaded).size, uploaded.length, `two uploads share an artifact name: ${uploaded.join(', ')}`);
+  assert.ok(uploaded.includes('wsf-player-evidence'), 'the player evidence must be uploaded');
+  assert.ok(uploaded.includes('wsf-hosted-evidence'), 'the hosted evidence must still be uploaded');
+});
+
+test('the player job consumes the deploy workflow’s own env artifact', () => {
+  const body = jobCode('player-journey');
+  assert.match(body, /name: wsf-staging-env/, 'the player job downloads the config job’s artifact');
+  assert.equal(/name: wsf-player-env/.test(text), false, 'the retired workflow’s env artifact name must not linger');
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);

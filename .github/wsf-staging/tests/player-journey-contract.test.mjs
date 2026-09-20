@@ -15,7 +15,28 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const JOURNEY = fs.readFileSync('.github/wsf-staging/hosted-player-journey.mjs', 'utf8');
-const WORKFLOW = fs.readFileSync('.github/workflows/wsf-player-journey.yml', 'utf8');
+// The journey is a MODE of the deploy workflow, not a workflow of its own: the
+// workload identity provider's attribute condition pins workflow_ref to
+// wsf-staging-deploy.yml, so a standalone file could never authenticate
+// (FEDERATION-PLAN.md). WORKFLOW is that file's player-journey JOB — the
+// assertions below are about the player path, not about the deploy path that
+// shares the file.
+const WORKFLOW_FILE = fs.readFileSync('.github/workflows/wsf-staging-deploy.yml', 'utf8');
+const WORKFLOW = (() => {
+  const start = WORKFLOW_FILE.indexOf('\n  player-journey:\n');
+  assert.notEqual(start, -1, 'the deploy workflow no longer carries a player-journey job');
+  const rest = WORKFLOW_FILE.slice(start + 1);
+  const nextJob = /\n {2}[a-z][a-z0-9-]*:\n/.exec(rest.slice(1));
+  const block = nextJob ? rest.slice(0, nextJob.index + 1) : rest;
+  // The slice must be exactly one job. Today player-journey is last in the
+  // file, so the "a job follows it" branch is not exercised by the real
+  // workflow; this guard is what makes a bad slice fail loudly instead of
+  // letting every "the player job does not do X" check pass on the wrong text.
+  assert.equal(/\n {2}[a-z][a-z0-9-]*:\n/.test(block.slice(1)), false,
+    'the player-journey slice swallowed the job after it');
+  assert.ok(/hosted-player-journey\.mjs/.test(block), 'the player-journey slice is not the player job');
+  return block;
+})();
 const SMOKE = fs.readFileSync('.github/wsf-staging/hosted-package-e-smoke.mjs', 'utf8');
 
 test('the journey never claims Safari, and names the engine it actually ran', () => {
@@ -36,7 +57,7 @@ test('the journey never claims Safari, and names the engine it actually ran', ()
   assert.equal(/webkit\.launch\(|firefox\.launch\(/.test(JOURNEY), false,
     'the journey launches an engine it does not name in its receipt');
   assert.ok(/chromium/.test(WORKFLOW) && !/webkit/.test(WORKFLOW),
-    'the workflow installs an engine the journey does not run');
+    'the player job installs an engine the journey does not run');
 });
 
 test('the journey disclaims what it cannot prove', () => {
@@ -244,17 +265,20 @@ test('captures are labelled by surface and width, and both widths are used', () 
   }
 });
 
-test('the workflow deploys nothing, runs the 24-row suite nowhere, and keeps its own manifest', () => {
+test('the player job deploys nothing, runs the 24-row suite nowhere, and keeps its own manifest', () => {
   assert.equal(/firebase deploy|hosting:channel|--only functions/.test(WORKFLOW), false,
-    'the player-journey workflow must not deploy anything');
+    'player mode must not deploy anything');
   assert.equal(/hosted-package-e-smoke/.test(WORKFLOW), false,
-    'the player-journey workflow must not re-run the 24-row authorization suite');
+    'player mode must not re-run the 24-row authorization suite');
   assert.ok(/wsf-player-evidence\/cleanup-manifest\.json/.test(WORKFLOW),
-    'the workflow must use its own cleanup manifest, never the deploy workflow’s');
+    'the player job must use its own cleanup manifest, never the hosted suite’s');
   assert.equal(/wsf-evidence\/cleanup-manifest\.json/.test(WORKFLOW), false,
-    'the workflow points at the deploy workflow’s manifest, which would let one run adopt the other’s fixtures');
-  assert.ok(/group: wsf-staging-deploy/.test(WORKFLOW),
+    'the player job points at the hosted suite’s manifest, which would let one run adopt the other’s fixtures');
+  assert.ok(/^concurrency:\n {2}group: wsf-staging-deploy$/m.test(WORKFLOW_FILE),
     'the journey must not be able to run while a deployment replaces the build underneath it');
+  // And the mode itself must not build or deploy: the job is gated on it.
+  assert.ok(/^ {4}if: \$\{\{ inputs\.mode == 'player-journey' \}\}$/m.test(WORKFLOW),
+    'the player job must run only in player mode');
   // Cleanup and the redacting scan both run even when the journey fails.
   const cleanupAt = WORKFLOW.indexOf('Remove synthetic fixtures');
   const scanAt = WORKFLOW.indexOf('Scan evidence before upload');
