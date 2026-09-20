@@ -330,20 +330,59 @@ FAILED, one control further on, and **the product is again not what failed.**
 - **Where it died:** `06-activity-chosen` is absent, so inside `chooseActivityByTitle`.
   The step ran **38 seconds** against a 45s wait in that function: an **immediate throw,
   not a timeout**.
-- **The same root cause as run 36, one control apart.** `testIdsWithPrefix` ran
-  `document.querySelectorAll`, so it counted the retained route's copies and a
-  two-activity event looked like four options. Run 36's fix addressed the title; the
-  defect was the **class**, not that control.
+- **The same root cause as run 36, one control apart — AND NOT THE PREFIX SCANNER.**
+  Run 37 threw at `visible(page.getByTestId('wsf-event-activity'), 45_000)`, the raw
+  activity CARD, which matched the visible route and the retained one: a strict-mode
+  refusal, exactly as on the title in run 36. **It never reached the prefix scan.**
+  *(Corrected after run 38. This entry first said the scanner counted route copies and
+  saw four options. That was wrong on both counts — the scanner did not run, and the
+  overcount run 38 later found has nothing to do with route copies. The number four was
+  my arithmetic, not a figure any run reported.)*
 - **The systematic correction:** one `memberRoot()` helper resolves the single visible
   `wsf-event-member` root and asserts exactly one root, exactly one title inside it, and
   the exact seeded title. Every positive post-arrival `wsf-event-*` read is scoped to
-  that root; `testIdsWithPrefix` scans within it; post-arrival absence checks count
+  that root; the prefix scan was scoped to it (and later retired outright, see run 38);
+  post-arrival absence checks count
   **visible** copies; pre-arrival reads stay page-scoped because no member root exists
   yet. A contract regression rejects page-scoped positive post-arrival locators by name.
 - **A defect found by enumeration, not by a run:** `joinSecondPhone` called
   `reachMemberEvent` without the expected title, so the second participant would have
   compared against `undefined` and failed case 4 even once the member view was
   reachable. Introduced by run 36's fix; corrected before it could cost a run.
+
+## Run 38 — `35521393874`, main `2520aa9`, app `6b257c3` (mode=player-journey)
+
+FAILED at the same capture boundary as run 37, **on a different defect one line further
+in.** The identical boundary is what made this easy to misread.
+
+- **#376 worked.** The journey reached the one correct visible member root and the real
+  two-activity event; `05-member-event` is present again. Run 37's strict-mode refusal on
+  the activity card is gone, which is *why* this run got as far as the option count.
+- **Cleanup complete**, third run running: `COMPLETE`, `56/56` documents, `3/3` users,
+  `MANIFEST_PRESERVED=false`. `EVIDENCE_SCAN=clean` over 12 files, all PNGs `UNSCANNABLE`.
+- **Where it died:** still inside `chooseActivityByTitle`, step **36 seconds** against a
+  45s wait — an immediate throw. `06-activity-chosen` absent.
+- **EIGHT options for two movements, inside ONE correct root.** Not route copies.
+  `OptionRow.tsx` sets the testID on the row and derives four more from it:
+  `-indicator`, `-indicator-dot` (selected only), `-label`, `-description`. So a
+  `wsf-event-activity-` PREFIX scan matches each row plus three of its own descendants:
+
+      2 rows x (row + indicator + label + description) = 8
+
+  The count was never a count of choices. A testID prefix cannot tell a choice from a
+  piece of one.
+- **The correction:** the prefix enumeration is **retired**, not narrowed. The option
+  group is a real `radiogroup` and each choice a real `radio` (`accessibilityRole` in
+  `OptionRow.tsx`), so the journey asks for what the thing *is*: exactly two radio rows
+  inside `wsf-event-activity-options`, the wanted one matched by the readable name
+  (`label={activity.title ?? activity.label}`), and exactly one match required. No
+  indicator, label or description is a radio, which is the property the prefix scan
+  lacked. Mutation-checked: restoring a prefix selector fails the suite, and dropping the
+  exact-two assertion fails it too.
+- **What this run cost, honestly.** Runs 37 and 38 stopped at the same capture, so the
+  second looked like the first. It was not, and reading it as "the fix did not work" was
+  wrong: the fix worked and uncovered the next defect. Two different bugs can share a
+  boundary.
 
 ## Still not established by any run — CURRENT
 
