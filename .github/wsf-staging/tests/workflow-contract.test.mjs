@@ -50,6 +50,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
   assert.ok(names.includes('wsf-deployment-evidence'), 'deployment evidence upload must be conditional');
   assert.ok(names.includes('wsf-hosted-evidence'), 'hosted evidence upload must be conditional');
   assert.ok(names.includes('wsf-player-evidence'), 'player evidence upload must be conditional');
+  assert.ok(names.includes('wsf-cleanup-recovery-evidence'), 'recovery evidence upload must be conditional');
   for (const [, cond, name] of uploads) {
     assert.match(cond, /steps\.scan-[a-z-]+\.outcome == 'success'/, `${name} upload is not gated on a scan outcome`);
   }
@@ -59,7 +60,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
 });
 
 test('both scan steps carry the id their upload references', () => {
-  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence', 'scan-player-evidence']) {
+  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence', 'scan-player-evidence', 'scan-recovery-evidence']) {
     assert.ok(text.includes(`id: ${id}`), `scan step id ${id} is missing`);
     assert.ok(text.includes(`steps.${id}.outcome == 'success'`), `nothing references ${id}`);
   }
@@ -75,7 +76,7 @@ test('the gate job has no OIDC capability', () => {
 });
 
 test('privileged jobs declare the wsf-staging environment', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery']) {
     assert.match(jobs[j], /environment: wsf-staging/, `${j} must declare the environment the trust condition requires`);
   }
 });
@@ -102,7 +103,7 @@ test('the browser jobs run the candidate-local Playwright binary', () => {
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -320,7 +321,7 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey'];
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery'];
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -379,6 +380,7 @@ test('player mode reaches only gate, config and the player journey', () => {
     deploy: false,
     'hosted-verify': false,
     'player-journey': true,
+    'cleanup-recovery': false,
   });
 });
 
@@ -416,6 +418,7 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     deploy: true,
     'hosted-verify': true,
     'player-journey': false,
+    'cleanup-recovery': false,
   });
 });
 
@@ -424,8 +427,9 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   const modeBlock = onBlock.slice(onBlock.indexOf('      mode:'));
   assert.match(modeBlock, /^\s+default: deploy$/m, 'the default must remain the deployment path');
   assert.match(modeBlock, /^\s+type: choice$/m, 'the mode must be a closed choice, not free text');
-  const options = [...modeBlock.matchAll(/^\s+- ([a-z-]+)$/gm)].map((m) => m[1]);
-  assert.deepEqual(options, ['deploy', 'player-journey'], 'exactly these two modes exist');
+  const optionsBlock = modeBlock.slice(modeBlock.indexOf('options:'), modeBlock.indexOf('recover_run_id:'));
+  const options = [...optionsBlock.matchAll(/^\s+- ([a-z-]+)$/gm)].map((m) => m[1]);
+  assert.deepEqual(options, ['deploy', 'player-journey', 'cleanup-recovery'], 'exactly these three modes exist');
 });
 
 test('the deploy path still carries the steps it carried before the mode existed', () => {
@@ -521,6 +525,150 @@ test('the player job consumes the deploy workflow’s own env artifact', () => {
   const body = jobCode('player-journey');
   assert.match(body, /name: wsf-staging-env/, 'the player job downloads the config job’s artifact');
   assert.equal(/name: wsf-player-env/.test(text), false, 'the retired workflow’s env artifact name must not linger');
+});
+
+// ---- the cleanup-recovery mode ---------------------------------------------
+// Run 35495928362 created three synthetic accounts and fifty-one documents and
+// removed none of them: the journey minted `e5j-…` tags, the cleaner accepted
+// `^e5h-` alone, so the run ended MANIFEST_UNUSABLE. The prefix is fixed in
+// run-tag.mjs; this mode is how the fixtures that run stranded get removed
+// WITHOUT running another journey, which would create more of them first.
+
+test('recovery mode reaches the recovery job and nothing else — not even the gate', () => {
+  const reached = reachedJobs('cleanup-recovery');
+  assert.deepEqual(reached, {
+    gate: false,
+    config: false,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'cleanup-recovery': true,
+  });
+});
+
+test('the recovery job creates no fixtures: no journey, build, deploy, 24-row suite or verification', () => {
+  const body = jobCode('cleanup-recovery');
+  const forbidden = [
+    [/hosted-player-journey\.mjs/, 'the browser/player journey'],
+    [/hosted-package-e-smoke\.mjs/, 'the 24-row authorization suite'],
+    [/verify-deployment\.mjs/, 'deployment verification'],
+    [/read-inventory\.mjs/, 'the pre-deploy inventory read'],
+    [/firebase deploy|hosting:channel:deploy|--only functions/, 'a deployment'],
+    [/expo export|build-staging\.sh/, 'a build'],
+    [/playwright|chromium/i, 'a browser'],
+  ];
+  for (const [re, what] of forbidden) {
+    assert.equal(re.test(body), false, `the recovery job must not perform ${what}`);
+  }
+  assert.match(body, /cleanup-synthetic\.mjs/, 'the recovery job must run the cleaner');
+  assert.match(body, /validate-recovery-manifest\.mjs/, 'the recovery job must gate the manifest first');
+});
+
+test('the recovery job takes exactly actions:read, contents:read and id-token:write', () => {
+  const body = jobs['cleanup-recovery'];
+  const block = body.slice(body.indexOf('permissions:'), body.indexOf('steps:'));
+  const granted = [...block.matchAll(/^\s+([a-z-]+): (read|write)$/gm)].map((m) => `${m[1]}:${m[2]}`).sort();
+  assert.deepEqual(granted, ['actions:read', 'contents:read', 'id-token:write'],
+    `the recovery job's permissions drifted: ${granted.join(', ')}`);
+  // actions: read exists to reach ANOTHER run's artifact, and belongs to no
+  // other job in this workflow.
+  for (const [name, other] of Object.entries(jobs)) {
+    if (name === 'cleanup-recovery') continue;
+    assert.equal(/^\s+actions: /m.test(other), false, `${name} must not carry an actions permission`);
+  }
+});
+
+test('the manifest is validated BEFORE a credential is obtained', () => {
+  const body = jobCode('cleanup-recovery');
+  const validate = body.indexOf('validate-recovery-manifest.mjs');
+  const auth = body.indexOf('google-github-actions/auth');
+  const clean = body.indexOf('cleanup-synthetic.mjs');
+  assert.ok(validate !== -1 && auth !== -1 && clean !== -1);
+  assert.ok(validate < auth, 'a manifest from a downloaded artifact must be gated before the job authenticates');
+  assert.ok(auth < clean, 'the cleaner needs the credential the auth step mints');
+});
+
+test('the artifact comes from a run id in THIS repository, never another repo', () => {
+  const body = jobCode('cleanup-recovery');
+  const download = body.slice(body.indexOf('actions/download-artifact'));
+  const step = download.slice(0, download.indexOf('- name:', 1) === -1 ? undefined : download.indexOf('- name:', 1));
+  assert.match(step, /name: wsf-player-evidence/, 'the recovery job reads the player evidence artifact');
+  assert.match(step, /run-id: \$\{\{ steps\.recover-target\.outputs\.run_id \}\}/,
+    'the run id must be the validated one, not the raw input');
+  assert.equal(/^\s+repository:/m.test(step), false,
+    'a repository input would let this mode be pointed at another repository’s run');
+  assert.match(step, /github-token:/, 'a cross-run artifact download needs a token');
+});
+
+test('the run id is checked for shape before it is used', () => {
+  const step = stepBlock('cleanup-recovery', 'Require a plain numeric run id');
+  assert.match(step, /\*\[!0-9\]\*\)/, 'a non-numeric run id must be refused');
+  assert.match(step, /exit 1/);
+  // And the empty case is its own message, not a confusing artifact error.
+  assert.match(step, /''\)/);
+  assert.match(step, /set -euo pipefail/);
+});
+
+test('a recovery that did not complete cannot leave a green run', () => {
+  const gate = stepBlock('cleanup-recovery', 'Require the recovery to have completed');
+  assert.match(gate, /if: always\(\)/);
+  // The receipt is read, not just the exit code: the status is the claim.
+  // Checking that "COMPLETE|NO_FIXTURES" merely APPEARS is not enough — it
+  // still appears in `COMPLETE|NO_FIXTURES|INCOMPLETE)`, which accepts a
+  // recovery that left fixtures behind. So the case arms are parsed and the
+  // passing one must be exactly those two statuses, with everything else
+  // falling to a catch-all that exits non-zero.
+  const caseBody = gate.slice(gate.indexOf('case "$status" in'), gate.indexOf('esac'));
+  assert.ok(caseBody.length > 0, 'the gate must decide on the receipt status');
+  const arms = [...caseBody.matchAll(/^\s+([A-Za-z_|*]+)\)(.*)$/gm)].map((m) => [m[1], m[2]]);
+  const passing = arms.filter(([, body]) => !/exit 1/.test(body)).map(([pattern]) => pattern);
+  assert.deepEqual(passing, ['COMPLETE|NO_FIXTURES'],
+    `only a COMPLETE or NO_FIXTURES receipt may pass; these do too: ${passing.join(' ')}`);
+  const catchAll = arms.find(([pattern]) => pattern === '*');
+  assert.ok(catchAll, 'every other status must fall to a catch-all');
+  assert.match(catchAll[1], /exit 1/, 'the catch-all must fail the run');
+  assert.match(gate, /steps\.scan-recovery-evidence\.outcome[^\n]*=[^\n]*["']success["']/);
+  assert.match(gate, /steps\.recover\.outcome[^\n]*=[^\n]*["']success["']/);
+  assert.match(gate, /cleanup-receipt\.json|RECEIPT/, 'the gate must read the receipt');
+  assert.match(gate, /exit 1/);
+});
+
+test('every step outcome the recovery job gates on belongs to a step that exists', () => {
+  const body = jobs['cleanup-recovery'];
+  const referenced = new Set([...body.matchAll(/steps\.([a-z0-9-]+)\.outcome/g)].map((m) => m[1]));
+  const declaredOutputs = new Set([...body.matchAll(/steps\.([a-z0-9-]+)\.outputs/g)].map((m) => m[1]));
+  const declared = new Set([...body.matchAll(/^\s+id: ([a-z0-9-]+)$/gm)].map((m) => m[1]));
+  assert.ok(referenced.size >= 2, `expected the cleaner and the scan to be gated on, saw ${[...referenced]}`);
+  for (const id of [...referenced, ...declaredOutputs]) {
+    assert.ok(declared.has(id), `steps.${id} is referenced but no step carries id: ${id}`);
+  }
+});
+
+test('the recovery job keeps its own evidence directory and artifact name', () => {
+  const body = jobCode('cleanup-recovery');
+  assert.match(body, /WSF_CLEANUP_RECEIPT: \$\{\{ github\.workspace \}\}\/wsf-recovery-evidence\//);
+  assert.equal(/wsf-evidence\/|wsf-player-evidence\/cleanup-receipt/.test(body), false,
+    'the recovery job must not write into another job’s evidence directory');
+  const upload = /if: \$\{\{([^}]*)\}\}\n\s+with:\n\s+name: wsf-cleanup-recovery-evidence/.exec(text);
+  assert.notEqual(upload, null, 'the recovery evidence upload was not found');
+  assert.match(upload[1], /steps\.scan-recovery-evidence\.outcome == 'success'/);
+});
+
+test('the modes are gated by equality, so a fourth mode cannot silently start building or deploying', () => {
+  for (const j of ['build', 'deploy']) {
+    const cond = jobCondition(j);
+    assert.match(cond, /inputs\.mode == 'deploy'/, `${j} must be gated on deploy mode by equality`);
+    assert.equal(/inputs\.mode !=/.test(cond), false, `${j} uses a negation, which admits every future mode`);
+  }
+  assert.equal(/inputs\.mode !=/.test(jobCondition('hosted-verify')), false,
+    'hosted-verify uses a negation, which admits every future mode');
+  // And prove it: a mode nobody has defined yet must reach NOTHING — not the
+  // gate, and above all not `config`, which is privileged.
+  const reached = reachedJobs('some-future-mode');
+  for (const [name, hit] of Object.entries(reached)) {
+    assert.equal(hit, false, `an unrecognised mode reached ${name}`);
+  }
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);

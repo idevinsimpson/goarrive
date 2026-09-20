@@ -709,4 +709,81 @@ await test('a departed uid with no run-tagged membership behind it is still refu
   assert.ok(r.receipt.unsafeDetails.some((d) => /neither .*-tagged nor .*uid/.test(d)));
 });
 
+// ---- the run tags this cleaner owns ----------------------------------------
+// Run 35495928362's whole failure: the player journey minted `e5j-…` from its
+// first line, this file only ever exercised `e5h-`, and the cleaner accepted
+// `^e5h-` alone. Three synthetic users and fifty-one documents were created
+// and none were removed. The predicate now lives in run-tag.mjs and BOTH
+// harnesses' real tags are checked against it below.
+
+await test('the player journey’s own e5j tag is accepted, cleaned COMPLETE, and read back', async () => {
+  const d = tmp();
+  const shape = runShapeManifest('e5j-testrun01');
+  const fake = await startFake(backendFor(shape));
+  const mp = writeManifest(d, shape.manifest);
+  const r = await runCleanup(fake.base, mp, path.join(d, 'receipt.json'));
+  fake.server.close();
+  assert.equal(r.receipt.status, 'COMPLETE', `e5j must be cleanable: ${r.out}${r.err}`);
+  assert.equal(r.receipt.usersDeleted, 9);
+  assert.equal(r.receipt.documentsDeleted, 74);
+  assert.equal(fake.accounts.size, 0);
+  assert.equal(fake.docs.size, 0);
+});
+
+for (const tag of ['e5i-testrun01', 'e5hj-testrun01', 'xe5h-testrun01', 'e5jgrp-testrun01', 'e5j', 'e5j-', 'E5J-testrun01', 'testrun01']) {
+  await test(`a lookalike run tag is still refused with zero deletions: ${JSON.stringify(tag)}`, async () => {
+    const d = tmp();
+    // A real, fully valid fixture set — only the tag is wrong. Nothing else
+    // can be the reason it is refused.
+    const shape = runShapeManifest('e5h-testrun01');
+    const fake = await startFake(backendFor(shape));
+    const r = await runCleanup(
+      fake.base,
+      writeManifest(d, { ...shape.manifest, runTag: tag }),
+      path.join(d, 'receipt.json')
+    );
+    fake.server.close();
+    assert.equal(r.receipt.status, 'MANIFEST_UNUSABLE', `${tag} must not be accepted`);
+    assert.equal(mutations(fake.calls).length, 0, `${tag}: nothing may be deleted`);
+    assert.equal(fake.accounts.size, 9, 'the accounts are untouched');
+    assert.equal(fake.docs.size, 74, 'the documents are untouched');
+  });
+}
+
+await test('EVERY harness’s real generated run tag is one the cleaner accepts', async () => {
+  // The cross-check that did not exist. Each harness's tag expression is read
+  // out of its own source and evaluated, so this compares what the harnesses
+  // ACTUALLY mint against what the cleaner ACTUALLY accepts — not two copies
+  // of a constant that were written to agree.
+  const { isOwnedRunTag } = await import('../run-tag.mjs');
+  const harnesses = [
+    ['hosted-package-e-smoke.mjs', 'e5h-'],
+    ['hosted-player-journey.mjs', 'e5j-'],
+  ];
+  for (const [file, expectedPrefix] of harnesses) {
+    const src = fs.readFileSync(path.resolve('.github/wsf-staging', file), 'utf8');
+    const m = /^const runTag = (`[^`]+`);$/m.exec(src);
+    assert.notEqual(m, null, `${file}: no single-line runTag assignment found — this check must be updated, not deleted`);
+    // Evaluate the harness's own template with the same inputs it uses.
+    const tag = new Function('Date', 'crypto', `return ${m[1]};`)(Date, crypto);
+    assert.ok(tag.startsWith(expectedPrefix), `${file} mints ${tag}, which does not start with ${expectedPrefix}`);
+    assert.ok(
+      isOwnedRunTag(tag),
+      `${file} mints ${tag}, which cleanup-synthetic.mjs REFUSES — this is exactly the defect that stranded run 35495928362's fixtures on staging`
+    );
+  }
+});
+
+await test('the owned-prefix list names every harness, so adding one cannot be a silent regex edit', async () => {
+  const { OWNED_RUN_TAG_PREFIXES } = await import('../run-tag.mjs');
+  assert.deepEqual(Object.keys(OWNED_RUN_TAG_PREFIXES).sort(), ['e5h-', 'e5j-']);
+  for (const [prefix, owner] of Object.entries(OWNED_RUN_TAG_PREFIXES)) {
+    assert.ok(/\.mjs/.test(owner), `${prefix} does not name the harness that mints it`);
+    assert.ok(
+      fs.existsSync(path.resolve('.github/wsf-staging', owner.split(' ')[0])),
+      `${prefix} names ${owner.split(' ')[0]}, which does not exist`
+    );
+  }
+});
+
 console.log(`\ncleanup-synthetic: ${passed} passed`);

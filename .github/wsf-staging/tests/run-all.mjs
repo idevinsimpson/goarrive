@@ -8,6 +8,7 @@ const suites = [
   'workflow-contract.test.mjs',
   'scan-evidence.test.mjs',
   'cleanup-synthetic.test.mjs',
+  'validate-recovery-manifest.test.mjs',
   'hosted-smoke-contract.test.mjs',
   'player-journey-contract.test.mjs',
   'write-sdk-config.test.mjs',

@@ -34,6 +34,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { isOwnedRunTag } from './run-tag.mjs';
 
 const PROJECT_ID = 'westayfit-staging';
 const TOKEN = process.env.WSF_GOOGLE_ACCESS_TOKEN;
@@ -141,7 +142,12 @@ try {
   finish('MANIFEST_UNUSABLE', { reason: 'manifest is not readable JSON', manifestPreserved: true }, 1);
 }
 const runTag = String(manifest?.runTag || '');
-if (manifest?.project !== PROJECT_ID || !/^e5h-[A-Za-z0-9_-]+$/.test(runTag)) {
+// The accepted prefixes live in run-tag.mjs, declared beside the harness that
+// mints each one. They were duplicated here until run 35495928362: the player
+// journey had always minted `e5j-…` while this file accepted `^e5h-` alone,
+// so that run created three synthetic users and fifty-one documents and then
+// refused to remove any of them.
+if (manifest?.project !== PROJECT_ID || !isOwnedRunTag(runTag)) {
   // Refuse to delete anything against a manifest whose identity does not check
   // out. A broadened predicate here would clear records this run never made.
   finish('MANIFEST_UNUSABLE', { reason: 'manifest identity check failed', manifestPreserved: true }, 1);
