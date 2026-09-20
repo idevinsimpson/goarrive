@@ -27,14 +27,26 @@ const WORKFLOW = (() => {
   assert.notEqual(start, -1, 'the deploy workflow no longer carries a player-journey job');
   const rest = WORKFLOW_FILE.slice(start + 1);
   const nextJob = /\n {2}[a-z][a-z0-9-]*:\n/.exec(rest.slice(1));
-  const block = nextJob ? rest.slice(0, nextJob.index + 1) : rest;
-  // The slice must be exactly one job. Today player-journey is last in the
-  // file, so the "a job follows it" branch is not exercised by the real
-  // workflow; this guard is what makes a bad slice fail loudly instead of
-  // letting every "the player job does not do X" check pass on the wrong text.
+  let block = nextJob ? rest.slice(0, nextJob.index + 1) : rest;
+  // A job's banner comment sits ABOVE its `name:` line, so cutting at the next
+  // job header carries THAT job's banner into this slice. Every "the player
+  // job does not do X" check below is a regex over this text, and a
+  // neighbour's prose is not the player job's code — the `cleanup-recovery`
+  // banner alone names the journey, the 24-row suite and a deployment. So
+  // trailing comment and blank lines are dropped and these checks read the
+  // player job and nothing else.
+  const lines = block.split('\n');
+  while (lines.length && /^\s*(#.*)?$/.test(lines[lines.length - 1])) lines.pop();
+  block = lines.join('\n');
+  // The slice must be exactly one job, and it must be the right one.
   assert.equal(/\n {2}[a-z][a-z0-9-]*:\n/.test(block.slice(1)), false,
     'the player-journey slice swallowed the job after it');
   assert.ok(/hosted-player-journey\.mjs/.test(block), 'the player-journey slice is not the player job');
+  // It must end on the job's own last line — the check that catches a trim
+  // which ate into the job itself, or stopped inside somebody else's banner.
+  const last = block.split('\n').pop();
+  assert.match(last, /\S/, 'the slice ends on a blank line');
+  assert.equal(/^\s*#/.test(last), false, 'the slice still ends inside a comment');
   return block;
 })();
 const SMOKE = fs.readFileSync('.github/wsf-staging/hosted-package-e-smoke.mjs', 'utf8');
