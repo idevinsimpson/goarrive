@@ -104,14 +104,28 @@ test('the shell carries four destinations on every member surface, and Home is t
     expect(bar!.y + bar!.height, `the tab bar sits below the fold at ${w.key}`).toBeLessThanOrEqual(w.height + 1);
 
     // EACH DESTINATION IS REAL, and marks itself current.
-    for (const [key, testId] of [
-      ['activity', 'wsf-activity-title'],
-      ['community', 'wsf-community-index-title'],
-      ['you', 'wsf-you-title'],
+    // EACH DESTINATION IS REAL, MARKS ITSELF CURRENT, AND IS CAPTURED
+    // SETTLED — not mid-load.
+    //
+    // The first version captured as soon as the heading appeared, so the
+    // contact sheet showed "Loading your activity…" and "Loading…" for two of
+    // the four destinations. A capture of a spinner is not evidence about a
+    // screen. Each one now waits for a RESOLVED state — its content or its
+    // honest empty state — before the shutter.
+    for (const [key, testId, settled] of [
+      ['activity', 'wsf-activity-title', ['wsf-activity-rows', 'wsf-activity-empty', 'wsf-activity-error']],
+      ['community', 'wsf-community-index-title', ['wsf-community-index-rows', 'wsf-community-index-empty', 'wsf-community-index-error']],
+      ['you', 'wsf-you-title', ['wsf-you-identity', 'wsf-you-signed-out']],
     ] as const) {
       await page.getByTestId(`wsf-member-tab-${key}`).click();
       await expect(page.getByTestId(testId)).toBeVisible({ timeout: 40_000 });
       await expect(page.getByTestId(`wsf-member-tab-${key}`)).toHaveAttribute('data-current', 'true');
+      await expect
+        .poll(async () => {
+          for (const id of settled) if (await page.getByTestId(id).count()) return id;
+          return null;
+        }, { timeout: 40_000, message: `${key} at ${w.key} never left its loading state` })
+        .not.toBeNull();
       await expectNoHorizontalOverflow(page, `${key} at ${w.key}`);
       await page.screenshot({ path: path.join(OUT, `${key}-${w.key}.png`) });
     }

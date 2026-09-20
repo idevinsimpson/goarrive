@@ -1,7 +1,9 @@
 import { usePathname, useRouter } from 'expo-router';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CARD_BORDER, CREAM, NAVY, PROGRESS_GREEN, TEXT_MUTED } from './kit';
+import { TabGlyph } from './TabGlyph';
 
 /**
  * THE APP SHELL'S BOTTOM NAVIGATION.
@@ -45,6 +47,11 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
   const pathname = usePathname() || '/';
   const router = useRouter();
   const { width } = useWindowDimensions();
+  // SAFE AREA, FROM THE PLATFORM RATHER THAN A GUESS. The previous version
+  // hard-coded 20px of bottom padding for "a modern phone", which is wrong on
+  // every device that is not that phone. `react-native-safe-area-context` is
+  // already a dependency and reports the real inset (0 in a browser).
+  const insets = useSafeAreaInsets();
   /**
    * AT 200% TEXT ZOOM THE FOUR DESTINATIONS WRAP INSTEAD OF CLIPPING.
    *
@@ -59,7 +66,7 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
   if (!signedIn || !shellAppliesTo(pathname)) return null;
   return (
     <View
-      style={[styles.bar, narrow ? styles.barWrapped : null]}
+      style={[styles.bar, { paddingBottom: 10 + insets.bottom }, narrow ? styles.barWrapped : null]}
       testID="wsf-member-tabs"
       accessibilityRole={Platform.OS === 'web' ? ('navigation' as 'none') : undefined}
       accessibilityLabel="Main"
@@ -85,7 +92,16 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
             // see and a reviewer would have taken on trust.
             dataSet={{ current: active ? 'true' : 'false' }}
           >
-            <View style={[styles.marker, active ? styles.markerActive : null]} />
+            {/*
+              ACTIVE IS SAID THREE WAYS: a filled pill behind the glyph, the
+              glyph and label in navy rather than muted, and the label at a
+              heavier weight. Shape and weight both carry it, so the current
+              destination survives greyscale and colour-blindness — the 3px
+              rule this replaces carried it in colour alone.
+            */}
+            <View style={[styles.glyphWrap, active ? styles.glyphWrapActive : null]}>
+              <TabGlyph name={tab.key} color={active ? NAVY : TEXT_MUTED} />
+            </View>
             <Text style={[styles.label, active ? styles.labelActive : null]}>{tab.label}</Text>
           </Pressable>
         );
@@ -101,20 +117,22 @@ const styles = StyleSheet.create({
     borderTopColor: CARD_BORDER,
     backgroundColor: CREAM,
     paddingTop: 6,
-    // The home indicator on a modern phone sits under this bar; the padding
-    // keeps the labels above it without a library.
-    paddingBottom: Platform.OS === 'web' ? 10 : 20,
     paddingHorizontal: 4,
   },
   barWrapped: { flexWrap: 'wrap' },
-  tab: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 6, minHeight: 48, justifyContent: 'center' },
+  tab: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: 6, minHeight: 48, justifyContent: 'center' },
   // Two rows of two. `flexBasis` rather than `width` so the row still
   // distributes the leftover pixel instead of overflowing by it.
   tabHalf: { flexBasis: '50%', flexGrow: 0, flexShrink: 0 },
-  // A short bar above the current label. Shape as well as colour, so the
-  // current tab survives greyscale and colour-blindness.
-  marker: { height: 3, width: 22, borderRadius: 2, backgroundColor: 'transparent' },
-  markerActive: { backgroundColor: PROGRESS_GREEN },
+  glyphWrap: {
+    width: 46,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  glyphWrapActive: { backgroundColor: PROGRESS_GREEN },
   label: { fontSize: 12, lineHeight: 16, color: TEXT_MUTED, fontWeight: '600' },
   labelActive: { color: NAVY, fontWeight: '700' },
 });

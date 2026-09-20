@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useWsfAuth, WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
@@ -16,10 +17,14 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <WsfAuthProvider>
-      <StatusBar style="dark" />
-      <AppShell />
-    </WsfAuthProvider>
+    /* The shell's bottom bar reads the real safe-area inset rather than
+       guessing at a phone's home indicator, so the provider is above it. */
+    <SafeAreaProvider>
+      <WsfAuthProvider>
+        <StatusBar style="dark" />
+        <AppShell />
+      </WsfAuthProvider>
+    </SafeAreaProvider>
   );
 }
 

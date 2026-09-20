@@ -132,6 +132,14 @@ type LoadState =
       memberCount: number | null;
       isSample: boolean;
       activeChallenge: ActiveChallenge | null;
+      /**
+       * How many OTHER communities this member belongs to. The switcher
+       * exists only when this is non-zero: an affordance that leads nowhere
+       * teaches people the app is lying about what it offers. Null means the
+       * aggregate read did not answer, and the switcher stays hidden rather
+       * than guessing.
+       */
+      otherCommunityCount: number;
     }
   | { kind: 'error'; message: string };
 
@@ -723,6 +731,7 @@ export default function CommunityPage() {
         // against a fresh join could momentarily miss it, and we fall back to
         // rendering without the count line rather than blocking the page.
         let memberCount: number | null = null;
+        let otherCommunityCount = 0;
         let isSample = group.isSample === true;
         let activeChallenge: ActiveChallenge | null = null;
         try {
@@ -732,6 +741,7 @@ export default function CommunityPage() {
           );
           const myResult = await myFn({});
           if (cancelled) return;
+          otherCommunityCount = Math.max(0, myResult.data.items.length - 1);
           const item = myResult.data.items.find((i) => i.groupId === groupId);
           if (item) {
             memberCount = item.memberCount;
@@ -773,6 +783,7 @@ export default function CommunityPage() {
           group,
           role: membership.role,
           memberCount,
+          otherCommunityCount,
           isSample,
           activeChallenge,
         });
@@ -1455,7 +1466,7 @@ export default function CommunityPage() {
     );
   }
 
-  const { group, role, memberCount, isSample, activeChallenge } = state;
+  const { group, role, memberCount, otherCommunityCount, isSample, activeChallenge } = state;
   const isChampion = role === 'foundingChampion';
   const hasShareApi = typeof navigator !== 'undefined' && 'share' in navigator;
 
@@ -3053,7 +3064,17 @@ export default function CommunityPage() {
         </View>
         {renderManageSheet()}
 
-        {/* Community identity: the main character. The name and one human line — the count and the founding month wait at the foot of the page. */}
+        {/*
+          SLICE 2b. NO EMPTY BLOCK, NO DEAD SPACE.
+
+          When the hero carries the identity, everything this block used to
+          hold moves with it — and an empty View still costs its parent's 18px
+          gap on BOTH sides, which is 36px of cream between the wordmark and
+          the hero for nothing. It renders only when it has something to say:
+          the name for a goal-less community, a Sample badge, or the human
+          line.
+        */}
+        {featured && !isSample && !humanLine ? null : (
         <View style={styles.identity}>
           <View style={styles.headingRow}>
             {/*
@@ -3100,6 +3121,7 @@ export default function CommunityPage() {
             </Text>
           ) : null}
         </View>
+        )}
 
         {/* The active goal: the product hero, on its own navy surface. */}
         <View style={styles.section} testID="wsf-community-goals">
@@ -3188,11 +3210,31 @@ export default function CommunityPage() {
                     >
                       {group.displayName}
                     </Text>
-                    {memberCount != null ? (
-                      <Text style={[styles.heroPresence, presenceCompact]} testID="wsf-community-hero-presence">
-                        {memberCountLabel(memberCount)}
-                      </Text>
-                    ) : null}
+                    <View style={styles.heroIdentityRow}>
+                      {memberCount != null ? (
+                        <Text style={[styles.heroPresence, presenceCompact]} testID="wsf-community-hero-presence">
+                          {memberCountLabel(memberCount)}
+                        </Text>
+                      ) : null}
+                      {/*
+                        SLICE 2b. THE SWITCHER APPEARS ONLY WHEN THERE IS
+                        SOMETHING TO SWITCH TO. A "Switch" control on the
+                        screen of somebody who belongs to one community is a
+                        control that does nothing, and a person who taps it
+                        learns the app is lying about what it offers.
+                      */}
+                      {otherCommunityCount > 0 ? (
+                        <Pressable
+                          onPress={() => router.replace('/community')}
+                          accessibilityRole="link"
+                          accessibilityLabel={`Switch community. You are in ${otherCommunityCount + 1}.`}
+                          style={styles.heroSwitch}
+                          testID="wsf-community-hero-switch"
+                        >
+                          <Text style={styles.heroSwitchText}>Switch</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
                   </View>
                   {/*
                     A3. The one place this surface can say the target is met
@@ -3383,7 +3425,16 @@ export default function CommunityPage() {
                 const p = progress[featured.goalId];
                 if (!p || p.kind !== 'ok' || p.ownCredit == null) return null;
                 return (
-                  <View style={styles.card} testID={`wsf-community-your-part-${featured.goalId}`}>
+                  /*
+                    SLICE 2b. A COMPACT PERSONAL STRIP, NOT ANOTHER EQUAL CARD.
+                    This was a full white card with the same border, radius
+                    and padding as everything else below it, which is what
+                    made the page read as a stack rather than a hierarchy. It
+                    is one person's private line about a shared goal — a quiet
+                    strip with a green edge, no fill and no shadow, so the
+                    hero above stays the only object with weight.
+                  */
+                  <View style={styles.personalStrip} testID={`wsf-community-your-part-${featured.goalId}`}>
                     <Text style={styles.sectionEyebrow}>Your part</Text>
                     {/*
                       SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE.
@@ -3859,6 +3910,13 @@ const styles = StyleSheet.create({
   // better still, but it cost the worst-case long name its clearance on a
   // 390x640 phone (15px left); 14 keeps the air and returns the margin.
   actions: { gap: 10, marginTop: 14 },
+  personalStrip: {
+    borderLeftWidth: 3,
+    borderLeftColor: PROGRESS_GREEN,
+    paddingLeft: 12,
+    paddingVertical: 4,
+    gap: 2,
+  },
   wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1 },
   // SLICE 2. The identity band: the community's name, then the one presence
   // fact, separated from the goal below by a hairline rather than a gap, so
@@ -3871,6 +3929,9 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(247,245,240,0.22)',
   },
   heroCommunity: { color: '#FFFFFF', fontSize: 17, lineHeight: 23, fontWeight: '800' },
+  heroIdentityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
+  heroSwitch: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(247,245,240,0.45)' },
+  heroSwitchText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '700' },
   heroPresence: { color: 'rgba(247,245,240,0.78)', fontSize: 13, lineHeight: 18 },
   // SLICE 1f. THE COMPLETED STATE SITS WHERE THE BUTTONS WERE, and is quiet.
   // It replaces two controls, so it must not read as a third: no fill, no
