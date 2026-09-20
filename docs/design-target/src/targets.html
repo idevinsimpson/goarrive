@@ -53,24 +53,22 @@
   .presence{font-size:12px;color:var(--muted);margin-top:3px;}
   .goal-title{font-size:30px;font-weight:900;line-height:1.02;letter-spacing:-.025em;margin-top:12px;}
   .goal-meta{font-size:12px;color:var(--muted);margin-top:6px;}
-  /* the WE dial: one ring, the community total inside it */
+  /* ---- the Living WE ----
+     The product's own monogram, filled bottom-up with confirmed-progress
+     green. --clip is the height fraction the SHIPPED area-calibration table
+     gives for the fill ratio, so the green AREA is the true ratio rather than
+     merely the green height. Aspect is the artwork's own 1200x583.
+       36.9% -> 43.55%    39.3% -> 45.49%    31.0% -> 38.23%              */
   .we-wrap{position:relative;display:flex;justify-content:center;}
-  .we{position:relative;width:236px;height:236px;display:flex;align-items:center;justify-content:center;}
-  .arc{position:absolute;inset:0;border-radius:50%;
-    background:conic-gradient(var(--green-400) 0turn .369turn,rgba(255,255,255,.07) .369turn 1turn);
-    -webkit-mask:radial-gradient(circle,transparent 101px,#000 102px,#000 110px,transparent 111px);
-    mask:radial-gradient(circle,transparent 101px,#000 102px,#000 110px,transparent 111px);}
-  .we.sm{width:180px;height:180px;}
-  .we.sm .arc{
-    -webkit-mask:radial-gradient(circle,transparent 75px,#000 76px,#000 83px,transparent 84px);
-    mask:radial-gradient(circle,transparent 75px,#000 76px,#000 83px,transparent 84px);}
-  .dial{position:relative;z-index:2;text-align:center;width:180px;}
-  .we.sm .dial{width:136px;}
-  .dial b{display:block;font-size:46px;font-weight:900;letter-spacing:-.04em;line-height:1;color:var(--cream);}
-  .we.sm .dial b{font-size:36px;}
-  .dial span{display:block;font-size:11.5px;color:var(--muted);margin-top:6px;}
-  .dial em{display:block;font-size:11px;font-style:normal;font-weight:800;color:var(--green-400);
-    margin-top:5px;letter-spacing:.02em;}
+  .we{position:relative;width:300px;aspect-ratio:1200/583;}
+  .we img{position:absolute;left:0;top:0;width:100%;height:100%;display:block;}
+  .we .fill{clip-path:inset(calc(100% - var(--clip)) 0 0 0);}
+  .we.sm{width:236px;}
+  .count{text-align:center;}
+  .count b{display:block;font-size:44px;font-weight:900;letter-spacing:-.04em;line-height:1;color:var(--cream);}
+  .count.sm b{font-size:38px;}
+  .count span{display:block;font-size:11.5px;color:var(--muted);margin-top:6px;}
+  .count em{font-style:normal;font-weight:800;color:var(--green-400);}
   /* momentum */
   .momentum{display:flex;gap:7px;overflow:hidden;}
   .mchip{background:rgba(255,255,255,.07);border:1px solid rgba(143,224,138,.22);
@@ -159,28 +157,31 @@
     <div class="goal-title">October Squat<br>Challenge</div>
     <div class="goal-meta">Open · ends Sun, Sep 27</div>
     <div class="spacer"></div>
-    <div class="we-wrap"><div class="we">
-      <div class="arc"></div>
-      <div class="dial">
-        <b>1,847</b>
-        <span>of 5,000 squats</span>
-        <em>36.9% · 3,153 to go</em>
-      </div>
+    <div class="we-wrap"><div class="we" style="--clip:43.55%">
+      <img src="../../../apps/westayfit/assets/brand/derived/monogram-unfilled-white.png" alt="">
+      <img class="fill" src="../../../apps/westayfit/assets/brand/derived/monogram-fill-green.png" alt="">
     </div></div>
+    <div class="count" style="margin-top:14px">
+      <b>1,847</b>
+      <span>of 5,000 squats · <em>36.9% complete</em> · 3,153 to go</span>
+    </div>
     <div class="spacer"></div>
     <div class="momentum">
       <div class="mchip"><b>+120</b><span>2 MIN AGO</span></div>
       <div class="mchip"><b>+60</b><span>18 MIN AGO</span></div>
       <div class="mchip"><b>+245</b><span>1 HR AGO</span></div>
     </div>
-    <div class="part" style="margin-top:12px"><b>310</b><span>squats — your part, private to you</span></div>
-    <div class="next" style="margin-top:12px">
-      <div>
-        <div class="eyebrow" style="color:var(--muted-2)">Also running here</div>
-        <div style="font-size:14px;font-weight:800;margin-top:4px">Step-ups round</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">612 of 2,000 step-ups</div>
-      </div>
-      <div class="pct"><b>31%</b><span>DONE</span></div>
+    <div class="part" style="margin-top:10px"><b>310</b><span>squats — your part, private to you</span></div>
+    <div class="eyebrow" style="margin-top:14px;color:var(--muted-2)">What we have done</div>
+    <div style="margin-top:2px">
+      <div class="row" style="padding:9px 0"><div class="l" style="font-size:13px">September Step-ups</div>
+        <div class="r" style="font-size:11px;color:var(--green-400);font-weight:700">2,000 of 2,000 · done</div></div>
+      <div class="row" style="padding:9px 0;border:none"><div class="l" style="font-size:13px">August Squat Challenge</div>
+        <div class="r" style="font-size:11px;color:var(--green-400);font-weight:700">4,500 of 4,000 · done</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <div class="ghost-btn" style="flex:1;margin:0;padding:9px;font-size:12px">Invite someone</div>
+      <div class="ghost-btn" style="flex:1;margin:0;padding:9px;font-size:12px">Manage community</div>
     </div>
   </div>
   <div class="nav">
@@ -206,16 +207,21 @@
     <div class="presence">12 members · 4 moved today</div>
     <div class="goal-title" style="font-size:24px;margin-top:10px">October Squat Challenge</div>
     <div class="spacer"></div>
-    <div class="we-wrap"><div class="we sm">
-      <div class="arc"></div>
-      <div class="dial">
-        <b>1,847</b>
-        <span>of 5,000 squats</span>
-        <em>36.9%</em>
-      </div>
+    <div class="we-wrap"><div class="we sm" style="--clip:43.55%">
+      <img src="../../../apps/westayfit/assets/brand/derived/monogram-unfilled-white.png" alt="">
+      <img class="fill" src="../../../apps/westayfit/assets/brand/derived/monogram-fill-green.png" alt="">
     </div></div>
+    <div class="count sm" style="margin-top:12px">
+      <b>1,847</b>
+      <span>of 5,000 squats · <em>36.9%</em></span>
+    </div>
     <div class="spacer"></div>
-    <div class="part"><b>310</b><span>your part, private to you</span></div>
+    <div class="momentum">
+      <div class="mchip"><b>+120</b><span>2 MIN AGO</span></div>
+      <div class="mchip"><b>+60</b><span>18 MIN AGO</span></div>
+      <div class="mchip"><b>+245</b><span>1 HR AGO</span></div>
+    </div>
+    <div class="part" style="margin-top:10px"><b>310</b><span>your part, private to you</span></div>
   </div>
   <div class="nav">
     <div class="i on"><div class="glyph">⌂</div>Home</div>
@@ -280,7 +286,12 @@
     <div style="font-size:92px;font-weight:900;letter-spacing:-.06em;line-height:1;margin-top:6px;
       background:linear-gradient(180deg,#fff,var(--green-400));-webkit-background-clip:text;background-clip:text;color:transparent">+120</div>
     <div style="font-size:15px;color:#CFE0F5;margin-top:2px">squats added to the WE</div>
-    <div class="panel" style="width:100%;margin-top:30px;text-align:left">
+    <div style="font-size:17px;font-weight:800;color:var(--green-400);margin-top:4px">You moved us closer.</div>
+    <div class="we-wrap" style="margin-top:20px"><div class="we sm" style="--clip:45.49%">
+      <img src="../../../apps/westayfit/assets/brand/derived/monogram-unfilled-white.png" alt="">
+      <img class="fill" src="../../../apps/westayfit/assets/brand/derived/monogram-fill-green.png" alt="">
+    </div></div>
+    <div class="panel" style="width:100%;margin-top:22px;text-align:left">
       <div class="eyebrow" style="color:var(--muted-2)">Community total</div>
       <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:7px">
         <div style="font-size:26px;font-weight:900;letter-spacing:-.02em">1,967 <span style="font-size:15px;color:var(--muted);font-weight:700">of 5,000</span></div>

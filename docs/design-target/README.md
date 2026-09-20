@@ -19,6 +19,25 @@ burnt into the image rather than written in a caption that can be cropped away.
 When real after-screenshots exist, they go in an `after/` folder beside these
 and are captured the same way `before/` was — from the running app.
 
+## The Living WE in these targets is the real one
+
+The mark filling with green on the Home, short-viewport and confirmed targets is
+the product's own monogram, loaded straight from
+`apps/westayfit/assets/brand/derived/`. Its fill is not drawn by eye: the clip
+height comes from the shipped area-calibration table that
+`apps/westayfit/src/ui/livingWeCalibration.ts` reads, so the green *area* is the
+true ratio rather than merely the green height.
+
+| Fill | Clip height from the bottom |
+| --- | --- |
+| 36.9% | 43.55% |
+| 39.3% | 45.49% |
+
+An earlier draft of these targets replaced the WE with a generic progress ring.
+That was wrong twice over: the Living WE is the product's signature instrument,
+and it is already truthful — it is what the served Home renders today. The ring
+is gone and the mark is back, giant.
+
 ## Why the targets are standalone HTML and not the real screens
 
 Rendering the targets from production React Native screens would have tied them
