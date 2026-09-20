@@ -51,6 +51,17 @@ const from = process.env.WSF_EMAIL_FROM ?? '';
  * here too, where it is reviewed, rather than silently in a shell line.
  */
 const ALLOWED_PROJECT = 'westayfit-staging';
+/**
+ * THE EXACT TARGET, not merely the right filename.
+ *
+ * Pinning only the basename let `/tmp/.env.westayfit-staging` — or any other
+ * directory — exit 0 and write successfully. firebase-tools reads the dotenv
+ * from BESIDE the functions source, so a correctly named file anywhere else
+ * is ignored: a green step, a green deploy, and mail still refusing to send.
+ * The path is relative on purpose, because the workflow runs this from the
+ * candidate checkout root and that is the only place the file belongs.
+ */
+const ALLOWED_TARGET = 'functions-westayfit/.env.westayfit-staging';
 const ALLOWED_APP_URL = 'https://westayfit-staging--staging-4a616y5m.web.app';
 const ALLOWED_ACTION_HANDLER = 'https://westayfit-staging.firebaseapp.com/__/auth/action';
 
@@ -65,11 +76,15 @@ if (!outPath || !projectId || !appUrl || !actionHandler) {
 if (projectId !== ALLOWED_PROJECT) {
   die(`this writer configures ${ALLOWED_PROJECT} only; refused ${projectId}`);
 }
-// EXACT BASENAME. `endsWith` admitted `anything.env.westayfit-staging`, and a
-// file firebase-tools does not recognise is a green deploy that changed
+// EXACT TARGET. `endsWith` admitted `anything.env.westayfit-staging`; a
+// basename check admitted the right name in the wrong directory. Both are
+// files firebase-tools does not read, which is a green deploy that changed
 // nothing — the most expensive failure available.
-if (path.basename(outPath) !== `.env.${ALLOWED_PROJECT}`) {
-  die(`the functions env file must be named exactly .env.${ALLOWED_PROJECT}; got ${path.basename(outPath)}`);
+if (path.isAbsolute(outPath)) {
+  die(`the functions env file must be the relative path ${ALLOWED_TARGET}; got an absolute path`);
+}
+if (path.normalize(outPath) !== path.normalize(ALLOWED_TARGET)) {
+  die(`the functions env file must be exactly ${ALLOWED_TARGET}; got ${outPath}`);
 }
 
 // A Resend key is `re_…`. If one is ever pasted into the sender variable by

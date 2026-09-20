@@ -13,10 +13,17 @@ const PROJECT = 'westayfit-staging';
 const APP_URL = 'https://westayfit-staging--staging-4a616y5m.web.app';
 const HANDLER = `https://${PROJECT}.firebaseapp.com/__/auth/action`;
 
-function run({ from, out = `.env.${PROJECT}`, project = PROJECT, appUrl = APP_URL, handler = HANDLER } = {}) {
+const TARGET = `functions-westayfit/.env.${PROJECT}`;
+
+// The writer is run from a throwaway checkout root with a real
+// functions-westayfit/ beside it, because the target it pins is RELATIVE —
+// the file only counts where firebase-tools reads it, next to the source.
+function run({ from, out = TARGET, project = PROJECT, appUrl = APP_URL, handler = HANDLER } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-env-'));
-  const target = path.join(dir, out);
-  const result = spawnSync(process.execPath, [SCRIPT, target, project, appUrl, handler], {
+  fs.mkdirSync(path.join(dir, 'functions-westayfit'), { recursive: true });
+  const target = path.isAbsolute(out) ? out : path.join(dir, out);
+  const result = spawnSync(process.execPath, [path.resolve(SCRIPT), out, project, appUrl, handler], {
+    cwd: dir,
     encoding: 'utf8',
     env: { ...process.env, WSF_EMAIL_FROM: from ?? '' },
   });
@@ -68,7 +75,7 @@ test('the four reported staging-boundary probes are all refused', () => {
     ['foreign app origin', { appUrl: 'https://example.invalid' }, /must be exactly/],
     ['lookalike handler host', { handler: 'https://westayfit-staging.example.invalid/__/auth/action' }, /must be exactly/],
     ['wrong handler path', { handler: 'https://westayfit-staging.firebaseapp.com/not-an-action-handler' }, /must be exactly/],
-    ['production project', { project: 'goarrive', out: '.env.goarrive', appUrl: 'https://goarrive.web.app', handler: 'https://goarrive.firebaseapp.com/__/auth/action' }, /configures westayfit-staging only/],
+    ['production project', { project: 'goarrive', out: 'functions-westayfit/.env.goarrive', appUrl: 'https://goarrive.web.app', handler: 'https://goarrive.firebaseapp.com/__/auth/action' }, /configures westayfit-staging only/],
   ];
   for (const [label, overrides, message] of probes) {
     const r = run({ from: 'a@b.test', ...overrides });
@@ -105,7 +112,7 @@ test('a file named for the wrong project is refused', () => {
   // nothing — the most expensive possible failure.
   const r = run({ from: 'a@b.test', out: '.env.production' });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /named exactly \.env\.westayfit-staging/);
+  assert.match(r.stderr, /must be exactly functions-westayfit\/\.env\.westayfit-staging/);
 });
 
 test('a handler belonging to another project is refused', () => {
@@ -114,12 +121,20 @@ test('a handler belonging to another project is refused', () => {
   assert.match(r.stderr, /must be exactly/);
 });
 
-test('a suffix-form basename is refused', () => {
-  // `endsWith` admitted `anything.env.westayfit-staging`; firebase-tools does
-  // not recognise it, which is a green deploy that changed nothing.
-  const r = run({ from: 'a@b.test', out: 'anything.env.westayfit-staging' });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /named exactly/);
+test('the file must land exactly where firebase-tools reads it', () => {
+  // Three ways to write a correctly named file firebase-tools will ignore —
+  // a green step, a green deploy, and mail still refusing to send.
+  for (const [label, out] of [
+    ['suffix form', 'functions-westayfit/anything.env.westayfit-staging'],
+    ['right name, wrong directory', '.env.westayfit-staging'],
+    ['a sibling directory', 'functions/.env.westayfit-staging'],
+    ['traversal out of the checkout', '../functions-westayfit/.env.westayfit-staging'],
+    ['an absolute path', '/tmp/.env.westayfit-staging'],
+  ]) {
+    const r = run({ from: 'a@b.test', out });
+    assert.equal(r.status, 1, `${label} was accepted`);
+    assert.equal(r.exists, false, `${label} wrote a file`);
+  }
 });
 
 test('a non-https app url is refused', () => {
@@ -134,6 +149,12 @@ test('the workflow writes the env BEFORE the functions deploy, and never echoes 
   assert.notEqual(envAt, -1, 'the deploy no longer writes the functions runtime config');
   assert.ok(envAt < deployAt, 'the runtime config must be written before the deploy that packages it');
   assert.ok(/vars\.WSF_EMAIL_FROM/.test(WORKFLOW), 'the sender must come from an environment variable, not a literal');
+  // The exact relative target, in the workflow too: a correctly named file in
+  // the wrong directory is one firebase-tools never reads.
+  assert.ok(
+    /"functions-westayfit\/\.env\.\$STAGING_PROJECT"/.test(WORKFLOW),
+    'the workflow must write the dotenv beside the functions source'
+  );
   // The diagnostic moved into a script so its four states are testable; the
   // workflow must still call it.
   assert.ok(/report-mail-secret\.mjs/.test(WORKFLOW), 'the deploy does not report the secret state');
@@ -194,6 +215,43 @@ test('a permission failure is UNKNOWN, never "not present"', () => {
 
 test('a missing gcloud is UNKNOWN and says so as tooling', () => {
   const r = reportWith('#!/bin/sh\necho "bash: gcloud: command not found" >&2\nexit 127\n');
+  assert.equal(r.state, 'unknown');
+});
+
+test('a permission error that CONTAINS "does not exist" is UNKNOWN, not absent', () => {
+  // gcloud's real permission message is deliberately ambiguous:
+  //   PERMISSION_DENIED: caller lacks secretmanager.secrets.get;
+  //   resource does not exist or caller lacks access
+  // Matching the phrase anywhere reported `absent` and told the operator to
+  // create a secret that already exists. Permission always wins.
+  const r = reportWith('#!/bin/sh\necho "ERROR: PERMISSION_DENIED: caller lacks secretmanager.secrets.get; resource does not exist or caller lacks access" >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+  assert.match(r.out, /NOT a report that it is missing/);
+});
+
+test('the hedge phrase alone is enough to refuse "absent"', () => {
+  // Isolates the ambiguous-phrasing rule: no PERMISSION_DENIED, no "lacks",
+  // no 403 — only Google's deliberate "does not exist OR is not visible",
+  // which is designed to reveal nothing either way. Without this probe the
+  // rule could be deleted and the suite would stay green on the strength of
+  // the other keywords.
+  const r = reportWith('#!/bin/sh\necho "ERROR: The resource does not exist or is not visible." >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+});
+
+test('when NOT_FOUND and a permission hint arrive together, permission wins', () => {
+  // gcloud can answer NOT_FOUND *because* the caller may not see the
+  // resource. Isolates the precedence rule: with both signals present, the
+  // order of the two checks is the only thing deciding the answer.
+  const r = reportWith('#!/bin/sh\necho "ERROR: NOT_FOUND: Secret [WSF_EMAIL_API_KEY] not found; PERMISSION_DENIED on secretmanager.secrets.get" >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+});
+
+test('a 403 with no keyword is UNKNOWN', () => {
+  const r = reportWith('#!/bin/sh\necho "ERROR: (gcloud.secrets.describe) HttpError 403" >&2\nexit 1\n');
   assert.equal(r.state, 'unknown');
 });
 

@@ -45,11 +45,43 @@ function run(args) {
   };
 }
 
-/** Only gcloud's own NOT_FOUND counts as "absent". Everything else is unknown. */
+/**
+ * ABSENT IS THE NARROWEST POSSIBLE READING, AND PERMISSION ALWAYS WINS.
+ *
+ * The first version matched the phrase "does not exist" anywhere in the
+ * error. gcloud's own permission failure reads:
+ *
+ *   PERMISSION_DENIED: caller lacks secretmanager.secrets.get;
+ *   resource does not exist or caller lacks access
+ *
+ * — which contains that phrase, so a permission problem was reported as
+ * `absent` and the operator was told to create a secret that already exists.
+ * That sentence is DESIGNED to be ambiguous: Google deliberately does not
+ * disclose whether a resource exists to a caller who may not see it, so its
+ * presence is a reason to say UNKNOWN, never a reason to say absent.
+ *
+ * So: any hint of permission, authentication or the ambiguous phrasing makes
+ * it unknown, and only an unambiguous NOT_FOUND with none of those makes it
+ * absent.
+ */
 function classify(result) {
   if (result.status === 0) return 'ok';
   const text = `${result.stderr}\n${result.stdout}`;
-  if (/NOT_FOUND|was not found|does not exist/i.test(text)) return 'absent';
+  const ambiguous =
+    /PERMISSION_DENIED|UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|\b40[13]\b/i.test(text) ||
+    /lacks? access|lacks? permission|caller lacks|reauthenticate|credentials/i.test(text);
+  // Permission wins even when gcloud also says NOT_FOUND, because it answers
+  // NOT_FOUND precisely when it will not disclose whether a resource exists.
+  if (ambiguous) return 'unknown';
+  // NOTHING here matches the bare phrase "does not exist". That phrase only
+  // ever reaches this code inside Google's deliberate hedge — "resource does
+  // not exist OR caller lacks access" — which reveals nothing, so it must not
+  // decide anything. An earlier version of this fix carried a separate clause
+  // for that phrase; mutation testing showed removing it changed no outcome,
+  // because the absent matcher below is already narrow enough to ignore it.
+  // A rule no test can fail is not a rule, so it is gone and the invariant it
+  // was protecting is pinned by a test instead.
+  if (/\bNOT_FOUND\b|\b404\b|was not found/i.test(text)) return 'absent';
   return 'unknown';
 }
 
