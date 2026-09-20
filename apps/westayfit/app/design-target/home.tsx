@@ -1,4 +1,4 @@
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { HomeTarget } from '../../src/ui/designTarget/HomeTarget';
 
@@ -34,21 +34,54 @@ export default function HomeTargetPreview() {
       </View>
     );
   }
+  /*
+    THE BANNER IS PART OF THE CAPTURE, NOT PART OF THE DESIGN.
+
+    It lives here rather than inside HomeTarget so the component stays clean
+    for the day the page is actually implemented from it. Every frame this
+    route produces carries the words, burnt into the image, because these
+    images circulate: a target that travels without its label is one paste away
+    from being read as a shipped screen.
+
+    It costs the composition 20px of height. That is a real cost and a cheap
+    one next to the alternative.
+  */
   return (
-    <HomeTarget
-      communityName="Smyrna Strong"
-      memberCount={23}
-      goalTitle="500 Squats by Friday"
-      goalWindow="Open · ends Fri, Sep 25"
-      sharedTotal={241}
-      target={500}
-      unit="squats"
-      yourPart={45}
-      recent={[
-        { amount: 20, unit: 'squats', when: '2h ago' },
-        { amount: 15, unit: 'squats', when: '5h ago' },
-        { amount: 30, unit: 'squats', when: '1d ago' },
-      ]}
-    />
+    <View style={style.frame}>
+      <View style={style.banner}>
+        <Text style={style.bannerText}>TARGET / CONCEPT — NOT IMPLEMENTED</Text>
+      </View>
+      <HomeTarget
+        communityName="Smyrna Strong"
+        memberCount={23}
+        goalTitle="500 Squats by Friday"
+        goalWindow="Open · ends Fri, Sep 25"
+        sharedTotal={241}
+        target={500}
+        unit="squats"
+        yourPart={45}
+        recent={[
+          { amount: 20, unit: 'squats', when: '2h ago' },
+          { amount: 15, unit: 'squats', when: '5h ago' },
+          { amount: 30, unit: 'squats', when: '1d ago' },
+        ]}
+      />
+    </View>
   );
 }
+
+const style = StyleSheet.create({
+  frame: { flex: 1, backgroundColor: '#F7F5F0' },
+  banner: {
+    height: 20,
+    backgroundColor: '#22C55E',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bannerText: {
+    color: '#04260F',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+  },
+});
