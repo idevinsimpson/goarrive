@@ -439,7 +439,7 @@ test('the device question is answered before anything else on every phone that o
   // The last marker is the helper, not the raw testID: run 36's fix moved the
   // event-title wait behind visibleEventTitle(). The ORDER is what this checks,
   // and it is unchanged.
-  const order = ['answerOwnPhone(', "'wsf-event-signed-out'", "'wsf-event-signin'", 'signInOnPage(', 'visibleEventTitle('];
+  const order = ['answerOwnPhone(', "'wsf-event-signed-out'", "'wsf-event-signin'", 'signInOnPage(', 'memberRoot('];
   let previous = -1;
   for (const marker of order) {
     const at = reach.indexOf(marker);
@@ -488,7 +488,7 @@ test('the rejoin chooses an activity again, because nothing is preselected on a 
   assert.notEqual(rejoinChoose, -1, 'the rejoin never chooses an activity again');
   assert.ok(rejoinChoose < rejoinQueue, 'the rejoin reaches for the queue before choosing an activity');
   // And the device question must NOT be asked again in a browser that answered.
-  assert.match(body.slice(leaveAt), /wsf-event-device-choice'\)\.count\(\)\) === 0/,
+  assert.match(body.slice(leaveAt), /visibleCount\(page, 'wsf-event-device-choice'\)\) === 0/,
     'the rejoin does not prove the remembered device answer was honoured');
 });
 
@@ -557,7 +557,7 @@ test('the PRODUCT brings the visitor back to the event — the harness must not 
   // The device answer is remembered per browser, so arriving back must NOT be
   // asked the question again. Without this, a build that forgot the answer on
   // every navigation would still pass everything above.
-  assert.match(reach, /wsf-event-device-choice'\)\.count\(\)\) === 0/,
+  assert.match(reach, /visibleCount\(page, 'wsf-event-device-choice'\)\) === 0/,
     'the return does not prove the remembered device answer survived the auth round trip');
 
   // No receipt may describe the return as the harness's any more.
@@ -569,52 +569,67 @@ test('the PRODUCT brings the visitor back to the event — the harness must not 
     'the receipt does not say the return was the product’s own');
 });
 
-test('the event title is waited for by VISIBLE locator only, and asserted to be the only one', () => {
-  // RUN 36 (35515986745). The journey died in 20 seconds — immediately, not on
-  // a timeout — because `getByTestId('wsf-event-title')` matched the visible
-  // route AND the copy expo-router keeps mounted under it, and Playwright
-  // strict mode refuses two. `waitForURL` had already passed, so the product's
-  // sign-in return had happened: the locator was wrong, not the build.
+test('every positive post-arrival event read is scoped to the ONE visible member root', () => {
+  // RUNS 36 AND 37, one control apart, same root cause: expo-router keeps the
+  // OUTGOING route mounted under the incoming one, so the document holds two
+  // copies of the event. Run 36 hit it on the title (strict mode refuses two
+  // matches); run 37 hit it in chooseActivityByTitle, where a document-wide
+  // querySelectorAll counted BOTH copies' activity options and a two-activity
+  // event looked like four.
   //
-  // CODE ONLY. The banner this test protects quotes the bad locator in prose,
-  // and three earlier checks in this suite were written against prose by
-  // accident. Strip comments before counting anything.
+  // This test exists so the class cannot come back one control at a time.
+  //
+  // CODE ONLY: the banner it protects quotes the bad patterns in prose.
   const code = JOURNEY.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-  // 1. No wait may go through the strict locator again.
-  assert.equal(
-    /visible\(\s*page\.getByTestId\('wsf-event-title'\)/.test(code), false,
-    'an event-title wait is back on the strict getByTestId locator that run 36 died on'
-  );
+  // 1. One helper resolves the visible member root.
+  const helper = codeOfFn('memberRoot', 'async function visibleCount');
+  assert.match(helper, /\[data-testid="wsf-event-member"\]:visible/,
+    'memberRoot does not resolve the member root by visibility');
+  assert.match(helper, /rootCount === 1/, 'memberRoot no longer asserts exactly ONE visible root');
+  assert.match(helper, /titleCount === 1/, 'memberRoot no longer asserts exactly ONE visible title');
+  assert.match(helper, /actual === expectedTitle/, 'memberRoot no longer asserts the title text');
 
-  // 2. Every surviving raw use must be an ABSENCE check, which cannot
-  //    strict-violate (count() is not a strict matcher) and means the opposite.
-  for (const m of [...code.matchAll(/getByTestId\('wsf-event-title'\)/g)]) {
-    const line = code.slice(code.lastIndexOf('\n', m.index) + 1, code.indexOf('\n', m.index));
-    assert.match(line, /count\(\)/,
-      `a raw event-title locator is used for something other than an absence check: ${line.trim()}`);
+  // 2. The prefix scan reads inside a root, never the whole document.
+  const scan = codeOfFn('testIdsWithPrefix', 'async function enrolScreen');
+  assert.equal(/document\.querySelectorAll/.test(scan), false,
+    'testIdsWithPrefix is document-wide again, so it will count the retained route');
+  assert.match(scan, /el\.querySelectorAll/, 'testIdsWithPrefix does not scan within the given root');
+
+  // 3. THE CLASS RULE. Controls that only exist once a member has arrived may
+  //    never be read page-scoped; they are descendants of the visible root.
+  const AFTER_ARRIVAL = [
+    'wsf-event-activity', 'wsf-event-choice', 'wsf-event-choice-activity', 'wsf-event-add',
+    'wsf-event-queue-start', 'wsf-event-queue-panel', 'wsf-event-queue-name-first',
+    'wsf-event-queue-join',
+  ];
+  for (const id of AFTER_ARRIVAL) {
+    assert.equal(
+      new RegExp(`\\bpage\\.getByTestId\\('${id}'`).test(code), false,
+      `${id} is read page-scoped after member arrival; it must be a descendant of the visible member root`
+    );
   }
 
-  // 3. The helper selects only what a person can see.
-  const helper = codeOfFn('visibleEventTitle', 'async function signInOnPage');
-  assert.match(helper, /\[data-testid="wsf-event-title"\]:visible/,
-    'the event-title helper does not restrict itself to the visible title');
+  // 4. And the pre-arrival reads stay page-scoped, because there is no member
+  //    root yet and scoping them to one would make them vacuous.
+  for (const id of ['wsf-event-device-choice', 'wsf-event-signed-out', 'wsf-event-signup', 'wsf-event-signin']) {
+    assert.match(code, new RegExp(`page\\.getByTestId\\('${id}'`),
+      `${id} is no longer read page-scoped, but it is asserted before any member root exists`);
+  }
 
-  // 4. The count assertion is the point, and must not be dropped. Without it
-  //    the helper would silently accept a screen that really rendered two
-  //    titles — the defect the strict locator was accidentally catching.
-  assert.match(helper, /count === 1/,
-    'the helper no longer asserts that exactly ONE title is visible');
+  // 5. A fresh navigation re-resolves the root: the locator captured before a
+  //    goto can be the copy that goto just hid.
+  const queueCase = codeOfFn('casePhoneChoosesQueue', 'async function caseTwoScreens');
+  const gotoAt = queueCase.indexOf('page.goto(qrUrl');
+  assert.notEqual(gotoAt, -1, 'the rejoin no longer navigates');
+  assert.ok(queueCase.slice(gotoAt).includes('memberRoot('),
+    'the rejoin reuses a stale root instead of resolving the newly visible one');
 
-  // 5. And it must check the title is the event's own, not merely present.
-  assert.match(helper, /actual === expectedTitle/,
-    'the helper no longer asserts the title text');
-
-  // 6. Both waits go through it, and the event title comes from the fixture
-  //    rather than being spelled out twice.
-  const uses = [...code.matchAll(/await visibleEventTitle\(page,/g)];
-  assert.equal(uses.length, 2, `expected exactly two event-title waits, found ${uses.length}`);
-  assert.match(code, /eventTitle,\s*$/m, 'the fixture does not expose the event’s own title');
+  // 6. The second phone asserts the real event title, not undefined. This was
+  //    a live defect: the call omitted the argument entirely.
+  const second = codeOfFn('joinSecondPhone', 'async function testIdsWithPrefix');
+  assert.match(second, /reachMemberEvent\(page, qrUrl, fx\.phoneTwo, fx\.eventTitle\)/,
+    'the second phone does not pass the expected event title');
 });
 
 test('no comment still claims the product does not return, or that approve-station is unprobed', () => {
