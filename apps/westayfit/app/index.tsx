@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 
 import { useWsfAuth } from '../src/auth';
 import { describeCallableError } from '../src/callableErrors';
+import { resolveCurrentCommunity } from '../src/currentCommunity';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFunctions } from '../src/firebase';
 import {
@@ -363,7 +364,29 @@ function SignedInHome({
   joinFieldError: string | null;
   onJoinCodeSubmit: () => void;
 }) {
+  const { user } = useWsfAuth();
   const noCommunityYet = state.kind === 'ready' && state.items.length === 0;
+  // HOME OPENS THE COMMUNITY. Replace rather than push: Home is not a place
+  // the member should have to press back through to leave the community they
+  // are in. The redirect waits for the real list, so it can never act on a
+  // guess, and it runs in an effect rather than during render.
+  const openable = state.kind === 'ready'
+    ? resolveCurrentCommunity(user?.uid ?? null, state.items.map((item) => item.groupId))
+    : null;
+  useEffect(() => {
+    if (openable) router.replace(`/community/${openable}`);
+  }, [openable]);
+  if (openable) {
+    return (
+      <View
+        style={styles.stack}
+        testID="wsf-home-opening-community"
+        {...({ 'data-state': 'opening' } as Record<string, unknown>)}
+      >
+        <Text style={kit.statusText}>Opening your community…</Text>
+      </View>
+    );
+  }
   const joinField = (
     <JoinWithCodeField
       title={noCommunityYet ? 'Join with a code' : 'Join another community'}
@@ -379,8 +402,17 @@ function SignedInHome({
       testID="wsf-home-signed-in"
       {...({ 'data-state': 'signed-in' } as Record<string, unknown>)}
     >
+      {/*
+        HOME IS A COMMUNITY, NOT A DIRECTORY.
+
+        When the member is in exactly one community — or in several and last
+        opened one of them — Home opens THAT community rather than a list of
+        cards to pick from. The list is still here, but only for the case it
+        was ever the right answer for: somebody in several communities who
+        has not chosen one yet.
+      */}
       <View style={styles.section}>
-        <Text style={kit.eyebrow}>Your communities</Text>
+        <Text style={kit.eyebrow}>Choose a community</Text>
         <MyCommunitiesList state={state} goalsByGroup={goalsByGroup} />
       </View>
 

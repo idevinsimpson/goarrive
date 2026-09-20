@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import { useWsfAuth } from '../../../src/auth';
+import { rememberCurrentCommunity } from '../../../src/currentCommunity';
 import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
 import { describeCallableError } from '../../../src/callableErrors';
 import { FormShell } from '../../../src/AuthFormPrimitives';
@@ -295,6 +296,12 @@ export default function CommunityPage() {
   const [resetConfirming, setResetConfirming] = useState(false);
   const [membershipOpen, setMembershipOpen] = useState(false);
   const router = useRouter();
+  // HOME OPENS THE COMMUNITY THE MEMBER LAST LOOKED AT. Written here, where
+  // it is a fact (they are on this community's screen) rather than in the
+  // navigation, where it would only be an intention.
+  useEffect(() => {
+    if (groupId) rememberCurrentCommunity(user?.uid ?? null, groupId);
+  }, [groupId, user?.uid]);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
@@ -1503,6 +1510,27 @@ export default function CommunityPage() {
    * it is a defect. The type scales at the two narrow steps so long words keep
    * their shape; nothing changes at 360 and above.
    */
+  /**
+   * SHORT-PHONE HERO RHYTHM.
+   *
+   * The identity band earns its place — it is what makes this a community and
+   * not a goal card — but it costs vertical space, and on a 390x640 phone
+   * that space came straight out of the primary action, which ended up 30px
+   * below the fold. Rather than drop the band or shrink the Living WE (the
+   * two things this slice exists to establish), the hero tightens its own
+   * padding and rhythm when the viewport is short. Nothing changes above
+   * ~700px tall.
+   */
+  const shortViewport = windowHeight < 700;
+  const heroCompact = shortViewport
+    ? { paddingTop: 14, paddingBottom: 14, gap: 6 }
+    : null;
+  const identityCompact = shortViewport
+    ? { paddingBottom: 6, marginBottom: 8 }
+    : null;
+  // The presence line is the cheapest thing in the band to shrink, and the
+  // only one whose meaning survives at 12px.
+  const presenceCompact = shortViewport ? { fontSize: 12, lineHeight: 16 } : null;
   const heroTitleType =
     windowWidth < 240
       ? { fontSize: 20, lineHeight: 25 }
@@ -2998,7 +3026,18 @@ export default function CommunityPage() {
       <View style={styles.inner}>
         {/* Product chrome: the full wordmark, compact; Champion tools behind one quiet control. */}
         <View style={styles.productHeader}>
-          <WsfWordmark variant="navy" height={22} testID="wsf-community-wordmark" />
+          {/* SHELL. The wordmark is the way Home on every member surface. */}
+          <Pressable
+            onPress={() => router.replace('/')}
+            accessibilityRole="link"
+            accessibilityLabel="We Stay Fit, go Home"
+            testID="wsf-community-wordmark-home"
+            // The mark is 22px tall; a 22px tap target is not a tap target.
+            // The padding makes the touchable 44 without moving the mark.
+            style={styles.wordmarkTouch}
+          >
+            <WsfWordmark variant="navy" height={22} testID="wsf-community-wordmark" />
+          </Pressable>
           {isChampion ? (
             <Pressable
               onPress={() => setManageOpen(true)}
@@ -3023,23 +3062,32 @@ export default function CommunityPage() {
               styles, and therefore the rendering, are unchanged.
             */}
             {/*
-              SLICE 1. BOUNDED, because the worst case is not hypothetical: an
-              80-character name wraps to four lines and pushed the primary
-              action to within ONE pixel of the bottom of a 390x640 phone. Two
-              lines caps the pre-goal block at a known height whatever the name
-              is. The full name is never lost — it stays the accessible label,
-              and Manage shows it in full.
+              SLICE 2. THE NAME MOVED INTO THE HERO — WHEN THERE IS A HERO.
+
+              It used to sit out here as navy text on cream, which made the
+              hero a goal card that happened to be on a page about a
+              community. The community is the thing the member is inside, so
+              its name is the first line of the hero itself.
+
+              BUT A COMMUNITY WITH NO GOAL HAS NO HERO. The first version of
+              this moved the name unconditionally and a goal-less community
+              lost its identity entirely — no name anywhere on its own screen.
+              So the name renders here when nothing is featured, and inside
+              the hero when something is. Exactly one level-1 heading either
+              way, never two and never none.
             */}
-            <Text
-              style={[styles.heading, styles.headingName]}
-              testID="wsf-community-name"
-              numberOfLines={2}
-              ellipsizeMode="tail"
-              accessibilityLabel={group.displayName}
-              {...HEADING_1}
-            >
-              {group.displayName}
-            </Text>
+            {featured ? null : (
+              <Text
+                style={[styles.heading, styles.headingName]}
+                testID="wsf-community-name"
+                numberOfLines={2}
+                ellipsizeMode="tail"
+                accessibilityLabel={group.displayName}
+                {...HEADING_1}
+              >
+                {group.displayName}
+              </Text>
+            )}
             {isSample ? (
               <Text style={styles.sampleBadge} testID="wsf-community-sample-badge">
                 Sample
@@ -3100,7 +3148,52 @@ export default function CommunityPage() {
                   : 'Open';
               return (
                 <Fragment>
-                <View style={styles.hero} testID="wsf-community-goal-hero">
+                <View style={[styles.hero, heroCompact]} testID="wsf-community-goal-hero">
+                  {/*
+                    SLICE 2, items 3 and 4. COMMUNITY IDENTITY AND PRESENCE
+                    COME FIRST, AND INSIDE THE HERO.
+
+                    The community name used to be navy text on cream above the
+                    card, which made the hero a goal card that happened to be
+                    on a page. It is the identity of the thing the member is
+                    inside, so it belongs at the top of the hero with the one
+                    presence fact this product is actually authorized to show:
+                    how many members are in it.
+
+                    PRESENCE WITHOUT INVENTION. No photos, no "3 friends are
+                    moving", no names, no reactions. A count of members is a
+                    fact the member is already authorized to read. The seam
+                    left for later: per-goal recent movement IS published
+                    (wsfGoalRecentAdditions — amount, unit and minute, never a
+                    person) but only where the Champion has authorized public
+                    display, so it is not shown here until it can be shown for
+                    every goal rather than some.
+                  */}
+                  <View style={[styles.heroIdentity, identityCompact]} testID="wsf-community-hero-identity">
+                    {/*
+                      BOUNDED, because the worst case is not hypothetical: an
+                      80-character name wrapped to four lines and pushed the
+                      primary action to within ONE pixel of the bottom of a
+                      390x640 phone. Two lines caps it whatever the name is,
+                      and the full name is never lost — it stays the
+                      accessible label, and Manage shows it in full.
+                    */}
+                    <Text
+                      style={styles.heroCommunity}
+                      testID="wsf-community-name"
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                      accessibilityLabel={group.displayName}
+                      {...HEADING_1}
+                    >
+                      {group.displayName}
+                    </Text>
+                    {memberCount != null ? (
+                      <Text style={[styles.heroPresence, presenceCompact]} testID="wsf-community-hero-presence">
+                        {memberCountLabel(memberCount)}
+                      </Text>
+                    ) : null}
+                  </View>
                   {/*
                     A3. The one place this surface can say the target is met
                     while the goal is still open. Confirmed pulse only — an
@@ -3292,9 +3385,21 @@ export default function CommunityPage() {
                 return (
                   <View style={styles.card} testID={`wsf-community-your-part-${featured.goalId}`}>
                     <Text style={styles.sectionEyebrow}>Your part</Text>
+                    {/*
+                      SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE.
+                      On a `once` goal already contributed to, the hero above
+                      says "You've recorded N unit." Repeating it here as
+                      "You've added N unit to this goal" was the accepted
+                      redundancy from slice 1f. The hero keeps the number —
+                      it is the one in the first viewport — and this card
+                      carries what the hero does not: that the part is
+                      counted, and where.
+                    */}
                     <Text style={styles.body}>
                       {p.ownCredit > 0
-                        ? `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`
+                        ? (p.repeatPolicy === 'once'
+                            ? 'Counted in the shared total above.'
+                            : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`)
                         : 'Your first contribution counts here.'}
                     </Text>
                     {/*
@@ -3631,6 +3736,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 44,
+    // SLICE 2. The wordmark became a tappable way Home, and a Pressable does
+    // not shrink the way a bare mark did: at 200% text zoom the Manage
+    // control was pushed past the right edge. The row wraps and both children
+    // may shrink, so the pair stays on the screen at any width.
+    flexWrap: 'wrap',
+    columnGap: 8,
+    rowGap: 4,
   },
   manageButton: {
     borderWidth: 1,
@@ -3747,6 +3859,19 @@ const styles = StyleSheet.create({
   // better still, but it cost the worst-case long name its clearance on a
   // 390x640 phone (15px left); 14 keeps the air and returns the margin.
   actions: { gap: 10, marginTop: 14 },
+  wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1 },
+  // SLICE 2. The identity band: the community's name, then the one presence
+  // fact, separated from the goal below by a hairline rather than a gap, so
+  // the hero reads as one object and not two stacked cards.
+  heroIdentity: {
+    gap: 2,
+    paddingBottom: 12,
+    marginBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(247,245,240,0.22)',
+  },
+  heroCommunity: { color: '#FFFFFF', fontSize: 17, lineHeight: 23, fontWeight: '800' },
+  heroPresence: { color: 'rgba(247,245,240,0.78)', fontSize: 13, lineHeight: 18 },
   // SLICE 1f. THE COMPLETED STATE SITS WHERE THE BUTTONS WERE, and is quiet.
   // It replaces two controls, so it must not read as a third: no fill, no
   // border, no tap affordance — a statement, in the hero's own type.

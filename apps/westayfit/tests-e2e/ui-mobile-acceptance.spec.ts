@@ -80,7 +80,9 @@ import {
 const PASSWORD = 'mobile-acceptance-password';
 const START_HEADING = 'Start your community';
 const GOAL_HEADING = 'Start a goal';
-const YOUR_COMMUNITIES = 'Your communities';
+// SLICE 2. Home is a community, so the only case that still shows a list is
+// somebody who has to choose one — including somebody with none yet.
+const HOME_CHOOSER = 'Choose a community';
 /** Every inline validation message on these two forms carries a `-error` testID. */
 const START_ERRORS = '[data-testid^="wsf-start"][data-testid$="-error"]';
 const GOAL_ERRORS = '[data-testid^="wsf-new-goal"][data-testid$="-error"]';
@@ -369,31 +371,32 @@ for (const def of PHONE_CONTEXTS) {
         await signInVia(page, fx.memberEmail, PASSWORD);
 
         // ---- Home, signed in, one community -------------------------------
+        //
+        // SLICE 2. HOME IS THE COMMUNITY, NOT A DIRECTORY OF THEM.
+        //
+        // This block used to assert the opposite: that Home showed a list of
+        // community cards and that tapping one was the way in. That was the
+        // product's model until the app-shell slice changed it. These
+        // assertions are RE-POINTED, not relaxed — Home must now land on the
+        // community itself, and what is checked is stronger than before,
+        // because it is the community's own identity, its goal hero and its
+        // primary action rather than a card that merely mentions them.
         await page.goto('/');
-        await expect(page.getByTestId('wsf-home-my-list')).toBeVisible({ timeout: 30_000 });
-        // The card settles on its own once the community's goal read returns;
-        // its action word is the proof that it did.
-        await expect(page.getByTestId(`wsf-home-community-${fx.groupId}`)).toContainText(
-          'Contribute',
-          { timeout: 30_000 }
-        );
-        await acceptScreen(run, def, {
-          label: 'Home, signed in, one community',
-          firstContent: { text: YOUR_COMMUNITIES },
-          cta: `wsf-home-community-${fx.groupId}`,
-          ctaText: /Maple Street Movers/,
-        });
-        // The card is the way in, and it names its own next action.
-        const cardState = await elementState(page, { testId: `wsf-home-community-${fx.groupId}` });
-        expect(cardState.text, 'Home: the community card names its next action').toContain(
-          'Contribute'
-        );
-        await tapInView(run, { testId: `wsf-home-community-${fx.groupId}` }, 'Home: community card');
         await page.waitForURL(new RegExp(`/community/${fx.groupId}`), { timeout: 30_000 });
+        await expect(page.getByTestId('wsf-community-goal-hero')).toBeVisible({ timeout: 30_000 });
         await expect(page.getByTestId('wsf-community-name').last()).toHaveText(
           'Maple Street Movers',
           { timeout: 30_000 }
         );
+        // The shell is how everywhere else is reached, and it says where you are.
+        await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+        await expect(page.getByTestId('wsf-member-tab-home')).toHaveAttribute('data-current', 'true');
+        await acceptScreen(run, def, {
+          label: 'Home, signed in, one community',
+          firstContent: { testId: 'wsf-community-name' },
+          cta: `wsf-community-goal-link-${fx.goalId}`,
+          ctaText: /Start moving/,
+        });
 
         // ---- Community Home, active goal, member --------------------------
         await page.goto(`/community/${fx.groupId}`);
@@ -507,7 +510,7 @@ for (const def of PHONE_CONTEXTS) {
         await expect(page.getByTestId('wsf-home-my-empty')).toBeVisible({ timeout: 30_000 });
         await acceptScreen(run, def, {
           label: 'Home, signed in, no community',
-          firstContent: { text: YOUR_COMMUNITIES },
+          firstContent: { text: HOME_CHOOSER },
           cta: 'wsf-home-start',
           ctaText: 'Start a community',
         });
