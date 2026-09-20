@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -35,6 +35,7 @@ import {
   EVENT_CHOICE_QUEUE_DESCRIPTION,
   EVENT_CHOICE_QUEUE_LABEL,
 } from '../../src/eventActivity';
+import { clearEventReturn, setEventReturn } from '../../src/eventReturn';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
 import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
@@ -190,6 +191,7 @@ export default function EventScreen() {
   /** The event's own title when the server resolved one. Null on the legacy
    * path, where the goal's title IS the event's title. */
   const [resolvedTitle, setResolvedTitle] = useState<string | null>(null);
+
   const activities = useMemo(
     () =>
       resolved.length
@@ -206,14 +208,51 @@ export default function EventScreen() {
    */
   const selectedGoalId = activityGoalIdFor(activities, selectedActivityKey) ?? goalId;
 
-  const onChooseActivity = useCallback((key: string) => {
-    setPicked(true);
-    setPickedKey(key);
-    // A different activity is a different decision; anything half-typed into
-    // the name control belonged to the old one.
-    setCallName(null);
-    setQueueError(null);
-  }, []);
+  const onChooseActivity = useCallback(
+    (key: string) => {
+      setPicked(true);
+      setPickedKey(key);
+      // A different activity is a different decision; anything half-typed into
+      // the name control belonged to the old one.
+      setCallName(null);
+      setQueueError(null);
+    },
+    [goalId]
+  );
+
+
+  /**
+   * ARRIVING AT EITHER SIGNED-IN OUTCOME CONSUMES THE RETURN.
+   *
+   * `member` and `notMember` are both TERMINAL: the handoff has delivered the
+   * visitor to the event and has nothing left to do. Consuming only `member`
+   * left it live for exactly the case that ends at `notMember` — a brand-new
+   * account, which belongs to no community — so signing out and back in
+   * inside the two-hour window would replay it. A one-shot handoff that fires
+   * twice is not one-shot.
+   *
+   * `loading` and `error` deliberately keep it: those are not outcomes, and a
+   * retry from one of them still wants the return.
+   */
+  const [focused, setFocused] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, [])
+  );
+  useEffect(() => {
+    // ONLY WHILE THIS SCREEN IS THE ONE IN FRONT.
+    //
+    // The stack keeps this route MOUNTED underneath the next one, so without
+    // the focus guard the backgrounded copy keeps resolving during the auth
+    // round trip: the moment a new account verifies, it settles on
+    // `notMember` and consumes the handoff — before profile-setup's
+    // `nextRouteAfterAuth` has read it. Measured, not theorised: the record
+    // was present at verify-email and null at profile-setup.
+    if (!focused) return;
+    if (state.kind === 'member' || state.kind === 'notMember') clearEventReturn();
+  }, [focused, state.kind]);
 
   /**
    * `undefined` until this browser's storage has actually been read.
@@ -493,12 +532,21 @@ export default function EventScreen() {
           </Text>
         </View>
         <View style={styles.actions}>
+          {/*
+            REMEMBER THE EVENT ON THE WAY INTO THE AUTH FLOW, and only on the
+            way in. Before this, signing in from here landed the visitor on the
+            app's home and the event they were standing in front of was gone —
+            they had to find the QR and scan it again. The handoff is created
+            by the act of going to sign in or sign up, so somebody who only
+            looks at this screen and leaves creates nothing.
+          */}
           <ButtonLink
             href="/signup"
             style={kit.primaryButton}
             textStyle={kit.primaryButtonText}
             testID="wsf-event-signup"
             label="Create an account"
+            onPress={() => setEventReturn(goalId)}
           />
           <ButtonLink
             href="/signin"
@@ -506,8 +554,15 @@ export default function EventScreen() {
             textStyle={kit.secondaryButtonText}
             testID="wsf-event-signin"
             label="Already have an account? Sign in"
+            onPress={() => setEventReturn(goalId)}
           />
-          <SecondaryLink href="/" label="Not now — back to home" />
+          {/* The cancel boundary: somebody who says "not now" must not be
+              carried back here by an auth flow they start later. */}
+          <SecondaryLink
+            href="/"
+            label="Not now — back to home"
+            onPress={clearEventReturn}
+          />
         </View>
       </>
     );
