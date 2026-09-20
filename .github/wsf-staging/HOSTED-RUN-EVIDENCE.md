@@ -157,6 +157,15 @@ only the thing it asserts, on the run it asserted it.
 ## Still not established by any run
 
 - **The browser/player journey.** No hosted row opens a browser against the turn flow.
+  Three defects were found in the unrun proof before it was ever dispatched, and all
+  three would have cost a run: the entry abandoned by Leave was never tracked (the
+  rejoin mints a second document and only that one was recorded, so the first leaked
+  with no way to recover its id afterwards); both claimed `wsfKioskPairings` documents
+  leaked, because the tracking branch read `approved.pairingId` and `wsfApproveStation`
+  returns no such field — dead code that could never run; and the pairing captures
+  carried the **live six-character enrolment code**, which `scan-evidence.mjs` cannot
+  catch because it lists PNGs as UNSCANNABLE and exits clean. An artifact reader could
+  have enrolled a screen on that goal.
   Run 32's PASS does not change this and must never be cited for it: a service-level row
   cannot establish QR → retained activity/auth → phone-or-queue choice → ready/start →
   shared player → review/receipt → cleared station. `hosted-player-journey.mjs` and its

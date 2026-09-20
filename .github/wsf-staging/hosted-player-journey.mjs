@@ -367,15 +367,49 @@ async function enrolScreen(browser, fx, slot) {
   await page.goto(`${BASE_URL}/station/${fx.activities[0].goalId}`, { waitUntil: 'domcontentloaded' });
   const code = (await textOf(page.getByTestId('wsf-station-pairing-code'))).replace(/\s+/g, '');
   assert(/^[A-Z0-9]{6}$/.test(code), `station ${slot} showed no six-character pairing code`);
-  await snap(page, 'station', 1280, `0${slot}-pairing`);
+
+  // THE CAPTURE MUST NOT CARRY A WORKING ENROLMENT CREDENTIAL.
+  //
+  // This screenshot was uploaded with the live six-character approval code
+  // legible in it. scan-evidence.mjs cannot read pixels — it lists PNGs as
+  // UNSCANNABLE and exits clean — so the redaction gate never looked at them,
+  // and anyone with the artifact could have enrolled a screen on this goal.
+  // The code element is replaced with a visible redaction before the shutter,
+  // so the pairing LAYOUT is still evidence and the credential is not in it.
+  await page.evaluate((testId) => {
+    const el = document.querySelector(`[data-testid="${testId}"]`);
+    if (el) el.textContent = '\u2588\u2588\u2588\u2588\u2588\u2588';
+  }, 'wsf-station-pairing-code');
+  await snap(page, 'station', 1280, `0${slot}-pairing-code-redacted`);
+
   const approved = await call(`approve screen ${slot}`, 'wsfApproveStation', {
     goalId: fx.activities[0].goalId, code, slot,
   }, fx.championToken);
   assert(approved?.slot === slot, `screen ${slot} was approved into slot ${approved?.slot}`);
   trackLinked(`wsfKioskStations/${approved.stationId}`, fx.activities[0].goalId);
-  // The pairing document is the server's own id; it is claimed through the
-  // goal this run created.
-  if (typeof approved.pairingId === 'string') trackLinked(`wsfKioskPairings/${approved.pairingId}`, fx.activities[0].goalId);
+
+  // THE PAIRING DOCUMENT, READ FROM THE STATION THE SERVER JUST WROTE.
+  //
+  // wsfApproveStation returns { stationId, slot, label, goalId } and NO
+  // pairingId, so the `if (approved.pairingId)` this replaces could never be
+  // true: two pairing documents were left on staging by every run, in
+  // `claimed` state. StationDoc carries `pairingId` (it is how revocation
+  // reaches the in-transit secret), so it is read back from there — and
+  // validated against this run's goal and station before it is claimed, so a
+  // wrong id can never be added to the manifest.
+  const stationDoc = await getDoc(`wsfKioskStations/${approved.stationId}`);
+  const pairingId = stationDoc.body?.fields?.pairingId?.stringValue;
+  assert(typeof pairingId === 'string' && pairingId, `screen ${slot}: the station carries no pairingId to clean up`);
+  const pairingDoc = await getDoc(`wsfKioskPairings/${pairingId}`);
+  assert(
+    pairingDoc.body?.fields?.goalId?.stringValue === fx.activities[0].goalId,
+    `screen ${slot}: the pairing names a different goal than this run's`
+  );
+  assert(
+    pairingDoc.body?.fields?.stationId?.stringValue === approved.stationId,
+    `screen ${slot}: the pairing names a different station than the one approved`
+  );
+  trackLinked(`wsfKioskPairings/${pairingId}`, fx.activities[0].goalId);
   // The screen claims its own secret in-page. It is enrolled when it stops
   // showing a pairing code and starts showing the event.
   await visible(page.getByTestId('wsf-station-hero'), 60_000);
@@ -476,6 +510,20 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   await snap(page, 'phone', 390, '05-waiting-with-place');
 
   // CANCELLING IS AVAILABLE AND REAL, and rejoining restores a place.
+  //
+  // THE ABANDONED ENTRY IS TRACKED BEFORE IT IS ABANDONED.
+  //
+  // Leaving marks the first entry `left` and rejoining mints a SECOND random
+  // document. Reading the entry id only after the rejoin tracked the second
+  // and left the first behind on staging, every run. There is no way to
+  // recover the id afterwards — the server named it and the member is no
+  // longer on it — so it is captured here, while it is still theirs.
+  const firstToken = await signInToken(fx.phoneOne);
+  const beforeLeaving = await call('place before leaving', 'wsfMyTurn', { goalId: fx.activities[0].goalId }, firstToken);
+  const firstEntryId = beforeLeaving?.turn?.entryId;
+  assert(typeof firstEntryId === 'string' && firstEntryId, 'the phone is in the line with no entry id to clean up');
+  trackLinked(`wsfTurnEntries/${firstEntryId}`, fx.activities[0].goalId);
+
   await visible(page.getByTestId('wsf-queue-leave'));
   await page.getByTestId('wsf-queue-leave').click();
   await visible(page.getByTestId('wsf-queue-not-in-line-reason'), 45_000);
@@ -497,6 +545,12 @@ async function casePhoneChoosesQueue(browser, fx, qrUrl) {
   const mine = await call('my place', 'wsfMyTurn', { goalId: fx.activities[0].goalId }, token);
   assert(mine?.turn, 'the phone rejoined and the server does not have it in the line');
   assert(typeof mine.turn.entryId === 'string', 'the place carries no entry id');
+  // A rejoin is a NEW place at the back of the line, not the old one handed
+  // back. If these were ever equal, the leave did not really leave.
+  assert(
+    mine.turn.entryId !== firstEntryId,
+    'the rejoin returned the same entry, so leaving did not abandon a place'
+  );
   trackLinked(`wsfTurnEntries/${mine.turn.entryId}`, fx.activities[0].goalId);
   const entry = await getDoc(`wsfTurnEntries/${mine.turn.entryId}`);
   const lineId = entry.body?.fields?.lineId?.stringValue;

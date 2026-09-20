@@ -266,3 +266,78 @@ test('the workflow deploys nothing, runs the 24-row suite nowhere, and keeps its
   assert.ok(/the browser\/player journey did not pass/.test(WORKFLOW),
     'a failed journey must not leave a green run');
 });
+
+test('the entry abandoned by Leave is tracked before it is abandoned', () => {
+  // Leaving marks the first entry `left`; rejoining mints a SECOND random
+  // document. Reading the id only after the rejoin tracked the second and
+  // left the first on staging, with no way to recover its id afterwards.
+  const body = JOURNEY.slice(
+    JOURNEY.indexOf('async function casePhoneChoosesQueue('),
+    JOURNEY.indexOf('// 3. TWO SCREENS')
+  );
+  const captureAt = body.indexOf('const firstEntryId');
+  const leaveAt = body.indexOf("getByTestId('wsf-queue-leave').click()");
+  assert.notEqual(captureAt, -1, 'the abandoned entry id is never captured');
+  assert.ok(captureAt < leaveAt, 'the abandoned entry must be tracked BEFORE Leave is pressed');
+  assert.ok(
+    /trackLinked\(`wsfTurnEntries\/\$\{firstEntryId\}`/.test(body),
+    'the abandoned entry is captured but never added to the manifest'
+  );
+  assert.ok(
+    /mine\.turn\.entryId !== firstEntryId/.test(body),
+    'the rejoined entry is never proven to be a different place'
+  );
+});
+
+test('both claimed pairing documents are tracked, from the station the server wrote', () => {
+  // wsfApproveStation returns { stationId, slot, label, goalId } and no
+  // pairingId, so an `approved.pairingId` branch can never run: two pairing
+  // documents were left on staging in `claimed` state by every run.
+  // Comments stripped: the journey EXPLAINS that wsfApproveStation returns no
+  // pairingId, and a naive search matched that sentence rather than any code.
+  // A check that fires on its own documentation is not a check — this is the
+  // second time on this file, so it is worth doing properly.
+  const journeyCode = JOURNEY
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  assert.equal(
+    /approved\.pairingId/.test(journeyCode),
+    false,
+    'wsfApproveStation returns no pairingId; a branch reading one is dead code'
+  );
+  const body = JOURNEY.slice(JOURNEY.indexOf('async function enrolScreen('), JOURNEY.indexOf('async function caseQrLink('));
+  assert.ok(
+    /getDoc\(`wsfKioskStations\/\$\{approved\.stationId\}`\)/.test(body),
+    'the pairing id must be read back from the station document'
+  );
+  assert.ok(
+    /trackLinked\(`wsfKioskPairings\/\$\{pairingId\}`/.test(body),
+    'the claimed pairing is never added to the manifest'
+  );
+  // Validated before it is claimed, so a wrong id cannot enter the manifest.
+  assert.ok(/pairingDoc\.body\?\.fields\?\.goalId/.test(body), 'the pairing is not checked against this run’s goal');
+  assert.ok(/pairingDoc\.body\?\.fields\?\.stationId/.test(body), 'the pairing is not checked against the approved station');
+  // enrolScreen runs once per station, so tracking inside it covers both.
+  assert.ok(/enrolScreen\(browser, fx, 1\)/.test(JOURNEY) && /enrolScreen\(browser, fx, 2\)/.test(JOURNEY),
+    'both screens must go through the same enrolment path');
+});
+
+test('no capture can carry a working enrolment code', () => {
+  // scan-evidence.mjs lists PNGs as UNSCANNABLE and exits clean — it cannot
+  // read pixels — so a legible six-character approval code in a screenshot
+  // would be uploaded as a working credential with nothing to catch it.
+  const body = JOURNEY.slice(JOURNEY.indexOf('async function enrolScreen('), JOURNEY.indexOf('async function caseQrLink('));
+  const redactAt = body.indexOf("'wsf-station-pairing-code'");
+  // The journey carries the escape SEQUENCE in its source, not the rendered
+  // character, so this looks for the text that is actually in the file.
+  const maskAt = body.indexOf('\\u2588');
+  const snapAt = body.indexOf("await snap(page, 'station', 1280, `0${slot}-pairing");
+  assert.notEqual(maskAt, -1, 'the pairing code is never masked');
+  assert.ok(maskAt < snapAt, 'the code must be masked BEFORE the capture is taken');
+  assert.ok(redactAt !== -1, 'the code element is never located for redaction');
+  // The capture's own name has to say the code is not in it.
+  assert.ok(
+    /pairing-code-redacted/.test(body),
+    'the capture must be labelled as redacted, so no reader assumes the code is present and valid'
+  );
+});
