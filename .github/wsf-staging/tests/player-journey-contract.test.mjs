@@ -590,11 +590,13 @@ test('every positive post-arrival event read is scoped to the ONE visible member
   assert.match(helper, /titleCount === 1/, 'memberRoot no longer asserts exactly ONE visible title');
   assert.match(helper, /actual === expectedTitle/, 'memberRoot no longer asserts the title text');
 
-  // 2. The prefix scan reads inside a root, never the whole document.
-  const scan = codeOfFn('testIdsWithPrefix', 'async function enrolScreen');
-  assert.equal(/document\.querySelectorAll/.test(scan), false,
-    'testIdsWithPrefix is document-wide again, so it will count the retained route');
-  assert.match(scan, /el\.querySelectorAll/, 'testIdsWithPrefix does not scan within the given root');
+  // 2. THE PREFIX SCAN IS GONE. It was retired, not narrowed: scoping it to
+  //    the root fixed the route-copy problem and left the real one, because
+  //    OptionRow derives `-indicator`, `-indicator-dot`, `-label` and
+  //    `-description` testIDs FROM the row's own id. Two movements enumerated
+  //    as eight ids inside a single correct root (run 38).
+  assert.equal(/testIdsWithPrefix/.test(code), false,
+    'the testID prefix enumeration is back; nested option nodes will inflate the count again');
 
   // 3. THE CLASS RULE. Controls that only exist once a member has arrived may
   //    never be read page-scoped; they are descendants of the visible root.
@@ -630,6 +632,44 @@ test('every positive post-arrival event read is scoped to the ONE visible member
   const second = codeOfFn('joinSecondPhone', 'async function testIdsWithPrefix');
   assert.match(second, /reachMemberEvent\(page, qrUrl, fx\.phoneTwo, fx\.eventTitle\)/,
     'the second phone does not pass the expected event title');
+});
+
+test('the activity choice is made by radio row, so nested option nodes cannot inflate the count', () => {
+  // RUN 38 (35521393874). The journey reached the ONE correct visible member
+  // root — #376 worked — and then counted EIGHT options for a two-activity
+  // event. Not two route copies. One copy, counted wrong:
+  //
+  //   OptionRow.tsx sets testID on the row AND derives `${testID}-indicator`,
+  //   `${testID}-indicator-dot` (selected only), `${testID}-label` and
+  //   `${testID}-description` from it.
+  //
+  //   2 rows x (row + indicator + label + description) = 8.
+  //
+  // A testID PREFIX cannot tell a choice from a piece of one. A ROLE can: the
+  // group is a radiogroup and each choice is a radio, and no indicator, label
+  // or description is a radio. That is the property this test protects.
+  const code = JOURNEY.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const fn = codeOfFn('chooseActivityByTitle', 'async function joinSecondPhone');
+
+  // The choices are read as radios inside the real option group.
+  assert.match(fn, /getByTestId\('wsf-event-activity-options'\)/,
+    'the activity choice no longer anchors on the real option group');
+  assert.match(fn, /getByRole\('radio'\)/,
+    'the activity choices are not selected by role, so nested nodes can inflate the count again');
+
+  // No prefix enumeration anywhere in the file.
+  assert.equal(/getByTestId\(\s*`?wsf-event-activity-\$\{/.test(code), false,
+    'an activity option is being addressed by a constructed testID again');
+  assert.equal(/data-testid\^=/.test(code), false,
+    'a testID PREFIX selector is back; it cannot distinguish a choice from part of one');
+
+  // The count assertion is on the radios, and stays exact.
+  assert.match(fn, /count === 2/, 'the exact two-choice assertion is gone');
+  // And the chosen row is matched by the name a person reads, not an id.
+  assert.match(fn, /filter\(\{ hasText: title \}\)/,
+    'the chosen activity is no longer matched by its readable name');
+  assert.match(fn, /chosenCount === 1/,
+    'more than one row could match the title without failing');
 });
 
 test('no comment still claims the product does not return, or that approve-station is unprobed', () => {

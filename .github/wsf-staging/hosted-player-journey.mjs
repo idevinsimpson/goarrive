@@ -485,30 +485,42 @@ async function reachMemberEvent(page, qrUrl, user, expectedTitle, { captures = {
 }
 
 /**
- * Choose an activity BY THE TITLE A PERSON READS, never by a guessed testID:
- * the option ids are slugs of labels. The WHERE panel does not exist until
- * this has happened.
+ * Choose an activity BY THE TITLE A PERSON READS, as a RADIO ROW.
+ *
+ * WHY NOT A TESTID PREFIX SCAN. Run 38 counted EIGHT options for a
+ * two-activity event. Not two route copies — one copy, counted wrong.
+ * OptionRow.tsx puts the row's testID on the row AND derives four more from
+ * it: `-indicator`, `-indicator-dot` (selected only), `-label`, `-description`.
+ * A `wsf-event-activity-` prefix scan therefore matches the row plus three of
+ * its own descendants, so two movements enumerate as eight ids. The count was
+ * never a count of choices.
+ *
+ * The group is a real radiogroup and each choice is a real radio
+ * (`accessibilityRole` in OptionRow.tsx), so ask for what the thing IS. A
+ * nested indicator or label is not a radio and cannot inflate this, which is
+ * the property the prefix scan lacked.
  */
 async function chooseActivityByTitle(root, title) {
   await visible(root.getByTestId('wsf-event-activity'), 45_000);
-  const optionIds = (await testIdsWithPrefix(root, 'wsf-event-activity-'))
-    .filter((id) => id !== 'wsf-event-activity-options' && id !== 'wsf-event-activity-none');
-  assert(optionIds.length === 2, `a two-activity event offered ${optionIds.length} options`);
+  const group = root.getByTestId('wsf-event-activity-options');
+  await visible(group, 45_000);
+  const rows = group.getByRole('radio');
+  const count = await rows.count();
+  assert(count === 2, `a two-activity event offered ${count} choices`);
   // Nothing is chosen for a two-activity event, so the WHERE panel must be
   // absent right now. If it were already there, "choosing" would prove nothing.
   assert(
     (await root.getByTestId('wsf-event-choice').count()) === 0,
     'the where-panel is on screen before any activity was chosen'
   );
-  let chosenId = null;
-  for (const id of optionIds) {
-    if ((await textOf(root.getByTestId(id))).includes(title)) chosenId = id;
-  }
-  assert(chosenId, `no option named "${title}"`);
-  await root.getByTestId(chosenId).click();
+  // BY THE NAME A PERSON READS. OptionRow renders `label={activity.title ??
+  // activity.label}`, so the title is the row's own accessible text.
+  const chosen = rows.filter({ hasText: title });
+  const chosenCount = await chosen.count();
+  assert(chosenCount === 1, `expected exactly one choice named "${sanitize(title)}", found ${chosenCount}`);
+  await chosen.first().click();
   await visible(root.getByTestId('wsf-event-choice'));
   await contains(root.getByTestId('wsf-event-choice-activity'), title);
-  return chosenId;
 }
 /**
  * A SECOND INDEPENDENT PARTICIPANT, on their own account and their own phone.
@@ -545,15 +557,6 @@ async function joinSecondPhone(browser, fx, qrUrl) {
   trackLinked(`wsfTurnReceipts/${`setup__${fx.setupId}`}__${fx.phoneTwo.uid}`, fx.phoneTwo.uid);
   await snap(page, 'phone', 390, '20-second-phone-waiting');
   return { context, page, entryId: mine.turn.entryId, code: mine.turn.code ?? null };
-}
-
-/** Every element whose testID starts with a prefix, as ids. */
-async function testIdsWithPrefix(root, prefix) {
-  // WITHIN THE GIVEN ROOT, never the document. Run 37 died because a
-  // document-wide querySelectorAll counted the retained route's copies too, so
-  // a two-activity event looked like it offered four options.
-  return root.evaluate((el, p) => Array.from(el.querySelectorAll(`[data-testid^="${p}"]`))
-    .map((node) => node.getAttribute('data-testid')), prefix);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
