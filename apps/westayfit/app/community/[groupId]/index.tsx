@@ -87,16 +87,29 @@ import {
   formatPeriod,
   formatReachedOn,
 } from '../../../src/ui/dates';
-import { kit } from '../../../src/ui/kit';
+import {
+  ACTION_GREEN,
+  ACTION_GREEN_DEEP,
+  HAIRLINE,
+  INK_QUIET,
+  ON_ACTION,
+  ON_NAVY_MUTED,
+  ON_NAVY_RULE,
+  display,
+  elevation,
+  kit,
+} from '../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../src/ui/livingWeCalibration';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
   formatCount,
   isReached,
+  fillRatio,
   percentLabel,
   progressPhase,
   statusLine,
   totalOfTargetLabel,
+  totalOfTargetParts,
 } from '../../../src/ui/progressFormat';
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
@@ -1511,7 +1524,32 @@ export default function CommunityPage() {
     }
   })();
   // Fits the hero at any width, including a 200% text-zoom reflow (≈195 px).
-  const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
+  const shortViewport = windowHeight < 700;
+  /*
+    THE FIRST VIEWPORT MUST REACH THE ACTION, ON EVERY PHONE.
+
+    Moving the action out of the hero onto the page put it below the fold on a
+    390x640 screen — the exact regression the approved target's short-phone
+    rule forbids: the first viewport keeps community identity, the mark at
+    meaningful progress, AND an unmistakable movement action.
+
+    So the rhythm gives on a short screen and the emotional core does not. The
+    hero's own padding is 16 now rather than 22, which is where the wider mark
+    comes from at full height.
+  */
+  const heroContentWidth = Math.max(60, windowWidth - 2 * 20 - 2 * 16);
+  const heroWeWidth = Math.max(96, Math.min(shortViewport ? 150 : 300, heroContentWidth));
+  /*
+    THE BLOOM NEVER EXCEEDS THE CARD IT SITS IN.
+
+    It was three fixed circles, the largest 300px. The hero clips with
+    overflow:hidden, so at 320px and at 195px (200% zoom) the card's own
+    scrollWidth ran past its box and the accessibility suite flagged it as
+    horizontal clipping — correctly, because a box that scrolls sideways is a
+    box that scrolls sideways whether or not the thing inside it is decorative.
+    Sized from the card's content width, it cannot overflow at any width.
+  */
+  const bloom = heroContentWidth;
   /**
    * THE GOAL TITLE SHRINKS BEFORE IT BREAKS A WORD.
    *
@@ -1532,13 +1570,17 @@ export default function CommunityPage() {
    * padding and rhythm when the viewport is short. Nothing changes above
    * ~700px tall.
    */
-  const shortViewport = windowHeight < 700;
   const heroCompact = shortViewport
-    ? { paddingTop: 14, paddingBottom: 14, gap: 6 }
+    ? { paddingTop: 11, paddingBottom: 11, gap: 3 }
     : null;
-  const identityCompact = shortViewport
-    ? { paddingBottom: 6, marginBottom: 8 }
+  // The identity block above the hero, not the band that used to be inside it.
+  const identityCompact = shortViewport ? { gap: 0 } : null;
+  const headingCompactType = shortViewport
+    ? { fontSize: 22, lineHeight: 27, marginTop: 0 }
     : null;
+  // The display tier steps down rather than the mark disappearing.
+  const heroTotalCompact = shortViewport ? { fontSize: 27, lineHeight: 31 } : null;
+  const factsCompact = shortViewport ? { gap: 4, paddingTop: 8, paddingBottom: 8, marginTop: 2 } : null;
   // The presence line is the cheapest thing in the band to shrink, and the
   // only one whose meaning survives at 12px.
   const presenceCompact = shortViewport ? { fontSize: 12, lineHeight: 16 } : null;
@@ -2112,14 +2154,43 @@ export default function CommunityPage() {
       goal.reachedAt && (phase === 'reachedOpen' || phase === 'closedReached')
         ? formatReachedOn(goal.reachedAt, { timeZone: p.pulse.timezone })
         : null;
+    // THE SAME RATIO THE MARK USES. fillRatio is what LivingWeProgress fills
+    // by, so the bar and the mark can never disagree, and neither can be
+    // driven by the rounded percentage text.
+    const barRatio = fillRatio(sharedTotal, target);
     return (
-      <View style={onDark ? styles.factsLarge : styles.factsSmall}>
+      <View style={onDark ? [styles.factsLarge, factsCompact] : styles.factsSmall}>
         <Text
           style={onDark ? styles.heroTotal : styles.totalSmall}
           testID={`wsf-community-goal-total-${goal.goalId}`}
         >
-          {totalOfTargetLabel(sharedTotal, target, unit)}
+          {/*
+            ON THE HERO THE COUNT LEADS AND WHAT IT IS OUT OF FOLLOWS, so the
+            line breaks between them rather than wrapping mid-phrase. Both
+            halves stay inside ONE Text node with a newline between them: the
+            element's text is still "1,847 of 5,000 squats", which is what the
+            journey and a11y specs assert, and both halves come from one helper
+            so they cannot drift.
+          */}
+          {onDark ? (
+            <>
+              <Text style={[styles.heroTotalCount, heroTotalCompact]}>
+                {totalOfTargetParts(sharedTotal, target, unit).count}
+              </Text>
+              {'\n'}
+              <Text style={styles.heroTotalRest}>
+                {totalOfTargetParts(sharedTotal, target, unit).rest}
+              </Text>
+            </>
+          ) : (
+            totalOfTargetLabel(sharedTotal, target, unit)
+          )}
         </Text>
+        {onDark ? (
+          <View style={styles.track}>
+            <View style={[styles.trackFill, { width: `${barRatio * 100}%` }]} />
+          </View>
+        ) : null}
         <Text
           style={onDark ? styles.heroPercent : styles.percentSmall}
           testID={`wsf-community-goal-percent-${goal.goalId}`}
@@ -3065,17 +3136,22 @@ export default function CommunityPage() {
         {renderManageSheet()}
 
         {/*
-          SLICE 2b. NO EMPTY BLOCK, NO DEAD SPACE.
+          THE COMMUNITY LEADS, ABOVE THE HERO.
 
-          When the hero carries the identity, everything this block used to
-          hold moves with it — and an empty View still costs its parent's 18px
-          gap on BOTH sides, which is 36px of cream between the wordmark and
-          the hero for nothing. It renders only when it has something to say:
-          the name for a goal-less community, a Sample badge, or the human
-          line.
+          Slice 2 moved the name INTO the hero, on the reasoning that a name
+          on cream above a goal card made the hero "a goal card that happened
+          to be on a page". The approved target answers that differently and
+          better: the name stays out here, and the hero stops being a card. It
+          becomes the one full-weight navy object on a light screen, so the
+          community reads first and the goal reads as the thing the community
+          is doing.
+
+          This block now always renders — the name is always here — so there
+          is exactly one level-1 heading whether or not a goal is featured,
+          instead of one in each of two places depending on state.
         */}
-        {featured && !isSample && !humanLine ? null : (
-        <View style={styles.identity}>
+        <View style={[styles.identity, identityCompact]}>
+          <Text style={styles.identityEyebrow}>Your community</Text>
           <View style={styles.headingRow}>
             {/*
               D-1. The community is what this page is about, so its name is
@@ -3097,22 +3173,43 @@ export default function CommunityPage() {
               the hero when something is. Exactly one level-1 heading either
               way, never two and never none.
             */}
-            {featured ? null : (
-              <Text
-                style={[styles.heading, styles.headingName]}
-                testID="wsf-community-name"
-                numberOfLines={2}
-                ellipsizeMode="tail"
-                accessibilityLabel={group.displayName}
-                {...HEADING_1}
-              >
-                {group.displayName}
-              </Text>
-            )}
+            <Text
+              style={[styles.heading, styles.headingName, headingCompactType]}
+              testID="wsf-community-name"
+              numberOfLines={2}
+              ellipsizeMode="tail"
+              accessibilityLabel={group.displayName}
+              {...HEADING_1}
+            >
+              {group.displayName}
+            </Text>
             {isSample ? (
               <Text style={styles.sampleBadge} testID="wsf-community-sample-badge">
                 Sample
               </Text>
+            ) : null}
+          </View>
+          {/*
+            PRESENCE, AND ONLY WHAT THIS PRODUCT MAY SAY. A member count is a
+            fact the member is already authorized to read. It is NOT a count
+            of people who moved, and this line must never become one.
+          */}
+          <View style={styles.presenceRow}>
+            {memberCount != null ? (
+              <Text style={styles.presenceText} testID="wsf-community-hero-presence">
+                {memberCountLabel(memberCount)} · moving together this week
+              </Text>
+            ) : null}
+            {otherCommunityCount > 0 ? (
+              <Pressable
+                onPress={() => router.replace('/community')}
+                accessibilityRole="link"
+                accessibilityLabel={`Switch community. You are in ${otherCommunityCount + 1}.`}
+                style={styles.switchChip}
+                testID="wsf-community-hero-switch"
+              >
+                <Text style={styles.switchChipText}>Switch</Text>
+              </Pressable>
             ) : null}
           </View>
           {humanLine ? (
@@ -3121,7 +3218,6 @@ export default function CommunityPage() {
             </Text>
           ) : null}
         </View>
-        )}
 
         {/* The active goal: the product hero, on its own navy surface. */}
         <View style={styles.section} testID="wsf-community-goals">
@@ -3171,71 +3267,12 @@ export default function CommunityPage() {
               return (
                 <Fragment>
                 <View style={[styles.hero, heroCompact]} testID="wsf-community-goal-hero">
-                  {/*
-                    SLICE 2, items 3 and 4. COMMUNITY IDENTITY AND PRESENCE
-                    COME FIRST, AND INSIDE THE HERO.
+                  {/* Depth, built from layered views: a light across the
+                      top of the card, and a bloom behind the mark. Neither
+                      needs a gradient dependency or any photography, and the
+                      bloom never touches the mark itself. */}
+                  <View pointerEvents="none" style={styles.heroTopLight} />
 
-                    The community name used to be navy text on cream above the
-                    card, which made the hero a goal card that happened to be
-                    on a page. It is the identity of the thing the member is
-                    inside, so it belongs at the top of the hero with the one
-                    presence fact this product is actually authorized to show:
-                    how many members are in it.
-
-                    PRESENCE WITHOUT INVENTION. No photos, no "3 friends are
-                    moving", no names, no reactions. A count of members is a
-                    fact the member is already authorized to read. The seam
-                    left for later: per-goal recent movement IS published
-                    (wsfGoalRecentAdditions — amount, unit and minute, never a
-                    person) but only where the Champion has authorized public
-                    display, so it is not shown here until it can be shown for
-                    every goal rather than some.
-                  */}
-                  <View style={[styles.heroIdentity, identityCompact]} testID="wsf-community-hero-identity">
-                    {/*
-                      BOUNDED, because the worst case is not hypothetical: an
-                      80-character name wrapped to four lines and pushed the
-                      primary action to within ONE pixel of the bottom of a
-                      390x640 phone. Two lines caps it whatever the name is,
-                      and the full name is never lost — it stays the
-                      accessible label, and Manage shows it in full.
-                    */}
-                    <Text
-                      style={styles.heroCommunity}
-                      testID="wsf-community-name"
-                      numberOfLines={2}
-                      ellipsizeMode="tail"
-                      accessibilityLabel={group.displayName}
-                      {...HEADING_1}
-                    >
-                      {group.displayName}
-                    </Text>
-                    <View style={styles.heroIdentityRow}>
-                      {memberCount != null ? (
-                        <Text style={[styles.heroPresence, presenceCompact]} testID="wsf-community-hero-presence">
-                          {memberCountLabel(memberCount)}
-                        </Text>
-                      ) : null}
-                      {/*
-                        SLICE 2b. THE SWITCHER APPEARS ONLY WHEN THERE IS
-                        SOMETHING TO SWITCH TO. A "Switch" control on the
-                        screen of somebody who belongs to one community is a
-                        control that does nothing, and a person who taps it
-                        learns the app is lying about what it offers.
-                      */}
-                      {otherCommunityCount > 0 ? (
-                        <Pressable
-                          onPress={() => router.replace('/community')}
-                          accessibilityRole="link"
-                          accessibilityLabel={`Switch community. You are in ${otherCommunityCount + 1}.`}
-                          style={styles.heroSwitch}
-                          testID="wsf-community-hero-switch"
-                        >
-                          <Text style={styles.heroSwitchText}>Switch</Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  </View>
                   {/*
                     A3. The one place this surface can say the target is met
                     while the goal is still open. Confirmed pulse only — an
@@ -3273,6 +3310,13 @@ export default function CommunityPage() {
                   <View style={[styles.progressArea, { minHeight: progressAreaMinHeight }]}>
                     {p.kind === 'ok' ? (
                       <View style={styles.weWrap}>
+                        <View pointerEvents="none" style={styles.glowLayer}>
+                          <View style={[styles.glowRing, glowSize(bloom, 1), styles.glow3]}>
+                            <View style={[styles.glowRing, glowSize(bloom, 0.7), styles.glow2]}>
+                              <View style={[styles.glowRing, glowSize(bloom, 0.43), styles.glow1]} />
+                            </View>
+                          </View>
+                        </View>
                         <LivingWeProgress
                           completed={p.pulse.sharedTotal}
                           target={p.pulse.target}
@@ -3303,76 +3347,90 @@ export default function CommunityPage() {
                     what was RECORDED — the system confirms a recorded
                     contribution, never that a person exercised.
                   */}
-                  {p.kind === 'ok' && p.repeatPolicy === 'once' && (p.ownCredit ?? 0) > 0 ? (
-                    <View
-                      style={styles.heroDone}
-                      testID={`wsf-community-goal-complete-${featured.goalId}`}
-                    >
-                      <Text style={styles.heroDoneLead}>
-                        {`You’ve recorded ${formatCount(p.ownCredit ?? 0)} ${p.pulse.unit}.`}
-                      </Text>
-                      <Text style={styles.heroDoneNote}>
-                        This goal takes one contribution from each member.
-                      </Text>
-                    </View>
-                  ) : (
-                  <View style={styles.actions}>
-                    <ButtonLink
-                      href={contributeHref(featured.goalId, 'move')}
-                      style={styles.primaryButton}
-                      textStyle={styles.primaryButtonText}
-                      testID={`wsf-community-goal-link-${featured.goalId}`}
-                      label="Start moving"
-                    />
-                    <ButtonLink
-                      href={contributeHref(featured.goalId, 'record')}
-                      style={styles.heroSecondaryAction}
-                      textStyle={styles.heroSecondaryActionText}
-                      testID={`wsf-community-goal-record-${featured.goalId}`}
-                      // SLICE 1. Was "Already moved? Record <unit>" — a question
-                      // plus a verb plus a unit, set as wide as the primary, so
-                      // it competed with it. The destination screen names the
-                      // unit; this only has to name the situation.
-                      label="I already moved"
-                    />
-                  </View>
-                  )}
-                  {/*
-                    SLICE 1. Below the actions, not between the figures and the
-                    primary control. It is maintenance metadata, and in the old
-                    order it was the last thing a 390x640 phone could show.
-                  */}
-                  {/*
-                    W7. Sharing, and only what is already published. The control
-                    exists only when this goal's aggregate is authorized for
-                    public display, because the public display is the only thing
-                    here that is safe to put in front of a stranger. Nothing in
-                    this control invites anyone, names anyone, or asks the member
-                    to recruit: it hands over a URL and stops.
-                  */}
-                  {featuredShareUrl ? (
-                    <View style={styles.shareBlock} testID={`wsf-community-goal-share-block-${featured.goalId}`}>
-                      <Pressable
-                        onPress={() => onShareGoalDisplay(featuredShareUrl)}
-                        style={styles.heroOutlineButtonWide}
-                        testID={`wsf-community-goal-share-${featured.goalId}`}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${featured.title}: share the public display link`}
-                      >
-                        <Text style={styles.heroOutlineButtonText}>
-                          {shareControlLabel(goalShareRoute, shareStatus)}
-                        </Text>
-                      </Pressable>
-                      {/* Said before the link leaves, not after. */}
-                      <Text
-                        style={styles.heroShareNote}
-                        testID={`wsf-community-goal-share-note-${featured.goalId}`}
-                      >
-                        {SHARE_DISCLOSURE}
-                      </Text>
-                    </View>
-                  ) : null}
                 </View>
+                {/*
+                  THE ACTION LIVES ON THE PAGE, NOT INSIDE THE HERO.
+
+                  The approved target puts the hero's weight behind the
+                  numbers and then hands the screen to one bright control on
+                  the light ground. Inside the navy card the same button was
+                  one more thing in the object it should be answering, and
+                  the card grew tall enough to push everything else off a
+                  short phone.
+
+                  Every state moved with it -- the once-policy statement, the
+                  two routes, and the share control -- so the gating is
+                  unchanged and nothing had to be re-derived.
+                */}
+                {p.kind === 'ok' && p.repeatPolicy === 'once' && (p.ownCredit ?? 0) > 0 ? (
+                  <View
+                    style={styles.heroDone}
+                    testID={`wsf-community-goal-complete-${featured.goalId}`}
+                  >
+                    <Text style={styles.heroDoneLead}>
+                      {`You’ve recorded ${formatCount(p.ownCredit ?? 0)} ${p.pulse.unit}.`}
+                    </Text>
+                    <Text style={styles.heroDoneNote}>
+                      This goal takes one contribution from each member.
+                    </Text>
+                  </View>
+                ) : (
+                <View style={styles.actions}>
+                  <ButtonLink
+                    href={contributeHref(featured.goalId, 'move')}
+                    style={styles.primaryButton}
+                    textStyle={styles.primaryButtonText}
+                    testID={`wsf-community-goal-link-${featured.goalId}`}
+                    label="Start moving"
+                  />
+                  <ButtonLink
+                    href={contributeHref(featured.goalId, 'record')}
+                    style={styles.heroSecondaryAction}
+                    textStyle={styles.heroSecondaryActionText}
+                    testID={`wsf-community-goal-record-${featured.goalId}`}
+                    // SLICE 1. Was "Already moved? Record <unit>" — a question
+                    // plus a verb plus a unit, set as wide as the primary, so
+                    // it competed with it. The destination screen names the
+                    // unit; this only has to name the situation.
+                    label="I already moved"
+                  />
+                </View>
+                )}
+                {/*
+                  SLICE 1. Below the actions, not between the figures and the
+                  primary control. It is maintenance metadata, and in the old
+                  order it was the last thing a 390x640 phone could show.
+                */}
+                {/*
+                  W7. Sharing, and only what is already published. The control
+                  exists only when this goal's aggregate is authorized for
+                  public display, because the public display is the only thing
+                  here that is safe to put in front of a stranger. Nothing in
+                  this control invites anyone, names anyone, or asks the member
+                  to recruit: it hands over a URL and stops.
+                */}
+                {featuredShareUrl ? (
+                  <View style={styles.shareBlock} testID={`wsf-community-goal-share-block-${featured.goalId}`}>
+                    <Pressable
+                      onPress={() => onShareGoalDisplay(featuredShareUrl)}
+                      style={styles.heroOutlineButtonWide}
+                      testID={`wsf-community-goal-share-${featured.goalId}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${featured.title}: share the public display link`}
+                    >
+                      <Text style={styles.heroOutlineButtonText}>
+                        {shareControlLabel(goalShareRoute, shareStatus)}
+                      </Text>
+                    </Pressable>
+                    {/* Said before the link leaves, not after. */}
+                    <Text
+                      style={styles.heroShareNote}
+                      testID={`wsf-community-goal-share-note-${featured.goalId}`}
+                    >
+                      {SHARE_DISCLOSURE}
+                    </Text>
+                  </View>
+                ) : null}
                 {renderFreshness(p)}
                 </Fragment>
               );
@@ -3768,6 +3826,13 @@ const INVITE_QR_CAVEAT =
   'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join.';
 
 const CARD_BORDER = '#E3E7E1';
+const SURFACE_WHITE = wsfTheme.colors.surface;
+
+/** One circle of the hero's bloom, sized from the card rather than fixed. */
+function glowSize(base: number, factor: number) {
+  const d = Math.round(base * factor);
+  return { width: d, height: d, borderRadius: Math.round(d / 2) };
+}
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 const HERO_RULE = 'rgba(247,245,240,0.35)';
@@ -3796,26 +3861,48 @@ const styles = StyleSheet.create({
     rowGap: 4,
   },
   manageButton: {
-    borderWidth: 1,
-    borderColor: NAVY,
+    backgroundColor: '#ECE8E0',
     borderRadius: wsfTheme.radius.pill,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     minHeight: 44,
     justifyContent: 'center',
   },
-  manageButtonText: { color: NAVY, fontWeight: '600', fontSize: 15 },
-  identity: { gap: 4 },
+  manageButtonText: { color: NAVY, fontWeight: '700', fontSize: 14 },
+  identity: { gap: 2 },
+  identityEyebrow: {
+    color: ACTION_GREEN_DEEP,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  presenceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 1 },
+  presenceText: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, fontWeight: '500' },
+  switchChip: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: wsfTheme.radius.pill,
+    backgroundColor: '#ECE8E0',
+  },
+  switchChipText: { color: NAVY, fontSize: 12, lineHeight: 16, fontWeight: '700' },
   headingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   heading: {
     // SLICE 1. Was 32/38/800 — larger than the goal title it sat above, so the
     // community's own name was the loudest thing on a screen whose job is the
     // goal. Demoted to context. At this size the two-line names that were
     // costing 76px of a 640px phone fit on one line.
+    // The community leads the page now, so its name carries the weight. Slice
+    // 1 demoted this to 20 because at 32 it shouted over a goal title sitting
+    // directly under it; the goal title is inside a navy hero now and has its
+    // own weight, so the two no longer compete for the same register.
     color: wsfTheme.colors.text,
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 26,
-    letterSpacing: -0.2,
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 31,
+    letterSpacing: -0.6,
+    marginTop: 2,
   },
   // The community name is a stored string of up to 80 characters sitting in a
   // row beside the Sample badge. A flex child's default minimum size is its
@@ -3844,7 +3931,7 @@ const styles = StyleSheet.create({
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   section: { gap: 12 },
   sectionEyebrow: {
-    color: wsfTheme.colors.textMuted,
+    color: ACTION_GREEN_DEEP,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1.5,
@@ -3855,10 +3942,52 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: NAVY,
     borderRadius: 24,
-    paddingHorizontal: 22,
-    paddingTop: 22,
-    paddingBottom: 22,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 14,
+    gap: 6,
+    // overflow clips the light and the bloom to the card's own corners.
+    overflow: 'hidden',
+    ...elevation.hero,
+  },
+  // A light falling across the top of the card. A rectangle drew a hard seam
+  // straight through the mark — an artifact, not depth — so it is a very
+  // large, very faint circle anchored above the card, which has no edge
+  // inside it.
+  heroTopLight: {
+    position: 'absolute',
+    top: -250,
+    // STAYS INSIDE THE CARD'S OWN WIDTH. A circle wide enough to arc nicely
+    // was 520px, and although the hero clips it, a clipped child still
+    // reports its full box — which the shell's horizontal-overflow check
+    // reads as content running past a 360px screen, correctly, because it
+    // cannot know the difference. A full-width box with deep bottom corners
+    // draws the same soft arc and has no width to run past anything.
+    left: 0,
+    right: 0,
+    height: 360,
+    borderBottomLeftRadius: 220,
+    borderBottomRightRadius: 220,
+    backgroundColor: 'rgba(143,224,138,0.06)',
+  },
+  // Three nested circles approximate a radial bloom without a gradient
+  // dependency. It sits BEHIND the Living WE and never touches it: the mark's
+  // own fill is the only thing that may say anything about progress.
+  glowLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  glowRing: { alignItems: 'center', justifyContent: 'center' },
+  glow3: { backgroundColor: 'rgba(145,203,125,0.05)' },
+  glow2: { backgroundColor: 'rgba(145,203,125,0.07)' },
+  glow1: { backgroundColor: 'rgba(145,203,125,0.09)' },
+  // The numbers sink into their own panel, so the progress area reads as a
+  // recessed instrument rather than as text floating on the card.
+  progressPanel: {
+    backgroundColor: 'rgba(0,0,0,0.20)',
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingTop: 10,
+    paddingBottom: 11,
+    marginTop: 6,
+    gap: 6,
   },
   heroEyebrow: {
     color: PROGRESS_GREEN,
@@ -3869,10 +3998,10 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: CREAM,
-    fontSize: 27,
+    fontSize: 22,
     fontWeight: '800',
-    lineHeight: 33,
-    letterSpacing: -0.3,
+    lineHeight: 27,
+    letterSpacing: -0.4,
   },
   heroMeta: { color: HERO_MUTED, fontSize: 15, lineHeight: 20 },
   heroBody: { color: CREAM, fontSize: 16, lineHeight: 22 },
@@ -3880,11 +4009,33 @@ const styles = StyleSheet.create({
   // Reserved room for the mark and the facts; the loading line sits centred
   // in it rather than at the top of a hole.
   progressArea: { justifyContent: 'center', gap: 2 },
-  weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
-  factsLarge: { alignItems: 'center', gap: 2 },
+  weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 8, paddingBottom: 4 },
+  // The numbers sit in their own recessed panel, so the progress area reads as
+  // an instrument rather than as text floating on the card.
+  factsLarge: {
+    alignItems: 'stretch',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.20)',
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingTop: 10,
+    paddingBottom: 11,
+    marginTop: 4,
+  },
+  track: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(247,245,240,0.14)',
+    overflow: 'hidden',
+  },
+  trackFill: { height: '100%', borderRadius: 999, backgroundColor: PROGRESS_GREEN },
   factsSmall: { gap: 2 },
-  heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
-  heroPercent: { color: PROGRESS_GREEN, fontSize: 19, fontWeight: '700', textAlign: 'center' },
+  // What the community has done together is what this screen exists to show,
+  // and at 24 it was smaller than the community's own name.
+  heroTotal: { textAlign: 'center' },
+  heroTotalCount: { ...display.lg, color: CREAM },
+  heroTotalRest: { color: ON_NAVY_MUTED, fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 13, fontWeight: '800', textAlign: 'center' },
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
@@ -3910,12 +4061,18 @@ const styles = StyleSheet.create({
   // better still, but it cost the worst-case long name its clearance on a
   // 390x640 phone (15px left); 14 keeps the air and returns the margin.
   actions: { gap: 10, marginTop: 14 },
+  // ONE FLOWING SECTION, NOT A TILE. The member's own part leads with a green
+  // edge; anything that belongs with it continues under a hairline rather than
+  // starting a second box of equal weight beside it.
   personalStrip: {
+    backgroundColor: SURFACE_WHITE,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 2,
     borderLeftWidth: 3,
     borderLeftColor: PROGRESS_GREEN,
-    paddingLeft: 12,
-    paddingVertical: 4,
-    gap: 2,
+    ...elevation.card,
   },
   wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1 },
   // SLICE 2. The identity band: the community's name, then the one presence
@@ -3936,39 +4093,45 @@ const styles = StyleSheet.create({
   // SLICE 1f. THE COMPLETED STATE SITS WHERE THE BUTTONS WERE, and is quiet.
   // It replaces two controls, so it must not read as a third: no fill, no
   // border, no tap affordance — a statement, in the hero's own type.
-  heroDone: { marginTop: 14, gap: 4 },
-  heroDoneLead: { color: '#FFFFFF', fontSize: 17, lineHeight: 23, fontWeight: '700' },
-  heroDoneNote: { color: '#C7D2E0', fontSize: 14, lineHeight: 20 },
+  heroDone: { marginTop: 2, gap: 4 },
+  heroDoneLead: { color: NAVY, fontSize: 17, lineHeight: 23, fontWeight: '700' },
+  heroDoneNote: { color: INK_QUIET, fontSize: 14, lineHeight: 20 },
   // SLICE 1. The already-moved route is DEMOTED, not duplicated and not
   // stripped. Bare centred text (the first attempt) read as a caption and
   // lost every signal that it could be tapped. This is a quiet chip: hairline
   // border at lower contrast than the share control, sized to its label rather
   // than the full width, and still a 44px target.
   heroSecondaryAction: {
-    alignSelf: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(247,245,240,0.22)',
-    borderRadius: 999,
+    alignSelf: 'stretch',
+    borderWidth: 1.5,
+    borderColor: HAIRLINE,
+    backgroundColor: SURFACE_WHITE,
+    borderRadius: 16,
     minHeight: 44,
     paddingHorizontal: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  heroSecondaryActionText: { color: HERO_MUTED, fontSize: 15, fontWeight: '600' },
+  heroSecondaryActionText: { color: NAVY, fontSize: 14, fontWeight: '700' },
+  // THE ACTION GREEN, NOT THE PROGRESS GREEN. They are separate tokens on
+  // purpose: a button must never be able to restate what the Living WE is
+  // saying about the shared total.
   primaryButton: {
-    backgroundColor: PROGRESS_GREEN,
-    borderRadius: 14,
-    minHeight: 54,
+    backgroundColor: ACTION_GREEN,
+    borderRadius: 16,
+    minHeight: 52,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    ...elevation.action,
   },
-  primaryButtonText: { color: NAVY, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  primaryButtonText: { color: ON_ACTION, fontSize: 17, fontWeight: '900', textAlign: 'center' },
   heroOutlineButtonWide: {
     borderWidth: 1.5,
-    borderColor: HERO_RULE,
-    borderRadius: 14,
-    minHeight: 48,
+    borderColor: HAIRLINE,
+    backgroundColor: SURFACE_WHITE,
+    borderRadius: 16,
+    minHeight: 46,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
@@ -3983,11 +4146,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 6,
   },
-  heroOutlineButtonText: { color: CREAM, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  heroOutlineButtonText: { color: NAVY, fontSize: 14, fontWeight: '700', textAlign: 'center' },
   // W7. The share control sits under the contribution actions, quieter than
   // both, with its disclosure directly beneath it rather than behind a tap.
   shareBlock: { gap: 8, marginTop: 12 },
-  heroShareNote: { color: HERO_MUTED, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  heroShareNote: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, textAlign: 'center' },
 
   // ---- light cards, quieter than the hero ----
   totalSmall: { color: wsfTheme.colors.text, fontSize: 16, fontWeight: '700' },
@@ -4023,12 +4186,11 @@ const styles = StyleSheet.create({
   inlineLink: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
   inlineLinkText: { color: NAVY, fontSize: 15, fontWeight: '700' },
   card: {
-    backgroundColor: wsfTheme.colors.surface,
-    borderRadius: 16,
+    backgroundColor: SURFACE_WHITE,
+    borderRadius: 20,
     padding: 16,
     gap: 8,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+    ...elevation.card,
   },
   cardQuiet: {
     backgroundColor: 'rgba(255,255,255,0.55)',
@@ -4043,12 +4205,11 @@ const styles = StyleSheet.create({
   // The goal slot when there is no goal to be a hero: a quiet card the height
   // of its sentence, not a navy surface with nothing to say.
   compactCard: {
-    backgroundColor: 'rgba(255,255,255,0.55)',
-    borderRadius: 16,
+    backgroundColor: SURFACE_WHITE,
+    borderRadius: 20,
     padding: 16,
     gap: 6,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+    ...elevation.card,
   },
   footerLine: { textAlign: 'center' },
   membership: { alignItems: 'center', gap: 8 },
