@@ -168,8 +168,22 @@ only the thing it asserts, on the run it asserted it.
   have enrolled a screen on that goal.
   Run 32's PASS does not change this and must never be cited for it: a service-level row
   cannot establish QR → retained activity/auth → phone-or-queue choice → ready/start →
-  shared player → review/receipt → cleared station. `hosted-player-journey.mjs` and its
-  own deploy-free workflow are built for exactly this gate and have **not yet been run**.
+  shared player → review/receipt → cleared station. `hosted-player-journey.mjs` is built
+  for exactly this gate and has **not yet been run**.
+  Its first dispatch never reached product code. It was written as a standalone
+  workflow, `.github/workflows/wsf-player-journey.yml`, and died at `config` with
+  `unauthorized_client: The given credential is rejected by the attribute condition`:
+  the workload identity provider pins
+  `assertion.workflow_ref=='idevinsimpson/goarrive/.github/workflows/wsf-staging-deploy.yml@refs/heads/main'`
+  (FEDERATION-PLAN.md line 37), so no other workflow file can ever authenticate. That
+  was a design error on my side — a second privileged workflow written without reading
+  the federation plan. The correction makes the journey a deploy-free `player-journey`
+  **mode** of the trusted workflow and retires the standalone file; it is pinned by
+  `tests/workflow-contract.test.mjs` (the plan's `workflow_ref` must name this file, no
+  other workflow may request `id-token`, player mode must reach neither build nor deploy
+  nor the 24-row suite, deploy mode must still reach all three, and a failed or skipped
+  journey must still clean up, scan, and fail the run). **No hosted run has been made in
+  the new mode.**
   Scan, explicit activity selection, the shared follow-along player, rep review, the hall
   clearing and the station session ending are **not covered**, and a green turn-service
   row does not cover them. That gate is separate and open.
