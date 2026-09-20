@@ -33,6 +33,27 @@ import path from 'node:path';
 const [, , outPath, projectId, appUrl, actionHandler] = process.argv;
 const from = process.env.WSF_EMAIL_FROM ?? '';
 
+/**
+ * THE STAGING BOUNDARY, PINNED HERE AND NOT INFERRED FROM THE ARGUMENTS.
+ *
+ * The first version validated the SHAPE of what it was handed — https, a host
+ * beginning with the project id — and accepted anything that matched. Four
+ * negative probes all wrote a config and exited 0:
+ *
+ *   https://example.invalid                                   (foreign origin)
+ *   https://westayfit-staging.example.invalid/__/auth/action  (lookalike host)
+ *   https://westayfit-staging.firebaseapp.com/not-an-action-handler
+ *   project goarrive with production-shaped URLs
+ *
+ * The workflow's literals were right, so nothing was actually mis-deployed —
+ * but a validator that only agrees with a correct caller is not a validator.
+ * These are exact values. A future edit that changes one has to change it
+ * here too, where it is reviewed, rather than silently in a shell line.
+ */
+const ALLOWED_PROJECT = 'westayfit-staging';
+const ALLOWED_APP_URL = 'https://westayfit-staging--staging-4a616y5m.web.app';
+const ALLOWED_ACTION_HANDLER = 'https://westayfit-staging.firebaseapp.com/__/auth/action';
+
 function die(message) {
   console.error(`::error::${message}`);
   process.exit(1);
@@ -41,13 +62,25 @@ function die(message) {
 if (!outPath || !projectId || !appUrl || !actionHandler) {
   die('write-functions-env.mjs needs <outPath> <projectId> <appUrl> <actionHandler>');
 }
-if (!outPath.endsWith(`.env.${projectId}`)) {
-  // A file named for the wrong project is silently ignored by firebase-tools,
-  // which is the most expensive possible failure: a green deploy that changed
-  // nothing.
-  die(`the functions env file must be named .env.${projectId}; got ${path.basename(outPath)}`);
+if (projectId !== ALLOWED_PROJECT) {
+  die(`this writer configures ${ALLOWED_PROJECT} only; refused ${projectId}`);
+}
+// EXACT BASENAME. `endsWith` admitted `anything.env.westayfit-staging`, and a
+// file firebase-tools does not recognise is a green deploy that changed
+// nothing — the most expensive failure available.
+if (path.basename(outPath) !== `.env.${ALLOWED_PROJECT}`) {
+  die(`the functions env file must be named exactly .env.${ALLOWED_PROJECT}; got ${path.basename(outPath)}`);
 }
 
+// A Resend key is `re_…`. If one is ever pasted into the sender variable by
+// mistake, it must not reach a file, a log or a deployment — and it must be
+// diagnosed as a KEY. This check comes FIRST: a bare key has no `@`, so the
+// address-shape check below would otherwise catch it and report the far less
+// useful "does not look like an address", leaving somebody to work out on
+// their own that they had just pasted a credential into a variable.
+if (/\bre_[A-Za-z0-9_-]{8,}/.test(from)) {
+  die('WSF_EMAIL_FROM looks like an API key, not a sender address. Nothing was written. Rotate it if it was a real key.');
+}
 // THE SENDER IS SUPPLIED, NEVER INVENTED. A guessed From address fails DMARC
 // and burns the real domain on the way out — the functions source says so in
 // its own words, and this is the check that keeps it true.
@@ -59,34 +92,40 @@ if (!from.trim()) {
     'Nothing was written.'
   );
 }
-// A Resend key is `re_…`. If one is ever pasted into the sender variable by
-// mistake, it must not reach a file, a log or a deployment — and it must be
-// diagnosed as a KEY. This check comes FIRST: a bare key has no `@`, so the
-// address-shape check below would otherwise catch it and report the far less
-// useful "does not look like an address", leaving somebody to work out on
-// their own that they had just pasted a credential into a variable.
-if (/\bre_[A-Za-z0-9_-]{8,}/.test(from)) {
-  die('WSF_EMAIL_FROM looks like an API key, not a sender address. Nothing was written. Rotate it if it was a real key.');
-}
 if (!/@/.test(from) || /\n|\r/.test(from)) {
   die('WSF_EMAIL_FROM does not look like an address, or contains a newline. Nothing was written.');
 }
 
-for (const [label, value] of [['WSF_APP_URL', appUrl], ['WSF_AUTH_ACTION_HANDLER', actionHandler]]) {
+/**
+ * An exact URL match, plus the parts a string compare would not catch on its
+ * own if the value were ever assembled rather than pasted: credentials, a
+ * port, a query or a fragment all change where a minted action code goes.
+ */
+function pinUrl(label, value, allowed) {
   let url;
   try {
     url = new URL(value);
   } catch {
-    die(`${label} is not a URL: ${value}`);
+    return die(`${label} is not a URL: ${value}`);
   }
+  if (url.username || url.password) die(`${label} carries credentials in the URL`);
+  if (url.port) die(`${label} carries a port: ${value}`);
+  if (url.search) die(`${label} carries a query string: ${value}`);
+  if (url.hash) die(`${label} carries a fragment: ${value}`);
   if (url.protocol !== 'https:') die(`${label} must be https: ${value}`);
+  // Compared after normalisation so a trailing slash is not a false alarm,
+  // and against the EXACT expected value so a lookalike host, a foreign
+  // origin or a wrong path is.
+  const normal = url.origin + url.pathname.replace(/\/$/, '');
+  const expected = new URL(allowed);
+  const expectedNormal = expected.origin + expected.pathname.replace(/\/$/, '');
+  if (normal !== expectedNormal) {
+    die(`${label} must be exactly ${allowed}; refused ${value}`);
+  }
 }
-// The handler must belong to THIS project, or a minted action code is handed
-// to somebody else's handler.
-const handlerHost = new URL(actionHandler).host;
-if (!handlerHost.startsWith(`${projectId}.`)) {
-  die(`WSF_AUTH_ACTION_HANDLER host ${handlerHost} does not belong to ${projectId}`);
-}
+
+pinUrl('WSF_APP_URL', appUrl, ALLOWED_APP_URL);
+pinUrl('WSF_AUTH_ACTION_HANDLER', actionHandler, ALLOWED_ACTION_HANDLER);
 
 const body = [
   `# Generated by .github/wsf-staging/write-functions-env.mjs for ${projectId}.`,

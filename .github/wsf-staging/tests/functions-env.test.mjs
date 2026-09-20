@@ -60,18 +60,66 @@ test('a sender that is actually an API key is refused, and nothing is written', 
   assert.equal(/re_abcdefgh12345678/.test(r.stdout), false, 'a key-shaped value must never be echoed');
 });
 
+test('the four reported staging-boundary probes are all refused', () => {
+  // Every one of these wrote a config and exited 0 before this fix. The
+  // workflow's literals were correct, so nothing was mis-deployed — but a
+  // validator that only agrees with a correct caller is not a validator.
+  const probes = [
+    ['foreign app origin', { appUrl: 'https://example.invalid' }, /must be exactly/],
+    ['lookalike handler host', { handler: 'https://westayfit-staging.example.invalid/__/auth/action' }, /must be exactly/],
+    ['wrong handler path', { handler: 'https://westayfit-staging.firebaseapp.com/not-an-action-handler' }, /must be exactly/],
+    ['production project', { project: 'goarrive', out: '.env.goarrive', appUrl: 'https://goarrive.web.app', handler: 'https://goarrive.firebaseapp.com/__/auth/action' }, /configures westayfit-staging only/],
+  ];
+  for (const [label, overrides, message] of probes) {
+    const r = run({ from: 'a@b.test', ...overrides });
+    assert.equal(r.status, 1, `${label} was accepted`);
+    assert.equal(r.exists, false, `${label} wrote a config`);
+    assert.match(r.stderr, message, label);
+  }
+});
+
+test('misleading URL forms are refused', () => {
+  for (const [label, overrides] of [
+    ['credentials in the URL', { appUrl: 'https://user:pass@westayfit-staging--staging-4a616y5m.web.app' }],
+    ['a port', { appUrl: 'https://westayfit-staging--staging-4a616y5m.web.app:8443' }],
+    ['a query string', { handler: 'https://westayfit-staging.firebaseapp.com/__/auth/action?x=1' }],
+    ['a fragment', { handler: 'https://westayfit-staging.firebaseapp.com/__/auth/action#x' }],
+    ['a prefixed host', { appUrl: 'https://evil-westayfit-staging--staging-4a616y5m.web.app' }],
+    ['a suffixed host', { appUrl: 'https://westayfit-staging--staging-4a616y5m.web.app.example.invalid' }],
+  ]) {
+    const r = run({ from: 'a@b.test', ...overrides });
+    assert.equal(r.status, 1, `${label} was accepted`);
+    assert.equal(r.exists, false, `${label} wrote a config`);
+  }
+});
+
+test('a trailing slash on the handler is not a false alarm', () => {
+  // Normalised before comparison: the boundary must reject lookalikes without
+  // rejecting the same URL written slightly differently.
+  const r = run({ from: 'a@b.test', handler: 'https://westayfit-staging.firebaseapp.com/__/auth/action/' });
+  assert.equal(r.status, 0, r.stderr);
+});
+
 test('a file named for the wrong project is refused', () => {
   // firebase-tools silently ignores it, which is a green deploy that changed
   // nothing — the most expensive possible failure.
   const r = run({ from: 'a@b.test', out: '.env.production' });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /must be named \.env\.westayfit-staging/);
+  assert.match(r.stderr, /named exactly \.env\.westayfit-staging/);
 });
 
 test('a handler belonging to another project is refused', () => {
   const r = run({ from: 'a@b.test', handler: 'https://goarrive.firebaseapp.com/__/auth/action' });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /does not belong to westayfit-staging/);
+  assert.match(r.stderr, /must be exactly/);
+});
+
+test('a suffix-form basename is refused', () => {
+  // `endsWith` admitted `anything.env.westayfit-staging`; firebase-tools does
+  // not recognise it, which is a green deploy that changed nothing.
+  const r = run({ from: 'a@b.test', out: 'anything.env.westayfit-staging' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /named exactly/);
 });
 
 test('a non-https app url is refused', () => {
@@ -86,10 +134,11 @@ test('the workflow writes the env BEFORE the functions deploy, and never echoes 
   assert.notEqual(envAt, -1, 'the deploy no longer writes the functions runtime config');
   assert.ok(envAt < deployAt, 'the runtime config must be written before the deploy that packages it');
   assert.ok(/vars\.WSF_EMAIL_FROM/.test(WORKFLOW), 'the sender must come from an environment variable, not a literal');
-  // Presence only: the secret's material must never be read or printed.
-  assert.ok(/secrets versions list WSF_EMAIL_API_KEY/.test(WORKFLOW), 'the deploy does not report the secret binding state');
+  // The diagnostic moved into a script so its four states are testable; the
+  // workflow must still call it.
+  assert.ok(/report-mail-secret\.mjs/.test(WORKFLOW), 'the deploy does not report the secret state');
   assert.equal(/secrets versions access/.test(WORKFLOW), false,
-    'the deploy must report the secret PRESENCE, never access its payload');
+    'the deploy must report the secret STATE, never access its payload');
   assert.equal(/WSF_EMAIL_API_KEY=/.test(WORKFLOW), false,
     'the API key must never be assigned in the workflow; it is a Secret Manager binding');
 });
@@ -112,4 +161,77 @@ test('the hosted smoke still sends no mail from staging', () => {
     false,
     'no hosted row may trigger a password reset send'
   );
+});
+
+// ── The secret diagnostic: four states, never collapsed ────────────────────
+const REPORTER = '.github/wsf-staging/report-mail-secret.mjs';
+
+function reportWith(script) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-gcloud-'));
+  const fake = path.join(dir, 'gcloud');
+  fs.writeFileSync(fake, script, { mode: 0o755 });
+  const r = spawnSync(process.execPath, [REPORTER, 'westayfit-staging', 'WSF_EMAIL_API_KEY'], {
+    encoding: 'utf8',
+    env: { ...process.env, WSF_GCLOUD_BIN: fake },
+  });
+  const out = r.stdout || '';
+  const field = (name) => (out.match(new RegExp(`^${name}=(.*)$`, 'm')) ?? [])[1];
+  return { status: r.status, out, state: field('WSF_EMAIL_SECRET_STATE'), versions: field('WSF_EMAIL_SECRET_ENABLED_VERSIONS') };
+}
+
+const DESCRIBE_OK = 'echo "projects/x/secrets/WSF_EMAIL_API_KEY"';
+
+test('a permission failure is UNKNOWN, never "not present"', () => {
+  // The previous shell printed EXISTS=false here — a confident, false claim
+  // that would send an operator to create a second secret beside a good one,
+  // or to widen IAM to make a diagnostic go green.
+  const r = reportWith('#!/bin/sh\necho "ERROR: PERMISSION_DENIED: caller lacks secretmanager.secrets.get" >&2\nexit 1\n');
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'absent');
+  assert.match(r.out, /NOT a report that it is missing/);
+  assert.equal(r.status, 0, 'a diagnostic must not fail an otherwise correct deploy');
+});
+
+test('a missing gcloud is UNKNOWN and says so as tooling', () => {
+  const r = reportWith('#!/bin/sh\necho "bash: gcloud: command not found" >&2\nexit 127\n');
+  assert.equal(r.state, 'unknown');
+});
+
+test('only gcloud\u2019s own NOT_FOUND is reported as absent', () => {
+  const r = reportWith('#!/bin/sh\necho "ERROR: NOT_FOUND: Secret [WSF_EMAIL_API_KEY] not found." >&2\nexit 1\n');
+  assert.equal(r.state, 'absent');
+});
+
+test('present with enabled versions, and present with none, are different answers', () => {
+  const withTwo = reportWith(`#!/bin/sh\ncase "$*" in *"versions list"*) echo v1; echo v2;; *) ${DESCRIBE_OK};; esac\nexit 0\n`);
+  assert.equal(withTwo.state, 'present_with_enabled');
+  assert.equal(withTwo.versions, '2');
+
+  const withNone = reportWith(`#!/bin/sh\ncase "$*" in *"versions list"*) : ;; *) ${DESCRIBE_OK};; esac\nexit 0\n`);
+  assert.equal(withNone.state, 'present_no_enabled');
+  assert.equal(withNone.versions, '0');
+});
+
+test('an unreadable version list does not become "no enabled versions"', () => {
+  // The same false-confidence bug, one level down.
+  const r = reportWith(`#!/bin/sh\ncase "$*" in *"versions list"*) echo "ERROR: PERMISSION_DENIED" >&2; exit 1;; *) ${DESCRIBE_OK};; esac\nexit 0\n`);
+  assert.equal(r.state, 'unknown');
+  assert.notEqual(r.state, 'present_no_enabled');
+});
+
+test('an enabled version is never reported as runtime binding or a working key', () => {
+  const r = reportWith(`#!/bin/sh\ncase "$*" in *"versions list"*) echo v1;; *) ${DESCRIBE_OK};; esac\nexit 0\n`);
+  assert.match(r.out, /WSF_EMAIL_RUNTIME_BINDING=not_established_by_this_check/);
+  assert.match(r.out, /WSF_EMAIL_KEY_VALIDITY=not_established_by_this_check/);
+});
+
+test('the payload is never read', () => {
+  // Comments stripped first: the file EXPLAINS that it never calls
+  // `versions access`, and a naive search matched that sentence rather than
+  // any code. A check that fires on its own documentation is not a check.
+  const code = fs.readFileSync(REPORTER, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  assert.equal(/'access'/.test(code), false, 'the reporter must never pass `access` to gcloud');
+  assert.equal(/versions[^\n]{0,20}access/.test(code), false, 'the reporter must never access a secret payload');
 });

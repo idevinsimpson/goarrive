@@ -355,20 +355,13 @@ jobs:
       # PRESENCE ONLY, NEVER A PAYLOAD. Whether the secret exists and has an
       # enabled version decides whether this deploy can produce a build that
       # actually sends; `versions list` prints metadata and no material.
-      - name: Report the mail secret's binding state
+      # FOUR STATES, NEVER COLLAPSED. "I could not read it" is not "it is not
+      # there": the previous shell `if` printed EXISTS=false on a
+      # PERMISSION_DENIED, which would send an operator to create a second
+      # secret beside a good one, or to widen IAM to make a diagnostic green.
+      - name: Report the mail secret's state
         working-directory: app
-        run: |
-          set -euo pipefail
-          if gcloud secrets describe WSF_EMAIL_API_KEY --project "$STAGING_PROJECT" >/dev/null 2>&1; then
-            enabled="$(gcloud secrets versions list WSF_EMAIL_API_KEY \
-              --project "$STAGING_PROJECT" --filter='state=ENABLED' --format='value(name)' | wc -l | tr -d ' ')"
-            echo "WSF_EMAIL_SECRET_EXISTS=true"
-            echo "WSF_EMAIL_SECRET_ENABLED_VERSIONS=$enabled"
-            [ "$enabled" != "0" ] || echo "::warning::WSF_EMAIL_API_KEY exists with no ENABLED version; mail will still refuse to send."
-          else
-            echo "WSF_EMAIL_SECRET_EXISTS=false"
-            echo "::warning::WSF_EMAIL_API_KEY is not present in $STAGING_PROJECT. The deploy continues and mail will answer failed-precondition until an operator creates it."
-          fi
+        run: node ../ops/.github/wsf-staging/report-mail-secret.mjs "$STAGING_PROJECT" WSF_EMAIL_API_KEY
 
       - name: Deploy WSF functions
         id: deploy-functions
