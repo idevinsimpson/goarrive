@@ -18,7 +18,7 @@ station and a public display are fixed canvases with no scroll.
 
 Contact sheet / other: `CONTACT-SHEET-batch-a.png`
 
-Evidence: `before/` 16 frozen
+Evidence: `before/` 24 frozen
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |

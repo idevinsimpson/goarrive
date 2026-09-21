@@ -24,6 +24,20 @@ const OUT = path.resolve(__dirname, '../../../docs/design-target/review/batch-a-
 const CLASSES = [
   { key: '390x844', width: 390, height: 844 },
   { key: '390x640', width: 390, height: 640 },
+  /**
+   * 430x932 WAS MISSING, AND THE WINDOW TO CAPTURE IT CLOSES AT IMPLEMENTATION.
+   *
+   * The first sixteen frozen frames cover eight states at two classes. The
+   * Batch A assignment asks for BEFORE -> AFTER at three, and a BEFORE can
+   * only be photographed while the BEFORE still exists: the moment these
+   * routes are built to the target, the large-phone BEFORE is gone for good
+   * and no later run can recover it. So this class is added and captured
+   * against untouched routes, before any Batch A code is written.
+   *
+   * This ADDS frames. The sixteen already frozen are not recaptured and not
+   * touched; check:evidence still holds them byte-for-byte.
+   */
+  { key: '430x932', width: 430, height: 932 },
 ];
 
 async function shoot(page: Page, name: string, key: string) {

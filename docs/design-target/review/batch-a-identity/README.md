@@ -185,3 +185,57 @@ rather than with padding.
 
 Still target only. Nothing here is approved and nothing should be built from
 these frames without a separate authorization.
+
+## The BEFORE set, completed to three classes — 2026-09-21
+
+`before/` held **eight states at two classes only**, 390×640 and 390×844.
+There was no 430×932 BEFORE at all.
+
+The Batch A implementation pass asks for BEFORE → AFTER at three classes, and
+a BEFORE can only be photographed **while the BEFORE still exists**. The moment
+these routes are built to the target, the large-phone BEFORE is gone and no
+later run can recover it. So the missing class was captured first, against
+untouched routes, before a line of Batch A code was written.
+
+This **added** eight frames. The sixteen already frozen were not recaptured;
+`npm run check:evidence` holds them byte-for-byte, and the four that a routine
+capture rewrote were reverted rather than re-baselined — see below for why two
+of them changed.
+
+### A capture race this uncovered, recorded rather than fixed
+
+Running the BEFORE capture rewrote four of the sixteen frozen frames. Both
+causes were measured, not guessed:
+
+| Frame | Diff | Cause |
+| --- | --- | --- |
+| `BEFORE-auth-error-390x640/844` | the synthetic email address only | Fixture nondeterminism. Each run stamps a fresh address. Cosmetic. |
+| `BEFORE-verify-email-390x640/844` | the whole intro paragraph | **A real race.** The frozen frames caught `unconfigured`; the new run caught `sending`. |
+
+`verify-email.tsx` derives its intro from `readVerificationSend(user.uid)`, and
+`sending` is deliberately the non-committal state — nothing has been confirmed,
+so nothing is asserted. The capture spec does not pin the outcome, so it
+photographs whichever state the send happens to be in when the shutter fires.
+
+It is genuinely intermittent, and the proof is inside one run: **at 430×932 the
+same code on the same run landed on `unconfigured`**, matching the frozen
+siblings, while 390×640 and 390×844 landed on `sending`.
+
+All four frames were reverted. The spec is **not** changed to pin the outcome,
+because a spec that produced a different frame than the frozen ones would break
+the guard on every future run — and re-baselining an accepted BEFORE is not
+something this pass is authorized to do.
+
+**Consequence worth knowing:** a future routine run may trip `check:evidence`
+on `BEFORE-verify-email-390x640/844` through no fault of the runner. That is
+the guard working, not a defect in the change under test. The AFTER capture
+built in this pass pins the outcome deterministically so the same race cannot
+reach the AFTER evidence.
+
+### What the BEFORE shows that the target fixes
+
+The `unconfigured` frame is the clearest case. It says plainly *"no message was
+sent. Nobody can finish verifying a new account here until it is switched on"*
+— and then offers **I have verified** and **Resend verification email**, two
+controls that cannot work, above the one that can. That is the dead-control
+defect the accepted target removes.
