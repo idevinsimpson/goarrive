@@ -71,18 +71,20 @@ second is operational.
 | | |
 | --- | --- |
 | User-facing routes | **23** |
-| Routes with a real-RN target | **15** |
-| Routes with no target | **8** |
+| Routes with a real-RN target | **17** |
+| Routes with no target | **6** |
 | Routes implemented against an approved target | **5** |
 
 ### Covered — a real-RN target exists
 
 | Route | Target package | Notes |
 | --- | --- | --- |
+| `/` | `review/batch-c-challenge-and-door/` | The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target only, **not approved**. |
 | `/activity` | `review/page-04-progress/` | Progress — the private record of what the member recorded. **Implemented (Phase A) and accepted.** The data audit in that package is why there is no streak. |
 | `/combined/[setupId]` | `review/batch-b-join-and-setup/` | Watching a combined goal — five states. Read-only; NOT a setup flow. Target only, **not approved**. |
 | `/community` | `review/page-03-community/` | The community list — Community's only route, since `/community/[groupId]` is Home. **Implemented and accepted.** The per-community `PROPOSAL-*` frames are exploration only and were explicitly ruled out of implementation. |
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **Implemented and accepted.** |
+| `/community/[groupId]/challenge` | `review/batch-c-challenge-and-door/` | The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**. |
 | `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes. **Implemented and accepted.** |
 | `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
 | `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**. |
@@ -99,8 +101,6 @@ second is operational.
 
 | Route | What it is |
 | --- | --- |
-| `/` | Home resolver / current-community landing |
-| `/community/[groupId]/challenge` | Community challenge surface |
 | `/display/[goalId]` | Public / shared display, phone through 1920x1080 |
 | `/event/[goalId]` | Scanned event landing |
 | `/kiosk/[goalId]` | Kiosk — tablet portrait |

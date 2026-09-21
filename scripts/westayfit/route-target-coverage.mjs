@@ -43,6 +43,8 @@ const TARGETS = {
   '/join/[joinCode]': 'review/batch-b-join-and-setup/',
   '/start-community': 'review/batch-b-join-and-setup/',
   '/combined/[setupId]': 'review/batch-b-join-and-setup/',
+  '/community/[groupId]/challenge': 'review/batch-c-challenge-and-door/',
+  '/': 'review/batch-c-challenge-and-door/',
   '/signin': 'review/batch-a-identity/',
   '/signup': 'review/batch-a-identity/',
   '/verify-email': 'review/batch-a-identity/',
@@ -80,6 +82,10 @@ const NOTES = {
     'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target only, **not approved**.',
   '/combined/[setupId]':
     'Watching a combined goal — five states. Read-only; NOT a setup flow. Target only, **not approved**.',
+  '/community/[groupId]/challenge':
+    'The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**.',
+  '/':
+    'The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target only, **not approved**.',
   '/signin':
     'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
   '/signup': 'Target only, **not approved**.',
@@ -90,8 +96,6 @@ const NOTES = {
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
-  '/': 'Home resolver / current-community landing',
-  '/community/[groupId]/challenge': 'Community challenge surface',
   '/display/[goalId]': 'Public / shared display, phone through 1920x1080',
   '/event/[goalId]': 'Scanned event landing',
   '/kiosk/[goalId]': 'Kiosk — tablet portrait',
