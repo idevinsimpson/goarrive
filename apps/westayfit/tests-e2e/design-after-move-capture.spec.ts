@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { expect, test, type Browser, type Page, type Route } from '@playwright/test';
 
+import { CAPTURE_FRAMES } from './helpers/capture';
+
 import {
   PROJECT_ID,
   seedActiveGoal,
@@ -144,7 +146,7 @@ async function shot(page: Page, name: string, topTestId: string, primaryTestId: 
   ).toBeGreaterThanOrEqual(0);
 
   await assertNothingUnderTheBar(page, name, primaryTestId);
-  await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, `${name}.png`) });
 }
 
 /**

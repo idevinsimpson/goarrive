@@ -2,12 +2,27 @@ import path from 'node:path';
 
 import { test, type Browser } from '@playwright/test';
 
+import { CAPTURE_FRAMES } from './helpers/capture';
+
 /**
  * Captures Atlas Batch A — identity and onboarding — from the gated preview
  * route. TARGETS, not screenshots of a member surface.
  */
 const OUT = path.resolve(__dirname, '../../../docs/design-target/review/batch-a-identity');
 
+
+/*
+  OPT-IN. This spec asserts nothing — its whole product is the Batch A identity target frames
+  in docs/, which a review has already accepted. Run in the ordinary suite it
+  rewrote them on every verification pass. Nothing is lost by skipping it and
+  an accepted frame stops drifting underneath the decision that approved it.
+
+  Set WSF_CAPTURE_FRAMES=1 to regenerate deliberately.
+*/
+test.skip(
+  !CAPTURE_FRAMES,
+  'Accepted frames are evidence; set WSF_CAPTURE_FRAMES=1 to regenerate them.',
+);
 const SCREENS = [
   'signin',
   'signup',

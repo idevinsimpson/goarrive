@@ -2,6 +2,8 @@ import path from 'node:path';
 
 import { test, type Browser } from '@playwright/test';
 
+import { CAPTURE_FRAMES } from './helpers/capture';
+
 /**
  * Captures the real-RN design targets at every device class the atlas asks
  * for. These are TARGETS -- drawings of where a page is going, rendered from
@@ -14,6 +16,19 @@ import { test, type Browser } from '@playwright/test';
  */
 const OUT = path.resolve(__dirname, '../../../docs/design-target/targets');
 
+
+/*
+  OPT-IN. This spec asserts nothing — its whole product is the Page 1 and Page 2 target frames
+  in docs/, which a review has already accepted. Run in the ordinary suite it
+  rewrote them on every verification pass. Nothing is lost by skipping it and
+  an accepted frame stops drifting underneath the decision that approved it.
+
+  Set WSF_CAPTURE_FRAMES=1 to regenerate deliberately.
+*/
+test.skip(
+  !CAPTURE_FRAMES,
+  'Accepted frames are evidence; set WSF_CAPTURE_FRAMES=1 to regenerate them.',
+);
 const CLASSES = [
   { key: '390x844', width: 390, height: 844 },
   { key: '390x640', width: 390, height: 640 },

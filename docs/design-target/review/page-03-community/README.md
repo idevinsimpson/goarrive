@@ -1,8 +1,12 @@
-# Page 3 · Community — BEFORE and TARGET
+# Page 3 · Community — BEFORE, TARGET and AFTER
 
-**Target only. Nothing here is implemented.** No product code changed in this
-pass. The gate is ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual
-acceptance; this package is the first two.
+**`/community` is implemented and accepted** (2026-09-21, at `a8f2ecf`). The
+gate ran in full: ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual
+acceptance.
+
+`PROPOSAL-detail-*` is the one thing here that is **not** implemented and is
+not to be: it is exploration of a per-community surface, and the IA decision
+below ruled it out. Home is untouched.
 
 ## Read this first: Community is one route, not two
 
@@ -62,9 +66,15 @@ Six corrections, each with the reason it mattered:
 4. **Replaced the naked underlined Join / Start links** with compact pill
    actions. The BEFORE critique was that the existing naked link reads like a
    website; ending the target with two more of them was the same defect in a
-   new place. **Superseded:** the Join pill is gone entirely — see the seam
-   below. There is no tappable Join anywhere, on any state, and the AFTER
-   asserts its absence by role and name.
+   new place.
+
+   **Then superseded entirely.** There is no tappable Join **anywhere, on any
+   state** — not a primary action in the zero state, not a pill beside Start
+   on a populated one. `/join/[joinCode]` takes the code from the route and
+   nothing in the product accepts a typed one, so every Join control would
+   have gone nowhere. `Start a community` is the only creation action, and
+   `community-list.spec.ts` asserts the absence of any Join link or button by
+   role and name, in both the empty state and a populated one.
 5. **Fixed the sparse compositions.** Join / Start now sit directly under the
    content instead of pinned to the bottom; loading skeletons the *real* final
    structure (current-community panel, then rows) beneath the stable app
@@ -85,10 +95,12 @@ only navigable join-adjacent screen.
 
 So a prominent **Join** *button* in the zero state would be a control that goes
 nowhere, which is the thing these frames refuse. Join leads that panel by
-heading and by copy that states the real mechanism, and the only button is the
-one that works. The `Join a community` pill appears on states where a member
-already has communities, where it is a real destination only once a code-entry
-route exists.
+heading and by copy that states the real mechanism — an invite link or QR from
+someone already in the community — and the only button is the one that works.
+
+An earlier revision kept a `Join a community` pill on the states where a member
+already has communities, reasoning it would become a real destination later.
+That was still a control with no destination today, and it is gone.
 
 **If Join should be a control here, it needs a join-code entry route** — new
 product surface, not a drawing change. Flagged rather than faked.
@@ -157,7 +169,8 @@ Page 2, caught this time by the check itself rather than by a review round.
 ## Evidence
 
 - `before/` — frozen. The capture spec is opt-in (`WSF_CAPTURE_BEFORE=1`) and
-  `npm run check:before-frozen` fails if a routine run changes a byte of it.
+  `npm run check:evidence` fails if a routine run changes a byte of it — and
+  now covers the accepted TARGET and AFTER frames too, not only the BEFOREs.
 - `TARGET-*` / `PROPOSAL-*` — real React Native from the real kit, rendered
   through the gated preview route `/design-target/community`. Every frame
   carries its own `TARGET / CONCEPT — NOT IMPLEMENTED` strip **inside** the
@@ -256,6 +269,7 @@ here because this pass changes no product code.
 ## Open, and explicitly not claimed
 
 - Combined / multi-movement remains separate later scope.
-- No implementation, no Progress, no You, no auth, no kiosk/event
-  administration, no staging, no merge and no release work is part of this
-  package.
+- `/community` is implemented; `PROPOSAL-detail-*` is not, and Home is
+  untouched.
+- No Progress, no You, no auth, no kiosk/event administration, no staging, no
+  merge and no release work is part of this package.

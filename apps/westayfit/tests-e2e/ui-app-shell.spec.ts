@@ -2,6 +2,8 @@ import path from 'node:path';
 
 import { test, expect, type Browser } from '@playwright/test';
 
+import { CAPTURE_FRAMES } from './helpers/capture';
+
 import {
   stampId,
   seedVerifiedUser,
@@ -109,7 +111,7 @@ test('the shell carries four destinations and the MOVE action, and Home is the c
     await expect(page.getByTestId('wsf-member-tab-activity')).toContainText('Progress');
     await expect(page.getByTestId('wsf-member-tab-home')).toHaveAttribute('data-current', 'true');
     await expectNoHorizontalOverflow(page, `Home at ${w.key}`);
-    await page.screenshot({ path: path.join(OUT, `home-${w.key}.png`) });
+    if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, `home-${w.key}.png`) });
 
     // THE BAR IS ABOVE THE FOLD, ALWAYS. A navigation a person has to scroll
     // to reach is not persistent navigation.
@@ -141,7 +143,7 @@ test('the shell carries four destinations and the MOVE action, and Home is the c
         }, { timeout: 40_000, message: `${key} at ${w.key} never left its loading state` })
         .not.toBeNull();
       await expectNoHorizontalOverflow(page, `${key} at ${w.key}`);
-      await page.screenshot({ path: path.join(OUT, `${key}-${w.key}.png`) });
+      if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, `${key}-${w.key}.png`) });
     }
 
     // THE WORDMARK GOES HOME, from a destination that is not Home.
@@ -213,7 +215,7 @@ test('Activity shows what this member actually recorded, and says it is private'
   // seeded on the goal and must never appear on this private screen.
   await expect(page.getByTestId('wsf-activity')).not.toContainText('1,847');
   await expect(page.getByTestId('wsf-activity-privacy')).toContainText('Only you can see this');
-  await page.screenshot({ path: path.join(OUT, 'activity-recorded-390.png') });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, 'activity-recorded-390.png') });
   await context.close();
 });
 
@@ -230,7 +232,7 @@ test('the shell stays off the event surfaces and off the signed-out ones', async
   await page.goto('/');
   await expect(page.getByTestId('wsf-home-signed-out')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
-  await page.screenshot({ path: path.join(OUT, 'signed-out-390.png') });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, 'signed-out-390.png') });
 
   await signInVia(page, fx.email, fx.password);
   await page.goto('/');
@@ -244,7 +246,7 @@ test('the shell stays off the event surfaces and off the signed-out ones', async
   // which is still the event surface and must still carry no shell.
   await expect(page.getByTestId('wsf-event-wordmark')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
-  await page.screenshot({ path: path.join(OUT, 'event-no-shell-390.png') });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, 'event-no-shell-390.png') });
 
   await context.close();
 });
