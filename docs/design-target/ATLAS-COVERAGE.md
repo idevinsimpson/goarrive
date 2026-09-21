@@ -270,11 +270,11 @@ Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-ac
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
-| `failed` | 390x844 |  | 1 |
-| `loading` | 390x844 |  | 1 |
+| `failed` | 390x640 · 390x844 · 430x932 |  | 3 |
+| `loading` | 390x640 · 390x844 · 430x932 |  | 3 |
 | `member` | 390x640 · 390x844 · 430x932 |  | 3 |
-| `nocommunity` | 390x844 · 430x932 |  | 2 |
-| `signedout` | 390x640 · 390x844 |  | 2 |
+| `nocommunity` | 390x640 · 390x844 · 430x932 |  | 3 |
+| `signedout` | 390x640 · 390x844 · 430x932 |  | 3 |
 
 ## Device → frames
 
@@ -282,7 +282,7 @@ Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-ac
 | --- | ---: | --- |
 | 1280x800 | 32 | E · F · G |
 | 1920x1080 | 10 | F |
-| 390x640 | 156 | A · B · C · D · P1 · P2 · P3 · P4 · P5 |
+| 390x640 | 159 | A · B · C · D · P1 · P2 · P3 · P4 · P5 |
 | 390x844 | 152 | A · B · C · D · F · G · P1 · P2 · P3 · P4 · P5 |
-| 430x932 | 111 | A · B · C · D · P1 · P3 · P4 · P5 |
+| 430x932 | 114 | A · B · C · D · P1 · P3 · P4 · P5 |
 | 800x1280 | 23 | E · F |

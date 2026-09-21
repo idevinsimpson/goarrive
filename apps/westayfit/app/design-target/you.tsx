@@ -10,77 +10,41 @@ function previewAllowed(): boolean {
   return v === '1' || v === 'true';
 }
 
+type State = 'member' | 'noCommunity' | 'loading' | 'failed' | 'signedOut';
 type Frame = { id: string; label: string; width: number; height: number; node: React.ReactNode };
 
-const P = { w: 390, h: 844 };
-const SHORT = { w: 390, h: 640 };
-const BIG = { w: 430, h: 932 };
-
-const FRAMES: Frame[] = [
-  {
-    id: 'member-390x844',
-    label: 'You · signed in, in a community · 390×844',
-    width: P.w,
-    height: P.h,
-    node: <YouTarget state="member" />,
-  },
-  {
-    id: 'nocommunity-390x844',
-    label: 'You · signed in, no community yet · 390×844',
-    width: P.w,
-    height: P.h,
-    node: <YouTarget state="noCommunity" />,
-  },
-  {
-    id: 'loading-390x844',
-    label: 'You · loading · 390×844',
-    width: P.w,
-    height: P.h,
-    node: <YouTarget state="loading" />,
-  },
-  {
-    id: 'failed-390x844',
-    label: 'You · could not be loaded · 390×844',
-    width: P.w,
-    height: P.h,
-    node: <YouTarget state="failed" />,
-  },
-  {
-    id: 'signedout-390x844',
-    label: 'You · not signed in · 390×844',
-    width: P.w,
-    height: P.h,
-    node: <YouTarget state="signedOut" />,
-  },
-  {
-    id: 'member-390x640',
-    label: 'You · signed in, in a community · 390×640',
-    width: SHORT.w,
-    height: SHORT.h,
-    node: <YouTarget state="member" />,
-  },
-  {
-    id: 'signedout-390x640',
-    label: 'You · not signed in · 390×640',
-    width: SHORT.w,
-    height: SHORT.h,
-    node: <YouTarget state="signedOut" />,
-  },
-  {
-    id: 'member-430x932',
-    label: 'You · signed in, in a community · 430×932',
-    width: BIG.w,
-    height: BIG.h,
-    node: <YouTarget state="member" />,
-  },
-  {
-    id: 'nocommunity-430x932',
-    label: 'You · signed in, no community yet · 430×932',
-    width: BIG.w,
-    height: BIG.h,
-    node: <YouTarget state="noCommunity" />,
-  },
+/**
+ * A FULL MATRIX, NOT A SELECTION.
+ *
+ * The earlier list drew `member` at three classes and everything else at one
+ * or two, which the generated coverage mapping surfaced as uneven device
+ * coverage. A state that exists at one width and not another is a state
+ * somebody loses by turning their phone, so every state is drawn at every
+ * class.
+ */
+const STATES: { key: State; id: string; label: string }[] = [
+  { key: 'member', id: 'member', label: 'Member' },
+  { key: 'noCommunity', id: 'nocommunity', label: 'No community yet' },
+  { key: 'loading', id: 'loading', label: 'Loading' },
+  { key: 'failed', id: 'failed', label: 'Goals failed to load' },
+  { key: 'signedOut', id: 'signedout', label: 'Signed out' },
 ];
+
+const CLASSES = [
+  { key: '390x844', width: 390, height: 844 },
+  { key: '390x640', width: 390, height: 640 },
+  { key: '430x932', width: 430, height: 932 },
+];
+
+const FRAMES: Frame[] = CLASSES.flatMap((c) =>
+  STATES.map((st) => ({
+    id: `${st.id}-${c.key}`,
+    label: `${st.label} · ${c.key}`,
+    width: c.width,
+    height: c.height,
+    node: <YouTarget state={st.key} />,
+  }))
+);
 
 /** The label strip burnt into every captured frame. */
 const FRAME_BANNER = 18;

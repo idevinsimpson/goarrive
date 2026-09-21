@@ -20,17 +20,17 @@ test.skip(
   'Frame capture is evidence generation; set WSF_CAPTURE_FRAMES=1 to regenerate it.',
 );
 
-const FRAMES = [
-  'member-390x844',
-  'nocommunity-390x844',
-  'loading-390x844',
-  'failed-390x844',
-  'signedout-390x844',
-  'member-390x640',
-  'signedout-390x640',
-  'member-430x932',
-  'nocommunity-430x932',
-];
+/**
+ * THE FULL MATRIX, DERIVED — not a hand-listed subset.
+ *
+ * This list previously named ten frames while the page rendered a different
+ * set, so the states added at a new device class were simply never captured
+ * and the package looked complete at ten files. Deriving it from the same two
+ * axes the page uses means a state added to one is captured at all three.
+ */
+const STATES = ['member', 'nocommunity', 'loading', 'failed', 'signedout'] as const;
+const CLASSES = ['390x844', '390x640', '430x932'] as const;
+const FRAMES = CLASSES.flatMap((c) => STATES.map((st) => `${st}-${c}`));
 
 const FRAME_BANNER = 18;
 const FRAME_BORDER = 1;
@@ -92,26 +92,32 @@ test('you targets render at every device class the gate asks for', async ({
           if (n instanceof HTMLElement && n.scrollTop > 0) stuck.push(n.scrollTop);
         });
         const text = (el as HTMLElement).innerText ?? '';
-        return { stuck, hasWordmark: text.includes('WE STAY FIT') };
+        return { stuck };
       });
       expect(top.stuck, `${id}: a scroll container inside the frame is not at its top`).toEqual([]);
-      expect(top.hasWordmark, `${id}: the wordmark is not in the frame`).toBe(true);
 
       /*
-        THE WORDMARK STAYS PROMINENT AND STAYS AT THE TOP. It is the first
-        thing under the concept strip on every state, signed in or out, and
-        it is asserted rather than assumed — the same rule the Page 4 frames
-        were corrected onto.
+        THE REAL WORDMARK, ASSERTED AS THE REAL WORDMARK.
+
+        This used to look for the literal text "WE STAY FIT", which passed
+        only because the target drew the letters itself. `/you` renders
+        `WsfWordmark` — an Image with accessibilityLabel "We Stay Fit" — so
+        the target does too, and the assertion follows the component rather
+        than a string a drawing happened to contain. A check that can only
+        pass against a hand-lettered stand-in is a check that would have gone
+        green on the wrong thing.
       */
-      const wordmark = (await frame.getByText('WE STAY FIT', { exact: true }).boundingBox())!;
+      const wordmark = (await frame.getByLabel('We Stay Fit').first().boundingBox())!;
+      expect(wordmark, `${id}: the real wordmark is not in the frame`).toBeTruthy();
       expect(wordmark.y, `${id}: the wordmark sits above the frame`).toBeGreaterThanOrEqual(box.y);
       expect(
         Math.round(wordmark.y - (bannerBox.y + bannerBox.height)),
         `${id}: the wordmark is not just under the concept strip`,
       ).toBeLessThan(48);
 
-      // The persistent shell is present and wholly inside the frame.
-      const tabs = (await frame.getByText('Progress', { exact: true }).boundingBox())!;
+      // The persistent shell is present and wholly inside the frame. The bar
+      // sits outside the scroll area now, as the real shell's does.
+      const tabs = (await frame.getByText('Progress', { exact: true }).first().boundingBox())!;
       expect(tabs.y, `${id}: the member tab bar is not in the frame`).toBeGreaterThan(wordmark.y);
       expect(
         tabs.y + tabs.height,

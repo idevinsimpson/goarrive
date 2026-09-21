@@ -16,6 +16,54 @@ the way to having an account, not a place to return to.
   and the capture asserts the strip, the frame's exact device class, the
   wordmark's position under the strip and the presence of the member tab bar.
 
+## Second revision — 2026-09-21
+
+The first target was reviewed and **not accepted**: *"the page still repeats a
+community card, two own-part cards and two history cards on cream; the progress
+instrument is small and the account actions arrive below the first viewport. It
+remains too close to the rejected card-stack grammar."*
+
+That was a fair reading. What changed:
+
+| Was | Now |
+| --- | --- |
+| A community card, two own-part cards and two history cards, all cream | Identity, belonging and account are **one navy composition**; goals are **compact rows** with a rule between them |
+| A hairline progress track | The **real `LivingWeProgress`** at 150px on the open goal |
+| Account actions below the first viewport | The account row is **in the field**, so it is above the fold at every class |
+| The letters "WE STAY FIT" drawn as text | The **real `WsfWordmark`**, which `/you` already renders |
+| "Yours alone, and never compared" on the page | Moved into this truth table. It told the member nothing they could act on and read as the product reassuring itself. |
+| `member` at three classes, other states at one or two | **Every state at every class** — 5 × 3. A state that exists at one width and not another is a state somebody loses by turning their phone. |
+
+Two further fixes found by looking at the frame rather than trusting it: the
+lead goal was drawn **twice** (once as the spotlight, once as the first row),
+and the last section sat under the tab bar at rest. The list now carries only
+the goals the spotlight does not, and the sheet clears the bar by the shell's
+own `6 + 48 + 10` body plus the raised control's 24px overhang.
+
+The member tab bar was missing from the rewrite and is restored: **You is a
+shell tab**, and a target that omits the bar is a target of a screen the
+product never renders.
+
+### The capture assertion was passing on the wrong thing
+
+It looked for the literal text `WE STAY FIT`, which only ever passed because
+the target drew those letters itself. `WsfWordmark` is an `Image` with
+`accessibilityLabel="We Stay Fit"`, so the assertion now follows the component.
+A check that can only pass against a hand-lettered stand-in is a check that
+would have gone green on the wrong thing.
+
+### Still refused, and still true
+
+No photo, no quote, no streak, no dated activity, no per-week count, no
+personal score, no rank, no comparison, no share control, no leave control, and
+no `you moved us from X to Y` — that last one is not a missing callable but
+arithmetic over a window containing everybody who wrote in it. Exact own credit
+and current shared state are shown, separately labelled, with no causal claim
+joining them.
+
+**One account action, because there is one.** `/you` offers Sign out. A control
+with no capability behind it is the thing this atlas refuses everywhere else.
+
 ## Truth table
 
 `safe to render?` means: reachable by this client today, with no new backend

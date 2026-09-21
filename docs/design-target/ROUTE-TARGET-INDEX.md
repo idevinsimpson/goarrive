@@ -139,7 +139,7 @@ None. Every user-facing route has a target.
 | 2 | MOVE and contribution | `/move` `/contribute/[goalId]` | 19 | implemented, **accepted** |
 | 3 | Community | `/community` | 24 | implemented, **accepted** |
 | 4 | Progress | `/activity` | 10 | implemented (Phase A), **accepted** |
-| 5 | You | `/you` | 10 | target only, **not approved** |
+| 5 | You | `/you` | 16 | target only, **not approved** |
 
 ### Device classes, by frames actually drawn
 
@@ -147,9 +147,9 @@ None. Every user-facing route has a target.
 | --- | ---: |
 | 1280x800 | 32 |
 | 1920x1080 | 10 |
-| 390x640 | 156 |
+| 390x640 | 159 |
 | 390x844 | 152 |
-| 430x932 | 111 |
+| 430x932 | 114 |
 | 800x1280 | 23 |
 
 The full **state → file** and **device → file** mapping is generated into
