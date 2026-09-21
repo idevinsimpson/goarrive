@@ -58,6 +58,7 @@ const ACCEPTED_FRAMES = [
   'docs/design-target/review/page-03-community/PROPOSAL-*.png',
   'docs/design-target/review/page-03-community/after',
   'docs/design-target/review/page-04-progress/TARGET-*.png',
+  'docs/design-target/review/page-04-progress/after',
   'docs/design-target/review/batch-a-identity/TARGET-*.png',
   'docs/design-target/targets',
   'docs/westayfit/app-shell-2026-09-19',

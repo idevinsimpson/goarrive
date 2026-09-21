@@ -76,6 +76,39 @@ test('progress targets render at every device class the gate asks for', async ({
         Number(w) - 2 * FRAME_BORDER,
       );
 
+      /*
+        EVERY FRAME IS THE TOP OF ITS STATE.
+
+        A frame captured mid-scroll is evidence of a screen nobody arrives at:
+        the concept strip, the wordmark and the heading are the first things
+        cut, and they are exactly what tells a reader this is a target rather
+        than a shipped page. Asserted rather than eyeballed — twice now a
+        claim about what a committed frame does or does not carry has come
+        down to somebody's reading of a PNG.
+      */
+      const top = await frame.evaluate((el: Element) => {
+        const stuck: number[] = [];
+        el.querySelectorAll('*').forEach((n) => {
+          if (n instanceof HTMLElement && n.scrollTop > 0) stuck.push(n.scrollTop);
+        });
+        const text = (el as HTMLElement).innerText ?? '';
+        return { stuck, hasWordmark: text.includes('WE STAY FIT'), hasH1: text.includes('Your progress') };
+      });
+      expect(top.stuck, `${id}: a scroll container inside the frame is not at its top`).toEqual([]);
+      expect(top.hasWordmark, `${id}: the wordmark is not in the frame`).toBe(true);
+      expect(top.hasH1, `${id}: the heading is not in the frame`).toBe(true);
+
+      // And the chrome is where arrival puts it: strip, then wordmark, then H1.
+      // Exact: the failure state's sentence also begins "Your progress".
+      const wordmark = (await frame.getByText('WE STAY FIT', { exact: true }).boundingBox())!;
+      const heading = (await frame.getByText('Your progress', { exact: true }).boundingBox())!;
+      expect(wordmark.y, `${id}: the wordmark sits above the frame`).toBeGreaterThanOrEqual(box.y);
+      expect(
+        Math.round(wordmark.y - (bannerBox.y + bannerBox.height)),
+        `${id}: the wordmark is not just under the concept strip`,
+      ).toBeLessThan(40);
+      expect(heading.y, `${id}: the heading is above the wordmark`).toBeGreaterThan(wordmark.y);
+
       await frame.screenshot({ path: path.join(OUT, `TARGET-${id}.png`) });
     }
 

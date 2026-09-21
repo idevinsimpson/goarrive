@@ -1,8 +1,10 @@
-# Page 4 · Progress — BEFORE and TARGET
+# Page 4 · Progress — BEFORE, TARGET and AFTER
 
-**Target only. `/activity` is not changed by this package.** The gate is
-ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual acceptance; this is
-the first two, and it stops before implementation.
+**`/activity` is implemented (Phase A).** The gate ran in full: ACTUAL BEFORE
+→ reviewed TARGET → ACTUAL AFTER → visual acceptance.
+
+The contract for the callable that a private consistency view would need is
+in `PRIVATE-HISTORY-CONTRACT.md`. It is **not built** in this slice.
 
 - `before/` — the product as it renders today, captured before any Progress
   target existed. **Frozen**: the capture spec is opt-in (`WSF_CAPTURE_BEFORE=1`)
@@ -48,11 +50,12 @@ Today nothing can hand the client one, and **a target that needs new backend
 behaviour to be true is a target that lies**. None is drawn.
 
 **The seam, recorded rather than built:** the history already exists and is
-already written on every contribution. One callable that publishes a member's
-own `{count, unit, createdAt}` rows — their own only, the same gate
-`wsfMyContribution` already passes — would make a truthful private
-consistency view possible. That is a product decision and new backend surface,
-not a drawing change.
+already written on every contribution. One callable publishing a member's own
+`{count, unit, createdAt}` rows would make a truthful private consistency view
+possible. What that callable would have to promise — scope, authorization,
+pagination and bounds, idempotent attempts, timestamp and day-boundary
+semantics, and retention — is written out in `PRIVATE-HISTORY-CONTRACT.md`.
+It needs explicit owner and privacy review before any backend work.
 
 ## What the BEFORE does, and what the target undoes
 
@@ -99,5 +102,7 @@ not a drawing change.
 ## Open, and explicitly not claimed
 
 - Multi-movement selection remains separate later scope.
-- No implementation, no You, no auth, no kiosk/event administration, no
-  staging, no merge and no release work is part of this package.
+- Phase A is implemented; the private-history callable is **not**, and is
+  gated on owner and privacy review.
+- No You, no auth, no kiosk/event administration, no staging, no merge and no
+  release work is part of this package.

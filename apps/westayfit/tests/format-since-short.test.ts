@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatSinceShort } from '../src/ui/dates';
+import { formatEndedOn, formatSinceShort } from '../src/ui/dates';
 
 const NOW = new Date('2026-09-21T12:00:00.000Z');
 const at = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
@@ -35,5 +35,34 @@ describe('formatSinceShort', () => {
   it('returns null for a value that is not a date, rather than guessing', () => {
     expect(formatSinceShort('', { now: NOW })).toBeNull();
     expect(formatSinceShort('not-a-date', { now: NOW })).toBeNull();
+  });
+});
+
+describe('formatEndedOn', () => {
+  const NOW_2026 = new Date('2026-09-21T12:00:00.000Z');
+
+  it('says Ended, in the past tense, and does not repeat the verb', () => {
+    const label = formatEndedOn('2026-08-31T23:59:00.000Z', {
+      now: NOW_2026,
+      timeZone: 'America/New_York',
+    });
+    expect(label).toBe('Ended Aug 31');
+    expect(label).not.toContain('Ends');
+  });
+
+  it('leaves the year off the current year and puts it on any other', () => {
+    expect(
+      formatEndedOn('2026-06-21T12:00:00.000Z', { now: NOW_2026, timeZone: 'America/New_York' }),
+    ).toBe('Ended Jun 21');
+    expect(
+      formatEndedOn('2025-06-21T12:00:00.000Z', { now: NOW_2026, timeZone: 'America/New_York' }),
+    ).toBe('Ended Jun 21, 2025');
+  });
+
+  it('withholds a label rather than naming a day it cannot resolve', () => {
+    expect(formatEndedOn('not-a-date', { now: NOW_2026 })).toBeNull();
+    expect(
+      formatEndedOn('2026-08-31T00:00:00.000Z', { now: NOW_2026, timeZone: 'Not/AZone' }),
+    ).toBeNull();
   });
 });

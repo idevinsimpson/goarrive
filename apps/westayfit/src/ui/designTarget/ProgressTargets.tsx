@@ -129,7 +129,7 @@ const FINISHED = [
     reached: true,
   },
   {
-    title: 'Summer Step Streak',
+    title: 'Summer Step Round',
     community: 'Westside Walkers',
     unit: 'steps',
     yourPart: 8400,
@@ -240,12 +240,22 @@ export function ProgressTarget({
               <View key={i} style={s.skeletonRow}>
                 <View style={[s.bone, { width: '38%', height: 22 }]} />
                 <View style={[s.bone, { width: '66%', height: 13 }]} />
+                <View style={[s.bone, { width: '50%', height: 12 }]} />
+                <View style={[s.bone, { width: '100%', height: 6 }]} />
+              </View>
+            ))}
+            <View style={[s.bone, { width: '52%', height: 12, marginTop: 4 }]} />
+            {[0, 1].map((i) => (
+              <View key={`d${i}`} style={s.skeletonRowShort}>
+                <View style={[s.bone, { width: '30%', height: 18 }]} />
+                <View style={[s.bone, { width: '58%', height: 12 }]} />
               </View>
             ))}
             <Text style={s.note}>Loading what you have recorded…</Text>
           </View>
         ) : state === 'failed' ? (
-          <View style={s.stateWrap}>
+          <View style={[s.stateWrap, s.stateWrapSpread]}>
+            <View style={s.group}>
             <View style={s.failPanel}>
               <Text style={s.failTitle}>Your progress could not be loaded just now.</Text>
               <Text style={s.failBody}>
@@ -256,9 +266,25 @@ export function ProgressTarget({
                 <Text style={s.primaryText}>Try again</Text>
               </View>
             </View>
+            <View style={s.actionRow}>
+              <View style={s.pill}>
+                <Text style={s.pillText}>Go to Home</Text>
+              </View>
+              <View style={s.pill}>
+                <Text style={s.pillText}>Start moving</Text>
+              </View>
+            </View>
+            </View>
+            <View style={s.fact}>
+              <Text style={s.factTitle}>Nothing was lost</Text>
+              <Text style={s.factBody}>
+                Every amount you recorded is stored against its goal. This screen could not read
+                it just now; it is still there.
+              </Text>
+            </View>
           </View>
         ) : state === 'none' ? (
-          <View style={s.stateWrap}>
+          <View style={[s.stateWrap, s.stateWrapSpread]}>
             <View style={s.emptyPanel}>
               <Text style={[display.lg, s.emptyTitle]}>Nothing recorded yet</Text>
               <Text style={s.emptyBody}>
@@ -268,11 +294,19 @@ export function ProgressTarget({
                 <Text style={s.primaryText}>Start moving</Text>
               </View>
             </View>
-            <View style={s.fact}>
-              <Text style={s.factTitle}>This page is only ever yours</Text>
-              <Text style={s.factBody}>
-                It shows what you recorded. It is not a ranking, and nobody else can see it.
-              </Text>
+            <View style={s.group}>
+              <View style={s.fact}>
+                <Text style={s.factTitle}>This page is only ever yours</Text>
+                <Text style={s.factBody}>
+                  It shows what you recorded. It is not a ranking, and nobody else can see it.
+                </Text>
+              </View>
+              <View style={s.fact}>
+                <Text style={s.factTitle}>Finished goals stay here</Text>
+                <Text style={s.factBody}>
+                  When a goal you added to ends, your part in it does not disappear.
+                </Text>
+              </View>
             </View>
           </View>
         ) : (
@@ -323,7 +357,25 @@ export function ProgressTarget({
               ))}
             </View>
 
-            {finished.length > 0 ? (
+            {finished.length === 0 ? (
+              /*
+                THE SECTION KEEPS ITS PLACE WHEN IT IS EMPTY. Dropping it left
+                the running rows floating over a half-screen of cream, and it
+                also hid the one thing a member most wants to know here: that
+                a goal does not disappear when it ends. The sentence is a fact
+                about the product, not an invented figure.
+              */
+              <View style={s.section}>
+                <Text style={s.eyebrow}>WHAT YOU&apos;VE BEEN PART OF</Text>
+                <View style={s.quietPanel}>
+                  <Text style={s.quietTitle}>Nothing finished yet</Text>
+                  <Text style={s.quietBody}>
+                    When a goal you have added to ends, it stays here — your part in it, and
+                    whether the community reached it.
+                  </Text>
+                </View>
+              </View>
+            ) : (
               <View style={s.section}>
                 <Text style={s.eyebrow}>WHAT YOU&apos;VE BEEN PART OF</Text>
                 {finished.map((g) => (
@@ -370,7 +422,19 @@ export function ProgressTarget({
                   </View>
                 ))}
               </View>
-            ) : null}
+            )}
+
+            {/*
+              The privacy promise is repeated at the foot of a populated
+              screen, where it is the last thing read rather than the first
+              thing scrolled past. It is the same true sentence, not filler.
+            */}
+            <View style={s.fact}>
+              <Text style={s.factTitle}>This page is only ever yours</Text>
+              <Text style={s.factBody}>
+                It shows what you recorded. It is not a ranking, and nobody else can see it.
+              </Text>
+            </View>
           </>
         )}
       </ScrollView>
@@ -391,6 +455,16 @@ const s = StyleSheet.create({
   privacy: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   note: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   stateWrap: { gap: 12 },
+  /*
+    A STATE WITH LITTLE CONTENT IS STILL A COMPOSED SCREEN. Stacked at the top
+    of a tall phone, the empty and failure states left a website-like band of
+    cream below them. The panel opens and the true supporting facts settle at
+    the foot: the viewport is used deliberately, and nothing was invented to
+    fill it.
+  */
+  stateWrapSpread: { flexGrow: 1, justifyContent: 'space-between' },
+  /* Two blocks, not three: spreading every child left gaps in the middle. */
+  group: { gap: 12 },
   section: { gap: 8 },
   eyebrow: { color: '#2F7D4F', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
 
@@ -482,6 +556,36 @@ const s = StyleSheet.create({
     padding: 16,
     gap: 9,
   },
+  skeletonRowShort: {
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 7,
+  },
+  quietPanel: {
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+    gap: 4,
+  },
+  quietTitle: { color: NAVY, fontSize: 16, lineHeight: 22, fontWeight: '800' },
+  quietBody: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
+  actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', paddingTop: 2 },
+  pill: {
+    borderWidth: 1.5,
+    borderColor: '#C9C5BC',
+    backgroundColor: SURFACE,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  pillText: { color: NAVY, fontSize: 13, fontWeight: '800' },
   skeletonRow: {
     backgroundColor: SURFACE,
     borderRadius: 16,

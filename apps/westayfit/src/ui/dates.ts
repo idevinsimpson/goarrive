@@ -203,6 +203,34 @@ export function formatReachedOn(iso: string, opts?: DateOptions & { now?: Date }
 }
 
 /**
+ * "Ended Aug 31" — the day a goal's window closed, in its own zone.
+ *
+ * `formatEndsAt` is deliberately FUTURE tense ("Ends Mon, Sep 21") because it
+ * describes a window still open. Putting it behind the word "Ended" produced
+ * "Ended Ends Mon, Aug 31" on the first Progress capture: doubled, and
+ * present tense for something already over. A finished goal gets its own
+ * formatter rather than a prefix glued onto the running one.
+ *
+ * Same year rule as formatReachedOn: the year appears only when it is not
+ * the current one, so a recent goal reads short and an old one is unambiguous.
+ */
+export function formatEndedOn(iso: string, opts?: DateOptions & { now?: Date }): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const zone = resolveZone(opts);
+  if (!zone.ok) return null;
+  const [dy] = ymd(d, opts?.locale, zone.timeZone).split('-');
+  const [ny] = ymd(opts?.now ?? new Date(), opts?.locale, zone.timeZone).split('-');
+  const label = new Intl.DateTimeFormat(opts?.locale, {
+    timeZone: zone.timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(dy === ny ? {} : { year: 'numeric' as const }),
+  }).format(d);
+  return `Ended ${label}`;
+}
+
+/**
  * "Counting since Sep 19" — the instant a combined goal began counting, in its
  * own zone, on exactly the rule formatReachedOn uses for the year.
  *
