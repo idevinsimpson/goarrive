@@ -39,7 +39,10 @@ const TARGETS = {
   '/you': 'review/page-05-you/',
   '/move': 'review/page-02-move/',
   '/contribute/[goalId]': 'review/page-02-move/',
-  '/goals/new': 'review/page-02-move/',
+  '/goals/new': 'review/batch-b-join-and-setup/',
+  '/join/[joinCode]': 'review/batch-b-join-and-setup/',
+  '/start-community': 'review/batch-b-join-and-setup/',
+  '/combined/[setupId]': 'review/batch-b-join-and-setup/',
   '/signin': 'review/batch-a-identity/',
   '/signup': 'review/batch-a-identity/',
   '/verify-email': 'review/batch-a-identity/',
@@ -69,7 +72,14 @@ const NOTES = {
     'MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation).',
   '/contribute/[goalId]':
     'Contribution entry, review, and all six outcomes. **Implemented and accepted.**',
-  '/goals/new': 'The unit picker, built from the shipped `ACTIVITY_GUIDES`. Target only.',
+  '/goals/new':
+    'Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
+  '/join/[joinCode]':
+    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**.',
+  '/start-community':
+    'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target only, **not approved**.',
+  '/combined/[setupId]':
+    'Watching a combined goal — five states. Read-only; NOT a setup flow. Target only, **not approved**.',
   '/signin':
     'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
   '/signup': 'Target only, **not approved**.',
@@ -81,15 +91,12 @@ const NOTES = {
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
   '/': 'Home resolver / current-community landing',
-  '/combined/[setupId]': 'Multi-movement goal setup',
   '/community/[groupId]/challenge': 'Community challenge surface',
   '/display/[goalId]': 'Public / shared display, phone through 1920x1080',
   '/event/[goalId]': 'Scanned event landing',
-  '/join/[joinCode]': 'Join invitation landing',
   '/kiosk/[goalId]': 'Kiosk — tablet portrait',
   '/move/[goalId]': 'Movement / player route',
   '/queue/[goalId]': 'Queue',
-  '/start-community': 'Create a community',
   '/station/[goalId]': 'Station — tablet landscape',
 };
 

@@ -71,8 +71,8 @@ second is operational.
 | | |
 | --- | --- |
 | User-facing routes | **23** |
-| Routes with a real-RN target | **12** |
-| Routes with no target | **11** |
+| Routes with a real-RN target | **15** |
+| Routes with no target | **8** |
 | Routes implemented against an approved target | **5** |
 
 ### Covered — a real-RN target exists
@@ -80,15 +80,18 @@ second is operational.
 | Route | Target package | Notes |
 | --- | --- | --- |
 | `/activity` | `review/page-04-progress/` | Progress — the private record of what the member recorded. **Implemented (Phase A) and accepted.** The data audit in that package is why there is no streak. |
+| `/combined/[setupId]` | `review/batch-b-join-and-setup/` | Watching a combined goal — five states. Read-only; NOT a setup flow. Target only, **not approved**. |
 | `/community` | `review/page-03-community/` | The community list — Community's only route, since `/community/[groupId]` is Home. **Implemented and accepted.** The per-community `PROPOSAL-*` frames are exploration only and were explicitly ruled out of implementation. |
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **Implemented and accepted.** |
 | `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes. **Implemented and accepted.** |
-| `/goals/new` | `review/page-02-move/` | The unit picker, built from the shipped `ACTIVITY_GUIDES`. Target only. |
+| `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
+| `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation). |
 | `/profile-setup` | `review/batch-a-identity/` | Target only, **not approved**. Carries an owed truth correction — see that package. |
 | `/reset-password` | `review/batch-a-identity/` | Target only, **not approved**. |
 | `/signin` | `review/batch-a-identity/` | Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**. |
 | `/signup` | `review/batch-a-identity/` | Target only, **not approved**. |
+| `/start-community` | `review/batch-b-join-and-setup/` | Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target only, **not approved**. |
 | `/verify-email` | `review/batch-a-identity/` | Target only, **not approved**. |
 | `/you` | `review/page-05-you/` | You — identity, the community you belong to, and the account actions that really work. Target only; the truth table in that package is why there is no photo, streak or personal-impact claim. |
 
@@ -97,15 +100,12 @@ second is operational.
 | Route | What it is |
 | --- | --- |
 | `/` | Home resolver / current-community landing |
-| `/combined/[setupId]` | Multi-movement goal setup |
 | `/community/[groupId]/challenge` | Community challenge surface |
 | `/display/[goalId]` | Public / shared display, phone through 1920x1080 |
 | `/event/[goalId]` | Scanned event landing |
-| `/join/[joinCode]` | Join invitation landing |
 | `/kiosk/[goalId]` | Kiosk — tablet portrait |
 | `/move/[goalId]` | Movement / player route |
 | `/queue/[goalId]` | Queue |
-| `/start-community` | Create a community |
 | `/station/[goalId]` | Station — tablet landscape |
 
 <!-- END GENERATED ROUTES -->
