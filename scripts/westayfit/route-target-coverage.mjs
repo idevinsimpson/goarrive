@@ -47,6 +47,8 @@ const TARGETS = {
   '/': 'review/batch-c-challenge-and-door/',
   '/event/[goalId]': 'review/batch-d-event-and-line/',
   '/queue/[goalId]': 'review/batch-d-event-and-line/',
+  '/kiosk/[goalId]': 'review/batch-e-room-screens/',
+  '/station/[goalId]': 'review/batch-e-room-screens/',
   '/signin': 'review/batch-a-identity/',
   '/signup': 'review/batch-a-identity/',
   '/verify-email': 'review/batch-a-identity/',
@@ -75,7 +77,7 @@ const NOTES = {
   '/move':
     'MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation).',
   '/contribute/[goalId]':
-    'Contribution entry, review, and all six outcomes. **Implemented and accepted.**',
+    'Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **not approved**.',
   '/goals/new':
     'Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
   '/join/[joinCode]':
@@ -92,6 +94,10 @@ const NOTES = {
     'Standing in the room — eleven states, including the event route\'s OWN device question (the join route\'s variant differs and is Batch B). Target only, **not approved**.',
   '/queue/[goalId]':
     'Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target only, **not approved**.',
+  '/kiosk/[goalId]':
+    'The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target only, **not approved**.',
+  '/station/[goalId]':
+    'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target only, **not approved**.',
   '/signin':
     'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
   '/signup': 'Target only, **not approved**.',
@@ -103,9 +109,7 @@ const NOTES = {
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
   '/display/[goalId]': 'Public / shared display, phone through 1920x1080',
-  '/kiosk/[goalId]': 'Kiosk — tablet portrait',
   '/move/[goalId]': 'Movement / player route',
-  '/station/[goalId]': 'Station — tablet landscape',
 };
 
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */
