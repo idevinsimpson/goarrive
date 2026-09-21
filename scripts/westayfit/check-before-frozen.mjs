@@ -29,6 +29,7 @@ const FROZEN = [
   'docs/design-target/review/page-01-home/BEFORE-*.png',
   'docs/design-target/review/page-02-move/before',
   'docs/design-target/review/batch-a-identity/before',
+  'docs/design-target/review/page-03-community/before',
 ];
 
 function changed(paths) {

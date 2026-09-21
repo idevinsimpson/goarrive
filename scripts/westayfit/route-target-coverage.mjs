@@ -34,6 +34,7 @@ const EXCLUDED = (route) => route.startsWith('/design-target') || route === '/he
  */
 const TARGETS = {
   '/community/[groupId]': 'review/page-01-home/',
+  '/community': 'review/page-03-community/',
   '/move': 'review/page-02-move/',
   '/contribute/[goalId]': 'review/page-02-move/',
   '/goals/new': 'review/page-02-move/',
