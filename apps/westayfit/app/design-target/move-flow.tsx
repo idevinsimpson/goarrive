@@ -1,10 +1,14 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
+  ClosedGoalTarget,
   ConfirmedTarget,
   ContributeTarget,
   MoveEntryTarget,
+  PendingTarget,
   PickerTarget,
+  RefusedTarget,
+  ReviewTarget,
 } from '../../src/ui/designTarget/MoveFlowTargets';
 
 /**
@@ -48,10 +52,45 @@ const FRAMES: { id: string; label: string; height: number; node: React.ReactNode
     height: 844,
     node: <PickerTarget chosen={3} />,
   },
-  { id: 'contribute', label: 'Contribution', height: 844, node: <ContributeTarget /> },
-  { id: 'contribute-short', label: 'Contribution · 390×640', height: 640, node: <ContributeTarget /> },
-  { id: 'confirmed', label: 'Confirmed', height: 844, node: <ConfirmedTarget /> },
-  { id: 'confirmed-short', label: 'Confirmed · 390×640', height: 640, node: <ConfirmedTarget /> },
+  { id: 'contribute', label: 'Contribution entry', height: 844, node: <ContributeTarget /> },
+  {
+    id: 'contribute-short',
+    label: 'Contribution entry · 390×640',
+    height: 640,
+    node: <ContributeTarget />,
+  },
+  { id: 'review', label: 'Review · before anything is written', height: 844, node: <ReviewTarget /> },
+  { id: 'review-short', label: 'Review · 390×640', height: 640, node: <ReviewTarget /> },
+  { id: 'confirmed', label: 'Confirmed · ordinary', height: 844, node: <ConfirmedTarget /> },
+  {
+    id: 'confirmed-short',
+    label: 'Confirmed · ordinary · 390×640',
+    height: 640,
+    node: <ConfirmedTarget />,
+  },
+  {
+    id: 'confirmed-reached',
+    label: 'Confirmed · goal reached, still open',
+    height: 844,
+    node: <ConfirmedTarget variant="reached" />,
+  },
+  {
+    id: 'confirmed-reached-short',
+    label: 'Confirmed · reached · 390×640',
+    height: 640,
+    node: <ConfirmedTarget variant="reached" />,
+  },
+  {
+    id: 'confirmed-posttarget',
+    label: 'Confirmed · past the target already',
+    height: 844,
+    node: <ConfirmedTarget variant="postTarget" />,
+  },
+  { id: 'pending', label: 'Outcome unknown · not confirmed yet', height: 844, node: <PendingTarget /> },
+  { id: 'pending-short', label: 'Outcome unknown · 390×640', height: 640, node: <PendingTarget /> },
+  { id: 'refused', label: 'Definitive refusal · not recorded', height: 844, node: <RefusedTarget /> },
+  { id: 'closed', label: 'Closed goal', height: 844, node: <ClosedGoalTarget /> },
+  { id: 'closed-short', label: 'Closed goal · 390×640', height: 640, node: <ClosedGoalTarget /> },
 ];
 
 /** The label strip burnt into every captured frame. */

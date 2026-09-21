@@ -3,7 +3,14 @@ import { type LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'reac
 
 import { LivingWeProgress } from '../LivingWeProgress';
 import { HomeTarget } from './HomeTarget';
-import { fillRatio, percentLabel, statusLine, totalOfTargetParts } from '../progressFormat';
+import { refusalCopy, repeatNotice, resultCopy } from '../../contributionFlow';
+import {
+  fillRatio,
+  formatCount,
+  percentLabel,
+  statusLine,
+  totalOfTargetLabel,
+} from '../progressFormat';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -59,6 +66,8 @@ const SAMPLE = {
   target: 5000,
   sharedTotal: 1847,
   amount: 20,
+  /** The member's own credit on this goal. Nobody else's write changes it. */
+  yourPart: 120,
 };
 
 /** Measured, not asked for: these render inside a frame, not the window. */
@@ -242,16 +251,27 @@ export function PickerTarget({ chosen }: { chosen: number }) {
     <View style={s.screen} onLayout={onLayout} testID="wsf-target-picker">
       <ScrollView contentContainerStyle={[s.body, roomy ? s.bodyRoomy : null]}>
         <Chrome right="Step 2 of 3" />
-        <Text style={s.eyebrow}>{SAMPLE.community}</Text>
-        <Text style={s.h1}>What will the community count?</Text>
-        <Text style={s.intro}>
-          Pick one movement, or several. Each one is counted in its own units.
-        </Text>
+        {/*
+          A SETUP HEADER, NOT A GOAL HEADER. There is no total to show yet --
+          the goal being set up has not started -- so this anchor carries the
+          one true thing there is: whose community this goal will belong to,
+          and what the Champion is deciding right now. The mark belongs to the
+          screens that have a number for it to fill.
+        */}
+        <View style={s.setupHeader}>
+          <View pointerEvents="none" style={s.anchorGlow} />
+          <Text style={s.setupEyebrow}>{SAMPLE.community} · new goal</Text>
+          <Text style={s.setupTitle}>What will the community count?</Text>
+          <Text style={s.setupIntro}>
+            Pick one movement, or several. Each one is counted in its own units.
+          </Text>
+        </View>
         <View style={s.grid}>
           {CATALOG.map((m, i) => (
             <MovementTile key={m.label} {...m} selected={i < chosen} roomy={roomy} />
           ))}
         </View>
+        <View style={s.spacer} />
         <View style={s.summary}>
           <Text style={s.summaryLead}>
             {chosen === 1
@@ -266,7 +286,6 @@ export function PickerTarget({ chosen }: { chosen: number }) {
                   .join(' and ')} are counted separately, each in its own units. The community sees every one of them.`}
           </Text>
         </View>
-        <View style={s.spacer} />
         <View style={s.action}>
           <Text style={s.actionText}>Continue</Text>
         </View>
@@ -278,22 +297,75 @@ export function PickerTarget({ chosen }: { chosen: number }) {
   );
 }
 
-/* ── 3 · the contribution ───────────────────────────────────────────────── */
+/* ── 3 · the contribution family ─────────────────────────────────────────
+
+   THE ANCHOR. Every screen in the contribution family opens on the same navy
+   panel: the community, the goal, the Living WE at the CONFIRMED total, and
+   the shipped status line. It is there for three reasons. It is the community
+   context the member is acting inside, so the number they type is never a
+   number in a form. It is the brand's own mark doing the work no card can do.
+   And it is real content occupying the top of the viewport, which is what a
+   tall phone needs instead of a spacer.
+
+   THE WORDS ARE THE PRODUCT'S. Every headline, status line and refusal below
+   comes from the shipped resultCopy / refusalCopy / statusLine, never from a
+   sentence written for a picture. A target that invents its own phrasing is a
+   target the implementation cannot actually hit.
+------------------------------------------------------------------------- */
+
+function GoalAnchor({
+  status = 'active',
+  total = SAMPLE.sharedTotal,
+  compact,
+}: {
+  status?: 'active' | 'closed';
+  total?: number;
+  compact?: boolean;
+}) {
+  return (
+    <View style={[s.anchor, compact ? s.anchorCompact : null]}>
+      <View pointerEvents="none" style={s.anchorGlow} />
+      <View style={s.anchorWe}>
+        <LivingWeProgress
+          completed={total}
+          target={SAMPLE.target}
+          unit={SAMPLE.unit}
+          width={compact ? 84 : 104}
+          surface="dark"
+        />
+      </View>
+      <View style={s.anchorText}>
+        <Text style={s.anchorEyebrow}>{SAMPLE.community}</Text>
+        <Text style={s.anchorTitle} numberOfLines={2}>
+          {SAMPLE.goalTitle}
+        </Text>
+        <Text style={s.anchorTotal}>{totalOfTargetLabel(total, SAMPLE.target, SAMPLE.unit)}</Text>
+        <View style={s.track}>
+          <View style={[s.trackFill, { width: `${fillRatio(total, SAMPLE.target) * 100}%` }]} />
+        </View>
+        <Text style={s.anchorStatus}>{statusLine(total, SAMPLE.target, status)}</Text>
+      </View>
+    </View>
+  );
+}
 
 export function ContributeTarget() {
   const { onLayout, compact, roomy } = useBox();
-  const parts = totalOfTargetParts(SAMPLE.sharedTotal, SAMPLE.target, SAMPLE.unit);
+  const after = SAMPLE.yourPart + SAMPLE.amount;
   return (
     <View style={s.screen} onLayout={onLayout} testID="wsf-target-contribute">
       <ScrollView contentContainerStyle={[s.body, roomy ? s.bodyRoomy : null]}>
-        <Chrome right={SAMPLE.goalTitle} />
+        <Chrome right="Step 1 of 2" />
+        <GoalAnchor compact={compact} />
 
-        {/* Where it counts, said once and quietly, before the number. */}
-        <Text style={s.eyebrow}>{SAMPLE.community}</Text>
-        <Text style={s.h1}>How many squats?</Text>
-
-        <View style={[s.amountWrap, compact ? s.amountWrapCompact : null]}>
-          <Text style={s.amountUnit}>squats</Text>
+        <View
+          style={[
+            s.amountCard,
+            roomy ? s.amountCardRoomy : null,
+            compact ? s.amountCardCompact : null,
+          ]}
+        >
+          <Text style={s.amountLead}>How many {SAMPLE.unit}?</Text>
           <Text
             style={[
               display.xl,
@@ -304,47 +376,71 @@ export function ContributeTarget() {
           >
             {SAMPLE.amount}
           </Text>
-        </View>
-        <View style={s.stepRow}>
-          {['−10', '−1', '+1', '+10'].map((t) => (
-            <View key={t} style={[s.step, roomy ? s.stepRoomy : null]}>
-              <Text style={s.stepText}>{t}</Text>
+          <View style={s.stepRow}>
+            {['−10', '−1', '+1', '+10'].map((t) => (
+              <View key={t} style={[s.step, roomy ? s.stepRoomy : null]}>
+                <Text style={s.stepText}>{t}</Text>
+              </View>
+            ))}
+          </View>
+          {/*
+            SHORT PHONE. The quick chips are convenience the stepper already
+            covers, so they are what the rhythm takes first -- never the
+            number, the context or the action.
+          */}
+          {compact ? null : (
+            <View style={s.chipRow}>
+              {['+20', '+50', '+100'].map((t) => (
+                <View key={t} style={s.chip}>
+                  <Text style={s.chipText}>{t}</Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
-
-        <Text style={s.sectionLabel}>Counted in</Text>
-        <View style={s.pairRow}>
-          <MovementTile label="Squats" unit="this goal" selected />
-          <MovementTile label="Step-ups" unit="same goal" selected={false} />
+          )}
         </View>
 
         {/*
-          THE TOTAL AS IT IS, NEVER AS IT WOULD BE. A predicted shared total is
-          a promise another member can break between the render and the write.
+          THE PREVIEW IS OF THE MEMBER'S OWN PART, AND ONLY THAT.
+
+          The owner board previews the SHARED total this contribution would
+          produce. It cannot: another member may be writing in the same moment,
+          and the only authority on the shared total is the receipt. What no
+          one else can change is this member's own credit on this goal, so that
+          is what is previewed here -- their effort, before and after, with the
+          community's confirmed total stated separately AS IT IS, above.
         */}
-        <View style={s.nowPanel}>
-          <Text style={s.nowLabel}>Where it counts right now</Text>
-          <Text style={s.nowValue}>
-            {parts.count} {parts.rest}
-          </Text>
-          <View style={s.track}>
-            <View
-              style={[
-                s.trackFill,
-                { width: `${fillRatio(SAMPLE.sharedTotal, SAMPLE.target) * 100}%` },
-              ]}
-            />
+        <View style={s.yoursPanel}>
+          <Text style={s.yoursLabel}>Your part on this goal</Text>
+          <View style={s.yoursRow}>
+            <Text style={s.yoursNow}>{formatCount(SAMPLE.yourPart)}</Text>
+            <Text style={s.yoursArrow}>→</Text>
+            <Text style={s.yoursNext}>{formatCount(after)}</Text>
+            <Text style={s.yoursUnit}>{SAMPLE.unit}</Text>
           </View>
-          <Text style={s.nowMeta}>
-            {statusLine(SAMPLE.sharedTotal, SAMPLE.target, 'active')} · your {SAMPLE.amount} is
-            added when it is confirmed
-          </Text>
+          {compact ? null : (
+            <Text style={s.yoursNote}>
+              Private to you. The community total above is what everyone sees.
+            </Text>
+          )}
         </View>
+
+        {compact ? (
+          <Text style={s.countedInline}>
+            Counted in <Text style={s.countedInlineOn}>squats</Text> · this goal
+          </Text>
+        ) : (
+          <>
+            <Text style={s.sectionLabel}>Counted in</Text>
+            <View style={s.pairRow}>
+              <MovementTile label="Squats" unit="this goal" selected />
+              <MovementTile label="Step-ups" unit="same goal" selected={false} />
+            </View>
+          </>
+        )}
 
         <View style={s.spacer} />
         <View style={s.action}>
-          <Text style={s.actionText}>Record {SAMPLE.amount} squats</Text>
+          <Text style={s.actionText}>Review my contribution</Text>
         </View>
         <View style={s.ghost}>
           <Text style={s.ghostText}>Use a kiosk instead</Text>
@@ -354,24 +450,126 @@ export function ContributeTarget() {
   );
 }
 
-/* ── 4 · confirmed ──────────────────────────────────────────────────────── */
+/* ── 4 · the review, the step before anything is written ────────────────── */
 
-export function ConfirmedTarget() {
+export function ReviewTarget() {
   const { onLayout, compact, roomy } = useBox();
-  const after = SAMPLE.sharedTotal + SAMPLE.amount;
   return (
-    <View style={s.screenDark} onLayout={onLayout} testID="wsf-target-confirmed">
+    <View style={s.screen} onLayout={onLayout} testID="wsf-target-review">
+      <ScrollView contentContainerStyle={[s.body, roomy ? s.bodyRoomy : null]}>
+        <Chrome right="Step 2 of 2" />
+        <GoalAnchor compact={compact} />
+
+        <View style={s.reviewCard}>
+          <Text style={s.reviewEyebrow}>Review</Text>
+          <Text style={s.reviewHeading}>Review your contribution</Text>
+          <Text style={[display.lg, s.reviewQuantity, roomy ? s.reviewQuantityRoomy : null]}>
+            {formatCount(SAMPLE.amount)} {SAMPLE.unit}
+          </Text>
+          <Text style={s.reviewNotice}>{repeatNotice('multiple')}</Text>
+        </View>
+
+        {/* The same own-part preview as the entry: this is the moment it is
+            actually being committed, so it belongs here most of all. */}
+        <View style={s.yoursPanel}>
+          <Text style={s.yoursLabel}>Your part on this goal</Text>
+          <View style={s.yoursRow}>
+            <Text style={s.yoursNow}>{formatCount(SAMPLE.yourPart)}</Text>
+            <Text style={s.yoursArrow}>→</Text>
+            <Text style={s.yoursNext}>{formatCount(SAMPLE.yourPart + SAMPLE.amount)}</Text>
+            <Text style={s.yoursUnit}>{SAMPLE.unit}</Text>
+          </View>
+          {compact ? null : (
+            <Text style={s.yoursNote}>
+              Private to you. The community total above is what everyone sees.
+            </Text>
+          )}
+        </View>
+
+        {compact ? (
+          <Text style={s.countedInline}>
+            Counted in <Text style={s.countedInlineOn}>squats</Text> · this goal
+          </Text>
+        ) : (
+          <>
+            <Text style={s.sectionLabel}>Counted in</Text>
+            <View style={s.pairRow}>
+              <MovementTile label="Squats" unit="this goal" selected />
+              <MovementTile label="Step-ups" unit="same goal" selected={false} />
+            </View>
+          </>
+        )}
+
+        <Text style={s.note}>Nothing is recorded until you press Record.</Text>
+
+        <View style={s.spacer} />
+        <View style={s.action}>
+          <Text style={s.actionText}>
+            Record {formatCount(SAMPLE.amount)} {SAMPLE.unit}
+          </Text>
+        </View>
+        <View style={s.ghost}>
+          <Text style={s.ghostText}>Edit</Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/* ── 5 · confirmed: the emotional payoff ────────────────────────────────── */
+
+export function ConfirmedTarget({
+  variant = 'ordinary',
+}: {
+  variant?: 'ordinary' | 'reached' | 'postTarget';
+}) {
+  const { onLayout, compact, roomy } = useBox();
+  /*
+    THE COPY IS THE SHIPPED COPY. resultCopy owns which story a receipt tells
+    and in whose name. Three of its variants are visually distinct and are
+    drawn here; the target never writes a headline of its own, so the
+    implementation can call the same function and get the same words.
+
+    NO FALSE CROSSING ATTRIBUTION. `crossed` -- the one sentence that ties a
+    member to the moment the target was met -- is the SERVER's to grant, on a
+    signal stored on the attempt. A target cannot know it, so it does not
+    draw it, and nothing here computes a crossing from before-and-after.
+
+    REDUCED MOTION. The celebration is composition, scale and the mark's own
+    fill -- static. There is nothing here that has to be turned off for a
+    member who asked for less movement.
+  */
+  const total =
+    variant === 'ordinary'
+      ? SAMPLE.sharedTotal + SAMPLE.amount
+      : variant === 'reached'
+        ? SAMPLE.target - SAMPLE.amount + SAMPLE.amount
+        : SAMPLE.target + 430;
+  const copy = resultCopy(
+    {
+      addedCount: SAMPLE.amount,
+      ownCredit: SAMPLE.yourPart + SAMPLE.amount,
+      alreadyRecorded: false,
+      sharedTotal: total,
+      target: SAMPLE.target,
+      unit: SAMPLE.unit,
+      status: 'active',
+    },
+    SAMPLE.community,
+    SAMPLE.unit,
+    variant === 'postTarget' ? SAMPLE.target + 200 : null
+  );
+  return (
+    <View style={s.screenDark} onLayout={onLayout} testID={`wsf-target-confirmed-${variant}`}>
       <ScrollView contentContainerStyle={[s.body, s.bodyCentred]}>
-        {/* A receipt sits in the middle of its screen, not at the top of one. */}
         {roomy ? <View style={s.spacer} /> : null}
         <Text style={s.confirmedEyebrow}>Recorded</Text>
         <Text style={[display.xl, s.confirmedAmount, compact ? s.amountCompact : null]}>
           +{SAMPLE.amount}
         </Text>
-        <Text style={s.confirmedUnit}>squats, yours and confirmed</Text>
-        <Text style={s.confirmedLead}>You moved us closer.</Text>
+        <Text style={s.confirmedUnit}>{copy.headline}</Text>
+        <Text style={s.confirmedLead}>{copy.subline}</Text>
 
-        {/* The mark answers, at the CONFIRMED total — the receipt's own number. */}
         <View style={[s.weWrap, roomy ? s.weWrapRoomy : null]}>
           <View pointerEvents="none" style={s.glowLayer}>
             <View style={[s.glowRing, s.glow3, roomy ? s.glow3Roomy : null]}>
@@ -381,7 +579,7 @@ export function ConfirmedTarget() {
             </View>
           </View>
           <LivingWeProgress
-            completed={after}
+            completed={total}
             target={SAMPLE.target}
             unit={SAMPLE.unit}
             width={compact ? 150 : roomy ? 248 : 210}
@@ -392,26 +590,190 @@ export function ConfirmedTarget() {
         <View style={s.confirmedPanel}>
           <Text style={s.confirmedPanelLabel}>Together now</Text>
           <Text style={s.confirmedPanelValue}>
-            {after.toLocaleString()} <Text style={s.confirmedPanelOf}>of {SAMPLE.target.toLocaleString()} {SAMPLE.unit}</Text>
+            {formatCount(total)}{' '}
+            <Text style={s.confirmedPanelOf}>
+              of {formatCount(SAMPLE.target)} {SAMPLE.unit}
+            </Text>
           </Text>
           <View style={s.track}>
-            <View style={[s.trackFill, { width: `${fillRatio(after, SAMPLE.target) * 100}%` }]} />
+            <View style={[s.trackFill, { width: `${fillRatio(total, SAMPLE.target) * 100}%` }]} />
           </View>
           <Text style={s.confirmedPanelMeta}>
-            {percentLabel(after, SAMPLE.target)} · {statusLine(after, SAMPLE.target, 'active')}
+            {copy.standing ?? statusLine(total, SAMPLE.target, 'active')}
           </Text>
         </View>
 
         <Text style={s.confirmedPrivacy}>
-          Your {SAMPLE.amount} is yours. The community total is what everyone sees.
+          Your total on this goal: {formatCount(SAMPLE.yourPart + SAMPLE.amount)} {SAMPLE.unit},
+          private to you.
         </Text>
 
         <View style={s.spacer} />
         <View style={s.action}>
-          <Text style={s.actionText}>Back to the community</Text>
+          <Text style={s.actionText}>See community progress</Text>
         </View>
         <View style={s.ghostDark}>
-          <Text style={s.ghostDarkText}>Record more squats</Text>
+          <Text style={s.ghostDarkText}>Add another contribution</Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/* ── 6 · the outcome nobody knows yet ───────────────────────────────────── */
+
+export function PendingTarget() {
+  const { onLayout, compact } = useBox();
+  /*
+    THE ONE SCREEN THAT MUST NOT CELEBRATE OR APOLOGISE. The attempt may have
+    landed. The honest state is "we do not know", and the only safe action is
+    to send the SAME attempt again, which cannot double-count. The Living WE
+    shows the last confirmed total, unchanged, because nothing here has been
+    confirmed -- the mark must not move on an unknown.
+  */
+  return (
+    <View style={s.screen} onLayout={onLayout} testID="wsf-target-pending">
+      <ScrollView contentContainerStyle={s.body}>
+        <Chrome />
+        <GoalAnchor compact={compact} />
+        <View style={s.pendingCard}>
+          <Text style={s.pendingEyebrow}>Not confirmed yet</Text>
+          <Text style={s.pendingHeading}>We couldn’t confirm your contribution yet.</Text>
+          <Text style={s.pendingBody}>
+            We don’t know whether this effort was recorded. Don’t record it again.
+          </Text>
+          <Text style={s.pendingCount}>
+            You entered {formatCount(SAMPLE.amount)} {SAMPLE.unit}.
+          </Text>
+        </View>
+        {/*
+          THE RECOVERY PATH IS THE PRODUCT'S, not a reassurance written for a
+          picture: the attempt is kept, leaving and coming back restores the
+          same one, and sending it again cannot count it twice.
+        */}
+        <View style={s.quiet}>
+          <Text style={s.quietTitle}>What happens next</Text>
+          <Text style={s.quietBody}>
+            This attempt is kept. If you leave and come back, it is still here, and confirming it
+            sends the same attempt rather than a new one.
+          </Text>
+        </View>
+        <View style={s.holdPanel}>
+          <Text style={s.holdLabel}>Unchanged until this is confirmed</Text>
+          <Text style={s.holdValue}>
+            Your part on this goal: {formatCount(SAMPLE.yourPart)} {SAMPLE.unit}
+          </Text>
+          <Text style={s.holdMeta}>
+            The community total above is the last one we confirmed. Nothing here has moved.
+          </Text>
+        </View>
+        <View style={s.spacer} />
+        <View style={s.action}>
+          <Text style={s.actionText}>Confirm this contribution</Text>
+        </View>
+        <Text style={s.note}>
+          This sends the same attempt again. If it already reached us, it will not count twice.
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+/* ── 7 · the definitive refusal ─────────────────────────────────────────── */
+
+export function RefusedTarget() {
+  const { onLayout, compact } = useBox();
+  const copy = refusalCopy('closed', SAMPLE.amount, SAMPLE.unit);
+  return (
+    <View style={s.screen} onLayout={onLayout} testID="wsf-target-refused">
+      <ScrollView contentContainerStyle={s.body}>
+        <Chrome />
+        <GoalAnchor compact={compact} status="closed" />
+        <View style={s.refusedCard}>
+          <Text style={s.refusedEyebrow}>Not recorded</Text>
+          <Text style={s.refusedHeading}>{copy.headline}</Text>
+          <Text style={s.refusedBody}>{copy.body}</Text>
+        </View>
+        <View style={s.quiet}>
+          <Text style={s.quietTitle}>What you can still do</Text>
+          <Text style={s.quietBody}>
+            Your own movement is yours to keep. Progress holds everything you have recorded,
+            whether or not a goal was open when you did it.
+          </Text>
+        </View>
+        <View style={s.holdPanel}>
+          <Text style={s.holdLabel}>Unchanged</Text>
+          <Text style={s.holdValue}>
+            Your part on this goal: {formatCount(SAMPLE.yourPart)} {SAMPLE.unit}
+          </Text>
+          <Text style={s.holdMeta}>
+            The {formatCount(SAMPLE.amount)} {SAMPLE.unit} above were not added to it.
+          </Text>
+        </View>
+        <View style={s.spacer} />
+        <View style={s.action}>
+          <Text style={s.actionText}>Back to your community</Text>
+        </View>
+        <View style={s.ghost}>
+          <Text style={s.ghostText}>See your Progress</Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/* ── 8 · arriving at a goal that has closed ─────────────────────────────── */
+
+export function ClosedGoalTarget() {
+  const { onLayout, compact, roomy } = useBox();
+  const total = 4620;
+  return (
+    <View style={s.screen} onLayout={onLayout} testID="wsf-target-closed">
+      <ScrollView contentContainerStyle={[s.body, roomy ? s.bodyRoomy : null]}>
+        <Chrome />
+        {/*
+          A CLOSED GOAL IS STILL THE COMMUNITY'S WORK. The mark stays, at what
+          they reached together. The one thing that goes is the invitation to
+          add to it. No percentage line here beyond the shipped status line --
+          two percentages on one card invite the reader to reconcile them.
+        */}
+        <View style={s.closedHero}>
+          <View pointerEvents="none" style={s.anchorGlow} />
+          <Text style={s.closedEyebrow}>Closed</Text>
+          <Text style={s.closedHeading}>This goal is closed.</Text>
+          <View style={s.closedWe}>
+            <LivingWeProgress
+              completed={total}
+              target={SAMPLE.target}
+              unit={SAMPLE.unit}
+              width={compact ? 132 : roomy ? 224 : 168}
+              surface="dark"
+            />
+          </View>
+          <Text style={s.closedTotal}>
+            {totalOfTargetLabel(total, SAMPLE.target, SAMPLE.unit)}
+          </Text>
+          <Text style={s.closedStatus}>{statusLine(total, SAMPLE.target, 'closed')}</Text>
+          <View style={s.closedRule} />
+          <Text style={s.closedWindow}>{SAMPLE.community} · ended Fri, Oct 31</Text>
+        </View>
+        <Text style={s.closedOwn}>
+          Your total on this goal: {formatCount(SAMPLE.yourPart)} {SAMPLE.unit}
+        </Text>
+        <Text style={s.body2}>It is no longer taking contributions.</Text>
+        <View style={s.quiet}>
+          <Text style={s.quietTitle}>What this goal leaves behind</Text>
+          <Text style={s.quietBody}>
+            A closed goal keeps its number. It stays on the community's record, and what you
+            recorded toward it stays on yours.
+          </Text>
+        </View>
+        <View style={s.spacer} />
+        <View style={s.action}>
+          <Text style={s.actionText}>Back to your community</Text>
+        </View>
+        <View style={s.ghost}>
+          <Text style={s.ghostText}>See community progress</Text>
         </View>
       </ScrollView>
     </View>
@@ -424,6 +786,225 @@ const s = StyleSheet.create({
   body: { flexGrow: 1, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 22, gap: 10 },
   spacer: { flex: 1, minHeight: 8 },
   bodyRoomy: { gap: 15, paddingTop: 16 },
+  /* the contribution family's navy anchor */
+  anchor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: NAVY,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    overflow: 'hidden',
+    ...elevation.hero,
+  },
+  anchorCompact: { paddingVertical: 12, gap: 11 },
+  anchorGlow: {
+    position: 'absolute',
+    left: -40,
+    top: -120,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(145,203,125,0.09)',
+  },
+  anchorWe: { alignItems: 'center', justifyContent: 'center' },
+  anchorText: { flex: 1, gap: 4 },
+  anchorEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  anchorTitle: { color: ON_NAVY, fontSize: 17, lineHeight: 21, fontWeight: '900', letterSpacing: -0.4 },
+  anchorTotal: { color: ON_NAVY, fontSize: 14, lineHeight: 19, fontWeight: '800' },
+  anchorStatus: { color: ON_NAVY_MUTED, fontSize: 11.5, lineHeight: 16 },
+
+  /* the amount, as the bright interactive object it is */
+  amountCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
+    gap: 10,
+    alignItems: 'stretch',
+    ...elevation.card,
+  },
+  amountCardRoomy: { paddingTop: 14, paddingBottom: 16, gap: 11 },
+  amountCardCompact: { paddingTop: 8, paddingBottom: 10, gap: 7 },
+  setupHeader: {
+    backgroundColor: NAVY,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 5,
+    overflow: 'hidden',
+    ...elevation.hero,
+  },
+  setupEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  setupTitle: { color: ON_NAVY, fontSize: 23, lineHeight: 28, fontWeight: '900', letterSpacing: -0.7 },
+  setupIntro: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
+  countedInline: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, fontWeight: '600' },
+  countedInlineOn: { color: ACTION_GREEN_DEEP, fontWeight: '900' },
+  amountLead: { color: INK_QUIET, fontSize: 12.5, fontWeight: '700', textAlign: 'center' },
+  chipRow: { flexDirection: 'row', gap: 8 },
+  chip: {
+    flex: 1,
+    backgroundColor: '#EFF9F1',
+    borderWidth: 1.5,
+    borderColor: '#CBEBD4',
+    borderRadius: 999,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipText: { color: ACTION_GREEN_DEEP, fontSize: 14, fontWeight: '900' },
+
+  /* the member's own part, previewed -- never the shared total */
+  yoursPanel: {
+    backgroundColor: '#EFF9F1',
+    borderWidth: 1.5,
+    borderColor: '#CBEBD4',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  yoursLabel: {
+    color: ACTION_GREEN_DEEP,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  yoursRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  yoursNow: { color: INK_QUIET, fontSize: 20, fontWeight: '800' },
+  yoursArrow: { color: ACTION_GREEN_DEEP, fontSize: 17, fontWeight: '900' },
+  yoursNext: { color: NAVY, fontSize: 27, fontWeight: '900', letterSpacing: -0.8 },
+  yoursUnit: { color: INK_QUIET, fontSize: 13, fontWeight: '700' },
+  yoursNote: { color: INK_QUIET, fontSize: 11.5, lineHeight: 16 },
+
+  /* review */
+  reviewCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 22,
+    padding: 16,
+    gap: 6,
+    ...elevation.card,
+  },
+  reviewEyebrow: {
+    color: ACTION_GREEN_DEEP,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  reviewHeading: { color: NAVY, fontSize: 20, lineHeight: 25, fontWeight: '900', letterSpacing: -0.5 },
+  reviewQuantity: { color: NAVY, fontSize: 40, lineHeight: 46, letterSpacing: -1.4, marginTop: 4 },
+  reviewQuantityRoomy: { fontSize: 50, lineHeight: 56 },
+  reviewNotice: { color: INK_QUIET, fontSize: 13, lineHeight: 19 },
+
+  /* the unknown outcome */
+  pendingCard: {
+    backgroundColor: '#FFF8E8',
+    borderWidth: 1.5,
+    borderColor: '#E8D9AE',
+    borderRadius: 20,
+    padding: 16,
+    gap: 6,
+  },
+  pendingEyebrow: {
+    color: '#8A6A16',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  pendingHeading: { color: NAVY, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: -0.4 },
+  pendingBody: { color: NAVY, fontSize: 13.5, lineHeight: 19 },
+  pendingCount: { color: INK_QUIET, fontSize: 13, lineHeight: 18, fontWeight: '700', marginTop: 2 },
+
+  /* the definitive refusal */
+  refusedCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: HAIRLINE,
+    padding: 16,
+    gap: 6,
+    ...elevation.card,
+  },
+  refusedEyebrow: {
+    color: INK_QUIET,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  refusedHeading: { color: NAVY, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: -0.4 },
+  refusedBody: { color: INK_QUIET, fontSize: 13.5, lineHeight: 19 },
+
+  /* the closed goal */
+  closedHero: {
+    backgroundColor: NAVY,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    gap: 6,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...elevation.hero,
+  },
+  closedEyebrow: {
+    color: ON_NAVY_MUTED,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+  },
+  closedHeading: { color: ON_NAVY, fontSize: 22, lineHeight: 27, fontWeight: '900', letterSpacing: -0.6 },
+  closedWe: { alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
+  closedTotal: { color: ON_NAVY, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: -0.4 },
+  closedStatus: { color: ON_NAVY_MUTED, fontSize: 12.5, lineHeight: 17 },
+  closedOwn: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
+  body2: { color: NAVY, fontSize: 13.5, lineHeight: 19 },
+  closedRule: {
+    alignSelf: 'stretch',
+    height: 1,
+    backgroundColor: ON_NAVY_RULE,
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  closedWindow: { color: ON_NAVY_MUTED, fontSize: 11.5, lineHeight: 16 },
+
+  /* what has NOT moved -- said plainly, on every screen where nothing did */
+  holdPanel: {
+    backgroundColor: SURFACE,
+    borderRadius: 18,
+    borderLeftWidth: 4,
+    borderLeftColor: INK_QUIET,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 3,
+    ...elevation.card,
+  },
+  holdLabel: {
+    color: INK_QUIET,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  holdValue: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  holdMeta: { color: INK_QUIET, fontSize: 12, lineHeight: 17 },
   bodyCentred: { alignItems: 'center' },
   // MOVE entry: a sheet over the dimmed app, sized by what it asks.
   sheetScreen: { flex: 1, backgroundColor: CREAM, justifyContent: 'flex-end' },
@@ -565,9 +1146,9 @@ const s = StyleSheet.create({
   amountWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 2 },
   amountWrapCompact: { paddingTop: 4 },
   amountUnit: { color: INK_QUIET, fontSize: 12.5, fontWeight: '600', letterSpacing: 1 },
-  amount: { color: NAVY, fontSize: 76, lineHeight: 82, letterSpacing: -3 },
+  amount: { color: NAVY, fontSize: 70, lineHeight: 76, letterSpacing: -3, textAlign: 'center' },
   amountCompact: { fontSize: 58, lineHeight: 64 },
-  amountRoomy: { fontSize: 96, lineHeight: 102, letterSpacing: -4 },
+  amountRoomy: { fontSize: 84, lineHeight: 90, letterSpacing: -3.5 },
   stepRow: { flexDirection: 'row', gap: 8 },
   step: {
     flex: 1,

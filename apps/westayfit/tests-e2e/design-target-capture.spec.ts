@@ -94,8 +94,18 @@ test('the MOVE-family targets render at their device classes', async ({
       ['picker-many', 'TARGET-picker-many-390x844'],
       ['contribute', 'TARGET-contribute-390x844'],
       ['contribute-short', 'TARGET-contribute-390x640'],
+      ['review', 'TARGET-review-390x844'],
+      ['review-short', 'TARGET-review-390x640'],
       ['confirmed', 'TARGET-confirmed-390x844'],
       ['confirmed-short', 'TARGET-confirmed-390x640'],
+      ['confirmed-reached', 'TARGET-confirmed-reached-390x844'],
+      ['confirmed-reached-short', 'TARGET-confirmed-reached-390x640'],
+      ['confirmed-posttarget', 'TARGET-confirmed-posttarget-390x844'],
+      ['pending', 'TARGET-pending-390x844'],
+      ['pending-short', 'TARGET-pending-390x640'],
+      ['refused', 'TARGET-refused-390x844'],
+      ['closed', 'TARGET-closed-390x844'],
+      ['closed-short', 'TARGET-closed-390x640'],
     ] as const) {
       await page
         .getByTestId(`wsf-frame-${id}`)

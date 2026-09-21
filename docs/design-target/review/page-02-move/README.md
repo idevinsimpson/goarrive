@@ -26,10 +26,20 @@ route, it is a short journey, and this checkpoint covers the whole of it:
 | `TARGET-move-nogoal-390x844.png` | Target, MOVE entry with nothing running. |
 | `TARGET-picker-one-390x844.png` | Target, the picker with one movement chosen. |
 | `TARGET-picker-many-390x844.png` | Target, the picker with several chosen. |
-| `TARGET-contribute-390x844.png` | Target, the contribution. |
-| `TARGET-contribute-390x640.png` | Target, the contribution on a short phone — where `Record` is at risk. |
-| `TARGET-confirmed-390x844.png` | Target, the confirmed moment. |
-| `TARGET-confirmed-390x640.png` | Target, confirmed on a short phone. |
+| `TARGET-contribute-390x844.png` | Target, the contribution entry. |
+| `TARGET-contribute-390x640.png` | Target, entry on a short phone — where the primary action is at risk. |
+| `TARGET-review-390x844.png` | Target, the review step, before anything is written. |
+| `TARGET-review-390x640.png` | Target, review on a short phone. |
+| `TARGET-confirmed-390x844.png` | Target, confirmed — `ordinary`. |
+| `TARGET-confirmed-390x640.png` | Target, confirmed `ordinary`, short phone. |
+| `TARGET-confirmed-reached-390x844.png` | Target, confirmed — `reached`, the goal met and still open. |
+| `TARGET-confirmed-reached-390x640.png` | Target, `reached`, short phone. |
+| `TARGET-confirmed-posttarget-390x844.png` | Target, confirmed — `postTarget`, the goal was already past its target. |
+| `TARGET-pending-390x844.png` | Target, the outcome nobody knows yet. |
+| `TARGET-pending-390x640.png` | Target, unknown outcome, short phone. |
+| `TARGET-refused-390x844.png` | Target, the definitive refusal. |
+| `TARGET-closed-390x844.png` | Target, arriving at a goal that has closed. |
+| `TARGET-closed-390x640.png` | Target, closed goal, short phone. |
 
 Every TARGET frame carries `TARGET / CONCEPT — NOT IMPLEMENTED` burnt into the
 image itself, inside the frame, so the label travels with the picture. The
@@ -54,6 +64,36 @@ WSF_PLAYWRIGHT_CHROMIUM=... WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
 `EXPO_PUBLIC_WSF_USE_EMULATORS`, and `scripts/westayfit/build-staging.sh`
 refuses a build that sets it. No deployed artifact can serve this route.
 
+## The second pass, and what the first one got wrong
+
+The first package was refused. Four things changed:
+
+**The contribution family now opens on a navy anchor.** Every screen in it —
+entry, review, unknown, refusal — starts with the same panel: the community,
+the goal, the Living WE at the **confirmed** total, and the shipped status
+line. It is the community context the member is acting inside, so the number
+they type is never a number in a form; it is the brand's mark doing work no
+card can do; and it is real content at the top of the viewport, which is what
+a tall phone needed instead of a spacer.
+
+**The words are the product's.** Every headline, status line and refusal comes
+from the shipped `resultCopy`, `refusalCopy`, `repeatNotice` and `statusLine`,
+never from a sentence written for a picture. That is why the three confirmed
+variants read differently: the target calls the same function the
+implementation will.
+
+**The dead space is gone, and not by shrinking a gap.** Each screen that had a
+void now carries content that is true and useful there — the member's own part
+previewed, what happens next on an unknown outcome, what is unchanged after a
+refusal, what a closed goal leaves behind. Where the added content pushed the
+primary action below the fold at 390×640, the short phone gives up the quick
+chips and the tile pair, never the context, the number or the action.
+
+**The picker got the same lift.** Its header is a navy setup anchor naming the
+community whose goal is being made. It carries no Living WE, because the goal
+being set up has no total yet and the mark belongs to screens that have a
+number for it to fill.
+
 ## The design decisions in these frames, and why
 
 **MOVE entry is a sheet, not a page.** MOVE is one tap in the middle of the tab
@@ -73,6 +113,18 @@ choice between two live communities of effort, not a menu.
 amount, the stepper and the mark are larger than on a 390×640; the confirmed
 receipt sits centred between the top of the screen and its actions. The primary
 action stays anchored at the thumb on both.
+
+**The preview is of the member's own part, and only that.** The owner board
+previews the SHARED total a contribution would produce. It cannot — another
+member may be writing in the same moment. What nobody else can change is this
+member's own credit on this goal, so that is what is previewed: `120 → 140`,
+with the community's confirmed total stated separately, as it is, above.
+
+**The celebration is composition, not motion.** Scale, ground, glow and the
+mark's own fill carry it. Nothing here has to be switched off for a member who
+asked for reduced motion, and nothing computes a crossing: `crossed` — the one
+sentence tying a member to the moment the target was met — is the server's to
+grant, on a signal stored on the attempt, so the target does not draw it.
 
 ## What these targets refuse to take from the owner board
 
