@@ -30,22 +30,66 @@ Filing a page's accepted AFTER as another page's BEFORE is precisely the
 mislabelled evidence that destroyed the Page 2 comparison, so the two are kept
 apart by name.
 
-### The decision this puts to the review
+### The decision — made 2026-09-21
 
-The brief asks Community to carry identity, "what we're doing" / "what we've
-done", and active / no-goal / past-goal states. Today all of that lives on
-`/community/[groupId]`, which is Home. Two ways forward, and it is a product
-decision, not a drawing decision:
+**Community remains `/community`: the membership, identity and switching
+surface. Home remains `/community/[groupId]`: the current community's command
+centre.** That keeps the five-tab IA honest — Home is *act in the current
+community*, Community is *understand and switch who the WE is*.
 
-1. **Community is the list only.** `TARGET-list-*` is the whole package; the
-   goal states stay on Home where they already are and were already accepted.
-   Nothing in `PROPOSAL-*` is built.
-2. **Community identity becomes its own surface,** separate from Home for a
-   community. `PROPOSAL-*` is what that would look like — and adopting it means
-   deliberately revising an accepted page.
+So `PROPOSAL-detail-*` is **exploration only**. It is not to be implemented,
+and the accepted Page 1 Home is not revised. The frames are kept, clearly
+labelled, because the choice was made against pixels rather than prose.
 
-`TARGET-list-*` stands either way. `PROPOSAL-*` is shown so the choice can be
-made against pixels rather than prose.
+## Correction pass — 2026-09-21
+
+The first `TARGET-list-*` draft was the right base but did not clear the gate.
+Six corrections, each with the reason it mattered:
+
+1. **Added the "several memberships, none chosen yet" state.**
+   `resolveCurrentCommunity()` returns **null** when several memberships exist
+   and none is remembered — it does not fall back to the first. The first draft
+   assumed a CURRENT always exists, so it would have marked a row CURRENT by
+   convenience: a screen inventing a fact the product does not have. The state
+   now asks explicitly, and every row carries a `Choose` cue.
+2. **Removed the false "One goal at a time" claim.** The product supports
+   several open goals — Page 1 and MOVE both render them, and `wsfListGoals`
+   says so in its own comments. Replaced with "Count what you choose", which
+   states the opposite plainly.
+3. **Removed "YOU ARE THE WE".** The standing-slogan system was removed from
+   Home on direction; this screen does not get to reintroduce one. The zero
+   state leads with the heading `Join a community`.
+4. **Replaced the naked underlined Join / Start links** with compact pill
+   actions. The BEFORE critique was that the existing naked link reads like a
+   website; ending the target with two more of them was the same defect in a
+   new place.
+5. **Fixed the sparse compositions.** Join / Start now sit directly under the
+   content instead of pinned to the bottom; loading skeletons the *real* final
+   structure (current-community panel, then rows) beneath the stable app
+   header; failure keeps the page's identity, and offers a retry plus real
+   exits rather than a card stranded over blank cream. Tall phones spend their
+   height on rhythm and on a fuller panel.
+6. **Made row behaviour visible.** Tapping a row switches the current community
+   and opens its Home. A `Pressable` with an accessibility label says that to a
+   screen reader and to nobody else, so each row carries a `Switch` / `Choose`
+   cue.
+
+### A seam this pass found: Join has no screen
+
+There is **no join-by-code route in the product**. `/join/[joinCode]` reads the
+code from the route params, and nothing anywhere accepts a typed one — the only
+way in is opening an invite link or QR someone sends. `/start-community` is the
+only navigable join-adjacent screen.
+
+So a prominent **Join** *button* in the zero state would be a control that goes
+nowhere, which is the thing these frames refuse. Join leads that panel by
+heading and by copy that states the real mechanism, and the only button is the
+one that works. The `Join a community` pill appears on states where a member
+already has communities, where it is a real destination only once a code-entry
+route exists.
+
+**If Join should be a control here, it needs a join-code entry route** — new
+product surface, not a drawing change. Flagged rather than faked.
 
 ## Evidence
 
@@ -72,12 +116,13 @@ made against pixels rather than prose.
 | State | 390×844 | 390×640 | 430×932 |
 | --- | :---: | :---: | :---: |
 | **Community (`/community`) — the target** | | | |
-| Several memberships | ✓ | ✓ | ✓ |
-| One membership | ✓ | | |
-| No memberships | ✓ | | |
+| Several memberships, one current | ✓ | ✓ | ✓ |
+| Several memberships, none chosen yet | ✓ | ✓ | |
+| One membership | ✓ | ✓ | |
+| No memberships | ✓ | ✓ | |
 | Loading | ✓ | | |
 | Could not be loaded | ✓ | | |
-| **Per-community surface — the proposal** | | | |
+| **Per-community surface — exploration only, not to be built** | | | |
 | Goals running | ✓ | ✓ | ✓ |
 | Nothing running | ✓ | ✓ | ✓ |
 | What we've done | ✓ | ✓ | ✓ |

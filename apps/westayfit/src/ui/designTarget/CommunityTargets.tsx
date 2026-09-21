@@ -226,53 +226,138 @@ function Momentum({ rows, dark }: { rows: typeof MOMENTUM; dark?: boolean }) {
 
 /* ── 1 · the list ────────────────────────────────────────────────────────── */
 
+/** The stable app header. It is the same in every state, including the ones
+ *  that have no data: a page that loses its own identity while loading reads
+ *  as a page that failed. */
+function Header() {
+  return (
+    <>
+      <View style={s.wordmarkRow}>
+        <Text style={s.wordmark}>WE STAY FIT</Text>
+      </View>
+      <Text style={[display.md, s.pageTitle]}>Community</Text>
+    </>
+  );
+}
+
+/** Compact, app-like secondary actions. Never a naked underlined link — the
+ *  BEFORE critique was that the existing one reads like a website, and two
+ *  more of them would have been the same defect in a new place. */
+function SecondaryActions({ lead }: { lead?: 'join' | null }) {
+  return (
+    <View style={s.actionRow}>
+      <View style={[s.pill, lead === 'join' ? s.pillLead : null]}>
+        <Text style={[s.pillText, lead === 'join' ? s.pillLeadText : null]}>Join a community</Text>
+      </View>
+      <View style={s.pill}>
+        <Text style={s.pillText}>Start a community</Text>
+      </View>
+    </View>
+  );
+}
+
+/** A community that is not the current one. The cue says what tapping does. */
+function OtherRow({
+  name,
+  memberCount,
+  goal,
+  line,
+  cue,
+}: {
+  name: string;
+  memberCount: number;
+  goal?: { title: string; unit: string; target: number; total: number };
+  line?: string;
+  cue: string;
+}) {
+  return (
+    <View style={s.otherRow}>
+      <View style={s.otherHead}>
+        <View style={s.otherText}>
+          <Text style={s.otherName} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={s.otherMeta}>
+            {memberCountLabel(memberCount)} · {goal ? goal.title : line}
+          </Text>
+          {goal ? (
+            <Text style={s.otherTotal}>
+              {totalOfTargetLabel(goal.total, goal.target, goal.unit)} ·{' '}
+              {percentLabel(goal.total, goal.target)}
+            </Text>
+          ) : null}
+        </View>
+        {/*
+          ROW BEHAVIOUR HAS TO BE VISIBLE. Tapping a row switches the current
+          community AND opens its Home; a Pressable with an accessibility
+          label says that to a screen reader and to nobody else.
+        */}
+        <View style={s.cue}>
+          <Text style={s.cueText}>{cue}</Text>
+        </View>
+      </View>
+      {goal ? <Track total={goal.total} target={goal.target} /> : null}
+    </View>
+  );
+}
+
 export function CommunityListTarget({
   state,
 }: {
-  state: 'none' | 'one' | 'several' | 'loading' | 'failed';
+  state: 'none' | 'one' | 'several' | 'severalNoCurrent' | 'loading' | 'failed';
 }) {
   const { onLayout, compact, roomy } = useBox();
+  const hasCurrent = state === 'one' || state === 'several';
   const showOthers = state === 'several';
 
   return (
     <View style={s.screen} onLayout={onLayout}>
-      <ScrollView style={s.scroll} contentContainerStyle={[s.body, compact ? s.bodyCompact : null]}>
-        <View style={s.wordmarkRow}>
-          <Text style={s.wordmark}>WE STAY FIT</Text>
-        </View>
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={[
+          s.body,
+          compact ? s.bodyCompact : null,
+          roomy ? s.bodyRoomy : null,
+        ]}
+      >
+        <Header />
 
         {state === 'none' ? (
           <View style={s.emptyWrap}>
             <View style={s.emptyPanel}>
-              <Text style={s.emptyKicker}>YOU ARE THE WE</Text>
-              <Text style={[display.lg, s.emptyTitle]}>
-                A community is the people you move with.
-              </Text>
+              {/*
+                NO SLOGAN. The standing-slogan system was removed from Home on
+                direction; this screen does not get to reintroduce one. The
+                heading is the thing the member is here to do.
+
+                AND NO DEAD BUTTON. There is no join-by-code screen in the
+                product: `/join/[joinCode]` reads the code from the route, and
+                nothing anywhere accepts a typed one. So Join leads this panel
+                by heading and copy, which is true, rather than by a control
+                that would go nowhere. The seam is recorded in the README.
+              */}
+              <Text style={[display.lg, s.emptyTitle]}>Join a community</Text>
               <Text style={s.emptyBody}>
-                Join one with a code from someone already in it, or start your own and invite
-                people.
+                You join with an invite link or QR code from someone already in the community.
+                Ask them to send you one.
               </Text>
-              <View style={s.emptyActions}>
-                <View style={s.primary}>
-                  <Text style={s.primaryText}>Join a community</Text>
-                </View>
-                <View style={s.secondary}>
-                  <Text style={s.secondaryText}>Start a community</Text>
-                </View>
+              <View style={s.emptyRule} />
+              <Text style={s.emptyOr}>Or start your own and invite people to it.</Text>
+              <View style={s.primary}>
+                <Text style={s.primaryText}>Start a community</Text>
               </View>
             </View>
-            {/*
-              A SCREEN WITH NO DATA IS STILL A COMPOSED SCREEN. Centring the
-              one panel in a tall phone left 400px of nothing above and below
-              it, which reads as a page that failed to load rather than a page
-              with nothing yet. The spare height goes to what a community
-              actually is here — three statements of fact about the product,
-              not invented activity and not a promise.
-            */}
+
             <View style={s.emptyFacts}>
               {[
-                ['One goal at a time', 'Your community picks what it is counting, together.'],
-                ['Every amount counts once', 'You add what you did. The shared total is the record.'],
+                [
+                  'Count what you choose',
+                  'Your community sets what it is counting, and how much. It can run more than one goal at a time.',
+                ],
+                [
+                  'Every amount counts once',
+                  'You add what you did. The shared total is the record.',
+                ],
                 ['No leaderboards', 'There is no ranking here, and nobody is compared.'],
               ].map(([title, body]) => (
                 <View key={title} style={s.emptyFact}>
@@ -283,27 +368,100 @@ export function CommunityListTarget({
             </View>
           </View>
         ) : state === 'loading' ? (
+          /*
+            THE SKELETON IS THE REAL STRUCTURE. A single grey card over a blank
+            page tells the member nothing about what is arriving; this is the
+            current-community panel and two rows, in their real places.
+          */
           <View style={s.stateWrap}>
             <View style={s.skeletonPanel}>
-              <View style={[s.bone, { width: '46%', height: 14 }]} />
-              <View style={[s.bone, { width: '82%', height: 26 }]} />
-              <View style={[s.bone, { width: '60%', height: 14 }]} />
-              <View style={[s.bone, { width: '100%', height: 10, marginTop: 8 }]} />
+              <View style={s.boneRow}>
+                <View style={[s.bone, { width: 74, height: 20 }]} />
+                <View style={[s.bone, { width: 96, height: 20 }]} />
+              </View>
+              <View style={[s.bone, { width: '86%', height: 30 }]} />
+              <View style={[s.bone, { width: '40%', height: 14 }]} />
+              <View style={[s.boneRule]} />
+              <View style={[s.bone, { width: '54%', height: 13 }]} />
+              <View style={s.boneGoal}>
+                <View style={[s.bone, { width: 60, height: 42 }]} />
+                <View style={s.boneGoalText}>
+                  <View style={[s.bone, { width: '80%', height: 16 }]} />
+                  <View style={[s.bone, { width: '60%', height: 13 }]} />
+                  <View style={[s.bone, { width: '100%', height: 6 }]} />
+                </View>
+              </View>
             </View>
+            {(roomy ? [0, 1, 2] : [0, 1]).map((i) => (
+              <View key={i} style={s.skeletonRow}>
+                <View style={[s.bone, { width: '52%', height: 17 }]} />
+                <View style={[s.bone, { width: '34%', height: 12 }]} />
+              </View>
+            ))}
             <Text style={s.stateNote}>Loading your communities…</Text>
           </View>
         ) : state === 'failed' ? (
+          /*
+            A FAILURE STILL KNOWS WHAT PAGE IT IS. The header above stays, the
+            panel says what did not happen and what is still true, and the way
+            out is more than a retry: a member who cannot load this list can
+            still reach the community they were in.
+          */
           <View style={s.stateWrap}>
             <View style={s.failPanel}>
               <Text style={s.failTitle}>Your communities could not be loaded just now.</Text>
               <Text style={s.failBody}>
                 Nothing has changed — this is the reading, not the record.
               </Text>
-              <View style={s.secondary}>
-                <Text style={s.secondaryText}>Try again</Text>
+              <View style={s.failPrimary}>
+                <Text style={s.primaryText}>Try again</Text>
+              </View>
+            </View>
+            <View style={s.actionRow}>
+              <View style={s.pill}>
+                <Text style={s.pillText}>Go to Home</Text>
+              </View>
+              <View style={s.pill}>
+                <Text style={s.pillText}>Start a community</Text>
               </View>
             </View>
           </View>
+        ) : state === 'severalNoCurrent' ? (
+          <>
+            {/*
+              THE STATE THE PRODUCT ACTUALLY HAS, and the one the first draft
+              skipped. `resolveCurrentCommunity()` returns NULL when several
+              memberships exist and none is remembered — it does not fall back
+              to the first. Marking a row CURRENT here would be a convenience
+              inventing a fact, so the screen asks instead.
+            */}
+            <View style={s.choosePanel}>
+              <Text style={s.chooseTitle}>Choose which community Home opens</Text>
+              <Text style={s.chooseBody}>
+                You are in {OTHERS.length + 1} communities and have not opened one yet. Pick one —
+                you can switch whenever you like.
+              </Text>
+            </View>
+            <View style={s.others}>
+              <OtherRow
+                name={CURRENT.name}
+                memberCount={CURRENT.memberCount}
+                goal={{ ...CURRENT.goal, title: CURRENT.goal.title }}
+                cue="Choose"
+              />
+              {OTHERS.map((o) => (
+                <OtherRow
+                  key={o.name}
+                  name={o.name}
+                  memberCount={o.memberCount}
+                  goal={o.goal}
+                  line={o.line}
+                  cue="Choose"
+                />
+              ))}
+            </View>
+            <SecondaryActions />
+          </>
         ) : (
           <>
             {/*
@@ -331,7 +489,7 @@ export function CommunityListTarget({
                   completed={CURRENT.goal.total}
                   target={CURRENT.goal.target}
                   unit={CURRENT.goal.unit}
-                  width={compact ? 58 : 74}
+                  width={compact ? 58 : roomy ? 88 : 74}
                   surface="dark"
                 />
                 <View style={s.currentGoalText}>
@@ -363,44 +521,31 @@ export function CommunityListTarget({
                 </View>
               ) : null}
 
-              <Momentum rows={MOMENTUM.slice(0, compact ? 2 : 3)} dark />
+              <Momentum rows={MOMENTUM.slice(0, compact ? 2 : roomy ? 4 : 3)} dark />
             </View>
 
             {showOthers ? (
               <View style={s.others}>
                 <Text style={s.eyebrow}>ALSO YOURS</Text>
                 {OTHERS.map((o) => (
-                  <View key={o.name} style={s.otherRow}>
-                    <View style={s.otherText}>
-                      <Text style={s.otherName} numberOfLines={1}>
-                        {o.name}
-                      </Text>
-                      <Text style={s.otherMeta}>
-                        {memberCountLabel(o.memberCount)} · {o.goal ? o.goal.title : o.line}
-                      </Text>
-                      {o.goal ? (
-                        <Text style={s.otherTotal}>
-                          {totalOfTargetLabel(o.goal.total, o.goal.target, o.goal.unit)} ·{' '}
-                          {percentLabel(o.goal.total, o.goal.target)}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {o.goal ? (
-                      <View style={s.otherTrackWrap}>
-                        <Track total={o.goal.total} target={o.goal.target} />
-                      </View>
-                    ) : null}
-                  </View>
+                  <OtherRow
+                    key={o.name}
+                    name={o.name}
+                    memberCount={o.memberCount}
+                    goal={o.goal}
+                    line={o.line}
+                    cue="Switch"
+                  />
                 ))}
               </View>
             ) : null}
 
-            {/* Starting and joining stay available, and stay quiet. */}
-            <View style={s.foot}>
-              <Text style={s.footLink}>Join a community</Text>
-              <Text style={s.footDot}>·</Text>
-              <Text style={s.footLink}>Start a community</Text>
-            </View>
+            {/*
+              Joining and starting sit directly under the content rather than
+              pinned to the bottom of the frame: with one membership, pinning
+              them left most of the screen as empty cream.
+            */}
+            {hasCurrent || showOthers ? <SecondaryActions /> : null}
           </>
         )}
       </ScrollView>
@@ -616,10 +761,42 @@ const s = StyleSheet.create({
     gap: 14,
   },
   bodyCompact: { paddingTop: 8, gap: 10 },
+  /* A tall phone spends its height on rhythm rather than leaving it at the end. */
+  bodyRoomy: { gap: 18, paddingTop: 14 },
 
   wordmarkRow: { height: 26, justifyContent: 'center' },
   wordmark: { color: NAVY, fontSize: 17, fontWeight: '900', letterSpacing: 1.2 },
   wordmarkOnNavy: { color: ON_NAVY, fontSize: 13, fontWeight: '900', letterSpacing: 1.1 },
+  pageTitle: { color: NAVY, marginTop: -2 },
+
+  /* Compact, app-like secondary actions — never a naked underlined link. */
+  actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', paddingTop: 2 },
+  pill: {
+    borderWidth: 1.5,
+    borderColor: '#C9C5BC',
+    backgroundColor: SURFACE,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  pillLead: { borderColor: NAVY, backgroundColor: NAVY },
+  pillText: { color: NAVY, fontSize: 13, fontWeight: '800' },
+  pillLeadText: { color: ON_NAVY },
+
+  /* The cue that says what tapping a row does. */
+  cue: {
+    borderWidth: 1,
+    borderColor: '#C9C5BC',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  cueText: { color: INK_QUIET, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+
+  /* Several memberships, none chosen yet. */
+  choosePanel: { gap: 4 },
+  chooseTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '900' },
+  chooseBody: { color: TEXT_MUTED, fontSize: 13.5, lineHeight: 19 },
 
   eyebrow: { color: '#2F7D4F', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
   eyebrowDark: { color: PROGRESS_GREEN, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
@@ -684,10 +861,11 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: HAIRLINE,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
+    paddingVertical: 14,
+    gap: 9,
   },
-  otherText: { gap: 2 },
+  otherHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  otherText: { flex: 1, gap: 2 },
   otherName: { color: NAVY, fontSize: 15, lineHeight: 20, fontWeight: '800' },
   otherMeta: { color: TEXT_MUTED, fontSize: 12, lineHeight: 16 },
   otherTotal: { color: INK_QUIET, fontSize: 12, lineHeight: 16 },
@@ -721,16 +899,18 @@ const s = StyleSheet.create({
   emptyKicker: { color: PROGRESS_GREEN, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
   emptyTitle: { color: ON_NAVY },
   emptyBody: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
+  emptyRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 6 },
+  emptyOr: { color: ON_NAVY_MUTED, fontSize: 13.5, lineHeight: 19 },
   emptyActions: { gap: 9, paddingTop: 4 },
-  emptyFacts: { gap: 10, paddingTop: 2 },
+  emptyFacts: { gap: 11, paddingTop: 2 },
   emptyFact: {
     backgroundColor: SURFACE,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: HAIRLINE,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    gap: 2,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+    gap: 3,
   },
   emptyFactTitle: { color: NAVY, fontSize: 14, lineHeight: 19, fontWeight: '800' },
   emptyFactBody: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17 },
@@ -770,15 +950,37 @@ const s = StyleSheet.create({
     gap: 9,
   },
   bone: { backgroundColor: '#E3E0D8', borderRadius: 6 },
+  boneRow: { flexDirection: 'row', gap: 8 },
+  boneRule: { height: 1, backgroundColor: '#E3E0D8', marginVertical: 2 },
+  boneGoal: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  boneGoalText: { flex: 1, gap: 6 },
+  skeletonRow: {
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 7,
+  },
   stateNote: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   failPanel: {
     backgroundColor: NAVY,
-    borderRadius: 18,
-    padding: 16,
-    gap: 9,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    gap: 10,
   },
-  failTitle: { color: ON_NAVY, fontSize: 16, lineHeight: 22, fontWeight: '800' },
-  failBody: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
+  failTitle: { color: ON_NAVY, fontSize: 20, lineHeight: 27, fontWeight: '900' },
+  failBody: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
+  failPrimary: {
+    backgroundColor: ACTION_GREEN,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 6,
+    ...elevation.action,
+  },
 
   /* ── detail masthead ── */
   masthead: {

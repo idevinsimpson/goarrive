@@ -17,6 +17,10 @@ const OUT = path.resolve(__dirname, '../../../docs/design-target/review/page-03-
 /** Every frame the preview route publishes, by testID suffix. */
 const FRAMES = [
   'list-several-390x844',
+  'list-severalnocurrent-390x844',
+  'list-severalnocurrent-390x640',
+  'list-one-390x640',
+  'list-none-390x640',
   'list-one-390x844',
   'list-none-390x844',
   'list-loading-390x844',
