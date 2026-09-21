@@ -14,65 +14,81 @@ docs/design-target/owner-north-star/OWNER-BOARD-1-before-current-wsf-experience.
 docs/design-target/owner-north-star/OWNER-BOARD-2-after-target-wsf-vision.png
 ```
 
-**Implementation is frozen behind the atlas.** Home is implemented and is not
-being rolled back. Nothing else is implemented, and nothing else will be, until
-the complete Visual North Star Atlas is finished and reviewed. The MOVE family
-has a target and no implementation. See
-`VISUAL-NORTH-STAR-ATLAS-REQUIREMENTS.md` for the atlas, and the batch plan
-below for the order it is being built in.
+**The atlas is the coverage register, not an implementation blocker.** That
+changed on 2026-09-21: the earlier rule that the whole ~140-state atlas had to
+finish before any further implementation is superseded. The governing delivery
+priority is the truthful contribution → WE → shared-result loop, and the
+member-app transformation.
+
+**The page-level visual gate still stands**, on every page:
+ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual acceptance.
+
+Order of work: MOVE / contribution, then Community, then Progress, then You.
+Kiosk, station, display and event administration are secondary to those.
+Atlas Batch A is **parked as target-only** — not implemented, and not final as
+drawn (see `review/batch-a-identity/README.md` for the corrections it owes).
 
 ## Coverage today
 
+**Computed, not typed.** These numbers come from walking
+`apps/westayfit/app` and cross-referencing the target register, so a new route
+appears as uncovered rather than quietly missing from the arithmetic:
+
+```
+node scripts/westayfit/route-target-coverage.mjs
+```
+
 | | |
 | --- | --- |
-| User-facing routes | **22** |
-| Routes with a real-RN target | **5** |
-| Routes with no target | **17** |
-| Routes **implemented** against an approved target | **1** (Home) |
+| User-facing routes | **23** |
+| Routes with a real-RN target | **9** |
+| Routes with no target | **14** |
+| Routes implemented against an approved target | **1** |
 | Device classes above the phone with any target | **0** of 4 |
-| Superseded HTML concepts, kept as a record | 9 |
 
-Five of twenty-two is the honest number, and the tablet, kiosk, station and
-collective-display classes have nothing at all. That gap is what the atlas
-batches below exist to close.
+The previous revision of this file said 22 / 5 / 17. All three were wrong: the
+route tree holds 23 member-facing routes, and Atlas Batch A had already covered
+five identity routes that this file still listed as uncovered. A count someone
+types is a count that rots, which is why it is generated now.
+
+`/design-target/*` (four gated preview routes) and `/health` are excluded: the
+first are not member surfaces and cannot be served by a deployed artifact, and
+the second is operational.
 
 ## The routes
 
-### Covered
+### Covered — a real-RN target exists
 
-| Route | Target | Notes |
+| Route | Target package | Notes |
 | --- | --- | --- |
-| `/community/[groupId]` | `targets/TARGET-home-390x844.png`, `targets/TARGET-home-390x640.png`, `targets/TARGET-home-430x932.png` | Community Home. This is where `/` lands a member who has a current community, so it is the real Home. **Real RN**, three device classes. Ordinary-progress state ONLY — the other twelve Home states in the atlas §B have no target. |
-| `/move` | `review/page-02-move/TARGET-move-choose-390x844.png`, `TARGET-move-choose-390x640.png`, `TARGET-move-nogoal-390x844.png` | MOVE entry, the raised tab-bar action. **Real RN.** The target proposes a sheet over the dimmed Home rather than a page. Awaiting visual approval — not implemented. |
-| `/contribute/[goalId]` | `review/page-02-move/TARGET-contribute-390x844.png`, `TARGET-contribute-390x640.png`, `TARGET-confirmed-390x844.png`, `TARGET-confirmed-390x640.png` | The contribution and the confirmed moment. **Real RN.** Awaiting visual approval — not implemented. |
-| `/goals/new` | `review/page-02-move/TARGET-picker-one-390x844.png`, `TARGET-picker-many-390x844.png` | The unified movement picker, the step inside goal creation. **Real RN.** Awaiting visual approval — not implemented. |
-| `/community` | none | The superseded HTML concept is not a target. |
-| `/activity` | none | The atlas renames this destination Progress. The superseded HTML concept is not a target. |
-| `/you` | none | The superseded HTML concept is not a target. |
+| `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **The only implemented route.** |
+| `/move` | `review/page-02-move/` | MOVE entry, proposed as a sheet over the dimmed Home. Target only. |
+| `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes — ordinary, reached, postTarget, unknown, refusal, closed goal. Target only. |
+| `/goals/new` | `review/page-02-move/` | The unit picker, built from the shipped `ACTIVITY_GUIDES`. Target only. |
+| `/signin` | `review/batch-a-identity/` | Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only. |
+| `/signup` | `review/batch-a-identity/` | Target only. |
+| `/verify-email` | `review/batch-a-identity/` | Target only. |
+| `/reset-password` | `review/batch-a-identity/` | Target only. |
+| `/profile-setup` | `review/batch-a-identity/` | Target only. |
 
-### Not covered
+### Not covered — no target of any kind
 
 | Route | What it is |
 | --- | --- |
 | `/` | Home resolver / current-community landing |
-| `/community/[groupId]/challenge` | Community challenge surface |
-| `/move/[goalId]` | Movement / player route |
+| `/activity` | Progress (the destination is renamed; the route is not) |
 | `/combined/[setupId]` | Multi-movement goal setup |
-| `/join/[joinCode]` | Join invitation landing |
-| `/start-community` | Create a community |
-| `/signin` | Sign in |
-| `/signup` | Sign up |
-| `/verify-email` | Verification waiting / complete |
-| `/reset-password` | Reset request and completion |
-| `/profile-setup` | Profile setup |
-| `/event/[goalId]` | Scanned event landing |
-| `/queue/[goalId]` | Queue |
-| `/station/[goalId]` | Station — tablet landscape |
-| `/kiosk/[goalId]` | Kiosk — tablet portrait |
+| `/community` | Community destination and switcher |
+| `/community/[groupId]/challenge` | Community challenge surface |
 | `/display/[goalId]` | Public / shared display, phone through 1920×1080 |
-
-`/health` is operational, not member-facing, and is excluded by the atlas
-requirements.
+| `/event/[goalId]` | Scanned event landing |
+| `/join/[joinCode]` | Join invitation landing |
+| `/kiosk/[goalId]` | Kiosk — tablet portrait |
+| `/move/[goalId]` | Movement / player route |
+| `/queue/[goalId]` | Queue |
+| `/start-community` | Create a community |
+| `/station/[goalId]` | Station — tablet landscape |
+| `/you` | You |
 
 ## The atlas batches
 
@@ -81,12 +97,17 @@ drawings. Each batch is posted with its PNG paths and a contact sheet.
 
 | Batch | What it covers | State |
 | --- | --- | --- |
-| **A** | Identity and onboarding: sign in · sign up · verify email · reset password · profile setup · auth error · return-to-event · return-to-join | **posted for review** — `review/batch-a-identity/`, 16 TARGET frames + contact sheet + 16 BEFORE |
+| **A** | Identity and onboarding: sign in · sign up · verify email · reset password · profile setup · auth error · return-to-event · return-to-join | **PARKED, target only** — posted at `review/batch-a-identity/`; not final as drawn, corrections listed in its README |
 | **B** | Community, join and create: community destination · switcher · join invitation · join gates, success and refusal · start community · goal basics · one and several movement selection · goal review and opened success | not started |
 | **C** | Member secondary destinations: Progress · You · community challenge · no-goal, empty, history and private-consistency variants | not started |
 | **D** | LIVE personal-phone flow: event landing · signed out · member and not-member · activity selection · device choice · event completion · queue join, wait, assigned, ready, leave, rejoin, unavailable | not started |
 | **E** | Shared devices: kiosk portrait idle → select → handoff → contribution → confirmation → Finish/reset → next visitor → timeout/offline; station landscape enrol → available → assigned → ready → 60-second active → review/result → receipt → cleared → unavailable | not started |
 | **F** | Public and shared display: phone preview · 800×1280 picture-frame tablet · 1280×800 booth landscape · 1920×1080 collective display, across the nine-state matrix | not started |
+
+**Batches B–F are not started, and are not the next work.** The sequence reset
+puts MOVE / contribution implementation first, then Community, Progress and
+You as member surfaces. These batches remain the coverage register for what
+still has no target at all.
 
 Every batch inherits the owner boards' language — premium, vibrant, communal,
 app-like; expressive Living WE wherever progress exists; navy and bright green

@@ -3,6 +3,7 @@ import { type LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'reac
 
 import { LivingWeProgress } from '../LivingWeProgress';
 import { HomeTarget } from './HomeTarget';
+import { ACTIVITY_GUIDES } from '../../activityGuides';
 import { refusalCopy, repeatNotice, resultCopy } from '../../contributionFlow';
 import {
   fillRatio,
@@ -162,7 +163,7 @@ export function MoveEntryTarget({ state }: { state: 'choose' | 'noGoal' }) {
           ]}
           otherGoals={
             state === 'choose'
-              ? [{ title: 'Step-ups round', completed: 612, target: 2000, unit: 'step-ups' }]
+              ? [{ title: 'Step count week', completed: 612, target: 2000, unit: 'steps' }]
               : []
           }
         />
@@ -179,7 +180,7 @@ export function MoveEntryTarget({ state }: { state: 'choose' | 'noGoal' }) {
             </Text>
             {[
               { title: SAMPLE.goalTitle, total: 1847, target: 5000, unit: 'squats' },
-              { title: 'Step-ups round', total: 612, target: 2000, unit: 'step-ups' },
+              { title: 'Step count week', total: 612, target: 2000, unit: 'steps' },
             ].map((g) => (
               <View key={g.title} style={[s.goalCard, roomy ? s.goalCardRoomy : null]}>
                 <View style={s.goalRow}>
@@ -240,17 +241,31 @@ export function MoveEntryTarget({ state }: { state: 'choose' | 'noGoal' }) {
 
 /* ── 2 · the unified movement picker ────────────────────────────────────── */
 
-const CATALOG = [
-  { label: 'Squats', unit: 'squats' },
-  { label: 'Step-ups', unit: 'step-ups' },
-  { label: 'Walking', unit: 'minutes' },
-  { label: 'Push-ups', unit: 'push-ups' },
-  { label: 'Stretching', unit: 'minutes' },
-  { label: 'Cycling', unit: 'minutes' },
-  { label: 'Rowing', unit: 'metres' },
-  { label: 'Swimming', unit: 'lengths' },
-  { label: 'Dancing', unit: 'minutes' },
-];
+/*
+  THE CATALOG IS THE PRODUCT'S, NOT A DRAWING'S.
+
+  An earlier cut of this target invented nine activities -- walking, cycling,
+  rowing, swimming, dancing, stretching -- and by drawing them it proposed a
+  fixed catalog of activities as product scope. There is no such catalog. A
+  Champion types what the goal counts as free text ("Say what you're counting,
+  like squats or miles"), and the only retained, shipped set is the units the
+  product has COUNTING GUIDANCE for: ACTIVITY_GUIDES, seven of them.
+
+  So the tiles are built FROM that table rather than from a list written here.
+  The target cannot show an activity the product has not retained, because
+  there is nowhere for one to come from, and adding one would mean adding a
+  guide -- backend behaviour -- which a picture is never allowed to ask for.
+
+  The free-text path stays visible beside them, because that is what the
+  product actually offers: the tiles are shortcuts, not a menu.
+*/
+const CATALOG = Object.values(ACTIVITY_GUIDES).map((g) => ({
+  key: g.key,
+  label: g.key.charAt(0).toUpperCase() + g.key.slice(1),
+  /* Not the unit again -- the tile label IS the unit. What the second line
+     adds is why this one is offered: the app has a counting guide for it. */
+  unit: 'counting guide',
+}));
 
 export function PickerTarget({ chosen }: { chosen: number }) {
   const { onLayout, roomy } = useBox();
@@ -271,26 +286,43 @@ export function PickerTarget({ chosen }: { chosen: number }) {
           <Text style={s.setupEyebrow}>{SAMPLE.community} · new goal</Text>
           <Text style={s.setupTitle}>What will the community count?</Text>
           <Text style={s.setupIntro}>
-            Pick one movement, or several. Each one is counted in its own units.
+            Start from a unit the app knows how to count, or name your own. Pick one, or
+            several — each is counted separately.
           </Text>
         </View>
         <View style={s.grid}>
           {CATALOG.map((m, i) => (
-            <MovementTile key={m.label} {...m} selected={i < chosen} roomy={roomy} />
+            <MovementTile
+              key={m.key}
+              label={m.label}
+              unit={m.unit}
+              selected={i < chosen}
+              roomy={roomy}
+            />
           ))}
+          {/* What the product really offers, and the tiles above are shortcuts to. */}
+          <View style={[s.tile, roomy ? s.tileRoomy : null, s.tileOpen]}>
+            <View style={s.tileTop}>
+              <Text style={s.tileLabelOpen} numberOfLines={2}>
+                Something else
+              </Text>
+              <View style={s.tick} />
+            </View>
+            <Text style={s.tileUnit}>type the unit</Text>
+          </View>
         </View>
         <View style={s.spacer} />
         <View style={s.summary}>
           <Text style={s.summaryLead}>
             {chosen === 1
-              ? `One movement: ${picked[0]?.label.toLowerCase()}`
-              : `${chosen} movements together`}
+              ? `One unit: ${picked[0]?.key}`
+              : `${chosen} units, counted separately`}
           </Text>
           <Text style={s.summaryBody}>
             {chosen === 1
-              ? `The community's goal will be counted in ${picked[0]?.unit}.`
+              ? `The community's goal will be counted in ${picked[0]?.key}.`
               : `${picked
-                  .map((p) => p.label.toLowerCase())
+                  .map((p) => p.key)
                   .join(' and ')} are counted separately, each in its own units. The community sees every one of them.`}
           </Text>
         </View>
@@ -446,7 +478,7 @@ export function ContributeTarget() {
             <Text style={s.sectionLabel}>Counted in</Text>
             <View style={s.pairRow}>
               <MovementTile label="Squats" unit="this goal" selected />
-              <MovementTile label="Step-ups" unit="same goal" selected={false} />
+              <MovementTile label="Steps" unit="same goal" selected={false} />
             </View>
           </>
         )}
@@ -505,7 +537,7 @@ export function ReviewTarget() {
             <Text style={s.sectionLabel}>Counted in</Text>
             <View style={s.pairRow}>
               <MovementTile label="Squats" unit="this goal" selected />
-              <MovementTile label="Step-ups" unit="same goal" selected={false} />
+              <MovementTile label="Steps" unit="same goal" selected={false} />
             </View>
           </>
         )}
@@ -1124,6 +1156,8 @@ const s = StyleSheet.create({
   },
   tileRoomy: { paddingTop: 13, paddingBottom: 15, minHeight: 82 },
   tileOn: { borderColor: ACTION_GREEN_DEEP, borderWidth: 2.5, backgroundColor: '#EFF9F1' },
+  tileOpen: { borderStyle: 'dashed', backgroundColor: 'transparent' },
+  tileLabelOpen: { flex: 1, color: INK_QUIET, fontSize: 14, lineHeight: 18, fontWeight: '800' },
   tileTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
 
   // The tick is the part that survives greyscale.

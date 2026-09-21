@@ -168,3 +168,29 @@ backend behaviour in order to be true is a target that lies.
 infrastructure, not a fallback the standard member flow should advertise. If an
 event context genuinely offers it, it belongs in an event-specific state in
 Batch D or E, not here.
+
+## Correction, 2026-09-21 — the catalog is the product's, not a drawing's
+
+The picker drew nine activities: squats, step-ups, walking, push-ups,
+stretching, cycling, rowing, swimming, dancing. **Six of those do not exist in
+this product**, and by drawing them the target proposed a fixed catalog of
+activities as product scope.
+
+There is no catalog. A Champion types what a goal counts as free text — "Say
+what you're counting, like squats or miles" (`app/goals/new.tsx`) — and a
+combined goal carries a free-text `unit` per activity. The only retained,
+shipped set is the units the app has **counting guidance** for:
+`ACTIVITY_GUIDES` in `src/activityGuides.ts`, seven of them — squats,
+push-ups, sit-ups, steps, minutes, laps, reps.
+
+The tiles are now built **from that table**, not from a list written in the
+target. The frame cannot show an activity the product has not retained, because
+there is nowhere for one to come from, and adding one would mean adding a guide
+— backend behaviour, which a picture is never allowed to ask for. A dashed
+**"Something else · type the unit"** tile sits beside them, because the free
+text is what the product actually offers and the seven are shortcuts, not a
+menu.
+
+Two other places carried the same invented activity and were corrected with it:
+the chooser's second goal (`Step-ups round` → `Step count week`, counted in
+`steps`), and the "Counted in" pair on the contribution and review screens.

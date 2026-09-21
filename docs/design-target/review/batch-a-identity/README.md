@@ -90,3 +90,29 @@ WSF_PLAYWRIGHT_CHROMIUM=... WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
 `/design-target/auth` renders only when the build carries
 `EXPO_PUBLIC_WSF_USE_EMULATORS`, and `scripts/westayfit/build-staging.sh`
 refuses a build that sets it. No deployed artifact can serve this route.
+
+## Parked — target only, and not final as drawn
+
+Batch A is **not implemented and not approved**. Four corrections are owed
+before it is revisited, each of them a place where the drawing is ahead of the
+product:
+
+1. **Sign up must keep the real 8-character password requirement visible.** The
+   current frame shows a password field with no rule stated, which makes the
+   requirement a surprise at submit time.
+2. **Verify and reset need the real send states.** The product distinguishes
+   `sending`, `sent`, `already-verified`, `unconfigured` and `failed`, and the
+   intro copy changes with each — `INTRO` in `app/verify-email.tsx`. The frame
+   draws only "We sent…", which assumes an outcome the screen may not have. The
+   `unconfigured` case matters most: on a build without email switched on,
+   nobody can finish verifying, and the screen says so.
+3. **Profile setup must preserve the real acceptance gate** — Terms, Privacy
+   and 13+ — and must **not** depict it pre-checked. The current frame draws a
+   ticked box, which shows consent as already given. That is the one defect
+   here that is a truth problem rather than a coverage gap.
+4. **The returns must stay understandable through the verify and profile
+   gates**, without exposing a private community name before authorization.
+   The frames cover the sign-in hop only; the same pending destination survives
+   two more gates and is unexplained on both.
+
+Nothing should be built from these frames until those are fixed.
