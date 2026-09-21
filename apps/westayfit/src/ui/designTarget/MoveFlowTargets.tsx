@@ -213,11 +213,19 @@ export function MoveEntryTarget({ state }: { state: 'choose' | 'noGoal' }) {
             <Text style={s.intro}>
               When a Champion opens a goal, this is where you will record what you did.
             </Text>
+            {/*
+              WHAT THE PRODUCT ACTUALLY DOES. An earlier draft said a member's
+              movement is theirs to keep "whether or not a goal is open",
+              which promised a personal movement log this product does not
+              have. WSF records contributions TO GOALS, inside their windows.
+              What is true is that the record of past contributions does not
+              go away, and that a new one needs somewhere to go.
+            */}
             <View style={s.quiet}>
-              <Text style={s.quietTitle}>What you can still do</Text>
+              <Text style={s.quietTitle}>What is still here</Text>
               <Text style={s.quietBody}>
-                Your own movement is yours to keep. Progress holds everything you have
-                recorded, whether or not a goal is open.
+                Anything you already recorded toward past goals stays in Progress. New
+                contributions need an open goal.
               </Text>
             </View>
             <View style={s.ghost}>
@@ -289,9 +297,14 @@ export function PickerTarget({ chosen }: { chosen: number }) {
         <View style={s.action}>
           <Text style={s.actionText}>Continue</Text>
         </View>
-        <Text style={s.note}>
-          You can add or remove a movement later without starting the goal again.
-        </Text>
+        {/*
+          NO PROMISE OF LATER EDITING. A draft said a movement could be added
+          or removed after the goal opens. Nothing in the product does that --
+          wsfAdjustGoal corrects a COUNT, not the movement set -- and a target
+          that asks for backend behaviour in order to be true is a target that
+          lies. The sentence is gone rather than replaced: the picker says
+          what the choice means, and stops there.
+        */}
       </ScrollView>
     </View>
   );
@@ -441,9 +454,6 @@ export function ContributeTarget() {
         <View style={s.spacer} />
         <View style={s.action}>
           <Text style={s.actionText}>Review my contribution</Text>
-        </View>
-        <View style={s.ghost}>
-          <Text style={s.ghostText}>Use a kiosk instead</Text>
         </View>
       </ScrollView>
     </View>
@@ -695,10 +705,10 @@ export function RefusedTarget() {
           <Text style={s.refusedBody}>{copy.body}</Text>
         </View>
         <View style={s.quiet}>
-          <Text style={s.quietTitle}>What you can still do</Text>
+          <Text style={s.quietTitle}>What is still here</Text>
           <Text style={s.quietBody}>
-            Your own movement is yours to keep. Progress holds everything you have recorded,
-            whether or not a goal was open when you did it.
+            Anything already recorded toward this goal stays in Progress. This attempt was not
+            added to it.
           </Text>
         </View>
         <View style={s.holdPanel}>
@@ -764,8 +774,8 @@ export function ClosedGoalTarget() {
         <View style={s.quiet}>
           <Text style={s.quietTitle}>What this goal leaves behind</Text>
           <Text style={s.quietBody}>
-            A closed goal keeps its number. It stays on the community's record, and what you
-            recorded toward it stays on yours.
+            A closed goal keeps its number. It stays on the community's record, and anything
+            you recorded toward it stays in Progress.
           </Text>
         </View>
         <View style={s.spacer} />

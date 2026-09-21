@@ -54,3 +54,21 @@ synthetic test accounts the e2e fixtures create.
 ## What to compare against
 
 `../../owner-north-star/OWNER-BOARD-2-after-target-wsf-vision.png`.
+
+## Correction, 2026-09-21 — the standing slogan is out
+
+The hero's eyebrow carried *"Together we go further"* for one pass. It is
+removed from the implemented Home **and** from the approved target, so the two
+cannot disagree.
+
+The slot now carries real state news or nothing at all: `Goal reached` when
+that is true, and no element otherwise. Whose effort this is gets said where it
+is a fact rather than a slogan — the identity block above the hero names the
+community and its members.
+
+`TARGET-home-*.png` and `AFTER-home-*.png` in this folder were re-captured
+after the change; `BEFORE-home-*.png` is untouched. The two e2e specs that
+assert this slot were re-pointed, not relaxed: they assert the exact text where
+the news exists and the **absence of the element** where it does not, which is
+what "no standing slogan" means and what would catch one creeping back in.
+`ui-community-home`, `ui-matrix` and `ui-app-shell` pass at the correction head.

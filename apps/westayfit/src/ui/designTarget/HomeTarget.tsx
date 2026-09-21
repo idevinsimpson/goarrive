@@ -188,9 +188,10 @@ export function HomeTarget({
             {/* Top light. Depth without a gradient dependency. */}
             <View pointerEvents="none" style={s.heroTopLight} />
 
-            <Text style={[targetType.eyebrow, s.heroEyebrow]}>
-              {reached ? 'Goal reached' : 'Together we go further'}
-            </Text>
+            {/* Real state news owns this slot, or nothing does. */}
+            {reached ? (
+              <Text style={[targetType.eyebrow, s.heroEyebrow]}>Goal reached</Text>
+            ) : null}
             <Text style={[targetType.h2, s.heroTitle]}>{goalTitle}</Text>
             <Text style={[targetType.meta, s.heroWindow]}>{goalWindow}</Text>
 

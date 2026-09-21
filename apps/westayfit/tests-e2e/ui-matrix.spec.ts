@@ -431,14 +431,16 @@ test.describe('phone 390×844', () => {
         await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveText(
           s.percentText
         );
-        // RE-POINTED, NOT RELAXED. Slice 1 left this slot empty except when
-        // the goal was reached. The approved visual direction asks for a
-        // standing communal line, so the slot is never empty; both branches
-        // are asserted by exact text, which is more than the absence check
-        // this replaces. "Goal reached" still outranks the standing line.
-        await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText(
-          s.key === '515-of-500-open' ? 'Goal reached' : 'Together we go further',
-        );
+        // THE EYEBROW CARRIES REAL STATE NEWS, OR NOTHING. The standing
+        // communal line is removed; both branches are still asserted, by
+        // exact text where the news exists and by the ABSENCE of the element
+        // where it does not — which is what would catch a slogan creeping
+        // back into this slot.
+        if (s.key === '515-of-500-open') {
+          await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText('Goal reached');
+        } else {
+          await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveCount(0);
+        }
       }
       await page.waitForTimeout(700);
       await clip(

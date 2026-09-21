@@ -3302,22 +3302,26 @@ export default function CommunityPage() {
                     keeps the slot; the label does not.
                   */}
                   {/*
-                    THE COMMUNAL LINE. The hero opened straight onto the goal's
-                    own title, which made it a progress meter with a name on
-                    it. One short line says whose effort this is before it says
-                    what the effort is — and it is a statement about the
-                    community, not a claim about anybody in it.
+                    NO STANDING SLOGAN IN THIS SLOT.
 
-                    "Goal reached" still takes the slot when it is true,
-                    because that is real news and outranks a standing line.
+                    A communal line stood here for one pass. It is out: it is
+                    not part of the approved verbal hierarchy, and a sentence
+                    that is always true is a sentence that says nothing by the
+                    second time a member sees it. The slot belongs to real
+                    state news, so it carries "Goal reached" when that is true
+                    and nothing at all when it is not.
+
+                    Whose effort this is gets said where it is a fact rather
+                    than a slogan: the identity block above the hero names the
+                    community and its members.
                   */}
-                  <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
-                    {p.kind === 'ok' &&
-                    progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
-                      'reachedOpen'
-                      ? 'Goal reached'
-                      : 'Together we go further'}
-                  </Text>
+                  {p.kind === 'ok' &&
+                  progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
+                    'reachedOpen' ? (
+                    <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
+                      Goal reached
+                    </Text>
+                  ) : null}
                   <Text
                     style={[styles.heroTitle, heroTitleType]}
                     testID={`wsf-community-goal-title-${featured.goalId}`}

@@ -582,19 +582,18 @@ test('Living WE static states through the real data path', async ({ page }) => {
     // A3. The hero eyebrow is the one place this surface says the target is
     // met while the goal is still open.
     //
-    // SLICE 1 removed the neutral "What we're doing" and left the slot EMPTY
-    // except when the goal was reached, on the reasoning that the label named
-    // what the card already said.
+    // THE EYEBROW CARRIES REAL STATE NEWS, OR NOTHING.
     //
-    // RE-POINTED, NOT RELAXED. The approved visual direction asks for a
-    // standing communal line so the hero reads as a community in motion
-    // rather than as a progress meter with a title. The slot is never empty
-    // now, and this asserts BOTH branches by exact text rather than asserting
-    // the absence of one — which is strictly more than it checked before.
-    // "Goal reached" still outranks the standing line, because it is news.
-    await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText(
-      state.key === '500-of-500' ? 'Goal reached' : 'Together we go further',
-    );
+    // A standing communal line held this slot for one pass and has been
+    // removed: it is not part of the approved verbal hierarchy. Both branches
+    // are still asserted — exact text where the news exists, and the ABSENCE
+    // of the element where it does not, which is what "no standing slogan"
+    // actually means and what would catch one creeping back in.
+    if (state.key === '500-of-500') {
+      await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText('Goal reached');
+    } else {
+      await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveCount(0);
+    }
     const we = page.getByTestId(`wsf-community-goal-we-${goalId}`);
     await expect(we).toHaveAttribute('data-fill-ratio', state.ratio);
     await expect(we).toHaveAttribute(

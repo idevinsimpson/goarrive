@@ -148,3 +148,23 @@ grant, on a signal stored on the attempt, so the target does not draw it.
 
 Approval of the composition, hierarchy, density and emotional read of these
 four screens — **before** any of the four routes is implemented against them.
+
+## Correction, 2026-09-21 — three claims the target could not support
+
+**"Your own movement is yours to keep… whether or not a goal was open."** Gone.
+It promised a personal movement log this product does not have: WSF records
+contributions **to goals**, inside their windows. The no-goal sheet now says
+"Anything you already recorded toward past goals stays in Progress. New
+contributions need an open goal," and the refusal says "Anything already
+recorded toward this goal stays in Progress. This attempt was not added to it."
+
+**"You can add or remove a movement later without starting the goal again."**
+Gone, and not replaced. I looked for the behaviour before removing it:
+`wsfAdjustGoal` corrects a **count**, and no callable in `functions-westayfit`
+adds or removes a movement from a goal once it exists. A target that needs new
+backend behaviour in order to be true is a target that lies.
+
+**"Use a kiosk instead"** is off the ordinary contribution. Kiosk is event-mode
+infrastructure, not a fallback the standard member flow should advertise. If an
+event context genuinely offers it, it belongs in an event-specific state in
+Batch D or E, not here.
