@@ -44,6 +44,19 @@ The member tab bar was missing from the rewrite and is restored: **You is a
 shell tab**, and a target that omits the bar is a target of a screen the
 product never renders.
 
+### The strip, settled
+
+Every one of the fifteen state frames carries the green
+`TARGET / CONCEPT — NOT IMPLEMENTED` strip. That is now **asserted** rather
+than argued: immediately before each shutter the capture requires the label to
+be visible, to say those exact words, to span the frame, to compute to
+`rgb(34, 197, 94)`, and to sit wholly inside the frame on all four edges — at
+every state and every class.
+
+The one file in this package with no strip is `TARGET-contact-sheet.png`, which
+is a full-page screenshot of the preview route rather than a captured frame, so
+its top band is the page ground.
+
 ### The capture assertion was passing on the wrong thing
 
 It looked for the literal text `WE STAY FIT`, which only ever passed because
@@ -119,13 +132,15 @@ beside the drawing:
 
 ## The state matrix
 
-| State | 390×844 | 390×640 | 430×932 |
-| --- | :---: | :---: | :---: |
-| Signed in, in a community | ✓ | ✓ | ✓ |
-| Signed in, no community yet | ✓ | | ✓ |
-| Loading | ✓ | | |
-| Could not be loaded | ✓ | | |
-| Not signed in | ✓ | ✓ | |
+**Generated, not hand-kept.** See `docs/design-target/ATLAS-COVERAGE.md` —
+every state by name, the classes it is drawn at, and whether it carries an
+end-of-scroll companion, read from the PNGs on disk.
+
+> A hand table used to sit here. After the 5 × 3 recapture its blank cells
+> said `loading` and `failed` existed at one class when all five states exist
+> at all three, and it contradicted the generated coverage beside it. A table
+> a person maintains next to a table a script generates is a table that will
+> disagree with it; this one is deleted rather than re-typed.
 
 ## Boundaries held
 

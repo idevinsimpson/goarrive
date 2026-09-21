@@ -391,16 +391,25 @@ export function VerifyUnconfiguredTarget() {
       intro="No message was sent, and nobody can finish verifying a new account on this build until email is switched on."
       foot={<Text style={s.footNote}>Signed in as devin@example.com</Text>}
     >
+      {/*
+        ONE EXPLANATION, ONE ACTION.
+
+        The previous revision explained why two controls did nothing and then
+        drew them, disabled. That is a transcript of today's defect rather than
+        the destination: the destination is a screen that offers only what can
+        work. The shipped route's failure to gate its three actions on the
+        outcome is recorded in this package's README as a product finding,
+        which is where a defect belongs — not in the picture of how it should
+        look.
+      */}
       <Primary label="Sign out and use a verified account" />
       <View style={s.help}>
-        <Text style={s.helpTitle}>Why the two below do nothing</Text>
+        <Text style={s.helpTitle}>What to do</Text>
         <Text style={s.helpBody}>
-          There is no link to have followed, and nothing to resend. They stay visible because the
-          screen still offers them.
+          There is nothing to resend and no link to follow on this build. Sign in with an account
+          that is already verified, or ask for email to be switched on.
         </Text>
       </View>
-      <Secondary label="I have verified" muted />
-      <Secondary label="Resend verification email" muted />
     </Screen>
   );
 }
@@ -547,11 +556,33 @@ export function ProfileSetupTarget() {
         is what a person is actually deciding here — who sees this name — so
         the sheet says it rather than padding.
       */}
+      {/*
+        NARROWED TO WHAT THE SOURCE PROVES.
+
+        The first version said the community sees this name and that it is
+        "not shown to anybody outside your community". Both are broader than
+        anything the product guarantees:
+
+          · `wsfMemberProfiles/{uid}` is owner-readable only — `allow read: if
+            request.auth.uid == uid`.
+          · Every read and write of it in the functions source is keyed to the
+            CALLER's own uid. No callable returns another member's
+            displayName.
+          · Contributions are never attributed publicly: recent additions
+            carry amount, unit and time with uid and name stripped server-side.
+
+        So today this name is shown to nobody but its owner, and a promise
+        about who else sees it — in either direction — is a promise the
+        product has no mechanism to keep. The name that DOES go on a screen in
+        a room is a different one, chosen per turn on the event screen, and
+        the target says so rather than leaving the two to be confused.
+      */}
       <View style={s.help}>
-        <Text style={s.helpTitle}>Where this name appears</Text>
+        <Text style={s.helpTitle}>Where this name is used</Text>
         <Text style={s.helpBody}>
-          Your community sees it beside what you record. It is not shown to anybody outside your
-          community, and you can change it later.
+          It is the name on your account, and you can change it later. If you ever go up on a
+          screen at an event, you choose what that screen calls you then — separately, and each
+          time.
         </Text>
       </View>
       {/*

@@ -258,14 +258,21 @@ function Panel({ layout, status }: { layout: MoveLayout; status: string }) {
           </Text>
         </>
       ) : (
-        <>
-          <Text style={[s.panelNote, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}>
-            Enter what you counted. Nobody is checking it, and nobody else can change it.
-          </Text>
-          <View style={s.panelAction}>
-            <Text style={s.panelActionText}>Enter my reps</Text>
-          </View>
-        </>
+        /*
+          ONE "ENTER MY REPS" ON A PHONE, NOT TWO.
+
+          Correcting the QR contradiction put a direct action in this panel
+          while the controls above already carried one, so the ready state
+          offered the same action twice. The controls own it — Start is the
+          primary of a screen whose job is to run a round, and Enter my reps
+          is its one secondary. This panel states where you are and stops.
+          On the finished state the controls promote Enter my reps to primary,
+          which is the one moment it should lead.
+        */
+        <Text style={[s.panelNote, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}>
+          Enter what you counted when the round is finished. Nobody is checking it, and nobody
+          else can change it.
+        </Text>
       )}
     </View>
   );
@@ -578,18 +585,7 @@ const s = StyleSheet.create({
   panelEyebrowOnNavy: { color: PROGRESS_GREEN },
   panelStatusOnNavy: { color: ON_NAVY },
   panelNoteOnNavy: { color: ON_NAVY_MUTED },
-  /** The phone's way to record: the direct action, not a code to scan. */
-  panelAction: {
-    alignSelf: 'stretch',
-    minHeight: 48,
-    borderRadius: 14,
-    backgroundColor: ACTION_GREEN,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-    ...elevation.action,
-  },
-  panelActionText: { color: ON_ACTION, fontSize: 15.5, fontWeight: '900' },
+
   panelEyebrow: { color: INK_QUIET, fontWeight: '900', letterSpacing: 1.6 },
   panelStatus: { color: NAVY, fontWeight: '900', textAlign: 'center' },
   qr: { borderRadius: 10, backgroundColor: '#E4E8EC' },

@@ -67,7 +67,34 @@ test('you targets render at every device class the gate asks for', async ({
       await expect(banner, `${id}: the label does not say what the frame is`).toHaveText(
         'TARGET / CONCEPT — NOT IMPLEMENTED',
       );
+      /*
+        THE STRIP IS GREEN, AND IT IS INSIDE THE FRAME.
+
+        The assertion already required the label to be visible, to say the
+        right words and to span the frame's width. It did NOT require that it
+        actually renders as the concept strip — so a label that had lost its
+        background, or sat outside the captured element, would still have
+        passed while the committed PNG showed no strip at all.
+
+        Whether that ever happened here is answerable either way now: the
+        computed background must be the concept green and the box must sit
+        wholly inside the frame on all four edges, checked immediately before
+        the shutter on every state at every class.
+      */
+      const bg = await banner.evaluate((el: Element) => getComputedStyle(el).backgroundColor);
+      expect(bg, `${id}: the concept strip is not the concept green`).toBe('rgb(34, 197, 94)');
+
       const bannerBox = (await banner.boundingBox())!;
+      expect(bannerBox.y, `${id}: the strip starts above the frame`).toBeGreaterThanOrEqual(box.y - 1);
+      expect(
+        bannerBox.y + bannerBox.height,
+        `${id}: the strip runs past the frame`,
+      ).toBeLessThanOrEqual(box.y + box.height + 1);
+      expect(bannerBox.x, `${id}: the strip starts left of the frame`).toBeGreaterThanOrEqual(box.x - 1);
+      expect(
+        bannerBox.x + bannerBox.width,
+        `${id}: the strip runs past the frame's right edge`,
+      ).toBeLessThanOrEqual(box.x + box.width + 1);
       expect(
         Math.round(bannerBox.y - box.y),
         `${id}: the label is not flush with the frame top`,

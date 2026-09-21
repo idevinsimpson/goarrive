@@ -144,6 +144,33 @@ removed — removing them would hide that the shipped screen still offers them.
 > `VerificationSendOutcome`. The route is untouched here; the fix is a
 > condition, and it is a product decision.
 
+**Second revision of this state:** the first recomposition still explained why
+two controls did nothing and then drew them, disabled. That is a transcript of
+the defect, not the destination. The target now offers **only what can work** —
+Sign out as the sole action, one short "what to do" — and the defect lives here
+in the findings, which is where a defect belongs rather than in the picture of
+how the screen should look.
+
+## Profile setup: the privacy line, narrowed to what the source proves
+
+The recomposed state first said the community sees this name and that it is
+"not shown to anybody outside your community". **Both are broader than anything
+the product guarantees**, and the second is a global audience promise with no
+mechanism behind it.
+
+| Claim | Source |
+| --- | --- |
+| `wsfMemberProfiles/{uid}` is owner-readable only | `allow read: if request.auth.uid == uid` |
+| Every read and write of it is keyed to the caller's own uid | `functions-westayfit/src/index.ts` — lines 139, 222, 680 |
+| **No callable returns another member's `displayName`** | the only `displayName` in a response shape is a *community's* (`PreviewResponse`) |
+| Contributions are never attributed publicly | recent additions carry amount, unit and time; uid and name stripped server-side |
+
+So today this name is shown to **nobody but its owner**, and a promise about
+who else sees it — in either direction — is one the product cannot keep. The
+name that does go on a screen in a room is a **different** one, chosen per turn
+on the event screen, and the target now says so rather than leaving a member to
+conflate the two.
+
 **Profile setup.** A display name is one field, so this state was a name, a
 checkbox, a button and a third of a phone of empty cream. The void is filled
 with the one thing the screen owes an answer to — *where this name appears* —

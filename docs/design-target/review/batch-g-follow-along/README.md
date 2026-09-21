@@ -55,6 +55,13 @@ destination, not a transcript of today's wiring, so it is drawn correctly now:
 `/move/[goalId]` is untouched; this is a finding, and the fix is a one-line
 gate on `station`.
 
+**And a duplication the fix introduced, now removed.** Putting a direct action
+in the phone panel left `ready` offering *Enter my reps* twice — once in the
+controls, once in the panel. The controls own it: **Start** is the primary of a
+screen whose job is to run a round, *Enter my reps* is its one secondary, and
+the panel states where you are and stops. On **finished**, the controls promote
+*Enter my reps* to primary, which is the one moment it should lead.
+
 ### The station joins the navy room family
 
 The 1280 layout read as an enlarged cream web page. It now wears the same navy
