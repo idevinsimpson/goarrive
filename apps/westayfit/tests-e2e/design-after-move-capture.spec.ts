@@ -102,32 +102,115 @@ async function seed(label: string) {
  * page and then PROVES the claim: the named top element must be within a few
  * pixels of the viewport top before the shutter fires.
  */
-async function shot(page: Page, name: string) {
+/**
+ * THE SHUTTER, AND THE TWO THINGS IT HAS TO PROVE.
+ *
+ * 1. THE FRAME IS THE ARRIVAL STATE. Blur whatever holds focus first -- a
+ *    focused input can pull the page back down after a reset -- then let the
+ *    layout settle, then reset and ASSERT no scroll offset remains, with the
+ *    assertion immediately before the shutter rather than before a delay that
+ *    could undo it.
+ *
+ * 2. NOTHING INTERACTIVE HIDES UNDER THE SHELL. The tab bar and the raised
+ *    MOVE circle are persistent chrome drawn above the screen. Every control
+ *    the frame shows must have its WHOLE box clear of them; "the label is
+ *    visible" is not the rule, because a half-covered button is a button a
+ *    thumb cannot reliably hit.
+ */
+async function shot(page: Page, name: string, topTestId: string, primaryTestId: string) {
+  // A focused control can scroll itself back into view after a reset.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  await page.waitForTimeout(500);
   const offsets = await page.evaluate(() => {
     window.scrollTo(0, 0);
     document.querySelectorAll('*').forEach((el) => {
       if (el instanceof HTMLElement && el.scrollTop > 0) el.scrollTop = 0;
     });
-    // What is STILL scrolled after the reset. Anything here is a container
-    // that refused to go back, which is the failure this guards against.
     const stuck: number[] = [];
     document.querySelectorAll('*').forEach((el) => {
       if (el instanceof HTMLElement && el.scrollTop > 0) stuck.push(el.scrollTop);
     });
     return { window: window.scrollY, stuck };
   });
-  /*
-    THE CLAIM IS "CAPTURED FROM THE TOP", so assert exactly that rather than a
-    guessed y-coordinate for some element. The first attempt asserted the
-    wordmark sat above y=24; it sits at 27 when the page IS at the top, because
-    of the container's padding and the chrome row's own centring. A threshold
-    picked by eye tests the threshold, not the thing.
-  */
   expect(offsets.window, `${name}: the window is still scrolled`).toBe(0);
   expect(offsets.stuck, `${name}: a scroll container did not reset`).toEqual([]);
-  // The Living WE is an image; let it decode before the shutter.
-  await page.waitForTimeout(700);
+
+  // The state's own top chrome must actually be in the first viewport.
+  const top = await page.getByTestId(topTestId).first().boundingBox();
+  expect(top, `${name}: ${topTestId} is not rendered`).not.toBeNull();
+  expect(
+    top!.y,
+    `${name}: ${topTestId} is above the viewport — the frame is not the arrival state`,
+  ).toBeGreaterThanOrEqual(0);
+
+  await assertNothingUnderTheBar(page, name, primaryTestId);
   await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+}
+
+/**
+ * No interactive control may intersect the tab bar or the raised MOVE circle.
+ * Both are measured from the live DOM rather than assumed, so the check stays
+ * true if the shell's own metrics change.
+ */
+async function assertNothingUnderTheBar(page: Page, name: string, primaryTestId: string) {
+  const bar = await page.getByTestId('wsf-member-tabs').boundingBox();
+  if (!bar) return; // surfaces without the shell have nothing to collide with
+  const move = await page.getByTestId('wsf-member-tab-move').boundingBox();
+  const ceiling = Math.min(bar.y, move ? move.y : bar.y);
+
+  /*
+    TWO DIFFERENT RULES, because they are two different failures.
+
+    THE PRIMARY ACTION must be COMPLETELY clear on arrival. A member who has
+    just been asked a question should not have to scroll to find the button
+    that answers it, and half a button is not a touch target.
+
+    EVERYTHING ELSE may sit below the fold -- that is what scrolling is for --
+    but the page has to be able to scroll it CLEAR of the bar. Content that
+    ends at its own padding leaves the last control permanently half-covered
+    no matter how far you scroll, which is the defect the bottom inset fixes.
+    Asserting instead that nothing crosses the bar line at rest would fail
+    every scrollable screen and teach us to ignore it.
+  */
+  const primary = await page.getByTestId(primaryTestId).first().boundingBox();
+  expect(primary, `${name}: ${primaryTestId} is not rendered`).not.toBeNull();
+  expect(
+    primary!.y + primary!.height,
+    `${name}: the primary action runs under the shell (bottom=${Math.round(
+      primary!.y + primary!.height,
+    )}, chrome starts at ${Math.round(ceiling)})`,
+  ).toBeLessThanOrEqual(ceiling);
+
+  const unreachable = await page.evaluate((limit: number) => {
+    const shell = document.querySelector('[data-testid="wsf-member-tabs"]');
+    // How much further the page can be scrolled from wherever it is now.
+    let slack = document.documentElement.scrollHeight - window.innerHeight - window.scrollY;
+    document.querySelectorAll('*').forEach((el) => {
+      if (el instanceof HTMLElement && el.scrollHeight > el.clientHeight + 1) {
+        slack = Math.max(slack, el.scrollHeight - el.clientHeight - el.scrollTop);
+      }
+    });
+    const hits: string[] = [];
+    document
+      .querySelectorAll('button, a, input, [role="button"], [role="link"]')
+      .forEach((el) => {
+        if (shell && shell.contains(el)) return;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;
+        // Can this control ever be brought fully above the chrome?
+        const overlap = r.bottom - limit;
+        if (overlap > 0 && overlap > slack) {
+          const label = (el.textContent ?? '').trim().slice(0, 40);
+          hits.push(`${el.tagName}"${label}" needs ${Math.round(overlap)}px, slack ${Math.round(slack)}px`);
+        }
+      });
+    return hits;
+  }, ceiling);
+
+  expect(
+    unreachable,
+    `${name}: controls that can NEVER be scrolled clear of the shell's bar`,
+  ).toEqual([]);
 }
 
 test('AFTER: the MOVE and contribution surfaces as implemented', async ({
@@ -166,32 +249,32 @@ test('AFTER: the MOVE and contribution surfaces as implemented', async ({
       // MOVE with more than one actionable goal: it asks rather than guesses.
       await page.goto('/move');
       await expect(page.getByTestId('wsf-move-choose')).toBeVisible({ timeout: 40_000 });
-      await shot(page, `AFTER-move-choose-${c.key}`);
+      await shot(page, `AFTER-move-choose-${c.key}`, 'wsf-move-choose', `wsf-move-choose-${fx.goalId}`);
 
       await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}&mode=move`);
       await expect(page.getByTestId('wsf-contribute-move-screen').last()).toBeVisible({
         timeout: 40_000,
       });
-      await shot(page, `AFTER-contribute-move-${c.key}`);
+      await shot(page, `AFTER-contribute-move-${c.key}`, 'wsf-contribute-wordmark', 'wsf-contribute-done');
 
       await page.getByTestId('wsf-contribute-done').last().click();
       await expect(page.getByTestId('wsf-contribute-entry-screen').last()).toBeVisible({
         timeout: 20_000,
       });
       await page.getByTestId('wsf-contribute-entry').last().fill('20');
-      await shot(page, `AFTER-contribute-entry-${c.key}`);
+      await shot(page, `AFTER-contribute-entry-${c.key}`, 'wsf-contribute-wordmark', 'wsf-contribute-review');
 
       await page.getByTestId('wsf-contribute-review').last().click();
       await expect(page.getByTestId('wsf-contribute-review-screen').last()).toBeVisible({
         timeout: 20_000,
       });
-      await shot(page, `AFTER-contribute-review-${c.key}`);
+      await shot(page, `AFTER-contribute-review-${c.key}`, 'wsf-contribute-wordmark', 'wsf-contribute-submit');
 
       await page.getByTestId('wsf-contribute-submit').last().click();
       await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({
         timeout: 40_000,
       });
-      await shot(page, `AFTER-contribute-confirmed-${c.key}`);
+      await shot(page, `AFTER-contribute-confirmed-${c.key}`, 'wsf-contribute-wordmark', 'wsf-contribute-record-more');
     } finally {
       await ctx.close();
     }
@@ -242,7 +325,7 @@ test('AFTER: the unknown outcome and the definitive refusal', async ({
       await page.getByTestId('wsf-contribute-review').last().click();
       await page.getByTestId('wsf-contribute-submit').last().click();
       await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
-      await shot(page, `AFTER-contribute-pending-${c.key}`);
+      await shot(page, `AFTER-contribute-pending-${c.key}`, 'wsf-contribute-wordmark', 'wsf-contribute-reconcile');
     } finally {
       await ctx.close();
     }
@@ -281,7 +364,7 @@ test('AFTER: the unknown outcome and the definitive refusal', async ({
       });
       await page.getByTestId('wsf-contribute-submit').last().click();
       await expect(page.getByTestId('wsf-contribute-refused')).toBeVisible({ timeout: 40_000 });
-      await shot(page, `AFTER-contribute-refused-${c.key}`);
+      await shot(page, `AFTER-contribute-refused-${c.key}`, 'wsf-contribute-wordmark', 'wsf-contribute-back');
     } finally {
       await ctx.close();
     }
@@ -322,7 +405,7 @@ test('AFTER: MOVE when nothing is running', async ({ browser }: { browser: Brows
       await signInVia(page, email, password);
       await page.goto('/move');
       await expect(page.getByTestId('wsf-move-no-goal')).toBeVisible({ timeout: 40_000 });
-      await shot(page, `AFTER-move-nogoal-${c.key}`);
+      await shot(page, `AFTER-move-nogoal-${c.key}`, 'wsf-move-no-goal', 'wsf-move-no-goal-community');
     } finally {
       await ctx.close();
     }

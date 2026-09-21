@@ -160,6 +160,26 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
   );
 }
 
+/**
+ * WHAT THE BAR ACTUALLY COVERS, so a screen can keep its controls out from
+ * under it.
+ *
+ * The bar is persistent chrome rendered above the screen, so a screen that
+ * ends its content at its own padding puts the last control UNDERNEATH it.
+ * "The label is still visible" is not the test -- the whole touch target has
+ * to be reachable. These are the two numbers that decide it:
+ *
+ *   BAR_BODY      paddingTop 6 + the tab's 48 minimum + the 10 above the
+ *                 safe-area inset the bar adds itself.
+ *   MOVE_OVERHANG the raised action's marginTop of -24, which is how far it
+ *                 rises ABOVE the bar's top edge and occludes the screen.
+ *
+ * The caller adds the live safe-area inset; it is not baked in here because
+ * it is a property of the device, not of the bar.
+ */
+export const MEMBER_TAB_BAR_BODY = 6 + 48 + 10;
+export const MEMBER_TAB_MOVE_OVERHANG = 24;
+
 const styles = StyleSheet.create({
   bar: {
     position: 'relative',

@@ -32,6 +32,14 @@ async function shoot(page: Page, name: string, key: string) {
   await page.screenshot({ path: path.join(OUT, `BEFORE-${name}-${key}.png`) });
 }
 
+/* Frozen evidence, for the reason written in design-target-before-capture. */
+const CAPTURE_BEFORE = /^(1|true)$/i.test(process.env.WSF_CAPTURE_BEFORE ?? '');
+
+test.skip(
+  !CAPTURE_BEFORE,
+  'BEFORE frames are frozen evidence; set WSF_CAPTURE_BEFORE=1 to re-baseline them deliberately.',
+);
+
 test('Batch A: the identity surfaces as they render today', async ({
   browser,
 }: {

@@ -16,6 +16,26 @@ targets.
 | Unknown outcome | `AFTER-contribute-pending-390x844.png` | — | — |
 | Definitive refusal | `AFTER-contribute-refused-390x844.png` | — | — |
 
+## The BEFORE frames are frozen, and the freeze is enforced
+
+**They were destroyed, silently, by my own verification runs.** The BEFORE
+capture spec ran in the ordinary suite, so every full run of the *implemented*
+code re-shot the BEFOREs against the new code and overwrote them. At `4ad0596`
+the "BEFORE" receipt was the new full-navy one — visually identical to the
+AFTER beside it. The comparison the gate exists for had eaten itself.
+
+Three things now stand between that and a repeat:
+
+1. The ten corrupted frames are **restored from `ff426b3`**, the commit that
+   holds the true pre-implementation captures. `git diff ff426b3 -- before/`
+   is empty.
+2. Both BEFORE capture specs are **opt-in** (`WSF_CAPTURE_BEFORE=1`) and skip
+   in an ordinary run. Re-baselining is now a deliberate act.
+3. `node scripts/westayfit/check-before-frozen.mjs` **fails** if any frozen
+   frame differs from HEAD — tracked or untracked. Run it after any
+   verification pass. It found a second corruption the review had not: four of
+   Batch A's BEFORE frames had also been re-shot in the working tree.
+
 ## The evidence is deterministic, and says so honestly
 
 **One isolated fixture per device class.** The first cut seeded once and ran
@@ -26,15 +46,24 @@ class now gets its own community and goal: all three start at **1,847** and end
 at **1,867**, and the only difference between the frames is the thing under
 review.
 
-**Every frame is captured from the top, and the capture proves it.**
-`window.scrollTo(0, 0)` was not enough — the scroll that moves when the amount
-field is filled belongs to the React Native `ScrollView`'s own element, not the
-window, so the short phone was captured mid-page while this file claimed
-otherwise. The helper now resets every scrollable element and then **asserts
-that no scroll offset remains** before the shutter. An earlier attempt asserted
-that the wordmark sat above y=24; it sits at y=27 when the page *is* at the
-top, because of the container's padding and the chrome row's own centring. A
-threshold picked by eye tests the threshold, not the thing.
+**The retained scroll was a PRODUCT defect, not a shutter defect.** Move,
+entry, review and every outcome replace each other inside one `ScrollView`
+rather than by navigating, and a `ScrollView` keeps its offset across a
+re-render. A member who scrolled down to reach Review therefore *arrived* at
+the review body with the wordmark and goal anchor already scrolled off — and
+the same for the outcomes, which is the worst place to start someone halfway
+down. Forcing the screenshot to the top would have concealed it.
+
+The screen now holds a ref to its own `ScrollView` and returns to the top
+whenever the rendered phase changes. The capture blurs the focused control
+first (a focused input pulls the page back down), lets the layout settle, then
+resets and **asserts no offset remains** immediately before the shutter — not
+before a delay that could undo it — and asserts the state's own top chrome is
+inside the first viewport.
+
+An earlier attempt asserted the wordmark sat above y=24; it sits at y=27 when
+the page *is* at the top. A threshold picked by eye tests the threshold, not
+the thing.
 
 **Both forced outcomes are the real ones.** The unknown outcome drops the
 callable's response; the refusal closes the goal between Record and the
@@ -101,3 +130,35 @@ were right to, because they cannot know the paint is clipped. Home's top light
 learned this first. Both glows are now bound `left: 0, right: 0`; the anchor
 stacks to a column below 260px, and its mark is sized from the width actually
 available.
+
+## Nothing interactive hides under the shell
+
+The tab bar and the raised MOVE circle are persistent chrome drawn *above* the
+screen, so content that ended at its own padding put the last control
+underneath them. At 390×640 that was the entry's primary, the review's Edit,
+the MOVE-mode primary and the receipt's secondary.
+
+`MemberTabBar` now exports what it actually occludes — `MEMBER_TAB_BAR_BODY`
+(its own padding plus the tab's minimum height) and `MEMBER_TAB_MOVE_OVERHANG`
+(how far the raised control rises above the bar's top edge) — and the screens
+reserve that plus the live safe-area inset as bottom padding.
+
+The capture asserts **two different rules**, because they are two different
+failures:
+
+- **The primary action must be completely clear on arrival.** Someone who has
+  just been asked a question should not scroll to find the button that answers
+  it, and half a button is not a touch target.
+- **Everything else may sit below the fold** — that is what scrolling is for —
+  **but the page must be able to scroll it clear.** Content ending at its own
+  padding leaves the last control permanently half-covered however far you
+  scroll.
+
+Asserting instead that nothing crosses the bar line at rest would fail every
+scrollable screen, and a guard that cries wolf is a guard that gets ignored.
+
+Both rules found real defects: the MOVE-mode primary sat 57px under the chrome
+at 390×640, and the entry's 24px under. Fixed by giving rhythm where it is
+trim — the optional timer tightens and loses its explanatory sentence, the
+redundant "Counted in squats" line goes (the unit is already in the question
+above and the panel below) — and never where it is core.

@@ -68,6 +68,27 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(OUT, `${name}.png`) });
 }
 
+/*
+  OPT-IN, AND OFF BY DEFAULT.
+
+  A BEFORE is a photograph of the product as it was. This spec ran in the
+  ordinary suite, so every verification run of the IMPLEMENTED code re-shot
+  the BEFORE frames against the new code and overwrote them: at 4ad0596 the
+  "BEFORE" receipt was the new full-navy one, visually identical to the AFTER
+  beside it. The comparison the gate exists for had quietly destroyed itself.
+
+  AFTER verification must never rewrite historical evidence. This runs only
+  when WSF_CAPTURE_BEFORE is explicitly set, which is a deliberate act by
+  somebody who means to re-baseline, and `npm run check:before-frozen` fails
+  if a routine run changed a single byte of the frozen directory.
+*/
+const CAPTURE_BEFORE = /^(1|true)$/i.test(process.env.WSF_CAPTURE_BEFORE ?? '');
+
+test.skip(
+  !CAPTURE_BEFORE,
+  'BEFORE frames are frozen evidence; set WSF_CAPTURE_BEFORE=1 to re-baseline them deliberately.',
+);
+
 test('capture the current MOVE and contribution surfaces', async ({
   browser,
 }: {

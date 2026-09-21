@@ -8,7 +8,13 @@ import { describeCallableError } from '../../src/callableErrors';
 import { resolveCurrentCommunity } from '../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { ButtonLink } from '../../src/ui/ButtonLink';
+import {
+  MEMBER_TAB_BAR_BODY,
+  MEMBER_TAB_MOVE_OVERHANG,
+} from '../../src/ui/MemberTabBar';
 import {
   ACTION_GREEN,
   CREAM,
@@ -88,6 +94,9 @@ function actionableGoals(goals: ListedGoal[]): ListedGoal[] {
 
 export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
+  const safeArea = useSafeAreaInsets();
+  /* The shell's bar covers this screen too; reserve what it actually takes. */
+  const barInset = MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeArea.bottom;
   const [state, setState] = useState<Resolution>({ kind: 'working' });
 
   useEffect(() => {
@@ -182,7 +191,7 @@ export default function MoveResolver() {
 
   if (state.kind === 'choose') {
     return (
-      <ScrollView style={s.screen} contentContainerStyle={s.body}>
+      <ScrollView style={s.screen} contentContainerStyle={[s.body, { paddingBottom: barInset + 16 }]}>
         <View testID="wsf-move-choose" style={s.stack}>
           {field(
             state.community,
@@ -245,7 +254,7 @@ export default function MoveResolver() {
 
   if (state.kind === 'noGoal') {
     return (
-      <ScrollView style={s.screen} contentContainerStyle={s.body}>
+      <ScrollView style={s.screen} contentContainerStyle={[s.body, { paddingBottom: barInset + 16 }]}>
         <View testID="wsf-move-no-goal" style={s.stack}>
           {field(
             state.community,
@@ -272,7 +281,7 @@ export default function MoveResolver() {
   }
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
+    <ScrollView style={s.screen} contentContainerStyle={[s.body, { paddingBottom: barInset + 16 }]}>
       <View style={s.stack}>
         {state.kind === 'error' ? (
           <>

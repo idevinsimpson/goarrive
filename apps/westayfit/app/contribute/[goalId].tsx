@@ -73,7 +73,13 @@ import {
   statusLine,
   totalOfTargetLabel,
 } from '../../src/ui/progressFormat';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { ACTION_GREEN, ON_ACTION, elevation } from '../../src/ui/kit';
+import {
+  MEMBER_TAB_BAR_BODY,
+  MEMBER_TAB_MOVE_OVERHANG,
+} from '../../src/ui/MemberTabBar';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
@@ -202,6 +208,18 @@ export default function ContributeToGoal() {
   const initialStep: Step = params.mode === 'move' ? 'move' : 'enter';
   const { ready, user } = useWsfAuth();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const safeArea = useSafeAreaInsets();
+  /*
+    THE SHELL'S BAR IS NOT PART OF THIS SCREEN, BUT IT COVERS IT.
+
+    Persistent chrome renders above the screen, so content that ends at its
+    own padding puts the last control underneath the bar -- and under the
+    raised MOVE circle, which rises further still. At 390x640 that was the
+    entry's primary, the review's Edit, the MOVE-mode primary and the
+    receipt's secondary: reachable only by scrolling past content that looked
+    finished. The screen reserves the bar's real footprint instead.
+  */
+  const barInset = MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeArea.bottom;
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
@@ -230,6 +248,18 @@ export default function ContributeToGoal() {
   // Ref instead of state — the in-flight attempt id must NOT trigger a
   // re-render (would risk generating a new id mid-submit and defeat
   // idempotency). Cleared on each fresh "Record" tap.
+  /**
+   * THE SCREEN CHANGES STATE IN PLACE, SO IT HAS TO RETURN TO ITS OWN TOP.
+   *
+   * Move, entry, review and every outcome replace each other inside ONE
+   * ScrollView rather than by navigating, and a ScrollView keeps its offset
+   * across a re-render. A member who scrolled down to reach Review therefore
+   * arrived at the review BODY, with the wordmark and the goal anchor already
+   * scrolled off -- and the same for the outcomes, which is the worst place
+   * to start a member halfway down. Forcing the screenshot to the top would
+   * have hidden this rather than fixed it.
+   */
+  const scrollRef = useRef<ScrollView>(null);
   const attemptRef = useRef<string | null>(null);
   // THE FOLLOW-ALONG ROUND THIS ENTRY BELONGS TO, if the route named one.
   //
@@ -964,6 +994,21 @@ export default function ContributeToGoal() {
     Math.min(anchorShort ? 66 : 88, windowWidth - 2 * 20 - 2 * 16 - (anchorStacked ? 0 : 130)),
   );
 
+  /*
+    One string for "which screen am I looking at", so the reset fires on every
+    transition between them and on none of the polls in between.
+  */
+  const renderedPhase = [
+    state.kind,
+    step,
+    lastResult ? 'result' : '',
+    refusal ? 'refused' : '',
+    pending?.state ?? '',
+  ].join(':');
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [renderedPhase]);
+
   const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light') => (
     <View style={styles.chrome}>
       <WsfWordmark
@@ -1065,8 +1110,13 @@ export default function ContributeToGoal() {
    */
   const screen = (children: React.ReactNode, testID?: string, tone: 'light' | 'dark' = 'light') => (
     <ScrollView
+      ref={scrollRef}
       style={[styles.scroll, tone === 'dark' ? styles.scrollDark : null]}
-      contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null]}
+      contentContainerStyle={[
+        styles.container,
+        { paddingBottom: barInset + 16 },
+        tone === 'dark' ? styles.containerDark : null,
+      ]}
       keyboardShouldPersistTaps="handled"
       testID={testID}
     >
@@ -1728,9 +1778,22 @@ export default function ContributeToGoal() {
           <Text style={styles.body}>
             {`Count your own ${unit}. When you’re finished, enter the number you completed.`}
           </Text>
-          <View style={styles.timerBox} testID="wsf-contribute-timer">
+          {/*
+            SHORT PHONE. The timer is explicitly optional and explicitly does
+            not record anything, so it is what the rhythm takes: a tighter box
+            and a smaller clock, and the sentence explaining it goes. Without
+            that, at 390x640 the screen's primary action sat 57px under the
+            shell's bar -- visible, and not fully touchable.
+          */}
+          <View
+            style={[styles.timerBox, windowHeight < 700 ? styles.timerBoxShort : null]}
+            testID="wsf-contribute-timer"
+          >
             <Text style={styles.eyebrowMuted}>Optional timer</Text>
-            <Text style={styles.timerClock} testID="wsf-contribute-timer-clock">
+            <Text
+              style={[styles.timerClock, windowHeight < 700 ? styles.timerClockShort : null]}
+              testID="wsf-contribute-timer-clock"
+            >
               {formatElapsed(timerElapsed)}
             </Text>
             <View style={styles.timerActions}>
@@ -1749,9 +1812,11 @@ export default function ContributeToGoal() {
                 </Pressable>
               ) : null}
             </View>
-            <Text style={styles.caption}>
-              For your own reference. It doesn’t record anything or change the community total.
-            </Text>
+            {windowHeight < 700 ? null : (
+              <Text style={styles.caption}>
+                For your own reference. It doesn’t record anything or change the community total.
+              </Text>
+            )}
           </View>
           <View style={styles.actions}>
             <Pressable
@@ -1882,9 +1947,17 @@ export default function ContributeToGoal() {
             {entryError}
           </Text>
         ) : null}
-        <Text style={styles.countedIn} testID="wsf-contribute-counted-in">
-          Counted in <Text style={styles.countedInUnit}>{unit}</Text> · this goal
-        </Text>
+        {/*
+          SHORT PHONE. The unit is already in the question above ("How many
+          squats did you complete?") and in the panel below ("0 -> 20 squats"),
+          so this line is the redundant one at 390x640 -- and dropping it is
+          what puts the primary action fully clear of the shell's bar.
+        */}
+        {windowHeight < 700 ? null : (
+          <Text style={styles.countedIn} testID="wsf-contribute-counted-in">
+            Counted in <Text style={styles.countedInUnit}>{unit}</Text> · this goal
+          </Text>
+        )}
         {renderYourPart(Number.isFinite(Number(entry)) ? Math.trunc(Number(entry)) : null)}
         <View style={styles.actions}>
           <Pressable
@@ -2189,7 +2262,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_BORDER,
   },
+  timerBoxShort: { padding: 10, gap: 4 },
   timerClock: { color: wsfTheme.colors.text, fontSize: 36, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  timerClockShort: { fontSize: 26 },
   timerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   // buttons
