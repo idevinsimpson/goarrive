@@ -193,12 +193,53 @@ async function shotChecked(page: Page, name: string) {
   expect(offsets.window, `${name}: the window is still scrolled`).toBe(0);
   expect(offsets.stuck, `${name}: a scroll container did not reset`).toEqual([]);
 
-  const title = await page.getByTestId('wsf-activity-title').boundingBox();
-  expect(title, `${name}: the page title is not rendered`).not.toBeNull();
-  expect(title!.y, `${name}: the frame is not the arrival state`).toBeGreaterThanOrEqual(0);
+  /*
+    THE CHROME IS IN THE SHOT, not merely somewhere in the document.
 
-  const bar = await page.getByTestId('wsf-member-tabs').boundingBox();
-  if (bar) {
+    The previous assertion was `title.y >= 0`. That proves the title has a box
+    at or below the viewport top and nothing else: a frame that had lost the
+    persistent member bar entirely, or pushed the heading off the bottom, would
+    have sailed through it. When the committed frames were questioned I could
+    only answer by looking at the PNGs, which is exactly the position an
+    assertion exists to avoid.
+
+    So every element that makes this a signed-in member surface — the
+    wordmark, the heading, the tab bar and the raised MOVE control — must be
+    visible AND wholly inside the viewport at the moment the shutter fires.
+  */
+  const viewport = page.viewportSize()!;
+  for (const [label, locator] of [
+    ['the wordmark', page.getByTestId('wsf-activity-wordmark')],
+    ['the heading', page.getByTestId('wsf-activity-title')],
+    ['the member tab bar', page.getByTestId('wsf-member-tabs')],
+    ['the raised MOVE control', page.getByTestId('wsf-member-tab-move')],
+  ] as const) {
+    await expect(locator, `${name}: ${label} is not visible`).toBeVisible();
+    const box = await locator.boundingBox();
+    expect(box, `${name}: ${label} has no box`).not.toBeNull();
+    expect(box!.y, `${name}: ${label} is above the viewport`).toBeGreaterThanOrEqual(0);
+    expect(
+      box!.y + box!.height,
+      `${name}: ${label} runs past the bottom of the viewport`,
+    ).toBeLessThanOrEqual(viewport.height + 1);
+    expect(box!.x, `${name}: ${label} is off the left edge`).toBeGreaterThanOrEqual(0);
+    expect(
+      box!.x + box!.width,
+      `${name}: ${label} runs past the right edge`,
+    ).toBeLessThanOrEqual(viewport.width + 1);
+  }
+
+  // Arrival order: wordmark above the heading, heading above the bar.
+  const wordmarkBox = (await page.getByTestId('wsf-activity-wordmark').boundingBox())!;
+  const titleBox = (await page.getByTestId('wsf-activity-title').boundingBox())!;
+  const barBox = (await page.getByTestId('wsf-member-tabs').boundingBox())!;
+  expect(titleBox.y, `${name}: the heading is not below the wordmark`).toBeGreaterThan(
+    wordmarkBox.y,
+  );
+  expect(barBox.y, `${name}: the shell is not below the heading`).toBeGreaterThan(titleBox.y);
+
+  {
+    const bar = barBox;
     const move = await page.getByTestId('wsf-member-tab-move').boundingBox();
     const ceiling = Math.min(bar.y, move ? move.y : bar.y);
     const trapped = await page.evaluate((limit: number) => {
