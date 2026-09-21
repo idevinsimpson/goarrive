@@ -56,19 +56,32 @@ import {
  *   not show "14 members" or "3 goals open" — it would be an invention, and an
  *   invention that leaks.
  *
- * "NOT VALID" AND "PRIVATE" ARE ONE STATE, NOT TWO.
- *   The server returns the same `functions/not-found` for an unknown code and
- *   for a group that is not link-joinable, deliberately, so the page cannot
- *   become an oracle for which communities exist. Drawing a distinct
- *   "this community is private" screen would undo that at the last inch. One
- *   state, one wording. (Same rule at B4: unknown setup, unauthorized setup
- *   and revoked permission are the same two sentences.)
+ * "NOT VALID", "PRIVATE" AND "YOU WERE REMOVED" ARE ONE STATE, NOT THREE.
+ *   The server returns the same `functions/not-found` for an unknown code, for
+ *   a group that is not link-joinable, and for a person whose membership was
+ *   REMOVED — deliberately, so the page cannot become an oracle for which
+ *   communities exist, nor disclose that this person was once a member of one.
+ *   Drawing a distinct "this community is private" or "you were removed"
+ *   screen would undo that at the last inch. One state, one wording. (Same
+ *   rule at B4: unknown setup, unauthorized setup and revoked permission are
+ *   the same two sentences.)
+ *
+ *   A VOLUNTARILY DEPARTED PERSON IS NOT IN THAT SET, and gets no screen of
+ *   their own either: a valid link reactivates their existing membership and
+ *   they land on Community Home like anyone else. Leaving is not a ban, so
+ *   there is no welcome-back surface to draw — and no "you are already a
+ *   member" screen, because an active member's tap replaces straight through.
  *
  * THERE IS NO "JOINED!" SCREEN, AND NO "COMMUNITY CREATED!" SCREEN.
  *   A successful join does `router.replace(destination)` and a successful
  *   create does `router.replace('/community/<id>')`. The success IS Community
  *   Home, which is Page 1 and already accepted. Inventing a celebration screen
  *   between them would be designing a surface the router never renders.
+ *
+ * A TYPED CODE REACHES THIS ROUTE, FROM `/`.
+ *   `JoinWithCodeField` in app/index.tsx validates against `JOIN_CODE_SHAPE`
+ *   and pushes to `/join/<code>`, so the invitation is opened by a pasted code
+ *   as well as by a tapped link. Same screen either way, so it is drawn once.
  *
  * THERE IS NO PROFILE GATE ON THE INVITATION.
  *   The signed-out invitation routes to `/signup`; the profile step is its own

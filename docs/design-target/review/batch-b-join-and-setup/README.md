@@ -57,12 +57,15 @@ successful join does `router.replace(destination)` and a successful create does
 Page 1 and already accepted. A celebration screen between them would be a
 surface the router never renders.
 
-**"Private/refused" is not a separate state from "invalid".** The server
-returns the same `functions/not-found` for an unknown code and for a group that
-is not link-joinable, deliberately, so the page cannot become an oracle for
-which communities exist. Drawing a distinct "this community is private" screen
-would undo that at the last inch. One state, one wording —
-`TARGET-join-not-valid-*`.
+**"Private/refused" is not a separate state from "invalid" — and neither is
+"you were removed".** The server returns the same `functions/not-found` for an
+unknown code, for a group that is not link-joinable, and for a person whose
+membership was REMOVED (`wsfJoinCommunity`: *"a general link never reactivates
+a removed membership… the response is the same notFound() an unknown code gets,
+so it discloses nothing about the community's current state, its name, or even
+that this person was once a member"*). Three causes, one state, one wording —
+`TARGET-join-not-valid-*`. Drawing a distinct "this community is private" or
+"you were removed" screen would undo that at the last inch.
 
 **Two states the brief omitted and the route has:** rate-limited
 (`functions/resource-exhausted`, its own screen with its own wording), and the
@@ -90,6 +93,13 @@ beyond "Check again". Its real states are live, reached-and-closed, last-
 confirmed, connection-interrupted, and nothing-to-show.
 
 ## What this batch refuses, and why
+
+**A typed join code reaches this route from `/`.** `JoinWithCodeField` on
+`app/index.tsx` validates against `JOIN_CODE_SHAPE` and pushes to
+`/join/<code>`, so the invitation is opened by a pasted code as well as by a
+tapped link. The two arrivals are the same screen and this batch draws one.
+(An earlier note in `review/page-03-community/` said no typed code is accepted
+anywhere; that was wrong and is corrected in that package.)
 
 **No member count, no goal list, no progress on the invitation.**
 `wsfPreviewCommunity` returns `{ displayName, groupType, joinPolicy }` and

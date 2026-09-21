@@ -86,12 +86,38 @@ Six corrections, each with the reason it mattered:
    screen reader and to nobody else, so each row carries a `Switch` / `Choose`
    cue.
 
-### A seam this pass found: Join has no screen
+### CORRECTION (2026-09-21): the premise below was wrong
 
-There is **no join-by-code route in the product**. `/join/[joinCode]` reads the
-code from the route params, and nothing anywhere accepts a typed one — the only
-way in is opening an invite link or QR someone sends. `/start-community` is the
-only navigable join-adjacent screen.
+**A typed join code IS accepted, on `/`.** `app/index.tsx` renders
+`JoinWithCodeField` — "Paste a join code", a `Go` button, an inline
+`That does not look like a valid code.` — in BOTH the signed-out and the
+signed-in states. `onJoinCodeSubmit` validates against `JOIN_CODE_SHAPE` and
+does `router.push('/join/<code>')`.
+
+So the sentence this section was built on — "nothing anywhere accepts a typed
+one" — is false. What is true is narrower: there is no *route* whose job is
+code entry; the entry field lives on `/`.
+
+**What that changes.** The Join control removed from these frames was removed
+for a reason that does not hold: it would NOT have been a control with no
+destination. It could have pushed to the same field, or carried the same field
+inline. Whether `/community` should carry one is still a product decision — the
+argument that it *cannot* is withdrawn.
+
+Nothing was implemented on this false premise beyond the absence itself: the
+shipped `/community` has no Join control, and the AFTER capture asserts that.
+That assertion still passes; only its justification was wrong. **Restoring a
+Join control here is a live option again, and it is the owner's call.**
+
+The original section is kept below, struck through in substance, so the record
+shows what was believed and when.
+
+### ~~A seam this pass found: Join has no screen~~ (superseded — see above)
+
+~~There is **no join-by-code route in the product**.~~ `/join/[joinCode]` reads
+the code from the route params, ~~and nothing anywhere accepts a typed one~~ —
+the invite link or QR someone sends is one way in, and the field on `/` is the
+other. `/start-community` is the only *other* navigable join-adjacent screen.
 
 So a prominent **Join** *button* in the zero state would be a control that goes
 nowhere, which is the thing these frames refuse. Join leads that panel by
@@ -102,13 +128,14 @@ An earlier revision kept a `Join a community` pill on the states where a member
 already has communities, reasoning it would become a real destination later.
 That was still a control with no destination today, and it is gone.
 
-**If Join should be a control here, it needs a join-code entry route** — new
-product surface, not a drawing change. Flagged rather than faked.
+~~**If Join should be a control here, it needs a join-code entry route**~~ —
+superseded. The entry field exists on `/`; a control here would need only a
+destination decision, not new product surface.
 
-**Recorded as a product seam:** manual join-code entry. Until that route
-exists, this screen explains joining in words and offers no control for it,
-and the AFTER capture asserts that no Join link or button is rendered in
-either the empty state or a populated one.
+**Recorded as a product seam:** where code entry belongs. It is on `/` today
+and nowhere else; the AFTER capture asserts that no Join link or button is
+rendered on `/community` in either the empty state or a populated one. That
+assertion describes what shipped — it is not an argument that it was right.
 
 ## Implemented — 2026-09-21
 
