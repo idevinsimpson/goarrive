@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 /**
  * E2 end-to-end: a signed-out visitor with only a `/join/<code>` URL reaches
  * `/community/<groupId>`. This spec pins the four criteria in
@@ -207,9 +209,7 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
   // E3.5 A4: the 18+ checkbox is gone from profile-setup.
   await expect(page.getByTestId('wsf-profile-adultCheckbox')).toHaveCount(0);
   await page.getByTestId('wsf-profile-termsCheckbox').click();

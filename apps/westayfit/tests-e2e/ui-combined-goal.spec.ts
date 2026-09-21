@@ -32,6 +32,8 @@ import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 // Re-laying the Manage sheet out at four viewports is real work on top of a
 // full sign-up, two goals and a community, and the default 30 s budget is not
 // enough for it.
@@ -138,8 +140,7 @@ async function championWithTwoGoals(
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
   await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 20_000 });

@@ -807,3 +807,41 @@ export async function firstViewportShare(
     };
   }, testId);
 }
+
+/**
+ * GET PAST THE VERIFY GATE, WHICHEVER WAY THIS BUILD OFFERS.
+ *
+ * The gate has two ways through and which one applies depends on the send
+ * outcome, not on the test:
+ *
+ *   · Where a verification send was ATTEMPTED, "I have verified" is offered
+ *     and is the way on. A tap is what a person would do.
+ *   · Where email is UNCONFIGURED that control is deliberately absent — there
+ *     is no link to have followed — and the screen refreshes auth state on
+ *     its own and continues once the address is verified.
+ *
+ * Both end in the same place, so callers wait for the destination rather than
+ * insisting on a control. Call this only AFTER the account has actually been
+ * verified out of band; it does not make anything true, it just stops the
+ * test from depending on which path this build takes.
+ *
+ * Specs that exist to prove the MANUAL control still works should click it
+ * directly rather than call this — this helper deliberately cannot tell you
+ * which path it used.
+ */
+export async function clearVerifyGate(
+  page: Page,
+  destination: string,
+  timeout = 25_000
+): Promise<void> {
+  const check = page.getByTestId('wsf-verify-check');
+  // A short wait, not the full timeout: on the unconfigured path this control
+  // never appears, and the passive refresh is already running.
+  try {
+    await check.waitFor({ state: 'visible', timeout: 3_000 });
+    await check.click();
+  } catch {
+    // No control in this outcome. The screen is refreshing for itself.
+  }
+  await expect(page.getByTestId(destination)).toBeVisible({ timeout });
+}

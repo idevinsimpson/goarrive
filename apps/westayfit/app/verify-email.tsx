@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { reload, signOut } from 'firebase/auth';
+import { reload, signOut, type User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
@@ -60,42 +60,158 @@ export default function VerifyEmail() {
     forgetVerificationSend();
   }, [uid]);
 
+  /*
+    THE ONE WAY THROUGH THIS GATE.
+
+    Both the tapped check and the passive refresh below call this, and neither
+    carries its own copy. Two implementations of "are they verified yet, and
+    where do they go" would drift, and the half that drifts is the half that
+    routes somebody to the wrong place.
+
+    Returns true when it has routed. Throws on a failed refresh so the CALLER
+    decides whether that is worth showing — the tap says so, the passive poll
+    stays silent.
+  */
+  const passThroughIfVerified = useCallback(async (who: User): Promise<boolean> => {
+    // THE UID THIS ATTEMPT BELONGS TO, captured before any await. A refresh
+    // started for one account must never route another: a sign-out and a new
+    // sign-in can land between these lines.
+    const startedFor = who.uid;
+    await reload(who);
+    if (!who.emailVerified) return false;
+    // reload() refreshes the local User object but NOT the cached ID token,
+    // which still carries email_verified: false. Both firestore.rules and
+    // wsfCreateCommunity gate on the TOKEN claim, so without a forced refresh
+    // the very next write fails with PERMISSION_DENIED and the new member is
+    // dead-ended one step after verifying. Mint a fresh token.
+    await who.getIdToken(true);
+    const db = getFirebaseFirestore();
+    const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', startedFor));
+    // Checked again after every await: if the signed-in account changed while
+    // this was in flight, this result belongs to somebody who is gone.
+    if (getFirebaseAuth().currentUser?.uid !== startedFor) return false;
+    if (!profileSnap.exists()) {
+      router.replace('/profile-setup' as never);
+      return true;
+    }
+    // Same profile-vs-signed-in-home fork as signin.tsx — an already-set-up
+    // member clearing verify limbo lands on home, not on a profile screen they
+    // already finished. A brand-new signup with a pending join code MUST still
+    // hit profile-setup first so the profile exists before wsfJoinCommunity is
+    // called; nextRouteAfterAuth is only safe on the terminal branch.
+    router.replace(nextRouteAfterAuth('/') as never);
+    return true;
+  }, []);
+
   const onCheck = useCallback(async () => {
     if (!user) return;
     setChecking(true);
     setError(null);
     setStatus(null);
     try {
-      await reload(user);
-      if (user.emailVerified) {
-        // reload() refreshes the local User object but NOT the cached ID token,
-        // which still carries email_verified: false. Both firestore.rules and
-        // wsfCreateCommunity gate on the TOKEN claim, so without a forced
-        // refresh the very next write fails with PERMISSION_DENIED and the new
-        // member is dead-ended one step after verifying. Mint a fresh token.
-        await user.getIdToken(true);
-        // Same profile-vs-signed-in-home fork as signin.tsx — an already-set-up
-        // member who is just clearing verify limbo lands on the home, not on a
-        // profile screen they already finished. A brand-new signup with a
-        // pending join code MUST still hit profile-setup first so the profile
-        // exists before wsfJoinCommunity is called; nextRouteAfterAuth is only
-        // safe on the terminal (profile-exists) branch.
-        const db = getFirebaseFirestore();
-        const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
-        if (!profileSnap.exists()) {
-          router.replace('/profile-setup' as never);
-          return;
-        }
-        router.replace(nextRouteAfterAuth('/') as never);
-      } else {
-        setStatus('Still unverified. Check your inbox and try again.');
-      }
+      const verified = await passThroughIfVerified(user);
+      if (!verified) setStatus('Still unverified. Check your inbox and try again.');
     } catch (e) {
       setError(authErrorMessage(e, 'Refresh failed.'));
     } finally {
       setChecking(false);
     }
-  }, [user]);
+  }, [user, passThroughIfVerified]);
+
+  /*
+    THE SEND OUTCOME, DERIVED ONCE AND USED BY BOTH THE EFFECT AND THE RENDER.
+
+    It has two sources and they do not always agree. `setUnconfigured(true)`
+    is set by a TAP on Resend; the sign-up path instead records its answer
+    into the external store that `readVerificationSend` reads. So a member who
+    arrives from sign-up on a build with email off has the local flag FALSE
+    and the store saying `unconfigured` — the screen renders the unconfigured
+    state, correctly, from the store.
+
+    The passive refresh below first gated on the local flag alone, which meant
+    it never ran for the people it exists for: everyone arriving from sign-up.
+    Deriving it here, once, is what stops the two signals disagreeing again.
+  */
+  const sendOutcome: VerificationSendOutcome | null = user
+    ? unconfigured
+      ? 'unconfigured'
+      : readVerificationSend(user.uid)
+    : null;
+
+  /*
+    ON `unconfigured`, THE SCREEN CHECKS FOR ITSELF.
+
+    That outcome no longer offers "I have verified" — there is no link to have
+    followed on a build that cannot send — so without this the screen has no
+    way forward at all, and somebody whose address was verified elsewhere (an
+    administrator, another build) would sit on it with only an action that
+    abandons the account they are part-way through creating.
+
+    WHAT KEEPS THIS HONEST:
+
+    · It goes through `passThroughIfVerified`, the same path the tap uses, and
+      that function abandons its result if the signed-in uid changed. A poll
+      started for account A can never route account B.
+    · It is SILENT. A poll that comes back unverified says nothing, and a poll
+      that fails says nothing — the screen keeps stating what is true about
+      this build. Only a tap is allowed to report back, because only a tap
+      asked a question.
+    · It runs only while this screen is mounted, in this outcome, for this
+      user, and while the page is visible. Every one of those going away stops
+      it, and `stopped` makes a poll already in flight harmless.
+    · It backs off: 2s, then 4s, 8s, 16s, capped at 30s. A screen somebody
+      leaves open does not hammer the network forever.
+  */
+  useEffect(() => {
+    if (sendOutcome !== 'unconfigured' || !user) return;
+    const startedFor = user.uid;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let delay = 2_000;
+
+    const hidden = () =>
+      typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
+    const tick = async () => {
+      if (stopped || hidden()) return schedule();
+      try {
+        // The uid is re-checked here as well as inside the shared path: this
+        // is the cheap guard, that one is the one that cannot be skipped.
+        if (getFirebaseAuth().currentUser?.uid !== startedFor) return;
+        const routed = await passThroughIfVerified(user);
+        if (routed) stopped = true;
+      } catch {
+        // Silent by design. A failed refresh is not news to anybody on this
+        // screen, and the screen already says what is true.
+      }
+      if (!stopped) schedule();
+    };
+
+    const schedule = () => {
+      if (stopped) return;
+      timer = setTimeout(tick, delay);
+      delay = Math.min(delay * 2, 30_000);
+    };
+
+    // An immediate check first: the common case is an address that is already
+    // verified, and that member should not wait two seconds to find out.
+    void tick();
+
+    const onVisible = () => {
+      if (!stopped && !hidden()) void tick();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisible);
+    }
+
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+      }
+    };
+  }, [sendOutcome, user, passThroughIfVerified]);
 
   const onResend = useCallback(async () => {
     if (!user) return;
@@ -172,9 +288,9 @@ export default function VerifyEmail() {
   // 'sending' and null are deliberately non-committal: nothing has been
   // confirmed, so nothing is asserted.
   const where = user.email ?? 'your email';
-  const outcome: VerificationSendOutcome | null = unconfigured
-    ? 'unconfigured'
-    : readVerificationSend(user.uid);
+  // Derived above, in the hook section, so the effect and the render cannot
+  // disagree about which outcome this is.
+  const outcome: VerificationSendOutcome | null = sendOutcome;
   const INTRO: Record<VerificationSendOutcome, string> = {
     sending: `Sending a verification link to ${where}. Confirm it, then tap I have verified.`,
     sent: `We sent a verification link to ${where}. Confirm it, then tap I have verified.`,
@@ -308,20 +424,17 @@ export default function VerifyEmail() {
             submitting={false}
             testID="wsf-verify-signout-primary"
           />
-          {/* Kept, and demoted: this reads the current auth state rather than
-              anything this build sent, so an address verified by other means
-              still has its way through. Resend is gone because it is the one
-              that genuinely cannot do anything here. */}
-          <SubmitButton
-            label="I have verified"
-            onPress={onCheck}
-            submitting={checking}
-            testID="wsf-verify-check"
-            variant="secondary"
-          />
+          {/* NO MANUAL CHECK HERE. The screen refreshes auth state itself in
+              this outcome (see the effect above), so there is nothing for a
+              person to press and nothing crowding the one action that helps.
+              The control stays on every outcome where a send was attempted. */}
+          {/* TRUE ABOUT BEHAVIOUR, and careful not to become a promise about
+              email. It says what this build did not do, and what this screen
+              will do by itself — both of which are facts, unlike "we will
+              send you a link". */}
           <HelpPanel
             title="What to do"
-            body="There is nothing to resend on this build, because no message was sent. If this address is already verified, tap I have verified. Otherwise sign in with an account that is, or ask for email to be switched on."
+            body="Nothing was sent and nothing can be resent on this build. If this address gets verified somewhere else, this screen will carry on by itself — you do not need to do anything here. Otherwise sign in with an account that is already verified, or ask for email to be switched on."
             testID="wsf-verify-unconfigured"
           />
         </>

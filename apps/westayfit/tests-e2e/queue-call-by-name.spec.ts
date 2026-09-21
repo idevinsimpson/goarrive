@@ -29,6 +29,8 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import * as nodePath from 'node:path';
@@ -161,8 +163,7 @@ async function signUp(page: Page, displayName: string, label: string): Promise<s
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
   await sendSettled;
   const uid = await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
   await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 20_000 });

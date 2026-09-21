@@ -28,6 +28,9 @@ const JOIN_CODE = 'HARBOR7WALKERSINVITE01';
 const PHONE = { width: 390, height: 844 };
 const SHORT = { width: 390, height: 640 };
 
+const AUTH_EMULATOR = 'http://127.0.0.1:9099';
+const PROJECT_ID = 'demo-wsf-local';
+
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
   '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
@@ -93,6 +96,27 @@ async function newAccount(label: string) {
  * no outcome is ever reached. The signup flow is what puts somebody on that
  * screen with a send in flight.
  */
+/** Verify an account the way nothing in the product can: straight at the emulator. */
+async function markVerifiedOutOfBand(email: string): Promise<void> {
+  const base = `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1`;
+  const lookup = await fetch(`${base}/projects/${PROJECT_ID}/accounts:query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({}),
+  });
+  const { userInfo = [] } = (await lookup.json()) as {
+    userInfo?: { localId: string; email: string }[];
+  };
+  const found = userInfo.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  if (!found) throw new Error(`no emulator account for ${email}`);
+  const update = await fetch(`${base}/projects/${PROJECT_ID}/accounts:update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ localId: found.localId, emailVerified: true }),
+  });
+  if (!update.ok) throw new Error(`emulator verify failed: ${update.status}`);
+}
+
 async function signUpUnverified(page: Page, label: string): Promise<string> {
   const email = `wsf-${label}-${stampId()}@example.com`;
   await page.goto('/signup');
@@ -196,10 +220,9 @@ test('an unconfigured build drops Resend and keeps the control that still works'
   // RESEND IS THE DEAD ONE: it calls the callable that just refused, so
   // pressing it again fails identically. It is gone.
   await expect(page.getByTestId('wsf-verify-resend')).toHaveCount(0);
-  // "I have verified" is NOT dead — it reads the current auth state rather
-  // than anything this build sent — so it stays, demoted. Removing it is
-  // under discussion; see the blocker reported on PR #365.
-  await expect(page.getByTestId('wsf-verify-check')).toBeVisible();
+  // The manual check is gone from THIS outcome: there is no link to have
+  // followed, and the screen refreshes auth state for itself instead.
+  await expect(page.getByTestId('wsf-verify-check')).toHaveCount(0);
   // The way out that resolves this for most people is the primary.
   await expect(page.getByTestId('wsf-verify-signout-primary')).toBeVisible();
   // And it is offered ONCE, not also at the foot.
@@ -261,6 +284,106 @@ test('reset never reveals whether an account exists', async ({ browser }) => {
     'If an account exists for that email',
     { timeout: 40_000 }
   );
+  await context.close();
+});
+
+test('an unconfigured gate carries on by itself once the address is verified', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const { context, page } = await phone(browser, PHONE);
+  await page.route('**/wsfSendVerificationEmail**', (route: Route) =>
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { status: 'FAILED_PRECONDITION', message: 'WSF email sending is not configured.' },
+      }),
+    })
+  );
+  const email = await signUpUnverified(page, 'bapassive');
+  await expect(page.getByTestId('wsf-verify-unconfigured')).toBeVisible({ timeout: 40_000 });
+  // No control to press — this is the whole point of the outcome.
+  await expect(page.getByTestId('wsf-verify-check')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-verify-resend')).toHaveCount(0);
+
+  // Verified somewhere else entirely. NOTHING is tapped after this line.
+  await markVerifiedOutOfBand(email);
+
+  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 40_000 });
+  await context.close();
+});
+
+test('a poll started for one account can never route another', async ({ browser }) => {
+  test.setTimeout(240_000);
+  const { context, page } = await phone(browser, PHONE);
+  await page.route('**/wsfSendVerificationEmail**', (route: Route) =>
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { status: 'FAILED_PRECONDITION', message: 'WSF email sending is not configured.' },
+      }),
+    })
+  );
+  // A is left on the unconfigured gate with its refresh running.
+  const emailA = await signUpUnverified(page, 'bapolla');
+  await expect(page.getByTestId('wsf-verify-unconfigured')).toBeVisible({ timeout: 40_000 });
+
+  // A signs out and B signs up in the same browser, so A's poll — if it
+  // survived — is now in flight against a screen belonging to B.
+  await page.getByTestId('wsf-verify-signout-primary').click();
+  await expect(page.getByTestId('wsf-home-signed-out')).toBeVisible({ timeout: 40_000 });
+  const emailB = await signUpUnverified(page, 'bapollb');
+  await expect(page.getByTestId('wsf-verify-unconfigured')).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('wsf-verify-account')).toContainText(emailB.split('@')[0]);
+
+  /*
+    NOW VERIFY A, AND ONLY A.
+
+    If A's refresh were still running, or if the shared completion path did
+    not check the uid it started with, this would carry B's screen through a
+    gate B has not passed — the exact class of bug the account-switch spec
+    exists for. B must stay put.
+  */
+  await markVerifiedOutOfBand(emailA);
+  await page.waitForTimeout(8_000);
+  await expect(page.getByTestId('wsf-verify-unconfigured')).toBeVisible();
+  await expect(page.getByTestId('wsf-verify-account')).toContainText(emailB.split('@')[0]);
+  await expect(page.getByTestId('wsf-profile')).toHaveCount(0);
+
+  // And B's own verification still works, so nothing was broken to get here.
+  await markVerifiedOutOfBand(emailB);
+  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 40_000 });
+  await context.close();
+});
+
+test('the refresh stops when the screen goes away', async ({ browser }) => {
+  test.setTimeout(240_000);
+  const { context, page } = await phone(browser, PHONE);
+  await page.route('**/wsfSendVerificationEmail**', (route: Route) =>
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { status: 'FAILED_PRECONDITION', message: 'WSF email sending is not configured.' },
+      }),
+    })
+  );
+  await signUpUnverified(page, 'bapollstop');
+  await expect(page.getByTestId('wsf-verify-unconfigured')).toBeVisible({ timeout: 40_000 });
+
+  // Leave the screen. The effect's cleanup must stop the loop.
+  await page.getByTestId('wsf-verify-signout-primary').click();
+  await expect(page.getByTestId('wsf-home-signed-out')).toBeVisible({ timeout: 40_000 });
+
+  // A refresh that kept running would hit the auth endpoint; count them.
+  let refreshes = 0;
+  page.on('request', (r) => {
+    if (/identitytoolkit|securetoken/.test(r.url())) refreshes += 1;
+  });
+  await page.waitForTimeout(10_000);
+  expect(refreshes, 'the refresh kept polling after the screen was gone').toBe(0);
   await context.close();
 });
 

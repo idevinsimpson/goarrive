@@ -23,7 +23,11 @@ check:route-index` fails if any of them drifts.
 > the device classes it is drawn at, and whether it has an end-of-scroll
 > companion — all generated from the PNGs on disk.
 >
-> **Target existence is not visual acceptance.** Nothing here is approved.
+> **Target existence is not visual acceptance**, and the two are tracked
+> separately here. Batches A–G are **reviewed and accepted as target
+> reference**. **Batch A alone is implemented**, under its own separate owner
+> instruction, and is still under review. **B–G remain unimplemented
+> drawings** — their acceptance authorizes nothing to be built.
 
 ```
 npm run wsf:route-coverage          # the report

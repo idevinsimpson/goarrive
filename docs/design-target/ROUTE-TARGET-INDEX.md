@@ -31,10 +31,16 @@ accepted as target reference and remain drawings.
 **The page-level visual gate still stands**, on every page:
 ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual acceptance.
 
-**Target existence is not visual acceptance.** Every batch below is drawn and
-none is approved. Four states are tracked separately and must not be conflated:
-a target **exists**, a target is **reviewed**, a route is **implemented**, and
-an implementation is **verified**. Nothing in this atlas is past *exists*.
+**Target existence is not visual acceptance.** Four states are tracked
+separately and must not be conflated: a target **exists**, a target is
+**reviewed**, a route is **implemented**, and an implementation is
+**verified**.
+
+Where each batch stands against those four: **A–G are reviewed** and accepted
+as target reference. **Batch A is also implemented**, under its own separate
+owner instruction, and is under review — not yet verified. **B–G are drawn and
+reviewed and nothing more**; being accepted as reference authorizes none of
+them to be built.
 
 ## Coverage today
 
