@@ -7,11 +7,18 @@ import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
   ErrorText,
+  FootNote,
   FormShell,
+  HelpPanel,
+  NoticeText,
   SecondaryLink,
   StatusText,
   SubmitButton,
 } from '../src/AuthFormPrimitives';
+import {
+  authDestinationCard,
+  readAuthDestinationKind,
+} from '../src/authDestination';
 import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
@@ -180,37 +187,135 @@ export default function VerifyEmail() {
     ? INTRO[outcome]
     : `Confirm your email address at ${where}, then tap I have verified.`;
 
+  /*
+    WHAT THIS BUILD CAN ACTUALLY DO — AND WHICH CONTROL IS REALLY DEAD.
+
+    The brief said to drop BOTH "I have verified" and "Resend" on
+    `unconfigured`. Only one of them is dead, and the difference is in what
+    each actually calls:
+
+      RESEND is dead. It calls wsfSendVerificationEmail, which is what just
+      threw failed-precondition because WSF_EMAIL_* is unset. Pressing it
+      again fails identically. There is nothing to resend.
+
+      "I HAVE VERIFIED" IS NOT DEAD. `onCheck` calls reload(user) and reads
+      user.emailVerified — the CURRENT auth state, not anything this build
+      sent. An address verified by any other means (an earlier build, an
+      administrator, an already-verified account someone signed in with)
+      makes it succeed and route onward. Removing it would delete a working
+      way out of the gate, not a dead control.
+
+    So the dead one goes and the working one stays, demoted under the action
+    that resolves this for most people. The rest of the recomposition stands:
+    the reason is said once, and the way out is the primary.
+  */
+  const canResend = outcome !== 'unconfigured';
+  const canVerifyHere = outcome !== 'unconfigured';
+  const destinationKind = readAuthDestinationKind();
+
   return (
-    <FormShell heading="Verify your email" intro={intro} testID="wsf-verify">
+    <FormShell
+      heading={canVerifyHere ? 'Check your email.' : 'Verification is switched off here.'}
+      intro={intro}
+      testID="wsf-verify"
+      tone={canVerifyHere ? 'action' : 'error'}
+      step="Step 2 of 3"
+      eyebrow={
+        canVerifyHere
+          ? outcome === 'already-verified'
+            ? 'Nothing to wait for'
+            : outcome === 'failed'
+              ? 'Didn\u2019t send'
+              : 'One thing to do'
+          : 'Not possible on this build'
+      }
+      /* THE DESTINATION SURVIVES THIS GATE. `nextRouteAfterAuth` is read at
+         sign-in, here, and again at profile setup, so a pending destination
+         outlives all three — and this is the screen where somebody is most
+         likely to wonder whether it was lost. Still the KIND only. */
+      destination={
+        destinationKind
+          ? {
+              ...authDestinationCard(destinationKind),
+              label: 'Still waiting for you',
+              note: 'It survives this step and the next one. You will land on it, not on home.',
+            }
+          : undefined
+      }
+      /* ON `unconfigured` THE FOOT DROPS SIGN OUT, because the sheet has just
+         made it the primary. The same control twice on one screen is the
+         duplication this work has had to correct before. */
+      foot={
+        <>
+          <FootNote testID="wsf-verify-account">{`Signed in as ${where}`}</FootNote>
+          {canVerifyHere ? (
+            <SubmitButton
+              label="Sign out"
+              onPress={onSignOut}
+              submitting={false}
+              testID="wsf-verify-signout"
+              variant="tertiary"
+            />
+          ) : null}
+        </>
+      }
+    >
       {status ? <StatusText testID="wsf-verify-status">{status}</StatusText> : null}
-      {outcome === 'unconfigured' ? (
-        <ErrorText testID="wsf-verify-unconfigured">
-          Email isn't switched on for this test build yet, so no message was sent. Nobody can
-          finish verifying a new account here until it is switched on. Sign out to use an account
-          that is already verified.
-        </ErrorText>
-      ) : null}
       {error ? <ErrorText testID="wsf-verify-error">{error}</ErrorText> : null}
-      <SubmitButton
-        label="I have verified"
-        onPress={onCheck}
-        submitting={checking}
-        testID="wsf-verify-check"
-      />
-      <SubmitButton
-        label="Resend verification email"
-        onPress={onResend}
-        submitting={resending}
-        testID="wsf-verify-resend"
-        variant="secondary"
-      />
-      <SubmitButton
-        label="Sign out"
-        onPress={onSignOut}
-        submitting={false}
-        testID="wsf-verify-signout"
-        variant="tertiary"
-      />
+
+      {canVerifyHere ? (
+        <>
+          <SubmitButton
+            label="I have verified"
+            onPress={onCheck}
+            submitting={checking}
+            testID="wsf-verify-check"
+          />
+          {canResend ? (
+            <SubmitButton
+              label="Resend verification email"
+              onPress={onResend}
+              submitting={resending}
+              testID="wsf-verify-resend"
+              variant="secondary"
+            />
+          ) : null}
+          <HelpPanel
+            title="No email yet?"
+            body="Check spam, and confirm the address above is the one you meant. Resending sends a new link to the same address."
+          />
+        </>
+      ) : (
+        <>
+          {/* The reason, said ONCE — the intro does not repeat it. */}
+          <NoticeText testID="wsf-verify-unconfigured">
+            No message was sent, and nobody can finish verifying a new account on this build until
+            email is switched on.
+          </NoticeText>
+          {/* The action that resolves this for most people, as the primary. */}
+          <SubmitButton
+            label="Sign out and use a verified account"
+            onPress={onSignOut}
+            submitting={false}
+            testID="wsf-verify-signout-primary"
+          />
+          {/* Kept, and demoted: this reads the current auth state rather than
+              anything this build sent, so an address verified by other means
+              still has its way through. Resend is gone because it is the one
+              that genuinely cannot do anything here. */}
+          <SubmitButton
+            label="I have verified"
+            onPress={onCheck}
+            submitting={checking}
+            testID="wsf-verify-check"
+            variant="secondary"
+          />
+          <HelpPanel
+            title="What to do"
+            body="There is nothing to resend on this build, because no message was sent. If this address is already verified, tap I have verified. Otherwise sign in with an account that is, or ask for email to be switched on."
+          />
+        </>
+      )}
     </FormShell>
   );
 }

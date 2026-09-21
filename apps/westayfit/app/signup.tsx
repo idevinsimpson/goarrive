@@ -69,7 +69,7 @@ export default function SignUp() {
   // someone the useEffect above is already about to redirect.
   if (!ready || user) {
     return (
-      <FormShell heading="Create your account" testID="wsf-signup-loading">
+      <FormShell heading="Start moving together." testID="wsf-signup-loading">
         <StatusText>Loading…</StatusText>
       </FormShell>
     );
@@ -128,9 +128,17 @@ export default function SignUp() {
 
   return (
     <FormShell
-      heading="Create your account"
+      heading="Start moving together."
       intro="We will send a verification email before you can join a community."
       testID="wsf-signup"
+      step="Step 1 of 3"
+      foot={
+        <SecondaryLink
+          href="/signin"
+          label="Already have an account? Sign in"
+          testID="wsf-signup-signin"
+        />
+      }
     >
       <FieldLabel>Display name</FieldLabel>
       <TextField
@@ -191,7 +199,6 @@ export default function SignUp() {
         disabled={!canSubmit}
         testID="wsf-signup-submit"
       />
-      <SecondaryLink href="/signin" label="Already have an account? Sign in" />
     </FormShell>
   );
 }

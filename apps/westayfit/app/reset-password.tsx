@@ -5,6 +5,8 @@ import {
   ErrorText,
   FieldLabel,
   FormShell,
+  HelpPanel,
+  NoticeText,
   SecondaryLink,
   StatusText,
   SubmitButton,
@@ -53,9 +55,11 @@ export default function ResetPassword() {
 
   return (
     <FormShell
-      heading="Reset your password"
+      heading="Set a new password."
       intro="Enter your email and we will send a link to set a new one."
       testID="wsf-reset-screen"
+      tone={unconfigured ? 'error' : 'ordinary'}
+      foot={<SecondaryLink href="/signin" label="Back to sign in" testID="wsf-reset-back" />}
     >
       <FieldLabel>Email</FieldLabel>
       <TextField
@@ -74,11 +78,15 @@ export default function ResetPassword() {
         testID="wsf-reset-email"
       />
 
+      {/* ENUMERATION SAFETY IS A DESIGN CONSTRAINT, NOT A DETAIL. The product
+          cannot say whether that address has an account, so no state here may
+          imply it. This is a notice rather than a status line because it is a
+          statement about what may have happened, not a confirmation. */}
       {sent ? (
-        <StatusText testID="wsf-reset-sent">
+        <NoticeText testID="wsf-reset-sent">
           If an account exists for that email, a reset link is on its way. Check your inbox and
           spam.
-        </StatusText>
+        </NoticeText>
       ) : null}
       {unconfigured ? (
         <ErrorText testID="wsf-reset-unconfigured">
@@ -92,12 +100,21 @@ export default function ResetPassword() {
           label="Send reset link"
           onPress={onSubmit}
           submitting={submitting}
-          disabled={!email.trim()}
+          /* On `unconfigured` this build cannot send at all, so the control is
+             disabled rather than inviting somebody to keep pressing it. */
+          disabled={!email.trim() || unconfigured}
           testID="wsf-reset"
         />
       ) : null}
 
-      <SecondaryLink href="/signin" label="Back to sign in" />
+      {/* What happens next, said before it is waited for — and never in a way
+          that reveals whether the address has an account. */}
+      {!sent && !unconfigured ? (
+        <HelpPanel
+          title="What happens next"
+          body="If an account exists for that email, a reset link is on its way. Check your inbox and spam."
+        />
+      ) : null}
     </FormShell>
   );
 }
