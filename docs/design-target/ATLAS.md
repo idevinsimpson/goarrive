@@ -1,7 +1,16 @@
 # The Visual North Star Atlas
 
-**Complete.** Every user-facing route in `apps/westayfit/app` has a destination
-target. The generator agrees: **23 routes, 23 covered, 0 uncovered.**
+**Every user-facing route in `apps/westayfit/app` has a destination target.**
+The generator agrees: **23 routes, 23 covered, 0 uncovered** — 162 states and
+513 frames across twelve packages.
+
+> **A route count is not proof of completion**, and this file does not ask to
+> be read as one. A route with one frame and a route with thirty both count as
+> "covered". `ATLAS-COVERAGE.md` is the answer to that: every state by name,
+> the device classes it is drawn at, and whether it has an end-of-scroll
+> companion — all generated from the PNGs on disk.
+>
+> **Target existence is not visual acceptance.** Nothing here is approved.
 
 ```
 npm run wsf:route-coverage          # the report
@@ -17,7 +26,7 @@ npm run check:route-index           # fails if ROUTE-TARGET-INDEX.md has drifted
 
 | Batch | What | Route(s) | States | Frames | Package |
 | --- | --- | --- | --- | --- | --- |
-| **A** | Identity and onboarding | `/signin` `/signup` `/verify-email` `/reset-password` `/profile-setup` | 8 | 17 | `review/batch-a-identity/` |
+| **A** | Identity and onboarding | `/signin` `/signup` `/verify-email` `/reset-password` `/profile-setup` | 17 | 64 | `review/batch-a-identity/` |
 | **B** | The invitation, and what a Champion starts | `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` | 30 | 130 | `review/batch-b-join-and-setup/` |
 | **C** | The challenge, and the door | `/community/[groupId]/challenge` `/` | 17 | 67 | `review/batch-c-challenge-and-door/` |
 | **D** | The event and the line, on your own phone | `/event/[goalId]` `/queue/[goalId]` | 24 | 93 | `review/batch-d-event-and-line/` |
@@ -35,7 +44,7 @@ Plus the five page packages, which are **accepted work**, not atlas drawings:
 | 4 | `/activity` | implemented (Phase A), accepted | `review/page-04-progress/` |
 | 5 | `/you` | **target only — not implemented** | `review/page-05-you/` |
 
-**466 frames, 85 MB** across all twelve packages. Every batch package opens
+**513 frames** across all twelve packages. Every batch package opens
 with its own contact sheet or matrix; start there.
 
 ## Start here, in this order
@@ -54,15 +63,16 @@ route file that settles it.
 
 | Class | Where it is drawn |
 | --- | --- |
-| 390×844 | Batches B, C, D, G; pages 1–5 |
+| 390×844 | Batches A, B, C, D, F, G; pages 1–5 |
 | 390×640 | Batches A, B, C, D |
-| 430×932 | Batches B, C, D |
+| 430×932 | Batches A, B, C, D |
 | 800×1280 | Batch E (kiosk, kiosk contribution), Batch F |
 | 1280×800 | Batch E (station), Batch F, Batch G |
 | 1920×1080 | Batch F |
 
-Batch A drew only the two narrower phones; **430×932 was added from Batch B
-onward**, so the widest phone stopped being a size anyone assumed worked.
+**430×932 is now drawn everywhere a phone surface is.** Batch A originally had
+only the two narrower phones — the atlas's last open device gap — and it was
+reopened and recaptured at all three.
 
 Each screen is drawn at the classes it is actually served to, not at all six.
 A kiosk is a portrait tablet on a stand and a station is a landscape tablet
@@ -170,6 +180,31 @@ A second, smaller one: `review/page-03-community/` removed a Join control on a
 premise that turned out to be false (a typed join code **is** accepted, on `/`).
 That package records the correction; whether `/community` should carry a Join
 control is live again and is the owner's call.
+
+## Corrections made after the first completion claim
+
+The first version of this page said "complete" while Batch A still carried four
+recorded debts and only two phone classes. A batch with known defects cannot be
+counted toward a complete atlas. Reopened and fixed:
+
+- **Batch A's four owed corrections are closed** — the 8-character rule stated
+  where it is enforced, all five verify send outcomes drawn, reset's two real
+  outcomes drawn, consent drawn **unchecked** with the shipped sentence and the
+  primary disabled, and the pending destination shown surviving all three gates
+  it actually survives. A fifth gap nobody had recorded — the **kiosk** return,
+  the third destination kind `nextRouteAfterAuth` resolves — is drawn too.
+- **A privacy promise that is not kept.** The queue name panel's shipped copy
+  ends *"it goes when your place does."* Nothing deletes a `wsfTurnEntries`
+  document and there is no TTL, so it does not. The target now claims only the
+  provable scope; the shipped copy is recorded as a product finding.
+- **The owner-board README's drift.** It flattened two greens into one, letting
+  a value sampled off a JPEG stand in for the brand's `PROGRESS_GREEN`
+  (`#91CB7D`) — `#22C55E` is `ACTION_GREEN`. Its "take it as drawn" line let an
+  unlisted board element override newer decisions. Its streak substitute named
+  a capability the product cannot reach.
+- **The index's own prose had rotted underneath its generated tables**, still
+  claiming "Batches B–F are not started" while six of them shipped. The batch,
+  device and state tables are generated now too.
 
 ## Next
 

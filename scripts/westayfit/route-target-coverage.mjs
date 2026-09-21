@@ -116,6 +116,119 @@ const NOTES = {
 const WHAT = {
 };
 
+/**
+ * THE ATLAS BATCHES, AND THE REASON THIS IS DECLARED RATHER THAN DESCRIBED.
+ *
+ * The prose that used to live in ROUTE-TARGET-INDEX.md said "Batches B-F are
+ * not started" while B, C, D, E, F and G were shipping underneath it. The
+ * route tables were generated and correct; the section below them was hand-
+ * written and stale, which is the same failure the generated tables were
+ * introduced to end, one heading further down the page.
+ *
+ * So the batch table, the device table and the state-to-file mapping are all
+ * derived now: the ROUTES and the review status are declared here, and every
+ * COUNT comes from the PNGs actually on disk. A batch that loses its frames
+ * stops claiming them.
+ */
+const BATCHES = [
+  {
+    key: 'A',
+    title: 'Identity and onboarding',
+    dir: 'batch-a-identity',
+    routes: ['/signin', '/signup', '/verify-email', '/reset-password', '/profile-setup'],
+    status: 'target only, **not approved**',
+  },
+  {
+    key: 'B',
+    title: 'The invitation, and what a Champion starts',
+    dir: 'batch-b-join-and-setup',
+    routes: ['/join/[joinCode]', '/start-community', '/goals/new', '/combined/[setupId]'],
+    status: 'target only, **not approved**',
+  },
+  {
+    key: 'C',
+    title: 'The challenge, and the door',
+    dir: 'batch-c-challenge-and-door',
+    routes: ['/community/[groupId]/challenge', '/'],
+    status: 'target only, **not approved**',
+  },
+  {
+    key: 'D',
+    title: 'The event and the line, on your own phone',
+    dir: 'batch-d-event-and-line',
+    routes: ['/event/[goalId]', '/queue/[goalId]'],
+    status: 'target only, **not approved**',
+  },
+  {
+    key: 'E',
+    title: 'The screens in the room',
+    dir: 'batch-e-room-screens',
+    routes: ['/kiosk/[goalId]', '/contribute/[goalId]?kiosk=1', '/station/[goalId]'],
+    status: 'target only, **not approved**',
+  },
+  {
+    key: 'F',
+    title: 'The public display',
+    dir: 'batch-f-public-display',
+    routes: ['/display/[goalId]'],
+    status: 'target only, **not approved**',
+  },
+  {
+    key: 'G',
+    title: 'The follow-along',
+    dir: 'batch-g-follow-along',
+    routes: ['/move/[goalId]'],
+    status: 'target only, **not approved**',
+  },
+];
+
+/** The page packages, which are NOT atlas drawings and must not be counted as
+ * though they were. Their review state is a human act, so it is declared. */
+const PAGES = [
+  { page: '1', title: 'Home', dir: 'page-01-home', routes: ['/community/[groupId]'], status: 'implemented, **accepted**' },
+  { page: '2', title: 'MOVE and contribution', dir: 'page-02-move', routes: ['/move', '/contribute/[goalId]'], status: 'implemented, **accepted**' },
+  { page: '3', title: 'Community', dir: 'page-03-community', routes: ['/community'], status: 'implemented, **accepted**' },
+  { page: '4', title: 'Progress', dir: 'page-04-progress', routes: ['/activity'], status: 'implemented (Phase A), **accepted**' },
+  { page: '5', title: 'You', dir: 'page-05-you', routes: ['/you'], status: 'target only, **not approved**' },
+];
+
+/**
+ * Reads a package directory and returns what is actually drawn in it.
+ * Frame names are `TARGET-<state>-<class>[-end].png`; the class is the trailing
+ * NNNxNNN. Anything that does not parse is returned in `unparsed` rather than
+ * silently dropped, because a frame nobody can attribute to a state is exactly
+ * the kind of thing a coverage count should refuse to hide.
+ */
+function readPackage(dir) {
+  const full = path.join(REVIEW, dir);
+  let files = [];
+  try {
+    files = readdirSync(full).filter((f) => f.endsWith('.png')).sort();
+  } catch {
+    return { missing: true, states: new Map(), classes: new Map(), sheets: [], unparsed: [], frames: 0 };
+  }
+  const states = new Map();
+  const classes = new Map();
+  const sheets = [];
+  const unparsed = [];
+  for (const f of files) {
+    if (!f.startsWith('TARGET-')) {
+      sheets.push(f);
+      continue;
+    }
+    const m = /^TARGET-(.+)-(\d+x\d+)(-end)?\.png$/.exec(f);
+    if (!m) {
+      unparsed.push(f);
+      continue;
+    }
+    const [, state, cls, end] = m;
+    if (!states.has(state)) states.set(state, []);
+    states.get(state).push({ file: f, cls, end: Boolean(end) });
+    classes.set(cls, (classes.get(cls) ?? 0) + 1);
+  }
+  return { missing: false, states, classes, sheets, unparsed, frames: files.length };
+}
+
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */
 const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]', '/community', '/activity'];
 
@@ -132,6 +245,8 @@ function routes(dir, prefix = '') {
   }
   return out;
 }
+
+const REVIEW = path.resolve(process.cwd(), 'docs/design-target/review');
 
 const all = routes(APP).sort();
 const facing = all.filter((r) => !EXCLUDED(r));
@@ -187,6 +302,147 @@ function markdown() {
   return lines.join('\n');
 }
 
+const ATLAS_BEGIN = '<!-- BEGIN GENERATED ATLAS -->';
+const ATLAS_END = '<!-- END GENERATED ATLAS -->';
+
+/** Everything the packages on disk actually contain, read once. */
+const packages = [
+  ...BATCHES.map((b) => ({ ...b, kind: 'batch', pkg: readPackage(b.dir) })),
+  ...PAGES.map((p) => ({ ...p, kind: 'page', pkg: readPackage(p.dir) })),
+];
+
+/** Device class -> how many frames are drawn at it, across the whole atlas. */
+function deviceTally() {
+  const tally = new Map();
+  for (const entry of packages) {
+    for (const [cls, n] of entry.pkg.classes) {
+      tally.set(cls, (tally.get(cls) ?? 0) + n);
+    }
+  }
+  return tally;
+}
+
+/** The batch / device / state block that replaces the prose that rotted. */
+function atlasMarkdown() {
+  const L = [];
+  L.push(ATLAS_BEGIN);
+  L.push('');
+  L.push('> Generated by `node scripts/westayfit/route-target-coverage.mjs --write`.');
+  L.push('> Every count below is read from the PNGs on disk, not declared. Do not');
+  L.push('> hand-edit between these markers — the prose that used to sit here said');
+  L.push('> "Batches B–F are not started" while six of them were shipping underneath it.');
+  L.push('');
+  L.push('### The atlas batches');
+  L.push('');
+  L.push('| Batch | What it covers | Routes | States | Frames | Classes | State |');
+  L.push('| --- | --- | ---: | ---: | ---: | --- | --- |');
+  for (const b of packages.filter((e) => e.kind === 'batch')) {
+    const cls = [...b.pkg.classes.keys()].sort().join(' · ') || '—';
+    const missing = b.pkg.missing ? ' **package missing**' : '';
+    L.push(
+      `| **${b.key}** | ${b.title} | ${b.routes.length} | ${b.pkg.states.size} | ${b.pkg.frames} | ${cls} | ${b.status}${missing} |`
+    );
+  }
+  L.push('');
+  L.push('### The page packages — accepted work, not atlas drawings');
+  L.push('');
+  L.push('| Page | What | Route(s) | Frames | State |');
+  L.push('| --- | --- | --- | ---: | --- |');
+  for (const p of packages.filter((e) => e.kind === 'page')) {
+    L.push(
+      `| ${p.page} | ${p.title} | ${p.routes.map((r) => `\`${r}\``).join(' ')} | ${p.pkg.frames} | ${p.status} |`
+    );
+  }
+  L.push('');
+  L.push('### Device classes, by frames actually drawn');
+  L.push('');
+  L.push('| Class | Frames |');
+  L.push('| --- | ---: |');
+  for (const [cls, n] of [...deviceTally()].sort()) L.push(`| ${cls} | ${n} |`);
+  L.push('');
+  L.push('The full **state → file** and **device → file** mapping is generated into');
+  L.push('`ATLAS-COVERAGE.md` beside this file. A route count alone cannot prove');
+  L.push('atlas completion, so that mapping names every state and the frames that');
+  L.push('back it.');
+  L.push('');
+  const unparsed = packages.flatMap((e) => e.pkg.unparsed);
+  if (unparsed.length) {
+    L.push(`**${unparsed.length} frame(s) could not be attributed to a state:** ` +
+      unparsed.map((f) => `\`${f}\``).join(', ') + '.');
+    L.push('');
+  }
+  L.push(ATLAS_END);
+  return L.join('\n');
+}
+
+/** The exhaustive mapping, its own file because it is long by design. */
+const COVERAGE_DOC = path.resolve(process.cwd(), 'docs/design-target/ATLAS-COVERAGE.md');
+
+function coverageMarkdown() {
+  const L = [];
+  L.push('# Atlas coverage — every state, and the frames that back it');
+  L.push('');
+  L.push('**Generated.** `node scripts/westayfit/route-target-coverage.mjs --write`.');
+  L.push('Read from the PNGs on disk. Do not hand-edit.');
+  L.push('');
+  L.push('A route count cannot prove atlas completion: a route with one frame and a');
+  L.push('route with thirty both count as "covered". This file is the answer to that');
+  L.push('— every state by name, the device classes it is drawn at, and whether it');
+  L.push('carries an end-of-scroll companion.');
+  L.push('');
+  L.push('`end` means the state overflows its frame and a second frame was captured');
+  L.push('scrolled to the bottom. Batches E and F have none by design: a kiosk, a');
+  L.push('station and a public display are fixed canvases with no scroll.');
+  L.push('');
+  for (const e of packages) {
+    const head = e.kind === 'batch' ? `Batch ${e.key} — ${e.title}` : `Page ${e.page} — ${e.title}`;
+    L.push(`## ${head}`);
+    L.push('');
+    L.push(`\`review/${e.dir}/\` · ${e.routes.map((r) => `\`${r}\``).join(' ')} · ${e.status}`);
+    L.push('');
+    if (e.pkg.missing) {
+      L.push('**The package directory is missing.**');
+      L.push('');
+      continue;
+    }
+    if (e.pkg.sheets.length) {
+      L.push(`Contact sheet / other: ${e.pkg.sheets.map((f) => `\`${f}\``).join(', ')}`);
+      L.push('');
+    }
+    if (e.pkg.states.size === 0) {
+      L.push('_No `TARGET-` frames in this package._');
+      L.push('');
+      continue;
+    }
+    L.push('| State | Classes | end | Files |');
+    L.push('| --- | --- | :---: | ---: |');
+    for (const [state, frames] of [...e.pkg.states].sort()) {
+      const cls = [...new Set(frames.filter((f) => !f.end).map((f) => f.cls))].sort().join(' · ');
+      const hasEnd = frames.some((f) => f.end) ? 'yes' : '';
+      L.push(`| \`${state}\` | ${cls} | ${hasEnd} | ${frames.length} |`);
+    }
+    L.push('');
+  }
+  L.push('## Device → frames');
+  L.push('');
+  L.push('| Class | Frames | Packages |');
+  L.push('| --- | ---: | --- |');
+  const byClass = new Map();
+  for (const e of packages) {
+    for (const [cls, n] of e.pkg.classes) {
+      if (!byClass.has(cls)) byClass.set(cls, { n: 0, where: [] });
+      const row = byClass.get(cls);
+      row.n += n;
+      row.where.push(e.kind === 'batch' ? e.key : `P${e.page}`);
+    }
+  }
+  for (const [cls, row] of [...byClass].sort()) {
+    L.push(`| ${cls} | ${row.n} | ${row.where.join(' · ')} |`);
+  }
+  L.push('');
+  return L.join('\n');
+}
+
 const DOC = path.resolve(process.cwd(), 'docs/design-target/ROUTE-TARGET-INDEX.md');
 
 if (process.argv.includes('--markdown')) {
@@ -204,11 +460,38 @@ if (process.argv.includes('--check')) {
   }
   const current = doc.slice(a, b + END.length);
   if (current.trim() !== markdown().trim()) {
-    console.error('ROUTE-TARGET-INDEX.md is out of date. Run:');
+    console.error('ROUTE-TARGET-INDEX.md route block is out of date. Run:');
     console.error('  node scripts/westayfit/route-target-coverage.mjs --write');
     process.exit(1);
   }
-  console.log(`route index is current — ${facing.length} routes, ${covered.length} covered, ${uncovered.length} not`);
+  const c = doc.indexOf(ATLAS_BEGIN);
+  const d = doc.indexOf(ATLAS_END);
+  if (c < 0 || d < 0) {
+    console.error('ROUTE-TARGET-INDEX.md has no generated ATLAS block. Run --write.');
+    process.exit(1);
+  }
+  if (doc.slice(c, d + ATLAS_END.length).trim() !== atlasMarkdown().trim()) {
+    console.error('ROUTE-TARGET-INDEX.md atlas block is out of date (frames on disk changed). Run:');
+    console.error('  node scripts/westayfit/route-target-coverage.mjs --write');
+    process.exit(1);
+  }
+  let coverage = '';
+  try {
+    coverage = readFileSync(COVERAGE_DOC, 'utf8');
+  } catch {
+    console.error('ATLAS-COVERAGE.md is missing. Run --write.');
+    process.exit(1);
+  }
+  if (coverage.trim() !== coverageMarkdown().trim()) {
+    console.error('ATLAS-COVERAGE.md is out of date. Run --write.');
+    process.exit(1);
+  }
+  const states = packages.reduce((n, e) => n + e.pkg.states.size, 0);
+  const frames = packages.reduce((n, e) => n + e.pkg.frames, 0);
+  console.log(
+    `route index is current — ${facing.length} routes, ${covered.length} covered, ${uncovered.length} not; ` +
+      `${states} states, ${frames} frames across ${packages.length} packages`
+  );
   process.exit(orphans.length ? 1 : 0);
 }
 
@@ -220,8 +503,22 @@ if (process.argv.includes('--write')) {
     console.error('ROUTE-TARGET-INDEX.md has no generated block to write into.');
     process.exit(1);
   }
-  writeFileSync(DOC, doc.slice(0, a) + markdown() + doc.slice(b + END.length));
-  console.log(`route index rewritten — ${facing.length} routes, ${covered.length} covered, ${uncovered.length} not`);
+  let next = doc.slice(0, a) + markdown() + doc.slice(b + END.length);
+  const c = next.indexOf(ATLAS_BEGIN);
+  const d = next.indexOf(ATLAS_END);
+  if (c < 0 || d < 0) {
+    console.error('ROUTE-TARGET-INDEX.md has no generated ATLAS block to write into.');
+    process.exit(1);
+  }
+  next = next.slice(0, c) + atlasMarkdown() + next.slice(d + ATLAS_END.length);
+  writeFileSync(DOC, next);
+  writeFileSync(COVERAGE_DOC, coverageMarkdown());
+  const states = packages.reduce((n, e) => n + e.pkg.states.size, 0);
+  const frames = packages.reduce((n, e) => n + e.pkg.frames, 0);
+  console.log(
+    `route index rewritten — ${facing.length} routes, ${covered.length} covered, ${uncovered.length} not; ` +
+      `${states} states, ${frames} frames across ${packages.length} packages`
+  );
   process.exit(orphans.length ? 1 : 0);
 }
 

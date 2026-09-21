@@ -39,12 +39,42 @@ refusal below is already in the route; the target's job is to make it legible
 rather than quietly correct.
 
 **The name is chosen by the person it is about, before anything is sent.** The
-name panel is the feature's one real decision, not a formality. The shipped
-copy says where it goes ("the screen in the room, where everybody can read
-it"), what to pick ("whatever you are happy for strangers to see"), and what
-becomes of it ("kept with your place in the line and nowhere else… it never
-joins your profile, and it goes when your place does"). Initials are one tap
+name panel is the feature's one real decision, not a formality. It says where
+the name goes ("the screen in the room, where everybody can read it") and what
+to pick ("whatever you are happy for strangers to see"). Initials are one tap
 and not buried — `TARGET-event-name-panel-*`.
+
+### A product finding: one clause of that promise is not kept
+
+The shipped line ends *"…and it goes when your place does."* **That is not
+true of storage**, and the target does not repeat it.
+
+Leaving the line is `tx.update({status: 'left', leftAt: serverTimestamp()})`.
+**Nothing deletes a `wsfTurnEntries` document anywhere in
+`functions-westayfit/src/index.ts`, and there is no TTL policy on the
+collection**, so `calledName` remains in Firestore after the turn ends. The
+type's own comment — *"stored here and nowhere else in this system, and gone
+when this entry is"* — is accurate about *where*, and conditional on a
+deletion that never happens.
+
+What **is** provable, and what the frames now say:
+
+| Claim | Status |
+| --- | --- |
+| Lives in exactly one field of one document | ✅ `wsfTurnEntries/{entryId}.calledName` |
+| Never joins the profile | ✅ nothing writes it to `wsfMemberProfiles` |
+| Stops being shown the moment the turn ends | ✅ the station re-reads the entry on its next poll |
+| Is deleted when you leave | ❌ **no delete, no TTL** |
+
+So the target reads *"…it stops being shown the moment your turn ends"* — the
+two clauses that hold, plus what actually happens, instead of a retention
+promise the storage layer does not back. A privacy promise a drawing cannot
+back is worse than a smaller one it can.
+
+**This is a finding about shipped copy, not a change I made.** `/event/[goalId]`
+is untouched. Resolving it is either a copy change (say what is true) or a
+retention change (make it true) — a product decision, and neither is in this
+batch's scope.
 
 **Opening a control is not joining a line.** *"Opening either one puts nobody
 in a line. You are in the line only once you confirm the name the screen will

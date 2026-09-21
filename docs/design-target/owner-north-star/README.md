@@ -56,9 +56,22 @@ active tab. Back arrows and a close X top-left, settings or avatar top-right.
 Script lettering ("Stronger Together", "Every Movement Counts") used sparingly
 as a brand flourish.
 
-**Colour.** Bright energetic green `#22C55E`-ish for action and progress, deep
-navy `#0B1F3A`-ish for weight, white and pale grey for ground, with green
-gradients on the primary button.
+**Colour.** Deep navy `#0B1F3A` for weight, cream and pale grey for ground,
+with green gradients on the primary button.
+
+**There are TWO greens, and this README previously flattened them into one.**
+Sampling the board gave a bright `#22C55E`-ish and the note said it was "for
+action and progress" — which quietly replaced the brand's own progress green
+with a colour taken off a JPEG. The product defines both, with different jobs:
+
+| Token | Value | Job |
+| --- | --- | --- |
+| `PROGRESS_GREEN` | **`#91CB7D`** | The brand green. The wordmark's own slash, the move figure, the Living WE's fill, every eyebrow and progress cue. Defined in `src/ui/brandAssets.ts` and asserted by `tests/move-figure.test.ts`. |
+| `ACTION_GREEN` | `#22C55E` | The action colour. Primary buttons and the things a thumb is aimed at. Defined in `src/ui/kit.ts`. |
+
+A sampled value from a board image is never a replacement for a defined token.
+Where the board's green reads brighter than `#91CB7D`, that is the action
+colour on a button, not a redefinition of the progress green.
 
 ## The boards are a VISUAL reference, not a data contract
 
@@ -72,12 +85,22 @@ truthful substitute that keeps the board's energy.
 | `Morgan added 20 · 2h ago` | Names a contributor. Contributions are never attributed publicly. | `+20 squats · 2h ago`. The movement is real; the person is not named. |
 | `12 people contributed today`, `+18`, `23 members already moving together` | Unique-person counts | Member count where the product is authorized to read it; otherwise recent movement as amounts and times. Never a count of distinct people who moved. |
 | `Your update would move the community to 261 / 500` | A predicted shared total that concurrency cannot guarantee | Show your own amount and what the total is *now*. The new total appears after it is confirmed, never before. |
-| `6 Day streak — Keep going!` | Public streak pressure | Private consistency, visible only to the member, with no nudge and no comparison. |
+| `6 Day streak — Keep going!` | Public streak pressure — **and** the underlying data is not reachable by any client | **Nothing, today.** Private dated consistency is a *documented seam*, not an authorized capability: `wsfContributions` and `wsfGoalMemberTotals` are returned by no callable and `firestore.rules` denies them. See `review/page-04-progress/PRIVATE-HISTORY-CONTRACT.md`. Drawing it as a substitute would be drawing a target that needs backend work nobody has authorized. |
 | `A happier, healthier Smyrna` | Health and happiness claim | Community and movement language. `Moving together this week` is on the same board and is true. |
 | `Friends` tab | Friends is not a destination in this product | The agreed IA: **Home · Community · MOVE · Progress · You** |
 | `Workouts` tab | WSF does not own coaching or workout content | MOVE — recording what you did, which is what the product actually does. |
 
-Where a board element is not listed above, take it as drawn.
+Where a board element is not listed above, take it as **visual** direction —
+composition, energy, hierarchy, weight — and check it against the current
+product truth before drawing it.
+
+**"Take it as drawn" is not a licence.** An earlier revision of this line said
+exactly that, which would let any unlisted board element override the Strategic
+Master or a newer owner decision simply by having been drawn once. The boards
+are a visual reference, as the heading above says; they are not the most recent
+word on scope, data or permissions. Where a board element and a newer decision
+disagree, the newer decision wins, and where a board element needs data the
+product cannot reach, it is a seam to record rather than a screen to draw.
 
 ## Where this sits in the order
 

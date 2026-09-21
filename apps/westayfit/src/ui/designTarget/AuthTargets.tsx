@@ -119,7 +119,18 @@ function Field({
 }
 
 /** A form row. The target draws the field, never a live input. */
-function FormField({ label, value, hint }: { label: string; value?: string; hint?: string }) {
+function FormField({
+  label,
+  value,
+  hint,
+  rule,
+}: {
+  label: string;
+  value?: string;
+  hint?: string;
+  /** A requirement the product enforces, said before it is enforced. */
+  rule?: string;
+}) {
   return (
     <View style={s.formField}>
       <Text style={s.formLabel}>{label}</Text>
@@ -127,6 +138,7 @@ function FormField({ label, value, hint }: { label: string; value?: string; hint
         <Text style={value ? s.inputValue : s.inputPlaceholder}>{value ?? ''}</Text>
         {hint ? <Text style={s.inputHint}>{hint}</Text> : null}
       </View>
+      {rule ? <Text style={s.formRule}>{rule}</Text> : null}
     </View>
   );
 }
@@ -240,23 +252,60 @@ export function SignUpTarget() {
     >
       <FormField label="Display name" value="Devin" />
       <FormField label="Email" value="devin@example.com" />
-      <FormField label="Password" value="••••••••••" hint="Show" />
+      {/*
+        THE RULE IS STATED WHERE IT IS OBEYED, not discovered at submit.
+        `canSubmit` requires `password.length >= 8` and the shipped field
+        carries "At least 8 characters" as a hint. The earlier frame drew a
+        password field with no rule at all, which made the requirement a
+        surprise at the moment somebody is already committed.
+      */}
+      <FormField label="Password" value="••••••••••" hint="Show" rule="At least 8 characters" />
       <Primary label="Create account" />
     </Screen>
   );
 }
 
-/* ── 3 · verify email — action required ─────────────────────────────────── */
+/* ── 3 · verify email — all five send outcomes ──────────────────────────── */
 
-export function VerifyEmailTarget() {
+/**
+ * THE PRODUCT DISTINGUISHES FIVE OUTCOMES AND SO DOES THE TARGET.
+ *
+ * `INTRO` in app/verify-email.tsx keys the intro sentence off
+ * `VerificationSendOutcome`, and the earlier frame drew only "We sent…" — an
+ * outcome the screen may not have. Four of the five say something materially
+ * different about what to do next, and one of them says nothing can be done
+ * at all.
+ *
+ * `unconfigured` is the one that matters most and the one a drawing is most
+ * likely to omit: on a build with email switched off, nobody can finish
+ * verifying, and the screen says so plainly rather than inviting somebody to
+ * keep tapping Resend. The shipped copy is a full second sentence and the
+ * target carries it whole.
+ */
+function VerifyScreen({
+  id,
+  step,
+  eyebrow,
+  intro,
+  notice,
+  destination,
+}: {
+  id: string;
+  step?: string;
+  eyebrow?: string;
+  intro: string;
+  notice?: string;
+  destination?: { label: string; line: string; note: string };
+}) {
   return (
     <Screen
-      id="verify"
+      id={id}
       tone="action"
-      step="Step 2 of 3"
-      eyebrow="One thing to do"
+      step={step ?? 'Step 2 of 3'}
+      eyebrow={eyebrow ?? 'One thing to do'}
       title="Check your email."
-      intro="We sent a verification link to devin@example.com. Confirm it, then tap I have verified."
+      intro={intro}
+      destination={destination}
       foot={
         <>
           <Text style={s.footNote}>Signed in as devin@example.com</Text>
@@ -264,11 +313,11 @@ export function VerifyEmailTarget() {
         </>
       }
     >
-      {/*
-        THE INSTRUCTION IS THE CONTENT. There is no form here, so the sheet
-        leads with the action and says what to do when it does not arrive --
-        which is the actual support question this screen gets.
-      */}
+      {notice ? (
+        <View style={s.noticePanel}>
+          <Text style={s.noticeText}>{notice}</Text>
+        </View>
+      ) : null}
       <Primary label="I have verified" />
       <Secondary label="Resend verification email" />
       <View style={s.help}>
@@ -279,6 +328,86 @@ export function VerifyEmailTarget() {
         </Text>
       </View>
     </Screen>
+  );
+}
+
+/** `sent` — the ordinary outcome. */
+export function VerifyEmailTarget() {
+  return (
+    <VerifyScreen
+      id="verify"
+      intro="We sent a verification link to devin@example.com. Confirm it, then tap I have verified."
+    />
+  );
+}
+
+/** `sending` — in flight. The screen does not yet claim anything arrived. */
+export function VerifySendingTarget() {
+  return (
+    <VerifyScreen
+      id="verify-sending"
+      intro="Sending a verification link to devin@example.com. Confirm it, then tap I have verified."
+    />
+  );
+}
+
+/** `already-verified` — nothing to wait for; the way on is the only control. */
+export function VerifyAlreadyTarget() {
+  return (
+    <VerifyScreen
+      id="verify-already"
+      eyebrow="Nothing to wait for"
+      intro="devin@example.com is already verified. Tap I have verified to continue."
+    />
+  );
+}
+
+/** `unconfigured` — the build cannot send at all, and says so. */
+export function VerifyUnconfiguredTarget() {
+  return (
+    <VerifyScreen
+      id="verify-unconfigured"
+      eyebrow="Not possible here"
+      intro="Email isn't switched on for this test build, so no verification link can be sent to devin@example.com yet."
+      notice="Email isn't switched on for this test build yet, so no message was sent. Nobody can finish verifying a new account here until it is switched on. Sign out to use an account that is already verified."
+    />
+  );
+}
+
+/** `failed` — the send failed, and Resend is the named way out. */
+export function VerifyFailedTarget() {
+  return (
+    <VerifyScreen
+      id="verify-failed"
+      eyebrow="Didn’t send"
+      intro="We could not send a verification link to devin@example.com. Tap Resend to try again."
+    />
+  );
+}
+
+/**
+ * THE DESTINATION SURVIVES THIS GATE TOO — debt 4.
+ *
+ * `nextRouteAfterAuth` is read at signup, at verify-email AND at
+ * profile-setup, so a pending destination outlives all three. Batch A drew
+ * only the sign-in hop, which left the same waiting thing unexplained on two
+ * further screens where somebody is most likely to wonder whether it is lost.
+ *
+ * It still names only the KIND of thing waiting: a pending join code is
+ * opaque and a private community's name is not something a half-authorized
+ * account is entitled to read.
+ */
+export function VerifyCarryingTarget() {
+  return (
+    <VerifyScreen
+      id="verify-carrying"
+      intro="We sent a verification link to devin@example.com. Confirm it, then tap I have verified."
+      destination={{
+        label: 'Still waiting for you',
+        line: 'An invitation to a community',
+        note: 'It survives this step and the next one. You will land on it, not on home.',
+      }}
+    />
   );
 }
 
@@ -311,6 +440,56 @@ export function ResetPasswordTarget() {
   );
 }
 
+/* ── 4b · reset password — the two outcomes it actually has ─────────────── */
+
+/**
+ * The shipped screen has two states past submit, and they are not the same
+ * news. `sent` keeps the enumeration-safe sentence and disables the field;
+ * `unconfigured` says the build cannot send at all, so waiting for an email
+ * is waiting for nothing.
+ */
+export function ResetSentTarget() {
+  return (
+    <Screen
+      id="reset-sent"
+      tone="ordinary"
+      title="Set a new password."
+      intro="Enter your email and we will send a link to set a new one."
+      foot={<Secondary label="Back to sign in" />}
+    >
+      <FormField label="Email" value="devin@example.com" />
+      <View style={s.noticePanel}>
+        <Text style={s.noticeText}>
+          If an account exists for that email, a reset link is on its way. Check your inbox and
+          spam.
+        </Text>
+      </View>
+      <Secondary label="Back to sign in" />
+    </Screen>
+  );
+}
+
+export function ResetUnconfiguredTarget() {
+  return (
+    <Screen
+      id="reset-unconfigured"
+      tone="error"
+      title="Set a new password."
+      intro="Enter your email and we will send a link to set a new one."
+      foot={<Secondary label="Back to sign in" />}
+    >
+      <FormField label="Email" value="devin@example.com" />
+      <View style={s.errorPanel}>
+        <Text style={s.errorLabel}>Nothing was sent</Text>
+        <Text style={s.errorBody}>
+          Email isn't switched on for this test build yet, so no reset link was sent.
+        </Text>
+      </View>
+      <Primary label="Send reset link" disabled />
+    </Screen>
+  );
+}
+
 /* ── 5 · profile setup — action required ────────────────────────────────── */
 
 export function ProfileSetupTarget() {
@@ -330,15 +509,28 @@ export function ProfileSetupTarget() {
       }
     >
       <FormField label="Display name" value="Devin" />
+      {/*
+        CONSENT IS DRAWN UNCHECKED, AND THAT IS THE POINT.
+
+        `acceptedTerms` starts false and `canSubmit` requires it, so the
+        shipped screen cannot be submitted until a person ticks this
+        themselves. The earlier frame drew the box already ticked — a picture
+        of consent as a thing the product had arranged rather than a thing
+        somebody gave, which is the one defect in this batch that was a truth
+        problem rather than a coverage gap.
+
+        The sentence and both policy links are the shipped ones, and the
+        primary is drawn disabled because at this moment it is.
+      */}
       <View style={s.terms}>
-        <View style={s.checkbox}>
-          <Text style={s.checkmark}>✓</Text>
-        </View>
+        <View style={s.checkboxEmpty} />
         <Text style={s.termsText}>
-          I accept the current terms. Your display name is what your community sees.
+          By saving I confirm I am 13 or older and accept the{' '}
+          <Text style={s.termsLink}>Terms of Service</Text> and{' '}
+          <Text style={s.termsLink}>Privacy Policy</Text>.
         </Text>
       </View>
-      <Primary label="Save profile" />
+      <Primary label="Save profile" disabled />
     </Screen>
   );
 }
@@ -541,6 +733,8 @@ const s = StyleSheet.create({
   inputValue: { color: NAVY, fontSize: 16, fontWeight: '600' },
   inputPlaceholder: { color: INK_QUIET, fontSize: 16 },
   inputHint: { color: ACTION_GREEN_DEEP, fontSize: 13, fontWeight: '800' },
+  /** A requirement the product enforces, said before it is enforced. */
+  formRule: { color: INK_QUIET, fontSize: 11.5, lineHeight: 16 },
 
   primary: {
     backgroundColor: ACTION_GREEN,
@@ -566,6 +760,17 @@ const s = StyleSheet.create({
     gap: 4,
     ...elevation.card,
   },
+  /* A true statement about what did or did not happen — neither an error nor
+     an invitation to keep tapping. */
+  noticePanel: {
+    backgroundColor: '#EEF2F6',
+    borderRadius: 14,
+    borderLeftWidth: 4,
+    borderLeftColor: INK_QUIET,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  noticeText: { color: NAVY, fontSize: 13, lineHeight: 19 },
   helpTitle: { color: NAVY, fontSize: 14, fontWeight: '900' },
   helpBody: { color: INK_QUIET, fontSize: 12.5, lineHeight: 18 },
 
@@ -579,7 +784,17 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   checkmark: { color: '#FFFFFF', fontSize: 13, lineHeight: 16, fontWeight: '900' },
+  /** The gate before anybody has given it: an empty box, not a ticked one. */
+  checkboxEmpty: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#B9C4CF',
+    backgroundColor: SURFACE,
+  },
   termsText: { flex: 1, color: INK_QUIET, fontSize: 12.5, lineHeight: 18 },
+  termsLink: { color: ACTION_GREEN_DEEP, fontWeight: '800', textDecorationLine: 'underline' },
 
   errorPanel: {
     backgroundColor: '#FDECEC',
@@ -611,3 +826,76 @@ const s = StyleSheet.create({
   },
   forkText: { color: NAVY, fontSize: 14, fontWeight: '800' },
 });
+
+/* ── 9 · the profile gate, still carrying ───────────────────────────────── */
+
+/**
+ * The last of the three gates `nextRouteAfterAuth` is read at. Same rule as
+ * the verify frame: the KIND of thing waiting, never its name.
+ */
+export function ProfileCarryingTarget() {
+  return (
+    <Screen
+      id="profile-carrying"
+      tone="action"
+      step="Step 3 of 3"
+      eyebrow="Last step"
+      title="What should we call you?"
+      intro="One step before you can start or join a community."
+      destination={{
+        label: 'Still waiting for you',
+        line: 'An invitation to a community',
+        note: 'This is the last step before it opens.',
+      }}
+      foot={
+        <>
+          <Text style={s.footNote}>Signed in as devin@example.com</Text>
+          <Secondary label="Sign out" />
+        </>
+      }
+    >
+      <FormField label="Display name" value="Devin" />
+      <View style={s.terms}>
+        <View style={s.checkboxEmpty} />
+        <Text style={s.termsText}>
+          By saving I confirm I am 13 or older and accept the{' '}
+          <Text style={s.termsLink}>Terms of Service</Text> and{' '}
+          <Text style={s.termsLink}>Privacy Policy</Text>.
+        </Text>
+      </View>
+      <Primary label="Save profile" disabled />
+    </Screen>
+  );
+}
+
+/* ── 10 · returning to a kiosk ──────────────────────────────────────────── */
+
+/**
+ * THE THIRD DESTINATION KIND, which Batch A never drew.
+ *
+ * `nextRouteAfterAuth` resolves three: a pending join code, an event return
+ * and a KIOSK return (`readKioskReturnGoal` -> `kioskContributeRoute`). The
+ * kiosk one is the one where the wording matters most, because the person is
+ * standing at a shared device and the thing they most need to know is that
+ * signing in here does not leave them signed in on it.
+ */
+export function ReturnToKioskTarget() {
+  return (
+    <Screen
+      id="return-kiosk"
+      tone="returning"
+      title="Nearly there."
+      intro="Sign in and we will take you straight back to the screen you started at."
+      destination={{
+        label: 'Waiting for you',
+        line: 'The screen you started at',
+        note: 'You will land back on it to enter your count. Finishing signs you out of this device.',
+      }}
+      foot={<Secondary label="New here? Create an account" />}
+    >
+      <FormField label="Email" value="devin@example.com" />
+      <FormField label="Password" value="••••••••••" hint="Show" />
+      <Primary label="Sign in and continue" />
+    </Screen>
+  );
+}

@@ -91,28 +91,43 @@ WSF_PLAYWRIGHT_CHROMIUM=... WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
 `EXPO_PUBLIC_WSF_USE_EMULATORS`, and `scripts/westayfit/build-staging.sh`
 refuses a build that sets it. No deployed artifact can serve this route.
 
-## Parked — target only, and not final as drawn
+## The four owed corrections are closed — 2026-09-21
 
-Batch A is **not implemented and not approved**. Four corrections are owed
-before it is revisited, each of them a place where the drawing is ahead of the
-product:
+Batch A is still **target only and not approved**. But it is no longer "not
+final as drawn": every debt recorded here has been paid, and the frames were
+recaptured. A batch carrying known defects cannot be counted toward a complete
+atlas, and this one was, which is why it was reopened.
 
-1. **Sign up must keep the real 8-character password requirement visible.** The
-   current frame shows a password field with no rule stated, which makes the
-   requirement a surprise at submit time.
-2. **Verify and reset need the real send states.** The product distinguishes
-   `sending`, `sent`, `already-verified`, `unconfigured` and `failed`, and the
-   intro copy changes with each — `INTRO` in `app/verify-email.tsx`. The frame
-   draws only "We sent…", which assumes an outcome the screen may not have. The
-   `unconfigured` case matters most: on a build without email switched on,
-   nobody can finish verifying, and the screen says so.
-3. **Profile setup must preserve the real acceptance gate** — Terms, Privacy
-   and 13+ — and must **not** depict it pre-checked. The current frame draws a
-   ticked box, which shows consent as already given. That is the one defect
-   here that is a truth problem rather than a coverage gap.
-4. **The returns must stay understandable through the verify and profile
-   gates**, without exposing a private community name before authorization.
-   The frames cover the sign-in hop only; the same pending destination survives
-   two more gates and is unexplained on both.
+| Debt | Closed by |
+| --- | --- |
+| 1 · sign-up must keep the real 8-character rule visible | `TARGET-signup-*` now carries "At least 8 characters" under the field, as `FieldHint` does. `canSubmit` requires `password.length >= 8`, so the rule is stated where it is enforced rather than discovered at submit. |
+| 2 · verify and reset need the real send states | All five `VerificationSendOutcome` values are drawn — `verify-sending`, `verify` (sent), `verify-already`, `verify-unconfigured`, `verify-failed` — each with the shipped `INTRO` sentence. Reset gains `reset-sent` and `reset-unconfigured`. |
+| 3 · consent must not be depicted pre-checked | `TARGET-profile-*` draws the box **empty**, the shipped sentence in full ("By saving I confirm I am 13 or older and accept the Terms of Service and Privacy Policy"), both policy links, and the primary **disabled** — because with `acceptedTerms` false, it is. |
+| 4 · the destination must survive the later gates | `verify-carrying` and `profile-carrying` draw it. `nextRouteAfterAuth` is read at signup, verify-email **and** profile-setup, so a pending destination outlives all three gates; the frames previously covered only the sign-in hop. |
 
-Nothing should be built from these frames until those are fixed.
+### And a fifth gap, which nobody had recorded
+
+`nextRouteAfterAuth` resolves **three** destination kinds — a pending join
+code, an event return, and a **kiosk** return (`readKioskReturnGoal` →
+`kioskContributeRoute`). Batch A drew the first two. `TARGET-return-kiosk-*`
+draws the third, and it is the one where the wording matters most: the person
+is standing at a shared device, and what they most need to know is that
+finishing signs them out of it.
+
+### What the destination frames still refuse
+
+They name only the **kind** of thing waiting, never its name. A pending join
+code is opaque, and a private community's name is not something a
+half-authorized account is entitled to read. If an implementation can resolve
+the name for a destination the member is already entitled to see, it may add
+it; the target does not promise what it cannot read.
+
+## Coverage now
+
+- **17 states**, up from 8.
+- **Three phone classes** — 390×844, 390×640 and **430×932**, which this batch
+  previously left as the atlas's open device gap.
+- `-end` frames wherever a state overflows the phone.
+
+Still target only. Nothing here is approved and nothing should be built from
+these frames without a separate authorization.

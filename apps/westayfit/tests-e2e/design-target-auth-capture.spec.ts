@@ -26,28 +26,37 @@ test.skip(
 const SCREENS = [
   'signin',
   'signup',
+  'verify-sending',
   'verify',
+  'verify-already',
+  'verify-unconfigured',
+  'verify-failed',
   'reset',
+  'reset-sent',
+  'reset-unconfigured',
   'profile',
   'error',
   'return-join',
   'return-event',
+  'return-kiosk',
+  'verify-carrying',
+  'profile-carrying',
 ] as const;
 
-const CLASSES = ['390x844', '390x640'] as const;
+const CLASSES = ['390x844', '390x640', '430x932'] as const;
 
-test('Atlas Batch A renders at both phone classes, plus its contact sheet', async ({
+test('Atlas Batch A renders at three phone classes, plus its contact sheet', async ({
   browser,
 }: {
   browser: Browser;
 }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(600_000);
   const ctx = await browser.newContext({
     // TALL ENOUGH TO PAINT THE WHOLE CONTACT SHEET. At 1200 the second row
     // of frames was still being laid out when the shutter fired and came back
     // clipped -- the element screenshot captures what is painted, not what
     // will be.
-    viewport: { width: 1700, height: 2400 },
+    viewport: { width: 1800, height: 5200 },
     deviceScaleFactor: 2,
   });
   try {
@@ -63,9 +72,31 @@ test('Atlas Batch A renders at both phone classes, plus its contact sheet', asyn
 
     for (const c of CLASSES) {
       for (const id of SCREENS) {
-        await page
-          .getByTestId(`wsf-frame-auth-${id}-${c}`)
-          .screenshot({ path: path.join(OUT, `TARGET-${id}-${c}.png`) });
+        const frame = page.getByTestId(`wsf-frame-auth-${id}-${c}`);
+        await frame.screenshot({ path: path.join(OUT, `TARGET-${id}-${c}.png`) });
+
+        // Where a state runs past the frame there is a real end to show:
+        // same element, same size, different scroll offset.
+        const scrolled = await frame.evaluate((el: Element) => {
+          let moved = false;
+          Array.from(el.querySelectorAll('*')).forEach((n) => {
+            const node = n as HTMLElement;
+            if (node.scrollHeight > node.clientHeight + 4) {
+              node.scrollTop = node.scrollHeight;
+              moved = true;
+            }
+          });
+          return moved;
+        });
+        if (scrolled) {
+          await page.waitForTimeout(120);
+          await frame.screenshot({ path: path.join(OUT, `TARGET-${id}-${c}-end.png`) });
+          await frame.evaluate((el: Element) => {
+            Array.from(el.querySelectorAll('*')).forEach((n) => {
+              (n as HTMLElement).scrollTop = 0;
+            });
+          });
+        }
       }
     }
   } finally {

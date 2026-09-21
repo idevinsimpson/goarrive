@@ -52,8 +52,13 @@ import {
  *   feature's one real decision. The shipped copy says where it goes ("the
  *   screen in the room, where everybody can read it"), what to pick ("whatever
  *   you are happy for strangers to see"), and what becomes of it ("kept with
- *   your place in the line and nowhere else… it goes when your place does").
- *   Initials are one tap and not buried.
+ *   your place in the line and nowhere else"). Initials are one tap and not
+ *   buried.
+ *
+ *   BUT THE RETENTION CLAUSE IS NOT DRAWN, because it is not true. See the
+ *   note on the name panel: nothing deletes a turn entry and there is no TTL,
+ *   so the name is not "gone when your place is". The target says only what
+ *   the storage layer backs.
  *
  * OPENING A CONTROL IS NOT JOINING A LINE.
  *   "Opening either one puts nobody in a line. You are in the line only once
@@ -402,9 +407,29 @@ function NamePanel({ working, error }: { working?: boolean; error?: string }) {
           <Text style={s.pillText}>Initials only (S.H.)</Text>
         </View>
       </View>
+      {/*
+        THE PROVEN SCOPE, AND ONLY THE PROVEN SCOPE.
+
+        The shipped line reads "…and it goes when your place does." That last
+        clause is not true of storage: leaving is
+        `tx.update({status: 'left', leftAt})` — nothing deletes a
+        `wsfTurnEntries` document and there is no TTL policy on the
+        collection, so `calledName` remains in Firestore after the turn ends.
+
+        What IS provable: it lives in exactly one field of one document
+        (`wsfTurnEntries/{entryId}.calledName` — "stored here and nowhere else
+        in this system"), nothing writes it to `wsfMemberProfiles` or anywhere
+        a later screen reads, and it stops being shown the instant the turn
+        ends, because the station re-reads the entry on its next poll.
+
+        So the target promises the two clauses that hold and replaces the
+        third with what actually happens. A privacy promise a drawing cannot
+        back is worse than a smaller one it can. The shipped copy is flagged
+        in this batch's README as a product finding, not changed here.
+      */}
       <Text style={s.underNote}>
         It is kept with your place in the line and nowhere else. It never joins your profile, and
-        it goes when your place does.
+        it stops being shown the moment your turn ends.
       </Text>
       {error ? <Text style={s.fieldError}>{error}</Text> : null}
       <Primary label={working ? 'Getting in line…' : 'Get in line'} working={working} />
@@ -738,7 +763,7 @@ export function QueueWaitingTarget() {
             <Card title="While you wait">
               <Text style={s.cardBody}>
                 Your name is on the screen in the room with your place in the line, and nowhere
-                else.
+                else. It comes off the moment your turn ends.
               </Text>
             </Card>
             <Secondary label="Use my phone instead" />
