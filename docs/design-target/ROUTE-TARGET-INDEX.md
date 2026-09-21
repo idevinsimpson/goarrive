@@ -81,7 +81,7 @@ drawings. Each batch is posted with its PNG paths and a contact sheet.
 
 | Batch | What it covers | State |
 | --- | --- | --- |
-| **A** | Identity and onboarding: sign in · sign up · verify email · reset password · profile setup · auth error · return-to-event · return-to-join | not started |
+| **A** | Identity and onboarding: sign in · sign up · verify email · reset password · profile setup · auth error · return-to-event · return-to-join | **posted for review** — `review/batch-a-identity/`, 16 TARGET frames + contact sheet + 16 BEFORE |
 | **B** | Community, join and create: community destination · switcher · join invitation · join gates, success and refusal · start community · goal basics · one and several movement selection · goal review and opened success | not started |
 | **C** | Member secondary destinations: Progress · You · community challenge · no-goal, empty, history and private-consistency variants | not started |
 | **D** | LIVE personal-phone flow: event landing · signed out · member and not-member · activity selection · device choice · event completion · queue join, wait, assigned, ready, leave, rejoin, unavailable | not started |
