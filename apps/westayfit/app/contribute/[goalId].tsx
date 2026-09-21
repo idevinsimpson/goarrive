@@ -940,7 +940,7 @@ export default function ContributeToGoal() {
   */
   const heroWeWidth = Math.max(
     96,
-    Math.min(windowHeight < 700 ? 148 : 280, windowWidth - 2 * 20 - 2 * 22),
+    Math.min(windowHeight < 700 ? 118 : 280, windowWidth - 2 * 20 - 2 * 22),
   );
   /*
     THE ANCHOR AT 195px. A fixed 88px mark beside a text column overflowed the
@@ -950,14 +950,27 @@ export default function ContributeToGoal() {
     the text gets the whole width instead of a sliver.
   */
   const anchorStacked = windowWidth < 260;
+  /*
+    THE ANCHOR GIVES ON A SHORT PHONE. Captured honestly from the top, a
+    390x640 still had the primary action under the tab bar. The anchor is
+    CONTEXT -- who and what this counts toward -- so it is what yields: a
+    smaller mark, tighter padding, and the freshness line dropped. The
+    community, the goal, the total, the track and the status line all stay,
+    because those are the context itself rather than its trim.
+  */
+  const anchorShort = windowHeight < 700;
   const contextWeWidth = Math.max(
     56,
-    Math.min(88, windowWidth - 2 * 20 - 2 * 16 - (anchorStacked ? 0 : 130)),
+    Math.min(anchorShort ? 66 : 88, windowWidth - 2 * 20 - 2 * 16 - (anchorStacked ? 0 : 130)),
   );
 
-  const renderChrome = (showBack: boolean) => (
+  const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light') => (
     <View style={styles.chrome}>
-      <WsfWordmark variant="navy" height={22} testID="wsf-contribute-wordmark" />
+      <WsfWordmark
+        variant={tone === 'dark' ? 'white' : 'navy'}
+        height={22}
+        testID="wsf-contribute-wordmark"
+      />
       {/*
         ON A KIOSK THERE IS NO "BACK". The link goes to a community page that
         belongs to the account currently signed in, and on a shared device
@@ -979,7 +992,7 @@ export default function ContributeToGoal() {
         <ButtonLink
           href={backHref}
           style={styles.chromeLink}
-          textStyle={styles.chromeLinkText}
+          textStyle={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}
           testID="wsf-contribute-back"
           label={backLabel}
         />
@@ -1044,10 +1057,16 @@ export default function ContributeToGoal() {
     ) : null;
 
   // The community/goal labels, shown together only when verified.
-  const screen = (children: React.ReactNode, testID?: string) => (
+  /**
+   * `tone: 'dark'` paints the WHOLE page navy rather than putting a navy card
+   * on cream. The confirmed receipt is the one screen that earns it: a
+   * celebration inside a card is a card, and the approved target has the
+   * moment owning the screen.
+   */
+  const screen = (children: React.ReactNode, testID?: string, tone: 'light' | 'dark' = 'light') => (
     <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.container}
+      style={[styles.scroll, tone === 'dark' ? styles.scrollDark : null]}
+      contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null]}
       keyboardShouldPersistTaps="handled"
       testID={testID}
     >
@@ -1159,7 +1178,11 @@ export default function ContributeToGoal() {
     if (!p) return null;
     return (
     <View
-      style={[styles.anchor, anchorStacked ? styles.anchorStacked : null]}
+      style={[
+        styles.anchor,
+        anchorShort ? styles.anchorShort : null,
+        anchorStacked ? styles.anchorStacked : null,
+      ]}
       testID="wsf-contribute-context"
     >
       <View pointerEvents="none" style={styles.anchorGlow} />
@@ -1206,7 +1229,7 @@ export default function ContributeToGoal() {
           honesty Community Home and the public display carry. No refresh
           control: nothing here is waiting to be asked.
         */}
-        {pulseAt ? (
+        {pulseAt && !anchorShort ? (
           <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
             {`Confirmed ${formatClock(pulseAt)}`}
           </Text>
@@ -1243,9 +1266,11 @@ export default function ContributeToGoal() {
       </View>
       {/* The shipped sentence, unchanged and still addressable. */}
       {ownCreditLine(anchorOwnCredit, unitKnown)}
-      <Text style={styles.yoursNote}>
-        Private to you. The community total above is what everyone sees.
-      </Text>
+      {windowHeight < 700 ? null : (
+        <Text style={styles.yoursNote}>
+          Private to you. The community total above is what everyone sees.
+        </Text>
+      )}
     </View>
   );
 
@@ -1257,9 +1282,9 @@ export default function ContributeToGoal() {
     const hasShared = variant !== 'ownOnly';
     return screen(
       <>
-        {renderChrome(false)}
+        {renderChrome(false, 'dark')}
         <View
-          style={styles.hero}
+          style={[styles.receipt, windowHeight < 700 ? styles.receiptShort : null]}
           testID="wsf-contribute-receipt"
           // D-2. The outcome replaces the form in place rather than by
           // navigating, so the receipt has to announce itself.
@@ -1267,10 +1292,23 @@ export default function ContributeToGoal() {
           {...({ dataSet: { variant } } as Record<string, unknown>)}
         >
           <Text style={styles.heroEyebrow}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
-          <Text style={styles.heroHeadline} testID="wsf-contribute-result-headline" {...HEADING_1}>
+          {/*
+            THE AMOUNT, AT THE SIZE OF THE MOMENT. The exact number this member
+            just recorded -- theirs, not the community's -- is what the screen
+            opens on. `addedCount` is the server's own figure from the receipt,
+            so this is a bigger rendering of a fact the screen already carried,
+            not a new claim.
+          */}
+          <Text
+            style={[styles.receiptAmount, windowHeight < 700 ? styles.receiptAmountShort : null]}
+            testID="wsf-contribute-result-amount"
+          >
+            {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
+          </Text>
+          <Text style={styles.receiptHeadline} testID="wsf-contribute-result-headline" {...HEADING_1}>
             {copy.headline}
           </Text>
-          <Text style={styles.heroSubline} testID="wsf-contribute-result-subline">
+          <Text style={styles.receiptSubline} testID="wsf-contribute-result-subline">
             {copy.subline}
           </Text>
           {hasShared ? (
@@ -1312,7 +1350,9 @@ export default function ContributeToGoal() {
             </>
           ) : null}
         </View>
-        {ownCreditLine(r.ownCredit, hasShared ? r.unit : (r.unit ?? unitKnown))}
+        <Text style={styles.receiptOwn} testID="wsf-contribute-own-credit">
+          {`Your total on this goal: ${effortLabel(r.ownCredit, hasShared ? r.unit : (r.unit ?? unitKnown))}`}
+        </Text>
         {/* The receipt carries its own numbers; the anchor would repeat them. */}
         <View style={styles.actions}>
           {kiosk ? (
@@ -1346,9 +1386,9 @@ export default function ContributeToGoal() {
             ) : null}
             <ButtonLink
               href={hasShared ? backHref : '/'}
-              style={canAddMore(repeatPolicy, r) ? styles.secondaryButton : styles.primaryButton}
+              style={canAddMore(repeatPolicy, r) ? styles.ghostDark : styles.primaryButton}
               textStyle={
-                canAddMore(repeatPolicy, r) ? styles.secondaryButtonText : styles.primaryButtonText
+                canAddMore(repeatPolicy, r) ? styles.ghostDarkText : styles.primaryButtonText
               }
               testID="wsf-contribute-back"
               label={hasShared ? backLabel : 'Back to home'}
@@ -1358,7 +1398,8 @@ export default function ContributeToGoal() {
         </View>
         {renderTestNote()}
       </>,
-      'wsf-contribute-screen'
+      'wsf-contribute-screen',
+      'dark'
     );
   }
 
@@ -1773,7 +1814,7 @@ export default function ContributeToGoal() {
           );
           const input = (
             <TextInput
-              style={styles.entryInput}
+              style={[styles.entryInput, windowHeight < 700 ? styles.entryInputShort : null]}
               value={entry}
               onChangeText={(v) => {
                 setEntry(v);
@@ -1810,7 +1851,14 @@ export default function ContributeToGoal() {
             </View>
           );
         })()}
-        <View style={styles.quickRow}>
+        {/*
+          SHORT PHONE. The quick chips are convenience the stepper already
+          covers, so they are what the rhythm takes first. Captured honestly
+          from the top of the page, a 390x640 had "Review my contribution"
+          below the fold with them in; it does not without. Never the number,
+          the context or the action.
+        */}
+        <View style={[styles.quickRow, windowHeight < 700 ? styles.hidden : null]}>
           {[5, 10, 25].map((n) => (
             <Pressable
               key={n}
@@ -1878,6 +1926,8 @@ const styles = StyleSheet.create({
   kioskCountdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
 
   scroll: { flex: 1, backgroundColor: CREAM },
+  scrollDark: { backgroundColor: NAVY },
+  containerDark: { backgroundColor: NAVY },
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
@@ -1925,6 +1975,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 200,
     backgroundColor: 'rgba(145,203,125,0.09)',
   },
+  anchorShort: { paddingVertical: 11, gap: 11 },
   anchorStacked: { flexDirection: 'column', alignItems: 'stretch', gap: 10 },
   anchorWe: { alignItems: 'center', justifyContent: 'center' },
   /* minWidth 0 lets the column shrink inside the row; without it a long goal
@@ -1976,6 +2027,7 @@ const styles = StyleSheet.create({
   yoursNote: { color: wsfTheme.colors.textMuted, fontSize: 11.5, lineHeight: 16 },
 
   closedGoalTitle: { color: CREAM, fontSize: 20, fontWeight: '900', lineHeight: 26, textAlign: 'center' },
+  hidden: { display: 'none' },
   countedIn: { color: wsfTheme.colors.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '600' },
   countedInUnit: { color: '#15803D', fontWeight: '900' },
 
@@ -2079,6 +2131,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     backgroundColor: CREAM,
   },
+  /* The number stays large enough to read at a glance; the BOX around it is
+     what gives on a short phone, which is the last 30 points the primary
+     action needed to clear the tab bar at 390x640. */
+  entryInputShort: { minHeight: 56, fontSize: 34 },
   stepButton: {
     width: 56,
     height: 56,
@@ -2160,6 +2216,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  chromeLinkTextDark: { color: CREAM },
+
+  /* ---- the confirmed receipt: the whole page is the moment --------------- */
+  receipt: { alignItems: 'center', gap: 6, paddingTop: 6 },
+  /* The short phone gives rhythm, never the moment: the mark and the numbers
+     stay, the air between them goes, so the way onward clears the tab bar. */
+  receiptShort: { gap: 2, paddingTop: 0 },
+  receiptAmount: {
+    color: CREAM,
+    fontSize: 76,
+    lineHeight: 82,
+    fontWeight: '900',
+    letterSpacing: -3,
+    textAlign: 'center',
+  },
+  receiptAmountShort: { fontSize: 52, lineHeight: 56, letterSpacing: -2 },
+  receiptHeadline: {
+    color: CREAM,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  receiptSubline: {
+    color: PROGRESS_GREEN,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  receiptOwn: {
+    color: HERO_MUTED,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  ghostDark: {
+    alignSelf: 'stretch',
+    borderRadius: 16,
+    minHeight: 48,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(247,245,240,0.22)',
+  },
+  ghostDarkText: { color: CREAM, fontSize: 15, fontWeight: '800', textAlign: 'center' },
   tertiaryButton: { alignSelf: 'center', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   tertiaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
   testNote: { color: wsfTheme.colors.textMuted, fontSize: 11, textAlign: 'center', letterSpacing: 1, textTransform: 'uppercase' },
