@@ -11,15 +11,20 @@ import { getFirebaseFunctions } from '../../src/firebase';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import {
   ACTION_GREEN,
+  CREAM,
   HAIRLINE,
   INK_QUIET,
   NAVY,
   ON_ACTION,
+  ON_NAVY,
+  ON_NAVY_MUTED,
+  PROGRESS_GREEN,
   SURFACE,
+  display,
   elevation,
   kit,
 } from '../../src/ui/kit';
-import { totalOfTargetLabel } from '../../src/ui/progressFormat';
+import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -58,7 +63,14 @@ type MyCommunityItem = { groupId: string; displayName: string };
 
 type Resolution =
   | { kind: 'working' }
-  | { kind: 'choose'; groupId: string; goals: ListedGoal[] }
+  | { kind: 'choose'; groupId: string; community: string | null; goals: ListedGoal[] }
+  /**
+   * NOTHING OPEN. This used to redirect to the community, which is a truthful
+   * destination but makes MOVE look like a button that did nothing. The member
+   * pressed the one action in the chrome; they are owed a sentence about why
+   * it did not take them anywhere, and a way on.
+   */
+  | { kind: 'noGoal'; groupId: string; community: string | null }
   | { kind: 'error'; message: string };
 
 /**
@@ -95,6 +107,7 @@ export default function MoveResolver() {
         if (cancelled) return;
         const ids = mine.data.items.map((i) => i.groupId);
         const groupId = resolveCurrentCommunity(user.uid, ids);
+        const community = mine.data.items.find((i) => i.groupId === groupId)?.displayName ?? null;
         // No community, or several with none chosen: Home already owns both of
         // those questions and answers them better than this route could.
         if (!groupId) {
@@ -107,11 +120,22 @@ export default function MoveResolver() {
         >(
           fns,
           'wsfListGoals',
-        )({ groupId, includeHistory: false });
+          /*
+            THE TOTALS ARE ONLY IN THE RESPONSE WHEN THIS FLAG IS ON.
+            wsfListGoals returns sharedTotal only under includeHistory, so
+            asking without it and falling back to zero printed "0 of 5,000
+            squats" for a goal that actually stood at 1,847 -- a false
+            statement about every row. This asks for what it is going to
+            show. No new backend behaviour: the flag and the callable are
+            both already there, and the caller is active-member-gated either
+            way. Closed goals arrive with it; actionableGoals drops them, as
+            it always has.
+          */
+        )({ groupId, includeHistory: true });
         if (cancelled) return;
         const open = actionableGoals(listed.data.goals ?? []);
         if (open.length === 0) {
-          router.replace(`/community/${groupId}`);
+          setState({ kind: 'noGoal', groupId, community });
           return;
         }
         if (open.length === 1) {
@@ -121,7 +145,7 @@ export default function MoveResolver() {
           );
           return;
         }
-        setState({ kind: 'choose', groupId, goals: open });
+        setState({ kind: 'choose', groupId, community, goals: open });
       } catch (e) {
         if (cancelled) return;
         setState({
@@ -135,49 +159,131 @@ export default function MoveResolver() {
     };
   }, [ready, user]);
 
+  /*
+    THE COMPOSITION, AND WHERE IT DIFFERS FROM THE TARGET.
+
+    The approved target draws MOVE entry as a SHEET rising over the dimmed
+    Home. Doing that truthfully needs a transparent-modal presentation so the
+    real Home stays mounted underneath -- a router and shell change outside
+    this slice, and a sheet floating above a tab bar that is still visible
+    would be incoherent. So the implementation composes the same content as a
+    screen, in the same language: a navy field carrying the question and the
+    community, then the open goals on cream. The sheet stays an approved idea
+    with a router change owing, and this AFTER says so rather than faking it.
+  */
+  const field = (eyebrow: string | null, title: string, intro: string) => (
+    <View style={s.field}>
+      <View pointerEvents="none" style={s.fieldGlow} />
+      {eyebrow ? <Text style={s.fieldEyebrow}>{eyebrow}</Text> : null}
+      <Text style={[display.md, s.fieldTitle]}>{title}</Text>
+      <Text style={s.fieldIntro}>{intro}</Text>
+    </View>
+  );
+
   if (state.kind === 'choose') {
     return (
-      <ScrollView style={kit.scroll} contentContainerStyle={kit.page}>
-        <View style={kit.column} testID="wsf-move-choose">
-          <Text style={kit.heading}>What are you moving toward?</Text>
-          <Text style={s.intro}>
-            This community has more than one goal open. Pick the one this counts toward.
-          </Text>
+      <ScrollView style={s.screen} contentContainerStyle={s.body}>
+        <View testID="wsf-move-choose" style={s.stack}>
+          {field(
+            state.community,
+            'What are you moving toward?',
+            `${state.goals.length} goals are open here. Pick the one this counts toward.`,
+          )}
           {state.goals.map((g) => (
-            <View key={g.goalId} style={s.row}>
-              <Text style={s.rowTitle}>{g.title}</Text>
-              <Text style={s.rowMeta}>
-                {totalOfTargetLabel(g.sharedTotal ?? 0, g.target, g.unit)}
-              </Text>
-              <ButtonLink
-                href={`/contribute/${g.goalId}?groupId=${encodeURIComponent(
-                  state.groupId,
-                )}&mode=move`}
-                style={s.rowAction}
-                textStyle={s.rowActionText}
-                testID={`wsf-move-choose-${g.goalId}`}
-                label={`Move toward ${g.title}`}
-              />
+            <View key={g.goalId} style={s.card}>
+              <View style={s.cardRow}>
+                <View style={s.cardText}>
+                  <Text style={s.cardTitle}>{g.title}</Text>
+                  {/*
+                    NEVER A FABRICATED ZERO. If this caller was not given the
+                    shared total, the row says what the goal is FOR rather
+                    than inventing a number for where it stands.
+                  */}
+                  <Text style={s.cardMeta} testID={`wsf-move-total-${g.goalId}`}>
+                    {typeof g.sharedTotal === 'number'
+                      ? totalOfTargetLabel(g.sharedTotal, g.target, g.unit)
+                      : `Target ${formatCount(g.target)} ${g.unit}`}
+                  </Text>
+                </View>
+                <ButtonLink
+                  href={`/contribute/${g.goalId}?groupId=${encodeURIComponent(
+                    state.groupId,
+                  )}&mode=move`}
+                  style={s.cardAction}
+                  textStyle={s.cardActionText}
+                  testID={`wsf-move-choose-${g.goalId}`}
+                  label="Move"
+                  accessibilityLabel={`Move toward ${g.title}`}
+                />
+              </View>
+              {/*
+                WHERE THE COMMUNITY ALREADY IS, on the row you would join. The
+                track is filled by fillRatio -- the same ratio the Living WE
+                fills by -- so the two can never disagree. A goal whose shared
+                total this caller is not told renders no track at all rather
+                than a track at nothing, which would read as zero progress.
+              */}
+              {typeof g.sharedTotal === 'number' ? (
+                <View style={s.track}>
+                  <View
+                    style={[
+                      s.trackFill,
+                      { width: `${fillRatio(g.sharedTotal, g.target) * 100}%` },
+                    ]}
+                  />
+                </View>
+              ) : null}
             </View>
           ))}
+          <Text style={s.note}>
+            Nothing is recorded until you choose a goal and confirm an amount.
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  if (state.kind === 'noGoal') {
+    return (
+      <ScrollView style={s.screen} contentContainerStyle={s.body}>
+        <View testID="wsf-move-no-goal" style={s.stack}>
+          {field(
+            state.community,
+            'Nothing is running right now',
+            'When a Champion opens a goal, this is where you will record what you did.',
+          )}
+          <View style={s.quiet}>
+            <Text style={s.quietTitle}>What is still here</Text>
+            <Text style={s.quietBody}>
+              Anything you already recorded toward past goals stays in Progress. New
+              contributions need an open goal.
+            </Text>
+          </View>
+          <ButtonLink
+            href={`/community/${state.groupId}`}
+            style={s.ghost}
+            textStyle={s.ghostText}
+            testID="wsf-move-no-goal-community"
+            label="Go to your community"
+          />
         </View>
       </ScrollView>
     );
   }
 
   return (
-    <ScrollView style={kit.scroll} contentContainerStyle={kit.page}>
-      <View style={kit.column}>
+    <ScrollView style={s.screen} contentContainerStyle={s.body}>
+      <View style={s.stack}>
         {state.kind === 'error' ? (
           <>
-            <Text style={kit.heading}>Something went wrong</Text>
-            <Text style={s.intro} testID="wsf-move-error">
+            {field(null, 'Something went wrong', state.message)}
+            <Text style={s.hiddenProbe} testID="wsf-move-error">
               {state.message}
             </Text>
             <ButtonLink
               href="/"
-              style={s.rowAction}
-              textStyle={s.rowActionText}
+              style={s.cardAction}
+              textStyle={s.cardActionText}
               testID="wsf-move-error-home"
               label="Go Home"
             />
@@ -193,24 +299,89 @@ export default function MoveResolver() {
 }
 
 const s = StyleSheet.create({
-  intro: { color: INK_QUIET, fontSize: 15, lineHeight: 21 },
-  row: {
+  screen: { flex: 1, backgroundColor: CREAM },
+  body: { flexGrow: 1, padding: 20 },
+  stack: { gap: 14 },
+
+  field: {
+    backgroundColor: NAVY,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    gap: 6,
+    overflow: 'hidden',
+    ...elevation.hero,
+  },
+  /* Bound to the field's width: a fixed circle reports its full box even
+     when the parent clips it, and the overflow checks read the box. */
+  fieldGlow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: -110,
+    height: 200,
+    borderBottomLeftRadius: 180,
+    borderBottomRightRadius: 180,
+    backgroundColor: 'rgba(34,197,94,0.10)',
+  },
+  fieldEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  fieldTitle: { color: ON_NAVY },
+  fieldIntro: { color: ON_NAVY_MUTED, fontSize: 13.5, lineHeight: 19 },
+
+  card: {
+    backgroundColor: SURFACE,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 11,
+    ...elevation.card,
+  },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cardText: { flex: 1, gap: 3 },
+  cardTitle: { color: NAVY, fontSize: 16, lineHeight: 21, fontWeight: '800' },
+  cardMeta: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17 },
+  cardAction: {
+    backgroundColor: ACTION_GREEN,
+    borderColor: ACTION_GREEN,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardActionText: { color: ON_ACTION, fontSize: 15, fontWeight: '900', textAlign: 'center' },
+  track: { height: 7, borderRadius: 999, backgroundColor: '#E8E4DC', overflow: 'hidden' },
+  trackFill: { height: '100%', borderRadius: 999, backgroundColor: ACTION_GREEN },
+
+  quiet: {
     backgroundColor: SURFACE,
     borderRadius: 20,
     padding: 16,
-    gap: 6,
+    gap: 5,
     ...elevation.card,
   },
-  rowTitle: { color: NAVY, fontSize: 17, fontWeight: '800', lineHeight: 23 },
-  rowMeta: { color: INK_QUIET, fontSize: 13, lineHeight: 18 },
-  rowAction: {
-    backgroundColor: ACTION_GREEN,
+  quietTitle: { color: NAVY, fontSize: 15, fontWeight: '800' },
+  quietBody: { color: INK_QUIET, fontSize: 13, lineHeight: 19 },
+
+  ghost: {
+    backgroundColor: SURFACE,
     borderColor: HAIRLINE,
+    borderWidth: 1.5,
     borderRadius: 16,
     minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
   },
-  rowActionText: { color: ON_ACTION, fontSize: 16, fontWeight: '900', textAlign: 'center' },
+  ghostText: { color: NAVY, fontSize: 15, fontWeight: '800', textAlign: 'center' },
+
+  note: { color: INK_QUIET, fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  /* The message is already the field's intro; this keeps the long-standing
+     testID addressable without printing the sentence twice. */
+  hiddenProbe: { height: 0, opacity: 0 },
 });

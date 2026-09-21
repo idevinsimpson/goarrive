@@ -30,9 +30,15 @@ drawn (see `review/batch-a-identity/README.md` for the corrections it owes).
 
 ## Coverage today
 
-**Computed, not typed.** These numbers come from walking
-`apps/westayfit/app` and cross-referencing the target register, so a new route
-appears as uncovered rather than quietly missing from the arithmetic:
+**The route tree is computed; the register is maintained by hand.** Say that
+precisely, because the difference matters. The script walks
+`apps/westayfit/app` and derives every route from the file tree, then checks
+each one against a **manually maintained** target registry and a manually
+maintained implemented-list written inside the script. **It does not discover
+target files on disk.** What it buys is that a new route shows up as uncovered
+rather than missing from the arithmetic, and that a registry entry for a route
+that no longer exists exits non-zero. Keeping the registry honest is still a
+person's job.
 
 ```
 node scripts/westayfit/route-target-coverage.mjs
@@ -43,7 +49,7 @@ node scripts/westayfit/route-target-coverage.mjs
 | User-facing routes | **23** |
 | Routes with a real-RN target | **9** |
 | Routes with no target | **14** |
-| Routes implemented against an approved target | **1** |
+| Routes implemented against an approved target | **3** |
 | Device classes above the phone with any target | **0** of 4 |
 
 The previous revision of this file said 22 / 5 / 17. All three were wrong: the
@@ -62,8 +68,8 @@ the second is operational.
 | Route | Target package | Notes |
 | --- | --- | --- |
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **The only implemented route.** |
-| `/move` | `review/page-02-move/` | MOVE entry, proposed as a sheet over the dimmed Home. Target only. |
-| `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes — ordinary, reached, postTarget, unknown, refusal, closed goal. Target only. |
+| `/move` | `review/page-02-move/` | MOVE entry. **Implemented** against the reviewed target, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation, outside that slice). |
+| `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes. **Implemented** against the reviewed target. |
 | `/goals/new` | `review/page-02-move/` | The unit picker, built from the shipped `ACTIVITY_GUIDES`. Target only. |
 | `/signin` | `review/batch-a-identity/` | Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only. |
 | `/signup` | `review/batch-a-identity/` | Target only. |

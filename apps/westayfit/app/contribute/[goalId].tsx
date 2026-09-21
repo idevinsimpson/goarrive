@@ -66,12 +66,14 @@ import { ButtonLink } from '../../src/ui/ButtonLink';
 import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import {
+  fillRatio,
   formatCount,
   percentLabel,
   progressPhase,
   statusLine,
   totalOfTargetLabel,
 } from '../../src/ui/progressFormat';
+import { ACTION_GREEN, ON_ACTION, elevation } from '../../src/ui/kit';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
@@ -199,7 +201,7 @@ export default function ContributeToGoal() {
   // starts at result entry, the most direct path.
   const initialStep: Step = params.mode === 'move' ? 'move' : 'enter';
   const { ready, user } = useWsfAuth();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
@@ -929,8 +931,29 @@ export default function ContributeToGoal() {
   const communityName = context.kind === 'verified' ? context.communityName : null;
   const backHref = context.kind === 'verified' ? `/community/${context.groupId}` : '/';
   const backLabel = context.kind === 'verified' ? 'Back to community' : 'Back to home';
-  const heroWeWidth = Math.max(96, Math.min(280, windowWidth - 2 * 20 - 2 * 22));
-  const contextWeWidth = 88;
+  /*
+    THE RECEIPT ON A SHORT PHONE. The mark was sized from WIDTH alone, so on a
+    390x640 the celebration filled the viewport and pushed "Record more" and
+    "Back to community" below the fold -- the member is congratulated and then
+    has to go looking for the way on. The rhythm gives on a short screen and
+    the emotional core does not: the mark shrinks, it does not disappear.
+  */
+  const heroWeWidth = Math.max(
+    96,
+    Math.min(windowHeight < 700 ? 148 : 280, windowWidth - 2 * 20 - 2 * 22),
+  );
+  /*
+    THE ANCHOR AT 195px. A fixed 88px mark beside a text column overflowed the
+    card at the narrowest supported width -- ui-a11y R1 and ui-qa caught it,
+    the same way they caught Home's fixed-size bloom. The mark is sized from
+    what is actually available, and below 260px the row becomes a column so
+    the text gets the whole width instead of a sliver.
+  */
+  const anchorStacked = windowWidth < 260;
+  const contextWeWidth = Math.max(
+    56,
+    Math.min(88, windowWidth - 2 * 20 - 2 * 16 - (anchorStacked ? 0 : 130)),
+  );
 
   const renderChrome = (showBack: boolean) => (
     <View style={styles.chrome}>
@@ -1021,18 +1044,6 @@ export default function ContributeToGoal() {
     ) : null;
 
   // The community/goal labels, shown together only when verified.
-  const renderContextLabels = () =>
-    context.kind === 'verified' ? (
-      <View style={styles.contextLabels}>
-        <Text style={styles.contextCommunity} testID="wsf-contribute-community">
-          {context.communityName}
-        </Text>
-        <Text style={styles.contextGoal} testID="wsf-contribute-goal-title">
-          {context.goalTitle}
-        </Text>
-      </View>
-    ) : null;
-
   const screen = (children: React.ReactNode, testID?: string) => (
     <ScrollView
       style={styles.scroll}
@@ -1111,6 +1122,15 @@ export default function ContributeToGoal() {
   // number alone when the unit is not on hand.
   const unitKnown: string | null =
     state.kind === 'ready' || state.kind === 'closed' ? state.pulse.unit : null;
+  /**
+   * The goal as the anchor needs it, available to EVERY screen below rather
+   * than only to the ones that run after `const pulse`. A refusal or an
+   * unknown outcome can render with no goal loaded at all, and the anchor has
+   * to say nothing then rather than throw.
+   */
+  const anchorPulse = state.kind === 'ready' || state.kind === 'closed' ? state.pulse : null;
+  const anchorOwnCredit =
+    state.kind === 'ready' || state.kind === 'closed' ? state.ownCredit : 0;
   const effortLabel = (count: number, u: string | null) =>
     u ? `${formatCount(count)} ${u}` : formatCount(count);
 
@@ -1118,6 +1138,115 @@ export default function ContributeToGoal() {
     <Text style={styles.ownCredit} testID="wsf-contribute-own-credit">
       {`Your total on this goal: ${effortLabel(value, u)}`}
     </Text>
+  );
+
+  /**
+   * THE GOAL ANCHOR. One navy panel that every screen in this flow opens on:
+   * the community, the goal, the Living WE at the CONFIRMED total, the total
+   * itself, a track at the ratio the mark fills by, and the shipped status
+   * line. It replaces a pale context label stacked on a pale progress row.
+   *
+   * WHY IT IS HERE AT ALL. The number a member types is a number inside a
+   * community's effort, and the screen used to say so in two grey lines above
+   * a form. The panel is the context, the brand's own mark doing work no card
+   * can do, and -- on a tall phone -- real content where a spacer used to be.
+   *
+   * Every testID the old two-part context carried is carried here, so the
+   * specs that assert this screen's truth keep asserting it.
+   */
+  const renderGoalAnchor = (opts: { status?: 'active' | 'closed' } = {}) => {
+    const p = anchorPulse;
+    if (!p) return null;
+    return (
+    <View
+      style={[styles.anchor, anchorStacked ? styles.anchorStacked : null]}
+      testID="wsf-contribute-context"
+    >
+      <View pointerEvents="none" style={styles.anchorGlow} />
+      <View style={styles.anchorWe}>
+        <LivingWeProgress
+          completed={p.sharedTotal}
+          target={p.target}
+          unit={p.unit}
+          width={contextWeWidth}
+          surface="dark"
+          testID="wsf-contribute-context-we"
+        />
+      </View>
+      <View style={styles.anchorText}>
+        {context.kind === 'verified' ? (
+          <Text style={styles.anchorEyebrow} testID="wsf-contribute-community">
+            {context.communityName}
+          </Text>
+        ) : null}
+        {context.kind === 'verified' ? (
+          <Text style={styles.anchorTitle} numberOfLines={2} testID="wsf-contribute-goal-title">
+            {context.goalTitle}
+          </Text>
+        ) : null}
+        <Text style={styles.anchorTotal} testID="wsf-contribute-shared-total">
+          {totalOfTargetLabel(p.sharedTotal, p.target, p.unit)}
+        </Text>
+        <View style={styles.anchorTrack}>
+          <View
+            style={[
+              styles.anchorTrackFill,
+              { width: `${fillRatio(p.sharedTotal, p.target) * 100}%` },
+            ]}
+          />
+        </View>
+        <Text style={styles.anchorPercent} testID="wsf-contribute-context-percent">
+          {`${percentLabel(p.sharedTotal, p.target)} complete`}
+        </Text>
+        <Text style={styles.anchorStatusLine}>
+          {statusLine(p.sharedTotal, p.target, opts.status ?? p.status)}
+        </Text>
+        {/*
+          A6. The total is live (a 2s poll), so it needs the same "as of"
+          honesty Community Home and the public display carry. No refresh
+          control: nothing here is waiting to be asked.
+        */}
+        {pulseAt ? (
+          <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
+            {`Confirmed ${formatClock(pulseAt)}`}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+    );
+  };
+
+  /**
+   * THE MEMBER'S OWN PART, AND ONLY THAT.
+   *
+   * The owner board previews the SHARED total a contribution would produce.
+   * It cannot: another member may be writing in the same moment, and the only
+   * authority on the shared total is the receipt. What nobody else's write can
+   * change is this member's own credit on this goal, so that is what is
+   * previewed -- before and after -- with the community's confirmed total
+   * stated separately, as it is, in the anchor above.
+   */
+  const renderYourPart = (pending: number | null) => (
+    <View style={styles.yoursPanel} testID="wsf-contribute-your-part">
+      <Text style={styles.yoursLabel}>Your part on this goal</Text>
+      <View style={styles.yoursRow}>
+        <Text style={styles.yoursNow}>{formatCount(anchorOwnCredit)}</Text>
+        {pending != null && pending > 0 ? (
+          <>
+            <Text style={styles.yoursArrow}>→</Text>
+            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next">
+              {formatCount(anchorOwnCredit + pending)}
+            </Text>
+          </>
+        ) : null}
+        <Text style={styles.yoursUnit}>{unitKnown ?? ''}</Text>
+      </View>
+      {/* The shipped sentence, unchanged and still addressable. */}
+      {ownCreditLine(anchorOwnCredit, unitKnown)}
+      <Text style={styles.yoursNote}>
+        Private to you. The community total above is what everyone sees.
+      </Text>
+    </View>
   );
 
   // ---- confirmed result: the signature moment -------------------------------
@@ -1184,7 +1313,7 @@ export default function ContributeToGoal() {
           ) : null}
         </View>
         {ownCreditLine(r.ownCredit, hasShared ? r.unit : (r.unit ?? unitKnown))}
-        {hasShared ? renderContextLabels() : null}
+        {/* The receipt carries its own numbers; the anchor would repeat them. */}
         <View style={styles.actions}>
           {kiosk ? (
             renderKioskFinish('confirmed')
@@ -1239,6 +1368,7 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
+        {renderGoalAnchor()}
         <View
           style={styles.card}
           testID="wsf-contribute-refused"
@@ -1303,6 +1433,15 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
+        {/*
+          NO ANCHOR HERE, DELIBERATELY. The anchor paints the shared total, and
+          on an unknown outcome this screen must not narrate one: the member's
+          effort may or may not be inside it, the poll is switched off for the
+          whole unknown period on purpose, and a total shown beside "we don't
+          know whether this was recorded" invites exactly the arithmetic the
+          member cannot safely do. The target drew the anchor here; that was
+          wrong, and ui-contribute-torture-2 caught it.
+        */}
         <View style={styles.pendingCard} testID="wsf-contribute-pending" aria-live="polite">
           <Text style={styles.eyebrowMuted}>Not confirmed yet</Text>
           <Text style={styles.heading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
@@ -1426,45 +1565,22 @@ export default function ContributeToGoal() {
   };
 
   // Compact confirmed context: small navy WE beside the exact numbers.
-  const renderCompactProgress = () => (
-    <View style={styles.compactProgress} testID="wsf-contribute-context">
-      <LivingWeProgress
-        completed={pulse.sharedTotal}
-        target={pulse.target}
-        unit={unit}
-        width={contextWeWidth}
-        surface="light"
-        testID="wsf-contribute-context-we"
-      />
-      <View style={styles.compactText}>
-        <Text style={styles.compactTotal} testID="wsf-contribute-shared-total">
-          {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
-        </Text>
-        <Text style={styles.compactPercent} testID="wsf-contribute-context-percent">
-          {`${percentLabel(pulse.sharedTotal, pulse.target)} complete`}
-        </Text>
-        {ownCreditLine(ownCredit, unit)}
-        {/*
-          A6. The compact total is live (a 2s poll), so it needs the same
-          "as of" honesty Community Home and the public display carry. No
-          refresh control: nothing here is waiting to be asked.
-        */}
-        {pulseAt ? (
-          <Text style={styles.contextUpdated} testID="wsf-contribute-context-updated">
-            {`Confirmed ${formatClock(pulseAt)}`}
-          </Text>
-        ) : null}
-      </View>
-    </View>
-  );
-
   // ---- closed goal ------------------------------------------------------------
   if (state.kind === 'closed') {
     return screen(
       <>
         {renderChrome(false)}
-        {renderContextLabels()}
         <View style={styles.hero} testID="wsf-contribute-closed">
+          {context.kind === 'verified' ? (
+            <Text style={styles.heroEyebrow} testID="wsf-contribute-community">
+              {context.communityName}
+            </Text>
+          ) : null}
+          {context.kind === 'verified' ? (
+            <Text style={styles.closedGoalTitle} testID="wsf-contribute-goal-title">
+              {context.goalTitle}
+            </Text>
+          ) : null}
           <Text style={styles.heroEyebrow}>Closed</Text>
           <Text style={styles.heroHeadline} {...HEADING_1}>This goal is closed.</Text>
           <View style={styles.weWrap}>
@@ -1522,10 +1638,10 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
+        {renderGoalAnchor()}
         <View style={styles.card} testID="wsf-contribute-review-screen">
           <Text style={styles.eyebrowMuted}>Review</Text>
           <Text style={styles.heading} {...HEADING_1}>Review your contribution</Text>
-          {renderContextLabels()}
           <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
             {`${formatCount(reviewCount)} ${unit}`}
           </Text>
@@ -1553,6 +1669,7 @@ export default function ContributeToGoal() {
             </Pressable>
           </View>
         </View>
+        {renderYourPart(reviewCount)}
         {renderTestNote()}
       </>,
       'wsf-contribute-screen'
@@ -1564,8 +1681,7 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(true)}
-        {renderContextLabels()}
-        {renderCompactProgress()}
+        {renderGoalAnchor()}
         <View style={styles.card} testID="wsf-contribute-move-screen">
           <Text style={styles.heading} {...HEADING_1}>Ready when you are.</Text>
           <Text style={styles.body}>
@@ -1617,6 +1733,8 @@ export default function ContributeToGoal() {
             ) : null}
           </View>
         </View>
+        {/* Their own standing on this goal, before they have entered anything. */}
+        {renderYourPart(null)}
         {renderTestNote()}
       </>,
       'wsf-contribute-screen'
@@ -1627,10 +1745,9 @@ export default function ContributeToGoal() {
   return screen(
     <>
       {renderChrome(true)}
-      {renderContextLabels()}
-      {renderCompactProgress()}
+      {renderGoalAnchor()}
       <View style={styles.card} testID="wsf-contribute-entry-screen">
-        <Text style={styles.heading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
+        <Text style={styles.entryHeading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
         {(() => {
           const minus = (
             <Pressable
@@ -1717,6 +1834,10 @@ export default function ContributeToGoal() {
             {entryError}
           </Text>
         ) : null}
+        <Text style={styles.countedIn} testID="wsf-contribute-counted-in">
+          Counted in <Text style={styles.countedInUnit}>{unit}</Text> · this goal
+        </Text>
+        {renderYourPart(Number.isFinite(Number(entry)) ? Math.trunc(Number(entry)) : null)}
         <View style={styles.actions}>
           <Pressable
             onPress={onReview}
@@ -1729,6 +1850,15 @@ export default function ContributeToGoal() {
         </View>
         {renderCountingGuide()}
       </View>
+      {/*
+        ONE CONFIGURED UNIT, SO NO CHOICE TO MAKE. A goal on this route has
+        exactly one unit -- there is no activity list here and nothing to pick
+        between, so the screen names what this counts toward and moves on. The
+        several-activity case belongs to the combined goal, which is a
+        different route and is not in this slice. The target drew a pair of
+        movement tiles here; that was a choice the product does not offer, and
+        drawing it would have taught the member a control that does not exist.
+      */}
       {renderTestNote()}
     </>,
     'wsf-contribute-screen'
@@ -1764,25 +1894,92 @@ const styles = StyleSheet.create({
   },
   chromeLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   chromeLinkText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
-  contextLabels: { gap: 2 },
-  contextCommunity: { color: wsfTheme.colors.textMuted, fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
-  contextGoal: { color: wsfTheme.colors.text, fontSize: 20, fontWeight: '800', lineHeight: 26 },
-  compactProgress: {
+  // ---- the goal anchor ---------------------------------------------------
+  anchor: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: wsfTheme.colors.surface,
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+    backgroundColor: NAVY,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    overflow: 'hidden',
+    ...elevation.hero,
   },
-  compactText: { flex: 1, gap: 2 },
-  compactTotal: { color: wsfTheme.colors.text, fontSize: 17, fontWeight: '800' },
-  compactPercent: { color: wsfTheme.colors.text, fontSize: 14, fontWeight: '600' },
+  /*
+    BOUND TO THE CARD'S WIDTH, NOT A FIXED CIRCLE.
+
+    A 260px circle inside a card with overflow:hidden still REPORTS a 260px
+    box, so at a 195px viewport the overflow checks saw an element past the
+    right edge -- and they were right to: they cannot know the paint is
+    clipped. Home's top light learned this first. left/right 0 means the
+    decoration can never be wider than what contains it, at any width.
+  */
+  anchorGlow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: -140,
+    height: 240,
+    borderBottomLeftRadius: 200,
+    borderBottomRightRadius: 200,
+    backgroundColor: 'rgba(145,203,125,0.09)',
+  },
+  anchorStacked: { flexDirection: 'column', alignItems: 'stretch', gap: 10 },
+  anchorWe: { alignItems: 'center', justifyContent: 'center' },
+  /* minWidth 0 lets the column shrink inside the row; without it a long goal
+     title makes the flex child refuse to go below its content width and the
+     card runs past the screen. */
+  anchorText: { flex: 1, minWidth: 0, gap: 4 },
+  anchorEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  anchorTitle: { color: CREAM, fontSize: 17, lineHeight: 21, fontWeight: '900', letterSpacing: -0.4 },
+  anchorTotal: { color: CREAM, fontSize: 14, lineHeight: 19, fontWeight: '800' },
+  anchorTrack: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(247,245,240,0.16)',
+    overflow: 'hidden',
+  },
+  anchorTrackFill: { height: '100%', borderRadius: 999, backgroundColor: PROGRESS_GREEN },
+  anchorPercent: { color: PROGRESS_GREEN, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
+  anchorStatusLine: { color: HERO_MUTED, fontSize: 11.5, lineHeight: 16 },
+  anchorUpdated: { color: HERO_MUTED, fontSize: 11, lineHeight: 15, letterSpacing: 0.3 },
+
+  // ---- the member's own part, previewed -----------------------------------
+  yoursPanel: {
+    backgroundColor: '#EFF9F1',
+    borderWidth: 1.5,
+    borderColor: '#CBEBD4',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  yoursLabel: {
+    color: '#15803D',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  yoursRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
+  yoursNow: { color: wsfTheme.colors.textMuted, fontSize: 20, fontWeight: '800' },
+  yoursArrow: { color: '#15803D', fontSize: 17, fontWeight: '900' },
+  yoursNext: { color: NAVY, fontSize: 27, fontWeight: '900', letterSpacing: -0.8 },
+  yoursUnit: { color: wsfTheme.colors.textMuted, fontSize: 13, fontWeight: '700' },
+  yoursNote: { color: wsfTheme.colors.textMuted, fontSize: 11.5, lineHeight: 16 },
+
+  closedGoalTitle: { color: CREAM, fontSize: 20, fontWeight: '900', lineHeight: 26, textAlign: 'center' },
+  countedIn: { color: wsfTheme.colors.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '600' },
+  countedInUnit: { color: '#15803D', fontWeight: '900' },
+
   ownCredit: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 20 },
-  // A6. Freshness under the live compact total.
-  contextUpdated: { color: wsfTheme.colors.textMuted, fontSize: 12, lineHeight: 18, letterSpacing: 0.3 },
 
   card: {
     backgroundColor: wsfTheme.colors.surface,
@@ -1819,6 +2016,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 32,
     letterSpacing: -0.3,
+  },
+  /* The card's lead, not a page title: the NUMBER is what the eye should
+     land on here, and a 26px two-line question above it pushed the member's
+     own part below the fold on a 390x844 phone. */
+  entryHeading: {
+    color: wsfTheme.colors.text,
+    fontSize: 19,
+    fontWeight: '800',
+    lineHeight: 25,
+    letterSpacing: -0.2,
+    textAlign: 'center',
   },
   body: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22 },
   caption: { color: wsfTheme.colors.textMuted, fontSize: 13, lineHeight: 18 },
@@ -1931,14 +2139,15 @@ const styles = StyleSheet.create({
   // buttons
   actions: { gap: 10, marginTop: 4 },
   primaryButton: {
-    backgroundColor: PROGRESS_GREEN,
-    borderRadius: 14,
+    backgroundColor: ACTION_GREEN,
+    borderRadius: 16,
     minHeight: 54,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    ...elevation.action,
   },
-  primaryButtonText: { color: NAVY, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  primaryButtonText: { color: ON_ACTION, fontSize: 17, fontWeight: '900', textAlign: 'center' },
   secondaryButton: {
     alignSelf: 'stretch',
     backgroundColor: wsfTheme.colors.surface,

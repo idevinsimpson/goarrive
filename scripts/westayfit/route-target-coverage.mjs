@@ -8,6 +8,14 @@
  * A number a person types is a number that rots, so this walks
  * apps/westayfit/app and cross-references the target register below.
  *
+ * WHAT THIS DOES AND DOES NOT DO. The ROUTE TREE is derived from the file
+ * system. The TARGET REGISTRY below and the implemented-list are MAINTAINED BY
+ * HAND -- nothing here discovers target files on disk or reads a frame to see
+ * which route it draws. The guarantees are narrower than "automatic": a new
+ * route appears as uncovered rather than missing from the arithmetic, and a
+ * registry entry for a route that no longer exists exits non-zero. Keeping the
+ * registry truthful is still a person's job.
+ *
  * Run:  node scripts/westayfit/route-target-coverage.mjs
  */
 import { readdirSync, statSync } from 'node:fs';
@@ -37,7 +45,7 @@ const TARGETS = {
 };
 
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */
-const IMPLEMENTED = ['/community/[groupId]'];
+const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]'];
 
 function routes(dir, prefix = '') {
   const out = [];
