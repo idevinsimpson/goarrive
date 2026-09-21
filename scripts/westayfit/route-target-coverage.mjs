@@ -45,6 +45,8 @@ const TARGETS = {
   '/combined/[setupId]': 'review/batch-b-join-and-setup/',
   '/community/[groupId]/challenge': 'review/batch-c-challenge-and-door/',
   '/': 'review/batch-c-challenge-and-door/',
+  '/event/[goalId]': 'review/batch-d-event-and-line/',
+  '/queue/[goalId]': 'review/batch-d-event-and-line/',
   '/signin': 'review/batch-a-identity/',
   '/signup': 'review/batch-a-identity/',
   '/verify-email': 'review/batch-a-identity/',
@@ -86,6 +88,10 @@ const NOTES = {
     'The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**.',
   '/':
     'The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target only, **not approved**.',
+  '/event/[goalId]':
+    'Standing in the room — eleven states, including the event route\'s OWN device question (the join route\'s variant differs and is Batch B). Target only, **not approved**.',
+  '/queue/[goalId]':
+    'Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target only, **not approved**.',
   '/signin':
     'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
   '/signup': 'Target only, **not approved**.',
@@ -97,10 +103,8 @@ const NOTES = {
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
   '/display/[goalId]': 'Public / shared display, phone through 1920x1080',
-  '/event/[goalId]': 'Scanned event landing',
   '/kiosk/[goalId]': 'Kiosk — tablet portrait',
   '/move/[goalId]': 'Movement / player route',
-  '/queue/[goalId]': 'Queue',
   '/station/[goalId]': 'Station — tablet landscape',
 };
 

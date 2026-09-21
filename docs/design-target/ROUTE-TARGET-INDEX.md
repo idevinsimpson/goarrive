@@ -71,8 +71,8 @@ second is operational.
 | | |
 | --- | --- |
 | User-facing routes | **23** |
-| Routes with a real-RN target | **17** |
-| Routes with no target | **6** |
+| Routes with a real-RN target | **19** |
+| Routes with no target | **4** |
 | Routes implemented against an approved target | **5** |
 
 ### Covered — a real-RN target exists
@@ -86,10 +86,12 @@ second is operational.
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **Implemented and accepted.** |
 | `/community/[groupId]/challenge` | `review/batch-c-challenge-and-door/` | The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**. |
 | `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes. **Implemented and accepted.** |
+| `/event/[goalId]` | `review/batch-d-event-and-line/` | Standing in the room — eleven states, including the event route's OWN device question (the join route's variant differs and is Batch B). Target only, **not approved**. |
 | `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
 | `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation). |
 | `/profile-setup` | `review/batch-a-identity/` | Target only, **not approved**. Carries an owed truth correction — see that package. |
+| `/queue/[goalId]` | `review/batch-d-event-and-line/` | Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target only, **not approved**. |
 | `/reset-password` | `review/batch-a-identity/` | Target only, **not approved**. |
 | `/signin` | `review/batch-a-identity/` | Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**. |
 | `/signup` | `review/batch-a-identity/` | Target only, **not approved**. |
@@ -102,10 +104,8 @@ second is operational.
 | Route | What it is |
 | --- | --- |
 | `/display/[goalId]` | Public / shared display, phone through 1920x1080 |
-| `/event/[goalId]` | Scanned event landing |
 | `/kiosk/[goalId]` | Kiosk — tablet portrait |
 | `/move/[goalId]` | Movement / player route |
-| `/queue/[goalId]` | Queue |
 | `/station/[goalId]` | Station — tablet landscape |
 
 <!-- END GENERATED ROUTES -->

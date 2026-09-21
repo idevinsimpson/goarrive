@@ -69,8 +69,12 @@ that this person was once a member"*). Three causes, one state, one wording —
 
 **Two states the brief omitted and the route has:** rate-limited
 (`functions/resource-exhausted`, its own screen with its own wording), and the
-event-path device question. The device pair lives on the join route, so it is
-drawn here and is **excluded from Batch D** rather than counted twice.
+event-path device question. The device pair drawn here is the JOIN route's,
+which carries `signupAhead` and therefore promises an account is about to be
+made. The EVENT route has its own variant that promises no such thing, and
+Batch D draws that one. Neither is a duplicate of the other. (An earlier
+revision of this line said the pair was simply "excluded from Batch D"; that
+was too strong, and Batch D's package records the correction.)
 
 **`/goals/new` has no movement catalog, and no one-vs-many selection.** A goal
 is a title, a whole number and a unit the Champion types
