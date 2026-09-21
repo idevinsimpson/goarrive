@@ -46,7 +46,7 @@ const TARGETS = {
 };
 
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */
-const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]'];
+const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]', '/community'];
 
 function routes(dir, prefix = '') {
   const out = [];

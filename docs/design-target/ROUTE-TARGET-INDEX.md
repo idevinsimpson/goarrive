@@ -49,7 +49,7 @@ node scripts/westayfit/route-target-coverage.mjs
 | User-facing routes | **23** |
 | Routes with a real-RN target | **10** |
 | Routes with no target | **13** |
-| Routes implemented against an approved target | **3** |
+| Routes implemented against an approved target | **4** |
 | Device classes above the phone with any target | **0** of 4 |
 
 The previous revision of this file said 22 / 5 / 17. All three were wrong: the
@@ -68,7 +68,7 @@ the second is operational.
 | Route | Target package | Notes |
 | --- | --- | --- |
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **The only implemented route.** |
-| `/community` | `review/page-03-community/` | The community list — Community's only route, since `/community/[groupId]` is Home. Target only. Ships with a proposal for the per-community surface that would revise accepted Page 1 work; the split is declared in that package's README. |
+| `/community` | `review/page-03-community/` | The community list — Community's only route, since `/community/[groupId]` is Home. **Implemented** against the corrected target. The per-community `PROPOSAL-*` frames are exploration only and were explicitly ruled out of implementation. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented** against the reviewed target, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation, outside that slice). |
 | `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes. **Implemented** against the reviewed target. |
 | `/goals/new` | `review/page-02-move/` | The unit picker, built from the shipped `ACTIVITY_GUIDES`. Target only. |

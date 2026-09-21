@@ -240,15 +240,20 @@ function Header() {
   );
 }
 
-/** Compact, app-like secondary actions. Never a naked underlined link — the
- *  BEFORE critique was that the existing one reads like a website, and two
- *  more of them would have been the same defect in a new place. */
-function SecondaryActions({ lead }: { lead?: 'join' | null }) {
+/**
+ * Compact, app-like secondary actions. Never a naked underlined link — the
+ * BEFORE critique was that the existing one reads like a website, and two more
+ * of them would have been the same defect in a new place.
+ *
+ * THERE IS NO JOIN PILL, ON ANY STATE. `/join/[joinCode]` reads the code from
+ * the route and nothing in the product accepts a typed one, so a tappable
+ * "Join a community" would be a control with nowhere to go — on the one screen
+ * whose whole job is to be true. Manual join-code entry is recorded as a future
+ * product seam in this package's README, not drawn as a button.
+ */
+function SecondaryActions() {
   return (
     <View style={s.actionRow}>
-      <View style={[s.pill, lead === 'join' ? s.pillLead : null]}>
-        <Text style={[s.pillText, lead === 'join' ? s.pillLeadText : null]}>Join a community</Text>
-      </View>
       <View style={s.pill}>
         <Text style={s.pillText}>Start a community</Text>
       </View>
@@ -317,7 +322,7 @@ export function CommunityListTarget({
         contentContainerStyle={[
           s.body,
           compact ? s.bodyCompact : null,
-          roomy ? s.bodyRoomy : null,
+          roomy && !showOthers ? s.bodyRoomy : null,
         ]}
       >
         <Header />
@@ -489,7 +494,7 @@ export function CommunityListTarget({
                   completed={CURRENT.goal.total}
                   target={CURRENT.goal.target}
                   unit={CURRENT.goal.unit}
-                  width={compact ? 58 : roomy ? 88 : 74}
+                  width={compact ? 58 : roomy && !showOthers ? 88 : 74}
                   surface="dark"
                 />
                 <View style={s.currentGoalText}>
@@ -510,7 +515,7 @@ export function CommunityListTarget({
                 </View>
               </View>
 
-              {roomy ? (
+              {roomy && !showOthers ? (
                 <View style={s.currentSecond}>
                   <Text style={s.currentSecondTitle} numberOfLines={1}>
                     {CURRENT.second.title}
@@ -521,7 +526,7 @@ export function CommunityListTarget({
                 </View>
               ) : null}
 
-              <Momentum rows={MOMENTUM.slice(0, compact ? 2 : roomy ? 4 : 3)} dark />
+              <Momentum rows={MOMENTUM.slice(0, compact ? 2 : roomy && !showOthers ? 4 : 3)} dark />
             </View>
 
             {showOthers ? (
@@ -779,9 +784,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
-  pillLead: { borderColor: NAVY, backgroundColor: NAVY },
   pillText: { color: NAVY, fontSize: 13, fontWeight: '800' },
-  pillLeadText: { color: ON_NAVY },
 
   /* The cue that says what tapping a row does. */
   cue: {

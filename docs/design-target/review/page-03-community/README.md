@@ -62,7 +62,9 @@ Six corrections, each with the reason it mattered:
 4. **Replaced the naked underlined Join / Start links** with compact pill
    actions. The BEFORE critique was that the existing naked link reads like a
    website; ending the target with two more of them was the same defect in a
-   new place.
+   new place. **Superseded:** the Join pill is gone entirely — see the seam
+   below. There is no tappable Join anywhere, on any state, and the AFTER
+   asserts its absence by role and name.
 5. **Fixed the sparse compositions.** Join / Start now sit directly under the
    content instead of pinned to the bottom; loading skeletons the *real* final
    structure (current-community panel, then rows) beneath the stable app
@@ -90,6 +92,67 @@ route exists.
 
 **If Join should be a control here, it needs a join-code entry route** — new
 product surface, not a drawing change. Flagged rather than faked.
+
+**Recorded as a product seam:** manual join-code entry. Until that route
+exists, this screen explains joining in words and offers no control for it,
+and the AFTER capture asserts that no Join link or button is rendered in
+either the empty state or a populated one.
+
+## Implemented — 2026-09-21
+
+`/community` is implemented against the corrected target. `PROPOSAL-detail-*`
+is **not** implemented and Home is untouched, per the IA decision above.
+
+`after/` holds the ACTUAL AFTER: real screenshots of the running product
+against the emulators. Nothing drawn, no banners.
+
+### What the implementation does that a drawing cannot promise
+
+- **The resolver decides, not the screen.** `resolveCurrentCommunity(uid,
+  memberOf)` is called with the real membership list. When it returns `null` —
+  several memberships, none remembered — the screen asks. Nothing is ever
+  marked CURRENT by convenience, and `AFTER-several-nocurrent-*` is captured
+  with an assertion that no current panel exists in that state.
+- **Choosing remembers, then opens.** A row calls `rememberCurrentCommunity()`
+  and then `router.replace('/community/<id>')`. The interaction test asserts
+  the URL, the rendered community Home, *and* the stored value — then reloads
+  `/community` and asserts the chosen one is now current and nothing is asked.
+- **Bounded, parallel, isolated reads.** Goals are read per community through
+  `mapWithLimit(items, 4, …)`: never serial (an N+1 chain whose latency grows
+  with membership count), never unbounded (a burst of callables from a phone
+  on a bad network). Each community's failure is its own — `AFTER-partial-
+  failure-390x844` is a real forced failure of ONE community's `wsfListGoals`,
+  and the screen keeps the rest, including the current community's progress.
+- **Recent movement is merged on the real instant.** Two goals' tails
+  interleave in time; stitching them end to end would present a false
+  sequence. They are sorted by parsed `at` descending and capped.
+- **The shell's footprint is measured.** `MEMBER_TAB_BAR_BODY +
+  MEMBER_TAB_MOVE_OVERHANG + safeAreaInsets.bottom`. Every AFTER frame asserts
+  that no interactive control is permanently trapped under the shell — the
+  rule is reachability, because asserting nothing crosses the bar line *at
+  rest* would fail every scrollable screen and teach us to ignore it.
+
+### Two fixture defects the capture caught
+
+1. **The movement strip was empty on the first run.** `seedActiveGoal` seeds
+   counter shards but not the `recentAdditions` subcollection, which only
+   `wsfContribute` writes. The product was being honest and the fixture was
+   wrong. The tail is now seeded at the real path, with the real two fields
+   and the real minute-truncated `at`; a tail seeded in any other shape would
+   be evidence of a screen reading data the product never produces.
+2. **Every community read "1 member".** True of the fixture and of nothing
+   else. `memberCount` is an aggregate over `wsfMemberships`, so the fixture
+   now seeds real membership documents and the counts on the frames are real
+   counts of real rows.
+
+### The in-frame label is asserted now, not assumed
+
+A claim that the frames were labelled was checked by eye once. The capture now
+asserts, for every frame, that the strip exists, says what it says, sits flush
+with the frame's top inside its 1px border, and spans the frame's width. The
+first version of that assertion measured the *text node* rather than the strip
+and failed at 1px — the same mistake as the `y < 24` wordmark threshold on
+Page 2, caught this time by the check itself rather than by a review round.
 
 ## Evidence
 

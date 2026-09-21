@@ -14,6 +14,18 @@ import { expect, test, type Browser } from '@playwright/test';
  */
 const OUT = path.resolve(__dirname, '../../../docs/design-target/review/page-03-community');
 
+/*
+  OPT-IN. Same reason as the AFTER capture: this renders 23 phone-sized frames
+  in one context and its product is PNGs in docs/, not an assertion about the
+  product. Set WSF_CAPTURE_FRAMES=1 to regenerate them deliberately.
+*/
+const CAPTURE_FRAMES = /^(1|true)$/i.test(process.env.WSF_CAPTURE_FRAMES ?? '');
+
+test.skip(
+  !CAPTURE_FRAMES,
+  'Frame capture is evidence generation; set WSF_CAPTURE_FRAMES=1 to regenerate it.',
+);
+
 /** Every frame the preview route publishes, by testID suffix. */
 const FRAMES = [
   'list-several-390x844',
@@ -43,6 +55,8 @@ const FRAMES = [
 
 /** The banner strip added on top of each frame's device height. */
 const FRAME_BANNER = 18;
+/** The frame's own hairline. The strip sits inside it, not on top of it. */
+const FRAME_BORDER = 1;
 
 test('community targets render at every device class the gate asks for', async ({
   browser,
@@ -87,6 +101,32 @@ test('community targets render at every device class the gate asks for', async (
         target, and they are named so nobody has to read a README to know
         the difference. Community's own route is `/community`, the list.
       */
+      /*
+        THE LABEL IS ASSERTED, NOT ASSUMED. A target frame that circulates
+        without its strip is one paste away from being read as a shipped
+        screen, and "I can see it in the PNG" is not a check that survives the
+        next capture. The strip must exist, sit flush with the frame's own top
+        edge, and span its full width.
+      */
+      // The STRIP, not the text inside it: the text node sits at its own
+      // line-height offset within the strip and is narrower than the frame,
+      // so asserting its box would be measuring the wrong thing — the same
+      // mistake as the y<24 wordmark threshold on Page 2.
+      const banner = page.getByTestId(`wsf-frame-banner-${id}`);
+      await expect(banner, `${id}: the in-frame label is missing`).toBeVisible();
+      await expect(
+        banner,
+        `${id}: the label does not say what the frame is`,
+      ).toHaveText('TARGET / CONCEPT — NOT IMPLEMENTED');
+      const bannerBox = (await banner.boundingBox())!;
+      expect(
+        Math.round(bannerBox.y - box.y),
+        `${id}: the label is not flush with the frame top`,
+      ).toBe(FRAME_BORDER);
+      expect(Math.round(bannerBox.width), `${id}: the label does not span the frame`).toBe(
+        Number(w) - 2 * FRAME_BORDER,
+      );
+
       const prefix = id.startsWith('detail-') ? 'PROPOSAL' : 'TARGET';
       await frame.screenshot({ path: path.join(OUT, `${prefix}-${id}.png`) });
     }

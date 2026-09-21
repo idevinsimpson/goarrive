@@ -226,7 +226,7 @@ export default function CommunityPreview() {
               style={[st.frame, { width: f.width, height: f.height + FRAME_BANNER }]}
               testID={`wsf-frame-${f.id}`}
             >
-              <View style={st.frameBanner}>
+              <View style={st.frameBanner} testID={`wsf-frame-banner-${f.id}`}>
                 <Text style={st.frameBannerText}>TARGET / CONCEPT — NOT IMPLEMENTED</Text>
               </View>
               <View style={{ height: f.height }}>{f.node}</View>
