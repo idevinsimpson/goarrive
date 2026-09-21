@@ -49,6 +49,7 @@ const TARGETS = {
   '/queue/[goalId]': 'review/batch-d-event-and-line/',
   '/kiosk/[goalId]': 'review/batch-e-room-screens/',
   '/station/[goalId]': 'review/batch-e-room-screens/',
+  '/display/[goalId]': 'review/batch-f-public-display/',
   '/signin': 'review/batch-a-identity/',
   '/signup': 'review/batch-a-identity/',
   '/verify-email': 'review/batch-a-identity/',
@@ -98,6 +99,8 @@ const NOTES = {
     'The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target only, **not approved**.',
   '/station/[goalId]':
     'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target only, **not approved**.',
+  '/display/[goalId]':
+    'The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target only, **not approved**.',
   '/signin':
     'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
   '/signup': 'Target only, **not approved**.',
@@ -108,7 +111,6 @@ const NOTES = {
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
-  '/display/[goalId]': 'Public / shared display, phone through 1920x1080',
   '/move/[goalId]': 'Movement / player route',
 };
 

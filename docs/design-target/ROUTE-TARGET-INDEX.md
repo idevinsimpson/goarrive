@@ -71,8 +71,8 @@ second is operational.
 | | |
 | --- | --- |
 | User-facing routes | **23** |
-| Routes with a real-RN target | **21** |
-| Routes with no target | **2** |
+| Routes with a real-RN target | **22** |
+| Routes with no target | **1** |
 | Routes implemented against an approved target | **5** |
 
 ### Covered — a real-RN target exists
@@ -86,6 +86,7 @@ second is operational.
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **Implemented and accepted.** |
 | `/community/[groupId]/challenge` | `review/batch-c-challenge-and-door/` | The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**. |
 | `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **not approved**. |
+| `/display/[goalId]` | `review/batch-f-public-display/` | The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target only, **not approved**. |
 | `/event/[goalId]` | `review/batch-d-event-and-line/` | Standing in the room — eleven states, including the event route's OWN device question (the join route's variant differs and is Batch B). Target only, **not approved**. |
 | `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
 | `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**. |
@@ -105,7 +106,6 @@ second is operational.
 
 | Route | What it is |
 | --- | --- |
-| `/display/[goalId]` | Public / shared display, phone through 1920x1080 |
 | `/move/[goalId]` | Movement / player route |
 
 <!-- END GENERATED ROUTES -->
