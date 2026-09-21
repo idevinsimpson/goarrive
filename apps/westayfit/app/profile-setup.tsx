@@ -251,12 +251,26 @@ export default function ProfileSetup() {
         />
       </View>
 
+      {/*
+        `aria-checked` IS SET DIRECTLY, BECAUSE accessibilityState DID NOT
+        REACH THE DOM.
+
+        This renders a role="checkbox" whose checked state was announced to
+        nobody: react-native-web did not map `accessibilityState={{ checked }}`
+        to an attribute here, so a screen reader met a checkbox with no state
+        — on the one control in the product that records a legal consent.
+        Caught by asserting the attribute rather than assuming the prop
+        arrived.
+
+        `accessibilityState` stays for native, where it is the supported API.
+      */}
       <Pressable
         onPress={() => setAcceptedTerms((v) => !v)}
         style={authFormStyles.checkboxRow}
         testID="wsf-profile-termsCheckbox"
         accessibilityRole="checkbox"
         accessibilityState={{ checked: acceptedTerms }}
+        aria-checked={acceptedTerms}
       >
         <View style={[authFormStyles.checkbox, acceptedTerms ? authFormStyles.checkboxChecked : null]}>
           {acceptedTerms ? <Text style={authFormStyles.checkboxCheck}>{'\u2713'}</Text> : null}
