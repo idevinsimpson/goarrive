@@ -50,6 +50,7 @@ const TARGETS = {
   '/kiosk/[goalId]': 'review/batch-e-room-screens/',
   '/station/[goalId]': 'review/batch-e-room-screens/',
   '/display/[goalId]': 'review/batch-f-public-display/',
+  '/move/[goalId]': 'review/batch-g-follow-along/',
   '/signin': 'review/batch-a-identity/',
   '/signup': 'review/batch-a-identity/',
   '/verify-email': 'review/batch-a-identity/',
@@ -101,6 +102,8 @@ const NOTES = {
     'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target only, **not approved**.',
   '/display/[goalId]':
     'The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target only, **not approved**.',
+  '/move/[goalId]':
+    'The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target only, **not approved**.',
   '/signin':
     'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
   '/signup': 'Target only, **not approved**.',
@@ -111,7 +114,6 @@ const NOTES = {
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
-  '/move/[goalId]': 'Movement / player route',
 };
 
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */

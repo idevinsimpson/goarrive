@@ -71,8 +71,8 @@ second is operational.
 | | |
 | --- | --- |
 | User-facing routes | **23** |
-| Routes with a real-RN target | **22** |
-| Routes with no target | **1** |
+| Routes with a real-RN target | **23** |
+| Routes with no target | **0** |
 | Routes implemented against an approved target | **5** |
 
 ### Covered — a real-RN target exists
@@ -92,6 +92,7 @@ second is operational.
 | `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**. |
 | `/kiosk/[goalId]` | `review/batch-e-room-screens/` | The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target only, **not approved**. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation). |
+| `/move/[goalId]` | `review/batch-g-follow-along/` | The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target only, **not approved**. |
 | `/profile-setup` | `review/batch-a-identity/` | Target only, **not approved**. Carries an owed truth correction — see that package. |
 | `/queue/[goalId]` | `review/batch-d-event-and-line/` | Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target only, **not approved**. |
 | `/reset-password` | `review/batch-a-identity/` | Target only, **not approved**. |
@@ -104,9 +105,7 @@ second is operational.
 
 ### Not covered — no target of any kind
 
-| Route | What it is |
-| --- | --- |
-| `/move/[goalId]` | Movement / player route |
+None. Every user-facing route has a target.
 
 <!-- END GENERATED ROUTES -->
 
