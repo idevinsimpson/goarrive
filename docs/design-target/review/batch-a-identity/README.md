@@ -93,6 +93,11 @@ refuses a build that sets it. No deployed artifact can serve this route.
 
 ## The four owed corrections are closed — 2026-09-21
 
+> **Superseded, and kept as the record of that day.** Batch A's targets were
+> accepted as reference later on 2026-09-21, and the five routes were then
+> implemented under a separate owner instruction. What follows described the
+> state at the time it was written.
+
 Batch A is still **target only and not approved**. But it is no longer "not
 final as drawn": every debt recorded here has been paid, and the frames were
 recaptured. A batch carrying known defects cannot be counted toward a complete
@@ -180,6 +185,11 @@ rather than with padding.
 
 Still target only. Nothing here is approved and nothing should be built from
 these frames without a separate authorization.
+
+> **That separate authorization arrived**, and the five routes are built. See
+> *Implemented* below. The sentence above stands as what was true when it was
+> written, and the rule it states — that a target authorizes nothing by itself
+> — is unchanged.
 
 ## The BEFORE set, completed to three classes — 2026-09-21
 

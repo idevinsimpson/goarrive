@@ -19,7 +19,14 @@ atlas was "the coverage register, not an implementation blocker". That is
 superseded: the owner's instruction and the committed
 `THREAD-CONTINUATION-BRIEF-2026-09-21.md` both require the missing atlas to be
 finished and visually reviewed **before any further page implementation**.
-Pages 1–4 keep their recorded acceptance; Page 5 (`/you`) stays target only.
+**That gate is now cleared.** The atlas was reviewed and accepted as target
+reference on 2026-09-21. Pages 1–5 all keep their recorded acceptance,
+including Page 5 (`/you`), which was implemented under its own separate owner
+instruction and accepted. **Batch A** was likewise authorized separately and
+is implemented, awaiting visual/functional review.
+
+**Acceptance of a batch authorizes nothing to be built.** Batches B–G are
+accepted as target reference and remain drawings.
 
 **The page-level visual gate still stands**, on every page:
 ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual acceptance.
@@ -52,10 +59,18 @@ each page shipped and the matching uncovered row was never pruned. Both tables
 are generated now, between markers, and `--check` fails if they and the route
 tree disagree.
 
-**A known gap the script does not measure:** of the device classes the atlas
-requires — 390x844, 390x640, 430x932, 800x1280 tablet portrait, 1280x800 tablet
-landscape and 1920x1080 collective display — only the three phone sizes have any
-target at all. The three larger classes are Batches E and F.
+**That gap is closed.** It used to read here that of the six device classes the
+atlas requires — 390x844, 390x640, 430x932, 800x1280 tablet portrait, 1280x800
+tablet landscape and 1920x1080 collective display — only the three phone sizes
+had any target at all. All six are now drawn, and the generated
+`ATLAS-COVERAGE.md` device tally is the authority rather than this sentence:
+1280x800 in Batches E, F and G, 800x1280 in E and F, 1920x1080 in F and the
+physical-flow board.
+
+**Drawn is not built.** Those three larger classes are **target reference
+only** — no kiosk, station or display route was implemented, and the frame
+counts anywhere in these documents describe drawings, never implementation and
+never verification.
 
 `/design-target/*` (gated preview routes) and `/health` are excluded: the first
 are not member surfaces and cannot be served by a deployed artifact, and the
@@ -80,29 +95,29 @@ second is operational.
 
 | Route | Target package | Notes |
 | --- | --- | --- |
-| `/` | `review/batch-c-challenge-and-door/` | The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target only, **not approved**. |
+| `/` | `review/batch-c-challenge-and-door/` | The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/activity` | `review/page-04-progress/` | Progress — the private record of what the member recorded. **Implemented (Phase A) and accepted.** The data audit in that package is why there is no streak. |
-| `/combined/[setupId]` | `review/batch-b-join-and-setup/` | Watching a combined goal — five states. Read-only; NOT a setup flow. Target only, **not approved**. |
+| `/combined/[setupId]` | `review/batch-b-join-and-setup/` | Watching a combined goal — five states. Read-only; NOT a setup flow. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/community` | `review/page-03-community/` | The community list — Community's only route, since `/community/[groupId]` is Home. **Implemented and accepted.** The per-community `PROPOSAL-*` frames are exploration only and were explicitly ruled out of implementation. |
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **Implemented and accepted.** |
-| `/community/[groupId]/challenge` | `review/batch-c-challenge-and-door/` | The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**. |
-| `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **not approved**. |
-| `/display/[goalId]` | `review/batch-f-public-display/` | The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target only, **not approved**. |
-| `/event/[goalId]` | `review/batch-d-event-and-line/` | Standing in the room — eleven states, including the event route's OWN device question (the join route's variant differs and is Batch B). Target only, **not approved**. |
-| `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
-| `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**. |
-| `/kiosk/[goalId]` | `review/batch-e-room-screens/` | The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target only, **not approved**. |
+| `/community/[groupId]/challenge` | `review/batch-c-challenge-and-door/` | The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **accepted as reference only** and not implemented. |
+| `/display/[goalId]` | `review/batch-f-public-display/` | The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/event/[goalId]` | `review/batch-d-event-and-line/` | Standing in the room — eleven states, including the event route's OWN device question (the join route's variant differs and is Batch B). Target **reviewed and accepted as reference**; NOT implemented. |
+| `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target **reviewed and accepted as reference**; NOT implemented. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
+| `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/kiosk/[goalId]` | `review/batch-e-room-screens/` | The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation). |
-| `/move/[goalId]` | `review/batch-g-follow-along/` | The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target only, **not approved**. |
-| `/profile-setup` | `review/batch-a-identity/` | Target only, **not approved**. Carries an owed truth correction — see that package. |
-| `/queue/[goalId]` | `review/batch-d-event-and-line/` | Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target only, **not approved**. |
-| `/reset-password` | `review/batch-a-identity/` | Target only, **not approved**. |
-| `/signin` | `review/batch-a-identity/` | Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**. |
-| `/signup` | `review/batch-a-identity/` | Target only, **not approved**. |
-| `/start-community` | `review/batch-b-join-and-setup/` | Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target only, **not approved**. |
-| `/station/[goalId]` | `review/batch-e-room-screens/` | The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target only, **not approved**. |
-| `/verify-email` | `review/batch-a-identity/` | Target only, **not approved**. |
-| `/you` | `review/page-05-you/` | You — identity, the community you belong to, and the account actions that really work. Target only; the truth table in that package is why there is no photo, streak or personal-impact claim. |
+| `/move/[goalId]` | `review/batch-g-follow-along/` | The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/profile-setup` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. The owed truth correction it carried is closed in that package. |
+| `/queue/[goalId]` | `review/batch-d-event-and-line/` | Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/reset-password` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. |
+| `/signin` | `review/batch-a-identity/` | Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented** to the accepted target; awaiting visual/functional review. |
+| `/signup` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. |
+| `/start-community` | `review/batch-b-join-and-setup/` | Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/station/[goalId]` | `review/batch-e-room-screens/` | The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/verify-email` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. One open question on the `unconfigured` outcome is recorded on PR #365. |
+| `/you` | `review/page-05-you/` | You — identity, the community you belong to, and the account actions that really work. **Implemented and accepted.** The truth table in that package is why there is no photo, streak or personal-impact claim. |
 
 ### Not covered — no target of any kind
 

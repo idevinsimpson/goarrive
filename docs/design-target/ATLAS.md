@@ -30,11 +30,13 @@ npm run wsf:route-coverage          # the report
 npm run check:route-index           # fails if ROUTE-TARGET-INDEX.md has drifted
 ```
 
-> **REVIEWED AND ACCEPTED AS TARGET REFERENCE — NOT IMPLEMENTED.**
+> **REVIEWED AND ACCEPTED AS TARGET REFERENCE.**
 > On 2026-09-21 the atlas content and product direction were accepted, which
-> clears the atlas-first gate. **Accepted does not mean built.** Every batch
-> here is still a drawing: no route in them changed and nothing in them was
-> implemented. The two states stay separate and must not be collapsed — a
+> clears the atlas-first gate. **Accepted does not mean built.** Acceptance of
+> a batch authorizes nothing by itself; **Batch A** was implemented under its
+> own separate owner instruction and is awaiting visual/functional review.
+> **Batches B–G remain drawings**: no route in them changed and nothing in
+> them was implemented. The two states stay separate and must not be collapsed — a
 > target that is *reviewed* is not a route that *exists*. Pages 1–4 are
 > separate: those are implemented against accepted targets, and the atlas does
 > not redraw them.
@@ -65,7 +67,7 @@ Plus the five page packages, which are **accepted work**, not atlas drawings:
 | 2 | `/move` `/contribute/[goalId]` | implemented, accepted | `review/page-02-move/` |
 | 3 | `/community` | implemented, accepted | `review/page-03-community/` |
 | 4 | `/activity` | implemented (Phase A), accepted | `review/page-04-progress/` |
-| 5 | `/you` | **target only — not implemented** | `review/page-05-you/` |
+| 5 | `/you` | implemented, accepted | `review/page-05-you/` |
 
 Every batch package opens
 with its own contact sheet or matrix; start there.
@@ -233,5 +235,12 @@ counted toward a complete atlas. Reopened and fixed:
 
 ## Next
 
-**Stop here for visual review.** Page 5 (`/you`) remains target only, and no
-further page implementation begins until the atlas is accepted.
+**Stop here for visual review.** Page 5 (`/you`) is implemented and accepted.
+**Batch A** is implemented under its own owner instruction and is awaiting
+visual/functional review; one open question on the `unconfigured` verification
+outcome is recorded on PR #365. **No further surface begins** — Batches B–G
+are accepted as target reference only, which authorizes nothing to be built.
+
+Counts above and in `ATLAS-COVERAGE.md` are generated from the PNGs on disk.
+They describe **drawings**, not implementation and not verification: a frame
+existing says nothing about whether a route was built or a build was checked.

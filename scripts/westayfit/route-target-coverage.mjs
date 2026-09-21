@@ -75,41 +75,41 @@ const NOTES = {
   '/activity':
     'Progress — the private record of what the member recorded. **Implemented (Phase A) and accepted.** The data audit in that package is why there is no streak.',
   '/you':
-    'You — identity, the community you belong to, and the account actions that really work. Target only; the truth table in that package is why there is no photo, streak or personal-impact claim.',
+    'You — identity, the community you belong to, and the account actions that really work. **Implemented and accepted.** The truth table in that package is why there is no photo, streak or personal-impact claim.',
   '/move':
     'MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation).',
   '/contribute/[goalId]':
-    'Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **not approved**.',
+    'Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **accepted as reference only** and not implemented.',
   '/goals/new':
-    'Opening a goal — eight states, three phone classes. Target only, **not approved**. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
+    'Opening a goal — eight states, three phone classes. Target **reviewed and accepted as reference**; NOT implemented. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
   '/join/[joinCode]':
-    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target only, **not approved**.',
+    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target **reviewed and accepted as reference**; NOT implemented.',
   '/start-community':
-    'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target only, **not approved**.',
+    'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target **reviewed and accepted as reference**; NOT implemented.',
   '/combined/[setupId]':
-    'Watching a combined goal — five states. Read-only; NOT a setup flow. Target only, **not approved**.',
+    'Watching a combined goal — five states. Read-only; NOT a setup flow. Target **reviewed and accepted as reference**; NOT implemented.',
   '/community/[groupId]/challenge':
-    'The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target only, **not approved**.',
+    'The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target **reviewed and accepted as reference**; NOT implemented.',
   '/':
-    'The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target only, **not approved**.',
+    'The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target **reviewed and accepted as reference**; NOT implemented.',
   '/event/[goalId]':
-    'Standing in the room — eleven states, including the event route\'s OWN device question (the join route\'s variant differs and is Batch B). Target only, **not approved**.',
+    'Standing in the room — eleven states, including the event route\'s OWN device question (the join route\'s variant differs and is Batch B). Target **reviewed and accepted as reference**; NOT implemented.',
   '/queue/[goalId]':
-    'Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target only, **not approved**.',
+    'Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target **reviewed and accepted as reference**; NOT implemented.',
   '/kiosk/[goalId]':
-    'The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target only, **not approved**.',
+    'The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target **reviewed and accepted as reference**; NOT implemented.',
   '/station/[goalId]':
-    'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target only, **not approved**.',
+    'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target **reviewed and accepted as reference**; NOT implemented.',
   '/display/[goalId]':
-    'The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target only, **not approved**.',
+    'The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target **reviewed and accepted as reference**; NOT implemented.',
   '/move/[goalId]':
-    'The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target only, **not approved**.',
+    'The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**; NOT implemented.',
   '/signin':
-    'Plus its error state and both pending-destination returns, which are states of this route rather than routes of their own. Target only, **not approved**.',
-  '/signup': 'Target only, **not approved**.',
-  '/verify-email': 'Target only, **not approved**.',
-  '/reset-password': 'Target only, **not approved**.',
-  '/profile-setup': 'Target only, **not approved**. Carries an owed truth correction — see that package.',
+    'Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented** to the accepted target; awaiting visual/functional review.',
+  '/signup': '**Implemented** to the accepted target; awaiting visual/functional review.',
+  '/verify-email': '**Implemented** to the accepted target; awaiting visual/functional review. One open question on the `unconfigured` outcome is recorded on PR #365.',
+  '/reset-password': '**Implemented** to the accepted target; awaiting visual/functional review.',
+  '/profile-setup': '**Implemented** to the accepted target; awaiting visual/functional review. The owed truth correction it carried is closed in that package.',
 };
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
