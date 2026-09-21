@@ -13,8 +13,8 @@ boards first, and they are not present yet (see `owner-north-star/README.md`).
 | | |
 | --- | --- |
 | User-facing routes | **22** |
-| Routes with a real-RN target | **1** |
-| Routes with no target | **21** |
+| Routes with a real-RN target | **5** |
+| Routes with no target | **17** |
 | Superseded HTML concepts, kept as a record | 9 |
 
 ## The routes
@@ -24,7 +24,9 @@ boards first, and they are not present yet (see `owner-north-star/README.md`).
 | Route | Target | Notes |
 | --- | --- | --- |
 | `/community/[groupId]` | `targets/TARGET-home-390x844.png`, `targets/TARGET-home-390x640.png`, `targets/TARGET-home-430x932.png` | Community Home. This is where `/` lands a member who has a current community, so it is the real Home. **Real RN**, three device classes. Ordinary-progress state ONLY — the other twelve Home states in the atlas §B have no target. |
-| `/contribute/[goalId]` | none | **Next up.** The superseded HTML concept is not a target. |
+| `/move` | `review/page-02-move/TARGET-move-choose-390x844.png`, `TARGET-move-choose-390x640.png`, `TARGET-move-nogoal-390x844.png` | MOVE entry, the raised tab-bar action. **Real RN.** The target proposes a sheet over the dimmed Home rather than a page. Awaiting visual approval — not implemented. |
+| `/contribute/[goalId]` | `review/page-02-move/TARGET-contribute-390x844.png`, `TARGET-contribute-390x640.png`, `TARGET-confirmed-390x844.png`, `TARGET-confirmed-390x640.png` | The contribution and the confirmed moment. **Real RN.** Awaiting visual approval — not implemented. |
+| `/goals/new` | `review/page-02-move/TARGET-picker-one-390x844.png`, `TARGET-picker-many-390x844.png` | The unified movement picker, the step inside goal creation. **Real RN.** Awaiting visual approval — not implemented. |
 | `/community` | none | The superseded HTML concept is not a target. |
 | `/activity` | none | The atlas renames this destination Progress. The superseded HTML concept is not a target. |
 | `/you` | none | The superseded HTML concept is not a target. |
@@ -36,7 +38,6 @@ boards first, and they are not present yet (see `owner-north-star/README.md`).
 | `/` | Home resolver / current-community landing |
 | `/community/[groupId]/challenge` | Community challenge surface |
 | `/move/[goalId]` | Movement / player route |
-| `/goals/new` | Champion goal setup |
 | `/combined/[setupId]` | Multi-movement goal setup |
 | `/join/[joinCode]` | Join invitation landing |
 | `/start-community` | Create a community |

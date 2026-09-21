@@ -70,3 +70,38 @@ test('the Home lifecycle state matrix renders every state in one frame', async (
     await ctx.close();
   }
 });
+
+test('the MOVE-family targets render at their device classes', async ({
+  browser,
+}: {
+  browser: Browser;
+}) => {
+  const OUT2 = path.resolve(__dirname, '../../../docs/design-target/review/page-02-move');
+  const ctx = await browser.newContext({
+    viewport: { width: 1688, height: 1200 },
+    deviceScaleFactor: 2,
+  });
+  try {
+    const page = await ctx.newPage();
+    await page.goto('/design-target/move-flow');
+    await page.getByTestId('wsf-target-move-flow').waitFor({ state: 'visible', timeout: 30_000 });
+    await page.waitForTimeout(1200);
+    for (const [id, name] of [
+      ['move-choose', 'TARGET-move-choose-390x844'],
+      ['move-nogoal', 'TARGET-move-nogoal-390x844'],
+      ['move-choose-short', 'TARGET-move-choose-390x640'],
+      ['picker-one', 'TARGET-picker-one-390x844'],
+      ['picker-many', 'TARGET-picker-many-390x844'],
+      ['contribute', 'TARGET-contribute-390x844'],
+      ['contribute-short', 'TARGET-contribute-390x640'],
+      ['confirmed', 'TARGET-confirmed-390x844'],
+      ['confirmed-short', 'TARGET-confirmed-390x640'],
+    ] as const) {
+      await page
+        .getByTestId(`wsf-frame-${id}`)
+        .screenshot({ path: path.join(OUT2, `${name}.png`) });
+    }
+  } finally {
+    await ctx.close();
+  }
+});
