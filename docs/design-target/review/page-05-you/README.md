@@ -1,13 +1,17 @@
-# Page 5 · You — BEFORE and TARGET
+# Page 5 · You — BEFORE, TARGET and AFTER
 
-**Target only. `/you` is not changed by this package.** The gate is
-ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual acceptance; this is
-the first two, and it stops before implementation.
+**Implemented.** The target was reviewed and accepted, and `/you` is now built
+to it. The gate is ACTUAL BEFORE → reviewed TARGET → ACTUAL AFTER → visual
+acceptance; this package now carries the first three and **stops for the
+fourth**. Nothing beyond Page 5 was begun.
 
 **The route is `/you`.** There is no `/profile`; `/profile-setup` is a step on
 the way to having an account, not a place to return to.
 
-- `before/` — the product as it renders today. **Frozen**: the capture spec is
+- `after/` — `/you` as it renders **now**, after implementation. Each frame is
+  the running product against the emulators, at the same three device classes.
+  No `TARGET` strip: these are not targets.
+- `before/` — the product as it rendered before this change. **Frozen**: the capture spec is
   opt-in (`WSF_CAPTURE_BEFORE=1`) and `npm run check:evidence` fails if a
   routine run changes a byte.
 - `TARGET-*.png` — real React Native from the real kit, through the gated
@@ -76,6 +80,67 @@ joining them.
 
 **One account action, because there is one.** `/you` offers Sign out. A control
 with no capability behind it is the thing this atlas refuses everywhere else.
+
+## The AFTER, and two things it is honest about
+
+### The BEFORE covers two states, not six
+
+`before/` holds six PNGs: `identity` and `signed-out`, each at the three
+classes. That is not an omission in the capture — **it is the whole of what
+the old page could show.** The previous `/you` was 74 lines: signed in, it
+rendered an email and a Sign out button; signed out, it rendered a Sign in
+button. It had no community read, no goal read, no loading state and no
+failure state, so there was nothing else to photograph.
+
+The frozen BEFOREs are therefore **not recaptured to match the AFTER's state
+list**, and `npm run check:evidence` still fails if a routine run changes a
+byte of them. Where the AFTER has a state the BEFORE has none of, the
+comparison is `new state` — not a frame pair — and saying so is the honest
+report. The matched pairs are `identity` → `member` and `signed-out` →
+`signedout`.
+
+### There are six states, not the five the target named
+
+The accepted target drew five. Building it turned up a sixth, and it was a
+bug in the first draft rather than a flourish: `resolveCurrentCommunity`
+returns `null` **both** for a member who belongs to nothing and for a member
+who belongs to several with none remembered. The draft folded both into
+`noCommunity`, which told the second person *"You're not in a community
+yet."* That sentence is false about them.
+
+`pickCommunity` is now its own state — *"Which community? You are in N
+communities."* — and `you-page.spec.ts` asserts that the person in two
+communities is never shown the sentence about being in none, and that no
+community is chosen for them behind their back.
+
+### What the AFTER frames assert before the shutter fires
+
+Four of the six states are signed in, and each of those runs the full chrome
+assertion: the wordmark, the heading, the member tab bar and the raised MOVE
+control are all **visible and wholly inside the viewport** at scroll zero, in
+that vertical order, and no control outside the shell can be left permanently
+trapped under it.
+
+`signedout` is the one state that is exempt, and the exemption is the shell's
+rule rather than this page's: `MemberTabBar` returns `null` when `signedIn` is
+false, so a visitor has no member navigation to be visible. Rather than drop
+the assertion there, it is **inverted** — that frame asserts the bar and the
+raised MOVE are absent, and that no name or email is on the page. A shell that
+began rendering for signed-out visitors would break a test instead of quietly
+changing the evidence.
+
+### Behaviour is asserted separately, and on every run
+
+`tests-e2e/you-page.spec.ts` is not gated on `WSF_CAPTURE_FRAMES`. It proves,
+against the running product: identity survives a failed goal read; retry
+recovers in place without a reload; a goal with no recorded own part is never
+listed; the lead is the open goal **ending soonest**, not the first one back,
+shown in its own unit; a member of several communities is told that; a member
+of none is told that and offered a way in; a failed own-part read is admitted
+rather than hidden; and a signed-out visitor gets no member navigation.
+
+The capture spec writes PNGs into `docs/` and is evidence generation. These
+assertions are cheap and belong in every run.
 
 ## Truth table
 
@@ -156,6 +221,9 @@ and it is the one action a member may urgently want here.
 - The private-history callable remains a documented seam, not authorized and
   not built. It is what would make "this week", a contribution count and a
   consistency view truthful.
-- No implementation, no auth, no kiosk/event administration, no multi-movement
-  expansion, no staging, no merge and no release work is part of this package,
-  and no accepted page is redesigned by it.
+- Page 5 is implemented; **nothing else is**. No auth change, no kiosk or event
+  administration, no multi-movement expansion, no new backend or data
+  collection, no staging, no deploy, no merge and no release work is part of
+  this package, and no accepted page is redesigned by it.
+- This package stops at **actual Before → After visual acceptance**. Atlas
+  acceptance authorized Page 5 and nothing further.

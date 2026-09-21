@@ -200,7 +200,7 @@ const PAGES = [
   { page: '2', title: 'MOVE and contribution', dir: 'page-02-move', routes: ['/move', '/contribute/[goalId]'], status: 'implemented, **accepted**' },
   { page: '3', title: 'Community', dir: 'page-03-community', routes: ['/community'], status: 'implemented, **accepted**' },
   { page: '4', title: 'Progress', dir: 'page-04-progress', routes: ['/activity'], status: 'implemented (Phase A), **accepted**' },
-  { page: '5', title: 'You', dir: 'page-05-you', routes: ['/you'], status: '**target accepted** · implementation in progress' },
+  { page: '5', title: 'You', dir: 'page-05-you', routes: ['/you'], status: 'implemented · **awaiting Before → After acceptance**' },
 ];
 
 /**
@@ -237,11 +237,38 @@ function readPackage(dir) {
     states.get(state).push({ file: f, cls, end: Boolean(end) });
     classes.set(cls, (classes.get(cls) ?? 0) + 1);
   }
-  return { missing: false, states, classes, sheets, unparsed, frames: files.length };
+  /**
+   * BEFORE AND AFTER FRAMES LIVE IN SUBDIRECTORIES AND WERE NEVER COUNTED.
+   *
+   * This function only ever read the package root, which holds the TARGET
+   * frames. That was right while the atlas was targets only. Now that pages
+   * are implemented, a coverage doc that shows a package's targets and says
+   * nothing about the evidence beside them describes itself as complete while
+   * having looked at part of the package. Counting them here keeps the doc
+   * generated rather than leaving the AFTER to prose somebody maintains.
+   */
+  const sub = {};
+  for (const kind of ['before', 'after']) {
+    try {
+      sub[kind] = readdirSync(path.join(full, kind)).filter((f) => f.endsWith('.png')).length;
+    } catch {
+      sub[kind] = 0;
+    }
+  }
+  return {
+    missing: false,
+    states,
+    classes,
+    sheets,
+    unparsed,
+    frames: files.length,
+    before: sub.before,
+    after: sub.after,
+  };
 }
 
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */
-const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]', '/community', '/activity'];
+const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]', '/community', '/activity', '/you'];
 
 function routes(dir, prefix = '') {
   const out = [];
@@ -462,6 +489,15 @@ function coverageMarkdown() {
     }
     if (e.pkg.sheets.length) {
       L.push(`Contact sheet / other: ${e.pkg.sheets.map((f) => `\`${f}\``).join(', ')}`);
+      L.push('');
+    }
+    // The evidence beside the targets. Counted, so this doc cannot claim a
+    // package is covered while having looked only at its TARGET frames.
+    if (e.pkg.before || e.pkg.after) {
+      const parts = [];
+      if (e.pkg.before) parts.push(`\`before/\` ${e.pkg.before} frozen`);
+      if (e.pkg.after) parts.push(`\`after/\` ${e.pkg.after}`);
+      L.push(`Evidence: ${parts.join(' · ')}`);
       L.push('');
     }
     if (e.pkg.states.size === 0) {

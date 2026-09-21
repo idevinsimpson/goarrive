@@ -74,7 +74,7 @@ second is operational.
 | User-facing routes | **23** |
 | Routes with a real-RN target | **23** |
 | Routes with no target | **0** |
-| Routes implemented against an approved target | **5** |
+| Routes implemented against an approved target | **6** |
 
 ### Covered — a real-RN target exists
 
@@ -145,7 +145,7 @@ None. Every user-facing route has a target.
 | 2 | MOVE and contribution | `/move` `/contribute/[goalId]` | 19 | implemented, **accepted** |
 | 3 | Community | `/community` | 24 | implemented, **accepted** |
 | 4 | Progress | `/activity` | 10 | implemented (Phase A), **accepted** |
-| 5 | You | `/you` | 16 | **target accepted** · implementation in progress |
+| 5 | You | `/you` | 16 | implemented · **awaiting Before → After acceptance** |
 
 ### Device classes, by frames actually drawn
 

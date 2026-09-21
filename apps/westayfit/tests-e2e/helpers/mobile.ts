@@ -214,6 +214,8 @@ export async function seedActiveGoal(opts: {
   unit: string;
   total: number;
   timezone?: string;
+  /** Defaults to a week out, which is what every caller before this wanted. */
+  endsAt?: Date;
 }): Promise<void> {
   const now = new Date();
   await firestoreWrite(`wsfGoals/${opts.goalId}`, {
@@ -224,7 +226,7 @@ export async function seedActiveGoal(opts: {
     unit: { stringValue: opts.unit },
     status: { stringValue: 'active' },
     startsAt: tsField(new Date(now.getTime() - 7 * 24 * 60 * 60_000)),
-    endsAt: tsField(new Date(now.getTime() + 7 * 24 * 60 * 60_000)),
+    endsAt: tsField(opts.endsAt ?? new Date(now.getTime() + 7 * 24 * 60 * 60_000)),
     timezone: { stringValue: opts.timezone ?? 'America/New_York' },
     createdAt: tsField(now),
     updatedAt: tsField(now),

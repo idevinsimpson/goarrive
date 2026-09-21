@@ -18,6 +18,8 @@ station and a public display are fixed canvases with no scroll.
 
 Contact sheet / other: `CONTACT-SHEET-batch-a.png`
 
+Evidence: `before/` 16 frozen
+
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
 | `error` | 390x640 · 390x844 · 430x932 | yes | 4 |
@@ -234,6 +236,8 @@ Contact sheet / other: `AFTER-home-390x640.png`, `AFTER-home-390x844.png`, `AFTE
 
 `review/page-02-move/` · `/move` `/contribute/[goalId]` · implemented, **accepted**
 
+Evidence: `before/` 12 frozen · `after/` 20
+
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
 | `closed` | 390x640 · 390x844 |  | 2 |
@@ -255,6 +259,8 @@ Contact sheet / other: `AFTER-home-390x640.png`, `AFTER-home-390x844.png`, `AFTE
 
 Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-active-390x844.png`, `PROPOSAL-detail-active-430x932.png`, `PROPOSAL-detail-failed-390x844.png`, `PROPOSAL-detail-history-390x640.png`, `PROPOSAL-detail-history-390x844.png`, `PROPOSAL-detail-history-430x932.png`, `PROPOSAL-detail-loading-390x844.png`, `PROPOSAL-detail-nogoal-390x640.png`, `PROPOSAL-detail-nogoal-390x844.png`, `PROPOSAL-detail-nogoal-430x932.png`, `PROPOSAL-detail-switch-390x844.png`
 
+Evidence: `before/` 9 frozen · `after/` 15
+
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
 | `list-failed` | 390x844 |  | 1 |
@@ -268,6 +274,8 @@ Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-ac
 
 `review/page-04-progress/` · `/activity` · implemented (Phase A), **accepted**
 
+Evidence: `before/` 8 frozen · `after/` 9
+
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
 | `failed` | 390x844 |  | 1 |
@@ -278,7 +286,9 @@ Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-ac
 
 ## Page 5 — You
 
-`review/page-05-you/` · `/you` · **target accepted** · implementation in progress
+`review/page-05-you/` · `/you` · implemented · **awaiting Before → After acceptance**
+
+Evidence: `before/` 6 frozen · `after/` 18
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
