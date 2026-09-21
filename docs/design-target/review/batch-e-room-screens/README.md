@@ -19,10 +19,12 @@ changed. Captured from the gated preview route `/design-target/room-screens`.
 | **E2** | `/contribute/[goalId]?kiosk=1` | 800×1280 portrait | 7 |
 | **E3** | `/station/[goalId]` | 1280×800 landscape | 15 |
 
-Each screen is drawn at the **one** device class it is actually installed at.
-A kiosk is a portrait tablet on a stand; a station is a landscape tablet beside
-a mat. Drawing either at the other's aspect would be drawing a device nobody
-has.
+Each screen is drawn at the **one device class this design targets for it**.
+These are target classes, not installed hardware — nothing here asserts what is
+standing in a room. A kiosk surface is targeted portrait and a station surface
+landscape because that is each one's intended orientation; drawing either at
+the other's aspect would be designing for a shape this product is not aiming
+at.
 
 ## These are not big phones
 
@@ -129,7 +131,7 @@ target showing the product's instrument as something simpler than it is.
 ## Device coverage
 
 800×1280 and 1280×800 — the two classes the atlas asks for here, and the two
-these routes are installed at. 1920×1080 collective display is Batch F.
+this design targets for these routes. 1920×1080 collective display is Batch F.
 
 ## Regenerating
 

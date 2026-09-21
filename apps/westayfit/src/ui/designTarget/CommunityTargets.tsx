@@ -245,15 +245,25 @@ function Header() {
  * BEFORE critique was that the existing one reads like a website, and two more
  * of them would have been the same defect in a new place.
  *
- * THERE IS NO JOIN PILL, ON ANY STATE. `/join/[joinCode]` reads the code from
- * the route and nothing in the product accepts a typed one, so a tappable
- * "Join a community" would be a control with nowhere to go — on the one screen
- * whose whole job is to be true. Manual join-code entry is recorded as a future
- * product seam in this package's README, not drawn as a button.
+ * JOIN IS BACK, AND SECONDARY.
+ *
+ * An earlier revision removed every Join control from this screen on the
+ * grounds that "nothing in the product accepts a typed code". That was false:
+ * `JoinWithCodeField` in app/index.tsx validates a pasted code against
+ * `JOIN_CODE_SHAPE` and pushes to `/join/<code>`. The control has a real
+ * destination and real behaviour to reuse.
+ *
+ * It is drawn compact and secondary on purpose. Joining is legitimate and it
+ * is not what this screen is for — it must not outrank Home or MOVE, so it
+ * sits beside Start rather than above the content, and neither is a naked
+ * underlined link.
  */
 function SecondaryActions() {
   return (
     <View style={s.actionRow}>
+      <View style={s.pill}>
+        <Text style={s.pillText}>Join with a code</Text>
+      </View>
       <View style={s.pill}>
         <Text style={s.pillText}>Start a community</Text>
       </View>
@@ -335,17 +345,26 @@ export function CommunityListTarget({
                 direction; this screen does not get to reintroduce one. The
                 heading is the thing the member is here to do.
 
-                AND NO DEAD BUTTON. There is no join-by-code screen in the
-                product: `/join/[joinCode]` reads the code from the route, and
-                nothing anywhere accepts a typed one. So Join leads this panel
-                by heading and copy, which is true, rather than by a control
-                that would go nowhere. The seam is recorded in the README.
+                AND THE FIELD IS REAL. `JoinWithCodeField` on `/` validates a
+                pasted code against `JOIN_CODE_SHAPE` and pushes to
+                `/join/<code>`, so this is existing behaviour placed where
+                somebody with a code is actually standing — not a new capability
+                and not a control with nowhere to go. An earlier revision
+                removed it on the false premise that nothing accepted a typed
+                code; that premise is withdrawn.
               */}
               <Text style={[display.lg, s.emptyTitle]}>Join a community</Text>
               <Text style={s.emptyBody}>
-                You join with an invite link or QR code from someone already in the community.
-                Ask them to send you one.
+                Paste the code someone sent you, or open their invite link.
               </Text>
+              <View style={s.joinRow}>
+                <View style={s.joinInput}>
+                  <Text style={s.joinPlaceholder}>Paste a join code</Text>
+                </View>
+                <View style={s.joinGo}>
+                  <Text style={s.joinGoText}>Go</Text>
+                </View>
+              </View>
               <View style={s.emptyRule} />
               <Text style={s.emptyOr}>Or start your own and invite people to it.</Text>
               <View style={s.primary}>
@@ -902,6 +921,30 @@ const s = StyleSheet.create({
   emptyKicker: { color: PROGRESS_GREEN, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
   emptyTitle: { color: ON_NAVY },
   emptyBody: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
+  /* the code field, reusing the behaviour that already exists on `/` */
+  joinRow: { flexDirection: 'row', gap: 9, alignItems: 'stretch', marginTop: 4 },
+  joinInput: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: SURFACE,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: HAIRLINE,
+    paddingHorizontal: 13,
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  joinPlaceholder: { color: INK_QUIET, fontSize: 15 },
+  joinGo: {
+    minWidth: 66,
+    borderRadius: 13,
+    backgroundColor: NAVY,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  joinGoText: { color: CREAM, fontSize: 15, fontWeight: '900' },
+
   emptyRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 6 },
   emptyOr: { color: ON_NAVY_MUTED, fontSize: 13.5, lineHeight: 19 },
   emptyActions: { gap: 9, paddingTop: 4 },

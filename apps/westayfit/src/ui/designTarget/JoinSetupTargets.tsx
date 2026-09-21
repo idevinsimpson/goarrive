@@ -1361,6 +1361,203 @@ export function GoalNoCommunityTarget() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   B3b · SETTING UP A COMBINED GOAL — the capability I wrongly called absent
+   ════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * A CORRECTION TO THIS BATCH'S FIRST REVISION.
+ *
+ * It said `/goals/new` has "no movement catalog and no one-vs-many selection"
+ * — true of that route — and then treated multiple-movement setup as out of
+ * scope. That was wrong, and wrong in the way this atlas is supposed to catch:
+ * I declared a capability absent because one route did not have it.
+ *
+ * `wsfCreateCombinedGoal` exists and is deployed. Its contract is exact:
+ *
+ *   { communityGroupId, title, unit, target, startsAt, endsAt, timezone,
+ *     childGoalIds: string[] — 2..6, distinct }  ->  { setupId }
+ *
+ * And it is ALREADY CALLED, from `app/community/[groupId]/index.tsx:559`. So
+ * this is not a seam and not a proposal: it is shipped behaviour on Page 1
+ * that has never had a visual target drawn for it.
+ *
+ * CONFIGURED ACTIVITIES, NOT AN INVENTED CATALOG. The picker chooses among the
+ * community's OWN existing goals — that is what `childGoalIds` means, and the
+ * server freezes each child's title and unit into the setup at creation
+ * (`FrozenChild`). There is no global movement list anywhere in this product,
+ * and this target does not draw one.
+ *
+ * TWO IS THE FLOOR AND SIX IS THE CEILING, because the callable says so. The
+ * target draws the floor as a live constraint rather than a validation error
+ * discovered after a tap.
+ */
+function CombinedPick({
+  title,
+  unit,
+  picked,
+}: {
+  title: string;
+  unit: string;
+  picked?: boolean;
+}) {
+  return (
+    <View style={[s.pick, picked ? s.pickOn : null]}>
+      <View style={[s.pickBox, picked ? s.pickBoxOn : null]}>
+        {picked ? <View style={s.pickTick} /> : null}
+      </View>
+      <View style={s.pickText}>
+        <Text style={[s.pickTitle, picked ? s.pickTitleOn : null]}>{title}</Text>
+        <Text style={s.pickUnit}>{`Counted in ${unit}`}</Text>
+      </View>
+    </View>
+  );
+}
+
+function CombinedSetupScreen({
+  id,
+  chosen,
+  error,
+  working,
+}: {
+  id: string;
+  chosen: number;
+  error?: string;
+  working?: boolean;
+}) {
+  return (
+    <Frame id={id}>
+      {({ compact, frameHeight }) => (
+        <>
+          <Field
+            compact={compact}
+            grow={0.26}
+            frameHeight={frameHeight}
+            chip="Combined goal"
+            chipTone="action"
+          >
+            <Text style={s.fieldEyebrow}>The Henderson Family</Text>
+            <Text style={[compact ? display.md : display.lg, s.fieldTitle]}>
+              Count several goals as one.
+            </Text>
+            <Text style={s.fieldIntro}>
+              Everything people add to the goals you pick also counts toward this one, from the
+              moment it starts.
+            </Text>
+          </Field>
+          <Sheet compact={compact}>
+            {error ? (
+              <Banner tone="error" title="That combined goal could not be started." body={error} />
+            ) : null}
+            <Step n="1" title="Which goals count toward it?">
+              <Text style={s.underNote}>
+                Pick between two and six of your community&apos;s open goals. Each keeps its own
+                total and its own target.
+              </Text>
+              <CombinedPick title="October Push-Up Challenge" unit="push-ups" picked={chosen >= 1} />
+              <CombinedPick title="Riverside Morning Walk" unit="movements" picked={chosen >= 2} />
+              <CombinedPick title="Tuesday Night Circuit" unit="movements" picked={chosen >= 3} />
+              <CombinedPick title="Saturday Stretch" unit="movements" />
+              {/*
+                THE FLOOR IS SHOWN AS A CONSTRAINT, NOT A REFUSAL. The callable
+                takes 2..6; a picker that accepts one and then fails on submit
+                teaches somebody the rule by wasting their time.
+              */}
+              <Text style={chosen < 2 ? s.pickFloorShort : s.pickFloor}>
+                {chosen < 2 ? `Pick at least one more — ${chosen} of 2 so far.` : `${chosen} of 6 picked.`}
+              </Text>
+            </Step>
+
+            <Step n="2" title="What is the combined goal?">
+              <FormField label="Title" value="Fall Together" />
+              <View style={s.pair}>
+                <View style={s.pairItem}>
+                  <FormField label="Target" value="20,000" />
+                </View>
+                <View style={s.pairItem}>
+                  <FormField label="Unit" value="movements" />
+                </View>
+              </View>
+              {/*
+                THE UNIT IS THE COMBINED GOAL'S OWN, and it has to be, because
+                its children do not share one — push-ups and movements cannot
+                be added. Every activity enters as `countsAs: 'repetition'`,
+                which is what makes the sum legitimate at all.
+              */}
+              <Text style={s.underNote}>
+                The goals you picked count in different units, so this one carries its own. Each
+                addition counts once toward it.
+              </Text>
+            </Step>
+
+            <Step n="3" title="When is it open?">
+              <Chips options={['1 week', '2 weeks', '1 month', 'Custom']} selected="1 month" />
+              <View style={s.windowLines}>
+                <Text style={s.windowLine}>Starts today at 6:00 AM</Text>
+                <Text style={s.windowLine}>Ends Sat, Oct 31 at 11:45 PM</Text>
+              </View>
+              <Text style={s.zoneLine}>Times are in Eastern Time, from this device.</Text>
+            </Step>
+
+            <Step n="4" title="Check it over">
+              <View style={s.summaryCard}>
+                <SummaryRow label="Combined goal" value="Fall Together" />
+                <SummaryRow label="Counting to" value="20,000 movements" />
+                <SummaryRow label="Counts" value={`${chosen} goals`} />
+                <SummaryRow label="Open" value="Today — Sat, Oct 31" />
+                <SummaryRow label="Zone" value="Eastern Time" last />
+              </View>
+              {/*
+                WHAT IT WILL AND WILL NOT COUNT, said before it is frozen. A
+                goal already under way brings its future additions, not its
+                past ones, and that is the single most surprising thing about
+                a combined goal.
+              */}
+              <Text style={s.underNote}>
+                It counts what is added from the moment it starts. Whatever those goals have
+                already counted stays theirs.
+              </Text>
+            </Step>
+
+            <Primary
+              label={working ? 'Starting…' : 'Start this combined goal'}
+              working={working}
+              disabled={chosen < 2}
+            />
+            <Foot>
+              <Secondary label="Back to community" quiet />
+            </Foot>
+          </Sheet>
+        </>
+      )}
+    </Frame>
+  );
+}
+
+/** Only one goal picked: the floor is stated and the primary cannot fire. */
+export function CombinedSetupShortTarget() {
+  return <CombinedSetupScreen id="combined-setup-short" chosen={1} />;
+}
+
+/** Three picked — a legitimate setup, ready to freeze. */
+export function CombinedSetupReadyTarget() {
+  return <CombinedSetupScreen id="combined-setup-ready" chosen={3} />;
+}
+
+export function CombinedSetupWorkingTarget() {
+  return <CombinedSetupScreen id="combined-setup-working" chosen={3} working />;
+}
+
+export function CombinedSetupFailedTarget() {
+  return (
+    <CombinedSetupScreen
+      id="combined-setup-failed"
+      chosen={3}
+      error="Nothing was started. Your goals are unchanged — check your connection and try again."
+    />
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    B4 · /combined/[setupId] — WATCHING A COMBINED GOAL
    ════════════════════════════════════════════════════════════════════════ */
 
@@ -1962,6 +2159,47 @@ const s = StyleSheet.create({
     gap: 9,
   },
   skel: { backgroundColor: '#E9E5DC', borderRadius: 6 },
+
+  /* picking the goals a combined goal counts */
+  pick: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+    backgroundColor: SURFACE,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: HAIRLINE,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+  },
+  pickOn: { borderColor: ACTION_GREEN_DEEP, backgroundColor: '#F1F9F3' },
+  pickBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#B9C4CF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  pickBoxOn: { borderColor: ACTION_GREEN_DEEP, backgroundColor: ACTION_GREEN_DEEP },
+  pickTick: {
+    width: 11,
+    height: 6,
+    borderLeftWidth: 2.5,
+    borderBottomWidth: 2.5,
+    borderColor: SURFACE,
+    transform: [{ rotate: '-45deg' }],
+    marginTop: -3,
+  },
+  pickText: { flexShrink: 1, minWidth: 0, gap: 2 },
+  pickTitle: { color: NAVY, fontSize: 14.5, fontWeight: '800' },
+  pickTitleOn: { color: ACTION_GREEN_DEEP },
+  pickUnit: { color: INK_QUIET, fontSize: 12, lineHeight: 16.5 },
+  pickFloor: { color: INK_QUIET, fontSize: 12.5, fontWeight: '700' },
+  underNote: { color: INK_QUIET, fontSize: 12, lineHeight: 17 },
+  pickFloorShort: { color: ERROR_RED, fontSize: 12.5, fontWeight: '800' },
 
   /* combined activities */
   activity: {

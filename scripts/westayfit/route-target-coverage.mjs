@@ -182,6 +182,17 @@ const BATCHES = [
   },
 ];
 
+/** Boards that are not a route's destination target. */
+const BOARDS = [
+  {
+    key: 'FLOW',
+    title: 'The physical product, end to end',
+    dir: 'physical-flow',
+    routes: ['(no single route — the whole journey)'],
+    status: 'target only, **not approved**',
+  },
+];
+
 /** The page packages, which are NOT atlas drawings and must not be counted as
  * though they were. Their review state is a human act, so it is declared. */
 const PAGES = [
@@ -308,6 +319,7 @@ const ATLAS_END = '<!-- END GENERATED ATLAS -->';
 /** Everything the packages on disk actually contain, read once. */
 const packages = [
   ...BATCHES.map((b) => ({ ...b, kind: 'batch', pkg: readPackage(b.dir) })),
+  ...BOARDS.map((b) => ({ ...b, kind: 'board', pkg: readPackage(b.dir) })),
   ...PAGES.map((p) => ({ ...p, kind: 'page', pkg: readPackage(p.dir) })),
 ];
 
@@ -344,6 +356,14 @@ function atlasMarkdown() {
     );
   }
   L.push('');
+  L.push('### Boards');
+  L.push('');
+  L.push('| Board | What | Frames | State |');
+  L.push('| --- | --- | ---: | --- |');
+  for (const b of packages.filter((e) => e.kind === 'board')) {
+    L.push(`| **${b.key}** | ${b.title} | ${b.pkg.frames} | ${b.status} |`);
+  }
+  L.push('');
   L.push('### The page packages — accepted work, not atlas drawings');
   L.push('');
   L.push('| Page | What | Route(s) | Frames | State |');
@@ -377,6 +397,36 @@ function atlasMarkdown() {
 
 /** The exhaustive mapping, its own file because it is long by design. */
 const COVERAGE_DOC = path.resolve(process.cwd(), 'docs/design-target/ATLAS-COVERAGE.md');
+const ATLAS_DOC = path.resolve(process.cwd(), 'docs/design-target/ATLAS.md');
+const SUMMARY_BEGIN = '<!-- BEGIN GENERATED SUMMARY -->';
+const SUMMARY_END = '<!-- END GENERATED SUMMARY -->';
+
+/**
+ * The headline counts, generated into ATLAS.md.
+ *
+ * They were typed there, and drifted the moment a capture added six frames:
+ * ATLAS.md said 513 while the index said 519. A number a person types is a
+ * number that rots, which is the whole reason the tables below it are
+ * generated — the summary had simply been left out of that.
+ */
+function summaryMarkdown() {
+  const states = packages.reduce((n, e) => n + e.pkg.states.size, 0);
+  const frames = packages.reduce((n, e) => n + e.pkg.frames, 0);
+  const L = [];
+  L.push(SUMMARY_BEGIN);
+  L.push('');
+  L.push(`| | |`);
+  L.push(`| --- | ---: |`);
+  L.push(`| User-facing routes | **${facing.length}** |`);
+  L.push(`| Routes with a target | **${covered.length}** |`);
+  L.push(`| Routes with no target | **${uncovered.length}** |`);
+  L.push(`| States drawn | **${states}** |`);
+  L.push(`| Frames on disk | **${frames}** |`);
+  L.push(`| Packages | **${packages.length}** |`);
+  L.push('');
+  L.push(SUMMARY_END);
+  return L.join('\n');
+}
 
 function coverageMarkdown() {
   const L = [];
@@ -395,7 +445,12 @@ function coverageMarkdown() {
   L.push('station and a public display are fixed canvases with no scroll.');
   L.push('');
   for (const e of packages) {
-    const head = e.kind === 'batch' ? `Batch ${e.key} — ${e.title}` : `Page ${e.page} — ${e.title}`;
+    const head =
+      e.kind === 'batch'
+        ? `Batch ${e.key} — ${e.title}`
+        : e.kind === 'board'
+          ? `Board — ${e.title}`
+          : `Page ${e.page} — ${e.title}`;
     L.push(`## ${head}`);
     L.push('');
     L.push(`\`review/${e.dir}/\` · ${e.routes.map((r) => `\`${r}\``).join(' ')} · ${e.status}`);
@@ -433,7 +488,7 @@ function coverageMarkdown() {
       if (!byClass.has(cls)) byClass.set(cls, { n: 0, where: [] });
       const row = byClass.get(cls);
       row.n += n;
-      row.where.push(e.kind === 'batch' ? e.key : `P${e.page}`);
+      row.where.push(e.kind === 'batch' ? e.key : e.kind === 'board' ? e.key : `P${e.page}`);
     }
   }
   for (const [cls, row] of [...byClass].sort()) {
@@ -486,6 +541,17 @@ if (process.argv.includes('--check')) {
     console.error('ATLAS-COVERAGE.md is out of date. Run --write.');
     process.exit(1);
   }
+  const atlas = readFileSync(ATLAS_DOC, 'utf8');
+  const e0 = atlas.indexOf(SUMMARY_BEGIN);
+  const e1 = atlas.indexOf(SUMMARY_END);
+  if (e0 < 0 || e1 < 0) {
+    console.error('ATLAS.md has no generated SUMMARY block. Run --write.');
+    process.exit(1);
+  }
+  if (atlas.slice(e0, e1 + SUMMARY_END.length).trim() !== summaryMarkdown().trim()) {
+    console.error('ATLAS.md summary counts disagree with the frames on disk. Run --write.');
+    process.exit(1);
+  }
   const states = packages.reduce((n, e) => n + e.pkg.states.size, 0);
   const frames = packages.reduce((n, e) => n + e.pkg.frames, 0);
   console.log(
@@ -513,6 +579,17 @@ if (process.argv.includes('--write')) {
   next = next.slice(0, c) + atlasMarkdown() + next.slice(d + ATLAS_END.length);
   writeFileSync(DOC, next);
   writeFileSync(COVERAGE_DOC, coverageMarkdown());
+  const atlas = readFileSync(ATLAS_DOC, 'utf8');
+  const e0 = atlas.indexOf(SUMMARY_BEGIN);
+  const e1 = atlas.indexOf(SUMMARY_END);
+  if (e0 < 0 || e1 < 0) {
+    console.error('ATLAS.md has no generated SUMMARY block to write into.');
+    process.exit(1);
+  }
+  writeFileSync(
+    ATLAS_DOC,
+    atlas.slice(0, e0) + summaryMarkdown() + atlas.slice(e1 + SUMMARY_END.length)
+  );
   const states = packages.reduce((n, e) => n + e.pkg.states.size, 0);
   const frames = packages.reduce((n, e) => n + e.pkg.frames, 0);
   console.log(

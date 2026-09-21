@@ -86,6 +86,20 @@ Six corrections, each with the reason it mattered:
    screen reader and to nobody else, so each row carries a `Switch` / `Choose`
    cue.
 
+### RESTORED (2026-09-21): Join is back, compact and secondary
+
+The target now draws it, on the owner's decision that joining remains
+legitimate. It reuses `JoinWithCodeField`'s existing behaviour — a pasted code
+validated against `JOIN_CODE_SHAPE`, pushed to `/join/<code>` — so it is not a
+new capability and not a control with nowhere to go.
+
+**It is deliberately secondary.** A code field sits in the empty state where
+somebody holding a code is actually standing, and a compact `Join with a code`
+pill sits beside `Start a community` on the populated states. Neither outranks
+Home or MOVE, and neither is a naked underlined link.
+
+Target only. Implementation waits for the atlas gate.
+
 ### CORRECTION (2026-09-21): the premise below was wrong
 
 **A typed join code IS accepted, on `/`.** `app/index.tsx` renders

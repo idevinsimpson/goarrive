@@ -1,8 +1,21 @@
 # The Visual North Star Atlas
 
 **Every user-facing route in `apps/westayfit/app` has a destination target.**
-The generator agrees: **23 routes, 23 covered, 0 uncovered** — 162 states and
-513 frames across twelve packages.
+Every number below is generated from the frames on disk — `npm run
+check:route-index` fails if any of them drifts.
+
+<!-- BEGIN GENERATED SUMMARY -->
+
+| | |
+| --- | ---: |
+| User-facing routes | **23** |
+| Routes with a target | **23** |
+| Routes with no target | **0** |
+| States drawn | **167** |
+| Frames on disk | **544** |
+| Packages | **13** |
+
+<!-- END GENERATED SUMMARY -->
 
 > **A route count is not proof of completion**, and this file does not ask to
 > be read as one. A route with one frame and a route with thirty both count as
@@ -34,6 +47,12 @@ npm run check:route-index           # fails if ROUTE-TARGET-INDEX.md has drifted
 | **F** | The public display | `/display/[goalId]` | 10 × 4 boards | 41 | `review/batch-f-public-display/` |
 | **G** | The follow-along | `/move/[goalId]` | 7 × 2 layouts | 16 | `review/batch-g-follow-along/` |
 
+Plus one board that is not any single route's destination:
+
+| Board | What | Package |
+| --- | --- | --- |
+| **FLOW** | The physical product, end to end — two stations, entry, the turn, the count, the reset, and the collective display beside it. Every step marked BUILT / PROOF NEEDED / TARGET ONLY / SEAM. | `review/physical-flow/` |
+
 Plus the five page packages, which are **accepted work**, not atlas drawings:
 
 | Page | Route | State | Package |
@@ -44,7 +63,7 @@ Plus the five page packages, which are **accepted work**, not atlas drawings:
 | 4 | `/activity` | implemented (Phase A), accepted | `review/page-04-progress/` |
 | 5 | `/you` | **target only — not implemented** | `review/page-05-you/` |
 
-**513 frames** across all twelve packages. Every batch package opens
+Every batch package opens
 with its own contact sheet or matrix; start there.
 
 ## Start here, in this order
@@ -74,10 +93,12 @@ route file that settles it.
 only the two narrower phones — the atlas's last open device gap — and it was
 reopened and recaptured at all three.
 
-Each screen is drawn at the classes it is actually served to, not at all six.
-A kiosk is a portrait tablet on a stand and a station is a landscape tablet
-beside a mat; drawing either at the other's aspect would be drawing a device
-nobody has.
+Each screen is drawn at the classes **this design targets for it**, not at all
+six. These are target device classes, not hardware anyone has bought or
+installed — nothing here asserts what is standing in a room. A kiosk surface is
+targeted portrait and a station surface landscape because that is the intended
+orientation of each; drawing either at the other's aspect would be designing
+for a shape this product is not aiming at.
 
 ## Where a frame does not show the whole screen
 

@@ -15,7 +15,7 @@ from the gated preview route `/design-target/join-setup`.
 | Preview route | `apps/westayfit/app/design-target/join-setup.tsx` |
 | Capture | `apps/westayfit/tests-e2e/design-target-join-setup-capture.spec.ts` |
 
-Start with `CONTACT-SHEET-batch-b.png` — all thirty states at 390×844,
+Start with `CONTACT-SHEET-batch-b.png` — every state at 390×844,
 grouped by destination. Then the individual frames.
 
 ## The four destinations
@@ -79,7 +79,33 @@ was too strong, and Batch D's package records the correction.)
 **`/goals/new` has no movement catalog, and no one-vs-many selection.** A goal
 is a title, a whole number and a unit the Champion types
 (`FIELD_ORDER = title, target, unit, starts, ends, timezone`). Nothing in that
-route picks an activity from a list. See the open decision below.
+route picks an activity from a list.
+
+### CORRECTION: I then used that to call a capability absent, and it is not
+
+The first revision of this package went on to treat multiple-movement setup as
+out of scope. That was wrong, and wrong in the way this atlas exists to catch:
+**I declared a capability absent because one route did not have it.**
+
+`wsfCreateCombinedGoal` is deployed, and its contract is exact:
+
+```
+{ communityGroupId, title, unit, target, startsAt, endsAt, timezone,
+  childGoalIds: string[]  // 2..6, distinct }   ->   { setupId }
+```
+
+It is **already called**, from `app/community/[groupId]/index.tsx:559`. So this
+is not a seam and not a proposal — it is shipped behaviour on Page 1 that had
+never had a visual target drawn for it. **B3b** now draws it, in four states.
+
+**Configured activities, not an invented catalog.** The picker chooses among
+the community's own existing goals — that is what `childGoalIds` means, and the
+server freezes each child's title and unit into the setup (`FrozenChild`). No
+global movement list exists anywhere in this product and none is drawn.
+
+**Two is the floor and six is the ceiling**, because the callable says so, and
+the target draws the floor as a live constraint rather than a validation error
+discovered after a tap.
 
 **`/goals/new` has no review step.** The summary is a live card on the same
 page, recomputed as the fields change. The target keeps it a card — step 4 of

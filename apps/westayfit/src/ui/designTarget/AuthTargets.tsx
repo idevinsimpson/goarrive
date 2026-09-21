@@ -151,10 +151,10 @@ function Primary({ label, disabled }: { label: string; disabled?: boolean }) {
   );
 }
 
-function Secondary({ label }: { label: string }) {
+function Secondary({ label, muted }: { label: string; muted?: boolean }) {
   return (
     <View style={s.secondary}>
-      <Text style={s.secondaryText}>{label}</Text>
+      <Text style={[s.secondaryText, muted ? s.secondaryTextMuted : null]}>{label}</Text>
     </View>
   );
 }
@@ -362,15 +362,46 @@ export function VerifyAlreadyTarget() {
   );
 }
 
-/** `unconfigured` — the build cannot send at all, and says so. */
+/**
+ * `unconfigured` — the build cannot send at all, so the screen is composed
+ * around the ONE action that still works.
+ *
+ * The shipped screen renders all three controls unconditionally: "I have
+ * verified", "Resend verification email" and "Sign out". In this outcome the
+ * first two cannot succeed — there is no link to have followed and nothing to
+ * resend — and the only one that resolves anything, signing out to use an
+ * already-verified account, is the tertiary at the bottom.
+ *
+ * The first revision of this target reproduced that faithfully AND stated the
+ * failure twice, in the intro and again in the panel. A target is the
+ * destination, so this one is recomposed: the reason is said once, the working
+ * way out is the primary, and the two that cannot work are drawn disabled
+ * rather than removed — removing them would hide that the shipped screen still
+ * offers them. The route's behaviour is recorded as a product finding in this
+ * package's README.
+ */
 export function VerifyUnconfiguredTarget() {
   return (
-    <VerifyScreen
+    <Screen
       id="verify-unconfigured"
-      eyebrow="Not possible here"
-      intro="Email isn't switched on for this test build, so no verification link can be sent to devin@example.com yet."
-      notice="Email isn't switched on for this test build yet, so no message was sent. Nobody can finish verifying a new account here until it is switched on. Sign out to use an account that is already verified."
-    />
+      tone="error"
+      step="Step 2 of 3"
+      eyebrow="Not possible on this build"
+      title="Verification is switched off here."
+      intro="No message was sent, and nobody can finish verifying a new account on this build until email is switched on."
+      foot={<Text style={s.footNote}>Signed in as devin@example.com</Text>}
+    >
+      <Primary label="Sign out and use a verified account" />
+      <View style={s.help}>
+        <Text style={s.helpTitle}>Why the two below do nothing</Text>
+        <Text style={s.helpBody}>
+          There is no link to have followed, and nothing to resend. They stay visible because the
+          screen still offers them.
+        </Text>
+      </View>
+      <Secondary label="I have verified" muted />
+      <Secondary label="Resend verification email" muted />
+    </Screen>
   );
 }
 
@@ -509,6 +540,20 @@ export function ProfileSetupTarget() {
       }
     >
       <FormField label="Display name" value="Devin" />
+      {/*
+        THE VOID IS FILLED WITH THE ONE THING THIS SCREEN OWES AN ANSWER TO.
+        A display name is one field, so this state had a name, a checkbox, a
+        button and then a third of a phone of empty cream. What belongs in it
+        is what a person is actually deciding here — who sees this name — so
+        the sheet says it rather than padding.
+      */}
+      <View style={s.help}>
+        <Text style={s.helpTitle}>Where this name appears</Text>
+        <Text style={s.helpBody}>
+          Your community sees it beside what you record. It is not shown to anybody outside your
+          community, and you can change it later.
+        </Text>
+      </View>
       {/*
         CONSENT IS DRAWN UNCHECKED, AND THAT IS THE POINT.
 
@@ -750,6 +795,8 @@ const s = StyleSheet.create({
   primaryTextOff: { color: '#6B8A76' },
   secondary: { minHeight: 40, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: NAVY, fontSize: 14, fontWeight: '800' },
+  /** A control the shipped screen offers and this outcome cannot honour. */
+  secondaryTextMuted: { color: '#9AA7B4' },
   footNote: { color: INK_QUIET, fontSize: 12, textAlign: 'center', marginTop: 2 },
 
   /* what to do when the obvious thing did not work */

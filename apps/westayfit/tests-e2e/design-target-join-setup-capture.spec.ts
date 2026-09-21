@@ -52,6 +52,11 @@ const SCREENS = [
   'goal-live',
   'goal-unavailable',
   'goal-no-community',
+  // B3b · combined-goal setup
+  'combined-setup-short',
+  'combined-setup-ready',
+  'combined-setup-working',
+  'combined-setup-failed',
   // B4 · /combined/[setupId]
   'combined-live',
   'combined-closed',

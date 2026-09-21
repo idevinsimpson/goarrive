@@ -37,6 +37,30 @@ something had been recorded. Offering it before the round is deliberate:
 somebody who already did the movement should not have to sit through a timer to
 record it.
 
+### A product finding: the QR is not gated by layout
+
+`qrUri` in `app/move/[goalId].tsx` is gated on `handoffUrl` alone and **not**
+on `station`, even though the constant that builds it is commented *"the
+station panel's QR"*. So on a phone the product renders a code captioned
+*"Scan to enter your own count on your own phone"* — on that same phone.
+
+The first revision of this target reproduced it faithfully. A target is the
+destination, not a transcript of today's wiring, so it is drawn correctly now:
+
+| Layout | Panel offers |
+| --- | --- |
+| station | the QR — somebody across the room needs a way in |
+| phone | **Enter my reps** directly — the person holding it already has one |
+
+`/move/[goalId]` is untouched; this is a finding, and the fix is a one-line
+gate on `station`.
+
+### The station joins the navy room family
+
+The 1280 layout read as an enlarged cream web page. It now wears the same navy
+canvas as the kiosk, the station screen and the public display, with the player
+lifted on a translucent surface so it does not disappear into the ground.
+
 **The QR is a handoff, not a login.** *"Scan to enter your own count on your own
 phone. It opens the entry page for this goal and asks you to sign in as
 yourself."* A screen in a room must never be the thing that takes a password,

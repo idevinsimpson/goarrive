@@ -10,6 +10,8 @@ import {
   INK_QUIET,
   NAVY,
   ON_ACTION,
+  ON_NAVY,
+  ON_NAVY_MUTED,
   PROGRESS_GREEN,
   SURFACE,
   display,
@@ -76,10 +78,11 @@ function scale(layout: MoveLayout) {
 }
 
 function Chrome({ layout }: { layout: MoveLayout }) {
+  const station = layout === 'station';
   return (
     <View style={s.chrome}>
-      <WsfWordmark variant="navy" height={layout === 'station' ? 30 : 22} />
-      <Text style={s.back}>Back</Text>
+      <WsfWordmark variant={station ? 'white' : 'navy'} height={station ? 30 : 22} />
+      <Text style={[s.back, station ? s.backOnNavy : null]}>Back</Text>
     </View>
   );
 }
@@ -116,8 +119,11 @@ function Player({
   cue: string;
 }) {
   const t = scale(layout);
+  /* On a navy canvas the navy player card disappears into it, so on a station
+     it lifts on a lighter translucent surface instead — the same move the
+     room family makes for its panels, inverted. */
   return (
-    <View style={[s.player, { padding: t.pad }]}>
+    <View style={[s.player, layout === 'station' ? s.playerStation : null, { padding: t.pad }]}>
       <Figure layout={layout} dim={phase === 'ready' || phase === 'paused'} />
       <Text style={[s.clock, { fontSize: t.clock, lineHeight: Math.round(t.clock * 1.05) }]}>
         {clock}
@@ -200,16 +206,43 @@ function Controls({ layout, phase }: { layout: MoveLayout; phase: Phase }) {
   );
 }
 
-/** The panel: where you are, and something to scan. */
-function Panel({ layout, status, qr }: { layout: MoveLayout; status: string; qr: boolean }) {
+/**
+ * The panel: where you are, and the way to record what you did.
+ *
+ * A QR BELONGS ON A SHARED SCREEN AND NOWHERE ELSE.
+ *
+ * The first revision of this target drew the QR on both layouts, faithfully,
+ * because the route does: `qrUri` in app/move/[goalId].tsx is gated on
+ * `handoffUrl` alone and NOT on `station`, even though the constant that
+ * builds it is commented "the station panel's QR". So on a phone the product
+ * shows a code captioned "Scan to enter your own count on your own phone" —
+ * on that same phone.
+ *
+ * A target is the destination, not a transcript of today's wiring, so it is
+ * drawn correctly here and the route's behaviour is recorded as a product
+ * finding in this batch's README:
+ *
+ *   station   the QR, because somebody across the room needs a way in.
+ *   phone     the direct action, because the person holding it already has one.
+ */
+function Panel({ layout, status }: { layout: MoveLayout; status: string }) {
   const t = scale(layout);
+  const station = layout === 'station';
   return (
-    <View style={[s.panel, layout === 'station' ? s.panelStation : null]}>
-      <Text style={[s.panelEyebrow, { fontSize: t.eyebrow }]}>AT THIS SCREEN</Text>
-      <Text style={[s.panelStatus, { fontSize: t.status, lineHeight: Math.round(t.status * 1.3) }]}>
+    <View style={[s.panel, station ? s.panelStation : null]}>
+      <Text style={[s.panelEyebrow, station ? s.panelEyebrowOnNavy : null, { fontSize: t.eyebrow }]}>
+        AT THIS SCREEN
+      </Text>
+      <Text
+        style={[
+          s.panelStatus,
+          station ? s.panelStatusOnNavy : null,
+          { fontSize: t.status, lineHeight: Math.round(t.status * 1.3) },
+        ]}
+      >
         {status}
       </Text>
-      {qr ? (
+      {station ? (
         <>
           {/*
             THE PLACE A QR GOES, drawn as a plain square. A working code
@@ -217,15 +250,22 @@ function Panel({ layout, status, qr }: { layout: MoveLayout; status: string; qr:
             community sitting in a repository.
           */}
           <View style={[s.qr, { width: t.qr, height: t.qr }]} />
-          <Text style={[s.panelNote, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}>
+          <Text
+            style={[s.panelNote, s.panelNoteOnNavy, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}
+          >
             Scan to enter your own count on your own phone. It opens the entry page for this goal
             and asks you to sign in as yourself.
           </Text>
         </>
       ) : (
-        <Text style={[s.panelNote, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}>
-          Enter your own count on this screen when the round is finished.
-        </Text>
+        <>
+          <Text style={[s.panelNote, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}>
+            Enter what you counted. Nobody is checking it, and nobody else can change it.
+          </Text>
+          <View style={s.panelAction}>
+            <Text style={s.panelActionText}>Enter my reps</Text>
+          </View>
+        </>
       )}
     </View>
   );
@@ -260,16 +300,22 @@ function Screen({
   */
   return (
     <ScrollView
-      style={s.scroll}
-      contentContainerStyle={[s.page, { padding: t.pad }]}
+      style={[s.scroll, station ? s.scrollStation : null]}
+      contentContainerStyle={[s.page, station ? s.pageStation : null, { padding: t.pad }]}
       testID={`wsf-target-g-${id}-${layout}`}
     >
       <Chrome layout={layout} />
-      <Text style={[s.eyebrow, { fontSize: t.eyebrow }]}>FOLLOW ALONG</Text>
-      <Text style={[s.title, { fontSize: t.title, lineHeight: Math.round(t.title * 1.15) }]}>
+      <Text style={[s.eyebrow, station ? s.eyebrowOnNavy : null, { fontSize: t.eyebrow }]}>
+        FOLLOW ALONG
+      </Text>
+      <Text
+        style={[s.title, station ? s.titleOnNavy : null, { fontSize: t.title, lineHeight: Math.round(t.title * 1.15) }]}
+      >
         October Push-Up Challenge
       </Text>
-      <Text style={[s.activity, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}>
+      <Text
+        style={[s.activity, station ? s.activityOnNavy : null, { fontSize: t.body, lineHeight: Math.round(t.body * 1.4) }]}
+      >
         Riverside Church · counted in push-ups
       </Text>
       <View style={station ? s.columns : s.stack}>
@@ -278,7 +324,7 @@ function Screen({
           <Controls layout={layout} phase={phase} />
         </View>
         <View style={station ? s.colPanel : undefined}>
-          <Panel layout={layout} status={status} qr />
+          <Panel layout={layout} status={status} />
         </View>
       </View>
     </ScrollView>
@@ -297,17 +343,22 @@ function Quiet({
   body?: string;
 }) {
   const t = scale(layout);
+  const station = layout === 'station';
   return (
     <ScrollView
-      style={s.scroll}
-      contentContainerStyle={[s.page, { padding: t.pad }]}
+      style={[s.scroll, station ? s.scrollStation : null]}
+      contentContainerStyle={[s.page, station ? s.pageStation : null, { padding: t.pad }]}
       testID={`wsf-target-g-${id}-${layout}`}
     >
       <Chrome layout={layout} />
       <View style={s.quietBlock}>
-        <Text style={[layout === 'station' ? display.lg : display.md, s.quietTitle]}>{title}</Text>
+        <Text style={[station ? display.lg : display.md, s.quietTitle, station ? s.titleOnNavy : null]}>
+          {title}
+        </Text>
         {body ? (
-          <Text style={[s.quietBody, { fontSize: t.body, lineHeight: Math.round(t.body * 1.45) }]}>
+          <Text
+            style={[s.quietBody, station ? s.activityOnNavy : null, { fontSize: t.body, lineHeight: Math.round(t.body * 1.45) }]}
+          >
             {body}
           </Text>
         ) : null}
@@ -408,6 +459,11 @@ export function MoveUnavailableTarget({ layout }: { layout: MoveLayout }) {
 const s = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: CREAM },
   page: { flexGrow: 1, backgroundColor: CREAM, gap: 6 },
+  /* A STATION IS A ROOM SCREEN, so it wears the room family's navy rather
+     than reading as an enlarged cream web page. Same components, same
+     grammar as the kiosk and the public display. */
+  pageStation: { backgroundColor: NAVY },
+  scrollStation: { backgroundColor: NAVY },
   chrome: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,6 +471,10 @@ const s = StyleSheet.create({
     marginBottom: 6,
   },
   back: { color: INK_QUIET, fontSize: 14, fontWeight: '800' },
+  backOnNavy: { color: ON_NAVY_MUTED },
+  eyebrowOnNavy: { color: PROGRESS_GREEN },
+  titleOnNavy: { color: ON_NAVY },
+  activityOnNavy: { color: ON_NAVY_MUTED },
   eyebrow: { color: ACTION_GREEN_DEEP, fontWeight: '900', letterSpacing: 1.6 },
   title: { color: NAVY, fontWeight: '900', letterSpacing: -0.8 },
   activity: { color: INK_QUIET },
@@ -433,6 +493,12 @@ const s = StyleSheet.create({
     flexShrink: 1,
     minHeight: 0,
     ...elevation.hero,
+  },
+  playerStation: {
+    backgroundColor: 'rgba(247,245,240,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(247,245,240,0.16)',
+    shadowOpacity: 0,
   },
   figure: { alignItems: 'center', justifyContent: 'center' },
   figureDim: { opacity: 0.45 },
@@ -502,7 +568,28 @@ const s = StyleSheet.create({
     alignItems: 'center',
     ...elevation.card,
   },
-  panelStation: { padding: 24, gap: 12 },
+  panelStation: {
+    padding: 24,
+    gap: 12,
+    backgroundColor: 'rgba(0,0,0,0.26)',
+    borderWidth: 0,
+    shadowOpacity: 0,
+  },
+  panelEyebrowOnNavy: { color: PROGRESS_GREEN },
+  panelStatusOnNavy: { color: ON_NAVY },
+  panelNoteOnNavy: { color: ON_NAVY_MUTED },
+  /** The phone's way to record: the direct action, not a code to scan. */
+  panelAction: {
+    alignSelf: 'stretch',
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: ACTION_GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    ...elevation.action,
+  },
+  panelActionText: { color: ON_ACTION, fontSize: 15.5, fontWeight: '900' },
   panelEyebrow: { color: INK_QUIET, fontWeight: '900', letterSpacing: 1.6 },
   panelStatus: { color: NAVY, fontWeight: '900', textAlign: 'center' },
   qr: { borderRadius: 10, backgroundColor: '#E4E8EC' },

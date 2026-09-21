@@ -89,6 +89,22 @@ already says it. Two celebrations of one fact is one too many.
 sentence. What follows it is the together line, which is the true and generous
 thing to say about six thousand push-ups nobody had to do.
 
+## The way in — drawn, and named as unbuilt
+
+`/display/[goalId]` renders **no QR of any kind**: the route has no join URL,
+no encoder and no placement. The first revision therefore omitted the approved
+QR-to-join experience, which was the wrong instinct — **a destination target is
+the destination**, and leaving it out because the route cannot supply it turns
+the atlas into a transcript of current limitations.
+
+It is drawn on the three room boards and named as unbuilt here.
+
+| | |
+| --- | --- |
+| **Seam** | `/display/[goalId]` imports no join URL and no QR encoder |
+| **Precedent** | `/station/[goalId]` builds and renders one, so both pieces exist in the product |
+| **Not on the phone board** | a code on a phone, captioned for somebody to scan with their phone, is the same contradiction Batch G was corrected for. On a phone the way in is a link. |
+
 ## What this batch refuses
 
 **The recent strip carries an amount and an age, and nothing else.**

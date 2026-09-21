@@ -238,6 +238,15 @@ function AccountRow({ email }: { email: string }) {
   );
 }
 
+/**
+ * THE FIELD IS SIZED TO WHAT IT CARRIES.
+ *
+ * `grow` was a flat 0.52 on every state, which is right for the member state —
+ * name, join month, community and account — and wrong for the ones that carry
+ * two lines, where it left a third of a phone of empty navy above a short
+ * sheet. Each state now passes the share its own content earns, so the states
+ * with less to say are composed rather than padded.
+ */
 function Field({
   compact,
   frameHeight,
@@ -363,7 +372,7 @@ export function YouTarget({
 
         {state === 'noCommunity' ? (
           <>
-            <Field compact={compact} frameHeight={frameHeight} grow={0.52}>
+            <Field compact={compact} frameHeight={frameHeight} grow={0.34}>
               <Text style={[compact ? display.md : display.lg, s.name]}>{ME.displayName}</Text>
               <Text style={s.since}>{`Member since ${ME.memberSince}`}</Text>
               <AccountRow email={ME.email} />
@@ -388,7 +397,7 @@ export function YouTarget({
 
         {state === 'loading' ? (
           <>
-            <Field compact={compact} frameHeight={frameHeight} grow={0.42}>
+            <Field compact={compact} frameHeight={frameHeight} grow={0.3}>
               <View style={[s.skelOnNavy, { width: '62%', height: 30 }]} />
               <View style={[s.skelOnNavy, { width: '40%', height: 13 }]} />
             </Field>
@@ -410,7 +419,7 @@ export function YouTarget({
 
         {state === 'failed' ? (
           <>
-            <Field compact={compact} frameHeight={frameHeight} grow={0.52}>
+            <Field compact={compact} frameHeight={frameHeight} grow={0.34}>
               <Text style={[compact ? display.md : display.lg, s.name]}>{ME.displayName}</Text>
               <Text style={s.since}>{`Member since ${ME.memberSince}`}</Text>
               <AccountRow email={ME.email} />
@@ -436,7 +445,7 @@ export function YouTarget({
 
         {state === 'signedOut' ? (
           <>
-            <Field compact={compact} frameHeight={frameHeight} grow={0.42}>
+            <Field compact={compact} frameHeight={frameHeight} grow={0.3}>
               <Text style={[compact ? display.md : display.lg, s.name]}>You</Text>
               <Text style={s.since}>Sign in to see your part and your communities.</Text>
             </Field>

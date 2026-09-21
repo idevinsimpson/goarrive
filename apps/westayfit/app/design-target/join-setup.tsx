@@ -2,6 +2,10 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   CombinedClosedTarget,
+  CombinedSetupFailedTarget,
+  CombinedSetupReadyTarget,
+  CombinedSetupShortTarget,
+  CombinedSetupWorkingTarget,
   CombinedLiveTarget,
   CombinedNothingTarget,
   CombinedStaleTarget,
@@ -113,6 +117,17 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    key: 'b3b-combined-setup',
+    route: 'combined-goal setup (on Community Home today)',
+    title: 'B3b — setting up a combined goal',
+    screens: [
+      { id: 'combined-setup-short', label: 'One picked — floor stated', tone: 'ordinary', node: <CombinedSetupShortTarget /> },
+      { id: 'combined-setup-ready', label: 'Three picked — ready', tone: 'ordinary', node: <CombinedSetupReadyTarget /> },
+      { id: 'combined-setup-working', label: 'Starting', tone: 'working', node: <CombinedSetupWorkingTarget /> },
+      { id: 'combined-setup-failed', label: 'Could not start', tone: 'error', node: <CombinedSetupFailedTarget /> },
+    ],
+  },
+  {
     key: 'b4-combined',
     route: '/combined/[setupId]',
     title: 'B4 — watching a combined goal',
@@ -155,7 +170,7 @@ export default function JoinSetupTargetPreview() {
       <View style={st.contact} testID="wsf-contact-batch-b">
         <Text style={st.contactTitle}>Atlas Batch B — join, start, open, watch</Text>
         <Text style={st.contactSub}>
-          TARGET / CONCEPT — NOT IMPLEMENTED · four destinations, thirty states · 390×844
+          TARGET / CONCEPT — NOT IMPLEMENTED · five destinations, thirty-four states · 390×844
         </Text>
         {GROUPS.map((g) => (
           <View key={g.key} style={st.contactGroup}>

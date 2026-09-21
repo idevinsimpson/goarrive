@@ -219,18 +219,57 @@ function Figure({
   );
 }
 
+/**
+ * THE WAY IN, ON A SCREEN PEOPLE ARE LOOKING AT.
+ *
+ * `/display/[goalId]` renders NO QR of any kind today — the route has no join
+ * URL, no encoder and no placement. Batch F's first revision therefore omitted
+ * it, which was the wrong instinct: a destination target is the destination,
+ * and silently leaving out the approved QR-to-join experience because the
+ * route cannot supply it turns the atlas into a transcript of current
+ * limitations.
+ *
+ * So it is drawn, and named as unbuilt. The frame already carries
+ * TARGET / CONCEPT — NOT IMPLEMENTED, and this batch's README names the exact
+ * seam: `/display/[goalId]` would need a join URL for the goal's community and
+ * a QR encoder, both of which exist in the product (`/station/[goalId]` builds
+ * and renders one) and neither of which this route imports.
+ *
+ * NOT ON THE PHONE PREVIEW. A code on a phone, captioned for somebody to scan
+ * with their phone, is the same contradiction Batch G was just corrected for.
+ * The phone board is a preview of what the wall shows, and the way in on a
+ * phone is a link, not a picture of one.
+ */
+function JoinWay({ board }: { board: Board }) {
+  if (board === 'phone') return null;
+  const t = scale(board);
+  return (
+    <View style={s.joinWay}>
+      <View style={[s.joinQr, { width: t.we * 0.34, height: t.we * 0.34 }]} />
+      <View style={s.joinWords}>
+        <Text style={[s.joinTitle, { fontSize: t.status }]}>Scan to join in</Text>
+        <Text style={[s.joinNote, { fontSize: t.period, lineHeight: Math.round(t.period * 1.35) }]}>
+          Riverside Church · add your own count from your phone
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function Words({
   board,
   phase,
   status,
   together,
   recent,
+  joinWay,
 }: {
   board: Board;
   phase: Phase;
   status: string;
   together?: string;
   recent?: string[];
+  joinWay?: boolean;
 }) {
   const t = scale(board);
   const headline = HEADLINE[phase];
@@ -285,6 +324,7 @@ function Words({
           ))}
         </View>
       ) : null}
+      {joinWay ? <JoinWay board={board} /> : null}
     </>
   );
 }
@@ -327,12 +367,26 @@ function Ready({
             <Figure board={board} completed={completed} target={target} unit="push-ups" />
           </View>
           <View style={[s.wideRight, { gap: t.gap }]}>
-            <Words board={board} phase={phase} status={status} together={together} recent={recent} />
+            <Words
+              board={board}
+              phase={phase}
+              status={status}
+              together={together}
+              recent={recent}
+              joinWay
+            />
           </View>
         </View>
       ) : (
         <View style={[s.column, { gap: t.gap }]}>
-          <Words board={board} phase={phase} status={status} together={together} recent={recent} />
+          <Words
+            board={board}
+            phase={phase}
+            status={status}
+            together={together}
+            recent={recent}
+            joinWay
+          />
           <View style={s.columnFigure}>
             <Figure board={board} completed={completed} target={target} unit="push-ups" />
           </View>
@@ -578,6 +632,13 @@ const s = StyleSheet.create({
   },
   recentHead: { color: PROGRESS_GREEN, fontWeight: '900', letterSpacing: 2 },
   recentLine: { color: ON_NAVY, fontWeight: '700' },
+
+  /* the way in */
+  joinWay: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 14 },
+  joinQr: { borderRadius: 10, backgroundColor: 'rgba(247,245,240,0.22)' },
+  joinWords: { flexShrink: 1, minWidth: 0, gap: 2 },
+  joinTitle: { color: CREAM, fontWeight: '900' },
+  joinNote: { color: ON_NAVY_MUTED },
 
   genericBlock: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 18 },
   genericHeadline: { color: ON_NAVY, fontWeight: '900', letterSpacing: -1.4, textAlign: 'center' },

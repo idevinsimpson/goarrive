@@ -49,6 +49,10 @@ Contact sheet / other: `CONTACT-SHEET-batch-b.png`
 | `combined-closed` | 390x640 · 390x844 · 430x932 |  | 3 |
 | `combined-live` | 390x640 · 390x844 · 430x932 |  | 3 |
 | `combined-nothing` | 390x640 · 390x844 · 430x932 |  | 3 |
+| `combined-setup-failed` | 390x640 · 390x844 · 430x932 | yes | 6 |
+| `combined-setup-ready` | 390x640 · 390x844 · 430x932 | yes | 6 |
+| `combined-setup-short` | 390x640 · 390x844 · 430x932 | yes | 6 |
+| `combined-setup-working` | 390x640 · 390x844 · 430x932 | yes | 6 |
 | `combined-stale` | 390x640 · 390x844 · 430x932 | yes | 4 |
 | `combined-unreachable` | 390x640 · 390x844 · 430x932 |  | 3 |
 | `goal-custom-window` | 390x640 · 390x844 · 430x932 | yes | 6 |
@@ -208,6 +212,14 @@ Contact sheet / other: `CONTACT-SHEET-batch-g.png`
 | `round` | 1280x800 · 390x844 |  | 2 |
 | `unavailable` | 1280x800 · 390x844 |  | 2 |
 
+## Board — The physical product, end to end
+
+`review/physical-flow/` · `(no single route — the whole journey)` · target only, **not approved**
+
+| State | Classes | end | Files |
+| --- | --- | :---: | ---: |
+| `physical-flow` | 1920x1080 |  | 1 |
+
 ## Page 1 — Home
 
 `review/page-01-home/` · `/community/[groupId]` · implemented, **accepted**
@@ -281,8 +293,8 @@ Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-ac
 | Class | Frames | Packages |
 | --- | ---: | --- |
 | 1280x800 | 32 | E · F · G |
-| 1920x1080 | 10 | F |
-| 390x640 | 159 | A · B · C · D · P1 · P2 · P3 · P4 · P5 |
-| 390x844 | 152 | A · B · C · D · F · G · P1 · P2 · P3 · P4 · P5 |
-| 430x932 | 114 | A · B · C · D · P1 · P3 · P4 · P5 |
+| 1920x1080 | 11 | F · FLOW |
+| 390x640 | 167 | A · B · C · D · P1 · P2 · P3 · P4 · P5 |
+| 390x844 | 160 | A · B · C · D · F · G · P1 · P2 · P3 · P4 · P5 |
+| 430x932 | 122 | A · B · C · D · P1 · P3 · P4 · P5 |
 | 800x1280 | 23 | E · F |

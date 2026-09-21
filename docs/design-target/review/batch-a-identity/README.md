@@ -1,12 +1,17 @@
 # Atlas Batch A — identity and onboarding
 
-Eight surfaces, in four tones, at two phone classes. **Targets only.** Nothing
-in this batch is implemented, and implementation stays frozen until the whole
-atlas clears review.
+**Seventeen states, at three phone classes.** Targets only. Nothing in this
+batch is implemented, and implementation stays frozen until the whole atlas
+clears review.
+
+> This file opened "eight surfaces… at two phone classes" for a while after
+> the batch had grown to seventeen and three. The table immediately below was
+> the stale half; the generated `ATLAS-COVERAGE.md` is the authority for what
+> is actually on disk.
 
 ## The frames
 
-`CONTACT-SHEET-batch-a.png` — all eight at 390×844 in one labelled frame.
+`CONTACT-SHEET-batch-a.png` — every state at 390×844 in one labelled frame.
 
 | Surface | Tone | 390×844 | 390×640 |
 | --- | --- | --- | --- |
@@ -121,6 +126,28 @@ code is opaque, and a private community's name is not something a
 half-authorized account is entitled to read. If an implementation can resolve
 the name for a destination the member is already entitled to see, it may add
 it; the target does not promise what it cannot read.
+
+## Recomposed after review — the two states that were truthful but not settled
+
+**Verify · email switched off.** The shipped screen renders all three controls
+unconditionally: *I have verified*, *Resend verification email* and *Sign out*.
+In this outcome the first two cannot succeed — there is no link to have
+followed and nothing to resend — and the only one that resolves anything is the
+**tertiary** at the bottom. The first revision reproduced that faithfully and
+stated the failure twice, in the intro and again in the panel.
+
+Recomposed: the reason is said once, **signing out to use a verified account is
+the primary**, and the two that cannot work are drawn muted rather than
+removed — removing them would hide that the shipped screen still offers them.
+
+> **Product finding.** `app/verify-email.tsx` does not gate its three actions on
+> `VerificationSendOutcome`. The route is untouched here; the fix is a
+> condition, and it is a product decision.
+
+**Profile setup.** A display name is one field, so this state was a name, a
+checkbox, a button and a third of a phone of empty cream. The void is filled
+with the one thing the screen owes an answer to — *where this name appears* —
+rather than with padding.
 
 ## Coverage now
 
