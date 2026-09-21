@@ -47,8 +47,8 @@ node scripts/westayfit/route-target-coverage.mjs
 | | |
 | --- | --- |
 | User-facing routes | **23** |
-| Routes with a real-RN target | **11** |
-| Routes with no target | **12** |
+| Routes with a real-RN target | **12** |
+| Routes with no target | **11** |
 | Routes implemented against an approved target | **4** |
 | Device classes above the phone with any target | **0** of 4 |
 
@@ -70,6 +70,7 @@ the second is operational.
 | `/community/[groupId]` | `review/page-01-home/` | Community Home, where `/` lands a member with a current community. Three device classes plus a twelve-state matrix. **The only implemented route.** |
 | `/community` | `review/page-03-community/` | The community list — Community's only route, since `/community/[groupId]` is Home. **Implemented** against the corrected target. The per-community `PROPOSAL-*` frames are exploration only and were explicitly ruled out of implementation. |
 | `/activity` | `review/page-04-progress/` | Progress — the private record of what the member recorded. Target only; the data audit behind it is in that package's README, and it is the reason there is no streak. |
+| `/you` | `review/page-05-you/` | You — identity, the community you belong to, and the account actions that really work. Target only; the truth table in that package's README is why there is no photo, streak or personal-impact claim. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented** against the reviewed target, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation, outside that slice). |
 | `/contribute/[goalId]` | `review/page-02-move/` | Contribution entry, review, and all six outcomes. **Implemented** against the reviewed target. |
 | `/goals/new` | `review/page-02-move/` | The unit picker, built from the shipped `ACTIVITY_GUIDES`. Target only. |

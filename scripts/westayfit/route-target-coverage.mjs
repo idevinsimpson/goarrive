@@ -36,6 +36,7 @@ const TARGETS = {
   '/community/[groupId]': 'review/page-01-home/',
   '/community': 'review/page-03-community/',
   '/activity': 'review/page-04-progress/',
+  '/you': 'review/page-05-you/',
   '/move': 'review/page-02-move/',
   '/contribute/[goalId]': 'review/page-02-move/',
   '/goals/new': 'review/page-02-move/',
