@@ -196,8 +196,9 @@ test('an unconfigured build drops Resend and keeps the control that still works'
   // RESEND IS THE DEAD ONE: it calls the callable that just refused, so
   // pressing it again fails identically. It is gone.
   await expect(page.getByTestId('wsf-verify-resend')).toHaveCount(0);
-  // "I have verified" is NOT dead — it reads the current auth state, not
-  // anything this build sent — so it stays, demoted.
+  // "I have verified" is NOT dead — it reads the current auth state rather
+  // than anything this build sent — so it stays, demoted. Removing it is
+  // under discussion; see the blocker reported on PR #365.
   await expect(page.getByTestId('wsf-verify-check')).toBeVisible();
   // The way out that resolves this for most people is the primary.
   await expect(page.getByTestId('wsf-verify-signout-primary')).toBeVisible();
@@ -218,6 +219,7 @@ test('a build that can send offers Resend, and says so once', async ({ browser }
   );
   await signUpUnverified(page, 'bacansend');
 
+  // The carve-out: the check stays on every outcome where a send WAS made.
   await expect(page.getByTestId('wsf-verify-check')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('wsf-verify-resend')).toBeVisible();
   await expect(page.getByTestId('wsf-verify-unconfigured')).toHaveCount(0);
@@ -263,6 +265,22 @@ test('reset never reveals whether an account exists', async ({ browser }) => {
 });
 
 /* ── consent and password states ────────────────────────────────────────── */
+
+test('signup does not promise a send it cannot make', async ({ browser }) => {
+  test.setTimeout(240_000);
+  const { context, page } = await phone(browser, PHONE);
+  await page.goto('/signup');
+  await expect(page.getByTestId('wsf-signup')).toBeVisible({ timeout: 40_000 });
+  // Staging email is known unconfigured, so a screen that says a message WILL
+  // be sent is false on the build people are asked to smoke-test.
+  await expect(page.getByTestId('wsf-signup')).not.toContainText('We will send');
+  // The requirement is true either way, and the outcome screen says what
+  // actually happened.
+  await expect(page.getByTestId('wsf-signup')).toContainText(
+    'need to verify your email before you can join a community'
+  );
+  await context.close();
+});
 
 test('the password rule is visible before it is enforced', async ({ browser }) => {
   test.setTimeout(240_000);

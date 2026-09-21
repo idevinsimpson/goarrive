@@ -129,7 +129,12 @@ export default function SignUp() {
   return (
     <FormShell
       heading="Start moving together."
-      intro="We will send a verification email before you can join a community."
+      /* CAPABILITY-NEUTRAL, BECAUSE THE SEND IS NOT GUARANTEED. The old line
+         promised "We will send a verification email", which is false on any
+         build where WSF_EMAIL_* is unset — including the one being smoke
+         tested. This states the requirement, which is true either way; the
+         outcome screen then says what actually happened. */
+      intro="You'll need to verify your email before you can join a community."
       testID="wsf-signup"
       step="Step 1 of 3"
       foot={

@@ -1,31 +1,26 @@
 # Atlas Batch A — identity and onboarding
 
-**Seventeen states, at three phone classes.** Targets only. Nothing in this
-batch is implemented, and implementation stays frozen until the whole atlas
-clears review.
+**Implemented, and awaiting visual/functional review.** `/signin`, `/signup`,
+`/reset-password`, `/verify-email` and `/profile-setup` are built to the
+accepted target. See *Implemented* below for what changed and what was
+corrected.
 
-> This file opened "eight surfaces… at two phone classes" for a while after
-> the batch had grown to seventeen and three. The table immediately below was
-> the stale half; the generated `ATLAS-COVERAGE.md` is the authority for what
-> is actually on disk.
+> **This header has now been stale twice.** It first said "eight surfaces… at
+> two phone classes" after the batch had grown to seventeen and three; it then
+> said "targets only, nothing implemented" after the routes were built. A
+> hand-kept inventory beside a generated one will always drift, so the
+> inventory is deleted rather than re-typed for a third time.
+>
+> **`docs/design-target/ATLAS-COVERAGE.md` is the authority** for what is on
+> disk: every state by name, the classes it is drawn at, and the `before/` and
+> `after/` evidence beside the targets. It is generated from the PNGs, and
+> `npm run check:route-index` fails if it drifts.
 
 ## The frames
 
 `CONTACT-SHEET-batch-a.png` — every state at 390×844 in one labelled frame.
-
-| Surface | Tone | 390×844 | 390×640 |
-| --- | --- | --- | --- |
-| Sign in | ordinary | `TARGET-signin-390x844.png` | `TARGET-signin-390x640.png` |
-| Sign up | ordinary | `TARGET-signup-390x844.png` | `TARGET-signup-390x640.png` |
-| Verify email | action required | `TARGET-verify-390x844.png` | `TARGET-verify-390x640.png` |
-| Reset password | ordinary | `TARGET-reset-390x844.png` | `TARGET-reset-390x640.png` |
-| Profile setup | action required | `TARGET-profile-390x844.png` | `TARGET-profile-390x640.png` |
-| Credential error | error | `TARGET-error-390x844.png` | `TARGET-error-390x640.png` |
-| Return to join | returning | `TARGET-return-join-390x844.png` | `TARGET-return-join-390x640.png` |
-| Return to event | returning | `TARGET-return-event-390x844.png` | `TARGET-return-event-390x640.png` |
-
-**ACTUAL CURRENT BEFORE** — 16 PNGs under `before/`, one per surface per class.
-Real screenshots of the product as it renders today. Nothing there is drawn.
+`TARGET-*.png` are the reviewed and accepted targets; `before/` and `after/`
+hold the actual product, before and after implementation.
 
 Every TARGET frame carries `TARGET / CONCEPT — NOT IMPLEMENTED` burnt in
 **inside** the frame; the strip is added to the frame's height, so the device
