@@ -10,7 +10,6 @@ import {
   FootNote,
   FormShell,
   HelpPanel,
-  NoticeText,
   SecondaryLink,
   StatusText,
   SubmitButton,
@@ -183,9 +182,21 @@ export default function VerifyEmail() {
     unconfigured: `Email isn't switched on for this test build, so no verification link can be sent to ${where} yet.`,
     failed: `We could not send a verification link to ${where}. Tap Resend to try again.`,
   };
-  const intro = outcome
-    ? INTRO[outcome]
-    : `Confirm your email address at ${where}, then tap I have verified.`;
+  /*
+    THE REASON IS SAID ONCE.
+
+    `INTRO.unconfigured` names the address and explains the build cannot send.
+    The sheet then carried a panel making the same point again, so the screen
+    stated its one fact twice — the repetition the accepted target recomposed
+    away from. On this outcome the field carries the whole statement and the
+    sheet carries none of it.
+  */
+  const intro =
+    outcome === 'unconfigured'
+      ? 'No message was sent, and nobody can finish verifying a new account on this build until email is switched on.'
+      : outcome
+        ? INTRO[outcome]
+        : `Confirm your email address at ${where}, then tap I have verified.`;
 
   /*
     WHAT THIS BUILD CAN ACTUALLY DO — AND WHICH CONTROL IS REALLY DEAD.
@@ -287,11 +298,9 @@ export default function VerifyEmail() {
         </>
       ) : (
         <>
-          {/* The reason, said ONCE — the intro does not repeat it. */}
-          <NoticeText testID="wsf-verify-unconfigured">
-            No message was sent, and nobody can finish verifying a new account on this build until
-            email is switched on.
-          </NoticeText>
+          {/* No panel restating the reason, and none restating the account:
+              the field carries the first and the foot carries the second.
+              What is left in the sheet is only what to DO. */}
           {/* The action that resolves this for most people, as the primary. */}
           <SubmitButton
             label="Sign out and use a verified account"
@@ -313,6 +322,7 @@ export default function VerifyEmail() {
           <HelpPanel
             title="What to do"
             body="There is nothing to resend on this build, because no message was sent. If this address is already verified, tap I have verified. Otherwise sign in with an account that is, or ask for email to be switched on."
+            testID="wsf-verify-unconfigured"
           />
         </>
       )}

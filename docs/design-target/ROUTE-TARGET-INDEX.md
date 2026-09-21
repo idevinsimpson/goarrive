@@ -74,7 +74,7 @@ second is operational.
 | User-facing routes | **23** |
 | Routes with a real-RN target | **23** |
 | Routes with no target | **0** |
-| Routes implemented against an approved target | **6** |
+| Routes implemented against an approved target | **11** |
 
 ### Covered — a real-RN target exists
 
@@ -123,7 +123,7 @@ None. Every user-facing route has a target.
 
 | Batch | What it covers | Routes | States | Frames | Classes | State |
 | --- | --- | ---: | ---: | ---: | --- | --- |
-| **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
+| **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | implemented · **awaiting visual/functional review** |
 | **B** | The invitation, and what a Champion starts | 4 | 34 | 154 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
 | **C** | The challenge, and the door | 2 | 17 | 67 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
 | **D** | The event and the line, on your own phone | 2 | 24 | 93 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |

@@ -136,7 +136,7 @@ const BATCHES = [
     title: 'Identity and onboarding',
     dir: 'batch-a-identity',
     routes: ['/signin', '/signup', '/verify-email', '/reset-password', '/profile-setup'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status: 'implemented · **awaiting visual/functional review**',
   },
   {
     key: 'B',
@@ -268,7 +268,20 @@ function readPackage(dir) {
 }
 
 /** Implemented against an APPROVED target. Approval is a human act, so it is declared. */
-const IMPLEMENTED = ['/community/[groupId]', '/move', '/contribute/[goalId]', '/community', '/activity', '/you'];
+const IMPLEMENTED = [
+  '/community/[groupId]',
+  '/move',
+  '/contribute/[goalId]',
+  '/community',
+  '/activity',
+  '/you',
+  // Batch A identity, built to the accepted target.
+  '/signin',
+  '/signup',
+  '/reset-password',
+  '/verify-email',
+  '/profile-setup',
+];
 
 function routes(dir, prefix = '') {
   const out = [];

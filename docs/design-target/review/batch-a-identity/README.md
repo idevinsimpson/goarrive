@@ -239,3 +239,100 @@ sent. Nobody can finish verifying a new account here until it is switched on"*
 — and then offers **I have verified** and **Resend verification email**, two
 controls that cannot work, above the one that can. That is the dead-control
 defect the accepted target removes.
+
+## Implemented — 2026-09-21
+
+`/signin`, `/signup`, `/reset-password`, `/verify-email` and `/profile-setup`
+are built to the accepted target. `after/` holds 42 frames: 14 states at
+390×640, 390×844 and 430×932.
+
+**One shell, not five rewrites.** Every identity route renders through
+`FormShell`, so the reset is one composition — a navy field carrying the
+wordmark, the heading and any waiting destination, over a cream sheet carrying
+the form. No Living WE anywhere in the batch: its fill is the product's one
+truthful confirmed-progress instrument, and none of these surfaces owns a
+progress value.
+
+**The ways out moved to the foot.** They sat trailing the primary action above
+a third of a phone of empty cream. At the foot they are where a thumb is.
+
+### Product findings this pass FIXED rather than recorded
+
+The target recorded these as findings because a target is a drawing. The
+implementation is where they get resolved.
+
+| Finding | What was done |
+| --- | --- |
+| `/verify-email` renders all three actions regardless of outcome | **Resend is now gated** on the outcome. See the correction below for the one that is not. |
+| Sign out appeared twice on `unconfigured` once it became the primary | The foot drops it in that state. |
+| `/profile-setup` had no sign-out at all | Added. A member who reached the last gate on the wrong account had no control on the screen to leave with. |
+| The consent control announced no state | **A real accessibility defect.** It renders `role="checkbox"`, and react-native-web was not mapping `accessibilityState={{ checked }}` to an attribute — so a screen reader met a checkbox with no state, on the one control recording a legal consent. `aria-checked` is now set directly. |
+
+### One instruction not followed, and why
+
+The brief said to drop **both** "I have verified" and "Resend" on
+`unconfigured`. Only one of them is dead, and the difference is in what each
+calls:
+
+- **Resend is dead.** It calls `wsfSendVerificationEmail` — the callable that
+  just threw `failed-precondition` because `WSF_EMAIL_*` is unset. Pressing it
+  again fails identically. It is gone.
+- **"I have verified" is not dead.** `onCheck` calls `reload(user)` and reads
+  `user.emailVerified` — the *current auth state*, not anything this build
+  sent. An address verified by any other means (an earlier build, an
+  administrator, an already-verified account) makes it succeed and route
+  onward. Removing it would delete a working way out of the gate.
+
+So the dead one went and the working one stayed, demoted beneath **Sign out
+and use a verified account**, which is now the primary. The rest of the
+recomposition stands: the reason is said once, in the field, and the sheet
+carries only what to do.
+
+### The BEFORE spec's return fixtures never reached the product
+
+Worth knowing before anyone reuses them. `design-target-auth-before.spec.ts`
+seeds its two return states with `wsf.pendingJoinCode = 'ABC123'` and a key
+called `wsf.pendingEventGoalId`. Neither is read:
+
+- `isValidShape` in `pendingJoinCode.ts` requires **16–128** characters, so a
+  six-character code is refused on read.
+- The event return lives under **`wsf.eventReturn`**, as a JSON record
+  `{goalId, at}`. Nothing reads `wsf.pendingEventGoalId`.
+
+Those frozen BEFORE frames therefore show a sign-in screen with no destination
+because the fixture silently did nothing — not because the old screen resolved
+one and declined to say so. The frames are still **true about the product**
+(the old screen said nothing either way), so they are not re-baselined. But the
+AFTER spec does not inherit the fixtures: it uses shapes the product accepts
+and asserts the destination card is on screen before each shutter.
+
+### Outcomes are pinned, not raced
+
+Every verification and reset outcome in the AFTER capture is fulfilled by an
+intercept, so a frame means the state it is named after. This is a direct
+response to the race recorded above, where one BEFORE run caught `sending` at
+two classes and `unconfigured` at a third.
+
+### The state matrix
+
+| | BEFORE | AFTER |
+| --- | ---: | ---: |
+| States | 8 | 14 |
+| Classes | 3 (430×932 added in this pass) | 3 |
+| Frames | 24 | 42 |
+
+Six AFTER states have no BEFORE — `reset-sent`, `reset-unconfigured`,
+`verify-unconfigured`, `verify-carrying`, `profile-carrying`, `return-kiosk`.
+The old screens had no such state to photograph, so the honest label is **new
+state**, not a frame pair. The four the brief named as must-haves —
+pending-destination, unconfigured, failure and short-phone — are all present
+at all three classes, and none is grouped away into a contact sheet.
+
+### Boundaries held
+
+No secret, sender configuration, IAM, function, rule, index or PR #366 change.
+Staging email delivery remains a separate reliability track and a current
+blocker; nothing on these screens claims it is configured — `/verify-email`
+says the opposite, plainly, when it is not. Authorization and auth transitions
+are unchanged: `nextRouteAfterAuth` is still resolved and consumed on the
+terminal hop only, and `src/authDestination.ts` reads without consuming.

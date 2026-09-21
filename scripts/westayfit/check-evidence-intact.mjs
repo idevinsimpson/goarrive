@@ -65,6 +65,9 @@ const ACCEPTED_FRAMES = [
   // run cannot change what is being reviewed; a deliberate re-baseline is
   // recorded in its commit, the way this guard asks.
   'docs/design-target/review/page-05-you/after',
+  // Batch A identity, submitted for visual/functional review. Frozen from
+  // this commit so a routine run cannot change what is under review.
+  'docs/design-target/review/batch-a-identity/after',
   'docs/design-target/review/batch-a-identity/TARGET-*.png',
   'docs/design-target/targets',
   'docs/westayfit/app-shell-2026-09-19',
