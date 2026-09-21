@@ -79,6 +79,21 @@ export default function DisplayBoardTargetPreview() {
         frame is opened.
       */}
       <View style={st.contact} testID="wsf-contact-batch-f">
+        {/*
+          THE CONTACT SHEET CARRIES THE LABEL TOO.
+
+          Every framed state already had the green strip inside it; the
+          contact sheet did not, because it is a card of frames rather
+          than a frame. That left exactly one file per package whose top
+          band was the page ground — and twice now a review has opened a
+          package, found a file with no strip, and reported the frames as
+          unlabelled. Arguing about which file was opened is worth less
+          than removing the ambiguity, so now no file in any package is
+          without it.
+        */}
+        <View style={st.contactStrip} testID={`wsf-contact-strip-${'wsf-contact-batch-f'}`}>
+          <Text style={st.contactStripText}>TARGET / CONCEPT — NOT IMPLEMENTED</Text>
+        </View>
         <Text style={st.contactTitle}>Atlas Batch F — the public display</Text>
         <Text style={st.contactSub}>
           TARGET / CONCEPT — NOT IMPLEMENTED · one route, ten states, four boards · 40 frames
@@ -154,7 +169,23 @@ const st = StyleSheet.create({
   banner: { backgroundColor: '#22C55E', paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
   bannerText: { color: '#04260F', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
 
-  contact: { backgroundColor: '#F7F5F0', borderRadius: 16, padding: 18, gap: 4 },
+  contact: {
+    backgroundColor: '#F7F5F0',
+    borderRadius: 16,
+    overflow: 'hidden',
+    gap: 4,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+  },
+  /** Bleeds to the card's edges, so it reads as a label on the sheet. */
+  contactStrip: {
+    marginHorizontal: -18,
+    backgroundColor: '#22C55E',
+    paddingVertical: 7,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  contactStripText: { color: '#04260F', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
   contactTitle: { color: '#0B1F3A', fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
   contactSub: { color: '#6B7C93', fontSize: 12, fontWeight: '700', marginBottom: 12 },
   contactGroup: { gap: 8, marginBottom: 18 },

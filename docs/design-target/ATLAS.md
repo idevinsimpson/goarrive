@@ -30,8 +30,12 @@ npm run wsf:route-coverage          # the report
 npm run check:route-index           # fails if ROUTE-TARGET-INDEX.md has drifted
 ```
 
-> **TARGET / CONCEPT — NOT IMPLEMENTED.** Batches B through G are drawings.
-> No route in them changed and nothing in them was built. Pages 1–4 are
+> **REVIEWED AND ACCEPTED AS TARGET REFERENCE — NOT IMPLEMENTED.**
+> On 2026-09-21 the atlas content and product direction were accepted, which
+> clears the atlas-first gate. **Accepted does not mean built.** Every batch
+> here is still a drawing: no route in them changed and nothing in them was
+> implemented. The two states stay separate and must not be collapsed — a
+> target that is *reviewed* is not a route that *exists*. Pages 1–4 are
 > separate: those are implemented against accepted targets, and the atlas does
 > not redraw them.
 

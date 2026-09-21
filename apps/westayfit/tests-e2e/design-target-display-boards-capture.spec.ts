@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from '@playwright/test';
 
 import { CAPTURE_FRAMES } from './helpers/capture';
 
@@ -34,6 +34,51 @@ const STATES = [
 ] as const;
 
 const BOARDS = ['390x844', '800x1280', '1280x800', '1920x1080'] as const;
+
+/**
+ * THE STRIP IS PROVED, NOT ASSUMED.
+ *
+ * Every frame carries "TARGET / CONCEPT — NOT IMPLEMENTED" inside it. That was
+ * true and unasserted, and twice a review reported it missing — both times the
+ * file without a strip turned out to be the package's contact sheet, which is
+ * a card of frames rather than a frame. The sheets carry the label now too, so
+ * no file in a package is without one, and this makes the frames' own strips
+ * mechanical rather than arguable.
+ *
+ * Checked immediately before each shutter: visible, the exact words, spanning
+ * the frame, computing to the concept green, and wholly inside the frame.
+ */
+async function assertStrip(
+  page: import('@playwright/test').Page,
+  frameId: string,
+  bannerId: string,
+): Promise<void> {
+  const frame = page.getByTestId(frameId);
+  const banner = page.getByTestId(bannerId);
+  await expect(banner, `${frameId}: the in-frame label is missing`).toBeVisible();
+  await expect(banner, `${frameId}: the label does not say what the frame is`).toHaveText(
+    'TARGET / CONCEPT — NOT IMPLEMENTED',
+  );
+  const bg = await banner.evaluate((el: Element) => getComputedStyle(el).backgroundColor);
+  expect(bg, `${frameId}: the strip is not the concept green`).toBe('rgb(34, 197, 94)');
+  const fb = (await frame.boundingBox())!;
+  const bb = (await banner.boundingBox())!;
+  expect(bb.y, `${frameId}: the strip starts above the frame`).toBeGreaterThanOrEqual(fb.y - 1);
+  expect(bb.y + bb.height, `${frameId}: the strip runs past the frame`).toBeLessThanOrEqual(
+    fb.y + fb.height + 1,
+  );
+  /*
+    THE FRAME HAS A 1px BORDER, so the strip spans the frame's INNER width —
+    388 of an outer 390. Asserting exact equality with the outer width failed
+    on every frame in every batch, which is the assertion being wrong rather
+    than the strips. The border is the only allowed difference.
+  */
+  const FRAME_BORDER = 1;
+  expect(
+    Math.round(bb.width),
+    `${frameId}: the strip does not span the frame's inner width`,
+  ).toBe(Math.round(fb.width) - FRAME_BORDER * 2);
+}
 
 test('Atlas Batch F renders ten states on four boards, plus its matrix sheet', async ({
   browser,
@@ -72,6 +117,7 @@ test('Atlas Batch F renders ten states on four boards, plus its matrix sheet', a
 
     for (const board of BOARDS) {
       for (const id of STATES) {
+        await assertStrip(page, `wsf-frame-f-${id}-${board}`, `wsf-frame-banner-f-${id}-${board}`);
         await page
           .getByTestId(`wsf-frame-f-${id}-${board}`)
           .screenshot({ path: path.join(OUT, `TARGET-${id}-${board}.png`) });

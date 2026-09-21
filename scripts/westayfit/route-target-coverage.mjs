@@ -136,49 +136,49 @@ const BATCHES = [
     title: 'Identity and onboarding',
     dir: 'batch-a-identity',
     routes: ['/signin', '/signup', '/verify-email', '/reset-password', '/profile-setup'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
   {
     key: 'B',
     title: 'The invitation, and what a Champion starts',
     dir: 'batch-b-join-and-setup',
     routes: ['/join/[joinCode]', '/start-community', '/goals/new', '/combined/[setupId]'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
   {
     key: 'C',
     title: 'The challenge, and the door',
     dir: 'batch-c-challenge-and-door',
     routes: ['/community/[groupId]/challenge', '/'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
   {
     key: 'D',
     title: 'The event and the line, on your own phone',
     dir: 'batch-d-event-and-line',
     routes: ['/event/[goalId]', '/queue/[goalId]'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
   {
     key: 'E',
     title: 'The screens in the room',
     dir: 'batch-e-room-screens',
     routes: ['/kiosk/[goalId]', '/contribute/[goalId]?kiosk=1', '/station/[goalId]'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
   {
     key: 'F',
     title: 'The public display',
     dir: 'batch-f-public-display',
     routes: ['/display/[goalId]'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
   {
     key: 'G',
     title: 'The follow-along',
     dir: 'batch-g-follow-along',
     routes: ['/move/[goalId]'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
 ];
 
@@ -189,7 +189,7 @@ const BOARDS = [
     title: 'The physical product, end to end',
     dir: 'physical-flow',
     routes: ['(no single route — the whole journey)'],
-    status: 'target only, **not approved**',
+    status: '**reviewed & accepted** as target reference · NOT implemented',
   },
 ];
 
@@ -200,7 +200,7 @@ const PAGES = [
   { page: '2', title: 'MOVE and contribution', dir: 'page-02-move', routes: ['/move', '/contribute/[goalId]'], status: 'implemented, **accepted**' },
   { page: '3', title: 'Community', dir: 'page-03-community', routes: ['/community'], status: 'implemented, **accepted**' },
   { page: '4', title: 'Progress', dir: 'page-04-progress', routes: ['/activity'], status: 'implemented (Phase A), **accepted**' },
-  { page: '5', title: 'You', dir: 'page-05-you', routes: ['/you'], status: 'target only, **not approved**' },
+  { page: '5', title: 'You', dir: 'page-05-you', routes: ['/you'], status: '**target accepted** · implementation in progress' },
 ];
 
 /**

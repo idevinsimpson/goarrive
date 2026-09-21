@@ -14,7 +14,7 @@ station and a public display are fixed canvases with no scroll.
 
 ## Batch A — Identity and onboarding
 
-`review/batch-a-identity/` · `/signin` `/signup` `/verify-email` `/reset-password` `/profile-setup` · target only, **not approved**
+`review/batch-a-identity/` · `/signin` `/signup` `/verify-email` `/reset-password` `/profile-setup` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-a.png`
 
@@ -40,7 +40,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-a.png`
 
 ## Batch B — The invitation, and what a Champion starts
 
-`review/batch-b-join-and-setup/` · `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` · target only, **not approved**
+`review/batch-b-join-and-setup/` · `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-b.png`
 
@@ -83,7 +83,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-b.png`
 
 ## Batch C — The challenge, and the door
 
-`review/batch-c-challenge-and-door/` · `/community/[groupId]/challenge` `/` · target only, **not approved**
+`review/batch-c-challenge-and-door/` · `/community/[groupId]/challenge` `/` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-c.png`
 
@@ -109,7 +109,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-c.png`
 
 ## Batch D — The event and the line, on your own phone
 
-`review/batch-d-event-and-line/` · `/event/[goalId]` `/queue/[goalId]` · target only, **not approved**
+`review/batch-d-event-and-line/` · `/event/[goalId]` `/queue/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-d.png`
 
@@ -142,7 +142,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-d.png`
 
 ## Batch E — The screens in the room
 
-`review/batch-e-room-screens/` · `/kiosk/[goalId]` `/contribute/[goalId]?kiosk=1` `/station/[goalId]` · target only, **not approved**
+`review/batch-e-room-screens/` · `/kiosk/[goalId]` `/contribute/[goalId]?kiosk=1` `/station/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-e.png`
 
@@ -179,7 +179,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-e.png`
 
 ## Batch F — The public display
 
-`review/batch-f-public-display/` · `/display/[goalId]` · target only, **not approved**
+`review/batch-f-public-display/` · `/display/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `MATRIX-batch-f.png`
 
@@ -198,7 +198,7 @@ Contact sheet / other: `MATRIX-batch-f.png`
 
 ## Batch G — The follow-along
 
-`review/batch-g-follow-along/` · `/move/[goalId]` · target only, **not approved**
+`review/batch-g-follow-along/` · `/move/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-g.png`
 
@@ -214,7 +214,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-g.png`
 
 ## Board — The physical product, end to end
 
-`review/physical-flow/` · `(no single route — the whole journey)` · target only, **not approved**
+`review/physical-flow/` · `(no single route — the whole journey)` · **reviewed & accepted** as target reference · NOT implemented
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
@@ -278,7 +278,7 @@ Contact sheet / other: `PROPOSAL-detail-active-390x640.png`, `PROPOSAL-detail-ac
 
 ## Page 5 — You
 
-`review/page-05-you/` · `/you` · target only, **not approved**
+`review/page-05-you/` · `/you` · **target accepted** · implementation in progress
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |

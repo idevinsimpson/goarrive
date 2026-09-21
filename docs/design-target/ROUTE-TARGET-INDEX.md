@@ -123,19 +123,19 @@ None. Every user-facing route has a target.
 
 | Batch | What it covers | Routes | States | Frames | Classes | State |
 | --- | --- | ---: | ---: | ---: | --- | --- |
-| **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | target only, **not approved** |
-| **B** | The invitation, and what a Champion starts | 4 | 34 | 154 | 390x640 · 390x844 · 430x932 | target only, **not approved** |
-| **C** | The challenge, and the door | 2 | 17 | 67 | 390x640 · 390x844 · 430x932 | target only, **not approved** |
-| **D** | The event and the line, on your own phone | 2 | 24 | 93 | 390x640 · 390x844 · 430x932 | target only, **not approved** |
-| **E** | The screens in the room | 3 | 28 | 29 | 1280x800 · 800x1280 | target only, **not approved** |
-| **F** | The public display | 1 | 10 | 41 | 1280x800 · 1920x1080 · 390x844 · 800x1280 | target only, **not approved** |
-| **G** | The follow-along | 1 | 7 | 16 | 1280x800 · 390x844 | target only, **not approved** |
+| **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
+| **B** | The invitation, and what a Champion starts | 4 | 34 | 154 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
+| **C** | The challenge, and the door | 2 | 17 | 67 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
+| **D** | The event and the line, on your own phone | 2 | 24 | 93 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
+| **E** | The screens in the room | 3 | 28 | 29 | 1280x800 · 800x1280 | **reviewed & accepted** as target reference · NOT implemented |
+| **F** | The public display | 1 | 10 | 41 | 1280x800 · 1920x1080 · 390x844 · 800x1280 | **reviewed & accepted** as target reference · NOT implemented |
+| **G** | The follow-along | 1 | 7 | 16 | 1280x800 · 390x844 | **reviewed & accepted** as target reference · NOT implemented |
 
 ### Boards
 
 | Board | What | Frames | State |
 | --- | --- | ---: | --- |
-| **FLOW** | The physical product, end to end | 1 | target only, **not approved** |
+| **FLOW** | The physical product, end to end | 1 | **reviewed & accepted** as target reference · NOT implemented |
 
 ### The page packages — accepted work, not atlas drawings
 
@@ -145,7 +145,7 @@ None. Every user-facing route has a target.
 | 2 | MOVE and contribution | `/move` `/contribute/[goalId]` | 19 | implemented, **accepted** |
 | 3 | Community | `/community` | 24 | implemented, **accepted** |
 | 4 | Progress | `/activity` | 10 | implemented (Phase A), **accepted** |
-| 5 | You | `/you` | 16 | target only, **not approved** |
+| 5 | You | `/you` | 16 | **target accepted** · implementation in progress |
 
 ### Device classes, by frames actually drawn
 
