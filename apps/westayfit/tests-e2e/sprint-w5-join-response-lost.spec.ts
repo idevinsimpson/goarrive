@@ -44,6 +44,21 @@ import {
  * EXIST **before** a single assertion is made about what the screen says.
  * If that read ever fails, the test fails there, on its own premise, rather
  * than going on to report a UI finding it has not earned.
+ *
+ * WHEN THE FIX REACHES THIS BRANCH'S BASE, THIS FILE RETIRES.
+ *
+ * It records PRE-FIX behaviour and passes only while the base still carries
+ * it. Verified against W4's `a760a4ed01f80c50a4aab9140414371eb4ceecc2` (PR
+ * #417): the first case and the control both fail there, because the route no
+ * longer claims anything it cannot know. That failure is the evidence the fix
+ * works, so the assertions are deliberately NOT softened to agree with it — a
+ * baseline rewritten to pass against the fix destroys the only record of what
+ * was wrong.
+ *
+ * So when `a760a4e` lands in this branch's base, the two claim-recording cases
+ * here are deleted, not edited, and `sprint-w5-join-outcome-fixed.spec.ts`
+ * carries the guard from then on. The retry case is the exception: it asserts
+ * behaviour that must survive the fix and is already proven to, so it stays.
  */
 
 const BASE_URL = process.env.WSF_PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5010';

@@ -567,3 +567,56 @@ not touch `app/join/[joinCode].tsx` — there is no corrected immutable revision
 baseline is published now; the fixed verdict follows against W4's actual revision when it
 exists, requiring: uncertainty wording, no raw server text, one safe retry landing on the
 intended community/event, and no duplicate membership.
+
+
+## Join outcome — FIXED half verified on W4's `a760a4e`
+
+Assignment: PR #395 comment 5785633689. Revision held to:
+**`a760a4ed01f80c50a4aab9140414371eb4ceecc2`** (PR #417,
+`claude/wsf-sprint-w4-join-outcome-copy`), confirmed a direct child of `44cc063`.
+
+Built and run **from W4's own worktree** — functions compiled and the web bundle built from
+`a760a4e`, emulators started there — so the app under test is W4's revision and not mine.
+W4's checkout was not touched; test and evidence only, in `sprint-w5-*` paths.
+
+### The baseline now fails against the fix, and that is the evidence
+
+`sprint-w5-join-response-lost.spec.ts`, run **unmodified** on `a760a4e`: **2 failed, 1 passed.**
+The two failures are the two cases that recorded the false claim. The assertions were
+deliberately not softened to agree with the fix — a baseline rewritten to pass destroys the
+only record of what was wrong. A retirement note is committed in that file instead: when
+`a760a4e` reaches this branch's base, those two cases are **deleted, not edited**, and the
+fixed spec carries the guard.
+
+The passing one is the retry case, which asserts behaviour that had to survive the fix — and did.
+
+### All four stated criteria met
+
+`sprint-w5-join-outcome-fixed.spec.ts` — **4 tests, 4 passed** on `a760a4e`:
+
+| criterion | result |
+|---|---|
+| uncertainty wording, not a false no-change claim | **met** — `We couldn't confirm your join.Check your connection, then try again.` with the membership proven present; no `Nothing was changed.`, no definite `We couldn't join this community.` |
+| no raw server text | **met** — a planted unmapped-code error carrying `W5RAWSERVERTEXT …` appears in neither the card nor anywhere in the page body |
+| one safe retry to the intended community | **met** — lands on `/community/{groupId}` |
+| no duplicate membership | **met** — active memberships stay at **2** |
+
+Plus W4's own additional claim, tested rather than trusted: **a throw after the call succeeded
+is no longer shown as a failed join.** With `sessionStorage` forced to throw at the browser
+boundary, the member lands on the community, **no failure card renders**, and the membership
+exists. The event context is what is lost, which is the stated trade.
+
+### One behaviour change worth naming — correct, not a regression
+
+On the fix, the aborted-**before**-the-server case also now reads "unconfirmed" rather than
+"Nothing was changed." My baseline control recorded the old wording as *true* in that case,
+and on the fix it changes.
+
+That is right, and it is worth being precise about why: the client cannot distinguish a request
+that never left from one whose answer was lost. The old sentence was **accidentally** correct
+there — correct by luck, not by knowledge — and a screen that states certainty it does not
+have is wrong even on the occasions it happens to be right. Uniform uncertainty across both is
+the honest outcome.
+
+**Verdict: the fix holds on every criterion W5 stated before seeing the patch.** No approval or
+merge recommendation — that is the Director's and the owner's.
