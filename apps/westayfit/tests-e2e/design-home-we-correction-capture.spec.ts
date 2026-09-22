@@ -98,7 +98,18 @@ for (const c of CLASSES) {
         members: [{ uid, role: 'foundingChampion' }],
       });
 
-      // Featured: ends soonest, so it is the hero.
+      /*
+        WHICH GOAL IS FEATURED IS DECIDED BY `endsAt`, so both dates are set
+        explicitly and far apart.
+
+        The first version of this spec passed `endsInMs`, which is not a field
+        `seedActiveGoal` has — Playwright transpiles without typechecking, so
+        it ran, the property was dropped, and BOTH goals took the helper's
+        default end a week out. Which one came back featured was then decided
+        by nothing at all. The frames happened to come out right, which is the
+        worst outcome: a flake that looks like evidence.
+      */
+      const now = Date.now();
       const featured = `hwef${stamp}`.replace(/-/g, '');
       await seedActiveGoal({
         goalId: featured,
@@ -108,9 +119,9 @@ for (const c of CLASSES) {
         target: 500,
         unit: 'squats',
         total: 241,
-        endsInMs: 3 * 24 * 60 * 60_000,
+        endsAt: new Date(now + 3 * 24 * 60 * 60_000),
       });
-      // Secondary: still open, ends later — this is an "Also under way" row.
+      // Secondary: still open, ends well after the hero — an "Also under way" row.
       const second = `hwes${stamp}`.replace(/-/g, '');
       await seedActiveGoal({
         goalId: second,
@@ -120,7 +131,7 @@ for (const c of CLASSES) {
         target: 5000,
         unit: 'minutes',
         total: 1320,
-        endsInMs: 40 * 24 * 60 * 60_000,
+        endsAt: new Date(now + 40 * 24 * 60 * 60_000),
       });
       // History: one reached, one short, so both closed results are in frame.
       await seedClosed({
@@ -162,6 +173,15 @@ for (const c of CLASSES) {
       const marks = page.locator('[data-testid^="wsf-community-goal-we-"]');
       await expect(marks).toHaveCount(1);
       await expect(page.getByTestId(`wsf-community-goal-we-${second}`)).toHaveCount(0);
+      /*
+        And the ONE mark is on the goal this fixture meant to feature. Without
+        this the count alone would pass with the two goals swapped, which is
+        exactly the state the missing `endsAt` left them in.
+      */
+      await expect(page.getByTestId(`wsf-community-goal-we-${featured}`)).toHaveCount(1);
+      await expect(page.getByTestId(`wsf-community-goal-card-${second}`)).toContainText(
+        'Also under way'
+      );
 
       // And the rows still carry their real numbers, so nothing was lost with
       // the mark — only a duplicate of what the text already says.
