@@ -321,7 +321,18 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery'];
+  /*
+    THE ORDER IS DERIVED FROM THE WORKFLOW, NOT HARDCODED.
+
+    It used to be a literal list of seven job names. A job added to the YAML was
+    therefore INVISIBLE to this matrix — `assert.deepEqual(reached, {…seven…})`
+    kept passing while the new job ran, and an independent review demonstrated
+    it: an ungated job running `gcloud secrets versions add` against the very
+    secret under investigation passed all 58 assertions. Deriving the list means
+    a new job appears here, and every mode's expectation must then account for
+    it before this file goes green again.
+  */
+  const order = Object.keys(jobs);
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -381,6 +392,8 @@ test('player mode reaches only gate, config and the player journey', () => {
     'hosted-verify': false,
     'player-journey': true,
     'cleanup-recovery': false,
+    'mail-preflight': false,
+    'mail-binding': false,
   });
 });
 
@@ -419,6 +432,8 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     'hosted-verify': true,
     'player-journey': false,
     'cleanup-recovery': false,
+    'mail-preflight': false,
+    'mail-binding': false,
   });
 });
 
@@ -437,6 +452,8 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     'hosted-verify': false,
     'player-journey': false,
     'cleanup-recovery': false,
+    'mail-preflight': true,
+    'mail-binding': false,
   });
 });
 
@@ -455,6 +472,8 @@ test('mail-binding mode reaches NOTHING that builds, deploys or verifies', () =>
     'hosted-verify': false,
     'player-journey': false,
     'cleanup-recovery': false,
+    'mail-preflight': false,
+    'mail-binding': true,
   });
 });
 
@@ -590,6 +609,8 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     'hosted-verify': false,
     'player-journey': false,
     'cleanup-recovery': true,
+    'mail-preflight': false,
+    'mail-binding': false,
   });
 });
 
@@ -715,6 +736,101 @@ test('the modes are gated by equality, so a fourth mode cannot silently start bu
   for (const [name, hit] of Object.entries(reached)) {
     assert.equal(hit, false, `an unrecognised mode reached ${name}`);
   }
+});
+
+/*
+  EVERY JOB CARRIES AN `if:` — THE INVARIANT NEITHER THE MATRIX NOR THE
+  STRUCTURAL TEST WAS ACTUALLY ASSERTING.
+
+  An independent review demonstrated the hole rather than describing it. The
+  structural test counts the jobs that NAME a mode, so it catches a second job
+  gated on `mail-binding`. The reach matrix walked a hardcoded list, so it could
+  not see a new job at all. Neither notices a job with NO `if:` key — and
+  GitHub runs an ungated job in EVERY mode, `mail-binding` included. A job
+  running `gcloud secrets versions add` against the secret under investigation
+  passed all 58 assertions.
+
+  The obvious deploy shapes tripped OTHER rules incidentally: the same job
+  written with `npx` was caught by the global npx ban, not by anything about
+  reachability. A privileged step that is not `npx` slipped through entirely.
+  So the invariant is asserted directly here, and the probes below prove the
+  assertion bites rather than merely existing.
+*/
+function jobsOf(src) {
+  const at = src.indexOf('\njobs:');
+  assert.notEqual(at, -1, 'the workflow declares no jobs block');
+  const out = {};
+  let current = null;
+  for (const line of src.slice(at).split('\n')) {
+    const m = /^ {2}([a-z][a-z0-9-]*):\s*$/.exec(line);
+    if (m) {
+      current = m[1];
+      out[current] = [];
+      continue;
+    }
+    if (current) out[current].push(line);
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n')]));
+}
+
+const ungatedJobs = (src) =>
+  Object.entries(jobsOf(src))
+    .filter(([, body]) => !/^ {4}if: /m.test(body))
+    .map(([name]) => name);
+
+const negatedGates = (src) =>
+  Object.entries(jobsOf(src))
+    .filter(([, body]) => {
+      const m = /^ {4}if: (.*)$/m.exec(body);
+      return m ? /inputs\.mode !=/.test(m[1]) : false;
+    })
+    .map(([name]) => name);
+
+// A job appended at end of file lands inside the jobs block, which is the last
+// section of this workflow. The privileged step is a FIXTURE STRING and is
+// never executed by anything: these tests only parse text.
+const withExtraJob = (body) => `${text}\n  rollout-helper:\n    runs-on: ubuntu-latest\n${body}`;
+const BENIGN_UNGATED = withExtraJob('    steps:\n      - run: echo hello\n');
+const PRIVILEGED_UNGATED = withExtraJob(
+  '    steps:\n      - run: gcloud secrets versions add WSF_EMAIL_API_KEY --data-file=- --project westayfit-staging\n'
+);
+
+test('POSITIVE CONTROL: every job in this workflow is gated, and none by negation', () => {
+  // The parser must agree with the one the reach matrix uses, or a green
+  // result here would say nothing about the jobs that actually run.
+  assert.deepEqual(Object.keys(jobsOf(text)), Object.keys(jobs),
+    'the probe parser and the matrix disagree about which jobs exist');
+  assert.ok(Object.keys(jobs).length >= 9, 'the job list looks truncated');
+  assert.deepEqual(ungatedJobs(text), [],
+    'a job carries no if:, so it runs in EVERY mode including the read-only ones');
+  assert.deepEqual(negatedGates(text), [],
+    'a job gates by negation, which admits every future mode');
+});
+
+test('AN UNGATED JOB IS REJECTED, even when its step is harmless', () => {
+  // The mutation that survived the whole suite before this assertion existed.
+  assert.deepEqual(ungatedJobs(BENIGN_UNGATED), ['rollout-helper']);
+});
+
+test('AN UNGATED JOB RUNNING A PRIVILEGED NON-npx STEP IS REJECTED', () => {
+  /*
+    The one that matters. `gcloud secrets versions add` writes a new version of
+    the very secret this mode exists to read, and it is not `npx`, so the
+    global ban that incidentally caught the `firebase deploy` shape does
+    nothing here.
+  */
+  assert.deepEqual(ungatedJobs(PRIVILEGED_UNGATED), ['rollout-helper']);
+  assert.equal(/npx/.test(PRIVILEGED_UNGATED.slice(text.length)), false,
+    'the probe must not be caught by the npx ban — that would prove the wrong thing');
+});
+
+test('a job gated by NEGATION is rejected, whichever job it is', () => {
+  const negated = withExtraJob(
+    "    if: ${{ inputs.mode != 'player-journey' }}\n    steps:\n      - run: echo hello\n"
+  );
+  assert.deepEqual(negatedGates(negated), ['rollout-helper']);
+  // It is gated, so the ungated check alone would have passed it.
+  assert.deepEqual(ungatedJobs(negated), []);
 });
 
 test('the failure reprint is diagnostic only and can never become a gate', () => {
