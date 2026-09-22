@@ -55,6 +55,23 @@ board gets treated as accepted when only its source screens were:
    reconstructed 00–05 package.* It clears this status for these
    reconstructed artifacts only; it does not newly accept or stage the
    underlying app pages, and it authorises no deployment.
+
+   The Director then retrieved the full package natively (workflow artifact
+   `10717194625`, source `7dea164`, images identical to `41c053b`), verified
+   every file against its manifest and opened both owner boards and all seven
+   1× copies (`5783947669`). Creative notes recorded from that viewing, so the
+   gap stays visible rather than being read as closed: Home has the right
+   community-first structure, a dominant calibrated Living WE, restrained
+   secondary goals and distinct paths, and MOVE's full-navy receipt is the
+   strongest moment in the set; the owner TARGET is **more energetic than
+   several CURRENT BUILD frames**, particularly the sparse You / Progress empty
+   states and the utility-like entry areas — reference-package acceptance is
+   not "the app has reached the entire premium vision", and energy is never
+   regained by inventing faces, streaks, named activity or unapproved data.
+   Board 02's short-phone captures are the frozen earlier source, not proof of
+   the later #400 fix; Board 04 exposes and labels the old fold. Later
+   authorised product changes are compared with matched new AFTER frames,
+   never by silently replacing these.
 4. **Deployment** — never implied by anything in this directory.
 
 Every board here is a **RECONSTRUCTED REFERENCE** or a **CURRENT-BUILD
