@@ -415,10 +415,27 @@ test.describe('phone 390×844', () => {
       await expect(page.getByTestId(`wsf-community-goal-status-${goalId}`)).toHaveText(
         closed && s.total >= s.target ? 'Reached' : s.statusLine
       );
-      await expect(page.getByTestId(`wsf-community-goal-we-${goalId}`)).toHaveAttribute(
-        'data-fill-ratio',
-        s.ratio
-      );
+      /*
+        THE LIVING WE IS DRAWN ONCE PER SCREEN, ON THE FEATURED GOAL.
+
+        It is the product's signature instrument, and the North Star draws it
+        big, as the thing the screen is about. A mini mark repeated on every
+        secondary and history row turned a signature into a bullet point, so
+        those rows now carry their numbers and no mark. An OPEN goal here is
+        the community's featured goal and still fills from the true confirmed
+        ratio; a CLOSED one sits in History and carries none.
+
+        The row's numbers are asserted above either way, so removing the mark
+        removed a duplicate rather than a fact.
+      */
+      if (closed) {
+        await expect(page.getByTestId(`wsf-community-goal-we-${goalId}`)).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId(`wsf-community-goal-we-${goalId}`)).toHaveAttribute(
+          'data-fill-ratio',
+          s.ratio
+        );
+      }
       if (closed) {
         // A past goal states its result once: "Reached" / "Closed at N%" IS
         // the result, so no "N% complete" line above it.

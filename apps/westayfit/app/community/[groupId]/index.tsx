@@ -1607,7 +1607,6 @@ export default function CommunityPage() {
       : windowWidth < 300
         ? { fontSize: 20, lineHeight: 25 }
         : null;
-  const smallWeWidth = 104;
   // The hero's progress area reserves the room the We mark, its three facts
   // and the freshness line will take, so a pulse that lands does not move
   // the title above it or the actions below it.
@@ -3580,17 +3579,20 @@ export default function CommunityPage() {
             return (
               <View key={goal.goalId} style={styles.card} testID={`wsf-community-goal-card-${goal.goalId}`}>
                 <Text style={styles.sectionEyebrow}>Also under way</Text>
+                {/*
+                  NO MINI LIVING WE HERE. The mark is the product's signature
+                  instrument, and the North Star draws it once per screen, big,
+                  as the thing the screen is about. Repeating it at 104px on
+                  every secondary row turned a signature into a bullet point:
+                  four small WEs down a page compete with the hero's and with
+                  each other, and none of them reads as important.
+
+                  Nothing is lost, because nothing was being said twice. These
+                  rows already print the real shared total and the real
+                  percentage through `renderProgressFacts`, which is the same
+                  confirmed ratio the mark was filling from.
+                */}
                 <View style={styles.smallGoalRow}>
-                  {p.kind === 'ok' ? (
-                    <LivingWeProgress
-                      completed={p.pulse.sharedTotal}
-                      target={p.pulse.target}
-                      unit={p.pulse.unit}
-                      width={smallWeWidth}
-                      surface="light"
-                      testID={`wsf-community-goal-we-${goal.goalId}`}
-                    />
-                  ) : null}
                   <View style={styles.smallGoalText}>
                     <Text style={styles.cardTitle} testID={`wsf-community-goal-title-${goal.goalId}`}>
                       {goal.title}
@@ -3744,15 +3746,8 @@ export default function CommunityPage() {
                   testID={`wsf-community-goal-closed-${goal.goalId}`}
                   {...({ 'data-state': 'closed' } as Record<string, unknown>)}
                 >
+                  {/* No mini mark on a history row either — same reason. */}
                   <View style={styles.smallGoalRow}>
-                    <LivingWeProgress
-                      completed={goal.sharedTotal}
-                      target={goal.target}
-                      unit={goal.unit}
-                      width={smallWeWidth}
-                      surface="light"
-                      testID={`wsf-community-goal-we-${goal.goalId}`}
-                    />
                     <View style={styles.smallGoalText}>
                       <Text style={styles.cardTitle}>{goal.title}</Text>
                       <View style={styles.factsSmall}>

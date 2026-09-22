@@ -181,6 +181,121 @@ test('a finished goal the member was part of is kept, not filtered away', async 
   await context.close();
 });
 
+test('A GOAL CORRECTED BELOW ITS TARGET DOES NOT STILL SAY REACHED', async ({ browser }) => {
+  /*
+    THE BUG THIS EXISTS FOR. `reachedAt` records that a goal crossed its target
+    ONCE. It is an event, and events do not un-happen, so the stamp survives a
+    correction that takes the shared total back below the target. Progress read
+    that stamp as the present state — so a goal corrected down to 2,400 of
+    3,000 still wore REACHED and still drew the celebratory Living WE, on the
+    strength of something that had been true a week earlier.
+
+    The fixture is the real shape and not a contrived one: a `reachedAt` stamp
+    AND a current total below target is exactly what a community's own
+    correction leaves behind. Home already got this right — it prints the
+    reached date only when the stamp exists and the CURRENT phase is
+    reachedOpen or closedReached — and Progress was the one surface trusting
+    the stamp alone.
+  */
+  test.setTimeout(240_000);
+  const id = stampId();
+  const email = `wsf-pcorr-${id}@example.com`;
+  const password = `Pw-${randomBytes(9).toString('base64url')}`;
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Devin');
+
+  const groupId = `pcorrg-${id}`;
+  await seedCommunity({
+    groupId,
+    displayName: 'Alpharetta Morning Movers',
+    joinPolicy: 'inviteOnly',
+    members: [{ uid, role: 'foundingChampion' }],
+  });
+
+  // Corrected DOWN after reaching: the stamp stands, the total does not.
+  const corrected = `pcorrc-${id}`;
+  await seedClosedGoal({
+    goalId: corrected,
+    groupId,
+    ownerUid: uid,
+    title: 'Corrected Push-up Push',
+    target: 3000,
+    unit: 'push-ups',
+    total: 2400,
+    endedDaysAgo: 21,
+    reached: true, // the historical reachedAt stamp IS present
+  });
+  await seedOwnCredit(corrected, uid, 260);
+
+  const { context, page } = await phone(browser, { width: 390, height: 844 });
+  await signInVia(page, email, password);
+  await page.goto('/activity');
+  const rows = page.getByTestId('wsf-activity-rows');
+  await expect(rows).toBeVisible({ timeout: 40_000 });
+
+  // The goal is listed — a correction does not hide it...
+  await expect(rows).toContainText('Corrected Push-up Push');
+  /*
+    ...and the real, corrected progress is what is printed. The unreached
+    branch shows a PERCENTAGE, so 2,400 of 3,000 reads as 80% — asserted
+    explicitly, because a total the read never delivered would show 0% and a
+    test that only checked for the absence of REACHED would pass on it. That
+    is the same class of mistake as the bug itself: a label that looks right
+    for a reason nobody checked.
+  */
+  await expect(rows).toContainText('80%');
+  // ...but it does not claim the target was met.
+  await expect(rows).not.toContainText('REACHED');
+
+  await context.close();
+});
+
+test('a goal whose corrected total is still AT the target keeps REACHED', async ({ browser }) => {
+  /*
+    THE OTHER HALF, so the fix cannot be "never say reached". A correction that
+    lands exactly ON the target is still a target met — `isReached` is `>=`,
+    and a goal at 3,000 of 3,000 has reached it.
+  */
+  test.setTimeout(240_000);
+  const id = stampId();
+  const email = `wsf-pexact-${id}@example.com`;
+  const password = `Pw-${randomBytes(9).toString('base64url')}`;
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Devin');
+
+  const groupId = `pexactg-${id}`;
+  await seedCommunity({
+    groupId,
+    displayName: 'Alpharetta Morning Movers',
+    joinPolicy: 'inviteOnly',
+    members: [{ uid, role: 'foundingChampion' }],
+  });
+
+  const exact = `pexactc-${id}`;
+  await seedClosedGoal({
+    goalId: exact,
+    groupId,
+    ownerUid: uid,
+    title: 'Exact Push-up Push',
+    target: 3000,
+    unit: 'push-ups',
+    total: 3000,
+    endedDaysAgo: 21,
+    reached: true,
+  });
+  await seedOwnCredit(exact, uid, 260);
+
+  const { context, page } = await phone(browser, { width: 390, height: 844 });
+  await signInVia(page, email, password);
+  await page.goto('/activity');
+  const rows = page.getByTestId('wsf-activity-rows');
+  await expect(rows).toBeVisible({ timeout: 40_000 });
+  await expect(rows).toContainText('Exact Push-up Push');
+  await expect(rows).toContainText('REACHED');
+
+  await context.close();
+});
+
 test('a goal with no recorded own part is not listed', async ({ browser }) => {
   test.setTimeout(240_000);
   const fx = await seedMember('pbeh2');

@@ -24,7 +24,13 @@ import {
 } from '../src/ui/kit';
 import { LivingWeProgress } from '../src/ui/LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../src/ui/MemberTabBar';
-import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../src/ui/progressFormat';
+import {
+  fillRatio,
+  formatCount,
+  isReached,
+  percentLabel,
+  totalOfTargetLabel,
+} from '../src/ui/progressFormat';
 import { WsfWordmark } from '../src/ui/WsfWordmark';
 import { formatEndedOn } from '../src/ui/dates';
 
@@ -190,7 +196,29 @@ export default function ActivityScreen() {
           sharedTotal: goal.sharedTotal,
           status: goal.status,
           endsAt: goal.endsAt,
-          reached: Boolean(goal.reachedAt),
+          /*
+            THE CURRENT TOTAL DECIDES, NOT THE HISTORICAL STAMP.
+
+            `reachedAt` records that a goal crossed its target once. It is an
+            EVENT, and events do not un-happen — so it survives a correction
+            that takes the shared total back below the target. Reading it as
+            the present state meant a goal corrected down to 380 of 500 still
+            wore REACHED, and still drew the celebratory Living WE, because of
+            something that had been true a week earlier.
+
+            `isReached` over the confirmed total is the same rule Home already
+            applies: `community/[groupId]/index.tsx` prints the reached DATE
+            only when `reachedAt` exists AND the current phase is `reachedOpen`
+            or `closedReached`. This was the one surface trusting the stamp
+            alone.
+
+            An unconfirmed total is not a reached goal. `sharedTotal` is absent
+            when the aggregate read did not answer, and claiming the target was
+            met on a number the product does not have is the same error in a
+            different costume.
+          */
+          reached:
+            typeof goal.sharedTotal === 'number' && isReached(goal.sharedTotal, goal.target),
         };
         if (goal.status === 'active') running.push(row);
         else finished.push(row);
