@@ -13,7 +13,7 @@ running product under the allowance in the Director's release
 | Routes | `app/kiosk/[goalId].tsx` (the resting screen) and `app/contribute/[goalId].tsx?kiosk=1` (the ordinary contribution route in kiosk mode) |
 | Producer | `apps/westayfit/tests-e2e/sprint-w1b-kiosk-capture.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1`, through `helpers/capture` |
-| Gated run | **3 passed, 12 frames** |
+| Gated run | **5 passed, 15 frames** (12 in the first pass, 3 in the failure-state supplement) |
 | Ordinary run | assertions run, **0 images written** |
 | Fixtures | `helpers/mobile`, isolated `demo-wsf-local` over loopback |
 | Classes | 800×1280 (the class batch-e drew) and 1024×1366 (above the route's own 900 px wide-layout threshold) |
@@ -35,6 +35,62 @@ running product under the allowance in the Director's release
 | `kiosk-receipt-stay-800x1280.png` | `e53c7191e43e2164` | the same receipt after `Stay` — a restarted countdown, not a paused one |
 | `kiosk-rested-after-finish-800x1280.png` | `e646a312a9121e40` | the device back at rest, signed out, carrying the total that contribution produced |
 
+## The failure-state supplement
+
+Released on [`5786222162`](https://github.com/idevinsimpson/goarrive/pull/423#issuecomment-5786222162):
+the two locked states the first pass reported as missing. Each is reached by a
+fault injected **outside the product** — no app, backend, config or
+existing-producer change — and each frame carries the fault in its provenance
+tag. Produced by two further tests in the same gated producer.
+
+| Frame | sha256 (first 16) | What it is | Fault injected |
+|---|---|---|---|
+| `kiosk-unresolved-800x1280.png` | `2aa9ad903d76af19` | the unknown outcome in kiosk mode: `We couldn't confirm your contribution yet.` · `We don't know whether this effort was recorded. Don't record it again.` · `You entered 20 squats.` · `Confirm this contribution` · the kiosk notice · `Finish` · `Finishing in 90 seconds` · `Stay` | `route.abort('failed')` on `wsfContribute` — the request leaves and no answer comes back |
+| `kiosk-rested-after-unresolved-800x1280.png` | `aa2012468ef573a9` | Finish from unresolved: the device at rest, signed out, at `241 of 500 squats` · `48.2% complete` · `259 to go` · `Confirmed 11:43 PM` | same |
+| `kiosk-signout-failed-800x1280.png` | `efdc17aa0b240be4` | the receipt still on screen at `261 of 500` · `52.2%` · `239 to go`, with `We couldn't sign you out. Don't leave this device signed in — try Finish again.` in red beneath `Finishing in 90 seconds` | a readwrite transaction on Firebase Auth's own `firebaseLocalStorage` IndexedDB store made to throw, for the instant Finish runs — the web SDK signs out by **removing** the persisted user, so a refused removal is the real mechanism by which `signOut()` rejects |
+
+### Asserted for the unknown outcome
+
+- the state is stated as **uncertainty, not a result**: headline, the
+  `Don't record it again` line and the entered amount, each verbatim;
+- **no new shared total, no percent and no mark** — `wsf-contribute-shared-total`
+  and `wsf-contribute-we` are asserted absent, `261 of 500` and `241 of 500`
+  never appear, and no `%` appears anywhere on the screen;
+- the replay offered is the **same attempt** (`Confirm this contribution`, "it
+  will not count twice"), not a second contribution;
+- the guidance is the **shared-device** one — `KIOSK_UNRESOLVED_NOTICE` is
+  present and the ordinary route's "the same attempt will be here when you come
+  back" is **withheld**, because the visitor is about to be signed out;
+- the stored record exists, in state `unknown`, for the amount entered, under
+  **this account's uid**;
+- after Finish: the auth store is **empty** (signed out), the resting hero is
+  back at the confirmed `241 of 500` with `data-fill-ratio="0.4820"` — the
+  request never reached the server, so nothing is invented in either direction —
+  and the **record survives**, still keyed to the uid that made it.
+
+### Asserted for the sign-out failure
+
+- the error reads verbatim and the device **does not return to its start
+  screen**: the URL is still the kiosk-mode contribution route and the resting
+  screen, which is mounted beneath it in the router stack, stays hidden;
+- the receipt is still on screen and `Finish` is **offered again**, enabled,
+  rather than left spinning;
+- the account is **still attached**: its persisted record is still in the auth
+  store, and a reload — which drops the injected fault with the JS context —
+  comes back **signed in as the same visitor**, with no sign-in gate between the
+  next person and that account.
+
+### One defect these frames expose — reported, not fixed
+
+`Stay` is drawn in `#0B1F3A` on the dark receipt screen's `#0B1F3A`
+background: a contrast ratio of **1:1**. The control is present, focusable and
+operable — the producer clicks it and the countdown rises again — and on the
+light unresolved screen it reads normally. On the dark frames there is nothing
+legible where it sits, checked pixel by pixel across the right of that row
+rather than inferred. On a shared device this is the one control that keeps a
+receipt on screen for somebody still reading it. **The product is not this
+packet's to change**, so it is recorded and nowhere fixed.
+
 ## Asserted before each shot
 
 - the resting hero's community, title, total, percent, freshness line and the
@@ -54,12 +110,16 @@ running product under the allowance in the Director's release
 - after `Finish`, the resting screen carries neither the account name nor the
   amount the last visitor entered.
 
-## Two locked states this set does not contain
+## A correction to this package's earlier note
 
-**The unknown outcome** (`KIOSK_UNRESOLVED_NOTICE`) and **the sign-out
-failure**. Both exist in the code and are covered by `ui-kiosk.spec.ts`;
-reaching them needs a failure injected at a precise instant. They are named on
-Board 11 rather than drawn, and no screenshot is fabricated for them.
+An earlier version of this file said the unknown outcome and the sign-out
+failure were "covered by `ui-kiosk.spec.ts`". On re-reading, they are not: that
+spec reaches neither state end to end — it asserts only that a **confirmed**
+receipt carries no unresolved notice. The rules are covered at unit level in
+`apps/westayfit/tests/kiosk-session.test.ts` ("KEEPS an unresolved attempt",
+"never claims the unresolved attempt was recorded", "reports a FAILED sign-out
+instead of pretending the device is clean"). The three frames above are the
+first end-to-end evidence of either state.
 
 ## One current-build observation, reported not fixed
 

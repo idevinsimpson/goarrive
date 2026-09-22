@@ -41,7 +41,7 @@ import { REPO, frameHeight, header, footer, page, phone, NAVY, CREAM } from './l
 const K = (f) => path.join(REPO, 'docs/design-target/review/kiosk-current', f);
 
 export const width = 1280;
-export const height = 2327;
+export const height = 3196;
 
 const W = 200;
 const CAPTURED = 'CURRENT BUILD · CAPTURED';
@@ -60,6 +60,19 @@ const ROW = [
   'kiosk-rested-after-finish-800x1280.png',
 ];
 const SLOT = Math.max(...ROW.map((f) => frameHeight(K(f), W)));
+
+/* The supplement released on PR #423 (`5786222162`): the two locked failure
+   states the first pass named but did not photograph. Both are reached by a
+   fault injected OUTSIDE the product — no app, backend or config change — and
+   both carry the fault in their provenance tag. */
+const FAIL = [
+  'kiosk-unresolved-800x1280.png',
+  'kiosk-rested-after-unresolved-800x1280.png',
+  'kiosk-signout-failed-800x1280.png',
+];
+const FAIL_SLOT = Math.max(...FAIL.map((f) => frameHeight(K(f), W)));
+const CAPTURED_TRANSPORT = 'CURRENT BUILD · CAPTURED · INJECTED TRANSPORT FAULT';
+const CAPTURED_STORAGE = 'CURRENT BUILD · CAPTURED · INJECTED STORAGE FAULT';
 
 const b = (t) => `<b style="color:${NAVY}">${t}</b>`;
 const w = (t) => `<b style="color:${CREAM}">${t}</b>`;
@@ -179,6 +192,51 @@ export const html = page({
     </div>
   </div>
 
+  <div style="margin-top:30px">
+    <div class="sec-head">
+      <div>
+        <div class="eyebrow">THE TWO LOCKED FAILURE STATES · REACHED BY INJECTED FAULT · PHOTOGRAPHED</div>
+        <h3>Effort whose fate nobody knows, and a device that will not pretend to be free. Both are central to the shared-device contract, so both are shot rather than described.</h3>
+      </div>
+      <div class="how">Each needs a failure at a precise instant, so one was induced ${b('outside the product')} and named on the frame: a ${b('transport fault')} that aborts the contribution request in flight, and a ${b('storage fault')} that makes Firebase Auth's own IndexedDB refuse the removal by which sign-out happens. ${b('No app, backend, config or existing-producer change')}, and no expected design substituted for what rendered.</div>
+    </div>
+    <div class="phones" style="gap:26px">
+      ${phone({
+        file: K('kiosk-unresolved-800x1280.png'),
+        width: W,
+        slot: FAIL_SLOT,
+        tag: 'fresh',
+        tagText: CAPTURED_TRANSPORT,
+        title: 'Unknown outcome · the screen states uncertainty, not a result',
+        sub: `${b('NOT CONFIRMED YET')} · ${b('We couldn’t confirm your contribution yet.')} · "We don’t know whether this effort was recorded. Don’t record it again." · ${b('You entered 20 squats.')} The safe act is offered as itself — ${b('Confirm this contribution')}, "this sends the same attempt again… it will not count twice" — a replay of the same attempt, not a second contribution. ${b('No shared total, no percent and no Living WE anywhere on it')}: all three are asserted absent, because a mark beside "we don’t know" invites exactly the arithmetic the member cannot safely do.`,
+      })}
+      ${phone({
+        file: K('kiosk-rested-after-unresolved-800x1280.png'),
+        width: W,
+        slot: FAIL_SLOT,
+        tag: 'fresh',
+        tagText: CAPTURED_TRANSPORT,
+        title: 'Finish from unresolved · the account goes, the record stays',
+        sub: `The kiosk's own guidance first — ${b('Your attempt is saved to your account; check it from your own device.')} — then Finish. The device rests signed out (no auth record remains, asserted) at ${b('241 of 500 squats')} · ${b('48.2% complete')} · ${b('259 to go')} · ${b('Confirmed 11:43 PM')}: the request never reached the server, so the confirmed truth is unchanged and ${b('nothing is invented in either direction')}. The stored attempt ${b('survives the sign-out')}, keyed to the uid that made it — it is the only thing that lets its owner replay that attempt id and get the original receipt.`,
+      })}
+      ${phone({
+        file: K('kiosk-signout-failed-800x1280.png'),
+        width: W,
+        slot: FAIL_SLOT,
+        tag: 'fresh',
+        tagText: CAPTURED_STORAGE,
+        title: 'Sign-out failure · it refuses to look free',
+        sub: `A real confirmed receipt (${b('261 of 500')} · ${b('52.2%')} · ${b('239 to go')}), then Finish with the removal refused. The device ${b('does not return to its start screen')}; it stays put and says so in red: ${b('We couldn’t sign you out. Don’t leave this device signed in — try Finish again.')} Finish is offered again rather than left spinning. And it is not cosmetic — the account's persisted record is still on the device, and a reload comes back ${b('signed in as the same visitor with no gate')}. Asserted, both ways.`,
+      })}
+      <div class="panel" style="width:240px">
+        <div class="eyebrow seam">ONE DEFECT THESE FRAMES EXPOSE · REPORTED, NOT FIXED</div>
+        <p class="note">${b('“Stay” is invisible on the dark screens.')} In the countdown row the control is drawn in ${b('#0B1F3A')} on the receipt screen's ${b('#0B1F3A')} background — a contrast ratio of ${b('1:1')}. It is present, focusable and operable (the producer clicks it and the countdown rises again), and on the light unresolved screen the same control reads normally. On the two dark frames there is ${b('nothing legible')} where it sits — checked pixel by pixel across the right of that row, not inferred.</p>
+        <p class="note" style="margin-top:8px">On a shared device this is the one control that keeps a receipt on screen for somebody still reading it. ${b('The product is not this packet’s to change')}, so it is recorded here and nowhere fixed.</p>
+        <p class="note" style="margin-top:8px">${b('The tab-bar seam recurs.')} Both contribution-screen frames here carry the member shell's tab bar along the bottom edge, as the entry, review and receipt frames do.</p>
+      </div>
+    </div>
+  </div>
+
   <div class="two">
     <div class="side">
       <div class="panel dark">
@@ -214,8 +272,8 @@ export const html = page({
         <div class="eyebrow quiet">WHERE THIS BOARD IS HONEST ABOUT ITS OWN LIMITS</div>
         <table>
           <tr><td class="k">One provenance</td><td class="d">Every frame is ${b('CURRENT BUILD · CAPTURED')} — the running route at app-shell-equivalent product source, shot for this board. There are ${b('no drawings on this board at all')}, and nothing carries an accepted-page verdict: <b>/kiosk/[goalId]</b> has none, and this board grants none.</td></tr>
-          <tr><td class="k">Captured, not described</td><td class="d">Ten states are photographs. The producer also captured the ${b('signed-out handoff')} and the ${b('Stay')} frame; they are in the evidence set and not reproduced here, where the rule they prove is stated instead.</td></tr>
-          <tr><td class="k">Two locked states with no frame</td><td class="d">${b('The unknown outcome')} — its notice, "Your attempt is saved to your account; check it from your own device.", and the explicit "We don't know whether it was recorded." — and ${b('the sign-out failure')}, which must never return to the resting screen while an account is still attached. Both exist in the code (<b>KIOSK_UNRESOLVED_NOTICE</b>, <b>runKioskFinish</b>) and are covered by <b>ui-kiosk.spec.ts</b>; neither is photographed here, and neither is drawn. Inducing them needs a failure injected at a precise instant, and a board does not fabricate a screenshot for a state it did not reach.</td></tr>
+          <tr><td class="k">Captured, not described</td><td class="d">Thirteen states are photographs. The producer also captured the ${b('signed-out handoff')} and the ${b('Stay')} frame; they are in the evidence set and not reproduced here, where the rule they prove is stated instead.</td></tr>
+          <tr><td class="k">The two locked failure states, and a correction</td><td class="d">${b('Both are now photographed')}, under the labelled injected faults above — this supersedes this board's earlier statement that neither was drawn. That statement also said both were covered by <b>ui-kiosk.spec.ts</b>; on re-reading, they are not. That spec reaches neither state end to end (it asserts only that a ${b('confirmed')} receipt carries no unresolved notice). The rules are covered at unit level in <b>tests/kiosk-session.test.ts</b> — "KEEPS an unresolved attempt", "never claims the unresolved attempt was recorded", "reports a FAILED sign-out instead of pretending the device is clean" — and the two frames here are the first end-to-end evidence of either.</td></tr>
           <tr><td class="k">Not on this board, by the lock</td><td class="d">${b('No QR or phone pairing')}, no activity chooser, no queue, turn or station assignment, no participant-name callout, no individual display and no cross-device attempt recovery. None exists on this route; all belong to ${b('Board 14’s')} intended two-station experience, which is ${b('preserved by naming it')} rather than backfilled or erased.</td></tr>
           <tr><td class="k">Fixtures</td><td class="d">"Maple Street Movers", "Squats together this week" and every number are ${b('synthetic emulator fixtures')}, recorded in the evidence set's <b>fixture.json</b> and unchanged here. No real community, person or device appears; no faces, names, counts of people, streaks, rankings or comparison anywhere.</td></tr>
         </table>
@@ -223,6 +281,6 @@ export const html = page({
     </div>
   </div>
 
-  ${footer('WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL', 'SELF-CHECKED · INDEPENDENT REVIEW PENDING · PR #365 comment 5771528649 · current build / review: ten photographs of the running kiosk; the batch-e drawings are not reproduced, and two locked states are named rather than drawn')}
+  ${footer('WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL', 'SELF-CHECKED · INDEPENDENT REVIEW PENDING · PR #365 comment 5771528649 · current build / review: thirteen photographs of the running kiosk, two of them reached by a labelled injected fault; the batch-e drawings are not reproduced')}
   `,
 });

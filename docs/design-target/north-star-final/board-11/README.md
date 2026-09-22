@@ -9,12 +9,19 @@ Status layer, from that lock: **CURRENT BUILD / REVIEW.** This board records the
 route's state; it grants it nothing, and it takes nothing away from any
 acceptance recorded elsewhere.
 
-`WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL.png` · 2560×4654 (1280×2327 @2x)
+`WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL.png` · 2560×6392 (1280×3196 @2x)
 
 Released to W1B by the Creative/Product Director on PR #412, comment
 [`5786014162`](https://github.com/idevinsimpson/goarrive/pull/412#issuecomment-5786014162)
 — *"Board 11 reconstruction ONLY is now released; this explicitly supersedes the
 old '10–17 unreleased' sentence for 11, not 12–17. W2 owns Board 10."*
+
+**Supplemented** on PR #423, comment
+[`5786222162`](https://github.com/idevinsimpson/goarrive/pull/423#issuecomment-5786222162)
+— *"continue this same owned packet with the TWO essential locked states you
+explicitly report missing: unresolved contribution and sign-out failure… a
+precisely injected local failure is valid rendered evidence when labeled."* Both
+are now photographed; see **The two locked failure states** below.
 
 **Cut from canonical `4fe1943`**, the verified head at branch time. Delta from
 the head Board 09 was cut at (`d82890e`): roster commits plus the app-shell
@@ -28,7 +35,7 @@ node scripts/westayfit/north-star/render-board.mjs scripts/westayfit/north-star/
   docs/design-target/north-star-final/board-11/WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL.png
 ```
 
-Ten frames, all read in place, none copied, altered, re-captured or re-encoded.
+Thirteen frames, all read in place, none copied, altered, re-captured or re-encoded.
 
 **Control before authoring.** The renderer was run against an untouched
 committed board and reproduced
@@ -54,12 +61,15 @@ redesign. So the frames were produced from the running product.
 
 | Source | What it is | SHA |
 | --- | --- | --- |
-| `review/kiosk-current/**` | ten photographs of the running kiosk and its kiosk-mode contribution, produced by this board's own gated producer; `sha256` per frame in that package's README | this branch |
+| `review/kiosk-current/**` | thirteen photographs of the running kiosk and its kiosk-mode contribution, produced by this board's own gated producer; `sha256` per frame in that package's README | this branch |
 | `apps/westayfit/tests-e2e/sprint-w1b-kiosk-capture.spec.ts` | that producer | this branch |
 | `app/kiosk/[goalId].tsx`, `src/kioskSession.ts`, `app/contribute/[goalId].tsx` | the route, cited where it explains why a frame looks as it does | `4fe1943` |
 
-**There are no drawings on this board at all**, and one provenance only:
-`CURRENT BUILD · CAPTURED`.
+**There are no drawings on this board at all.** One provenance, in three
+forms: `CURRENT BUILD · CAPTURED`, and — on the two supplement frames whose
+state needed a failure — the same tag with `· INJECTED TRANSPORT FAULT` or
+`· INJECTED STORAGE FAULT`, so no frame can be read as an ordinary run of the
+product.
 
 ## Two device classes, and the threshold between them
 
@@ -98,16 +108,37 @@ asserts what is standing in a room.
 | the kiosk never verifies who moved or whether movement happened | stated in the lock panel; nothing on any frame claims otherwise |
 | no phone pairing, QR handoff, activity chooser, queue/turn/station assignment, participant-name callout or individual display | none appears; the producer asserts the resting screen's text contains none of those words, and the limits table names them as **Board 14's** |
 
-### Two locked states with no frame
+### The two locked failure states
 
-**The unknown outcome** — `KIOSK_UNRESOLVED_NOTICE` (*"Your attempt is saved to
-your account; check it from your own device."*) with its explicit *"We don't
-know whether it was recorded."* — and **the sign-out failure**, which must never
-return to the resting screen while an account is still attached. Both exist in
-the code and are covered by `ui-kiosk.spec.ts`. Neither is photographed here and
-neither is drawn: reaching them needs a failure injected at a precise instant,
-and a board does not fabricate a screenshot for a state it did not reach. The
-board says so on its own face.
+Both are now on the board, each reached by a fault injected **outside the
+product** and each labelled with that fault:
+
+| State | How it was reached | What the frame shows |
+| --- | --- | --- |
+| **The unknown outcome** | `route.abort('failed')` on `wsfContribute` — the same transport fault `design-after-move-capture.spec.ts` uses for the ordinary MOVE page | uncertainty stated as uncertainty: *"We couldn't confirm your contribution yet."*, *"We don't know whether this effort was recorded. Don't record it again."*, the amount entered, a replay of the **same attempt**, and `KIOSK_UNRESOLVED_NOTICE`. **No shared total, no percent and no mark** — all asserted absent. Finish from this state signs the account out and **keeps** the stored attempt, keyed to the uid that made it |
+| **The sign-out failure** | a readwrite transaction on Firebase Auth's own `firebaseLocalStorage` IndexedDB store made to throw for the instant Finish runs — the web SDK signs out by *removing* the persisted user, so a refused removal is the real mechanism by which `signOut()` rejects | the device **does not return to its start screen**. The receipt stays, `Finish` is offered again, and the warning reads verbatim. The producer also proves it is not cosmetic: the account's persisted record is still there, and a reload comes back signed in as the same visitor with no gate |
+
+Neither is drawn, neither is fabricated, and no product change was made to reach
+either. The successful Finish captured in the first pass remains the positive
+control.
+
+**A correction this supersedes.** The first version of this board said both
+states were "covered by `ui-kiosk.spec.ts`". On re-reading, they are not: that
+spec reaches neither end to end — it asserts only that a *confirmed* receipt
+carries no unresolved notice. The rules are covered at unit level in
+`apps/westayfit/tests/kiosk-session.test.ts`. The two frames are the first
+end-to-end evidence of either state, and the board now says so on its face.
+
+### One defect these frames expose — reported, not fixed
+
+`Stay` is drawn in `#0B1F3A` on the dark receipt screen's `#0B1F3A` background:
+a contrast ratio of **1:1**. The control is present, focusable and operable —
+the producer clicks it and the countdown rises again — and on the light
+unresolved screen it reads normally; on the dark frames nothing is legible where
+it sits, checked pixel by pixel across the right of that row rather than
+inferred. On a shared device it is the one control that keeps a receipt on
+screen for somebody still reading it. Recorded as a finding; the product is not
+this packet's to change.
 
 ## Where the built route and the drawn target diverge
 
@@ -151,9 +182,9 @@ banner, as captured. No real community, person or device appears.
 | --- | --- |
 | Control render | Board 03 re-rendered **byte-identical** to its committed PNG |
 | Determinism | Board 11 rendered twice, identical bytes (`cmp`) |
-| Canvas | content height 2327 CSS px; footer at 2261–2291, inside the canvas; every panel and frame inside, nothing clipped |
+| Canvas | content height 3196 CSS px, measured; footer at 3130–3160, inside the canvas; every panel and frame inside, nothing clipped |
 | Evidence guard | `check-evidence-intact.mjs` → frozen BEFORE intact (9 paths), accepted TARGET / AFTER intact (20 paths) |
-| Producer | 3 passed, 12 frames gated; ordinary ungated run writes no image (`helpers/capture`) |
+| Producer | 5 passed, 15 frames gated; ordinary ungated run writes no image, and the twelve first-pass frames are byte-unchanged by this supplement (checked before and after) |
 | Typecheck | `npm --prefix apps/westayfit run ts:check` passes with the spec in place |
 | Diff scope | `board-11/**`, `board-11.mjs`, `review/kiosk-current/**` and `tests-e2e/sprint-w1b-kiosk-capture.spec.ts` — the exact allowlist |
 
