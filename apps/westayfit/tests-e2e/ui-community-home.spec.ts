@@ -541,6 +541,55 @@ const STATES: Array<{
   { key: '29999-of-30000', total: 29999, target: 30000, percent: '99.9%', status: 'Only 1 to go', ratio: '0.9999' },
 ];
 
+test('a failed pulse read says so on the hero, and its retry can be read', async ({ page }) => {
+  test.setTimeout(120_000);
+  const stamp = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+  const password = 'uiA-password';
+  const email = `wsf-uiA-pulsefail-${stamp}@example.com`;
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Fixture Champion');
+  const groupId = await seedCommunity(`pulsefail-${stamp}`, 'WE pulse failure', [
+    { uid, role: 'foundingChampion' },
+  ]);
+  const goalId = `uiA-pulsefail-${stamp}`;
+  await seedGoal(groupId, uid, {
+    goalId,
+    title: 'Fixture goal 241 of 500',
+    target: 500,
+    unit: 'squats',
+    total: 241,
+    status: 'active',
+    endsInMs: 2 * 24 * 60 * 60_000,
+  });
+  await signInVia(page, email, password);
+
+  // The goal list answers; only the pulse fails. The hero keeps the goal's
+  // title and says the numbers could not be read — no mark, no zero.
+  await page.route('**/wsfGoalPulse', (route) => route.abort('failed'));
+  await page.goto(`/community/${groupId}`);
+  const error = page.getByTestId(`wsf-community-goal-progress-error-${goalId}`);
+  await expect(error).toBeVisible({ timeout: 30_000 });
+  await expect(error).toContainText('Progress couldn’t be loaded just now.');
+  await expect(page.getByTestId(`wsf-community-goal-we-${goalId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveCount(0);
+
+  // READABLE, NOT MERELY PRESENT. The retry sits inside the navy hero. For
+  // one pass its label was navy as well — the DOM had the words, a test
+  // could click them, and a person saw an empty outlined pill. The label is
+  // the hero's light ink, asserted as the colour that actually rendered.
+  const retry = page.getByTestId(`wsf-community-goal-progress-retry-${goalId}`);
+  await expect(retry).toHaveText('Try again');
+  await expect(retry.locator('div').first()).toHaveCSS('color', 'rgb(247, 245, 240)');
+
+  // And it works: once the read can succeed, the retry brings the numbers.
+  await page.unroute('**/wsfGoalPulse');
+  await retry.click();
+  await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveText('48.2% complete', {
+    timeout: 30_000,
+  });
+  await expect(error).toHaveCount(0);
+});
+
 test('Living WE static states through the real data path', async ({ page }) => {
   test.setTimeout(300_000);
   const stamp = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
