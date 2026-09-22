@@ -31,7 +31,8 @@
  *                              everything they cannot — the lower form, both
  *                              repeat choices, the same-page summary, the
  *                              validation, the in-flight call, the real created
- *                              receipt and the refusals.
+ *                              receipt, an interrupted request and its
+ *                              recovery, and the entry refusals.
  *
  *   TARGET DRAWING · NEVER     batch-b's B3 `TARGET-goal-*` set — drawn against
  *   BUILT                      the real kit in a gated preview route, never
@@ -83,12 +84,15 @@ const SMALL_SLOT = Math.max(...TARGET_FRAMES.map((f) => frameHeight(TARGET(f), S
 const CAPTURED = 'CURRENT BUILD · CAPTURED';
 /*
   Two frames in the strip reached their state through an injection, and each
-  says which on its own tag rather than in a footnote: the in-flight frame held
-  the REAL callable open and then released it, and the refusal frame aborted
-  it. No success response is fabricated anywhere.
+  says which on its own tag rather than in a footnote. The in-flight frame held
+  the REAL callable open and then released it, so the receipt beside it is that
+  same call's answer. The other ABORTED the call in transport — which is an
+  interrupted request, NOT a server refusal, and establishes nothing about
+  whether the write landed; the frame is captioned for what it actually shows,
+  the recovery. No success response is fabricated anywhere.
 */
 const CAPTURED_DELAY = 'CURRENT BUILD · CAPTURED · INJECTED DELAY';
-const CAPTURED_NETWORK = 'CURRENT BUILD · CAPTURED · INJECTED NETWORK';
+const CAPTURED_NETWORK = 'CURRENT BUILD · CAPTURED · INJECTED NETWORK FAULT';
 const CAPTURED_SHORT = 'CURRENT BUILD · CAPTURED · 390×640';
 const DRAWN = 'TARGET DRAWING · NEVER BUILT';
 /* The strip's frames are a uniform device class; the slot is measured anyway. */
@@ -178,7 +182,7 @@ export const html = page({
         tag: 'fresh',
         tagText: CAPTURED,
         title: 'A preset window, in words',
-        sub: `All four durations, ${b('2 weeks')} chosen, and the window the preset derives stated as ${b('Starts today at 10:15 PM')} / ${b('Ends Tuesday, Sep 29 at 10:15 PM')}, with ${b('Times are in Coordinated Universal Time')} under it. The zone is the device's, in words.`,
+        sub: `All four durations, ${b('2 weeks')} chosen, and the window that preset derives stated as ${b('Starts today at 10:15 PM')} / ${b('Ends Tuesday, Oct 6 at 10:15 PM')} — fourteen days on, which is what "2 weeks" means here. ${b('Times are in Coordinated Universal Time')} sits under it; the zone is the device's, in words.`,
       })}
       ${phone({
         file: NOW('form-custom-window-390x844.png'),
@@ -233,8 +237,8 @@ export const html = page({
         slot: NOW_SLOT,
         tag: 'fresh',
         tagText: CAPTURED_NETWORK,
-        title: 'The server refused',
-        sub: `${b('One')} message, in human words — "Something went wrong. Please try again." — no raw code, and never several stacked. The summary and ${b('the typed title are still there')}: the work is not lost, and the primary is back to ${b('Start this goal')}.`,
+        title: 'Request interrupted · injected network fault',
+        sub: `The call was ${b('aborted in transport')}, which is what this frame establishes — ${b('not')} a server refusal, and nothing here shows whether the write landed. What it does show is the recovery: ${b('one')} message in human words, "Something went wrong. Please try again.", with no raw code; the summary and ${b('the typed title still there')}, so the work is not lost; and the primary back to ${b('Start this goal')}.`,
       })}
       ${phone({
         file: NOW('no-community-390x844.png'),
