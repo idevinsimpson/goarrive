@@ -36,3 +36,22 @@ Eleven frames. Nine are the **accepted Page 2 AFTER evidence** — `docs/design-
 - The lock's **illustrative fixture** was 241 → 261 of 500 with own credit 120 → 140. The accepted evidence carries the accepted fixture (1,847 → 1,867 of 5,000, own credit 0 → 20). The two new confirmations use 500-target fixtures so the reached and post-target states are exact.
 - The receipt contract carries `crossedTarget`, but `functions-westayfit/src/index.ts` never raises it yet (*"never raised here"*), so the member whose attempt crossed reads the state truth **"Our goal is reached."** and no "this one took us past our goal" line. The board shows what the product says, not what the contract could say.
 - `SAMPLE DATA` appears at the foot of the accepted confirmation frames and the two new ones alike; it is the route's own label on the emulator build.
+
+## Repair pass — 2026-09-22 (W2, packet P-6)
+
+Authorised by PR #365 comment [`5782379245`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5782379245) §3, from canonical `e9ad923`.
+
+The independent audit found that this board carries **two** synthetic fixture
+communities without saying so: the nine accepted frames are seeded
+`Alpharetta Morning Movers`, while the two confirmations captured for the
+reached and post-target states are seeded `Smyrna Strong`. A reader following
+one community through the journey was handed another halfway down, and the
+panel that exists to record exactly this kind of gap did not mention it.
+
+A `Fixture communities` row now sits in that panel, between `Numbers` and
+`Crossing claim`. **No frame changed** — the disclosure is the repair.
+
+The board is **2560 px tall (1×) instead of 2470**: the added row pushed the
+footer past the old fixed height, which the first render of this pass proved by
+clipping it. The height follows the content rather than the content being cut
+to fit.

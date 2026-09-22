@@ -33,7 +33,7 @@ export const html = page({
     <div class="sec-head">
       <div>
         <div class="eyebrow">/you · ACCEPTED PAGE 5 EVIDENCE</div>
-        <h3>One navy identity field with Sign out above the fold; the selected community; one dominant Living WE on its real open goal; your exact part, separately labelled.</h3>
+        <h3>One navy identity field with Sign out above the fold; the selected community; the page’s only Living WE, on its real open goal; your exact part, separately labelled.</h3>
       </div>
       <div class="how">The accepted AFTER frames at 3× (7e788a9). The identity is text only: no photo, quote, badge, score or rank. The display name and email are fixture values.</div>
     </div>
@@ -70,6 +70,12 @@ export const html = page({
           <div>No cross-unit totals, dated history, weekly counts, streaks, social features, notifications, profile sharing, duplicate leave control, or coaching.</div>
           <div><b>Sign out is available on every resolved signed-in state</b>, including failure.</div>
         </div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow quiet">WHERE THE ACCEPTED BUILD READS DIFFERENTLY FROM THE LOCK’S WORDING</div>
+        <table>
+          <tr><td class="k">“Dominant”</td><td class="d">The lock’s word is kept above, unaltered. The accepted build does not render the instrument that way: on <b style="color:${NAVY}">Member</b> the mark is a compact inline element set beside the goal text, about a twelfth of the screen’s height — one mark and the only one, on the selected community’s real open-goal ratio, but not a dominant field like Home’s hero. The frame is the accepted build; the adjective is the lock’s. Neither is edited to agree with the other.</td></tr>
+        </table>
       </div>
       <div class="panel">
         <div class="eyebrow quiet">SEAM · ALREADY DOCUMENTED UNDER BOARD 04</div>

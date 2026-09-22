@@ -40,7 +40,7 @@ export const html = page({
       <div class="how">The accepted AFTER frames at 3× (aebd1aa). <b style="color:${NAVY}">recorded</b> is the governing verb throughout: the system knows a contribution was recorded, never that a person exercised.</div>
     </div>
     <div class="phones" style="gap:30px">
-      ${phone({ file: AFTER('AFTER-rows-390x844.png'), width: W, slot: SLOT, title: 'Running and finished', sub: 'N goals you have added to · running · finished. Own credit, RECORDED, goal and community, the goal’s confirmed total and slim track. One mark, on the finished, reached goal.' })}
+      ${phone({ file: AFTER('AFTER-rows-390x844.png'), width: W, slot: SLOT, title: 'Running and finished', sub: `N goals you have added to · running · finished. Own credit, RECORDED, goal and community, the goal’s confirmed total and slim track. One mark, on the finished, reached goal. This is the whole first 390×844 viewport, uncropped: the page scrolls on under the floating tab bar, which is why the card beneath is cut through its first line rather than ending there. That card reads in full on <b style="color:${NAVY}">Nothing recorded yet</b>.` })}
       ${phone({ file: AFTER('AFTER-empty-390x844.png'), width: W, slot: SLOT, title: 'Nothing recorded yet', sub: 'Distinct from “no goals exist”: goals with ownCredit ≤ 0 do not become personal-record rows.' })}
       ${phone({ file: AFTER('AFTER-loading-390x844.png'), width: W, slot: SLOT, title: 'Loading', sub: 'The page and its promise; no invented rows.' })}
       ${phone({ file: AFTER('AFTER-partial-failure-390x844.png'), width: W, slot: SLOT, title: 'Partial read', sub: 'What could be read is shown; a note says what could not. The record is unchanged.' })}

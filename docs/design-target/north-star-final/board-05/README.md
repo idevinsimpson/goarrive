@@ -30,3 +30,26 @@ Six frames, all the **accepted Page 5 AFTER evidence** (`docs/design-target/revi
 ## Fixture note
 
 The display name on the accepted frames is the accepted fixture's (`Devin`, seeded by the Page 5 capture spec) and the email is a generated fixture address. Neither is presented as a real account.
+
+## Repair pass — 2026-09-22 (W2, packet P-4)
+
+Authorised by PR #365 comment [`5782379245`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5782379245) §3, from canonical `e9ad923`.
+
+The independent audit found the board asserting a **dominant** Living WE that
+the accepted build does not render. Measured on the `Member` frame, the mark is
+a compact inline element beside the goal text — about a twelfth of the screen's
+height — not a dominant field like Home's hero. It is correct, calibrated and
+the only mark on the page; it is simply not dominant.
+
+The word appeared twice, and the two needed opposite treatment:
+
+- the **lock panel** quotes the lock's own sentence (`5771338856`: *"exactly one
+  dominant Living WE may represent…"*). A faithful quotation of a lock is not
+  ours to rewrite, so it is **unaltered**;
+- the **board's own lead line** claimed it as a description of these frames.
+  That now reads *"the page's only Living WE, on its real open goal"* — true of
+  what is shown.
+
+A `where the accepted build reads differently from the lock's wording` panel
+records the gap, so the board neither edits the lock nor quietly implies the
+frames satisfy its adjective. **No frame changed; the board is the same size.**
