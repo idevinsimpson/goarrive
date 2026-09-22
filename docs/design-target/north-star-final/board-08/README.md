@@ -259,3 +259,18 @@ lock did not settle something, it is not asserted.
 The 1× review copy, the INDEX, the package README row for 08 and the export
 allowlist entry for this PNG are the lead integrator's. The independent board
 review is the Creative/Product Director's. **This board does not self-approve.**
+
+## Independent board review — PASSED 2026-09-22
+
+Creative Director verdict on PR #409, comment `5786034310`: a pixel review of
+the exported original at head `5674a86` (run `35797187977`, artifact
+`10724116667`; PNG git blob `bb72dacc` matched to the PR head) — *both holds
+closed; final reconstructed CURRENT-BUILD reference acceptance.* The path:
+composition PASS at `fb0846f` (`5784966469`), coverage PARTIAL (`5785026250`)
+closed by the one bounded revision `56fb683` from W4's goal-setup captures
+(#415), then two caption corrections (`5785827590`) at `5674a86`. Status 3 in
+the manifest is now REVIEWED. Status-only: the PNG bytes are exactly the
+reviewed bytes; its footer's "SELF-CHECKED · INDEPENDENT REVIEW PENDING" is
+historical submission labelling and was deliberately not re-rendered. The
+verdict accepts the reference artifact only: it grants no page acceptance of
+`/goals/new`, no production UI, no main merge and no staging deployment.

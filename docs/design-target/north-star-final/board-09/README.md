@@ -223,3 +223,20 @@ read from a named file in this repository.
 The 1× review copy, the INDEX, the package README row for 09 and the export
 allowlist entry for this PNG are the lead integrator's. The independent board
 review is the Creative/Product Director's. **This board does not self-approve.**
+
+## Independent board review — PASSED 2026-09-22
+
+Creative Director verdict on PR #412, comment `5786014162`: a pixel review of
+the exported original at head `8aae42d` (run `35796426467`, artifact
+`10724485128`; PNG git blob `f34cfaf3` matched to the PR head) — *the only
+outstanding completeness hold closed; final reconstructed CURRENT-BUILD
+reference acceptance.* The path: layout PASS at `193c3bc` (`5785588557`) with
+completeness PARTIAL for the Corrected Below Target specimen, closed by the
+supplement at `8aae42d` (a real reach with a server-stamped `reachedAt`, then
+a real group-level correction to 460 of 500, photographed on Home and
+Progress; producer `tests-e2e/sprint-w1b-lifecycle-capture.spec.ts`, evidence
+`review/lifecycle-corrected-current/`). Status 3 in the manifest is now
+REVIEWED. Status-only: the PNG bytes are exactly the reviewed bytes; the
+footer's submission label is historical and was deliberately not re-rendered.
+The verdict accepts the reference artifact only: no new History route, no
+personal dated-history backend, no streak, no deployment approval.
