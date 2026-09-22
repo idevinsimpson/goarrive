@@ -620,3 +620,56 @@ the honest outcome.
 
 **Verdict: the fix holds on every criterion W5 stated before seeing the patch.** No approval or
 merge recommendation — that is the Director's and the owner's.
+
+
+## #393 malformed-metadata recheck — `0e58f419`
+
+Head verified: **`0e58f4199e86f4a12ab0a404f2222d329c0a0546`** on `claude/wsf-staging-mail-binding`
+(`a shape nobody could read is unknown, not an absent binding`). Read-only detached worktree;
+nothing pushed. This one **does** touch the reporter (+99/−9), unlike the R1 commit.
+
+Suite: **exit 0, 323 assertions, 0 failures** (was 315); `mail-binding` 26 → **34**.
+
+### The states that must not collapse
+
+| scenario | state |
+|---|---|
+| `malformed` / `partial` / `no-name` | `unknown` |
+| `no-version` / `no-secret-field` / `no-project-field` / `project-number` | `unknown` |
+| `nosecret` (a legitimate empty binding) | **`unbound`** — not swallowed |
+| `pinned` / `alias` / `wrong-secret` / `other-variable` | unchanged |
+
+### Its two stated guarantees, tested rather than trusted
+
+**"One function's bad metadata must not suppress the other's row."** Driven with my own
+two-function stub — `fnBAD` returning `serviceConfig: []`, `fnGOOD` a clean binding:
+
+```
+WSF_MAIL_BINDING_FNBAD=unknown
+WSF_MAIL_BINDING_FNGOOD=bound_pinned      exit 0
+```
+
+Both rows present. The guarantee holds.
+
+**Shape is part of the answer.** `isPlainObject` closes `serviceConfig: "invalid"` and
+`serviceConfig: []`, which previously reached the reference lookup, found nothing, and were
+reported `unbound` — the report asserting the deploy never wired the secret from metadata that
+was not a function description at all.
+
+### Probes
+
+| # | mutation | result |
+|---|---|---|
+| Q1 | `isPlainObject` stops rejecting arrays | **CAUGHT** — `AN ARRAY serviceConfig IS UNKNOWN, not unbound` |
+| Q2 | drop the `Array.isArray` guard on containers | **CAUGHT** twice, including `A MALFORMED REVISION DOES NOT SUPPRESS THE OTHER FUNCTION` |
+| Q3 | remove the per-function `try/catch` | **SURVIVED — not a finding.** Every shape it guards is validated upstream, so no fixture can reach it; its own comment says so and keeps it anyway. An unreachable guard being untestable is the point of it, not a gap. |
+
+R1's four ids still CAUGHT; N1, N3, N4 CAUGHT; **N5** still survives and is still trivial;
+**P2** (a quoted job id) still open, low, unchanged.
+
+**Verdict: the malformed-metadata correction holds.** No approval or merge recommendation.
+
+A note on method: my first attempt at Q3 edited the file with a regex that did not match, leaving
+it broken, and the run produced unrelated failures. That result was discarded rather than
+reported — a mutation that did not apply proves nothing, and reporting its noise as a finding is
+how a reviewer wastes a writer's time.
