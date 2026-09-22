@@ -4,6 +4,8 @@
 
 `WE_STAY_FIT_NORTH_STAR_BOARD_01_HOME_CANDIDATE.png` · 2560×4380 (1280×2190 @2x)
 
+`review-copy/` holds three lightweight JPEG copies — the whole board, the lifecycle panel and the seam panel — each under 1 MB, cut from this exact PNG for reviewers and connectors that cannot decode a 1.7 MB image. They are copies for reading, never the artifact; see `review-copy/README.md`.
+
 ## How it was made — captured, not drawn
 
 The lock's first item was that every mark on revisions 1–7 was a generated approximation and the final must *"composite the exact owner wordmark and real calibrated LivingWeProgress output."* The only source that satisfies that sentence is the running product, so:
