@@ -166,8 +166,14 @@ test.describe('Batch B — /join/[joinCode]', () => {
     // The failure REPLACES "What joining means" — three facts already read do
     // not belong above the one new sentence.
     expect(await visibleCount(page, 'wsf-join-meaning')).toBe(0);
-    await expect(page.getByTestId('wsf-join-submit-error')).toContainText(
-      'We couldn’t join this community.'
+    // The heading moved with the correction and the PROPERTY did not. This
+    // fixture refuses with INTERNAL, which carries no mapped code, so nothing
+    // came back that says the join did not happen — the screen now says the
+    // outcome is unconfirmed instead of asserting a failure it cannot know.
+    // What this test is actually about, below, is unchanged: the failure
+    // replaces what was read, and the invitation still stands.
+    await expect(page.getByTestId('wsf-join-submit-error-title')).toHaveText(
+      'We couldn’t confirm your join.'
     );
     // The invitation itself is unchanged: the community is still there and
     // the action is still offered. A failed attempt is not a dead end.
@@ -392,10 +398,31 @@ test.describe('Batch B — /join/[joinCode] never renders server text', () => {
     await page.getByTestId('wsf-join-submit').click();
     await expect(page.getByTestId('wsf-join-submit-error')).toBeVisible({ timeout: 30_000 });
 
-    // Truthful as a matter of fact, not reassurance: the callable runs the
-    // whole join inside `db.runTransaction`, so a failure commits nothing.
+    /*
+      THE EXPECTATION CHANGED ON PURPOSE, AND THE PROPERTY DID NOT.
+
+      This asserted "Nothing was changed.", on the reasoning that the join
+      runs inside `db.runTransaction` so a failure commits nothing. The
+      atomicity is real; the inference is not. A transaction makes the write
+      all-or-nothing ON THE SERVER, and says nothing about whether the server
+      got that far — an INTERNAL with no mapped code is precisely the case
+      where the commit may have happened and the response was lost. The screen
+      reads no membership before speaking, so it cannot know, and the old
+      sentence was a promise the client was not entitled to make.
+
+      What is still asserted, unweakened: stable copy of OUR choosing, never
+      the server's wording, and the leak check below is untouched.
+    */
+    await expect(page.getByTestId('wsf-join-submit-error-title')).toHaveText(
+      'We couldn’t confirm your join.'
+    );
     await expect(page.getByTestId('wsf-join-submit-error')).toContainText(
-      'Nothing was changed. Check your connection and try again.'
+      'Check your connection, then try again.'
+    );
+    // And it must NOT claim the join did not happen, which is the thing that
+    // was not knowable here.
+    await expect(page.getByTestId('wsf-join-submit-error')).not.toContainText(
+      'Nothing was changed',
     );
     expect(await page.locator('body').innerText()).not.toContain(LEAK);
   });
@@ -423,6 +450,13 @@ test.describe('Batch B — /join/[joinCode] never renders server text', () => {
 
     await expect(page.getByTestId('wsf-join-submit-error')).toContainText(
       'Complete your profile before joining a community.'
+    );
+    // A NAMED REFUSAL KEEPS THE DEFINITE HEADING. The server answered and
+    // said no, so "we couldn't join" is a fact here — and the unconfirmed
+    // wording, which exists for the case where nothing came back, must not
+    // leak onto a refusal the server actually made.
+    await expect(page.getByTestId('wsf-join-submit-error-title')).toHaveText(
+      'We couldn’t join this community.'
     );
     expect(await page.locator('body').innerText()).not.toContain(LEAK);
   });
