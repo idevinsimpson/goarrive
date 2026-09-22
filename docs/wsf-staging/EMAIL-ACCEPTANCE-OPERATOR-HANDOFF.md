@@ -3,14 +3,20 @@
 **Scope: `westayfit-staging` only.** Nothing in this document applies to, or may be run
 against, a production project or a production account.
 
-**Who runs this.** A human operator, in an ordinary browser, who has been **separately
-approved by the owner** for this staging-only test. Approval to read this document is not
-approval to run it.
+**Who runs this.** An **owner-designated browser operator** — a person, or an agent the
+owner has separately authorized — using its own already-authorized browser, **never a
+tunnel around this environment's proxy**. Being designated is what confers authority here,
+not being human and not being an agent. Approval to read this document is not approval to
+run it.
 
 **No automated agent is assigned by this document.** It assigns nobody. It names no
-service, no scheduled job and no AI session as the operator. A Claude session cannot run
-it — see [Why a browser operator](#why-a-browser-operator) — and naming one here would not
-change that.
+service, no scheduled job and no AI session as the operator, and it does not make any
+party's designation true by describing one. The designation is the owner's to make and to
+record elsewhere; until it exists and is acknowledged, nobody runs this.
+
+Separately: a session that cannot reach the staging hosts cannot run it whatever its
+designation — see [Why a browser operator](#why-a-browser-operator). That is a statement
+about reachability, not about who is eligible.
 
 **One operator at a time.** The mailbox and the staging-only send/reset authorization are
 already recorded privately with the owner. **Do not ask which address**, and do not write
@@ -221,6 +227,17 @@ And once, for Part A:
 - [ ] whether `emailVerified` took effect (you left the gate)
 - [ ] whether an intended destination was carried, and whether it survived
 
+### Optional, and only if your existing console permissions already allow it
+
+- [ ] the current **function / serving-revision secret-reference metadata** — resource and
+      variable **names and version numbers only**. **No payloads, no environment dumps, no
+      writes**, and do not acquire access you do not already have in order to look.
+
+This is an **independently sourced receipt** and is reported **separately from delivery**.
+It is not part of the acceptance, it is not required for a pass, and it neither confirms
+nor substitutes for the delivery result above. Skip it entirely if in any doubt — a missing
+optional receipt costs nothing, and a widened permission to obtain one costs a great deal.
+
 ---
 
 ## What NOT to publish
@@ -249,9 +266,12 @@ nothing.
 When both parts have an outcome:
 
 1. **Sign out** of the staging site and close the private window.
-2. In the mailbox, **delete both messages** — the verification and the reset — including
-   from Trash/Bin if it retains them. Each carries a link that is live until used or
-   expired.
+2. **Retain both messages** — the verification and the reset. Do not delete them, and do
+   not empty Trash/Bin to remove them. The owner authorized a test, not deletion from
+   their mailbox; the messages are the delivery evidence, and whether they are cleaned up
+   later is the owner's call on separate request. Both links stay live until used or
+   expired, which is a reason to keep them **unpublished**, not a reason to destroy them —
+   see [What NOT to publish](#what-not-to-publish).
 3. Leave the **staging account in place** unless the owner asks otherwise. It is the
    evidence that the flow worked, and deleting it costs the next run a fresh signup. If
    the owner does want it removed, that is an owner action in the Firebase console, not
