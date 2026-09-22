@@ -61,7 +61,7 @@ jobs:
           # PR head this job checks out, original committed bytes only. The board's
           # own footer states its status: SELF-CHECKED · independent review pending.
           allow = [
-              (f'{NS}/board-09/WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png', 'Board 09 · goal setup · W1B, PR #412 · SELF-CHECKED, independent review pending'),
+              (f'{NS}/board-09/WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png', 'Board 09 · lifecycle / history · W1B, PR #412 · SELF-CHECKED, independent review pending'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
