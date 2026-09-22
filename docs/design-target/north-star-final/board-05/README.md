@@ -1,6 +1,6 @@
 # Board 05 — You
 
-**Status: FINAL.** Locked by PR #365 comment [`5771338856`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771338856). Status layer from the lock: `/you` is **accepted build**; private dated history remains the unbuilt seam documented under Board 04.
+**Status: SELF-CHECKED · independent board review pending.** The `_FINAL` filename is the lock verdict's canonical name for this artifact, not an acceptance status; this is a reconstructed reference / current-build composite, not a recovered original. Locked by PR #365 comment [`5771338856`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771338856). Status layer from the lock: `/you` is **accepted build**; private dated history remains the unbuilt seam documented under Board 04.
 
 `WE_STAY_FIT_NORTH_STAR_BOARD_05_YOU_FINAL.png` · 2560×3440 (1280×1720 @2x)
 

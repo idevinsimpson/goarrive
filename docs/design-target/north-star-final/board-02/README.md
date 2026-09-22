@@ -1,6 +1,6 @@
 # Board 02 — MOVE
 
-**Status: FINAL.** Locked by PR #365 comment [`5771235529`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771235529): *"Board 02 now clears the MOVE + contribution + confirmation North Star gate."* Status layer from the lock: `/move` and `/contribute/[goalId]` are **accepted build**; the board is a refinement of accepted behaviour, not proof of new capability.
+**Status: SELF-CHECKED · independent board review pending.** The `_FINAL` filename is the lock verdict's canonical name for this artifact, not an acceptance status; this is a reconstructed reference / current-build composite, not a recovered original. Locked by PR #365 comment [`5771235529`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771235529): *"Board 02 now clears the MOVE + contribution + confirmation North Star gate."* Status layer from the lock: `/move` and `/contribute/[goalId]` are **accepted build**; the board is a refinement of accepted behaviour, not proof of new capability.
 
 `WE_STAY_FIT_NORTH_STAR_BOARD_02_MOVE_FINAL.png` · 2560×4940 (1280×2470 @2x)
 

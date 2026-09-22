@@ -1,6 +1,6 @@
 # Board 03 — Community
 
-**Status: FINAL.** Locked by PR #365 comment [`5771275765`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771275765). Status layer from the lock: `/community` is **accepted build**; the Join placement inset is **product question / seam only**.
+**Status: SELF-CHECKED · independent board review pending.** The `_FINAL` filename is the lock verdict's canonical name for this artifact, not an acceptance status; this is a reconstructed reference / current-build composite, not a recovered original. Locked by PR #365 comment [`5771275765`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771275765). Status layer from the lock: `/community` is **accepted build**; the Join placement inset is **product question / seam only**.
 
 `WE_STAY_FIT_NORTH_STAR_BOARD_03_COMMUNITY_FINAL.png` · 2560×3440 (1280×1720 @2x)
 

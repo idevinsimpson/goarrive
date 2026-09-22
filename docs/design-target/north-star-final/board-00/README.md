@@ -1,6 +1,6 @@
 # Board 00 — Brand foundation
 
-**Status: FINAL.** Locked by PR #365 comment [`5770785512`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5770785512), which made this board *"the governing visual constitution for Boards 01–17."*
+**Status: SELF-CHECKED · independent board review pending.** The `_FINAL` filename is the lock verdict's canonical name for this artifact, not an acceptance status; this is a reconstructed reference / current-build composite, not a recovered original. Locked by PR #365 comment [`5770785512`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5770785512), which made this board *"the governing visual constitution for Boards 01–17."*
 
 `WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL.png` · 2560×2800 (1280×1400 @2x)
 

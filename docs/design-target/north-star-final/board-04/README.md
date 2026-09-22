@@ -1,6 +1,6 @@
 # Board 04 — Progress
 
-**Status: FINAL.** Locked by PR #365 comment [`5771310017`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771310017). Status layer from the lock: `/activity` is **accepted build Phase A**; private dated history is **seam only**.
+**Status: SELF-CHECKED · independent board review pending.** The `_FINAL` filename is the lock verdict's canonical name for this artifact, not an acceptance status; this is a reconstructed reference / current-build composite, not a recovered original. Locked by PR #365 comment [`5771310017`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771310017). Status layer from the lock: `/activity` is **accepted build Phase A**; private dated history is **seam only**.
 
 `WE_STAY_FIT_NORTH_STAR_BOARD_04_PROGRESS_FINAL.png` · 2560×3120 (1280×1560 @2x)
 
