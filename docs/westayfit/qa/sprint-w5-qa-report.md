@@ -26,7 +26,36 @@ All three matched the SHAs named in the assignment at fetch time.
 
 ## Status
 
-- Part 1 — independent review of #393: in progress.
-- Part 2 — member-work QA (identity switching, pending/unknown outcomes, short-phone 390x640, #390 visibility/rejoin and payload identity): queued.
+- Part 1 — independent review of #393 at `cb91d78`: **CHECKPOINT-READY**.
+  Posted as a comment on PR #393 and reproduced in PR #395's body.
+- Part 2 — member-work QA (identity switching, pending/unknown outcomes, short-phone
+  390x640 Home/MOVE/You, and #390 visibility/rejoin plus payload identity): in progress.
 
-Findings are recorded in this PR's body and, for #393, as one comment on PR #393.
+## Part 1 — #393 independent review, findings
+
+Full evidence is in the #393 comment. Summary, three moderate and three low/trivial:
+
+| | finding | severity |
+|---|---|---|
+| F1 | `reachedJobs` (`workflow-contract.test.mjs:316-338`) walks a hardcoded seven-name `order` array, so a job added to the workflow is invisible to the reach matrix; neither it nor the structural test catches a job with **no `if:` at all**, which GitHub runs in every mode including `mail-binding` | moderate |
+| F2 | when the serving revision carries the alias — real Cloud Run behaviour after a `--set-secrets=SECRET:latest` deploy, since Cloud Run resolves `latest` at instance start — the report prints `served version latest` with no qualifier on that line; the docstring (`:18-23`) claims revision-time resolution and `fake-gcloud.mjs:72` hardcodes `'2'`, so the case is never modelled | moderate |
+| F4 | `:150` matches `v?.key === secretName \|\| v?.secret === secretName`, conflating the **env var name** with the **secret name**; a different secret's version can be reported under the requested secret's header, and `ref.secret` is never printed | moderate |
+| F3 | the revision projection `json(spec.containers[].env)` is path-wide, not variable-wide — literal env values enter the process (nothing reaches stdout, proven), so the stated mechanism is not what prevents the dump | low |
+| F6 | a failure carrying an absence token and none of the three guard tokens still reads as `absent`; unproven against real `gcloud`, and bounded (`absent`, never `unbound`) | low |
+| F5 | docstring says "FOUR STATES" and lists five (`:25-32`); `readsAsAbsent` evaluated twice at `:133-134` | trivial |
+
+Verified correct rather than assumed: no secret payload read is reachable (`versions`/`secrets` → 0 hits,
+array-form `spawnSync` with no shell, `secretName` never passed to `gcloud`); nothing read reaches the
+log; an alias is never relabelled as a number and a served version is never guessed; permission failure
+never reads as absence for any phrasing carrying a guard token; the report never fails the run; and in
+`mail-binding` mode no build, deploy or verify job runs at this head.
+
+`node .github/wsf-staging/tests/run-all.mjs` at `cb91d78`: **exit 0, all suites passed, 14 suites,
+293 assertions, 0 failures.**
+
+Nine mutations attempted (`sprint-w5-393-mutations.sh`, reproducible): M1/M2/M3 caught by the PR's own
+tests; M4/M5 caught only incidentally by unrelated rules; **M6, M7 and M9 survived**; M8 is a case the
+fixture does not model.
+
+No member-privacy or data-isolation defect was found in #393, so no escalation was triggered by part 1.
+No approval or merge recommendation was given.
