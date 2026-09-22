@@ -46,6 +46,8 @@ Evidence: `before/` 24 frozen · `after/` 42
 
 Contact sheet / other: `CONTACT-SHEET-batch-b.png`
 
+Evidence: `before/` 30 frozen
+
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |
 | `combined-closed` | 390x640 · 390x844 · 430x932 |  | 3 |

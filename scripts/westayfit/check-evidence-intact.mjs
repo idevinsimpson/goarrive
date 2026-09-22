@@ -40,6 +40,10 @@ const FROZEN_BEFORE = [
   'docs/design-target/review/page-03-community/context-home-route',
   'docs/design-target/review/page-04-progress/before',
   'docs/design-target/review/page-05-you/before',
+  // Captured against the untouched /join route before Batch B implementation.
+  // The package had NO before/ at all; once the route is built to the
+  // target this screen stops existing and no later run can recover it.
+  'docs/design-target/review/batch-b-join-and-setup/before',
 ];
 
 /**
