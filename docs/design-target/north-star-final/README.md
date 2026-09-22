@@ -45,7 +45,7 @@ the notes column and left out.** Gaps are not filled from memory.
 
 | # | Title | Status | Lock verdict | Capability shown | PNG | Last-reviewed SHA | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 00 | Brand foundation | PENDING | `5770785512` | accepted build | — | — | First artifact of this pass. |
+| 00 | Brand foundation | **FINAL** | `5770785512` | accepted build | [`board-00/…BOARD_00_BRAND_FOUNDATION_FINAL.png`](board-00/WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL.png) | `3c7c7d3` | Governing constitution for 01–17. Rendered from the repo's own brand assets and Living WE area calibration; see `board-00/README.md` for the line-by-line check against the lock. |
 | 01 | Home | PENDING | `5770964377`, corrected by `5771119797`, precision holds `5771373306` + `5771398679` | accepted build | — | — | Creative direction locked; needs the final precision pass before FINAL. |
 | 02 | MOVE | PENDING | `5771235529` | accepted build | — | — | |
 | 03 | Community | PENDING | `5771275765` | accepted build | — | — | |
