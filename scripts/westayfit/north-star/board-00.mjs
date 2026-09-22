@@ -332,7 +332,7 @@ export const html = `<!doctype html>
 
   <footer>
     <span>WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL</span>
-    <span>LOCK VERDICT · PR #365 comment 5770785512 · governing constitution for boards 01–17 · RECONSTRUCTED REFERENCE, self-checked · independent board review pending</span>
+    <span>LOCK VERDICT · PR #365 comment 5770785512 · governing constitution for boards 01–17 · RECONSTRUCTED REFERENCE · independent board review PASSED 2026-09-22 (comment 5783373780)</span>
   </footer>
 
 </div></body></html>`;

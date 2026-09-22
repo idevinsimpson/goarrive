@@ -54,3 +54,12 @@ all visible and never said the viewport ended there. It now states that the
 frame is the whole first 390×844 viewport, uncropped, that the page scrolls on
 under the tab bar, and that the same card reads in full on
 `Nothing recorded yet`. **No frame changed; the board is the same size.**
+
+
+## Independent board review — PASSED 2026-09-22
+
+Program Director verdict on PR #365, comment `5783373780`: a pixel review of
+this board's commit-pinned 1× review copy at canonical `a912773` — *PASS as
+the canonical reconstructed 00–05 package.* Status 3 in the manifest is now
+REVIEWED. Status-only: no composition, capture, copy, number, mark or seam
+changed for it. It does not newly accept or stage the underlying app page.

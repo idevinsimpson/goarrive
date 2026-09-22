@@ -422,8 +422,8 @@ export const html = `<!doctype html>
   </div>
 
   <footer>
-    <span>WE_STAY_FIT_NORTH_STAR_BOARD_01_HOME_CANDIDATE</span>
-    <span>PRECISION CANDIDATE · creative direction LOCKED by PR #365 comments 5771373306 / 5771398679 · phones and eight lifecycle states are captures of app e609c57; the ninth state and the seam panel are labelled compositions, not captures · Round 2 corrections (5781542755) applied: stale restored as TARGET, seam scoped to what #390 approves</span>
+    <span>WE_STAY_FIT_NORTH_STAR_BOARD_01_HOME_FINAL</span>
+    <span>REVIEWED 2026-09-22 · PR #365 comment 5783373780 · creative direction LOCKED by PR #365 comments 5771373306 / 5771398679 · phones and eight lifecycle states are captures of app e609c57; the ninth state and the seam panel are labelled compositions, not captures · Round 2 corrections (5781542755) applied: stale restored as TARGET, seam scoped to what #390 approves</span>
   </footer>
 
 </div></body></html>`;

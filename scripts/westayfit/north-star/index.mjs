@@ -49,7 +49,9 @@ function manifestStatus(num) {
   if (!row) return 'NOT IN MANIFEST';
   const cells = row.split('|').map((c) => c.trim());
   // | # | Title | Status | ...
-  return (cells[3] || 'NOT IN MANIFEST').replace(/\*\*/g, '').trim();
+  // The manifest cites the verdict comment in parentheses; the contact sheet
+  // has room for the status, not the citation.
+  return (cells[3] || 'NOT IN MANIFEST').replace(/\*\*/g, '').replace(/\s*\([^)]*\)/g, '').trim();
 }
 
 const CELL_W = 176;
