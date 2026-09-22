@@ -104,6 +104,33 @@ reviewed commit `fb0846f` stays intact underneath.
 3. the Board 06 "unbuilt" reference **dated as historical**, now that its
    corrected board is accepted and integrated.
 
+### Caption corrections after the revision's pixel review (2026-09-22)
+
+The Director opened the whole revised board at `56fb683`
+([`5785827590`](https://github.com/idevinsimpson/goarrive/pull/409#issuecomment-5785827590)):
+coverage **CLOSED**, layout and coverage **PASS**, and two caption corrections
+before final reference acceptance. Both were right, and both are mine:
+
+1. **A date read off the wrong frame.** *"A preset window, in words"* said
+   *Ends Tuesday, Sep 29*; the frame shows **2 weeks** selected and
+   *Ends Tuesday, **Oct 6** at 10:15 PM*. Sep 29 is correct for the summary and
+   receipt frames, which used the default one week — I carried it onto a
+   two-week frame. The caption now reads Oct 6 and says why it is fourteen days
+   on. **The one-week frames are untouched.**
+2. **An over-claim about what an aborted call proves.** The frame was captioned
+   *"The server refused"*. Aborting a request in transport is an **interrupted
+   request**, not a server decision, and it establishes nothing about whether
+   the write landed. The title is now *"Request interrupted · injected network
+   fault"*, its tag reads `· INJECTED NETWORK FAULT`, and the caption describes
+   what the frame actually evidences: the recovery message, the preserved typed
+   work, and the primary back at `Start this goal`. The producer's filename
+   keeps its original `…-server-refusal-INJECTED-NETWORK…` naming — accepted
+   evidence is not renamed or re-captured to suit a caption — and the difference
+   is recorded here instead.
+
+No source screenshot was changed, no image added or removed, and no other board
+touched.
+
 **Three constraints from W4's captures, honoured on the board:**
 
 - the Custom window carries **no** derived "Starts …" line — they are
@@ -151,7 +178,7 @@ prose — so the frames say it themselves.
 | summary reads back Community, Goal, Target, Starts, Ends, Time zone and Members policy | All seven rows photographed, ending *Members · Members can contribute again* |
 | validation appears after submit, under its field; the first refused field receives focus/scroll | `form-validation-first-refused` — three messages each under their own field, the first refused field marked and brought into view. Its capture asserts zero error nodes before the submit |
 | button state `Start this goal` → `Starting…` | `form-submitting` shows `Starting…` with the form disabled; `form-server-refusal` shows the primary back at `Start this goal` |
-| mutually-exclusive server errors never stacked; refusals are human copy, no raw Firebase codes | `form-server-refusal` — **one** message, *"Something went wrong. Please try again."*, no code, and the typed work still on the form. The route holds one error string and maps codes through `describeServerError` |
+| mutually-exclusive server errors never stacked; refusals are human copy, no raw Firebase codes | The route holds **one** error string and maps codes through `describeServerError`, so two cannot stack. The captured specimen is an **interrupted request**, not a server refusal: `form-server-refusal-INJECTED-NETWORK` aborts the call in transport, and what it evidences is the recovery — one message, *"Something went wrong. Please try again."*, no raw code, the typed work still on the form. The board's caption says exactly that; it claims nothing about whether the write landed. **The filename is the producer's original naming and is left as it is** rather than renaming or re-capturing accepted evidence |
 | created: `Your goal is live` + `Send it to your members and put it on a screen.`, the summary, one primary `Open the contribute page`, secondary `Show on a big screen`, `Back to community` | `created-receipt` — every element, produced by the **real** `wsfCreateGoal`, the container carrying a server-assigned goal id that nothing on screen prints. `created-actions-390x640` shows the primary reachable on the short phone |
 | no Living WE on setup/creation merely because a denominator exists | **No Living WE appears anywhere on this board**, and the status panel says why |
 | common states — signed out → Sign in; unverified → Verify your email; no community context → `Choose a community before starting a goal` + go to communities; validation, server unavailable, submitting and created distinct | `signed-out` and `no-community` photographed; validation, refusal, submitting and created each have their own frame and stay visibly distinct. **Unverified has no frame**: the route answers that refusal with copy rather than a screen of its own, so none is invented |
