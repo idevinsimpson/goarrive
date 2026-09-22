@@ -535,3 +535,54 @@ wrong one, and told a member they were somewhere they were not.
 It is built in the established language and recorded as UNCOVERED rather than quietly claimed,
 because a route index that counts it as covered is the same stale-by-hand table the generator
 was introduced to end.
+
+**A privacy control that reads like a contract is one people leave alone.** The first cut of
+the people page was technically impeccable and exhausting: a headline announcing the member's
+own state, a paragraph reassuring them their contributions still counted, another explaining
+the setting was per community, an eyebrow reading WHO CHOSE TO BE NAMED, and a closing
+paragraph promising nobody could expose them. Every sentence was true. Together they made a
+one-line preference feel legalistic, which is the opposite of what a privacy control needs to
+feel like. It is now a labelled toggle, one sentence saying who can see what, the list, and
+one quiet line saying why the list is the length it is. **Nothing about the model changed** —
+every guarantee the prose used to make is enforced in `functions-westayfit` and pinned by
+tests that fail when it is removed, which is where a guarantee belongs rather than in a
+paragraph a member has to be trusted to read.
+
+**A toggle is the state; a button is an action that has to name its own direction.** "Show my
+name" / "Stop showing my name" changes label underneath the member, so the CURRENT state has
+to be spelled out in a sentence beside it. A switch reads the same in both positions and a
+member sees what is true at a glance. It needs `aria-checked` set explicitly: this
+react-native-web version emits `aria-disabled` from `accessibilityState` but drops `checked`
+for `role="switch"`, and a switch without it announces as a control whose state is unknown —
+worse than a plain button, because it says there is a state and then refuses to name it.
+
+**"Who is here" was the wrong name.** It reads as live presence, and this product tracks
+nobody's presence. "People here" is a list of members, which is what it is.
+
+**The question is asked per membership, on arrival, and declining counts as an answer.**
+Visibility is per community, so a global onboarding preference would put words in a member's
+mouth about every community they ever join — somebody glad to be named among their family has
+said nothing at all about the gym. The server stamps the answer on the membership row for
+`private` exactly as for `visible`, because arriving, reading the question and continuing with
+the toggle off IS an answer and the commonest one. Recording only `visible` would re-ask
+everybody who declined on every arrival: the member who most clearly said no would be the one
+the product pestered. Rejoin and reinstate DELETE the stamp along with the visibility, so a
+returning member is asked again rather than governed by a decision they made before they left.
+
+**The Join flow was left alone on purpose.** It is hardened, freshly re-baselined, and carries
+its own privacy and destination-continuity guarantees for people arriving from a link while
+signed out. Threading a new question through it would put all of those back in play to add a
+control that works perfectly well one screen later, on first authenticated arrival, where the
+member can already see the community the question is about. The membership is created private
+by Join exactly as before; the sheet asks afterwards and changes nothing if it is ignored.
+
+**Non-blocking has to be enforced, not intended — and passing taps through is only half of
+it.** The arrival sheet's first version used an ordinary modal scrim and swallowed every
+control on Home; six existing flows failed in one run, which is exactly what a member would
+have met: arriving to check in and finding a privacy dialog in the way. `pointerEvents:
+box-none` fixed the taps around it, and the sheet's own body still sat on whatever was at the
+foot of the page — which on Home is "Membership options", **the control a member uses to
+leave**. An invitation that covers the way out is the worst thing it could cover. Home now
+reserves the sheet's measured height, and the guard for it clicks that control rather than
+asserting it is visible, because visibility was never the property that broke: the button had
+a perfectly good bounding box the whole time and simply could not be tapped.

@@ -706,8 +706,23 @@ describe('wsfSetCommunityVisibility', () => {
     for (const forbidden of keys.filter((k) => /ByUid$/.test(k))) {
       throw new Error(`the visibility write added an actor field: ${forbidden}`);
     }
+    /*
+      THE WHOLE STORED ROW, whitelisted. This caught `visibilityPromptedAt` on
+      the commit that added it, which is what it is for: the write is a merge,
+      so any field it names lands on a membership document permanently, and a
+      merge that quietly grows is how a row acquires facts about a person
+      nobody decided to store.
+    */
     expect(keys.sort()).toEqual(
-      ['groupId', 'membershipStatus', 'role', 'updatedAt', 'userId', 'visibility'].sort()
+      [
+        'groupId',
+        'membershipStatus',
+        'role',
+        'updatedAt',
+        'userId',
+        'visibility',
+        'visibilityPromptedAt',
+      ].sort()
     );
   });
 
@@ -773,6 +788,103 @@ describe('wsfMyCommunities carries the caller OWN visibility', () => {
   });
 });
 
+/* ── being asked, once, per membership ───────────────────────────────────── */
+
+/** Whether the stored row carries an answer. Read straight from Firestore. */
+async function storedPrompted(groupId: string, userId: string): Promise<boolean> {
+  const snap = await getFirestore().doc(`wsfMemberships/${groupId}_${userId}`).get();
+  return snap.exists && (snap.data() as { visibilityPromptedAt?: unknown }).visibilityPromptedAt != null;
+}
+
+describe('the question is asked once per membership, not once per person', () => {
+  test('a membership nobody has answered reports NOT prompted', async () => {
+    const groupId = await seedGroup('Unasked');
+    const me = uid('unasked');
+    await seedMembership({ groupId, userId: me });
+    await seedProfile(me, 'Unasked Member');
+    const mine = await wsfMyCommunities.run(req(me));
+    expect(mine.items.find((i) => i.groupId === groupId)?.visibilityPrompted).toBe(false);
+  });
+
+  test('CHOOSING PRIVATE COUNTS AS AN ANSWER', async () => {
+    /*
+      THE MOST IMPORTANT ASSERTION HERE. Arriving, reading the question and
+      continuing with the toggle off is an answer — and it is the commonest
+      one. If only `'visible'` were recorded, everybody who declined would be
+      asked again on every arrival, which is how a one-time question turns
+      into nagging for consent: the member who most clearly said no is the one
+      the product would pester.
+    */
+    const groupId = await seedGroup('Declined');
+    const me = uid('declined');
+    await seedMembership({ groupId, userId: me });
+    await seedProfile(me, 'Declining Member');
+
+    const r = await trySet(me, { groupId, visibility: 'private' });
+    expect(r.ok).toBe(true);
+    expect(await storedPrompted(groupId, me)).toBe(true);
+    // And the stored answer is still private — recording the ANSWER must not
+    // have changed the ANSWER.
+    expect(await storedVisibility(groupId, me)).toBe('private');
+
+    const mine = await wsfMyCommunities.run(req(me));
+    const item = mine.items.find((i) => i.groupId === groupId);
+    expect(item?.visibilityPrompted).toBe(true);
+    expect(item?.visibility).toBe('private');
+  });
+
+  test('choosing visible counts too', async () => {
+    const groupId = await seedGroup('Accepted');
+    const me = uid('accepted');
+    await seedMembership({ groupId, userId: me });
+    await seedProfile(me, 'Accepting Member');
+    await trySet(me, { groupId, visibility: 'visible' });
+    expect(await storedPrompted(groupId, me)).toBe(true);
+  });
+
+  test('a REFUSED answer records nothing — a malformed request is not an answer', async () => {
+    const groupId = await seedGroup('Malformed');
+    const me = uid('malformed');
+    await seedMembership({ groupId, userId: me });
+    const r = await trySet(me, { groupId, visibility: 'Visible' });
+    expect(r.ok).toBe(false);
+    expect(await storedPrompted(groupId, me)).toBe(false);
+  });
+
+  test('the answer is PER COMMUNITY — answering one does not answer another', async () => {
+    /*
+      The whole reason this is not an account setting. A member who chose to be
+      visible among their family has said nothing at all about the gym.
+    */
+    const here = await seedGroup('Here');
+    const there = await seedGroup('There');
+    const me = uid('twoCommunities');
+    await seedMembership({ groupId: here, userId: me });
+    await seedMembership({ groupId: there, userId: me });
+    await seedProfile(me, 'Member Of Two');
+
+    await trySet(me, { groupId: here, visibility: 'visible' });
+
+    const mine = await wsfMyCommunities.run(req(me));
+    const a = mine.items.find((i) => i.groupId === here);
+    const b = mine.items.find((i) => i.groupId === there);
+    expect(a?.visibility).toBe('visible');
+    expect(a?.visibilityPrompted).toBe(true);
+    // The other community is untouched in BOTH respects: no carried-over
+    // visibility, and the question there is still unanswered.
+    expect(b?.visibility).toBe('private');
+    expect(b?.visibilityPrompted).toBe(false);
+    expect(await storedVisibility(there, me)).toBeUndefined();
+  });
+
+  test('a non-member answering nothing leaves no row behind', async () => {
+    const groupId = await seedGroup();
+    const outsider = uid('promptOutsider');
+    await trySet(outsider, { groupId, visibility: 'private' });
+    expect(await storedVisibility(groupId, outsider)).toBe('<<no row>>');
+  });
+});
+
 /* ── the life of a membership ────────────────────────────────────────────── */
 
 /**
@@ -813,6 +925,7 @@ describe('the life of a membership — publication never outlives it', () => {
     const champ = uid('createChamp');
     const { groupId } = await makeCommunity(champ);
     expect(await storedVisibility(groupId, champ)).toBe('private');
+    expect(await storedPrompted(groupId, champ)).toBe(false);
     const list = await tryList(champ, { groupId });
     expect(list.ok).toBe(true);
     if (!list.ok) return;
@@ -826,6 +939,9 @@ describe('the life of a membership — publication never outlives it', () => {
     await seedProfile(joiner, 'Joiner Name');
     await call(wsfJoinCommunity, joiner, { joinCode });
     expect(await storedVisibility(groupId, joiner)).toBe('private');
+    // Joining does not answer the question, and does not ask it either — the
+    // Join flow is untouched. The arrival sheet asks, later and separately.
+    expect(await storedPrompted(groupId, joiner)).toBe(false);
   });
 
   test('LEAVE THEN REJOIN RESETS TO PRIVATE', async () => {
@@ -849,6 +965,10 @@ describe('the life of a membership — publication never outlives it', () => {
     await call(wsfJoinCommunity, leaver, { joinCode });
 
     expect(await storedVisibility(groupId, leaver)).toBe('private');
+    // AND THE QUESTION COMES BACK. A merge preserves what it does not name, so
+    // without an explicit delete the answer given before they left would count
+    // as an answer about the community they have just re-entered.
+    expect(await storedPrompted(groupId, leaver)).toBe(false);
     const list = await tryList(leaver, { groupId });
     expect(list.ok).toBe(true);
     if (!list.ok) return;
@@ -876,6 +996,7 @@ describe('the life of a membership — publication never outlives it', () => {
     await call(wsfReinstateMember, champ, { groupId, targetUid: member });
 
     expect(await storedVisibility(groupId, member)).toBe('private');
+    expect(await storedPrompted(groupId, member)).toBe(false);
     const list = await tryList(champ, { groupId });
     expect(list.ok).toBe(true);
     if (!list.ok) return;

@@ -17,42 +17,47 @@ import {
   elevation,
 } from '../../../src/ui/kit';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
+import { VisibilityNote, VisibilityToggle } from '../../../src/ui/VisibilityToggle';
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 /**
- * WHO IS HERE — and only the people who said they wanted to be.
+ * PEOPLE HERE — and only the people who said they wanted to be.
  *
- * THIS PAGE HAS NO ACCEPTED DESIGN TARGET. Every other implemented route in
- * this app was built to a reviewed frame; this one was authorised as a
- * capability before any frame for it was drawn. It is therefore built in the
- * established language — the same tokens, the same card, the same wordmark
- * header, the same skeleton-then-content shape as `/community` — and it is
- * recorded as UNCOVERED in the route index rather than quietly claimed as
- * covered. It needs creative review before it ships.
+ * THE PAGE IS A TOGGLE AND A LIST. An earlier version of this screen was
+ * technically accurate and read like a terms-of-service page: a headline
+ * announcing the member's own state, a paragraph reassuring them that what
+ * they add still counts, another explaining that the setting is per community,
+ * an eyebrow reading WHO CHOSE TO BE NAMED, and a closing paragraph promising
+ * nobody could expose them. Every sentence was true and the whole was
+ * exhausting — it made a one-line preference feel like a legal instrument, and
+ * a privacy control that feels complicated is one people leave alone.
  *
- * THE PAGE STATES A CHOICE, NOT A ROSTER. The reason the list is short is
- * never "nobody is here"; it is "this is who chose to be named". Those are
- * different sentences and the difference is the whole feature, so the copy
- * says the second one in every state including the empty one. A member
- * reading an empty list must not conclude they are alone.
+ * So the explaining is gone and the guarantees are not. What a member sees is
+ * a labelled toggle, one sentence saying who can see what, the list, and one
+ * quiet line saying why the list is the length it is. Everything the prose
+ * used to promise is still enforced in `functions-westayfit` and pinned by
+ * tests that fail when it is removed — which is where a guarantee belongs, not
+ * in a paragraph a member has to be trusted to read.
  *
- * WHAT IS NOT DRAWN, and why each would be a leak rather than a nicety:
+ * IT IS NOT CALLED "WHO IS HERE". That title reads as live presence, and this
+ * product tracks nobody's presence. "People here" is a list of members, which
+ * is what it is.
  *
- *   · NO COUNT OF THIS LIST BESIDE THE COMMUNITY'S MEMBER COUNT. `/community`
- *     already shows `memberCount` over ALL active members. Printing "3 of 12
- *     are named" here makes "nine people are hiding" a subtraction the product
+ * WHAT IS DELIBERATELY ABSENT, each because adding it would leak:
+ *
+ *   · NO COUNT OF THIS LIST beside the community's member count. `/community`
+ *     already shows `memberCount` over ALL active members, so a second number
+ *     here makes "how many people are hiding" a subtraction the product
  *     performs for the reader. The server refuses to return a visible count
- *     for the same reason; drawing `members.length` next to a number carried
- *     from another screen would reintroduce it in the client.
- *   · NO AVATARS, NO INITIALS, NO MONOGRAMS. No photo is collected anywhere in
- *     this slice, and a generated initial is a second identifier beside a name
- *     that a member did not choose to publish.
- *   · NO "JOINED" DATE, no "active recently", no ordering by anything but the
- *     name. When somebody became visible turns a list into a timeline.
- *   · NO TAP TARGET ON A ROW. A name here leads nowhere: there is no member
- *     profile, no message, no contribution attributed to it. A row that looked
- *     pressable would promise one.
- *   · NO SEARCH. A field that answers "is Sam in this community" is a lookup
+ *     for the same reason; printing `members.length` would reintroduce it.
+ *   · NO AVATARS, INITIALS OR MONOGRAMS. No photo is collected in this slice,
+ *     and a generated initial is a second identifier beside a name.
+ *   · NO JOINED DATE, no "active recently", no ordering but the name. When
+ *     somebody became visible turns a list into a timeline.
+ *   · NO TAP TARGET ON A ROW. A name here leads nowhere — there is no member
+ *     profile and no contribution attributed to it — so a pressable row would
+ *     promise one.
+ *   · NO SEARCH. A field answering "is Sam in this community" is a lookup
  *     oracle over a list somebody joined for the opposite reason.
  */
 
@@ -232,7 +237,7 @@ export default function CommunityMembersScreen() {
       </Pressable>
 
       <Text style={[display.md, styles.pageTitle]} testID="wsf-members-title">
-        Who is here
+        People here
       </Text>
 
       {!ready || !user ? (
@@ -358,81 +363,44 @@ function ReadyBody({
   saving: Saving;
   onSetVisibility: (next: 'private' | 'visible') => void;
 }) {
-  const visible = state.own.visibility === 'visible';
-
   return (
     <View style={styles.stateWrap} testID="wsf-members-ready">
       <Text style={styles.community} numberOfLines={2} testID="wsf-members-community">
         {state.own.displayName}
       </Text>
 
-      {/* ── the member's own choice, first ──────────────────────────────── */}
       {/*
-        THE CONTROL COMES BEFORE THE LIST, not after it. A member who has not
-        chosen is private, and a private member scrolling a list of named
-        people should find their own choice at the top rather than discover it
-        under other people's names.
+        THE CONTROL COMES BEFORE THE LIST. A member who has not chosen is
+        private, and should find their own setting at the top rather than
+        discover it under other people's names.
       */}
       <View style={styles.panel} testID="wsf-members-own">
-        <Text style={styles.panelTitle}>
-          {visible ? 'You are named here.' : 'You are not named here.'}
-        </Text>
-        <Text style={styles.panelBody}>
-          {visible
-            ? 'The other people in this community can see your name in the list below. Nothing else about you is shown — no photo, and nothing you have recorded.'
-            : 'What you add still counts toward what this community is doing. Your name simply is not shown beside it.'}
-        </Text>
-
-        <Pressable
-          onPress={() => onSetVisibility(visible ? 'private' : 'visible')}
-          disabled={saving.kind === 'saving'}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: saving.kind === 'saving' }}
-          accessibilityLabel={
-            visible
-              ? `Stop showing your name in ${state.own.displayName}`
-              : `Show your name in ${state.own.displayName}`
-          }
-          style={[styles.primary, saving.kind === 'saving' ? styles.primaryBusy : null]}
+        <Text style={styles.panelHeading}>Privacy</Text>
+        <VisibilityToggle
+          communityName={state.own.displayName}
+          value={state.own.visibility}
+          busy={saving.kind === 'saving'}
+          onChange={onSetVisibility}
           testID="wsf-members-toggle"
-        >
-          <Text style={styles.primaryText}>
-            {saving.kind === 'saving'
-              ? 'Saving…'
-              : visible
-                ? 'Stop showing my name'
-                : 'Show my name'}
-          </Text>
-        </Pressable>
-
+        />
+        <VisibilityNote communityName={state.own.displayName} />
         {saving.kind === 'failed' ? (
           <Text style={styles.saveFailed} testID="wsf-members-save-failed">
             That did not save. Nothing has changed — try again.
           </Text>
         ) : null}
-
-        <Text style={styles.panelFoot}>
-          This is per community. Changing it here changes nothing anywhere else.
-        </Text>
       </View>
-
-      {/* ── the people who chose to be named ───────────────────────────── */}
-      <Text style={styles.eyebrow}>WHO CHOSE TO BE NAMED</Text>
 
       {state.members.length === 0 ? (
         /*
           NOT "NOBODY IS HERE". The community has members — `/community` says
-          how many. This list is empty because none of them has chosen to be
+          how many. The list is empty because none of them has chosen to be
           named, which is a different fact and the only one this screen is
-          entitled to state.
+          entitled to state. Said in one line rather than the paragraph this
+          used to be; the standing line below the list carries the rest.
         */
         <View style={styles.emptyPanel} testID="wsf-members-empty">
-          <Text style={styles.emptyBody}>
-            Nobody in this community has chosen to show their name yet.
-          </Text>
-          <Text style={styles.emptyFoot}>
-            That is not the same as nobody being here.
-          </Text>
+          <Text style={styles.emptyBody}>No one has chosen to show their name yet.</Text>
         </View>
       ) : (
         <View style={styles.list} testID="wsf-members-list">
@@ -466,9 +434,13 @@ function ReadyBody({
         </View>
       )}
 
+      {/*
+        ONE LINE, and it is the only explaining left on the page. It says why
+        the list is the length it is, which is the single thing a member cannot
+        work out for themselves and would otherwise get wrong.
+      */}
       <Text style={styles.foot} testID="wsf-members-foot">
-        Everyone chooses this for themselves. Nobody can show your name for you,
-        and nobody can see who has chosen not to be shown.
+        Only members who choose to be visible are shown.
       </Text>
     </View>
   );
@@ -497,8 +469,9 @@ const styles = StyleSheet.create({
     ...elevation.card,
   },
   panelTitle: { fontSize: 18, lineHeight: 24, color: NAVY, fontWeight: '600' },
+  /* A quiet section label, not a headline: the toggle under it is the content. */
+  panelHeading: { fontSize: 13, lineHeight: 18, letterSpacing: 0.8, color: INK_QUIET, fontWeight: '700' },
   panelBody: { fontSize: 15, lineHeight: 21, color: TEXT_MUTED },
-  panelFoot: { fontSize: 13, lineHeight: 18, color: INK_QUIET },
   saveFailed: { fontSize: 14, lineHeight: 20, color: NAVY },
 
   primary: {
@@ -551,7 +524,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   emptyBody: { fontSize: 15, lineHeight: 21, color: NAVY },
-  emptyFoot: { fontSize: 13, lineHeight: 18, color: INK_QUIET },
 
   foot: { fontSize: 13, lineHeight: 19, color: INK_QUIET, marginTop: 2 },
 

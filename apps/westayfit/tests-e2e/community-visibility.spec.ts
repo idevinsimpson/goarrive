@@ -41,6 +41,8 @@ async function seedVisibleMembership(
   uid: string,
   role: 'foundingChampion' | 'member',
   visibility: 'private' | 'visible',
+  /** Whether this member has already answered the question for this community. */
+  prompted = false,
 ): Promise<void> {
   const now = new Date();
   await firestoreWrite(`wsfMemberships/${groupId}_${uid}`, {
@@ -49,6 +51,7 @@ async function seedVisibleMembership(
     role: { stringValue: role },
     membershipStatus: { stringValue: 'active' },
     visibility: { stringValue: visibility },
+    ...(prompted ? { visibilityPromptedAt: tsField(now) } : {}),
     createdAt: tsField(now),
     updatedAt: tsField(now),
   });
@@ -86,9 +89,10 @@ async function seedFixture(): Promise<Fixture> {
     joinPolicy: 'private',
     members: [{ uid, role: 'foundingChampion' }],
   });
-  // The caller starts PRIVATE, which is the product's default and the state a
-  // member arrives in.
-  await seedVisibleMembership(groupId, uid, 'foundingChampion', 'private');
+  // The caller starts PRIVATE — the product's default — and ALREADY ASKED, so
+  // the arrival sheet does not sit over the cases that are about the
+  // directory. The sheet has its own describe at the bottom of this file.
+  await seedVisibleMembership(groupId, uid, 'foundingChampion', 'private', true);
 
   const namedUid = `${groupId}-named`;
   const namedName = 'Devon Named';
@@ -171,8 +175,12 @@ test.describe('who is here', () => {
     await openMembers(page, f);
     const text = await page.evaluate(() => document.body.innerText);
 
-    // The eyebrow says what the list IS.
-    expect(text).toContain('WHO CHOSE TO BE NAMED');
+    // One line says why the list is the length it is — the single thing a
+    // member cannot work out for themselves and would otherwise get wrong.
+    expect(text).toContain('Only members who choose to be visible are shown.');
+    // And the page is not called "Who is here", which reads as live presence.
+    expect(text).toContain('People here');
+    expect(text).not.toContain('Who is here');
     /*
       The community has four active members and one is named. No arithmetic
       over those two numbers may appear — "1 of 4", "3 hidden", "3 others" —
@@ -187,20 +195,24 @@ test.describe('who is here', () => {
     const f = await seedFixture();
     await openMembers(page, f);
 
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are not named here.');
-    await page.getByTestId('wsf-members-toggle').click();
+    /*
+      THE TOGGLE'S STATE, read from `aria-checked` rather than from a colour or
+      a sentence. The control announces itself as a switch, and that attribute
+      is what a member using a screen reader actually gets.
+    */
+    const toggle = page.getByTestId('wsf-members-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
 
     // The settled value, read back from the server.
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are named here.', {
-      timeout: 20_000,
-    });
+    await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 });
     await expect(page.getByTestId('wsf-members-list')).toContainText('Casey Caller');
 
     // A RELOAD IS THE REAL TEST. Optimistic local state would also have
-    // redrawn the panel; only a stored value survives a fresh read.
+    // redrawn the control; only a stored value survives a fresh read.
     await page.reload();
     await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are named here.');
+    await expect(page.getByTestId('wsf-members-toggle')).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByTestId('wsf-members-list')).toContainText('Casey Caller');
   });
 
@@ -208,19 +220,16 @@ test.describe('who is here', () => {
     const f = await seedFixture();
     await openMembers(page, f);
 
-    await page.getByTestId('wsf-members-toggle').click();
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are named here.', {
-      timeout: 20_000,
-    });
+    const toggle = page.getByTestId('wsf-members-toggle');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 });
 
-    await page.getByTestId('wsf-members-toggle').click();
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are not named here.', {
-      timeout: 20_000,
-    });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 20_000 });
 
     await page.reload();
     await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are not named here.');
+    await expect(page.getByTestId('wsf-members-toggle')).toHaveAttribute('aria-checked', 'false');
     const listText = await page.getByTestId('wsf-members-list').innerText();
     expect(listText).not.toContain('Casey Caller');
   });
@@ -247,13 +256,17 @@ test.describe('who is here', () => {
 
     const empty = page.getByTestId('wsf-members-empty');
     await expect(empty).toBeVisible();
-    await expect(empty).toContainText('has chosen to show their name');
+    await expect(empty).toContainText('No one has chosen to show their name yet.');
     /*
-      THE SENTENCE THAT MATTERS. A member reading this must not conclude the
-      community is deserted — it has two members. The copy says the true thing
-      explicitly rather than leaving the reader to infer the false one.
+      AND THE STANDING LINE IS STILL THERE. A member reading an empty list in a
+      community of two must not conclude it is deserted. The page no longer
+      spells that out in a paragraph — it says why the list is short, once, and
+      that line has to be present in the EMPTY case too or the empty state
+      reads as "nobody is here".
     */
-    await expect(empty).toContainText('not the same as nobody being here');
+    await expect(page.getByTestId('wsf-members-foot')).toContainText(
+      'Only members who choose to be visible are shown.',
+    );
     expect(await page.evaluate(() => document.body.innerText)).not.toContain('Other Person');
   });
 
@@ -347,7 +360,7 @@ test.describe('who is here', () => {
     await who.click();
     await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
     await page.getByTestId('wsf-members-toggle').click();
-    await expect(page.getByTestId('wsf-members-own')).toContainText('You are named here.', {
+    await expect(page.getByTestId('wsf-members-toggle')).toHaveAttribute('aria-checked', 'true', {
       timeout: 20_000,
     });
 
@@ -355,5 +368,281 @@ test.describe('who is here', () => {
     await expect(page.getByTestId('wsf-community-index-who')).toContainText('Your name is shown', {
       timeout: 25_000,
     });
+  });
+});
+
+/* ── the arrival sheet ───────────────────────────────────────────────────── */
+
+/**
+ * THE ONE TIME A MEMBER IS ASKED, IN THE COMMUNITY IT IS ABOUT.
+ *
+ * Asked on ARRIVAL rather than in the Join flow: that flow is hardened and
+ * freshly re-baselined, and carries its own privacy and destination-continuity
+ * guarantees for people following a link while signed out. The membership is
+ * created private by Join, exactly as before, and this sheet asks one screen
+ * later where the member can already see which community it is about.
+ *
+ * The properties below are the ones that make it an invitation rather than a
+ * gate: it does not block, declining is recorded so nobody is nagged, and
+ * a rejoin asks again.
+ */
+async function seedUnpromptedMember(): Promise<{
+  email: string;
+  password: string;
+  uid: string;
+  groupId: string;
+}> {
+  const stamp = stampId();
+  const email = `wsf-ask-${stamp}@example.test`;
+  const password = 'Str0ng-Passw0rd!';
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Newly Arrived');
+  const groupId = `wsfask${stamp}`.replace(/-/g, '');
+  await seedCommunity({
+    groupId,
+    displayName: 'Riverside Runners',
+    joinPolicy: 'private',
+    members: [{ uid, role: 'foundingChampion' }],
+  });
+  // No `visibilityPromptedAt` — this is what a new join, a new community, a
+  // rejoin, a reinstatement AND every legacy membership all look like.
+  await seedVisibleMembership(groupId, uid, 'foundingChampion', 'private');
+  return { email, password, uid, groupId };
+}
+
+test.describe('being asked, once, in the community it is about', () => {
+  test('a member who has not been asked is asked on arrival, naming the community', async ({
+    page,
+  }) => {
+    const f = await seedUnpromptedMember();
+    await signInVia(page, f.email, f.password);
+    await page.goto(`/community/${f.groupId}`);
+
+    const sheet = page.getByTestId('wsf-visibility-arrival');
+    await expect(sheet).toBeVisible({ timeout: 25_000 });
+    // THE COMMUNITY'S NAME IS IN THE QUESTION. This is the whole reason it is
+    // not an account-level onboarding step — and it is in the control's own
+    // label, not a title above it, so the question IS the toggle.
+    await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toContainText(
+      'Show my name in Riverside Runners',
+    );
+    // And it is OFF until they turn it on.
+    await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
+  test('IT DOES NOT BLOCK — Home is behind it and Continue leaves the member private', async ({
+    page,
+  }) => {
+    const f = await seedUnpromptedMember();
+    await signInVia(page, f.email, f.password);
+    await page.goto(`/community/${f.groupId}`);
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeVisible({ timeout: 25_000 });
+
+    // Home itself is loaded and present underneath, not replaced by a gate.
+    await expect(page.getByTestId('wsf-community')).toBeVisible();
+
+    await page.getByTestId('wsf-visibility-arrival-continue').click();
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden({ timeout: 20_000 });
+
+    // Continuing with the toggle off is an answer, and the answer is private.
+    await page.goto(`/community/${f.groupId}/members`);
+    await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-members-toggle')).toHaveAttribute('aria-checked', 'false');
+    expect(await page.evaluate(() => document.body.innerText)).not.toContain('Newly Arrived');
+  });
+
+  test('THE SHEET DOES NOT COVER THE WAY OUT', async ({ page }) => {
+    /*
+      THE BUG THIS EXISTS FOR. Passing taps through the area around the sheet
+      stops it swallowing the whole page, but the sheet's own body still sits
+      on whatever is at the foot of it — and on Home that is "Membership
+      options", the disclosure a member opens to LEAVE a community. A privacy
+      invitation that covers the way out is the worst thing it could cover,
+      and the leave flow hung on exactly that control for a full test timeout
+      before Home learned to reserve room for the sheet.
+
+      Asserted with a real click rather than `toBeVisible`, because visibility
+      is not the property that broke: the control had a perfectly good
+      bounding box the whole time. It simply could not be tapped.
+    */
+    /*
+      An ORDINARY MEMBER, not a Champion. A sole Champion has "Manage" rather
+      than "Membership options" and cannot leave at all (D7), so they are
+      precisely the one person for whom this control does not exist — and
+      seeding one is how the first version of this guard failed for a reason
+      that had nothing to do with the sheet.
+    */
+    const stamp = stampId();
+    const email = `wsf-wayout-${stamp}@example.test`;
+    const password = 'Str0ng-Passw0rd!';
+    const uid = await seedVerifiedUser(email, password);
+    await seedProfile(uid, 'Leaving Member');
+    const groupId = `wsfout${stamp}`.replace(/-/g, '');
+    const champUid = `${groupId}-champ`;
+    await seedCommunity({
+      groupId,
+      displayName: 'Riverside Runners',
+      joinPolicy: 'public',
+      members: [{ uid: champUid, role: 'foundingChampion' }],
+    });
+    await seedProfile(champUid, 'The Champion');
+    await seedVisibleMembership(groupId, champUid, 'foundingChampion', 'private', true);
+    // Unanswered, so the sheet is up.
+    await seedVisibleMembership(groupId, uid, 'member', 'private');
+
+    await signInVia(page, email, password);
+    await page.goto(`/community/${groupId}`);
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeVisible({ timeout: 25_000 });
+
+    const options = page.getByTestId('wsf-community-membership-toggle');
+    // `click()` performs Playwright's hit-target check, so this fails if the
+    // sheet is on top of it — which is the whole point.
+    await options.click({ timeout: 15_000 });
+    await expect(page.getByTestId('wsf-community-leave')).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('DECLINING IS AN ANSWER — the question does not come back', async ({ page }) => {
+    /*
+      THE ASSERTION THAT KEEPS THIS AN INVITATION. If only "visible" were
+      recorded, every member who declined would be asked again on every single
+      arrival — the person who most clearly said no would be the one the
+      product pestered. Recording the decline is what makes it one-time.
+    */
+    const f = await seedUnpromptedMember();
+    await signInVia(page, f.email, f.password);
+    await page.goto(`/community/${f.groupId}`);
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId('wsf-visibility-arrival-continue').click();
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden({ timeout: 20_000 });
+
+    // A FULL RELOAD, not a client-side navigation: the local dismissal flag is
+    // gone, so only the stored answer can keep the sheet away.
+    await page.reload();
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden();
+  });
+
+  test('accepting from the sheet publishes the member, and is not asked again', async ({
+    page,
+  }) => {
+    const f = await seedUnpromptedMember();
+    await signInVia(page, f.email, f.password);
+    await page.goto(`/community/${f.groupId}`);
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeVisible({ timeout: 25_000 });
+
+    await page.getByTestId('wsf-visibility-arrival-toggle').click();
+    await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toHaveAttribute(
+      'aria-checked',
+      'true',
+      { timeout: 20_000 },
+    );
+    await page.getByTestId('wsf-visibility-arrival-continue').click();
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden({ timeout: 20_000 });
+
+    await page.reload();
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden();
+
+    await page.goto(`/community/${f.groupId}/members`);
+    await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-members-toggle')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('wsf-members-list')).toContainText('Newly Arrived');
+  });
+
+  test('a member who has already answered is never asked again', async ({ page }) => {
+    const f = await seedFixture();
+    await signInVia(page, f.email, f.password);
+    await page.goto(`/community/${f.groupId}`);
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden();
+  });
+
+  test('the sheet and the settings page ask the SAME question in the same words', async ({
+    page,
+  }) => {
+    /*
+      A privacy control phrased one way on arrival and another way in settings
+      teaches a member that they mean different things. They are the same
+      setting and they say the same sentence, which is why both render the same
+      component.
+    */
+    const f = await seedUnpromptedMember();
+    await signInVia(page, f.email, f.password);
+
+    await page.goto(`/community/${f.groupId}`);
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeVisible({ timeout: 25_000 });
+    const onArrival = page.getByTestId('wsf-visibility-arrival-toggle');
+    // Same control: a switch, off, with the same verb and the same direction.
+    await expect(onArrival).toHaveAttribute('role', 'switch');
+    await expect(onArrival).toHaveAttribute('aria-checked', 'false');
+    /*
+      The ONLY permitted difference between the two surfaces is which phrase
+      points at the community, and it may only ever get MORE specific: the
+      sheet names it outright because the question arrives on its own, the
+      settings page says "this community" because the screen around it has
+      already said which. Any other divergence — a different verb, a different
+      direction, a second question — is the drift this pins.
+
+      Asserted HERE, before navigating: a locator checked after its page has
+      gone is a locator that can only ever report a stale answer.
+    */
+    await expect(onArrival).toContainText('Show my name in Riverside Runners');
+
+    await page.getByTestId('wsf-visibility-arrival-continue').click();
+    await page.goto(`/community/${f.groupId}/members`);
+    await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
+
+    const inSettings = page.getByTestId('wsf-members-toggle');
+    await expect(inSettings).toHaveAttribute('role', 'switch');
+    await expect(inSettings).toHaveAttribute('aria-checked', 'false');
+    await expect(inSettings).toContainText('Show my name in this community');
+    await expect(page.getByTestId('wsf-members-own')).toContainText(
+      'members of Riverside Runners can see your name and role',
+    );
+  });
+
+  test('the answer is per community — answering one does not answer another', async ({ page }) => {
+    const a = await seedUnpromptedMember();
+    // A second community for the SAME member, also unanswered.
+    const stamp = stampId();
+    const groupB = `wsfaskb${stamp}`.replace(/-/g, '');
+    await seedCommunity({
+      groupId: groupB,
+      displayName: 'Westside Walkers',
+      joinPolicy: 'private',
+      members: [{ uid: a.uid, role: 'member' }],
+    });
+    await seedVisibleMembership(groupB, a.uid, 'member', 'private');
+
+    await signInVia(page, a.email, a.password);
+    await page.goto(`/community/${a.groupId}`);
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId('wsf-visibility-arrival-toggle').click();
+    await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toHaveAttribute(
+      'aria-checked',
+      'true',
+      { timeout: 20_000 },
+    );
+    await page.getByTestId('wsf-visibility-arrival-continue').click();
+    await expect(page.getByTestId('wsf-visibility-arrival')).toBeHidden({ timeout: 20_000 });
+
+    /*
+      THE OTHER COMMUNITY ASKS ITS OWN QUESTION, and the toggle there is OFF.
+      A member glad to be named among the runners has said nothing at all about
+      the walkers, and a visible choice must never carry across.
+    */
+    await page.goto(`/community/${groupB}`);
+    const sheet = page.getByTestId('wsf-visibility-arrival');
+    await expect(sheet).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toContainText(
+      'Show my name in Westside Walkers',
+    );
+    await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
   });
 });

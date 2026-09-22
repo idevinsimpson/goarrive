@@ -59,6 +59,7 @@ import { JoinQrCode } from '../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../src/ui/joinLink';
 import { buildKioskUrl, currentOrigin } from '../../../src/ui/kioskLink';
 import { buildStationUrl } from '../../../src/ui/eventLinks';
+import { VisibilityArrivalSheet } from '../../../src/ui/VisibilityArrivalSheet';
 import { buildCombinedUrl } from '../../../src/ui/combinedLink';
 import {
   childSelectionMessage,
@@ -153,6 +154,18 @@ type LoadState =
        * than guessing.
        */
       otherCommunityCount: number;
+      /**
+       * THE CALLER'S OWN visibility in THIS community, and whether they have
+       * been asked about it yet. Both come from the `wsfMyCommunities` item
+       * this page already reads, so the arrival sheet costs no extra call —
+       * and both are the caller's own answer, never anybody else's: that
+       * callable's query is `userId == caller`.
+       *
+       * Null when the aggregate read did not answer. The sheet stays hidden
+       * rather than guessing, because guessing here means asking a member a
+       * question they have already answered.
+       */
+      ownVisibility: { visibility: 'private' | 'visible'; prompted: boolean } | null;
     }
   | { kind: 'error'; message: string };
 
@@ -164,6 +177,8 @@ type MyCommunityItem = {
   role: string;
   memberCount: number;
   isSample: boolean;
+  visibility?: 'private' | 'visible';
+  visibilityPrompted?: boolean;
   activeChallenge: {
     id: string;
     title: string;
@@ -301,6 +316,26 @@ export default function CommunityPage() {
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  /*
+    THE ARRIVAL SHEET'S OWN STATE, kept apart from `state` so dismissing it
+    cannot disturb anything Home has loaded. `dismissed` is local and
+    deliberately so: the SERVER decides whether the question has been answered
+    (it stamps the membership row), and this only stops the sheet reappearing
+    within the session between the write landing and the next page load.
+  */
+  const [visibilityChoice, setVisibilityChoice] = useState<'private' | 'visible' | null>(null);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const [visibilityFailed, setVisibilityFailed] = useState(false);
+  const [visibilityDismissed, setVisibilityDismissed] = useState(false);
+  /*
+    How much room the sheet needs at the foot of the page. Home's content gets
+    this as extra bottom padding while the sheet is up, so nothing underneath
+    is permanently out of reach — including "Membership options", the control
+    a member uses to LEAVE. An invitation that covers the way out is the worst
+    thing it could cover, and the first version did exactly that: the leave
+    flow hung on a control the sheet was sitting on.
+  */
+  const [visibilitySheetHeight, setVisibilitySheetHeight] = useState(0);
   // W7. The display-link control keeps its OWN state and its own timer. It is
   // a different link to a different audience from the invite link, and a copy
   // of one must never light up the other's confirmation.
@@ -747,6 +782,7 @@ export default function CommunityPage() {
         let otherCommunityCount = 0;
         let isSample = group.isSample === true;
         let activeChallenge: ActiveChallenge | null = null;
+        let ownVisibility: { visibility: 'private' | 'visible'; prompted: boolean } | null = null;
         try {
           const myFn = httpsCallable<Record<string, never>, MyCommunitiesResponse>(
             functions,
@@ -760,6 +796,13 @@ export default function CommunityPage() {
             memberCount = item.memberCount;
             isSample = item.isSample;
             activeChallenge = item.activeChallenge;
+            ownVisibility = {
+              // Anything unrecognised reads as private, exactly as the server
+              // normalises it. A client that guessed the other way would draw
+              // a member as named on a value nobody wrote.
+              visibility: item.visibility === 'visible' ? 'visible' : 'private',
+              prompted: item.visibilityPrompted === true,
+            };
           }
         } catch {
           // Non-blocking. The page still renders with what we have.
@@ -799,6 +842,7 @@ export default function CommunityPage() {
           otherCommunityCount,
           isSample,
           activeChallenge,
+          ownVisibility,
         });
       } catch (e) {
         if (cancelled) return;
@@ -1479,8 +1523,47 @@ export default function CommunityPage() {
     );
   }
 
-  const { group, role, memberCount, otherCommunityCount, isSample, activeChallenge } = state;
+  const { group, role, memberCount, otherCommunityCount, isSample, activeChallenge, ownVisibility } =
+    state;
   const isChampion = role === 'foundingChampion';
+
+  /*
+    ASK ONCE, ON ARRIVAL, ONLY WHEN THE SERVER SAYS THIS MEMBERSHIP HAS NOT
+    BEEN ASKED. `ownVisibility` is null when the aggregate read did not answer,
+    and the sheet stays hidden in that case rather than guessing — guessing
+    here means asking somebody a question they have already answered.
+
+    This covers all four cases the product has without a special path for any
+    of them: a new community, a new join, a rejoin and a reinstatement all
+    arrive with no stamp on the membership row (the last two because those
+    merges delete it), and so does every membership created before the question
+    existed — which is exactly the one-time, non-blocking invitation a legacy
+    member should get on their next visit.
+  */
+  const askVisibility =
+    ownVisibility !== null && !ownVisibility.prompted && !visibilityDismissed;
+  const sheetValue = visibilityChoice ?? ownVisibility?.visibility ?? 'private';
+
+  /** Write the member's answer. Called by the toggle and by Continue alike. */
+  const saveVisibility = async (next: 'private' | 'visible'): Promise<boolean> => {
+    setVisibilitySaving(true);
+    setVisibilityFailed(false);
+    try {
+      const fn = httpsCallable<
+        { groupId: string; visibility: 'private' | 'visible' },
+        { groupId: string; visibility: 'private' | 'visible' }
+      >(getFirebaseFunctions(), 'wsfSetCommunityVisibility');
+      const r = await fn({ groupId, visibility: next });
+      // The SETTLED value, never the requested one.
+      setVisibilityChoice(r.data?.visibility === 'visible' ? 'visible' : 'private');
+      setVisibilitySaving(false);
+      return true;
+    } catch {
+      setVisibilitySaving(false);
+      setVisibilityFailed(true);
+      return false;
+    }
+  };
   const hasShareApi = typeof navigator !== 'undefined' && 'share' in navigator;
 
   // One featured goal, explicitly: the open goal that ends soonest (the
@@ -3116,9 +3199,19 @@ export default function CommunityPage() {
   );
 
   return (
+    /*
+      A FILLING WRAPPER, SO THE SHEET HAS SOMETHING TO BE ABSOLUTE INSIDE.
+      Home's own composition is untouched — the ScrollView, its styles and
+      every child below are exactly as they were accepted. This adds a
+      positioned parent and an overlay above it, and nothing else.
+    */
+    <View style={styles.rootFill}>
     <ScrollView
       style={styles.scroll}
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[
+        styles.container,
+        askVisibility ? { paddingBottom: visibilitySheetHeight + 24 } : null,
+      ]}
       testID="wsf-community"
       {...({ 'data-state': 'ready' } as Record<string, unknown>)}
     >
@@ -3824,6 +3917,38 @@ export default function CommunityPage() {
         </View>
       </View>
     </ScrollView>
+
+    {askVisibility ? (
+      <VisibilityArrivalSheet
+        communityName={group.displayName}
+        value={sheetValue}
+        busy={visibilitySaving}
+        failed={visibilityFailed}
+        onChange={(next) => {
+          void saveVisibility(next);
+        }}
+        onHeight={setVisibilitySheetHeight}
+        onContinue={() => {
+          /*
+            CONTINUE IS NOT A SAVE BUTTON — it closes the question. If the
+            member touched the toggle, that write already happened and only
+            needs confirming as answered; if they touched nothing, continuing
+            with it off IS their answer, and writing `'private'` records that
+            so they are not asked again. Either way the outcome is private
+            unless they deliberately turned it on.
+
+            The sheet closes even when the write fails. It blocks nothing, the
+            membership is already private, and holding somebody in a dialog
+            over a failed privacy write would be the one thing worse than
+            asking again later.
+          */
+          void saveVisibility(visibilityChoice ?? ownVisibility?.visibility ?? 'private').finally(
+            () => setVisibilityDismissed(true),
+          );
+        }}
+      />
+    ) : null}
+    </View>
   );
 }
 
@@ -3876,6 +4001,7 @@ const HERO_MUTED = 'rgba(247,245,240,0.78)';
 const HERO_RULE = 'rgba(247,245,240,0.35)';
 
 const styles = StyleSheet.create({
+  rootFill: { flex: 1 },
   scroll: { flex: 1, backgroundColor: wsfTheme.colors.background },
   container: {
     alignItems: 'center',

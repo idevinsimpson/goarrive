@@ -792,6 +792,14 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
               // setting somebody may want back, and would put the guarantee in
               // the path that is not the one doing the re-admitting.
               visibility: VISIBILITY_PRIVATE,
+              // AND THE MEMBER IS ASKED AGAIN. Deleted rather than left
+              // standing: a merge preserves what it does not name, so an
+              // answer given before somebody left would otherwise count as
+              // an answer about the community they have just re-entered.
+              // Resetting the value without resetting the question would
+              // silently turn "you were asked once, long ago" into "you have
+              // already decided".
+              visibilityPromptedAt: FieldValue.delete(),
               rejoinedAt: FieldValue.serverTimestamp(),
               updatedAt: FieldValue.serverTimestamp(),
             },
@@ -1133,6 +1141,10 @@ export const wsfReinstateMember = onCall<MembershipActionRequest>(
           // Champion override this feature does not have, arriving through the
           // back door of a status change.
           visibility: VISIBILITY_PRIVATE,
+          // Asked again, for the reason above and more so here: the actor is
+          // the Champion, so a standing answer would be one this member gave
+          // about a membership somebody else has just restored.
+          visibilityPromptedAt: FieldValue.delete(),
           reinstatedAt: FieldValue.serverTimestamp(),
           reinstatedByUid: uid,
           updatedAt: FieldValue.serverTimestamp(),
@@ -1344,7 +1356,24 @@ export const wsfSetCommunityVisibility = onCall<SetVisibilityRequest>(
     await requireOwnActiveMembership(db, groupId, uid);
 
     await db.doc(`wsfMemberships/${groupId}_${uid}`).set(
-      { visibility: requested, updatedAt: FieldValue.serverTimestamp() },
+      {
+        visibility: requested,
+        /*
+          ANSWERED. This is what stops the arrival sheet asking again, and it
+          is stamped for `'private'` exactly as for `'visible'` — arriving,
+          reading the question and continuing with the toggle off IS an
+          answer, and the commonest one. Treating only `'visible'` as an
+          answer would re-ask everybody who declined, every time, which is how
+          a one-time question becomes nagging for consent.
+
+          It carries a TIME rather than a boolean because the useful question
+          later is "asked about THIS membership, when" — and a `true` that
+          survives a rejoin merge is indistinguishable from a `true` written a
+          moment ago. The rejoin and reinstate paths delete it outright.
+        */
+        visibilityPromptedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
       { merge: true }
     );
 
@@ -2033,6 +2062,17 @@ type MyCommunityItem = {
   // `userId == caller`: every row this callable reads is the caller's own, so
   // no other person's answer is in scope to leak by accident.
   visibility: CommunityVisibility;
+  /*
+    WHETHER THIS MEMBER HAS BEEN ASKED ABOUT THIS COMMUNITY YET. False for a
+    membership created before the question existed, and false again after a
+    rejoin or a reinstatement, which is what makes the arrival sheet a
+    one-time, per-membership invitation rather than a global onboarding step.
+
+    A BOOLEAN, NOT THE TIMESTAMP. When somebody was asked is of no use to a
+    client and every stored instant is a fact about a person that does not
+    need to leave the server.
+  */
+  visibilityPrompted: boolean;
   activeChallenge: {
     id: string;
     title: string;
@@ -2067,6 +2107,7 @@ export const wsfMyCommunities = onCall(
           groupId: string;
           role: string;
           visibility?: unknown;
+          visibilityPromptedAt?: unknown;
         };
         const groupSnap = await db
           .doc(`wsfCommunityGroups/${membership.groupId}`)
@@ -2129,6 +2170,11 @@ export const wsfMyCommunities = onCall(
             membership.visibility === VISIBILITY_VISIBLE
               ? VISIBILITY_VISIBLE
               : VISIBILITY_PRIVATE,
+          // Present and a real timestamp, or the member has not been asked.
+          // Anything else — a stray string, a boolean left by a migration —
+          // reads as NOT asked, which costs one dismissible sheet rather than
+          // silently swallowing the question.
+          visibilityPrompted: membership.visibilityPromptedAt instanceof Timestamp,
           activeChallenge,
         };
         return item;
