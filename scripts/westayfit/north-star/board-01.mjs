@@ -11,13 +11,17 @@
  *    Final lock must composite the exact owner wordmark and real calibrated
  *    LivingWeProgress output."
  *
- * The only thing that satisfies that sentence is the running product. So the
- * phones and the lifecycle strip below are not drawn: they are PNGs
- * photographed from the emulator build by
+ * The captures are the product: the phones and eight lifecycle states below
+ * are not drawn, they are PNGs photographed from the emulator build by
  * `apps/westayfit/tests-e2e/north-star-board-01-capture.spec.ts`, each state
  * seeded and asserted (percent, status line, fill-ratio attribute, eyebrow)
  * before the shot. The wordmark is the owner-derived PNG. The mark in every
- * frame is `LivingWeProgress` itself.
+ * captured frame is `LivingWeProgress` itself. Targets and seams are
+ * COMPOSITIONS from the same exact assets and the same calibration table,
+ * labelled as such — a labelled target may carry the mark; it is composed
+ * from the owner PNGs and `living-we-calibration.json` exactly as Board 00
+ * is, never approximated. (Round 3/4 clarification: the earlier claim that
+ * only a photograph can carry the mark was too strong.)
  *
  * What the lock names as an INTENDED SEAM — opted-in member visibility — is
  * drawn here as a labelled composition and nowhere presented as a capture.
@@ -32,8 +36,11 @@
  *      confirmed values unchanged. Its words are not invented: /display,
  *      /kiosk and /station already ship `stale ? 'Last confirmed' :
  *      'Confirmed'` and the display's "Connection interrupted". Home's
- *      `renderFreshness` has no such branch. No Living WE is drawn on it —
- *      a composition carries no mark.
+ *      `renderFreshness` has no such branch. It carries the confirmed Living
+ *      WE at 241/500, composed from the owner monogram and the calibration
+ *      table: a stale state has a valid last-confirmed ratio, so it is NOT a
+ *      no-denominator state, and the mark persists unchanged while the
+ *      screen stops presenting itself as current.
  *
  *   2. SEAM SEMANTICS. PR #390 approves opted-in NAME + ROLE visibility in
  *      one community's members list. It does not approve attributed movement
@@ -52,6 +59,36 @@ const BRAND = path.join(REPO, 'apps/westayfit/assets/brand/derived');
 const CAPTURES = path.join(REPO, 'docs/design-target/north-star-final/board-01/captures');
 
 const asset = (f) => pathToFileURL(path.join(BRAND, f)).href;
+
+/* ── the confirmed Living WE for the drawn stale cell ─────────────────────
+   Same source as Board 00: the JSON `livingWeCalibration.ts` requires at
+   runtime, read exactly as `heightFractionForFill()` reads it, interpolation
+   included — so the green AREA on the drawn cell is the green area the
+   product paints for 241/500. The monogram PNGs are the owner assets. */
+import { readFileSync } from 'node:fs';
+const calibration = JSON.parse(readFileSync(path.join(BRAND, 'living-we-calibration.json'), 'utf8'));
+function heightFractionForFill(ratio) {
+  const table = calibration.heightFractionByFill;
+  const steps = calibration.steps;
+  if (!Number.isFinite(ratio) || ratio <= 0) return 0;
+  if (ratio >= 1) return 1;
+  const pos = ratio * steps;
+  const lo = Math.floor(pos);
+  const hi = Math.min(steps, lo + 1);
+  const t = pos - lo;
+  return table[lo] + (table[hi] - table[lo]) * t;
+}
+const LIVING_WE_ASPECT = calibration.width / calibration.height;
+function livingWe(ratio, width) {
+  const h = Math.round(width / LIVING_WE_ASPECT);
+  const fillPx = heightFractionForFill(Math.min(1, Math.max(0, ratio))) * h;
+  return `<div class="we" style="width:${width}px;height:${h}px">
+    <img class="we-base" src="${asset('monogram-unfilled-white.png')}" alt="">
+    <div class="we-clip" style="height:${fillPx.toFixed(2)}px">
+      <img class="we-fill" src="${asset('monogram-fill-green.png')}" style="width:${width}px;height:${h}px" alt="">
+    </div>
+  </div>`;
+}
 const capture = (f) => pathToFileURL(path.join(CAPTURES, f)).href;
 
 /* ── locked palette (Board 00) ───────────────────────────────────────────── */
@@ -181,17 +218,24 @@ export const html = `<!doctype html>
 
   .strip { display: flex; gap: 11px; align-items: flex-start; margin-top: 12px }
   .state { width: ${STATE_W}px; display: flex; flex-direction: column; gap: 7px }
-  .state .slot { height: 160px; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px }
+  /* Tall enough for the drawn cell's inset WITH its Living WE (the captured
+     cells are bottom-aligned, so extra room above them is empty ground). */
+  .state .slot { height: 206px; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px }
   .state .slot img { border-radius: 8px; box-shadow: 0 2px 8px rgba(11,31,58,0.10) }
   .state .nm { font-size: 13px; line-height: 17px; font-weight: 800 }
   .state .nt { font-size: 11px; line-height: 15px; color: ${TEXT_MUTED} }
 
   /* The ninth cell is DRAWN, not photographed, and has to be unmistakable at a
-     glance: its own rule, a dashed edge and its own tag. Everything inside it
-     is composed — which is exactly why it carries no Living WE. */
+     glance: its own rule, a dashed edge and its own tag. Its Living WE is the
+     confirmed one, composed from the owner monogram and the calibration table
+     — the stale state keeps its last-confirmed ratio. */
+  .tgt .we { position: relative; display: block; margin: 5px auto 0 }
+  .tgt .we-base { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
+  .tgt .we-clip { position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden }
+  .tgt .we-fill { position: absolute; left: 0; bottom: 0; display: block }
   .state.target { width: ${TARGET_W}px; border-left: 1px dashed ${HAIRLINE}; padding-left: 12px }
-  .tgt { border: 1px dashed ${INK_QUIET}; border-radius: 10px; padding: 7px; background: ${SURFACE};
-         display: flex; flex-direction: column; gap: 6px }
+  .tgt { position: relative; border: 1px dashed ${INK_QUIET}; border-radius: 10px; padding: 12px 7px 7px; background: ${SURFACE};
+         display: flex; flex-direction: column; gap: 6px; margin-top: 9px }
   .tgt .hero { background: ${NAVY}; border-radius: 7px; padding: 8px 9px 9px; color: ${CREAM} }
   .tgt .gt { font-size: 9px; line-height: 12px; font-weight: 800; white-space: nowrap }
   .tgt .gs { font-size: 7.5px; line-height: 10px; color: ${ON_NAVY_MUTED} }
@@ -208,7 +252,10 @@ export const html = `<!doctype html>
   .tgt .warn { font-size: 8.5px; line-height: 11px; font-weight: 900; letter-spacing: 0.2px; white-space: nowrap }
   .tgt .conf { font-size: 8px; line-height: 12px; color: ${TEXT_MUTED}; white-space: nowrap }
   .tgt .conf u { color: ${NAVY}; font-weight: 800 }
-  .tag.target { color: ${NAVY}; background: ${CREAM}; border: 1px dashed ${INK_QUIET}; font-size: 7px; letter-spacing: 0.5px; padding: 3px 5px; white-space: nowrap }
+  /* The tag straddles the inset's top border instead of taking a row of its
+     own, so this cell's caption sits on the same line as the eight captured
+     cells' captions. */
+  .tag.target { position: absolute; top: -9px; left: 8px; color: ${NAVY}; background: ${CREAM}; border: 1px dashed ${INK_QUIET}; font-size: 7px; letter-spacing: 0.5px; padding: 3px 5px; white-space: nowrap }
 
   .two { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px }
 
@@ -298,9 +345,11 @@ export const html = `<!doctype html>
       <div class="state target">
         <div class="slot">
           <div class="tgt">
+            <span class="tag target">TARGET · NOT IMPLEMENTED</span>
             <div class="hero">
               <div class="gt">500 Squats by Friday</div>
               <div class="gs">Open · Ends Fri, Sep 25</div>
+              ${livingWe(241 / 500, 72)}
               <div class="num">241</div>
               <div class="den">of 500 squats</div>
               <div class="bar"><i></i></div>
@@ -313,9 +362,8 @@ export const html = `<!doctype html>
             </div>
           </div>
         </div>
-        <div><span class="tag target">TARGET · NOT IMPLEMENTED</span></div>
         <div class="nm">Stale · last confirmed</div>
-        <div class="nt">Drawn, not captured. The last confirmed values and their receipt time, unchanged — no mark, and nothing implying anyone moved.</div>
+        <div class="nt">Drawn, not captured. The last confirmed values, the confirmed Living WE and the receipt time, all unchanged — nothing implying anyone moved.</div>
       </div>
     </div>
     <p class="note" style="margin-top:12px">The ninth cell is the one state Home does not distinguish. Its words are the product's own — <b style="color:${NAVY}">/display</b>, <b style="color:${NAVY}">/kiosk</b> and <b style="color:${NAVY}">/station</b> all render <b style="color:${NAVY}">Last confirmed</b> in place of <b style="color:${NAVY}">Confirmed</b> when a later poll fails, and the display adds <b style="color:${NAVY}">Connection interrupted</b> — so the target is Home adopting a treatment the product already ships, not a new idea. Reached and closed are separate facts, so the product carries four ends, not two: <b style="color:${NAVY}">reached / open</b>, <b style="color:${NAVY}">closed / reached</b>, <b style="color:${NAVY}">closed / unfinished</b>, and no goal at all. A closed goal is a History row on Home — it is never a hero. Nothing here streaks, ranks, compares or counts people.</p>

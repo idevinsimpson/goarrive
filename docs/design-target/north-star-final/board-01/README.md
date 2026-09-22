@@ -8,7 +8,7 @@
 
 ## How it was made — captured, not drawn
 
-The lock's first item was that every mark on revisions 1–7 was a generated approximation and the final must *"composite the exact owner wordmark and real calibrated LivingWeProgress output."* The only source that satisfies that sentence is the running product, so:
+The lock's first item was that every mark on revisions 1–7 was a generated approximation and the final must *"composite the exact owner wordmark and real calibrated LivingWeProgress output."* The captures are the product; targets and seams are compositions from the same exact assets and the same calibration table, labelled as such. (Round 3/4 clarification, `5781782947` §2 and `5781984220` §3: the earlier claim that *only* a photograph can carry the mark was too strong — a labelled target may composite the owner assets and calibrated output, exactly as Board 00 does.) So:
 
 ```
 # 1. photograph every phone and every lifecycle state from the emulator build
@@ -42,7 +42,7 @@ PR #365 comment [`5781542755`](https://github.com/idevinsimpson/goarrive/pull/36
 
 | # | Held for | On the board |
 | --- | --- | --- |
-| 10 | *"Current capability cannot erase intended North Star coverage."* The README had dropped **stale / last confirmed** because Home does not distinguish it | The strip has a ninth cell, **drawn**: a dashed inset carrying the building state's own confirmed values unchanged — 241 of 500, 48.2% complete, 259 to go — under **Connection interrupted · Last confirmed 5:57 PM · Refresh**, tagged **TARGET · NOT IMPLEMENTED**. Nothing on it implies a movement event; only the screen's standing changed. |
+| 10 | *"Current capability cannot erase intended North Star coverage."* The README had dropped **stale / last confirmed** because Home does not distinguish it | The strip has a ninth cell, **drawn**: a dashed inset carrying the building state's own confirmed values unchanged — 241 of 500, 48.2% complete, 259 to go, and the confirmed Living WE composed from the owner assets and calibration — under **Connection interrupted · Last confirmed 5:57 PM · Refresh**, tagged **TARGET · NOT IMPLEMENTED**. Nothing on it implies a movement event; only the screen's standing changed. |
 | 11 | *"#390 authorizes opted-in name+role membership, not attributed movement/photos."* The seam panel's `Alex Rivera · added 20 squats` presented attributed movement as part of the approved seam | The approved pair now shows what #390 returns and only that: a members-list row of **display name + role**, and beside it the private counterpart — **not listed**, counted in full. The named-movement concept is a separate cell below the legend, struck through and labelled **NOT AUTHORIZED · NOT IMPLEMENTED**. The screen note's "Intended seam" row was saying the same untrue thing and is corrected with it. |
 
 ### Why a composition, and not an unresolved-seam cell
@@ -59,7 +59,7 @@ and the display adds the words **"Connection interrupted"** above it. Its own ty
 
 So the cell invents no vocabulary and no behaviour. It is Home adopting a treatment three shipped routes already use, which is a target a reviewer can accept or reject on its merits rather than a drawing asking to be believed. An UNRESOLVED SEAM cell would have recorded a gap that is not actually unresolved anywhere but Home.
 
-Two things it deliberately does **not** do. It carries **no Living WE**: the lock's first item requires every mark on this board to be real calibrated `LivingWeProgress` output, and a composition has none, so it draws none. And it is the one cell in the strip with a dashed edge, its own rule, and a tag — the eight beside it are photographs, and the difference has to survive being looked at quickly.
+It **carries the confirmed Living WE at 241/500**, composed from the owner monogram PNGs and `living-we-calibration.json` exactly as Board 00's marks are (the same `heightFractionForFill` interpolation, so the green *area* is the area the product paints). A stale state has a valid last-confirmed ratio — it is **not** a no-denominator state — so the mark persists unchanged while the screen stops presenting itself as current; dropping it would have drawn a rule the product does not have. It is the one cell in the strip with a dashed edge, its own rule, and a tag — the eight beside it are photographs, and the difference has to survive being looked at quickly.
 
 The older TARGET matrix at `docs/design-target/review/page-01-home/TARGET-home-state-matrix.png` is where this state was last reviewed — bottom-right cell, captioned *"Stale · last confirmed / The screen says when it last knew, rather than implying it knows now."* Worth knowing before comparing: **that cell's phone is cut off by the matrix image's own bottom edge at 1688×1200**, so only its header and the top of the hero survive in the file. The caption, and the treatment the product ships on the room surfaces, are what this cell was drawn from. That file is not this worker's to fix and was not touched.
 
