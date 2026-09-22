@@ -14,6 +14,7 @@ Status: **CHECKPOINT-READY** — first deliverable complete; all three parts are
 | `journey-regression.md` | Join acceptance package: focused journey regression results, pinned to the source SHA. |
 | `e609c57-verification.md` | Verification of the hero "Try again" colour fix and the existing Progress/Home corrections. |
 | `pr-390-integration-plan.md` | Scratch integration test *plan* for PR #390 — prepared, not executed against any release branch. |
+| `combined-member-candidate.md` | The combined member candidate: accepted fix `ff8c880` + visibility `670edab`, 88 checks, plus the proposed acceptance-guard diff. |
 | `join-review-evidence.md` | The Join review-evidence package for `/join/[joinCode]`: frame inventory with capture revisions, the functional evidence it accompanies, and one finding about the intact guard's coverage. |
 | `members-rewrite-parity-fix.md` | Packet 3: the assigned bounded fix for the emulator members-rewrite drift, on branch `claude/wsf-sprint-w4-emulator-members-rewrite` (PR #405). |
 | `combined-runtime-e609c57-e982ddc.md` | Deliverable 4: the isolated combined-runtime test of app `e609c57` + visibility `e982ddc`, and the one defect it found. |
