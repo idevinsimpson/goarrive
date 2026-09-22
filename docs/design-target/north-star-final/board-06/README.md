@@ -5,12 +5,14 @@ filename is the lock verdict's canonical name for this artifact, not an
 acceptance status. Locked by PR #365 comment
 [`5771368550`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5771368550).
 
-Status layer, from that lock — and it is the most important sentence about this
-board: *"This board does NOT promote the underlying routes to accepted-page
-status; it records the current build truth and the intended visual grammar."*
-**Board 06 surfaces are CURRENT BUILD / REVIEW, not accepted Pages 1–5.**
+Status layer, from that lock: *"This board does NOT promote the underlying
+routes to accepted-page status; it records the current build truth and the
+intended visual grammar."* Nothing gains standing by appearing here — **and
+nothing loses the standing it already had.** The identity funnel's existing
+acceptance is recorded on the board rather than overwritten by it; see *Three
+provenances* below.
 
-`WE_STAY_FIT_NORTH_STAR_BOARD_06_CREATE_JOIN_AUTH_FINAL.png` · 2560×3860 (1280×3860 @2x)
+`WE_STAY_FIT_NORTH_STAR_BOARD_06_CREATE_JOIN_AUTH_FINAL.png` · 2560×3980 (1280×3980 @2x)
 
 Authorised as W2's packet by the Director's `5783373780` §2 (*"The 00–05 stop
 gate is removed"*), relayed on PR #397 `5783475743`, and confirmed against the
@@ -35,20 +37,27 @@ committed board — Board 03 — and reproduced it **byte-identically**. So the
 toolchain is faithful here, and nothing on Board 06 is an artefact of a
 different browser or font stack.
 
-## Three provenances, two tags, never blurred
+## Three provenances, three tags, never blurred
 
-This is the part of Board 06 that needed the most care, because the routes it
-covers are in three different states at once.
+This is the part of Board 06 that needed the most care, and **the first draft got
+it wrong.** It collapsed the identity funnel and the Join route into one
+"current build, not accepted" tag, reasoning from the freeze-list comment in
+`check-evidence-intact.mjs` (*"submitted for visual/functional review"*) and
+never looking for a positive acceptance record. There is one, and the Director's
+source review caught the error.
 
-| Source | State | Tag on the board |
+| Source | Actual state | Tag on the board |
 | --- | --- | --- |
-| `batch-b-join-and-setup/after/` | `/join/[joinCode]` — **implemented**, awaiting visual and functional acceptance. Deliberately **not** in the frozen/accepted list, because it has not been reviewed. | `CURRENT BUILD · CAPTURED` |
-| `batch-a-identity/after/` | the identity funnel — **built**, submitted for review. Frozen only so a routine run cannot change what is under review. | `CURRENT BUILD · CAPTURED` |
+| `batch-a-identity/after/` | the identity funnel — **ACCEPTED**. `/signin`, `/signup`, `/reset-password`, `/verify-email`, `/profile-setup`, accepted at `3562156` (2026-09-21), recorded in `.github/wsf-staging/approved-candidate.json`. The frames here were **re-baselined afterwards**, at `5cf92e1` (2026-09-22). | `ACCEPTED BUILD · LATER CAPTURE` |
+| `batch-b-join-and-setup/after/` | `/join/[joinCode]` — **implemented, still awaiting its page verdict**. Not in the accepted package label; its `after/` set is deliberately not frozen, because it has not been reviewed. | `CURRENT BUILD · CAPTURED` |
 | `batch-b-join-and-setup/TARGET-*` | `/start-community` — **drawn, never built**. Each frame carries its own TARGET strip burnt into the image. | `TARGET · NOT IMPLEMENTED` |
 
-**No frame on this board carries an accepted-build tag**, because none of these
-routes is an accepted page. Freezing is not acceptance, and the board says so on
-its face rather than leaving the distinction to this file.
+Two lessons are recorded rather than quietly fixed. **Freezing is not what makes
+something accepted — the record is.** The freeze list guards what is under
+review; it is evidence of neither acceptance nor its absence, and inferring
+either way from it was the mistake. And **a later capture of an accepted route
+is still a later capture**: that is a fact about the frame, not a demotion of
+the route.
 
 `/goals/new` and `/combined/[setupId]` are unbuilt as well. They are **named on
 the status panel and not drawn** — opening a goal is Board 08's subject, and a
@@ -70,9 +79,9 @@ board should not annex its neighbour's material to look complete.
 | signed-out invitation says a free account is required, one filled `Sign up to join`, text-weight `Already have an account? Sign in` | `AFTER-invite-out` — *"You'll need a free account first."*, filled green primary, sign-in at text weight |
 | signed-in invitation uses one primary `Join <community>` | `AFTER-invite-in` — `Join Harbor Walkers` |
 | `What joining means` limited to existing capabilities: see goals/shared progress, add own contributions, leave whenever you like | Exactly those three bullets, and nothing else, on both invite frames |
-| pending join code survives signup → verify-email → profile-setup → return-to-same-join | The four-frame funnel section, using the `carrying` variants that show the destination still named at each step |
+| pending join code survives signup → verify-email → profile-setup → return-to-same-join | The four-frame funnel section, using the `carrying` variants. Each frame discloses the destination's **kind** — *"An invitation to a community"* — never the community's name or the code; the capture spec asserts the opaque value is not on screen. The four are independently seeded screenshots and are **not** themselves end-to-end proof: the round trip is proved by `e2-join-flow.spec.ts` §3.5, cited on the board |
 | invalid, rate limit and generic preview error stay distinct | Three separate frames in the failure section, captioned with what makes each different |
-| invalid/private/unknown has **no retry** that could leak existence | `AFTER-not-valid` has no retry control; the two that do are the ones that claim nothing about the link |
+| invalid/private/unknown has **no retry** that could leak existence | `AFTER-not-valid` carries no retry control; the two that do are the ones that claim nothing about the link. The board states the privacy contract as the **indistinguishable response and the authorization behind it** — an earlier draft asserted "a retry is the leak" as a categorical security claim, which the cited source does not establish, and the Director had it removed. The UI behaviour is unchanged |
 | rate limit blames the link load, not the person | `AFTER-too-many`, captioned so |
 | device question asked only from event context, before an account exists | `AFTER-device-choice`, captioned that an ordinary invitation never sees it |
 | shared screen creates NO account, routes to the shared-device path | `AFTER-device-shared` |
