@@ -440,6 +440,24 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
   });
 });
 
+test('mail-binding mode reaches NOTHING that builds, deploys or verifies', () => {
+  /*
+    The same statement of safety the preflight gets, in the same form. A
+    read-only report that can reach `deploy` is not a read-only report, and
+    the only thing standing between the two is this matrix.
+  */
+  const reached = reachedJobs('mail-binding');
+  assert.deepEqual(reached, {
+    gate: false,
+    config: false,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'cleanup-recovery': false,
+  });
+});
+
 test('deploy is the default mode, so an unset input runs the normal path', () => {
   const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\n# Nothing is granted'));
   const modeBlock = onBlock.slice(onBlock.indexOf('      mode:'));
@@ -455,8 +473,8 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   */
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight'],
-    'exactly these four modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'mail-binding'],
+    'exactly these five modes exist'
   );
 });
 
@@ -769,6 +787,57 @@ test('the mail preflight can report, and cannot deploy', () => {
     assert.equal(forbidden.test(job), false,
       `the preflight job matches ${forbidden}, so it is not read-only`);
   }
+});
+
+test('only the binding job runs in mail-binding mode, and it cannot deploy', () => {
+  const wf = fs.readFileSync(path.join(WORKFLOW_DIR, 'wsf-staging-deploy.yml'), 'utf8');
+
+  assert.match(wf, /^\s+- mail-binding$/m, 'the mail-binding mode is not offered');
+
+  const at = wf.indexOf('\n  mail-binding:');
+  assert.notEqual(at, -1, 'the mail-binding job is gone');
+  const job = wf.slice(at);
+
+  assert.match(job, /if: \$\{\{ inputs\.mode == 'mail-binding' \}\}/,
+    'the binding job does not gate on its own mode');
+
+  const namesIt = wf.split(/\n  (?=[a-z][a-z0-9-]*:\n)/).filter(
+    (j) => /inputs\.mode == 'mail-binding'/.test(j)
+  );
+  assert.equal(namesIt.length, 1,
+    `${namesIt.length} jobs run in mail-binding mode; only the binding job may`);
+
+  for (const forbidden of [
+    /firebase\s+deploy/,
+    /hosting:channel:deploy/,
+    /gcloud\s+secrets\s+(create|versions\s+add|versions\s+access)/,
+    /add-iam-policy-binding/,
+  ]) {
+    assert.equal(forbidden.test(job), false,
+      `the binding job matches ${forbidden}, so it is not read-only`);
+  }
+});
+
+test('the binding reporter never reads a secret payload, and never bare-describes', () => {
+  const src = fs.readFileSync(
+    path.join(WORKFLOW_DIR, '..', 'wsf-staging', 'report-mail-binding.mjs'),
+    'utf8'
+  );
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // The call that returns the key itself. It must not appear at all.
+  assert.equal(/versions['"\s,\]]*access/.test(code), false,
+    'the binding reporter reads a secret payload');
+
+  /*
+    AND EVERY describe MUST CARRY A PROJECTION. A bare `--format=json` prints
+    the function's whole environment, which is how an unrelated variable ends
+    up in a public run log — the reporter would still be "read-only" and would
+    still have leaked.
+  */
+  assert.equal(/--format=json'/.test(code), false,
+    'a describe runs without a field projection');
+  assert.match(code, /--format=json\(/, 'no projected describe found at all');
 });
 
 test('the preflight never reads a secret payload or prints a token', () => {

@@ -15,6 +15,7 @@ const suites = [
   'functions-env.test.mjs',
   'verify-deployment.test.mjs',
   'mail-preflight-domain.test.mjs',
+  'mail-binding.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {
