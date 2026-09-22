@@ -586,3 +586,39 @@ leave**. An invitation that covers the way out is the worst thing it could cover
 reserves the sheet's measured height, and the guard for it clicks that control rather than
 asserting it is visible, because visibility was never the property that broke: the button had
 a perfectly good bounding box the whole time and simply could not be tapped.
+
+**MEMBERS is a community feature; PRIVACY is a quiet personal control. Mashing them together
+is the failure mode.** Three successive versions of the member directory drifted the same way,
+and the pull is worth naming because it feels like diligence: each version was trying to prove
+the privacy guarantee IN THE INTERFACE, so privacy climbed the hierarchy until it was the page
+title ("Who is here"), the first card, the list's eyebrow ("WHO CHOSE TO BE NAMED"), the
+footer, AND a status line wedged into the community panel between the community's name and its
+first section. A members list had become a settings screen wearing a list, and the community
+panel was narrating a fact about ME inside an object that is entirely about US.
+
+The guarantee does not need proving on the screen. It is enforced in the callables and pinned
+by tests that fail when it is removed. **The North Star's own way of saying a thing is private
+is `45 squats · private to you` on the Home board** — three words, inline, a modifier on a line
+that is mostly about something else. Never a card, never a heading, never the page. That one
+detail settles every question this feature kept re-asking.
+
+**Navy is how the board says "this is the important object on the screen."** A members page
+drawn entirely in cream cards has no centre of gravity, which is a large part of why it read as
+settings rather than as community. The list moved into a navy panel — the members ARE the
+object here — and the member's own control became one unweighted row on the ground above it:
+no border, no fill, no shadow, no heading. The visual hierarchy now states the distinction that
+the copy kept trying to explain.
+
+**Two labels for one question, on purpose.** "Visible to members" on the Members page, where a
+community's name and count sit directly above and the shortest true phrase wins; "Show me to
+this community" on the arrival sheet, which arrives on its own. What may not differ is the
+thing being asked, the direction of the control, and that off is off. Neither says "your name
+is shown/hidden" — that phrasing, repeated across a product, is what turns a preference into a
+preoccupation.
+
+**A sheet that says "this community" must name the community.** The approved label names none,
+and a sheet is a distinct object, so without context it asks a per-community question without
+saying which. The fix is the board's own eyebrow — eleven letterspaced pixels, the same device
+as YOUR COMMUNITY and WHAT WE'RE DOING — not a headline. The version before it used a full
+headline directly above a toggle saying almost the same words: the same sentence twice, which
+is exactly the weight this design sheds.

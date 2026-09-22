@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { CREAM, HAIRLINE, NAVY, SURFACE, elevation } from './kit';
+import { CREAM, HAIRLINE, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
 import { VisibilityNote, VisibilityToggle } from './VisibilityToggle';
 
@@ -91,21 +91,31 @@ export function VisibilityArrivalSheet({
         onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
       >
         {/*
-          NO SEPARATE TITLE. It read "Show my name in <community>?" directly
-          above a toggle labelled "Show my name in this community" — the same
-          sentence twice, which is precisely the legalistic weight this design
-          is meant to shed. The toggle names the community itself here, so the
-          question IS the control.
+          AN EYEBROW, NOT A TITLE — the board's own device, the same one that
+          reads YOUR COMMUNITY above a community's name and WHAT WE'RE DOING
+          above a goal.
+
+          It is here because the approved label says "this community" and names
+          none, and a sheet is a distinct object: without one line of context
+          it asks a per-community question without saying which community. An
+          earlier version used a full headline instead ("Show my name in
+          <community>?") directly above a toggle that said almost the same
+          words — the same sentence twice, which is exactly the weight this
+          design sheds. Eleven letterspaced pixels say which community and
+          nothing else.
         */}
+        <Text style={s.eyebrow} numberOfLines={1}>
+          {communityName.toUpperCase()}
+        </Text>
         <VisibilityToggle
           communityName={communityName}
           value={value}
           busy={busy}
           onChange={onChange}
-          nameCommunity
+          variant="arrival"
           testID="wsf-visibility-arrival-toggle"
         />
-        <VisibilityNote communityName={communityName} withChangeHint />
+        <VisibilityNote communityName={communityName} variant="arrival" />
 
         {failed ? (
           <Text style={s.failed} testID="wsf-visibility-arrival-failed">
@@ -170,6 +180,13 @@ const s = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: -6 },
+  },
+  eyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '900',
+    letterSpacing: 1.4,
   },
   failed: { fontSize: 14, lineHeight: 20, color: NAVY },
   primary: {

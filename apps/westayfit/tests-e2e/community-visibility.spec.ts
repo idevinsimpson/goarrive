@@ -178,9 +178,27 @@ test.describe('who is here', () => {
     // One line says why the list is the length it is — the single thing a
     // member cannot work out for themselves and would otherwise get wrong.
     expect(text).toContain('Only members who choose to be visible are shown.');
-    // And the page is not called "Who is here", which reads as live presence.
-    expect(text).toContain('People here');
-    expect(text).not.toContain('Who is here');
+    /*
+      MEMBERS IS A COMMUNITY FEATURE AND PRIVACY IS A QUIET CONTROL, so the
+      page must not narrate whose name is or is not shown. Each of these
+      phrases was on this screen at some point and each made a one-line
+      preference read like a legal instrument. "Who is here" additionally
+      implies live presence, which this product does not track.
+    */
+    for (const banned of [
+      'Who is here',
+      'People here',
+      'Your name is not shown',
+      'Your name is shown',
+      'You are named here',
+      'You are not named here',
+      'WHO CHOSE TO BE NAMED',
+    ]) {
+      expect(text).not.toContain(banned);
+    }
+    // The community leads; the feature is named by the eyebrow.
+    expect(text).toContain('MEMBERS');
+    expect(text).toContain('Riverside Runners');
     /*
       The community has four active members and one is named. No arithmetic
       over those two numbers may appear — "1 of 4", "3 hidden", "3 others" —
@@ -256,7 +274,7 @@ test.describe('who is here', () => {
 
     const empty = page.getByTestId('wsf-members-empty');
     await expect(empty).toBeVisible();
-    await expect(empty).toContainText('No one has chosen to show their name yet.');
+    await expect(empty).toContainText('No one is shown here yet.');
     /*
       AND THE STANDING LINE IS STILL THERE. A member reading an empty list in a
       community of two must not conclude it is deserted. The page no longer
@@ -352,20 +370,33 @@ test.describe('who is here', () => {
     );
 
     await page.goto('/community');
-    const who = page.getByTestId('wsf-community-index-who');
-    await expect(who).toBeVisible({ timeout: 25_000 });
-    // Private by default, and SAID so rather than left for the member to find.
-    await expect(who).toContainText('Your name is not shown');
+    const members = page.getByTestId('wsf-community-index-members');
+    await expect(members).toBeVisible({ timeout: 25_000 });
+    /*
+      THE COMMUNITY PANEL SAYS NOTHING ABOUT ME. It previews who is shown and
+      opens the list; a privacy status here put a line about the member inside
+      a panel that is entirely about the community.
+    */
+    const panelText = await page.getByTestId('wsf-community-index-current').innerText();
+    for (const banned of ['Your name is not shown', 'Your name is shown', 'Who is here']) {
+      expect(panelText).not.toContain(banned);
+    }
+    expect(panelText).toContain('MEMBERS');
+    // The preview shows the member who chose to be shown, and not the one who
+    // did not — the same rule as the full list, on the panel.
+    expect(panelText).toContain('Devon Named');
+    expect(panelText).not.toContain('Quentin Quiet');
 
-    await who.click();
+    await members.click();
     await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
     await page.getByTestId('wsf-members-toggle').click();
     await expect(page.getByTestId('wsf-members-toggle')).toHaveAttribute('aria-checked', 'true', {
       timeout: 20_000,
     });
 
+    // And the member they just became now appears in the panel's preview.
     await page.goto('/community');
-    await expect(page.getByTestId('wsf-community-index-who')).toContainText('Your name is shown', {
+    await expect(page.getByTestId('wsf-community-index-current')).toContainText('Casey Caller', {
       timeout: 25_000,
     });
   });
@@ -424,7 +455,7 @@ test.describe('being asked, once, in the community it is about', () => {
     // not an account-level onboarding step — and it is in the control's own
     // label, not a title above it, so the question IS the toggle.
     await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toContainText(
-      'Show my name in Riverside Runners',
+      'Show me to this community',
     );
     // And it is OFF until they turn it on.
     await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toHaveAttribute(
@@ -589,8 +620,6 @@ test.describe('being asked, once, in the community it is about', () => {
       Asserted HERE, before navigating: a locator checked after its page has
       gone is a locator that can only ever report a stale answer.
     */
-    await expect(onArrival).toContainText('Show my name in Riverside Runners');
-
     await page.getByTestId('wsf-visibility-arrival-continue').click();
     await page.goto(`/community/${f.groupId}/members`);
     await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
@@ -598,9 +627,9 @@ test.describe('being asked, once, in the community it is about', () => {
     const inSettings = page.getByTestId('wsf-members-toggle');
     await expect(inSettings).toHaveAttribute('role', 'switch');
     await expect(inSettings).toHaveAttribute('aria-checked', 'false');
-    await expect(inSettings).toContainText('Show my name in this community');
+
     await expect(page.getByTestId('wsf-members-own')).toContainText(
-      'members of Riverside Runners can see your name and role',
+      'members of Riverside Runners can see your display name and role',
     );
   });
 
@@ -638,8 +667,11 @@ test.describe('being asked, once, in the community it is about', () => {
     const sheet = page.getByTestId('wsf-visibility-arrival');
     await expect(sheet).toBeVisible({ timeout: 25_000 });
     await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toContainText(
-      'Show my name in Westside Walkers',
+      'Show me to this community',
     );
+    // The SHEET names the community even though the label does not, because
+    // there the question arrives on its own.
+    await expect(sheet).toContainText('WESTSIDE WALKERS');
     await expect(page.getByTestId('wsf-visibility-arrival-toggle')).toHaveAttribute(
       'aria-checked',
       'false',

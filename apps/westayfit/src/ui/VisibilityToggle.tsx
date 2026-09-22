@@ -36,7 +36,7 @@ export function VisibilityToggle({
   busy,
   onChange,
   testID,
-  nameCommunity,
+  variant = 'settings',
 }: {
   communityName: string;
   value: 'private' | 'visible';
@@ -44,19 +44,22 @@ export function VisibilityToggle({
   onChange: (next: 'private' | 'visible') => void;
   testID?: string;
   /**
-   * Put the community's NAME in the label instead of "this community".
+   * Which of the two approved labels this instance wears.
    *
-   * The arrival sheet sets it, because there the question arrives on its own
-   * and "this community" would be asking somebody to work out which one is
-   * meant. On the community's own people page the surrounding screen has
-   * already said, and repeating the name in the control makes a one-line
-   * preference read like a legal form.
+   *   'settings' → "Visible to members"        (the Members page)
+   *   'arrival'  → "Show me to this community" (the arrival sheet)
    *
-   * Same question, same control, same verb, same direction — only the phrase
-   * that points at the community changes, and it changes to be MORE specific,
-   * never less.
+   * Both are the owner's wording for their own surface, and they differ on
+   * purpose: the settings row sits under a community's name and count, where
+   * "members" is unambiguous and the shortest true phrase wins; the sheet
+   * arrives on its own and has to say which community it means.
+   *
+   * WHAT MAY NOT DIFFER is the thing being asked, the direction of the
+   * control, and the fact that off is off. Neither label talks about "your
+   * name" being shown or hidden — that phrasing, repeated across a product,
+   * is what turns a preference into a preoccupation.
    */
-  nameCommunity?: boolean;
+  variant?: 'settings' | 'arrival';
 }) {
   const on = value === 'visible';
   return (
@@ -77,12 +80,16 @@ export function VisibilityToggle({
         `data-state` through, which is the one form RN-web forwards verbatim.
       */
       {...({ 'aria-checked': on ? 'true' : 'false' } as Record<string, unknown>)}
-      accessibilityLabel={`Show my name in ${communityName}`}
+      accessibilityLabel={
+        variant === 'arrival'
+          ? `Show me to ${communityName}`
+          : `Visible to members of ${communityName}`
+      }
       style={[s.row, busy ? s.busy : null]}
       testID={testID ?? 'wsf-visibility-toggle'}
     >
       <Text style={s.label}>
-        {nameCommunity ? `Show my name in ${communityName}` : 'Show my name in this community'}
+        {variant === 'arrival' ? 'Show me to this community' : 'Visible to members'}
       </Text>
       <View style={[s.track, on ? s.trackOn : null]} testID={`${testID ?? 'wsf-visibility-toggle'}-track`}>
         <View style={[s.knob, on ? s.knobOn : null]} />
@@ -96,19 +103,26 @@ export function VisibilityToggle({
  * surfaces cannot drift: it names the community, says exactly who can see what
  * — a display name and a role, nothing else — and stops.
  */
+/**
+ * The one supporting line, and it is the only explaining either surface does.
+ *
+ * It says who can see what — a display name and a role, nothing else — and
+ * stops. The arrival sheet adds "You can change this anytime", because there
+ * the member is meeting the question for the first time and the reversibility
+ * is the thing that makes it safe to answer either way.
+ */
 export function VisibilityNote({
   communityName,
-  withChangeHint,
+  variant = 'settings',
 }: {
   communityName: string;
-  /** The arrival sheet adds it; the settings page does not need to say so. */
-  withChangeHint?: boolean;
+  variant?: 'settings' | 'arrival';
 }) {
   return (
     <Text style={s.note}>
-      {withChangeHint
-        ? 'Members of this community can see your name and role. You can change this anytime.'
-        : `When on, members of ${communityName} can see your name and role.`}
+      {variant === 'arrival'
+        ? 'Members of this community can see your display name and role when this is on. You can change this anytime.'
+        : `When on, members of ${communityName} can see your display name and role.`}
     </Text>
   );
 }
@@ -126,7 +140,7 @@ const s = StyleSheet.create({
     paddingVertical: 4,
   },
   busy: { opacity: 0.55 },
-  label: { flexShrink: 1, fontSize: 16, lineHeight: 22, color: NAVY },
+  label: { flexShrink: 1, fontSize: 15, lineHeight: 21, color: NAVY },
   track: {
     width: TRACK_W,
     height: TRACK_H,

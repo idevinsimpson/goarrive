@@ -5,12 +5,17 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../../src/auth';
+import { memberCountLabel } from '../../../src/labels';
 import { getFirebaseFunctions } from '../../../src/firebase';
 import {
   CREAM,
   HAIRLINE,
   INK_QUIET,
   NAVY,
+  ON_NAVY,
+  ON_NAVY_MUTED,
+  ON_NAVY_RULE,
+  PROGRESS_GREEN,
   SURFACE,
   TEXT_MUTED,
   display,
@@ -21,35 +26,38 @@ import { VisibilityNote, VisibilityToggle } from '../../../src/ui/VisibilityTogg
 import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 /**
- * PEOPLE HERE — and only the people who said they wanted to be.
+ * MEMBERS — a community feature, with the member's own setting kept quiet.
  *
- * THE PAGE IS A TOGGLE AND A LIST. An earlier version of this screen was
- * technically accurate and read like a terms-of-service page: a headline
- * announcing the member's own state, a paragraph reassuring them that what
- * they add still counts, another explaining that the setting is per community,
- * an eyebrow reading WHO CHOSE TO BE NAMED, and a closing paragraph promising
- * nobody could expose them. Every sentence was true and the whole was
- * exhausting — it made a one-line preference feel like a legal instrument, and
- * a privacy control that feels complicated is one people leave alone.
+ * THIS PAGE WAS REDESIGNED AGAINST THE NORTH STAR, and what it drifted into is
+ * worth writing down because the pull is a real one. Each version was trying to
+ * prove the privacy guarantee IN THE INTERFACE — so privacy climbed the
+ * hierarchy until it was the page title, the first card, the list's eyebrow and
+ * the footer, and a members list had become a settings screen wearing a list.
  *
- * So the explaining is gone and the guarantees are not. What a member sees is
- * a labelled toggle, one sentence saying who can see what, the list, and one
- * quiet line saying why the list is the length it is. Everything the prose
- * used to promise is still enforced in `functions-westayfit` and pinned by
- * tests that fail when it is removed — which is where a guarantee belongs, not
- * in a paragraph a member has to be trusted to read.
+ * The guarantee does not need proving here. It is enforced in the callables and
+ * pinned by tests that fail when it is removed. The North Star's own way of
+ * saying a thing is private is `45 squats · private to you` on the Home
+ * board — three words, inline, a modifier on a line that is mostly about
+ * something else. Never a card, never a heading, never the page.
  *
- * IT IS NOT CALLED "WHO IS HERE". That title reads as live presence, and this
- * product tracks nobody's presence. "People here" is a list of members, which
- * is what it is.
+ * SO: THE COMMUNITY LEADS AND CARRIES THE WEIGHT. The header is the board's own
+ * rhythm — green eyebrow, community name, member count — and the list sits in a
+ * navy panel, because the board uses navy selectively for the important object
+ * on a screen and here the members ARE that object. The member's own control is
+ * one unweighted row on the cream ground: reachable without scrolling a long
+ * list, and visually subordinate to the panel below it by an order of
+ * magnitude.
+ *
+ * THE WORD "MEMBERS", NOT "WHO IS HERE". That reads as live presence, and this
+ * product tracks nobody's presence.
  *
  * WHAT IS DELIBERATELY ABSENT, each because adding it would leak:
  *
- *   · NO COUNT OF THIS LIST beside the community's member count. `/community`
- *     already shows `memberCount` over ALL active members, so a second number
- *     here makes "how many people are hiding" a subtraction the product
- *     performs for the reader. The server refuses to return a visible count
- *     for the same reason; printing `members.length` would reintroduce it.
+ *   · NO COUNT OF THE VISIBLE LIST beside the community's member count. The
+ *     header prints `memberCount` over ALL active members; a second number
+ *     would make "how many are hiding" a subtraction the product performs for
+ *     the reader. The server refuses to return a visible count for the same
+ *     reason.
  *   · NO AVATARS, INITIALS OR MONOGRAMS. No photo is collected in this slice,
  *     and a generated initial is a second identifier beside a name.
  *   · NO JOINED DATE, no "active recently", no ordering but the name. When
@@ -86,6 +94,7 @@ type MemberEntry = { displayName: string; role: 'foundingChampion' | 'member' };
 type OwnMembership = {
   groupId: string;
   displayName: string;
+  memberCount: number;
   visibility: 'private' | 'visible';
 };
 
@@ -175,6 +184,10 @@ export default function CommunityMembersScreen() {
         own: {
           groupId,
           displayName: own.displayName,
+          // The roll over EVERY active member, straight from the aggregate the
+          // product already publishes. Never compared with the list below it:
+          // the difference is "how many are hiding".
+          memberCount: typeof own.memberCount === 'number' ? own.memberCount : 0,
           visibility: own.visibility === 'visible' ? 'visible' : 'private',
         },
         members: Array.isArray(listedResult.value.data?.members)
@@ -236,8 +249,15 @@ export default function CommunityMembersScreen() {
         <WsfWordmark variant="navy" height={22} testID="wsf-members-wordmark" />
       </Pressable>
 
-      <Text style={[display.md, styles.pageTitle]} testID="wsf-members-title">
-        People here
+      {/*
+        THE BOARD'S HEADER RHYTHM: green eyebrow, community name, count. The
+        eyebrow names the page, so there is no second headline competing with
+        the community — and the community, not the feature, is what reads
+        first. An earlier version inverted this: "People here" large, with the
+        community reduced to a grey subtitle beneath it.
+      */}
+      <Text style={styles.pageEyebrow} testID="wsf-members-title">
+        MEMBERS
       </Text>
 
       {!ready || !user ? (
@@ -309,7 +329,7 @@ function LoadingBody() {
 function RefusedBody() {
   return (
     <View style={styles.stateWrap} testID="wsf-members-refused">
-      <View style={styles.panel}>
+      <View style={styles.panelWhite}>
         <Text style={styles.panelTitle}>This isn&apos;t yours to see.</Text>
         <Text style={styles.panelBody}>
           Who is in a community is only ever shown to the people in it.
@@ -333,7 +353,7 @@ function RefusedBody() {
 function FailureBody({ onRetry }: { onRetry: () => void }) {
   return (
     <View style={styles.stateWrap} testID="wsf-members-error">
-      <View style={styles.panel}>
+      <View style={styles.panelWhite}>
         <Text style={styles.panelTitle}>This could not be loaded just now.</Text>
         <Text style={styles.panelBody}>
           Nothing has changed — this is the reading, not the record.
@@ -365,17 +385,21 @@ function ReadyBody({
 }) {
   return (
     <View style={styles.stateWrap} testID="wsf-members-ready">
-      <Text style={styles.community} numberOfLines={2} testID="wsf-members-community">
+      <Text style={[display.md, styles.community]} numberOfLines={2} testID="wsf-members-community">
         {state.own.displayName}
+      </Text>
+      <Text style={styles.count} testID="wsf-members-count">
+        {memberCountLabel(state.own.memberCount)}
       </Text>
 
       {/*
-        THE CONTROL COMES BEFORE THE LIST. A member who has not chosen is
-        private, and should find their own setting at the top rather than
-        discover it under other people's names.
+        THE MEMBER'S OWN SETTING: one unweighted row, no card, no heading of
+        its own. It sits above the list so it is reachable without scrolling
+        past however many names there are, and it is subordinate to the navy
+        panel below by an order of magnitude — which is the whole point of the
+        correction. MEMBERS is about the community; this is about me.
       */}
-      <View style={styles.panel} testID="wsf-members-own">
-        <Text style={styles.panelHeading}>Privacy</Text>
+      <View style={styles.ownRow} testID="wsf-members-own">
         <VisibilityToggle
           communityName={state.own.displayName}
           value={state.own.visibility}
@@ -391,20 +415,23 @@ function ReadyBody({
         ) : null}
       </View>
 
-      {state.members.length === 0 ? (
-        /*
-          NOT "NOBODY IS HERE". The community has members — `/community` says
-          how many. The list is empty because none of them has chosen to be
-          named, which is a different fact and the only one this screen is
-          entitled to state. Said in one line rather than the paragraph this
-          used to be; the standing line below the list carries the rest.
-        */
-        <View style={styles.emptyPanel} testID="wsf-members-empty">
-          <Text style={styles.emptyBody}>No one has chosen to show their name yet.</Text>
-        </View>
-      ) : (
-        <View style={styles.list} testID="wsf-members-list">
-          {state.members.map((m, i) => (
+      {/*
+        THE IMPORTANT OBJECT ON THE SCREEN, and the board uses navy to say so.
+        A members page drawn entirely in cream cards has no centre of gravity
+        and reads as settings, which is exactly what this one did.
+      */}
+      <View style={styles.panel} testID="wsf-members-list">
+        {state.members.length === 0 ? (
+          /*
+            NOT "nobody is here". The count above says how many members there
+            are. The list is empty because none of them has chosen to be
+            shown — a different fact, and the only one this page may state.
+          */
+          <Text style={styles.empty} testID="wsf-members-empty">
+            No one is shown here yet.
+          </Text>
+        ) : (
+          state.members.map((m, i) => (
             /*
               KEYED BY INDEX, DELIBERATELY. There is no id in the payload and
               there must not be: a stable per-member key would be a handle on a
@@ -413,8 +440,6 @@ function ReadyBody({
             */
             <View
               key={i}
-              // The card already draws the top edge; a border on the first row
-              // doubles it into a visible two-pixel line.
               style={[styles.row, i === 0 ? styles.rowFirst : null]}
               testID={`wsf-members-row-${i}`}
             >
@@ -430,14 +455,15 @@ function ReadyBody({
                 <Text style={styles.rowRole}>Champion</Text>
               ) : null}
             </View>
-          ))}
-        </View>
-      )}
+          ))
+        )}
+      </View>
 
       {/*
-        ONE LINE, and it is the only explaining left on the page. It says why
-        the list is the length it is, which is the single thing a member cannot
-        work out for themselves and would otherwise get wrong.
+        ONE LINE, and the only explaining the page does about the LIST rather
+        than about any member. It says why the list is the length it is, which
+        is the single thing a reader cannot work out and would otherwise get
+        wrong — most of all when it is empty.
       */}
       <Text style={styles.foot} testID="wsf-members-foot">
         Only members who choose to be visible are shown.
@@ -451,15 +477,59 @@ function ReadyBody({
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: CREAM },
   page: { paddingHorizontal: 20, paddingTop: 18 },
-  column: { gap: 14 },
+  column: { gap: 12 },
   wordmarkTap: { alignSelf: 'flex-start', paddingVertical: 4, paddingRight: 8 },
-  pageTitle: { color: NAVY },
+  /* The board's eyebrow: green, small, heavy, letterspaced. */
+  pageEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+  },
   note: { fontSize: 15, lineHeight: 21, color: TEXT_MUTED },
 
-  stateWrap: { gap: 14 },
-  community: { fontSize: 15, lineHeight: 20, color: INK_QUIET },
+  stateWrap: { gap: 12 },
+  community: { color: NAVY },
+  count: { fontSize: 15, lineHeight: 21, color: TEXT_MUTED, marginTop: -4 },
 
+  /* One row on the ground, not a card: no border, no fill, no shadow. */
+  ownRow: { gap: 6, paddingVertical: 4 },
+  saveFailed: { fontSize: 14, lineHeight: 20, color: NAVY },
+
+  /* THE navy object. */
   panel: {
+    backgroundColor: NAVY,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    marginTop: 4,
+    ...elevation.card,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: ON_NAVY_RULE,
+  },
+  rowFirst: { borderTopWidth: 0 },
+  rowName: { flexShrink: 1, fontSize: 16, lineHeight: 22, color: ON_NAVY },
+  rowRole: {
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.6,
+    color: ON_NAVY_MUTED,
+    fontWeight: '700',
+  },
+  empty: { fontSize: 15, lineHeight: 21, color: ON_NAVY_MUTED, paddingVertical: 16 },
+
+  foot: { fontSize: 13, lineHeight: 19, color: INK_QUIET },
+
+  /* The refusal and failure panels keep the ordinary white card. */
+  panelWhite: {
     backgroundColor: SURFACE,
     borderRadius: 16,
     borderWidth: 1,
@@ -469,11 +539,7 @@ const styles = StyleSheet.create({
     ...elevation.card,
   },
   panelTitle: { fontSize: 18, lineHeight: 24, color: NAVY, fontWeight: '600' },
-  /* A quiet section label, not a headline: the toggle under it is the content. */
-  panelHeading: { fontSize: 13, lineHeight: 18, letterSpacing: 0.8, color: INK_QUIET, fontWeight: '700' },
   panelBody: { fontSize: 15, lineHeight: 21, color: TEXT_MUTED },
-  saveFailed: { fontSize: 14, lineHeight: 20, color: NAVY },
-
   primary: {
     alignSelf: 'flex-start',
     backgroundColor: NAVY,
@@ -482,50 +548,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 2,
   },
-  primaryBusy: { opacity: 0.6 },
   primaryText: { color: CREAM, fontSize: 15, lineHeight: 20, fontWeight: '600' },
-
-  eyebrow: {
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: 1.1,
-    color: INK_QUIET,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-
-  list: {
-    backgroundColor: SURFACE,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: HAIRLINE,
-    overflow: 'hidden',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: HAIRLINE,
-  },
-  rowFirst: { borderTopWidth: 0 },
-  rowName: { flexShrink: 1, fontSize: 16, lineHeight: 22, color: NAVY },
-  rowRole: { fontSize: 12, lineHeight: 16, letterSpacing: 0.6, color: INK_QUIET, fontWeight: '700' },
-
-  emptyPanel: {
-    backgroundColor: SURFACE,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: HAIRLINE,
-    padding: 18,
-    gap: 6,
-  },
-  emptyBody: { fontSize: 15, lineHeight: 21, color: NAVY },
-
-  foot: { fontSize: 13, lineHeight: 19, color: INK_QUIET, marginTop: 2 },
 
   skeletonPanel: {
     backgroundColor: SURFACE,
