@@ -234,3 +234,48 @@ The operator's receipt already establishes that both tested revisions bind
 secret version 2. The #393 correctness review and its bounded patch continue
 independently and are not asked to rediscover that fact; nothing in #393
 fixes, or claims to fix, this authorization failure.
+
+
+## 9 · Operator result — 2026-09-22 20:11 UTC: STOPPED WITHOUT CHANGE
+
+PR #385 comment 5783381703. The one-permission correction was **not
+applied**, because its mandatory precondition — a *conclusively* established
+missing allow for the runtime principal — could not be met with the operator's
+existing access:
+
+- both functions confirmed ACTIVE on the expected runtime principal
+  (`…-00030-lup`, `…-00030-jus`);
+- Policy Troubleshooter is **disabled** on the project and was not enabled;
+- a short-lived impersonation of the runtime principal was **denied** (the
+  operator lacks `iam.serviceAccounts.getAccessToken` on it);
+- direct project inspection found **no** exact-one-permission custom role and
+  **no** binding for it — but hierarchy-level allow / deny / group controls
+  could not be fully evaluated, so effective access is not proven either way.
+
+Per the owner's stop condition: no role created, no binding added, the
+project policy etag / fingerprint / binding count unchanged, no email sent,
+nothing else touched.
+
+**What a conclusive inspection now needs — an owner decision, not an operator
+or Claude action.** Three paths, in order of least change:
+
+1. **The owner runs the read-only query with owner-level access** (nothing
+   granted to anyone): enable the Policy Troubleshooter API on the staging
+   project if it is off (`gcloud services enable policytroubleshooter.googleapis.com --project westayfit-staging` — a project API setting, not IAM), then
+   `gcloud policy-troubleshoot iam //cloudresourcemanager.googleapis.com/projects/westayfit-staging --principal-email=857281977774-compute@developer.gserviceaccount.com --permission=firebaseauth.users.sendEmail`
+   and paste the sanitized outcome (GRANTED / NOT_GRANTED / UNKNOWN and the
+   matching binding or deny rule, no other detail). An owner with
+   organisation-level read sees the whole hierarchy, which is what the
+   operator could not.
+2. **Give the operator hierarchy read** for one inspection
+   (`roles/iam.securityReviewer` at the organisation or folder that holds the
+   project, plus the API above) — a real IAM grant, so it needs its own
+   bounded approval and rollback.
+3. **Accept the project-level finding as sufficient**: no allow exists at
+   project level and the runtime failure is real; the owner relaxes the stop
+   condition explicitly and the §5 correction proceeds. If a hierarchy deny
+   turns out to be the cause, the binding does nothing and is rolled back —
+   the risk is one wasted attempt, not a wrong grant.
+
+Until one of these is chosen, M5 stays open with an exact blocker; no retry
+send, no further diagnostic deployment.
