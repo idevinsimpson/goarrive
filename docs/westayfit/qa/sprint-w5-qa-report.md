@@ -337,3 +337,25 @@ unproven string turns real NOT_FOUNDs into `unknown` — the same misdirection i
 other direction. It stays bounded: `absent`, never `unbound`.
 
 No approval or merge recommendation given.
+
+
+### Re-take against the real head `b2a7ad8`
+
+Posted: https://github.com/idevinsimpson/goarrive/pull/393#issuecomment-5784327955
+
+W3's `.github/` write restriction lifted and the corrections landed as a commit.
+**Head `b2a7ad89345365f783bf502db45254ae4785f35b`.**
+
+Verified it is `cb91d78` + exactly the patch already reviewed, by applying the patch to a
+fresh `cb91d78` worktree and **diffing the whole tree** against the real head — no
+difference under `.github/wsf-staging`. (`git apply --check --reverse` alone would only
+have shown the patch was *contained*, not that nothing else rode along.)
+`.github/workflows/` untouched.
+
+Re-run at that head rather than carried over: **exit 0, 14 suites, 311 assertions,
+0 failures** — `workflow-contract` 62, `mail-binding` 24. That total was re-tallied
+independently; the head-move note said it had not been.
+
+Everything transfers verbatim: M6/M7 CAUGHT by the gating invariant itself; N1, N3 and
+N5 still survive; N4 still caught; **R1 still open — all four job ids still evade every
+assertion at the real head.** R1 and the N1/N3 fixtures are queued as a follow-up commit.
