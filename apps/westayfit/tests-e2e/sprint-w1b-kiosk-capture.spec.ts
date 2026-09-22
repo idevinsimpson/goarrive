@@ -396,3 +396,264 @@ test.describe('Board 11 · above the route’s own wide-layout threshold', () =>
     await saveFrame(page, frame('kiosk-resting-wide-1024x1366.png'));
   });
 });
+
+/**
+ * THE TWO LOCKED FAILURE STATES — released as a supplement to the same packet.
+ *
+ * Board 11's lock fixes two states the first pass named but did not photograph,
+ * because reaching either needs a failure injected at a precise instant: the
+ * UNKNOWN OUTCOME (`KIOSK_UNRESOLVED_NOTICE`) and the SIGN-OUT FAILURE. Both are
+ * central to the single-goal shared-device contract — one is about effort whose
+ * fate nobody knows, the other about a device that must not hand the next
+ * visitor the last visitor's account — so they are produced here rather than
+ * left as prose.
+ *
+ * WHAT IS INJECTED, AND WHERE. Two faults, both outside the product:
+ *
+ *   1. `route.abort('failed')` on `wsfContribute` — the same transport fault
+ *      `design-after-move-capture.spec.ts` uses for the ordinary MOVE page's
+ *      unknown outcome. The request never reaches the server, so nothing is
+ *      recorded and nothing can be: that is exactly the state whose defining
+ *      property is that the member cannot know.
+ *   2. A readwrite transaction on Firebase Auth's own IndexedDB store
+ *      (`firebaseLocalStorage`) made to throw, for the instant Finish runs.
+ *      The web SDK signs out by REMOVING the persisted user, so a storage layer
+ *      that refuses the removal is the real mechanism by which `signOut()`
+ *      rejects — which is the condition `runKioskFinish` reports as
+ *      `signedOut: false`. Reads are left working; only the removal fails.
+ *
+ * NEITHER TOUCHES THE PRODUCT. No app, backend, config or existing-producer
+ * change was made to reach these screens, and no expected design is substituted
+ * for what rendered. Frames are labelled with the fault that produced them.
+ *
+ * ONE VIEWPORT EACH, the 800×1280 class batch-e drew. The successful Finish
+ * captured above remains the positive control.
+ */
+test.describe('Board 11 · the two locked failure states', () => {
+  test.use({ viewport: TARGET_CLASS, deviceScaleFactor: 2 });
+
+  /** Firebase Auth's persisted records for this origin, read read-only. */
+  async function authRecords(page: Page): Promise<string[]> {
+    return page.evaluate(
+      () =>
+        new Promise<string[]>((resolve) => {
+          const req = indexedDB.open('firebaseLocalStorageDb');
+          req.onerror = () => resolve([]);
+          req.onsuccess = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('firebaseLocalStorage')) {
+              db.close();
+              resolve([]);
+              return;
+            }
+            const all = db
+              .transaction('firebaseLocalStorage', 'readonly')
+              .objectStore('firebaseLocalStorage')
+              .getAllKeys();
+            all.onsuccess = () => {
+              db.close();
+              resolve((all.result as unknown[]).map(String));
+            };
+            all.onerror = () => {
+              db.close();
+              resolve([]);
+            };
+          };
+        })
+    );
+  }
+
+  /** Every stored contribution record this browser holds, parsed. */
+  async function pendingRecords(page: Page): Promise<{ key: string; state: string; count: number }[]> {
+    return page.evaluate(() =>
+      Object.keys(window.localStorage)
+        .filter((k) => k.startsWith('wsf.pendingContribution.'))
+        .map((key) => {
+          let state = '';
+          let count = -1;
+          try {
+            const raw = JSON.parse(window.localStorage.getItem(key) ?? '{}') as {
+              state?: string;
+              count?: number;
+            };
+            state = String(raw.state ?? '');
+            count = Number(raw.count ?? -1);
+          } catch {
+            /* an unparseable row is reported as it reads */
+          }
+          return { key, state, count };
+        })
+    );
+  }
+
+  /** Walk up to the kiosk and arrive, signed in, on the entry screen. */
+  async function walkUp(page: Page, fx: Fixture): Promise<void> {
+    await restingReady(page, fx);
+    await page.getByTestId('wsf-kiosk-start').click();
+    await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-contribute-signin-link').click();
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('wsf-signin-email').fill(fx.email);
+    await page.getByTestId('wsf-signin-password').fill(fx.password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+  }
+
+  test('the unknown outcome: the kiosk says nobody knows, invents no total, and Finish keeps the record', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    const fx = await seedKiosk('d');
+    await walkUp(page, fx);
+
+    await page.getByTestId('wsf-contribute-entry').fill(String(ADDED));
+    await page.getByTestId('wsf-contribute-review').click();
+    await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible();
+    // The write leaves; no answer ever comes back.
+    await page.route('**/wsfContribute', (route: Route) => route.abort('failed'));
+    await page.getByTestId('wsf-contribute-submit').click();
+
+    // ── THE STATE ITSELF, asserted as uncertainty and not as a result ────────
+    await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-contribute-pending')).toContainText(
+      'We couldn’t confirm your contribution yet.'
+    );
+    await expect(page.getByTestId('wsf-contribute-pending')).toContainText(
+      'We don’t know whether this effort was recorded. Don’t record it again.'
+    );
+    await expect(page.getByTestId('wsf-contribute-pending-count')).toHaveText(
+      `You entered ${ADDED} ${UNIT}.`
+    );
+    // NO NEW SHARED TOTAL AND NO MARK. The anchor is deliberately absent here:
+    // a Living WE beside "we don't know whether this was recorded" would invite
+    // exactly the arithmetic the member cannot safely do.
+    await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-contribute-we')).toHaveCount(0);
+    const pendingText = await page.getByTestId('wsf-contribute-screen').innerText();
+    expect(pendingText).not.toContain(`${NEW_TOTAL} of ${TARGET}`);
+    expect(pendingText).not.toContain(`${START_TOTAL} of ${TARGET}`);
+    expect(pendingText).not.toContain('%');
+    // THE GUIDANCE IS THE SHARED-DEVICE ONE: do not repeat it here, and the
+    // replay that is safe is the SAME attempt, not a second contribution.
+    await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveText(
+      'Confirm this contribution'
+    );
+    await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
+      'Your attempt is saved to your account; check it from your own device.'
+    );
+    // The ordinary route's "you can come back to this page" is NOT offered on a
+    // device the visitor is about to be signed out of.
+    expect(pendingText).not.toContain('The same attempt will be here when you come back');
+    // An unresolved attempt is a rest state, so the session can end by itself.
+    await expect(page.getByTestId('wsf-kiosk-finish')).toHaveText('Finish');
+    await expect(page.getByTestId('wsf-kiosk-countdown')).toHaveText(/^Finishing in \d+ seconds?$/);
+    // The record that makes the effort reconcilable exists, under this account.
+    const held = await pendingRecords(page);
+    expect(held.map((r) => r.state)).toEqual(['unknown']);
+    expect(held[0].count).toBe(ADDED);
+    expect(held[0].key).toContain(fx.uid);
+    await page.waitForTimeout(600);
+    await saveFrame(page, frame('kiosk-unresolved-800x1280.png'));
+
+    // ── FINISH FROM UNRESOLVED ───────────────────────────────────────────────
+    // The one case where Finish must NOT clear the stored attempt: it is the
+    // only thing that lets its owner replay the same attempt id and get the
+    // original receipt instead of booking a second contribution.
+    await page.getByTestId('wsf-kiosk-finish').click();
+    await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-kiosk-percent')).toBeVisible({ timeout: 30_000 });
+    // The device is signed out, and the resting screen carries the confirmed
+    // truth — which is still the total before the attempt, because the request
+    // never reached the server. Nothing is invented in either direction.
+    expect(await authRecords(page)).toEqual([]);
+    await expect(page.getByTestId('wsf-kiosk-total-line')).toHaveText(
+      `${START_TOTAL} of ${TARGET} ${UNIT}`
+    );
+    await expect(page.getByTestId('wsf-kiosk-we')).toHaveAttribute('data-fill-ratio', '0.4820');
+    const restedText = await page.getByTestId('wsf-kiosk-screen').innerText();
+    expect(restedText).not.toContain('Alex Rivera');
+    expect(restedText.toLowerCase()).not.toContain('not confirmed');
+    // THE RECORD SURVIVED THE SIGN-OUT, keyed to the account that made it.
+    const kept = await pendingRecords(page);
+    expect(kept.map((r) => r.state)).toEqual(['unknown']);
+    expect(kept[0].key).toContain(fx.uid);
+    await page.waitForTimeout(900);
+    await saveFrame(page, frame('kiosk-rested-after-unresolved-800x1280.png'));
+    await page.unroute('**/wsfContribute');
+  });
+
+  test('the sign-out failure: the device refuses to return to rest while the account is still on it', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    const fx = await seedKiosk('e');
+    await walkUp(page, fx);
+
+    // A REAL, CONFIRMED contribution first: the failure under test is the
+    // sign-out, not the write.
+    await page.getByTestId('wsf-contribute-entry').fill(String(ADDED));
+    await page.getByTestId('wsf-contribute-review').click();
+    await page.getByTestId('wsf-contribute-submit').click();
+    await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText(
+      `${NEW_TOTAL} of ${TARGET} ${UNIT}`
+    );
+    expect(await authRecords(page)).not.toEqual([]);
+
+    // ── THE INJECTION ────────────────────────────────────────────────────────
+    // Firebase Auth signs out by REMOVING its persisted user from IndexedDB.
+    // Only that removal is made to fail; reads keep working, and nothing else
+    // in the page is touched.
+    await page.evaluate(() => {
+      const proto = IDBDatabase.prototype;
+      const original = proto.transaction;
+      proto.transaction = function patched(
+        this: IDBDatabase,
+        names: string | string[] | DOMStringList,
+        mode?: IDBTransactionMode,
+        options?: IDBTransactionOptions
+      ): IDBTransaction {
+        const list = typeof names === 'string' ? [names] : Array.from(names as string[]);
+        if (mode === 'readwrite' && list.includes('firebaseLocalStorage')) {
+          throw new DOMException('injected storage fault', 'InvalidStateError');
+        }
+        return original.call(this, names as string[], mode, options);
+      } as typeof proto.transaction;
+    });
+
+    await page.getByTestId('wsf-kiosk-finish').click();
+
+    // ── WHAT THE DEVICE DOES ─────────────────────────────────────────────────
+    // It stays where it is and says so. A start screen here would be a device
+    // claiming to be free while the previous visitor's account is still on it.
+    await expect(page.getByTestId('wsf-kiosk-finish-error')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-kiosk-finish-error')).toHaveText(
+      'We couldn’t sign you out. Don’t leave this device signed in — try Finish again.'
+    );
+    // The start screen is MOUNTED but not shown: kiosk mode pushes the
+    // contribution route on top of it, and Finish returns by popping back to
+    // it. So the check that matters is that the visitor is not LOOKING at a
+    // resting screen — it is still underneath, and the failure did not reveal
+    // it.
+    await expect(page.getByTestId('wsf-kiosk-screen')).toBeHidden();
+    expect(page.url()).toContain('/contribute/');
+    expect(page.url()).toContain('kiosk=1');
+    await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible();
+    // Finish is offered again rather than left spinning.
+    await expect(page.getByTestId('wsf-kiosk-finish')).toHaveText('Finish');
+    await expect(page.getByTestId('wsf-kiosk-finish')).toBeEnabled();
+    // THE ACCOUNT IS STILL ATTACHED: its persisted record is still on the
+    // device, which is precisely what the warning is about.
+    expect(await authRecords(page)).not.toEqual([]);
+    await page.waitForTimeout(600);
+    await saveFrame(page, frame('kiosk-signout-failed-800x1280.png'));
+
+    // And it is not a cosmetic warning. A reload drops the injected fault with
+    // the JS context; the device comes back still signed in as the same
+    // visitor, with no sign-in gate between the next person and this account.
+    await page.reload();
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-contribute-signed-out')).toHaveCount(0);
+    expect(await authRecords(page)).not.toEqual([]);
+  });
+});
