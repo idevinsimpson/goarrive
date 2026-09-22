@@ -9,7 +9,7 @@ Status layer, from that lock: *"CURRENT BUILD / REVIEW; this board locks
 lifecycle truth, not a new History route."* Nothing gains standing by appearing
 here, and nothing loses the standing it already had.
 
-`WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png` · 2560×6704 (1280×3352 @2x)
+`WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png` · 2560×8562 (1280×4281 @2x)
 
 Released to W1B by the Creative/Product Director on PR #409, comment
 [`5784862880`](https://github.com/idevinsimpson/goarrive/pull/409#issuecomment-5784862880)
@@ -67,27 +67,73 @@ because of something that had been true a week earlier."*
 | `north-star-final/board-02/captures/confirmed-post-target-390x844.png` | a confirmation past the target, 512 → 532 of 500 | `4fe51f0` (2026-09-22) |
 | `review/page-01-home/correction-2026-09-22/ACTUAL-home-{history,alsounderway}-390x844.png` | Home's History and secondary rows **after** the one-mark correction | `6e1ce26` (2026-09-22) |
 | `review/page-04-progress/after/AFTER-rows-390x844.png` | the accepted Page 4 AFTER evidence | `02e24df` (2026-09-21) |
-| `apps/westayfit/src/ui/progressFormat.ts`, `app/community/[groupId]/index.tsx`, `app/activity.tsx` | the lifecycle rules, read for the one state with no frame | `d82890e` |
+| `apps/westayfit/src/ui/progressFormat.ts`, `app/community/[groupId]/index.tsx`, `app/activity.tsx` | the lifecycle rules, cited where they explain why a frame looks as it does | `d82890e` |
+| `review/lifecycle-corrected-current/{home-reached-open-before-correction,home-corrected-below-target,progress-corrected-below-target}-390x844.png` | **Corrected Below Target**, photographed: the same goal reached and then corrected, and the member's own page. Product source proved identical to app-shell head | `44cc063` |
 
 Fixture values come from the JSON sidecars committed beside the captures
 (`state-reached-open.json` → 512 of 500; `state-history.json` → 515 of 500 and
 90 of 400), not from reading numbers off a picture.
 
-## Three provenances, and one state with no frame
+## Three provenances
 
 | Tag | Meaning |
 | --- | --- |
 | `ACCEPTED BUILD · LATER CAPTURE` | Home and Progress are **accepted** at the staging pin `3562156`; these frames were shot afterwards, for Boards 01–02 and the one-mark correction. A later capture of an accepted route is a fact about the frame, not a demotion of the route. |
 | `ACCEPTED BUILD · CAPTURED` | the accepted Page 4 AFTER evidence. |
-| *(no tag — stated on the dark panel)* | **Corrected Below Target.** No capture of this state exists on any surface. It is stated from the source and drawn nowhere. |
+| `CURRENT BUILD · CAPTURED` | the corrected-below-target trio, shot for this board at app-shell `44cc063`. |
 
-**The named dependency.** A frame of Corrected Below Target needs a fixture that
-confirms a total above target, stamps `reachedAt`, then corrects the total below
-it, captured on Home and on Progress. That is a change to a capture producer and
-belongs to whoever owns those specs — not to this board, and not to a drawing.
-Reporting it is the Director's own instruction: *"If a necessary real capture is
-absent, report the exact state/path dependency promptly rather than label
-missing pixels complete."*
+## The supplement — Corrected Below Target, photographed (2026-09-22)
+
+The first cut of this board had **no frame of this state on any surface**. It
+said so on its own face and named the fixture a real one would need. The
+Director opened the exported pixels
+([`5785588557`](https://github.com/idevinsimpson/goarrive/pull/412#issuecomment-5785588557)),
+passed the composition and layout, and held state coverage **PARTIAL** for
+exactly that gap: *"the board's main lifecycle contract needs a visible
+specimen, not only a text promise."* That is right — this board documents the
+product's central lifecycle rule, and it should not be the one place the rule is
+only asserted.
+
+The Director then assigned the capture to this worker under an additional
+exclusive allowlist. The evidence is
+`docs/design-target/review/lifecycle-corrected-current/**`, produced by
+`apps/westayfit/tests-e2e/sprint-w1b-lifecycle-capture.spec.ts`, and its own
+README carries the per-frame `sha256` and the full method. In short:
+
+1. the goal **actually reaches** its target — a real `wsfContribute` crosses it
+   and the **server** stamps `reachedAt`; nothing is seeded reached;
+2. a real **`wsfAdjustGoal`** by the community's own `foundingChampion`, with a
+   reason, moves the confirmed total below target; no shard is hand-edited, and
+   the producer sums the ten counter shards to prove the total is exactly 460;
+3. the spec then reads the goal document and asserts **`reachedAt` is still
+   there** — otherwise a missing date line would be evidence of deleted data
+   rather than of a page reporting the present tense;
+4. every post-correction assertion names the exact non-zero value, and the
+   progress-error node is asserted absent, so **a zero is not a pass**;
+5. the **positive case is preserved** twice over: the same goal is photographed
+   reached before it is corrected, and a second goal — genuinely reached, closed,
+   never corrected — keeps its `Reached` result on Home and its `REACHED` badge
+   and full mark on Progress.
+
+**Three things the frames show that the lock's prose does not, all stated on the
+board:**
+
+- the status line reads **`Only 40 to go`**, not `40 to go`: 460 of 500 is 92%,
+  past the 90% threshold, so the goal lands back in **nearGoal** and takes that
+  phase's wording. The lock's figure is illustrative of the numbers, not a copy
+  string;
+- the member's own part still reads **520** while the shared total reads 460,
+  because a goal-level correction moves the **community's** confirmed total and
+  makes no claim about whose contribution was wrong;
+- Home reports a **confirmed snapshot** and says when, so the correction is taken
+  the way a member takes it — by pressing the page's own `Refresh`. Reaching past
+  that into the cache would have been staging the result.
+
+**Writes are gated; the assertions are not.** `helpers/capture` documents both
+shapes, and this spec asserts a regression the build has had before, so the guard
+does not depend on somebody asking for pictures. An ungated run was verified to
+write no image. If the lead prefers the plain `test.skip` shape the other capture
+producers use, it is a one-line change.
 
 ## The lock, line by line, against what the board shows
 
@@ -98,7 +144,7 @@ missing pixels complete."*
 | Post-target/Open: mark stays full, percent capped at 100%, overshoot visible in exact totals (`515 of 500`, `15 beyond our goal`) | `confirmed-post-target` — **532 of 500**, `100% complete`, *32 beyond our goal · still open*. The lock illustrates this rule with 515 of 500 / *15 beyond our goal*; the captured open fixtures are 532 of 500 and 512 of 500, and the board prints what each frame prints. 515 of 500 does appear on the board — as the **closed** reached row, which is a different phase |
 | Closed/Reached = ended + target met: `Reached`, exact final total/period, no contribution action | `state-closed-reached` — *August push-ups · 515 of 500 push-ups · Reached · Aug 19 – Sep 2* |
 | Closed/Unfinished: neutral `Closed at N%`, exact final total/period, no shame copy | `state-closed-unfinished` — *July stairs · 90 of 400 flights · Closed at 22.5% · Jul 20 – Aug 3* |
-| Corrected Below Target: show the current phase/status, and **must not** print `Reached on …` as the present | The dark panel — **no frame exists**; the rule, the two guards and the build's own note are quoted, and the capture dependency is named |
+| Corrected Below Target: show the current phase/status, and **must not** print `Reached on …` as the present | **Photographed** — the same goal at `520 of 500 · 100% · Reached Sep 22`, then at `460 of 500 · 92% · Only 40 to go` with no date anywhere, while `reachedAt` is asserted still present in Firestore. The Progress frame shows the same rule by contrast |
 | Only CLOSED goals appear in History; open goals stay active and are never duplicated | `ACTUAL-home-history` (two closed rows under `HISTORY`) beside `ACTUAL-home-alsounderway` (an open goal in the active section) |
 | History is absent when there is nothing to record | Stated in the lock panel. The accepted Home AFTER frames seed one goal and contain **no** History section at all — which is that rule, though it is an absence and is not shown as a frame |
 | A failed history/goals read is an error/recovery state, never a fake empty history | `state-unavailable` — *Progress couldn't be loaded just now.* + `Try again`, and **no mark at all** |
@@ -135,27 +181,36 @@ caption, so an accepted frame is not mistaken for a relapse.
   which belong to the Progress page's own board.
 - It does not edit, re-capture or re-encode any source PNG, and it does not
   touch `lib.mjs`, `render-board.mjs`, `index.mjs`, the package README or
-  manifest, `review-copies/`, the INDEX, Boards 00–08, `.github/`, app or
-  backend code, or any test. `board-09.mjs` defines its one local helper —
-  a card-crop frame — inside its own module.
+  manifest, `review-copies/`, the INDEX, any other board, `.github/`, app or
+  backend code, or any pre-existing test. `board-09.mjs` defines its one local
+  helper — a card-crop frame — inside its own module. The supplement adds **one**
+  new file outside the board's own directory, the gated producer the Director
+  allowlisted, and touches no product, functions, config or shared producer.
+- The new evidence set is **not** on `check-evidence-intact.mjs`'s freeze list.
+  That file belongs to the lead; adding these paths is their call, not this
+  packet's.
 
 ## Fixtures
 
 "Smyrna Strong", "Alpharetta Morning Movers", "500 Squats by Friday", "August
 push-ups", "July stairs", "Minutes walked in September" and every total on these
 frames are synthetic emulator fixtures, recorded in the JSON sidecars beside the
-captures and unchanged here. No real community, person or activity appears, and
+captures and unchanged here. The corrected-below-target set carries its own
+`fixture.json` naming the goal, the contribution, the correction and the
+untouched control. No real community, person or activity appears, and
 no names, faces, reactions, streaks, rankings or comparison appears anywhere.
 
 ## Verification
 
 | Check | Result |
 | --- | --- |
-| Control render | Board 01 re-rendered **byte-identical** to its committed PNG at this branch's head |
-| Determinism | Board 09 rendered twice, identical bytes (`cmp`) |
-| Canvas | content height 3352 CSS px; footer at 3286–3316, inside the canvas; every panel and frame inside, nothing clipped |
-| Evidence guard | `node scripts/westayfit/check-evidence-intact.mjs` → frozen BEFORE intact (8 paths), accepted TARGET / AFTER intact (16 paths) |
-| Diff scope | `docs/design-target/north-star-final/board-09/**` and `scripts/westayfit/north-star/board-09.mjs` only |
+| Control render | Board 01 re-rendered **byte-identical** to its committed PNG, before the first cut and again before this supplement |
+| Determinism | Board 09 rendered twice at this head, identical bytes (`cmp`) |
+| Canvas | content height 4281 CSS px; footer at 4215–4245, inside the canvas; every panel and frame inside, nothing clipped |
+| Evidence guard | `node scripts/westayfit/check-evidence-intact.mjs` → frozen BEFORE intact (9 paths), accepted TARGET / AFTER intact (18 paths) |
+| Producer | `sprint-w1b-lifecycle-capture.spec.ts`: **1 passed, 3 frames** gated; **1 passed, 0 images written** ungated (frames hashed before and after) |
+| Typecheck | `npm --prefix apps/westayfit run ts:check` passes with the spec in place |
+| Diff scope | `board-09/**`, `board-09.mjs`, `review/lifecycle-corrected-current/**` and `tests-e2e/sprint-w1b-lifecycle-capture.spec.ts` — the exact allowlist, nothing else |
 
 ## Nothing was filled from memory
 

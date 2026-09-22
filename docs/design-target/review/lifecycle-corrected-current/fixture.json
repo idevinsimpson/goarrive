@@ -1,0 +1,28 @@
+{
+  "note": "Synthetic emulator fixture — not real members or activity.",
+  "community": "Smyrna Strong",
+  "groupId": "w1blmuda7dsyee8331",
+  "corrected": {
+    "goalId": "w1blmuda7dsyee8331o",
+    "title": "500 Squats by Friday",
+    "target": 500,
+    "unit": "squats",
+    "contributed": 520,
+    "correction": -60,
+    "correctedTotal": 460,
+    "reachedAtStamped": "by wsfContribute, and still present after wsfAdjustGoal"
+  },
+  "control": {
+    "goalId": "w1blmuda7dsyee8331c",
+    "title": "August push-ups",
+    "target": 500,
+    "unit": "push-ups",
+    "total": 515,
+    "status": "closed",
+    "corrected": false
+  },
+  "viewport": {
+    "width": 390,
+    "height": 844
+  }
+}
