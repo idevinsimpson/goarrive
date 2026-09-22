@@ -90,3 +90,23 @@ Adding a ninth cell and a third seam cell would not fit the old canvas, so two g
 - **The board is 1280×2190 (was 1280×1935).** At 1935 the screen note's last two rows and the footer were clipped off the bottom. Width is the set's constant — every board is 1280 — and height is per board already (Board 00 is 1400, Board 02 is 2470). The new height is the content's exact height: the footer sits on the bottom padding with no dead space under it.
 
 Both were verified by measuring the rendered DOM, not by eye: no element overflows its parent, and `scrollHeight` equals the declared height exactly.
+
+
+## Correction — 2026-09-22 (L0, answering W2's D-01.1 / P-1)
+
+Column 2 (`captures/phone-member-multiple-goals-390x844.png`) is a truthful
+capture of a **scrolled** Home: the capture spec centres the second goal's
+card, so the frame opens below the hero — no wordmark, no community identity,
+no Living WE in it. It was captioned as if it showed the featured goal's mark.
+It now carries a second pill, **SCROLLED VIEW**, the title says
+`(scrolled)`, and the caption describes what is in the frame: the hero and
+its Living WE sit above it; the second goal gets a compact card — figures, no
+mark; the roll-up counts goals, never people. The capture is unchanged and is
+not presented as the arrival state.
+
+Not done here: **P-8** (recording `total` / `target` / `ownCredit` in the
+Champion sidecar) is a capture-spec change; the original sidecar records are
+preserved as written and no measurement is added by hand.
+
+Re-rendered at `2f088d7`; opened and read at 1×. Status unchanged: PRECISION
+REVIEW.

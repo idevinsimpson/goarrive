@@ -51,3 +51,21 @@ any presentation of the script tagline treatment as a locked typography rule.
 
 The lock settles every panel above. Where it did not settle a detail, the detail
 is not on the board.
+
+
+## Corrections — 2026-09-22 (L0, answering W2's audit `de63beb`)
+
+- **D-00.1 / P-5** — the overshoot state's caption read `103% · numbers keep
+  the overshoot`. The product caps the percent text at 100% and keeps the
+  overshoot in the exact total (Board 02's lock and frames), and this board
+  is the constitution the others read against, so it now says
+  `100% shown · the total keeps the overshoot`. The mark and the `515 of 500`
+  figure are unchanged.
+- **D-00.2** — the footer said `LOCKED` with no reconstruction caveat on the
+  board's own face. It now reads `LOCK VERDICT · PR #365 comment 5770785512 ·
+  governing constitution for boards 01–17 · RECONSTRUCTED REFERENCE,
+  self-checked · independent board review pending`, which is what this README
+  and the manifest already said.
+
+Re-rendered at `2f088d7`; opened and read at 1× (footer and caption checked in
+crops). Status unchanged: SELF-CHECKED · independent review pending.
