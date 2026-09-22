@@ -359,3 +359,49 @@ independently; the head-move note said it had not been.
 Everything transfers verbatim: M6/M7 CAUGHT by the gating invariant itself; N1, N3 and
 N5 still survive; N4 still caught; **R1 still open — all four job ids still evade every
 assertion at the real head.** R1 and the N1/N3 fixtures are queued as a follow-up commit.
+
+
+## Progress and You — short-phone and keyboard check: CLEAN
+
+Assignment: PR #395 comment 5784436697. Candidate pinned: **`e609c57`** (this branch's base;
+#400 touches only the contribution route and is not in this base yet).
+
+Routes read from source rather than assumed — `MemberTabBar.tsx:47-48` gives
+Progress = `/activity` (`app/activity.tsx`) and You = `/you` (`app/you.tsx`).
+
+Both routes **do** still carry the end-padding pattern W5-M1 found wanting:
+
+- `activity.tsx:112,253` — `paddingBottom: MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeArea.bottom + 16`
+- `you.tsx:662` — `paddingBottom: MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG`
+
+That is a reason to look, not a defect. **Neither route is defective.**
+
+`sprint-w5-progress-you-occlusion.spec.ts`: **4 tests, 4 passed.** At 390x640, 390x664 and
+390x844, at rest and at half and full scroll, **no control whose centre is inside the route's
+own scroll container resolves to the shell** — on either route, at any height, at any of the
+three positions. Keyboard: Tab reaches the controls and none of them is covered once focused.
+
+Method, per the packet and the W5-M1 correction: the scroll container is **discovered**, not
+assumed (`/activity` has a testID, `/you` does not, and the document element scrolls on
+neither); merely-below-fold content is **not** counted as occluded; a real tap is recorded as
+context only and never as proof, because Playwright scrolls an element into its container
+before clicking and so succeeds on a broken build too.
+
+### The clean result is not vacuous — the detector was proven against a known defect
+
+The identical detector, pointed at `/move` on the same build in the same run, reports:
+
+```
+"664/at-rest": ["wsf-contribute-skip-timer -> wsf-member-tab-move"]
+```
+
+That is W5-M1 exactly — same control, same height, same occluding element — reproduced by an
+independently written probe, while Progress and You stayed clean in that same run. A detector
+that never fires proves nothing; this one fires on the real defect and not on these two routes.
+
+One incidental observation, not a finding: `/move`'s **keyboard** case passes even on the
+broken build. The occluded control is reachable by focus and uncovered once focused; it is
+dead only to a tap at rest. That is consistent with W5-M1's severity and is why the geometry
+check, not the keyboard or the tap, is what decides.
+
+Probe stopped, as instructed.
