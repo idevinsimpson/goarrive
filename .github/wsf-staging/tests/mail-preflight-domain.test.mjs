@@ -63,6 +63,48 @@ test('a westay.fit sender matches the default verified domain', () => {
   assert.equal(r.domainOk, 'yes', 'the intended staging domain must match the default');
 });
 
+test('the display-name form is read — this is the form the environment actually uses', () => {
+  /*
+    THE SECOND REGRESSION THIS FILE EXISTS FOR, and it reached production
+    configuration. `WSF_EMAIL_FROM` on the wsf-staging environment is
+    `We Stay Fit <noreply@westay.fit>`, the ordinary RFC 5322 display-name
+    form. Slicing after the last `@` returned `westay.fit>` — angle bracket
+    included — so a correctly configured environment reported NOT READY
+    (run 35735970775).
+
+    A diagnostic that accuses a correct configuration is worse than one that
+    is merely unhelpful: it sends the next operator chasing a problem that
+    does not exist, or teaches them to disbelieve the report.
+  */
+  const r = preflight({ WSF_EMAIL_FROM: 'We Stay Fit <noreply@westay.fit>' });
+  assert.equal(r.senderState, 'present');
+  assert.equal(r.domainOk, 'yes', 'the display-name form must resolve to westay.fit');
+});
+
+test('the angle-bracket-only form is read too', () => {
+  const r = preflight({ WSF_EMAIL_FROM: '<noreply@westay.fit>' });
+  assert.equal(r.domainOk, 'yes');
+});
+
+test('the display-name form is not a way round the domain check', () => {
+  const r = preflight({ WSF_EMAIL_FROM: 'We Stay Fit <noreply@goarrive.fit>' });
+  assert.equal(r.senderState, 'present');
+  assert.equal(r.domainOk, 'no', 'the other workspace stays refused in every form');
+  assert.equal(r.ready, 'no');
+});
+
+test('a display name wrapped round something that is not an address is refused', () => {
+  const r = preflight({ WSF_EMAIL_FROM: 'We Stay Fit <not-an-address>' });
+  assert.equal(r.senderState, 'refused');
+  assert.equal(r.domainOk, 'no');
+});
+
+test('an empty pair of angle brackets is refused rather than read as a domain', () => {
+  const r = preflight({ WSF_EMAIL_FROM: 'We Stay Fit <>' });
+  assert.equal(r.senderState, 'refused');
+  assert.equal(r.domainOk, 'no');
+});
+
 test('a goarrive.fit sender does NOT match — it is the other workspace', () => {
   /*
     THE REGRESSION THIS FILE EXISTS FOR. `goarrive.fit` is verified, and
@@ -104,12 +146,22 @@ test('the report still never prints the local part of the address', () => {
     only the DOMAIN is reported. Re-asserted here because this suite is the
     one that feeds real-looking addresses through the script.
   */
-  const r = preflight({ WSF_EMAIL_FROM: 'a-very-distinctive-local-part@westay.fit' });
+  const r = preflight({
+    WSF_EMAIL_FROM: 'A Distinctive Display Name <a-very-distinctive-local-part@westay.fit>',
+  });
   assert.ok(
     !r.stdout.includes('a-very-distinctive-local-part'),
     'the preflight echoed the local part of the sender address'
   );
-  assert.match(r.stdout, /on westay\.fit/, 'the domain itself is still reported');
+  assert.ok(
+    !r.stdout.includes('A Distinctive Display Name'),
+    'the preflight echoed the display name'
+  );
+  assert.match(r.stdout, /on westay\.fit\b/, 'the domain itself is still reported');
+  assert.ok(
+    !/westay\.fit>/.test(r.stdout),
+    'the reported domain still carries the closing angle bracket'
+  );
 });
 
 test('the preflight still exits 0 — a report that fails the run gets routed around', () => {
