@@ -284,6 +284,88 @@ test('A RESPONSE THAT IDENTIFIES NO FUNCTION IS UNKNOWN, however complete the re
   assert.notEqual(r.read(KEY), 'bound_pinned');
 });
 
+// ── Malformed shape vs genuine absence ──────────────────────────────────────
+// Every case below is valid JSON, exits 0, and identifies a function. Only the
+// SHAPE distinguishes it from a real answer — and each one previously reported
+// `unbound`, which asserts that the deploy never wired the secret.
+
+test('A NON-OBJECT serviceConfig IS UNKNOWN, not unbound', () => {
+  // `typeof "invalid" !== 'object'`, but the old guard only tested `!= null`.
+  const r = report('serviceconfig-string');
+  assert.equal(r.read(KEY), 'unknown');
+  assert.notEqual(r.read(KEY), 'unbound');
+});
+
+test('AN ARRAY serviceConfig IS UNKNOWN, not unbound', () => {
+  // The trap in the old guard: `typeof [] === 'object'` and `[] != null`, so
+  // an array passed a check that meant to require an object.
+  const r = report('serviceconfig-array');
+  assert.equal(r.read(KEY), 'unknown');
+  assert.notEqual(r.read(KEY), 'unbound');
+});
+
+test('A NON-ARRAY secret reference COLLECTION IS UNKNOWN, not unbound', () => {
+  // `Array.isArray(x) ? x : []` silently turned an object into "no references",
+  // which reads identically to a function that genuinely has none.
+  const r = report('refs-object');
+  assert.equal(r.read(KEY), 'unknown');
+  assert.notEqual(r.read(KEY), 'unbound');
+});
+
+test('A MALFORMED ENTRY inside the reference list is unknown', () => {
+  // A non-object entry would be filtered out silently and could hide a real
+  // reference behind it.
+  const r = report('refs-bad-entry');
+  assert.equal(r.read(KEY), 'unknown');
+});
+
+test('POSITIVE CONTROL: a valid serviceConfig that OMITS the list is still unbound', () => {
+  /*
+    The case the fixes above must not swallow. A projected describe omits a
+    field with no value, so this is what a real function with no secret
+    reference looks like — and it is genuine absence, not unreadable metadata.
+  */
+  const r = report('serviceconfig-empty');
+  assert.equal(r.read(KEY), 'unbound');
+  assert.notEqual(r.read(KEY), 'unknown');
+});
+
+// ── A malformed revision must not take the report down with it ──────────────
+
+test('A NON-ITERABLE container list is UNRESOLVED, and does not throw', () => {
+  const r = report('revision-containers-object');
+  assert.equal(r.status, 0, 'the reporter exited non-zero on a malformed revision');
+  assert.equal(r.read(`${KEY}_SERVED`), 'unresolved');
+  assert.match(r.stdout, /revision version UNRESOLVED/);
+});
+
+test('a non-array env list and a non-object spec are UNRESOLVED, not a crash', () => {
+  for (const scenario of ['revision-env-object', 'revision-spec-string']) {
+    const r = report(scenario);
+    assert.equal(r.status, 0, `${scenario}: the reporter exited non-zero`);
+    assert.equal(r.read(`${KEY}_SERVED`), 'unresolved', `${scenario}: served was not unresolved`);
+  }
+});
+
+test('A MALFORMED REVISION DOES NOT SUPPRESS THE OTHER FUNCTION', () => {
+  /*
+    THE REASON THIS MATTERS MORE THAN ITS OWN ROW.
+
+    The iteration threw at top level, so the process ended mid-loop: the run
+    log showed NEITHER function rather than one answer and one `unresolved`.
+    Both rows must be present, and the reporter must still exit 0.
+  */
+  const r = report('revision-containers-object', [
+    'wsfSendVerificationEmail',
+    'wsfSendPasswordResetEmail',
+  ]);
+  assert.equal(r.status, 0);
+  assert.equal(r.read('WSF_MAIL_BINDING_WSFSENDVERIFICATIONEMAIL'), 'bound_pinned');
+  assert.equal(r.read('WSF_MAIL_BINDING_WSFSENDPASSWORDRESETEMAIL'), 'bound_pinned',
+    'the second function lost its row to the first function@s malformed revision');
+  assert.equal(r.read('WSF_MAIL_BINDING_WSFSENDPASSWORDRESETEMAIL_SERVED'), 'unresolved');
+});
+
 test('A LEGITIMATE EMPTY BINDING IS STILL UNBOUND', () => {
   // The case the malformed-response fix must NOT swallow: the response
   // identifies the function and it genuinely references no secret.
