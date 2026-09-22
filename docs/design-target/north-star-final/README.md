@@ -47,10 +47,10 @@ the notes column and left out.** Gaps are not filled from memory.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 00 | Brand foundation | **FINAL** | `5770785512` | accepted build | [`board-00/…BOARD_00_BRAND_FOUNDATION_FINAL.png`](board-00/WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL.png) | `3c7c7d3` | Governing constitution for 01–17. Rendered from the repo's own brand assets and Living WE area calibration; see `board-00/README.md` for the line-by-line check against the lock. |
 | 01 | Home | **PRECISION REVIEW** | `5770964377`, corrected by `5771119797`, precision holds `5771373306` + `5771398679` | accepted build + labelled visibility seam | [`board-01/…BOARD_01_HOME_CANDIDATE.png`](board-01/WE_STAY_FIT_NORTH_STAR_BOARD_01_HOME_CANDIDATE.png) | `39ee522` | Creative direction locked. Every phone and lifecycle state is a **real capture** of the build (`north-star-board-01-capture.spec.ts`), asserted before it was shot; the member-visibility seam is a labelled composition. See `board-01/README.md` for the nine corrections line by line. Takes the `_FINAL` name when the precision review clears. |
-| 02 | MOVE | PENDING | `5771235529` | accepted build | — | — | |
-| 03 | Community | PENDING | `5771275765` | accepted build | — | — | |
-| 04 | Progress | PENDING | `5771310017` | accepted build | — | — | Phase A only; private dated history remains an unbuilt seam. |
-| 05 | You | PENDING | `5771338856` | accepted build | — | — | |
+| 02 | MOVE | **FINAL** | `5771235529` | accepted build | [`board-02/…BOARD_02_MOVE_FINAL.png`](board-02/WE_STAY_FIT_NORTH_STAR_BOARD_02_MOVE_FINAL.png) | `e609c57` | Nine accepted Page 2 AFTER frames read in place, plus the reached and post-target confirmations captured by `north-star-board-02-capture.spec.ts`. Numeric differences from the lock's illustrative fixture are recorded in `board-02/README.md`. |
+| 03 | Community | **FINAL** | `5771275765` | accepted build; Join placement seam | [`board-03/…BOARD_03_COMMUNITY_FINAL.png`](board-03/WE_STAY_FIT_NORTH_STAR_BOARD_03_COMMUNITY_FINAL.png) | `e609c57` | Seven accepted Page 3 AFTER frames read in place; the Join placement is a labelled product question, not a screen. |
+| 04 | Progress | **FINAL** | `5771310017` | accepted build (Phase A); dated history seam | [`board-04/…BOARD_04_PROGRESS_FINAL.png`](board-04/WE_STAY_FIT_NORTH_STAR_BOARD_04_PROGRESS_FINAL.png) | `e609c57` | Five accepted Page 4 AFTER frames read in place. "Nothing finished yet" has no standalone accepted frame and is shown inside the partial-read frame, flagged. |
+| 05 | You | **FINAL** | `5771338856` | accepted build | [`board-05/…BOARD_05_YOU_FINAL.png`](board-05/WE_STAY_FIT_NORTH_STAR_BOARD_05_YOU_FINAL.png) | `e609c57` | Six accepted Page 5 AFTER frames read in place; every lock state has one. |
 | 06 | Create / join / auth | PENDING | `5771368550` | current build review | — | — | |
 | 07 | Champion management | PENDING | `5771412585` | current Manage-sheet truth | — | — | Champion administration beyond the current sheet is an unbuilt seam. |
 | 08 | Goal setup | PENDING | `5771436211` | staging-only current-build truth | — | — | |
@@ -93,9 +93,11 @@ unfinished board holds a status note and nothing else.
 ## INDEX.png
 
 `INDEX.png` is a contact sheet of real thumbnails of every completed board,
-00–11 in order, with restrained labelled `PENDING` placeholders for 12–17 and
+00–17 in order, with restrained labelled `PENDING` placeholders for the rest and
 no fabricated screenshots. **It is navigation, not a substitute for opening the
-full board.**
+full board.** It is rendered by `scripts/westayfit/north-star/index.mjs`, which
+reads the package directory at render time, so a board appears on it only once
+its PNG exists — the sheet cannot claim a board the directory does not hold.
 
 ## Review protocol
 
