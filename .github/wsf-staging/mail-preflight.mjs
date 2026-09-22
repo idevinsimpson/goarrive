@@ -142,7 +142,29 @@ function authorizedDomainState(host) {
 /* ── report ─────────────────────────────────────────────────────────────── */
 
 const STAGING_HOST = 'westayfit-staging--staging-4a616y5m.web.app';
-const VERIFIED_SENDER_DOMAIN = (process.env.WSF_VERIFIED_SENDER_DOMAIN ?? 'goarrive.fit').toLowerCase();
+/**
+ * THE VERIFIED SENDER DOMAIN FOR THIS TRACK IS `westay.fit`.
+ *
+ * It defaulted to `goarrive.fit`, and that was wrong in a way worth writing
+ * down, because the evidence for it looked solid. An inspection of the Resend
+ * workspace reachable from a developer session returned exactly one domain —
+ * `goarrive.fit`, verified, sending enabled — with no `westay.fit` in it at
+ * all. That reading was accurate. It was accurate about the wrong workspace.
+ *
+ * There are TWO Resend workspaces. The one reachable from here owns
+ * `goarrive.fit`. The WE STAY FIT staging track lives in a separate workspace
+ * that owns verified `westay.fit` and holds the sending-only key restricted to
+ * it — the credential in `WSF_EMAIL_API_KEY` version 2.
+ *
+ * So a `goarrive.fit` sender is not merely un-preferred here: it belongs to a
+ * different workspace from the key this project deploys with, and the provider
+ * would refuse the send. The preflight has to say so BEFORE a deploy, which is
+ * what `WSF_MAIL_PREFLIGHT_SENDER_DOMAIN_OK` reports.
+ *
+ * Still overridable by `WSF_VERIFIED_SENDER_DOMAIN`, so a later domain change
+ * stays a variable rather than a commit. The DEFAULT is the intended truth.
+ */
+const VERIFIED_SENDER_DOMAIN = (process.env.WSF_VERIFIED_SENDER_DOMAIN ?? 'westay.fit').toLowerCase();
 
 const secret = secretState();
 const sender = senderState();
