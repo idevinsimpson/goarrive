@@ -1,0 +1,220 @@
+# WSF — visual-review export for the /join/[joinCode] page gate: the existing
+# Batch B evidence named in W4's join-review-evidence.md, packaged at a pinned
+# current app ref with each ORIGINAL capture revision retained in the label —
+# the reviewer's proven native-file path (PR #365 comment 5785039295 §5).
+# Scope, exactly: batch-b-join-and-setup/before (frozen, 30), after (30) for
+# the ten Join states at 390x844 / 390x640 / 430x932, and TARGET-join-* (36)
+# only — none of the setup/start-community/goal targets. Same posture as the
+# other exporters: ordinary pull_request job into this one branch,
+# contents:read, pinned actions, persist-credentials false, inline stdlib
+# packaging, nothing from the tree executed, nothing recaptured, rendered or
+# resized. This branch carries only this file on top of the app ref and is
+# never merged; it exists to run the job.
+name: WSF visual-review export — /join page gate (Batch B before/after/target)
+
+on:
+  pull_request:
+    branches:
+      - claude/wsf-app-shell
+    paths:
+      - '.github/workflows/wsf-visual-review-join-frames.yml'
+      - 'docs/design-target/review/batch-b-join-and-setup/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsf-visual-review-join-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Export the pinned canonical images with a manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the PR head commit exactly (not the merge ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Package original bytes + manifest (inline, stdlib only; nothing from the tree is executed)
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, shutil, struct, subprocess, sys
+          repo = os.environ['REPO']
+          want = os.environ['SOURCE_SHA']
+          def git(*a):
+              return subprocess.check_output(['git', *a], text=True).strip()
+          head = git('rev-parse', 'HEAD')
+          if head != want:
+              sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
+          NS = 'docs/design-target/north-star-final'
+          OWNER = 'docs/design-target/owner-north-star'
+          # THE EXACT ALLOWLIST: the 96 existing Batch B Join files, original committed
+          # bytes only. Each label carries the kind, the state, the matched viewport and
+          # the ORIGINAL capture/drawing revision (git log -1 for the path at the app ref).
+          JB = 'docs/design-target/review/batch-b-join-and-setup'
+          allow = [
+              (f'{JB}/before/BEFORE-device-choice-390x640.png', 'BEFORE (frozen) · BEFORE-device-choice · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-device-choice-390x844.png', 'BEFORE (frozen) · BEFORE-device-choice · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-device-choice-430x932.png', 'BEFORE (frozen) · BEFORE-device-choice · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-device-shared-390x640.png', 'BEFORE (frozen) · BEFORE-device-shared · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-device-shared-390x844.png', 'BEFORE (frozen) · BEFORE-device-shared · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-device-shared-430x932.png', 'BEFORE (frozen) · BEFORE-device-shared · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-failed-390x640.png', 'BEFORE (frozen) · BEFORE-failed · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-failed-390x844.png', 'BEFORE (frozen) · BEFORE-failed · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-failed-430x932.png', 'BEFORE (frozen) · BEFORE-failed · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-invite-in-390x640.png', 'BEFORE (frozen) · BEFORE-invite-in · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-invite-in-390x844.png', 'BEFORE (frozen) · BEFORE-invite-in · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-invite-in-430x932.png', 'BEFORE (frozen) · BEFORE-invite-in · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-invite-out-390x640.png', 'BEFORE (frozen) · BEFORE-invite-out · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-invite-out-390x844.png', 'BEFORE (frozen) · BEFORE-invite-out · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-invite-out-430x932.png', 'BEFORE (frozen) · BEFORE-invite-out · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-load-failed-390x640.png', 'BEFORE (frozen) · BEFORE-load-failed · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-load-failed-390x844.png', 'BEFORE (frozen) · BEFORE-load-failed · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-load-failed-430x932.png', 'BEFORE (frozen) · BEFORE-load-failed · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-loading-390x640.png', 'BEFORE (frozen) · BEFORE-loading · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-loading-390x844.png', 'BEFORE (frozen) · BEFORE-loading · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-loading-430x932.png', 'BEFORE (frozen) · BEFORE-loading · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-not-valid-390x640.png', 'BEFORE (frozen) · BEFORE-not-valid · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-not-valid-390x844.png', 'BEFORE (frozen) · BEFORE-not-valid · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-not-valid-430x932.png', 'BEFORE (frozen) · BEFORE-not-valid · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-too-many-390x640.png', 'BEFORE (frozen) · BEFORE-too-many · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-too-many-390x844.png', 'BEFORE (frozen) · BEFORE-too-many · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-too-many-430x932.png', 'BEFORE (frozen) · BEFORE-too-many · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-working-390x640.png', 'BEFORE (frozen) · BEFORE-working · viewport 390x640 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-working-390x844.png', 'BEFORE (frozen) · BEFORE-working · viewport 390x844 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/before/BEFORE-working-430x932.png', 'BEFORE (frozen) · BEFORE-working · viewport 430x932 · captured/drawn at c34526d 2026-09-22'),
+              (f'{JB}/after/AFTER-device-choice-390x640.png', 'AFTER · AFTER-device-choice · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-device-choice-390x844.png', 'AFTER · AFTER-device-choice · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-device-choice-430x932.png', 'AFTER · AFTER-device-choice · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-device-shared-390x640.png', 'AFTER · AFTER-device-shared · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-device-shared-390x844.png', 'AFTER · AFTER-device-shared · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-device-shared-430x932.png', 'AFTER · AFTER-device-shared · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-failed-390x640.png', 'AFTER · AFTER-failed · viewport 390x640 · captured/drawn at 21e042b 2026-09-22'),
+              (f'{JB}/after/AFTER-failed-390x844.png', 'AFTER · AFTER-failed · viewport 390x844 · captured/drawn at 21e042b 2026-09-22'),
+              (f'{JB}/after/AFTER-failed-430x932.png', 'AFTER · AFTER-failed · viewport 430x932 · captured/drawn at 21e042b 2026-09-22'),
+              (f'{JB}/after/AFTER-invite-in-390x640.png', 'AFTER · AFTER-invite-in · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-invite-in-390x844.png', 'AFTER · AFTER-invite-in · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-invite-in-430x932.png', 'AFTER · AFTER-invite-in · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-invite-out-390x640.png', 'AFTER · AFTER-invite-out · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-invite-out-390x844.png', 'AFTER · AFTER-invite-out · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-invite-out-430x932.png', 'AFTER · AFTER-invite-out · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-load-failed-390x640.png', 'AFTER · AFTER-load-failed · viewport 390x640 · captured/drawn at 21e042b 2026-09-22'),
+              (f'{JB}/after/AFTER-load-failed-390x844.png', 'AFTER · AFTER-load-failed · viewport 390x844 · captured/drawn at 21e042b 2026-09-22'),
+              (f'{JB}/after/AFTER-load-failed-430x932.png', 'AFTER · AFTER-load-failed · viewport 430x932 · captured/drawn at 21e042b 2026-09-22'),
+              (f'{JB}/after/AFTER-loading-390x640.png', 'AFTER · AFTER-loading · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-loading-390x844.png', 'AFTER · AFTER-loading · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-loading-430x932.png', 'AFTER · AFTER-loading · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-not-valid-390x640.png', 'AFTER · AFTER-not-valid · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-not-valid-390x844.png', 'AFTER · AFTER-not-valid · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-not-valid-430x932.png', 'AFTER · AFTER-not-valid · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-too-many-390x640.png', 'AFTER · AFTER-too-many · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-too-many-390x844.png', 'AFTER · AFTER-too-many · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-too-many-430x932.png', 'AFTER · AFTER-too-many · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-working-390x640.png', 'AFTER · AFTER-working · viewport 390x640 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-working-390x844.png', 'AFTER · AFTER-working · viewport 390x844 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/after/AFTER-working-430x932.png', 'AFTER · AFTER-working · viewport 430x932 · captured/drawn at 09ca52a 2026-09-22'),
+              (f'{JB}/TARGET-join-device-choice-390x640-end.png', 'TARGET drawing · TARGET-join-device-choice · viewport 390x640 · scrolled (-end) · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-device-choice-390x640.png', 'TARGET drawing · TARGET-join-device-choice · viewport 390x640 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-device-choice-390x844.png', 'TARGET drawing · TARGET-join-device-choice · viewport 390x844 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-device-choice-430x932.png', 'TARGET drawing · TARGET-join-device-choice · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-device-shared-390x640-end.png', 'TARGET drawing · TARGET-join-device-shared · viewport 390x640 · scrolled (-end) · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-device-shared-390x640.png', 'TARGET drawing · TARGET-join-device-shared · viewport 390x640 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-device-shared-390x844.png', 'TARGET drawing · TARGET-join-device-shared · viewport 390x844 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-device-shared-430x932.png', 'TARGET drawing · TARGET-join-device-shared · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-failed-390x640-end.png', 'TARGET drawing · TARGET-join-failed · viewport 390x640 · scrolled (-end) · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-failed-390x640.png', 'TARGET drawing · TARGET-join-failed · viewport 390x640 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-failed-390x844.png', 'TARGET drawing · TARGET-join-failed · viewport 390x844 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-failed-430x932.png', 'TARGET drawing · TARGET-join-failed · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-in-390x640-end.png', 'TARGET drawing · TARGET-join-invite-in · viewport 390x640 · scrolled (-end) · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-in-390x640.png', 'TARGET drawing · TARGET-join-invite-in · viewport 390x640 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-in-390x844.png', 'TARGET drawing · TARGET-join-invite-in · viewport 390x844 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-in-430x932.png', 'TARGET drawing · TARGET-join-invite-in · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-out-390x640-end.png', 'TARGET drawing · TARGET-join-invite-out · viewport 390x640 · scrolled (-end) · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-out-390x640.png', 'TARGET drawing · TARGET-join-invite-out · viewport 390x640 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-out-390x844.png', 'TARGET drawing · TARGET-join-invite-out · viewport 390x844 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-invite-out-430x932.png', 'TARGET drawing · TARGET-join-invite-out · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-load-failed-390x640.png', 'TARGET drawing · TARGET-join-load-failed · viewport 390x640 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-load-failed-390x844.png', 'TARGET drawing · TARGET-join-load-failed · viewport 390x844 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-load-failed-430x932.png', 'TARGET drawing · TARGET-join-load-failed · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-loading-390x640.png', 'TARGET drawing · TARGET-join-loading · viewport 390x640 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-loading-390x844.png', 'TARGET drawing · TARGET-join-loading · viewport 390x844 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-loading-430x932.png', 'TARGET drawing · TARGET-join-loading · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-not-valid-390x640.png', 'TARGET drawing · TARGET-join-not-valid · viewport 390x640 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-not-valid-390x844.png', 'TARGET drawing · TARGET-join-not-valid · viewport 390x844 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-not-valid-430x932.png', 'TARGET drawing · TARGET-join-not-valid · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-too-many-390x640.png', 'TARGET drawing · TARGET-join-too-many · viewport 390x640 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-too-many-390x844.png', 'TARGET drawing · TARGET-join-too-many · viewport 390x844 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-too-many-430x932.png', 'TARGET drawing · TARGET-join-too-many · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+              (f'{JB}/TARGET-join-working-390x640-end.png', 'TARGET drawing · TARGET-join-working · viewport 390x640 · scrolled (-end) · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-working-390x640.png', 'TARGET drawing · TARGET-join-working · viewport 390x640 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-working-390x844.png', 'TARGET drawing · TARGET-join-working · viewport 390x844 · captured/drawn at 5bed912 2026-09-21'),
+              (f'{JB}/TARGET-join-working-430x932.png', 'TARGET drawing · TARGET-join-working · viewport 430x932 · captured/drawn at ac86740 2026-09-21'),
+          ]
+          PER_FILE_MAX = 8 * 1024 * 1024
+          TOTAL_MAX = 24 * 1024 * 1024
+          out = 'wsf-visual-review-join-frames'
+          rows, total = [], 0
+          for rel, label in allow:
+              # Tracked as an ordinary regular file at this commit: mode 100644,
+              # never a symlink (120000), submodule (160000) or executable.
+              stage = git('ls-files', '--stage', '--', rel)
+              if not stage:
+                  sys.exit(f'not tracked at HEAD: {rel}')
+              mode, blob = stage.split()[0], stage.split()[1]
+              if mode != '100644':
+                  sys.exit(f'refusing {rel}: tracked mode {mode}, not a regular file')
+              if os.path.islink(rel) or not os.path.isfile(rel):
+                  sys.exit(f'refusing {rel}: not a regular file in the checkout')
+              if blob != git('rev-parse', f'HEAD:{rel}'):
+                  sys.exit(f'index/HEAD disagree on {rel}')
+              data = open(rel, 'rb').read()
+              if len(data) > PER_FILE_MAX:
+                  sys.exit(f'refusing {rel}: {len(data)} bytes exceeds the per-file bound')
+              total += len(data)
+              if total > TOTAL_MAX:
+                  sys.exit(f'refusing: total exceeds the {TOTAL_MAX}-byte bound at {rel}')
+              if data[:8] != b'\x89PNG\r\n\x1a\n' or data[12:16] != b'IHDR':
+                  sys.exit(f'not a PNG: {rel}')
+              w, h = struct.unpack('>II', data[16:24])
+              dest = os.path.join(out, rel)
+              os.makedirs(os.path.dirname(dest), exist_ok=True)
+              shutil.copyfile(rel, dest)
+              # The exported bytes must BE the committed blob: rehash the copy
+              # with git's own object hashing and compare, not merely record it.
+              copied = open(dest, 'rb').read()
+              rehashed = git('hash-object', '--', dest)
+              if rehashed != blob or hashlib.sha256(copied).digest() != hashlib.sha256(data).digest():
+                  sys.exit(f'exported bytes for {rel} do not match the committed blob ({rehashed} vs {blob})')
+              rows.append({'path': rel, 'label': label, 'git_blob_sha1': blob, 'bytes': len(data),
+                           'sha256': hashlib.sha256(data).hexdigest(), 'width': w, 'height': h})
+          manifest = {'repo': repo, 'source_sha': head, 'files_total_bytes': total,
+                      'note': 'original bytes copied from this commit and re-hashed against the git blob; nothing rendered, resized or repaired',
+                      'files': rows}
+          json.dump(manifest, open(os.path.join(out, 'MANIFEST.json'), 'w'), indent=2)
+          with open(os.path.join(out, 'MANIFEST.md'), 'w') as f:
+              f.write(f'# /join page gate — Batch B before / after / target — visual review package\n\nRepository `{repo}` · source commit `{head}` · {len(rows)} files, {total} bytes · original bytes, re-hashed against git.\n\n')
+              f.write('| path | label | git blob | bytes | sha256 | w×h |\n| --- | --- | --- | ---: | --- | --- |\n')
+              for r in rows:
+                  f.write(f"| `{r['path']}` | {r['label']} | `{r['git_blob_sha1']}` | {r['bytes']} | `{r['sha256']}` | {r['width']}×{r['height']} |\n")
+          print(open(os.path.join(out, 'MANIFEST.md')).read())
+          PY
+
+      - name: Upload as a workflow artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: wsf-visual-review-join-frames-${{ github.event.pull_request.head.sha }}
+          path: wsf-visual-review-join-frames
+          if-no-files-found: error
+          retention-days: 7
+          # The PNG is already compressed; keep its bytes verbatim inside the zip.
+          compression-level: 0
