@@ -492,3 +492,78 @@ evidence) as `8d2e1e6e`. No product or functions source changed — one new e2e 
 W4 plus frames — so this branch's two specs exercise byte-identical application code and were
 not re-run. The merged tree typechecks (`tsc --noEmit` clean, W4's new spec included), and the
 evidence guard reports **9 frozen / 18 accepted paths, no byte changed**.
+
+
+## Join: a response lost AFTER the server committed — BASELINE reproduced
+
+Assignment: PR #395 comment 5785415007. App head pinned:
+**`44cc0633f3d62b1f33d757f6bc0e401758f04523`** (`claude/wsf-app-shell`), merged into this
+branch as `968893ea`. Product source at that head is byte-identical to `5356e3cf`, so the
+existing bundle is valid for it — confirmed by diff, not assumed.
+
+Probe: `apps/westayfit/tests-e2e/sprint-w5-join-response-lost.spec.ts`. **3 tests, 3 passed.**
+Test and evidence only; no application or backend file touched; W4 owns the fix.
+
+### The defect is real, and the source says why
+
+`app/join/[joinCode].tsx` classifies a failed join by callable CODE only
+(`callableCode`), falling back to:
+
+```
+JOIN_FAILURE_DEFAULT = 'Nothing was changed. Check your connection and try again.'
+```
+
+whose own comment reads: *"The default is safe to state as fact: the whole join runs inside
+`db.runTransaction`, so a failure commits nothing."*
+
+That reasoning is correct about the **server** and silent about the **wire**. A transaction
+that committed and a response that never arrived is not something the transaction can roll
+back. The client holds a transport error with no callable code, `callableCode(e)` returns
+`null`, and the default sentence renders.
+
+### What the member is actually shown, verbatim
+
+With the membership **proven to exist on the server first**:
+
+```
+We couldn’t join this community.Nothing was changed. Check your connection and try again.
+```
+
+Both halves are false at that moment. The heading (`wsf-join-submit-error`,
+`[joinCode].tsx:398`) is unconditional, and the body is the default claim.
+
+### How the case is actually produced
+
+The request is allowed through to the real `wsfJoinCommunity` and only its **response** is
+discarded at the browser boundary — `route.fetch()` performs the real call, its HTTP status is
+asserted `200`, then `route.abort('connectionfailed')`. A request aborted before reaching the
+server would prove nothing, so the premise is asserted before any UI claim:
+
+- the visitor starts a non-member (membership doc absent, 1 active membership — the Champion);
+- the callable answered `200`;
+- `wsfMemberships/{groupId}_{uid}` exists, polled from Firestore, **before** the screen is read;
+- active memberships = **2**.
+
+If that premise ever fails the test fails there, on its own setup, rather than reporting a UI
+finding it has not earned.
+
+### Retry is already safe — recorded so the fix cannot regress it
+
+Second press, uninterrupted: lands on `/community/{groupId}` and active memberships stay at
+**2**. `wsfJoinCommunity` answers an active membership with `alreadyMember: true` inside the
+same transaction, and the join writes no `memberCount` field at all, so there is no counter to
+double. That is BASELINE behaviour W4's fix must preserve, not something the fix needs to add.
+
+### The control that keeps the finding honest
+
+A join aborted **before** the server sees it: membership absent, and the same default sentence
+renders — **correctly**. Without this the baseline could be misread as "the default copy is
+always wrong", which is not the finding and would send the fix after the wrong thing.
+
+### Fixed-revision half
+
+**Not yet runnable.** W4's branch `claude/wsf-sprint-member-journey` is at `81636fad` and does
+not touch `app/join/[joinCode].tsx` — there is no corrected immutable revision to test. The
+baseline is published now; the fixed verdict follows against W4's actual revision when it
+exists, requiring: uncertainty wording, no raw server text, one safe retry landing on the
+intended community/event, and no duplicate membership.
