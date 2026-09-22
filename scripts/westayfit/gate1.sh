@@ -90,7 +90,7 @@ WSF_PLAYWRIGHT_BASE_URL="http://127.0.0.1:${HOSTING_PORT}" \
   firebase emulators:exec \
     --project demo-wsf-local \
     --config "$EMULATOR_CONFIG" \
-    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts tests-e2e/e35-home.spec.ts tests-e2e/e35-auth-polish.spec.ts tests-e2e/e4-a1-shared-goal.spec.ts tests-e2e/e5-display-authorization.spec.ts tests-e2e/d1-signup-single-navigation.spec.ts"
+    "npm --prefix apps/westayfit run test:e2e -- tests-e2e/mu2-flow.spec.ts tests-e2e/e2-join-flow.spec.ts tests-e2e/e3-check-in-flow.spec.ts tests-e2e/e35-home.spec.ts tests-e2e/e35-auth-polish.spec.ts tests-e2e/e4-a1-shared-goal.spec.ts tests-e2e/e5-display-authorization.spec.ts tests-e2e/d1-signup-single-navigation.spec.ts tests-e2e/community-visibility.spec.ts"
 
 echo
 echo "GATE 1 CLEAR — profile-setup succeeded and /community/<id> served 200 on a cold load."

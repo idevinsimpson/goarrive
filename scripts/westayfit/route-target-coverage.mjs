@@ -114,6 +114,8 @@ const NOTES = {
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
+  '/community/[groupId]/members':
+    'Members — the people in one community who chose to be shown, and the member\'s own quiet toggle for whether they are. **Implemented, with NO accepted design target**: the capability was authorised before a frame for it was drawn. Proposal evidence at all three phone classes is committed in `review/page-06-members/`, compared against the owner North Star and the accepted Home/Community targets in that package\'s README, and it stays listed here as uncovered until a target exists or those frames are accepted.',
 };
 
 /**

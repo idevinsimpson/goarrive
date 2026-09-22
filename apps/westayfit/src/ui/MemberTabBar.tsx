@@ -41,9 +41,32 @@ import { TabGlyph } from './TabGlyph';
  * PROGRESS KEEPS THE /activity ROUTE. The destination is renamed, not rebuilt;
  * renaming the route as well would be a redirect and a migration for a label.
  */
+/**
+ * WHO IS HERE BELONGS TO COMMUNITY, NOT TO HOME, even though it lives under a
+ * community's path. The split above is by WHAT A DESTINATION IS, not by URL
+ * shape: Home is the community a member is in and what it is doing;
+ * Community is "the people side — the communities they belong to". A member
+ * reaches `/community/<id>/members` from the Community tab, so lighting Home
+ * while they are there tells them they are somewhere they are not.
+ *
+ * Matched on the route's last segment rather than the whole path, because the
+ * community id sits in the middle and may be anything.
+ */
+const IS_MEMBERS_ROUTE = (p: string) => /^\/community\/[^/]+\/members\/?$/.test(p);
+
 export const MEMBER_TABS = [
-  { key: 'home', label: 'Home', href: '/', match: (p: string) => p === '/' || p.startsWith('/community/') },
-  { key: 'community', label: 'Community', href: '/community', match: (p: string) => p === '/community' },
+  {
+    key: 'home',
+    label: 'Home',
+    href: '/',
+    match: (p: string) => p === '/' || (p.startsWith('/community/') && !IS_MEMBERS_ROUTE(p)),
+  },
+  {
+    key: 'community',
+    label: 'Community',
+    href: '/community',
+    match: (p: string) => p === '/community' || IS_MEMBERS_ROUTE(p),
+  },
   { key: 'activity', label: 'Progress', href: '/activity', match: (p: string) => p.startsWith('/activity') },
   { key: 'you', label: 'You', href: '/you', match: (p: string) => p.startsWith('/you') },
 ] as const;

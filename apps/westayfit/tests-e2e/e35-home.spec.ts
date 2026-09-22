@@ -384,7 +384,14 @@ test('F9: a Private community shows Private + type label + members count', async
   await page.getByTestId('wsf-start-submit').click();
 
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(communityName)).toBeVisible();
+  /*
+    THE HEADING SPECIFICALLY, which is what this line always meant. A loose
+    text match went ambiguous the moment the community's name started
+    appearing somewhere else on the page too — the arrival sheet asks "Show my
+    name in <community>?" — and an ambiguous locator is a test that will break
+    again on the next honest addition.
+  */
+  await expect(page.getByTestId('wsf-community-name')).toHaveText(communityName);
   // Human labels, not raw enums.
   await openChampionDetails(page);
   await expect(page.getByTestId('wsf-community-policy')).toContainText('Private');

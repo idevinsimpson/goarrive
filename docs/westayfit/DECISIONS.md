@@ -465,3 +465,193 @@ one image being the wrong one.
 whether anything is wider than the sheet that holds it, and whether the document scrolls
 sideways, are assertions that run at every width. Written, then mutation-tested by forcing an
 element to 3000 px, because a guard that cannot fail is decoration.
+
+**Privacy is the default because the QUERY says so, not because the code checks.** The member
+directory filters `visibility == 'visible'` at the index, with three equality clauses and no
+branch anywhere below it. A row missing the field — which is every membership written before
+the feature existed — simply does not match, and so does a row storing `'Visible'`, `true` or
+`' visible'`. The alternative, a code-side `String(v).trim().toLowerCase() === 'visible'`,
+looks more forgiving and is the exact shape that turns a legacy absence into a publication of
+the entire existing member base, retroactively, without one person having agreed to it.
+
+**A `{ merge: true }` write is where a privacy setting comes back from the dead.** A merge
+preserves every field it does not name, so a visibility chosen before somebody left survives
+their departure and their return. Rejoin and reinstate therefore reset to private explicitly,
+on the way back IN rather than on the way out — clearing it on departure would destroy a
+setting somebody may want back, and would put the guarantee in the path that is not doing the
+re-admitting. Reinstate matters more than rejoin, because there the actor is not the subject:
+without it, a Champion reinstating a member who had been visible republishes that person's
+name by a unilateral act, which is the Champion override this feature does not have arriving
+through the back door of a status change.
+
+**The document id is not the authority; the `userId` field is.** `firestore.rules` reads
+`resource.data.userId == request.auth.uid` and never parses the id, so a row at
+`{groupId}_{someoneElse}` carrying `userId: victim` is a row the product never wrote. Keying
+the permission gate off one and the name fan-out off the other means one person's tap
+publishes a different person's name. Both callables require the two to agree and the lister
+drops any row where they do not. The profile fan-out is a `Map` keyed by uid for the same
+family of reason: `getAll` returns a snapshot per ref including missing ones, so filtering
+while zipping by position shifts every later name one place — beside somebody else's role.
+
+**The absent field is the enforcement.** `wsfSetCommunityVisibility` has no `targetUid`, and
+`wsfCommunityMembers` has no cursor. The Champion action family sits a few hundred lines above,
+shares `{ groupId, targetUid }`, and opens each handler with `requireChampion` — copying one
+as a starting point would import both the parameter and an override in a single paste. And a
+`startAfter` cursor on `wsfMemberships` serialises a document id, which is a uid in plaintext;
+whoever added paging would reach for Firestore's default because there is no other idiom in
+the file to copy.
+
+**Two refusals that differ are an oracle, in the client as much as the server.** The server
+answers `permission-denied` identically for a community that does not exist and one the caller
+is not in. The screen renders ONE refusal for that one code — splitting it into "you are not a
+member" and "no such community" would rebuild in the browser the enumeration the server was
+careful to prevent. What the screen may do, and initially failed to do, is tell that refusal
+apart from a failed read: rendering a permission refusal as "could not be loaded just now"
+tells a stranger nothing is wrong and offers a retry that can never succeed.
+
+**"Nobody has chosen to be named" is not "nobody is here", and the copy has to say so.** An
+empty directory in a community with eleven members is a fact about consent, not about
+attendance. The empty state states the true sentence explicitly rather than leaving a reader
+to infer the false one, and no count of the list is ever printed beside `memberCount` —
+subtracting the two is "how many people are hiding", and a product that performs that
+subtraction for its reader has published it.
+
+**`invoker: 'public'` is a no-op in the emulator, so it needs a source-level guard.** It is
+enforced only by Cloud Run IAM at deploy, which means a stray `public` passes every local
+test and first takes effect in front of real people — and the two callables nearest the new
+directory are both public. `tests/deploy-config/public-invoker.test.ts` pins the allowlist by
+name. It strips comments before matching, because its first version read the comment saying
+this callable must never be public and reported it as public: a guard that reads prose cannot
+tell a promise from a breach of it.
+
+**A directory page belongs to Community even when it lives under a community's path.** The tab
+bar splits by what a destination IS, not by URL shape: Home is the community a member is in
+and what it is doing, Community is the people side. `/community/<id>/members` is reached from
+the Community tab, so the prefix match that lights Home for every `/community/` route lit the
+wrong one, and told a member they were somewhere they were not.
+
+**A capability can be authorised before a frame for it exists, and the index must say so.**
+`/community/[groupId]/members` is the only implemented route with no accepted design target.
+It is built in the established language and recorded as UNCOVERED rather than quietly claimed,
+because a route index that counts it as covered is the same stale-by-hand table the generator
+was introduced to end.
+
+**A privacy control that reads like a contract is one people leave alone.** The first cut of
+the people page was technically impeccable and exhausting: a headline announcing the member's
+own state, a paragraph reassuring them their contributions still counted, another explaining
+the setting was per community, an eyebrow reading WHO CHOSE TO BE NAMED, and a closing
+paragraph promising nobody could expose them. Every sentence was true. Together they made a
+one-line preference feel legalistic, which is the opposite of what a privacy control needs to
+feel like. It is now a labelled toggle, one sentence saying who can see what, the list, and
+one quiet line saying why the list is the length it is. **Nothing about the model changed** —
+every guarantee the prose used to make is enforced in `functions-westayfit` and pinned by
+tests that fail when it is removed, which is where a guarantee belongs rather than in a
+paragraph a member has to be trusted to read.
+
+**A toggle is the state; a button is an action that has to name its own direction.** "Show my
+name" / "Stop showing my name" changes label underneath the member, so the CURRENT state has
+to be spelled out in a sentence beside it. A switch reads the same in both positions and a
+member sees what is true at a glance. It needs `aria-checked` set explicitly: this
+react-native-web version emits `aria-disabled` from `accessibilityState` but drops `checked`
+for `role="switch"`, and a switch without it announces as a control whose state is unknown —
+worse than a plain button, because it says there is a state and then refuses to name it.
+
+**"Who is here" was the wrong name.** It reads as live presence, and this product tracks
+nobody's presence. "People here" is a list of members, which is what it is.
+
+**The question is asked per membership, on arrival, and declining counts as an answer.**
+Visibility is per community, so a global onboarding preference would put words in a member's
+mouth about every community they ever join — somebody glad to be named among their family has
+said nothing at all about the gym. The server stamps the answer on the membership row for
+`private` exactly as for `visible`, because arriving, reading the question and continuing with
+the toggle off IS an answer and the commonest one. Recording only `visible` would re-ask
+everybody who declined on every arrival: the member who most clearly said no would be the one
+the product pestered. Rejoin and reinstate DELETE the stamp along with the visibility, so a
+returning member is asked again rather than governed by a decision they made before they left.
+
+**The Join flow was left alone on purpose.** It is hardened, freshly re-baselined, and carries
+its own privacy and destination-continuity guarantees for people arriving from a link while
+signed out. Threading a new question through it would put all of those back in play to add a
+control that works perfectly well one screen later, on first authenticated arrival, where the
+member can already see the community the question is about. The membership is created private
+by Join exactly as before; the sheet asks afterwards and changes nothing if it is ignored.
+
+**Non-blocking has to be enforced, not intended — and passing taps through is only half of
+it.** The arrival sheet's first version used an ordinary modal scrim and swallowed every
+control on Home; six existing flows failed in one run, which is exactly what a member would
+have met: arriving to check in and finding a privacy dialog in the way. `pointerEvents:
+box-none` fixed the taps around it, and the sheet's own body still sat on whatever was at the
+foot of the page — which on Home is "Membership options", **the control a member uses to
+leave**. An invitation that covers the way out is the worst thing it could cover. Home now
+reserves the sheet's measured height, and the guard for it clicks that control rather than
+asserting it is visible, because visibility was never the property that broke: the button had
+a perfectly good bounding box the whole time and simply could not be tapped.
+
+**MEMBERS is a community feature; PRIVACY is a quiet personal control. Mashing them together
+is the failure mode.** Three successive versions of the member directory drifted the same way,
+and the pull is worth naming because it feels like diligence: each version was trying to prove
+the privacy guarantee IN THE INTERFACE, so privacy climbed the hierarchy until it was the page
+title ("Who is here"), the first card, the list's eyebrow ("WHO CHOSE TO BE NAMED"), the
+footer, AND a status line wedged into the community panel between the community's name and its
+first section. A members list had become a settings screen wearing a list, and the community
+panel was narrating a fact about ME inside an object that is entirely about US.
+
+The guarantee does not need proving on the screen. It is enforced in the callables and pinned
+by tests that fail when it is removed. **The North Star's own way of saying a thing is private
+is `45 squats · private to you` on the Home board** — three words, inline, a modifier on a line
+that is mostly about something else. Never a card, never a heading, never the page. That one
+detail settles every question this feature kept re-asking.
+
+**Navy is how the board says "this is the important object on the screen."** A members page
+drawn entirely in cream cards has no centre of gravity, which is a large part of why it read as
+settings rather than as community. The list moved into a navy panel — the members ARE the
+object here — and the member's own control became one unweighted row on the ground above it:
+no border, no fill, no shadow, no heading. The visual hierarchy now states the distinction that
+the copy kept trying to explain.
+
+**Two labels for one question, on purpose.** "Visible to members" on the Members page, where a
+community's name and count sit directly above and the shortest true phrase wins; "Show me to
+this community" on the arrival sheet, which arrives on its own. What may not differ is the
+thing being asked, the direction of the control, and that off is off. Neither says "your name
+is shown/hidden" — that phrasing, repeated across a product, is what turns a preference into a
+preoccupation.
+
+**A sheet that says "this community" must name the community.** The approved label names none,
+and a sheet is a distinct object, so without context it asks a per-community question without
+saying which. The fix is the board's own eyebrow — eleven letterspaced pixels, the same device
+as YOUR COMMUNITY and WHAT WE'RE DOING — not a headline. The version before it used a full
+headline directly above a toggle saying almost the same words: the same sentence twice, which
+is exactly the weight this design sheds.
+
+**A `.limit()` on an unordered query is a silent lie, not a bound.** The member directory
+applied `.limit(500)` to an equality-only query — which Firestore returns in document-id order,
+and on `wsfMemberships` those ids differ only by uid — and then sorted the result by name.
+Past the limit it presented **"the 500 smallest uids, alphabetised"** as a complete
+alphabetical list. Nothing in the response said names were missing, and *which* names went
+missing was decided by uid: by nothing a member did, chose, or could see. Logging that the
+ceiling was reached told the operator; it did not make the list a member reads true.
+
+It is now a bounded page plus a continuation, so the response is never silently short. **The
+cursor is an integer offset into the name-sorted array, never a Firestore document cursor** —
+`startAfter(lastDoc)` on this collection serialises `wsfMemberships/{groupId}_{uid}`, a uid in
+plaintext handed to the client and echoed back on every page, and since there is no pagination
+idiom elsewhere in the file that is exactly what the next person would reach for. A malformed
+cursor is `invalid-argument`, never a silent restart at zero, because a cursor that quietly
+falls back turns a paging bug into a list that repeats its first page forever.
+
+**Sorting by a field in another collection forces a whole-set read; say so rather than
+pretend.** Names live in `wsfMemberProfiles` and the filter lives on `wsfMemberships`, so a
+globally name-ordered page cannot be read ordered — the visible set has to be read and sorted
+before it is cut. That is bounded work only if the visible set is bounded, and **no
+community-size ceiling is enforced anywhere in this product** (the four `resource-exhausted`
+sites in the callables file are all email quotas). Inventing one here would change who may
+JOIN a community, which is not this feature's decision to make. So the guard is a safety valve
+that **throws rather than truncates** — a refusal is honest and visible; a quietly shortened
+list is neither — and the real fix, if communities ever approach it, is to denormalise the sort
+key onto the membership row: a schema change with a backfill, deliberately not smuggled into
+this PR.
+
+**A capture spec must resolve its output from the file, not the working directory.** The
+proposal frames were written with a repo-relative literal while the run's cwd was inside
+`apps/westayfit`, so 24 PNGs landed in a parallel `apps/westayfit/docs/` tree. It looks exactly
+like success — the spec passes, the frames exist — until you list the directory you meant.

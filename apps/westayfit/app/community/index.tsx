@@ -70,13 +70,32 @@ const GOAL_READ_LIMIT = 4;
 const MOMENTUM_GOAL_LIMIT = 3;
 /** And at most this many entries are shown, newest first. */
 const MOMENTUM_ROWS = 4;
+/**
+ * How many names the current community's panel previews.
+ *
+ * A PREVIEW, NOT A ROSTER — the panel is about the community, and the full
+ * list is one tap away. Three keeps the section the same visual weight as the
+ * two beneath it rather than turning the card into a directory.
+ */
+const MEMBER_PREVIEW_ROWS = 3;
 
 type Membership = {
   groupId: string;
   displayName: string;
   memberCount: number;
   role: string;
+  /*
+    THE CALLER'S OWN answer in this community, never anybody else's — the
+    callable's query is `userId == caller`, so no other person's choice is in
+    scope here. It is carried so a member can be TOLD whether they are named
+    without having to go looking for a setting; a privacy control somebody has
+    to find is one they assume is off.
+  */
+  visibility?: 'private' | 'visible';
 };
+
+/** One listed member. Mirrors `wsfCommunityMembers` exactly — two fields. */
+type MemberEntry = { displayName: string; role: 'foundingChampion' | 'member' };
 
 type Goal = {
   goalId: string;
@@ -90,7 +109,16 @@ type Goal = {
 type Addition = { amount: number; unit: string; at: string };
 
 /** A membership plus whatever could be read about it. `failed` is its own. */
-type Enriched = Membership & { goals: Goal[] | 'failed' };
+type Enriched = Membership & {
+  goals: Goal[] | 'failed';
+  /*
+    The visible members of the CURRENT community only — the other rows do not
+    preview names, so nothing is read for them. 'loading' is its own state so
+    the panel shows its shape while the names arrive rather than flashing
+    "No one is shown here yet." at a community that has plenty.
+  */
+  members: MemberEntry[] | 'loading';
+};
 
 type State =
   | { kind: 'loading' }
@@ -158,7 +186,7 @@ export default function CommunityIndexScreen() {
 
       const enriched: Enriched[] = items.map((m, i) => {
         const s = settled[i];
-        return { ...m, goals: s && s.ok ? s.value : 'failed' };
+        return { ...m, goals: s && s.ok ? s.value : 'failed', members: 'loading' as const };
       });
 
       // `memberOf` is the authority, and the resolver — not this screen —
@@ -190,8 +218,37 @@ export default function CommunityIndexScreen() {
           .slice(0, MOMENTUM_ROWS);
       }
 
+      /*
+        THE CURRENT COMMUNITY'S NAMES, and only that one. A member sees the
+        people they stand beside in the community they are actually in; reading
+        names for every membership would be several more calls for a panel that
+        is not on screen.
+
+        A failure here is not a failure of the screen: the panel falls back to
+        its empty line, which is already the honest sentence for "no names to
+        show". Nothing about the community's identity or its goal depends on
+        this read landing.
+      */
+      let members: MemberEntry[] = [];
+      if (currentId) {
+        try {
+          const listed = await httpsCallable<{ groupId: string }, { members: MemberEntry[] }>(
+            fns,
+            'wsfCommunityMembers',
+          )({ groupId: currentId });
+          members = Array.isArray(listed.data?.members) ? listed.data.members : [];
+        } catch {
+          members = [];
+        }
+      }
+
       if (liveRef.current === token) {
-        setState({ kind: 'ready', items: enriched, currentId, momentum });
+        setState({
+          kind: 'ready',
+          items: enriched.map((e) => (e.groupId === currentId ? { ...e, members } : e)),
+          currentId,
+          momentum,
+        });
       }
     })();
 
@@ -451,6 +508,59 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
 
       <View style={styles.currentRule} />
 
+      {/*
+        MEMBERS IS A COMMUNITY FEATURE, so it is a section of this panel in the
+        panel's own rhythm — a green eyebrow, then content — exactly like WHAT
+        WE'RE DOING and RECENT MOVEMENT below it.
+
+        An earlier version put a privacy STATUS here instead: a pill reading
+        "Who is here · Your name is not shown", wedged between the community's
+        name and its first section. It made a line about ME the second thing
+        read inside a panel that is entirely about US. The member's own setting
+        lives on the Members page as one quiet row and is not narrated here.
+
+        NO COUNT OF THIS PREVIEW. `memberCount` is printed above over every
+        active member; a second number here would make "how many are hiding" a
+        subtraction the product performs for the reader.
+      */}
+      <Pressable
+        onPress={() => router.push(`/community/${item.groupId}/members`)}
+        accessibilityRole="link"
+        accessibilityLabel={`Members of ${item.displayName}`}
+        style={styles.membersHead}
+        testID="wsf-community-index-members"
+      >
+        <Text style={styles.eyebrowDark}>MEMBERS</Text>
+        <Text style={styles.membersChevron}>›</Text>
+      </Pressable>
+      {item.members === 'loading' ? (
+        <View style={styles.membersBoneRow}>
+          {[0, 1].map((i) => (
+            <View key={i} style={styles.membersBone} />
+          ))}
+        </View>
+      ) : item.members.length > 0 ? (
+        <View style={styles.membersPreview}>
+          {item.members.slice(0, MEMBER_PREVIEW_ROWS).map((m, i) => (
+            <Text key={i} style={styles.memberLine} numberOfLines={1}>
+              {m.displayName}
+              {m.role === 'foundingChampion' ? (
+                <Text style={styles.memberRole}> · Champion</Text>
+              ) : null}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        /*
+          NOT "nobody is here". The count above says how many members there
+          are; this preview is empty because none of them has chosen to be
+          shown, which is a different fact and the only one this may state.
+        */
+        <Text style={styles.membersNone}>No one is shown here yet.</Text>
+      )}
+
+      <View style={styles.currentRule} />
+
       <Text style={styles.eyebrowDark}>WHAT WE&apos;RE DOING</Text>
       {item.goals === 'failed' ? (
         /*
@@ -658,6 +768,25 @@ const styles = StyleSheet.create({
   currentName: { color: ON_NAVY },
   currentMeta: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
   currentRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 4 },
+  /*
+    The section head sits in the panel's existing rhythm: the same green
+    eyebrow as WHAT WE'RE DOING, with a chevron to say it opens somewhere. No
+    pill, no border, no weight of its own — the goal below is what this panel
+    is for.
+  */
+  membersHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+  },
+  membersChevron: { color: ON_NAVY_MUTED, fontSize: 20, lineHeight: 22 },
+  membersPreview: { gap: 3, marginTop: 4 },
+  memberLine: { color: ON_NAVY, fontSize: 15, lineHeight: 21 },
+  memberRole: { color: ON_NAVY_MUTED, fontSize: 13 },
+  membersNone: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20, marginTop: 4 },
+  membersBoneRow: { gap: 6, marginTop: 6 },
+  membersBone: { height: 14, width: '52%', borderRadius: 4, backgroundColor: 'rgba(247,245,240,0.14)' },
   currentUnavailable: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
   currentGoalRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   currentGoalText: { flex: 1, gap: 3 },
