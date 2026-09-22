@@ -171,6 +171,37 @@ Accepted evidence must remain byte-stable during ordinary verification unless ca
 - Expo/player harness debt exists but should not displace the atlas/member visual work unless it reveals a real product blocker.
 - Production release is not authorized.
 
+## Sprint roster — Round 1 (2026-09-22, deadline Wed 2026-09-23 23:00 America/New_York)
+
+The one status record for the parallel sprint set by PR #365 comment
+`5781435779`. The lead updates it at each checkpoint; workers report through
+their own draft PRs. Status words: SENT · ACKNOWLEDGED · EXECUTING ·
+CHECKPOINT-READY · REVIEWED · INTEGRATED · STAGED. This is the roster, not a
+second roadmap: artifacts stay in the canonical board manifest.
+
+**Mechanism.** Workers are independent Claude Code Remote sessions in the same
+cloud environment (`Default`), each in its own container with its own
+checkout, emulators, ports, build output and screenshots — isolation is by
+container, not by convention. Spawned from the lead with `create_session`;
+model requested `claude-opus-5`; effort/Ultracode flags are not settable from
+that call and are reported by each worker in its own PR body. Billing is the
+account subscription (five-hour window, not in overage at spawn time); no
+Anthropic API key, Bedrock or Vertex setting is present in the lead's
+environment. Session/weekly usage percentage: UNKNOWN from inside a session.
+
+| ID | Mechanism / session | Branch · starting SHA | Allowed files | First deliverable | Status / evidence | Blocker | Next gate |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| L0 | lead — `session_017cby7B21o4bFbnpsa1ciRV` | `claude/wsf-north-star-canonical` @ `4fe51f0`; integrates to `#365` / `#392` | manifest, INDEX, this brief, integration | Board 01 candidate + Boards 02–05 + INDEX (**landed** at `4fe51f0`) | EXECUTING | — | visual review of 00–05 |
+| W1 | not started — first deliverable already landed by L0 before the roster existed | would be `claude/wsf-sprint-north-star-home` from `4fe51f0` | `board-01/**`, `north-star/board-01.mjs` | Board 01 review-candidate PNG — **exists**: `board-01/…HOME_CANDIDATE.png` | NOT STARTED (launch packet ready; opens on review feedback) | none — waiting on the 00–05 review | Board 01 precision review |
+| W2 | not started — first deliverable already landed by L0 | would be `claude/wsf-sprint-north-star-core` from `4fe51f0` | `board-02/**`–`board-05/**`, their modules | Boards 02–05 PNGs — **exist** (FINAL) | NOT STARTED (launch packet ready) | the 00–05 stop gate: no 06–11 before review | 00–05 package review |
+| W3 | CCR `session_01J1CepL52CKS8SqaGSZFfLc` | `claude/wsf-sprint-email-staging` from `cb91d78` (#393) | new files only; `docs/wsf-staging/EMAIL-ACCEPTANCE-OPERATOR-HANDOFF.md` | second-machine receipt for #393 · network-reachability probe · owner-mediated browser handoff packet | SENT (container pending at spawn) | staging hosts denied by the lead's proxy; real mailbox test has ONE operator, unassigned | #393 independent review → recorded merge |
+| W4 | CCR `session_014VhZAgvNzjfA9ahZas8eX5` | `claude/wsf-sprint-member-journey` from `e609c57` (#365) | `tests-e2e/sprint-w4-*.spec.ts`, `review/sprint-w4-member-journey/**` | Join acceptance package + journey regression on `e609c57`; verify retry fix; #390 scratch-integration PLAN (local trial only) | SENT | — | lead assigns any proved defect as a bounded patch |
+| W5 | CCR `session_01G4FfDv5vKhCNNkSg3JgXGL` | `claude/wsf-sprint-independent-qa` from `e609c57` | `tests-e2e/sprint-w5-*.spec.ts`, `tests/callable/sprint-w5-*.test.ts` | independent #393 review with mutations → then identity/pending/visibility/short-phone QA | SENT | — | Program Director closes #393 review |
+
+Cap: six sessions including the lead; four are open (L0, W3, W4, W5). Heavy
+emulator/browser suites run in separate containers (W4, W5), so the two-per-
+machine rule is met by construction.
+
 ## How a fresh ChatGPT thread should begin
 1. Read this file.
 2. Fetch PR #365 latest comments.
