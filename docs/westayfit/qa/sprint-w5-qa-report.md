@@ -703,3 +703,124 @@ reasoned about:
 
 Evidence guard after the merge: **9 frozen / 20 accepted paths, no byte changed** (accepted up
 from 18 — `d0477cc` freezes the Join AFTER set and the correction frames).
+
+
+## Kiosk navigation isolation — DEFECT, bounded (probe `sprint-w5-kiosk-navigation-isolation.spec.ts`)
+
+**Packet:** investigate the kiosk navigation seam W1B reported in #423 at
+`3e311beec260b01e6468beee3e90efec65cf0d30`; establish what ordinary taps actually permit and
+whether the shared device clears the visitor on returning to rest; return PASS or one
+reproducible defect, not an assumed leak.
+
+**Source delta, checked first.** `git diff --stat d0477cc..3e311be -- apps/westayfit/app
+apps/westayfit/src functions-westayfit/src` is **empty**. W1B's capture head and my pinned
+product source are byte-identical across app, src and functions, so what reproduces here at
+`d0477cc` reproduces at `3e311be`.
+
+### What the bar is, before anything is claimed about it
+
+`MemberTabBar` is rendered unconditionally by `app/_layout.tsx:52` as
+`<MemberTabBar signedIn={Boolean(user)} />`, and `shellAppliesTo` admits any path under
+`/contribute` (`src/ui/MemberTabBar.tsx:58`). `kioskContributeRoute()` returns
+`/contribute/<goalId>?kiosk=1` (`src/kioskSession.ts:73`) — the kiosk deliberately rides the
+existing contribution route rather than minting a second bracketed one. So the shell applies
+to the kiosk's contribution screen for the same reason the kiosk works at all, and the flag
+that makes it a kiosk is a query parameter the shell never reads.
+
+That the bar is on screen is not itself the finding. The bar's own docstring says the event
+surfaces are kept bare because a bar on a station screen "would offer a room's worth of
+strangers a way into somebody's account" — the question is whether that is what it does here.
+
+### What one ordinary tap actually permits — measured, not inferred
+
+Signed in as a synthetic visitor at `/contribute/<goalId>?kiosk=1`, the kiosk's own chrome is
+correct: `wsf-contribute-back` absent, `wsf-kiosk-finish-chrome` present. The bar is also
+present and is hit-testable where a thumb lands (`document.elementFromPoint` resolves inside
+`wsf-member-tabs`, not merely "in the DOM").
+
+One press of the **You** tab:
+
+    url=/you  namesVisitor=true  emailShown=true  signOutOffered=true
+    stillAttached=true  kioskFinishControls=0
+
+One press of **Progress**:
+
+    url=/activity  rendersAsSignedIn=true  stillAttached=true  kioskFinishControls=0
+
+`stillAttached` is read from the Firebase web SDK's IndexedDB store, not from the screen: it is
+what the next person would inherit, not what the current screen chooses to draw.
+
+An early version of this measurement reported `namesVisitor=false`. That was **my probe being
+wrong**, not the product being safe — `wsf-you` is visible while the profile is still loading,
+and I was reading a spinner. The probe now waits for one of `/you`'s terminal states
+(`wsf-you-identity`, `wsf-you-signed-out`, `wsf-you-no-community`) before measuring anything.
+Recorded here because a QA report that quietly fixes its own instrument is not a record.
+
+### The defect
+
+**Head:** `d0477cc` (identical product source to `3e311be`). **Steps:** open
+`/kiosk/<goalId>` → *Contribute here* → sign in → on the entry screen press **You** in the
+bottom bar.
+
+**Expected:** a kiosk session cannot be left by ordinary chrome; wherever a tap lands, the
+session is still endable.
+**Actual:** the device lands on `/you`, which shows the visitor's display name, their email
+under "SIGNED IN AS", and a Sign out control; `/activity` renders their own recorded movement.
+The account is still attached. Neither destination carries any kiosk control — `Finish` is a
+child of the contribution screen, which has unmounted, and the 90-second idle auto-finish
+(`kioskTerminal` in `app/contribute/[goalId].tsx`) goes with it.
+
+**Impact:** a shared device left on `/you` or `/activity` sits on the previous visitor's
+identity and private movement, signed in, with nothing on screen that ends the session and no
+countdown that would end it unattended. The next person walks up to that. This is exactly the
+failure the bar's own docstring keeps it off event surfaces to avoid; the kiosk's contribution
+screen is an event surface that the `/contribute` prefix did not know about.
+
+### What is NOT broken — the bound on the finding
+
+The kiosk's rest-clearing defence holds, and this is the half that keeps the finding a
+navigation defect rather than a carry-over between visitors. After a tab tap and a Back, and on
+any arrival at `/kiosk/<goalId>`:
+
+- auth attachment drops to **zero** records (polled, read from IndexedDB);
+- `wsf.kioskReturnGoalId` is gone;
+- the start screen names nobody;
+- the second synthetic visitor meets the sign-in gate and signs in to **their own** session,
+  with no text of the first visitor's on the gate or the entry screen.
+
+`app/kiosk/[goalId].tsx` does this in a `useFocusEffect` — tied to the device having come to
+rest on its start screen, not to a bare `user` change, which is what keeps it from firing
+underneath the sign-in hop.
+
+### Unresolved attempts, kept distinct from kiosk-owned state
+
+Asserted in the same test so neither can be mistaken for the other. With the contribution
+callable served and its answer dropped (`route.fetch()` then `route.abort()`), the screen
+reaches its pending/unknown state and `wsf.pendingContribution.<goalId>.<uid>` is written.
+After the visitor leaves via the bar and the device returns to rest:
+
+- kiosk-owned state **goes** — auth detached, `wsf.kioskReturnGoalId` removed;
+- the member's unresolved record **stays**, keyed to a uid that is no longer signed in;
+- the next visitor's gate and entry screen carry no trace of it — no `13`, no name, and
+  `wsf-contribute-reconcile` absent for them.
+
+That is `kioskFinishPlan`'s documented rule holding under a route this probe is the first to
+exercise. Erasing that record to make the device look clean would be the defect, not the fix.
+
+### Result
+
+    3 tests, 3 as expected on d0477cc
+      W5-K1  an ordinary tap ... stays inside the kiosk session   — expected failure (the defect)
+      W5-K2  after a tap away and a Back, the device clears ...   — passed
+      W5-K3  an unresolved attempt survives ...                   — passed
+
+W5-K1 is marked `test.fail()`, not skipped: the body still runs, so it retires itself the day
+the shell stops rendering over the kiosk's contribution screen.
+
+**No fix proposed in product source and none attempted** — this is a QA branch and the seam is
+W1B's to close. The shape of a fix is not mine to choose, but the measurement narrows it: the
+shell needs to know the route is a kiosk session, and nothing in `shellAppliesTo`'s inputs
+carries that today.
+
+Evidence guard after the run: **9 frozen / 20 accepted paths, no byte changed.** No artifacts
+or test-results committed.
