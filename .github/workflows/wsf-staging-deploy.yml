@@ -67,6 +67,13 @@ on:
           - deploy
           - player-journey
           - cleanup-recovery
+          # `mail-preflight` READS and reports which of the three staging mail
+          # prerequisites exist. It cannot deploy, and that is structural
+          # rather than a promise: every job above gates on an explicit
+          # equality list of the modes it runs in, never a negation, so a mode
+          # added here runs nothing until a job names it. Only the preflight
+          # job names this one.
+          - mail-preflight
 
       # WHY A RECOVERY MODE EXISTS.
       # Run 35495928362 created synthetic users and documents on staging and
@@ -1018,3 +1025,56 @@ jobs:
           esac
           [ "${{ steps.recover.outcome }}" = "success" ] \
             || { echo "::error::the cleanup step failed even though the receipt reads $status"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # WHICH STAGING MAIL PREREQUISITES EXIST. READ-ONLY.
+  #
+  # Staging cannot send because `readSendConfig()` has nothing to read, not
+  # because the callables are missing — `wsfSendVerificationEmail` and
+  # `wsfSendPasswordResetEmail` are deployed and answer failed-precondition.
+  # Three things have to exist, and an operator should be told which are
+  # genuinely absent rather than guess: the secret with an ENABLED version,
+  # a sender on a verified domain, and the staging Hosting host authorized in
+  # staging Auth.
+  #
+  # WHY THIS CANNOT DEPLOY, structurally rather than by assurance: every job
+  # in this file gates on an explicit equality list of the modes it runs in,
+  # never a negation. `mail-preflight` is named by this job and by no other,
+  # so build, deploy, hosted-verify, player-journey and cleanup-recovery all
+  # skip. It also installs nothing with lifecycle scripts, writes no config,
+  # creates nothing, grants nothing and reads no secret payload.
+  #
+  # It never fails the run. A report that exits nonzero becomes a thing people
+  # route around instead of read.
+  # ---------------------------------------------------------------------------
+  mail-preflight:
+    if: ${{ inputs.mode == 'mail-preflight' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Report which mail prerequisites exist
+        env:
+          # Presence and DOMAIN only. The script never prints the local part:
+          # a sender address is a real address that ends up in headers and
+          # logs, and the domain is the half that has to match a verified one.
+          WSF_EMAIL_FROM: ${{ vars.WSF_EMAIL_FROM }}
+        run: node .github/wsf-staging/mail-preflight.mjs "$STAGING_PROJECT"
