@@ -133,13 +133,30 @@ for it.
 
 ## Status after review
 
-**#405 accepted for integration into the #390 visibility DRAFT branch only** (Product Director,
-`5784102622`), at this exact head `b1fc01b`. Integration is **L0's** to perform; W4 pushes
-nothing further to this branch. The acceptance authorizes no main merge, staging deploy, privacy
-release, rules/index/IAM change or production action.
+**#405 accepted** (Product Director, `5784102622`) at exactly `b1fc01b`, and **merged by L0 into
+`claude/wsf-community-visibility`** as `670edab04cfa3b24a2846e19eca5f4b1e5102c79`.
 
-W4's next packet — the Join review-evidence set for `/join/[joinCode]` — is **gated**: it may
-begin only after L0 records the integration receipt. Not started.
+**The integration is byte-exact.** The merged branch's tree is
+`5fb0b938bff7cb92818861a73e3df4c3911e2894` — *identical* to the tree of the reviewed fix head
+`b1fc01b`. Nothing was altered on the way in, so what the Director accepted is precisely what the
+visibility branch now carries, and the rewrite is present at
+`firebase.westayfit.emulators.json:43` on that branch.
+
+```
+$ git merge-base --is-ancestor b1fc01b origin/claude/wsf-community-visibility   # yes
+$ git rev-parse origin/claude/wsf-community-visibility^{tree}
+5fb0b938bff7cb92818861a73e3df4c3911e2894                                        # == b1fc01b's tree
+```
+
+**The integrated revision for any later combined-build proof is `670edab`**, whose tree is the
+one above. Per the Director, such proof must name that tree and stay a package separate from the
+baseline evidence in this directory — none of which was shot against it.
+
+The acceptance authorized no main merge, staging deploy, privacy release, rules/index/IAM change
+or production action, and the merge does not change that.
+
+W4's next packet — the Join review-evidence set for `/join/[joinCode]` — was separately ungated
+(`5784234771`) and is **delivered**: see `join-review-evidence.md` in this directory.
 
 ## Constraints held
 
