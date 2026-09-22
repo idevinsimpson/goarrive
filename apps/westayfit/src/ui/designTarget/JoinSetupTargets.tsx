@@ -497,10 +497,25 @@ export function JoinFailedTarget() {
               untouched: a failed round trip does not invalidate the link, and
               re-rendering the hero as an error state would say it did.
             */}
+            {/*
+              SUPERSEDED COPY, AND WHY. This said "We couldn't join this
+              community." / "Nothing was changed.", and the route it targets no
+              longer says either, because neither was knowable. An error with
+              no mapped callable code is the case where the commit may have
+              happened and the response was lost: `db.runTransaction` makes the
+              write all-or-nothing ON THE SERVER and says nothing about whether
+              the server got that far, and the screen reads no membership
+              before it speaks.
+
+              This frame is the generic, unclassified failure, so it takes the
+              uncertainty wording shipped at a760a4e. The NAMED refusals —
+              not-valid, too-many — are untouched: there a code came back, the
+              server answered, and "couldn't join" is a fact.
+            */}
             <Banner
               tone="error"
-              title="We couldn’t join this community."
-              body="Nothing was changed. Check your connection and try again."
+              title="We couldn’t confirm your join."
+              body="Check your connection, then try again."
             />
             <Primary label="Join The Henderson Family" />
             <Foot>
