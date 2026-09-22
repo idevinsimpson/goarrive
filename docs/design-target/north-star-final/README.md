@@ -49,14 +49,17 @@ board gets treated as accepted when only its source screens were:
    checked it line by line against the lock verdict (recorded in the board's
    README).
 3. **Independent board review** — the Program Director has visually reviewed
-   the rendered board itself. **Boards 00–07 + INDEX have it as of
+   the rendered board itself. **Boards 00–09 + INDEX have it as of
    2026-09-22** — Boards 00–05 + INDEX by Program Director verdict
    `5783373780`, a pixel review of the commit-pinned 1× review copies at
    `a912773` (*PASS as the canonical reconstructed 00–05 package*); Board 06
    by Creative Director verdict `5784845039` on PR #404, a pixel review of the
    exported original at `d6aba97`; Board 07 by Creative Director verdict
    `5785727716` on PR #416, a pixel review of the exported original at
-   `fe82c1e` (artifact `10723837867`, blob `df1a587`). It clears this status for these
+   `fe82c1e` (artifact `10723837867`, blob `df1a587`); Boards 08 and 09 by
+   Creative Director verdicts `5786034310` (PR #409, exported original at
+   `5674a86`, artifact `10724116667`, blob `bb72dacc`) and `5786014162`
+   (PR #412, `8aae42d`, artifact `10724485128`, blob `f34cfaf3`). It clears this status for these
    reconstructed artifacts only; it does not newly accept or stage the
    underlying app pages, and it authorises no deployment.
 
@@ -102,8 +105,8 @@ unaffected.
 | 05 | You | **REVIEWED** · independent board review passed 2026-09-22 (`5783373780`) | `5771338856` | accepted build | [`board-05/…BOARD_05_YOU_FINAL.png`](board-05/WE_STAY_FIT_NORTH_STAR_BOARD_05_YOU_FINAL.png) | `a912773` | Six accepted Page 5 AFTER frames read in place; every lock state has one. **2026-09-22 (W2, #399):** the board's own lead line no longer claims a *dominant* mark; the lock's quoted wording is unaltered and a differences panel records the gap (P-4). |
 | 06 | Create / join / auth | **REVIEWED** · independent board review passed 2026-09-22 (`5784845039`) | `5771368550` | current build review — identity accepted at `3562156` and captured later; `/join/[joinCode]` awaiting its page verdict; `/start-community` target redesign drawn, not implemented | [`board-06/…BOARD_06_CREATE_JOIN_AUTH_FINAL.png`](board-06/WE_STAY_FIT_NORTH_STAR_BOARD_06_CREATE_JOIN_AUTH_FINAL.png) | `d6aba97` | W2 (PR #404); reviewed from the exported original (artifact `10721560350`, blob `3f0b556`); the PNG's own footer still reads its submission label. |
 | 07 | Champion management | **REVIEWED** · independent board review passed 2026-09-22 (`5785727716`) | `5771412585` | current Manage-sheet truth — the three Home frames are the accepted Page 1 captured later; the fourteen sheet frames are current build; the expanded-details / QR / screens paths are disclosed, not pictured | [`board-07/…BOARD_07_CHAMPION_MANAGEMENT_FINAL.png`](board-07/WE_STAY_FIT_NORTH_STAR_BOARD_07_CHAMPION_MANAGEMENT_FINAL.png) | `ee4e4f8` | W2 (PR #416); reviewed from the exported original (artifact `10723837867`, blob `df1a587`); the PNG's own footer still reads its submission label. Two annotations travel with it (board README): the lock's "member directory not built" line is source-scoped to `5356e3c` and does not retire the separate #390 work; the event-first dense sheet and its invite-not-ready caveat remain product findings, not a premium standard. Champion administration beyond the current sheet is an unbuilt seam. |
-| 08 | Goal setup | PENDING | `5771436211` | staging-only current-build truth | — | — | |
-| 09 | Lifecycle / history | PENDING | `5771469193` | lifecycle truth | — | — | |
+| 08 | Goal setup | **REVIEWED** · independent board review passed 2026-09-22 (`5786034310`) | `5771436211` | staging-only current-build truth — the two arrival frames frozen at `02e24df`; a CURRENT BUILD strip from W4's real goal-setup captures (#415, source `0757379`); the target drawings kept non-authoritative where they conflict with the lock | [`board-08/…BOARD_08_GOAL_SETUP_FINAL.png`](board-08/WE_STAY_FIT_NORTH_STAR_BOARD_08_GOAL_SETUP_FINAL.png) | `5674a86` | W1B (PR #409); composition PASS `5784966469`, the coverage hold closed by the bounded revision `56fb683`, two captions corrected at `5674a86`; reviewed from the exported original (artifact `10724116667`, blob `bb72dacc`); the PNG's own footer still reads its submission label. Not page acceptance: the route stays available in staging and local emulators, production UI gated. |
+| 09 | Lifecycle / history | **REVIEWED** · independent board review passed 2026-09-22 (`5786014162`) | `5771469193` | lifecycle truth — eleven accepted-build captures read in place, plus the corrected-below-target specimen photographed from a real reach and a real group-level correction (`review/lifecycle-corrected-current/`, W1B's gated producer) | [`board-09/…BOARD_09_LIFECYCLE_HISTORY_FINAL.png`](board-09/WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png) | `8aae42d` | W1B (PR #412); layout PASS `5785588557`, the completeness hold closed by the supplement; reviewed from the exported original (artifact `10724485128`, blob `f34cfaf3`); the PNG's own footer still reads its submission label. No new History route, no dated personal history, no streak. |
 | 10 | Public display family | PENDING | `5771496484` | target | — | — | Device classes are design targets, not installed hardware. |
 | 11 | Single-goal kiosk | PENDING | `5771528649` | target | — | — | Device classes are design targets, not installed hardware. |
 | 12 | — | PENDING | — | — | — | — | Not started. Paused until 00–11 clears. |

@@ -71,7 +71,11 @@ type PreviewState =
 type JoinState =
   | { kind: 'idle' }
   | { kind: 'joining' }
-  | { kind: 'error'; message: string };
+  // TITLE TRAVELS WITH THE MESSAGE. A refusal the server named and an answer
+  // that never arrived are different facts, and the heading is where that
+  // difference is visible; one fixed heading over both would make the second
+  // one a lie.
+  | { kind: 'error'; title: string; message: string };
 
 export default function JoinPage() {
   const params = useLocalSearchParams<{ joinCode: string; event?: string; activity?: string }>();
@@ -223,37 +227,63 @@ export default function JoinPage() {
   const onJoin = useCallback(async () => {
     if (!user) return;
     setJoinState({ kind: 'joining' });
+
+    /*
+      THE CATCH ENDS WHERE THE CALL ENDS.
+
+      This try used to run to the end of the handler, so anything thrown AFTER
+      the await — reading session storage, computing the destination, the
+      navigation itself — was caught and presented as a failed join. That is a
+      false statement twice over: the call had already returned successfully,
+      so the member IS in the community, and the screen told them they were
+      not.
+
+      Only the call is inside the catch now. What follows it is a join that
+      already happened.
+    */
+    let result: { data: { groupId: string; alreadyMember: boolean } };
     try {
       const fn = httpsCallable<{ joinCode: string }, { groupId: string; alreadyMember: boolean }>(
         getFirebaseFunctions(),
         'wsfJoinCommunity'
       );
-      const result = await fn({ joinCode });
-      clearPendingJoinCode();
-      // Where a finished join lands: the event this visitor scanned into, or —
-      // for every join that did not come from an event — exactly where it
-      // landed before.
-      //
-      // And the END of the carrying: the event and
-      // the activity are read out of session storage, handed to the address,
-      // and both entries are dropped in the same breath. Read BEFORE either is
-      // cleared, so the two cannot get out of step.
-      const destination = routeAfterJoin(
+      result = await fn({ joinCode });
+    } catch (e) {
+      const { title, message } = joinFailurePresentation(e);
+      setJoinState({ kind: 'error', title, message });
+      return;
+    }
+
+    clearPendingJoinCode();
+    // Where a finished join lands: the event this visitor scanned into, or —
+    // for every join that did not come from an event — exactly where it
+    // landed before.
+    //
+    // And the END of the carrying: the event and
+    // the activity are read out of session storage, handed to the address,
+    // and both entries are dropped in the same breath. Read BEFORE either is
+    // cleared, so the two cannot get out of step.
+    //
+    // THE CARRYING IS THE OPTIONAL PART. `sessionStorage` throws in a browser
+    // that has storage blocked, and the member who scanned into an event
+    // should not lose a join that already succeeded because of it. The event
+    // address is attempted; its failure costs the event context and nothing
+    // else, and the community the member just joined is still where they
+    // land. Bounded on purpose: it changes no outcome the call decided.
+    let destination: string = `/community/${result.data.groupId}`;
+    try {
+      destination = routeAfterJoin(
         result.data.groupId,
         readPendingEventGoal(),
         readPendingEventActivity()
       );
       clearPendingEventGoal();
       clearPendingEventActivity();
-      router.replace(destination as never);
-    } catch (e) {
-      setJoinState({
-        kind: 'error',
-        // The heading of the failure card already says WHAT failed, so the
-        // fallback body says what to do rather than repeating it.
-        message: joinFailureCopy(e),
-      });
+    } catch {
+      // Keep the community destination above. Nothing is said to the member:
+      // the join worked and they are about to arrive.
     }
+    router.replace(destination as never);
   }, [joinCode, user]);
 
   if (!wsfAuthEnabled) {
@@ -396,7 +426,9 @@ export default function JoinPage() {
   const joinFailure =
     joinState.kind === 'error' ? (
       <View style={styles.failure} testID="wsf-join-submit-error">
-        <Text style={styles.failureTitle}>We couldn’t join this community.</Text>
+        <Text style={styles.failureTitle} testID="wsf-join-submit-error-title">
+          {joinState.title}
+        </Text>
         <Text style={styles.failureBody}>{joinState.message}</Text>
       </View>
     ) : null;
@@ -612,8 +644,10 @@ const PREVIEW_FAILURE_COPY =
  * would strand them on a screen whose real blocker is somewhere else. What
  * they must never get is the server's own wording.
  *
- * The default is safe to state as fact: the whole join runs inside
- * `db.runTransaction`, so a failure commits nothing.
+ * EVERY ENTRY HERE IS A REFUSAL THE SERVER NAMED. Reaching this map means a
+ * `callableCode` came back, which means the call completed and the server
+ * declined it — so "we couldn't join" is a fact about each of these, and the
+ * member is not a member.
  */
 const JOIN_FAILURE_COPY: Record<string, string> = {
   unauthenticated: 'Please sign in again, then try once more.',
@@ -624,11 +658,40 @@ const JOIN_FAILURE_COPY: Record<string, string> = {
   'resource-exhausted': 'Too many requests in a short time. Wait a moment and try again.',
 };
 
-const JOIN_FAILURE_DEFAULT = 'Nothing was changed. Check your connection and try again.';
+/** Named refusal: the call completed and the server said no. */
+const JOIN_REFUSED_TITLE = 'We couldn’t join this community.';
 
-function joinFailureCopy(e: unknown): string {
+/**
+ * NO CODE CAME BACK, SO NOTHING IS KNOWN — and this is the correction.
+ *
+ * This said "Nothing was changed.", on the reasoning that `wsfJoinCommunity`
+ * runs the whole join inside `db.runTransaction`, so a failure commits
+ * nothing. Atomicity is real and it is not the question. The transaction
+ * guarantees the write is all-or-nothing ON THE SERVER; it says nothing about
+ * whether the server got that far. An error with no callable code is exactly
+ * the case where the request may have committed and the RESPONSE was lost —
+ * and this screen performs no membership read before speaking, so it cannot
+ * know either way.
+ *
+ * Telling that member "nothing was changed" is a claim the client is not
+ * entitled to make, and the member who acts on it — asking for a new link,
+ * or joining again — acts on it wrongly. So the screen says what is true:
+ * the outcome is unconfirmed, and trying again is safe (the callable is
+ * idempotent for an existing member, which is why `alreadyMember` exists).
+ */
+const JOIN_UNCONFIRMED_TITLE = 'We couldn’t confirm your join.';
+const JOIN_UNCONFIRMED_BODY = 'Check your connection, then try again.';
+
+/**
+ * The heading and body for a thrown join, chosen by whether the server
+ * actually named a refusal.
+ */
+function joinFailurePresentation(e: unknown): { title: string; message: string } {
   const code = callableCode(e);
-  return (code && JOIN_FAILURE_COPY[code]) || JOIN_FAILURE_DEFAULT;
+  const named = code ? JOIN_FAILURE_COPY[code] : undefined;
+  return named
+    ? { title: JOIN_REFUSED_TITLE, message: named }
+    : { title: JOIN_UNCONFIRMED_TITLE, message: JOIN_UNCONFIRMED_BODY };
 }
 
 /**
