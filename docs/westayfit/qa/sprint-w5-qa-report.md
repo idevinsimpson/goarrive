@@ -673,3 +673,33 @@ A note on method: my first attempt at Q3 edited the file with a regex that did n
 it broken, and the run produced unrelated failures. That result was discarded rather than
 reported — a mutation that did not apply proves nothing, and reporting its noise as a finding is
 how a reviewer wastes a writer's time.
+
+
+## Join baseline RETIRED — the fix reached this branch's base
+
+`claude/wsf-app-shell` advanced to **`d0477cc`**, which carries W4's
+`a760a4ed01f80c50a4aab9140414371eb4ceecc2`. Merged here as `cc7356a4`.
+
+That is the condition the retirement note was written against, so it was executed as written:
+the two claim-recording cases in `sprint-w5-join-response-lost.spec.ts` are **deleted, not
+edited**. Softening them to agree with the fix would have left a test that looked like a guard
+and guarded nothing; the record of the defect lives in the commit history and in this report,
+which is where it belongs.
+
+`sprint-w5-join-outcome-fixed.spec.ts` carries the guard now, and it is the stricter of the
+two: uncertainty wording, no raw server text, a safe retry, no duplicate membership.
+
+**The retry case stays.** It asserts behaviour that had to survive the correction and did — a
+second press lands on the community and adds no second membership. True before the fix and
+true after, which is precisely what makes it worth keeping: it is the part of the old
+behaviour the correction was not allowed to break.
+
+This base advance **did** touch product source (`app/join/[joinCode].tsx`, +89/−26), so unlike
+the last three merges the bundle was rebuilt and the specs were genuinely re-run rather than
+reasoned about:
+
+- both join specs on the merged head: **5 passed, 0 failed**;
+- the other two sprint-w5 specs: **10 passed, 0 failed**.
+
+Evidence guard after the merge: **9 frozen / 20 accepted paths, no byte changed** (accepted up
+from 18 — `d0477cc` freezes the Join AFTER set and the correction frames).

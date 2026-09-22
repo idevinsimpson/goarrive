@@ -45,27 +45,28 @@ import {
  * If that read ever fails, the test fails there, on its own premise, rather
  * than going on to report a UI finding it has not earned.
  *
- * WHEN THE FIX REACHES THIS BRANCH'S BASE, THIS FILE RETIRES.
+ * RETIRED, AS THIS FILE SAID IT WOULD BE.
  *
- * It records PRE-FIX behaviour and passes only while the base still carries
- * it. Verified against W4's `a760a4ed01f80c50a4aab9140414371eb4ceecc2` (PR
- * #417): the first case and the control both fail there, because the route no
- * longer claims anything it cannot know. That failure is the evidence the fix
- * works, so the assertions are deliberately NOT softened to agree with it — a
- * baseline rewritten to pass against the fix destroys the only record of what
- * was wrong.
+ * The two cases that recorded the false claim are GONE — deleted, not edited.
+ * W4's fix `a760a4ed01f80c50a4aab9140414371eb4ceecc2` reached this branch's
+ * base in `d0477cc`, and from that moment those assertions described a build
+ * that no longer exists. Softening them to agree with the fix would have left
+ * a test that looked like a guard and guarded nothing; deleting them leaves
+ * the record where it belongs, in the commit history and in the report.
  *
- * So when `a760a4e` lands in this branch's base, the two claim-recording cases
- * here are deleted, not edited, and `sprint-w5-join-outcome-fixed.spec.ts`
- * carries the guard from then on. The retry case is the exception: it asserts
- * behaviour that must survive the fix and is already proven to, so it stays.
+ * `sprint-w5-join-outcome-fixed.spec.ts` carries the guard now, and it is the
+ * stricter one: it requires the uncertainty wording, no raw server text, a
+ * safe retry and no duplicate membership.
+ *
+ * WHAT REMAINS HERE, AND WHY. The retry case below asserts behaviour that had
+ * to survive the fix and did: a second press lands on the community and adds
+ * no second membership. It was true before the fix and is true after, which
+ * is exactly what makes it worth keeping — it is the part of the old
+ * behaviour the correction was not allowed to break.
  */
 
 const BASE_URL = process.env.WSF_PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5010';
 const JOIN_CALLABLE = /wsfJoinCommunity/;
-
-/** The exact sentence under test, quoted from the route rather than paraphrased. */
-const FALSE_NO_CHANGE_CLAIM = 'Nothing was changed.';
 
 type Fixture = {
   email: string;
@@ -160,59 +161,6 @@ test.describe('W5 probe — a join whose response is lost after the server commi
     baseURL: BASE_URL,
   });
 
-  test('BASELINE: the membership exists on the server, and the screen is recorded verbatim', async ({
-    page,
-  }) => {
-    const f = await seedJoinableCommunity();
-
-    const before = await activeMemberships(f.groupId);
-    expect(before, 'the visitor must start as a non-member').not.toContain(`${f.groupId}_${f.uid}`);
-    expect(before).toHaveLength(1); // the Champion only
-
-    await signInAndOpenJoin(page, f);
-    const { served } = loseTheResponseAfterCommit(page);
-    await page.getByTestId('wsf-join-submit').click();
-
-    // THE PREMISE, PROVEN FIRST. If the server did not commit, nothing below
-    // is a finding and this test must fail here rather than report one.
-    const status = await served;
-    expect(status, 'the callable must have answered — otherwise the join never reached the server').toBe(200);
-
-    await expect
-      .poll(async () => (await activeMemberships(f.groupId)).includes(`${f.groupId}_${f.uid}`), {
-        timeout: 15_000,
-        message: 'the membership must exist on the server before the UI is judged',
-      })
-      .toBe(true);
-
-    const after = await activeMemberships(f.groupId);
-    expect(after).toHaveLength(2); // Champion + the visitor who just joined
-
-    // Only now: what does the member actually see?
-    const card = page.getByTestId('wsf-join-submit-error');
-    await expect(card).toBeVisible({ timeout: 20_000 });
-    const rendered = ((await card.textContent()) || '').replace(/\s+/g, ' ').trim();
-
-    /*
-      RECORDED, NOT ASSERTED AWAY. The baseline's job is to state what the
-      shipped route says while the membership demonstrably exists. The
-      assertion is written so the failure message carries the sentence
-      verbatim into the report.
-    */
-    expect(
-      {
-        membershipExists: true,
-        activeMemberships: after.length,
-        screen: rendered,
-      },
-      'BASELINE RECORD — the join committed; this is what the screen claimed'
-    ).toEqual({
-      membershipExists: true,
-      activeMemberships: 2,
-      screen: expect.stringContaining(FALSE_NO_CHANGE_CLAIM),
-    });
-  });
-
   test('BASELINE: one safe retry still lands on the community, and adds no second membership', async ({
     page,
   }) => {
@@ -247,32 +195,5 @@ test.describe('W5 probe — a join whose response is lost after the server commi
       { destination: new URL(page.url()).pathname, activeMemberships: after.length },
       'the retry must land on the intended community and create no second membership'
     ).toEqual({ destination: `/community/${f.groupId}`, activeMemberships: 2 });
-  });
-
-  test('CONTROL: a join aborted BEFORE the server sees it commits nothing, so the default sentence is true there', async ({
-    page,
-  }) => {
-    /*
-      THE CONTROL THAT KEEPS THE FINDING HONEST. The same screen, the same
-      sentence, and this time it is correct — because the request never
-      reached the server and the membership genuinely does not exist. Without
-      this, the baseline above could be read as "the default copy is always
-      wrong", which is not the finding and would send W4 after the wrong fix.
-    */
-    const f = await seedJoinableCommunity();
-    await signInAndOpenJoin(page, f);
-
-    await page.route(JOIN_CALLABLE, (route) => route.abort('connectionfailed'));
-    await page.getByTestId('wsf-join-submit').click();
-
-    const card = page.getByTestId('wsf-join-submit-error');
-    await expect(card).toBeVisible({ timeout: 20_000 });
-    const rendered = ((await card.textContent()) || '').replace(/\s+/g, ' ').trim();
-
-    const after = await activeMemberships(f.groupId);
-    expect(
-      { membershipExists: after.includes(`${f.groupId}_${f.uid}`), saysNothingChanged: rendered.includes(FALSE_NO_CHANGE_CLAIM) },
-      'aborted before the server: nothing committed, so the sentence is accurate'
-    ).toEqual({ membershipExists: false, saysNothingChanged: true });
   });
 });
