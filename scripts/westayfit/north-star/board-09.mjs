@@ -27,11 +27,20 @@
  *
  *   ACCEPTED BUILD · CAPTURED        the accepted Page 4 AFTER evidence.
  *
- *   NO FRAME EXISTS                  Corrected-Below-Target has no capture on
- *                                    any surface. It is stated from the source
- *                                    and the test that guards it, drawn
- *                                    nowhere, and its absence is named on the
- *                                    board's face rather than filled in.
+ *   CURRENT BUILD · CAPTURED       Corrected-Below-Target, photographed at last.
+ *                                    The first cut of this board had no frame of
+ *                                    it on any surface and said so rather than
+ *                                    drawing one; the Director passed the layout
+ *                                    and held coverage PARTIAL for exactly that
+ *                                    gap (5785588557), because the board's main
+ *                                    lifecycle contract needed a visible
+ *                                    specimen and not a text promise. The
+ *                                    producer is this worker's own
+ *                                    sprint-w1b-lifecycle-capture.spec.ts: the
+ *                                    goal really reaches its target, the server
+ *                                    stamps reachedAt, a real Champion
+ *                                    correction moves the confirmed total below
+ *                                    it, and the stamp is asserted to survive.
  *
  * NO MINI LIVING WE IS REINTRODUCED. Community Home's secondary and History
  * rows lost their mini marks in the 2026-09-22 one-mark correction, and the
@@ -64,13 +73,15 @@ const B02 = (f) => path.join(REPO, 'docs/design-target/north-star-final/board-02
 const HOME = (f) =>
   path.join(REPO, 'docs/design-target/review/page-01-home/correction-2026-09-22', f);
 const P04 = (f) => path.join(REPO, 'docs/design-target/review/page-04-progress/after', f);
+const CORR = (f) => path.join(REPO, 'docs/design-target/review/lifecycle-corrected-current', f);
 
 export const width = 1280;
-export const height = 3352;
+export const height = 4281;
 
 const W = 268;
 const LATER = 'ACCEPTED BUILD · LATER CAPTURE';
 const ACCEPTED = 'ACCEPTED BUILD · CAPTURED';
+const CAPTURED = 'CURRENT BUILD · CAPTURED';
 
 const b = (t) => `<b style="color:${NAVY}">${t}</b>`;
 const w = (t) => `<b style="color:${CREAM}">${t}</b>`;
@@ -111,6 +122,9 @@ const LIVE_ROW = [
   B01('state-unavailable.png'),
 ];
 const LIVE_SLOT = Math.max(...LIVE_ROW.map((f) => frameHeight(f, W)));
+
+/* The corrected-below-target pair and its control, one device class. */
+const CORR_SLOT = frameHeight(CORR('home-corrected-below-target-390x844.png'), W);
 
 export const html = page({
   width,
@@ -271,16 +285,55 @@ export const html = page({
     </div>
   </div>
 
+  <div>
+    <div class="sec-head">
+      <div>
+        <div class="eyebrow">CORRECTED BELOW TARGET · PHOTOGRAPHED · THE SAME GOAL, BEFORE AND AFTER</div>
+        <h3>An authoritative correction can take a goal back under its target. The stamp stays in the record; the present tense does not.</h3>
+      </div>
+      <div class="how">The goal ${b('actually reaches')} its target — a real <b style="color:${NAVY}">wsfContribute</b> crosses it and the ${b('server')} stamps <b style="color:${NAVY}">reachedAt</b> — and a real <b style="color:${NAVY}">wsfAdjustGoal</b> by the community's own Champion then moves the confirmed total below it. Nothing is seeded reached and no shard is hand-edited. Captured at app-shell ${b('44cc063')}; per-frame sha256 in <b style="color:${NAVY}">lifecycle-corrected-current/README.md</b>.</div>
+    </div>
+    <div class="phones" style="gap:26px">
+      ${phone({
+        file: CORR('home-reached-open-before-correction-390x844.png'),
+        width: W,
+        slot: CORR_SLOT,
+        tag: 'fresh',
+        tagText: CAPTURED,
+        title: 'Before · it really did reach',
+        sub: `${b('GOAL REACHED')}, the mark full, ${b('520 of 500 squats')}, ${b('100% complete')}, ${b('20 beyond our goal · still open')} — and ${b('Reached Sep 22')}, printed because that is the phase ${b('now')}. The stamp on this goal is a server event, not a fixture field.`,
+      })}
+      ${phone({
+        file: CORR('home-corrected-below-target-390x844.png'),
+        width: W,
+        slot: CORR_SLOT,
+        tag: 'fresh',
+        tagText: CAPTURED,
+        title: 'After · the same goal, the same screen',
+        sub: `${b('460 of 500 squats')}, ${b('92% complete')}, ${b('Only 40 to go')}, the mark no longer full — and ${b('no reached date anywhere')}, while <b style="color:${NAVY}">reachedAt</b> is ${b('still in Firestore')}, asserted after the correction. 92% is past the 90% threshold, so the goal lands back in ${b('nearGoal')} and takes that phase's wording.`,
+      })}
+      ${phone({
+        file: CORR('progress-corrected-below-target-390x844.png'),
+        width: W,
+        slot: CORR_SLOT,
+        tag: 'fresh',
+        tagText: CAPTURED,
+        title: 'Progress · the rule, by contrast',
+        sub: `The corrected goal runs with ${b('460 of 500 squats · 92%')} and ${b('no REACHED')}. Beside it a goal that ${b('is')} reached and closed keeps its badge and the screen's ${b('one full mark')}. The member's own ${b('520 squats')} is untouched: a goal-level correction moves the ${b('community total')} and makes no claim about whose contribution was wrong.`,
+      })}
+    </div>
+  </div>
+
   <div class="two">
     <div class="side">
       <div class="panel dark">
-        <div class="eyebrow seam">THE STATE WITH NO FRAME · CORRECTED BELOW TARGET</div>
-        <h3>An authoritative correction can take a goal back under its target. The stamp stays; the present tense must not.</h3>
-        <p class="note">${w('No capture of this state exists on any surface')} — not in the review sets, not in Board 01's or Board 02's captures. It is therefore ${w('stated and not drawn')}, and this panel is the board saying so rather than illustrating it with something else.</p>
-        <p class="note" style="margin-top:8px">${w('What the lock requires:')} current UI shows the current phase and status — ${w('460 of 500')}, ${w('92%')}, ${w('40 to go')} — and ${w('MUST NOT show "Reached on …"')} as if it still described the present.</p>
+        <div class="eyebrow seam">WHY THAT PAIR IS THE WHOLE LOCK</div>
+        <h3>The current total decides. A historical stamp never does.</h3>
+        <p class="note">${w('What the lock requires:')} current UI shows the current phase and status — ${w('460 of 500')}, ${w('92%')}, ${w('40 to go')} — and ${w('MUST NOT show "Reached on …"')} as if it still described the present. The frames above are that sentence, photographed.</p>
         <p class="note" style="margin-top:8px">${w('What the build does.')} <b style="color:${CREAM}">progressPhase()</b> reads the confirmed total, the target and the status, and nothing else. Community Home prints the reached date only when the goal has a <b style="color:${CREAM}">reachedAt</b> AND the current phase is <b style="color:${CREAM}">reachedOpen</b> or <b style="color:${CREAM}">closedReached</b>. Progress computes its own <b style="color:${CREAM}">reached</b> from <b style="color:${CREAM}">isReached(sharedTotal, target)</b>.</p>
+        <p class="note" style="margin-top:8px">${w('The stamp is proved to survive, not assumed.')} After the correction the producer reads the goal document itself and asserts <b style="color:${CREAM}">reachedAt</b> is still there. Otherwise a missing date line would be evidence of ${w('deleted data')} rather than of a page reporting the present tense — the opposite of the rule.</p>
+        <p class="note" style="margin-top:8px">${w('A zero is not a pass.')} Every post-correction check names the exact non-zero value, and the progress-error node is asserted absent, so a stale or failed read fails the producer instead of passing as "no reached treatment".</p>
         <p class="note" style="margin-top:8px">${w('It was once wrong, and the source keeps the record:')} <i>"a goal corrected down to 380 of 500 still wore REACHED, and still drew the celebratory Living WE, because of something that had been true a week earlier."</i> The same note adds the other half — an ${w('unconfirmed')} total is not a reached goal either.</p>
-        <p class="note" style="margin-top:8px">${w('The dependency, named:')} a frame of this state needs a fixture that confirms a total above target, stamps <b style="color:${CREAM}">reachedAt</b>, then corrects the total below it, captured on Home and on Progress. That is a capture-producer change and belongs to whoever owns those specs — not to this board.</p>
       </div>
       <div class="panel">
         <div class="eyebrow quiet">THE LOCK · WHAT EVERY FRAME ABOVE OBEYS</div>
@@ -304,7 +357,8 @@ export const html = page({
       <div class="panel">
         <div class="eyebrow quiet">WHERE THIS BOARD IS HONEST ABOUT ITS OWN LIMITS</div>
         <table>
-          <tr><td class="k">Three provenances</td><td class="d"><b>ACCEPTED BUILD · LATER CAPTURE</b> — Home and Progress are accepted at the staging pin ${b('3562156')}; these frames were shot afterwards (${b('05a76bb')}, ${b('4fe51f0')}, ${b('6e1ce26')}) for Boards 01–02 and the one-mark correction. A later capture of an accepted route is a fact about the frame, not a demotion of the route. <b>ACCEPTED BUILD · CAPTURED</b> — the accepted Page 4 AFTER evidence at ${b('02e24df')}. <b>And one state with no frame at all</b>, named on the dark panel.</td></tr>
+          <tr><td class="k">Three provenances</td><td class="d"><b>ACCEPTED BUILD · LATER CAPTURE</b> — Home and Progress are accepted at the staging pin ${b('3562156')}; these frames were shot afterwards (${b('05a76bb')}, ${b('4fe51f0')}, ${b('6e1ce26')}) for Boards 01–02 and the one-mark correction. A later capture of an accepted route is a fact about the frame, not a demotion of the route. <b>ACCEPTED BUILD · CAPTURED</b> — the accepted Page 4 AFTER evidence at ${b('02e24df')}. <b>CURRENT BUILD · CAPTURED</b> — the corrected-below-target trio, shot for this board at app-shell ${b('44cc063')} and awaiting no verdict of its own.</td></tr>
+          <tr><td class="k">The gap this board once declared</td><td class="d">Its first cut had ${b('no frame')} of Corrected Below Target anywhere, said so on its own face, and named the fixture a real one would need. That is now built and shot rather than described — the producer is this board's own, gated for writes and ${b('asserted on every ordinary run')}, because the build has worn a stale REACHED before.</td></tr>
           <tr><td class="k">No mark was put back</td><td class="d">Community Home's secondary and History rows lost their mini marks in the ${b('2026-09-22 one-mark correction')}, and the frames used here are the corrected ones — the spec asserts exactly ${b('one')} <b>wsf-community-goal-we-*</b> element on the screen. Progress's single mark on its lead finished goal is ${b('current build')}, on a different surface, and is captioned as such rather than left to read as a relapse.</td></tr>
           <tr><td class="k">Not this board's subject</td><td class="d">The lock is explicit: private dated personal history — an individual activity log, dates, streaks — remains ${b("Board 04's separate unbuilt seam")} and is not community goal History. None is drawn or proposed here. This board also ${b('locks no new History route')}; History is a section of Community Home and a split on Progress, and it stays that.</td></tr>
           <tr><td class="k">Not reproduced</td><td class="d">The 390×640 and 430×932 classes of the Home correction frames; Board 04's loading, empty, failure and partial-failure states, which belong to the Progress page's own board; and the ${b('-end')} scrolled variants elsewhere in the atlas.</td></tr>
@@ -314,6 +368,6 @@ export const html = page({
     </div>
   </div>
 
-  ${footer('WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL', 'SELF-CHECKED · INDEPENDENT REVIEW PENDING · PR #365 comment 5771469193 · current build / review: lifecycle truth from the confirmed total, never from reachedAt; Corrected Below Target has no frame and is stated, not drawn')}
+  ${footer('WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL', 'SELF-CHECKED · INDEPENDENT REVIEW PENDING · PR #365 comment 5771469193 · current build / review: lifecycle truth from the confirmed total, never from reachedAt — including Corrected Below Target, photographed before and after on the same goal')}
   `,
 });
