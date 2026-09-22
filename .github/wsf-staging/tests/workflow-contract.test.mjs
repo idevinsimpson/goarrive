@@ -422,6 +422,24 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
   });
 });
 
+test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () => {
+  /*
+    The direct statement of the preflight's safety, in the same form the other
+    modes are pinned in. Every other job must be false here: if one ever flips
+    to true, a read-only report has become a deploy.
+  */
+  const reached = reachedJobs('mail-preflight');
+  assert.deepEqual(reached, {
+    gate: false,
+    config: false,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'cleanup-recovery': false,
+  });
+});
+
 test('deploy is the default mode, so an unset input runs the normal path', () => {
   const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\n# Nothing is granted'));
   const modeBlock = onBlock.slice(onBlock.indexOf('      mode:'));
@@ -429,7 +447,17 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   assert.match(modeBlock, /^\s+type: choice$/m, 'the mode must be a closed choice, not free text');
   const optionsBlock = modeBlock.slice(modeBlock.indexOf('options:'), modeBlock.indexOf('recover_run_id:'));
   const options = [...optionsBlock.matchAll(/^\s+- ([a-z-]+)$/gm)].map((m) => m[1]);
-  assert.deepEqual(options, ['deploy', 'player-journey', 'cleanup-recovery'], 'exactly these three modes exist');
+  /*
+    THE LIST IS PINNED EXACTLY, so adding a mode is a deliberate act rather
+    than something that happens quietly. `mail-preflight` was added here only
+    after the job matrix above was extended to say what runs in it — which is
+    the check that actually matters, because a mode no job names runs nothing.
+  */
+  assert.deepEqual(
+    options,
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight'],
+    'exactly these four modes exist'
+  );
 });
 
 test('the deploy path still carries the steps it carried before the mode existed', () => {
@@ -701,6 +729,70 @@ test('the failure reprint is diagnostic only and can never become a gate', () =>
   assert.equal(/continue-on-error/.test(gate), false,
     'the real gate became continue-on-error, so a failed journey could pass');
   assert.ok(at < gateAt, 'the reprint must come before the gate that exits');
+});
+
+test('the mail preflight can report, and cannot deploy', () => {
+  /*
+    THE PREFLIGHT'S SAFETY IS STRUCTURAL, AND THIS PINS THE STRUCTURE.
+
+    Every job in this workflow gates on an explicit equality list of the modes
+    it runs in, never a negation — which is what makes adding a mode safe: a
+    new mode runs nothing until a job names it. If any other job ever starts
+    matching `mail-preflight`, a read-only report becomes a deploy.
+  */
+  const wf = fs.readFileSync(path.join(WORKFLOW_DIR, 'wsf-staging-deploy.yml'), 'utf8');
+
+  assert.match(wf, /^\s+- mail-preflight$/m, 'the mail-preflight mode is not offered');
+
+  const at = wf.indexOf('\n  mail-preflight:');
+  assert.notEqual(at, -1, 'the mail-preflight job is gone');
+  const job = wf.slice(at);
+
+  assert.match(job, /if: \$\{\{ inputs\.mode == 'mail-preflight' \}\}/,
+    'the preflight job does not gate on its own mode');
+
+  // NOTHING ELSE MAY RUN IN THIS MODE. Count the jobs whose condition names
+  // it: exactly one, the preflight itself.
+  const namesIt = wf.split(/\n  (?=[a-z][a-z0-9-]*:\n)/).filter(
+    (j) => /inputs\.mode == 'mail-preflight'/.test(j)
+  );
+  assert.equal(namesIt.length, 1,
+    `${namesIt.length} jobs run in mail-preflight mode; only the preflight may`);
+
+  // And the preflight itself must not deploy, write or grant.
+  for (const forbidden of [
+    /firebase\s+deploy/,
+    /hosting:channel:deploy/,
+    /gcloud\s+secrets\s+(create|versions\s+add|versions\s+access)/,
+    /add-iam-policy-binding/,
+  ]) {
+    assert.equal(forbidden.test(job), false,
+      `the preflight job matches ${forbidden}, so it is not read-only`);
+  }
+});
+
+test('the preflight never reads a secret payload or prints a token', () => {
+  const src = fs.readFileSync(
+    path.join(WORKFLOW_DIR, '..', 'wsf-staging', 'mail-preflight.mjs'),
+    'utf8'
+  );
+  // `versions access` is the call that returns the key itself. It must not
+  // appear at all — not behind a flag, not in a comment-adjacent branch.
+  assert.equal(/versions['"\s,\]]*access/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')), false,
+    'the preflight reads a secret payload');
+
+  // The access token is passed to curl and must never reach stdout.
+  assert.equal(/console\.log\([^)]*print-access-token/.test(src), false,
+    'the preflight prints an access token');
+  assert.equal(/console\.log\([^)]*\btok\b/.test(src), false,
+    'the preflight prints the token variable');
+
+  // Only the sender's DOMAIN is reported, never the whole address.
+  assert.equal(/console\.log\([^)]*\braw\b/.test(src), false,
+    'the preflight prints the full sender address');
+
+  // A report must not fail the run.
+  assert.match(src, /process\.exit\(0\)/, 'the preflight can exit nonzero');
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);
