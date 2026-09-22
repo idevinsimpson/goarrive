@@ -174,7 +174,7 @@ export const width = 1280;
 /* 1935 clipped the screen note's last two rows and the footer once the strip
    gained its ninth cell and the seam panel its third. Width is the set's
    constant; height is per board (00 is 1400, 02 is 2470). */
-export const height = 2190;
+export const height = 2260;
 
 export const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
