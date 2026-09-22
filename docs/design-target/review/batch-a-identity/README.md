@@ -341,3 +341,35 @@ blocker; nothing on these screens claims it is configured — `/verify-email`
 says the opposite, plainly, when it is not. Authorization and auth transitions
 are unchanged: `nextRouteAfterAuth` is still resolved and consumed on the
 terminal hop only, and `src/authDestination.ts` reads without consuming.
+
+## Re-baselined — all 42 AFTER frames, for a defect in the field's texture
+
+`check:evidence` refused this change, correctly, and it is recorded here
+rather than absorbed quietly. **Only `after/` moved. The frozen BEFORE set
+and every TARGET frame are byte-identical.**
+
+The navy field's diagonal bands were drawn as 420 pt rectangles rotated about
+their own centres and left for the field's `overflow: hidden` to crop; the
+corner glow was a 230 pt disc pushed 70 pt past the right edge. Clipping hides
+paint, not layout, so on a 390 pt phone four decorative boxes reported their
+right edges at roughly 460, 534, 574 and 614 — past the screen. The project's
+own R1 rule ("nothing wider than the viewport and nothing past its right
+edge") caught all four.
+
+It caught them on **`/start-community`** as well, which no visual work had
+touched and which renders through this same shell. That is what settled it as
+a shell defect rather than anything to do with the surface being built at the
+time.
+
+The geometry is now anchored instead of cropped: each band rotates about its
+left edge — the end that is actually seen — and is measured to reach the
+field's right edge and stop; the glow keeps its corner at a diameter that
+reaches the same point its old arc did. The stripe a person sees starts in the
+same place, runs at the same angle and ends at the same edge. What changed in
+these 42 frames is the end cap of three near-invisible stripes at 5–10 % alpha
+and the curvature of one corner glow. Nothing else on any screen moved: the
+type, the fields, the actions and the foot are unchanged.
+
+`/you`'s AFTER frames were re-captured in the same pass and **restored**, not
+committed: comparing them showed the only difference was the randomly seeded
+fixture email, which is not a reason to re-baseline accepted evidence.
