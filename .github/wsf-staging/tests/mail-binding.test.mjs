@@ -237,6 +237,39 @@ test('a PARTIAL response — a name but no serviceConfig — is also unknown', (
   assert.notEqual(r.read(KEY), 'unbound');
 });
 
+test('N1: an EMPTY name is unknown, not merely a present one', () => {
+  /*
+    Distinct from `no-name`, and the distinction is the point. Here the `name`
+    key EXISTS and is `""`. A completeness guard written as a presence check —
+    `'name' in d`, or a truthiness test on the key rather than the value —
+    passes this and attributes a real secret reference to a function that
+    nothing identified. The project half of the identity check also has nothing
+    to resolve against.
+  */
+  const r = report('empty-name');
+  assert.equal(r.read(KEY), 'unknown');
+  assert.notEqual(r.read(KEY), 'bound_pinned');
+});
+
+test('N3: A DIGIT-CONTAINING VERSION THAT IS NOT A NUMBER IS AN ALIAS', () => {
+  /*
+    `v2` contains a digit and is not a version. Any test looser than `^\d+$` —
+    a bare `\d` search, a `parseInt`, a `Number()` coercion — reads it as
+    version 2 and reports the exact fact this whole exercise exists to
+    establish, off a string that never asserted it.
+
+    Checked at BOTH levels: the function declares `v2` and the revision carries
+    `v2`, so the served number must stay unresolved rather than fall out of a
+    lenient parse on either read.
+  */
+  const r = report('alias-digits');
+  assert.equal(r.read(KEY), 'bound_alias');
+  assert.equal(r.read(`${KEY}_DECLARED`), 'v2');
+  assert.equal(r.read(`${KEY}_SERVED`), 'unresolved');
+  assert.notEqual(r.read(`${KEY}_SERVED`), '2');
+  assert.match(r.stdout, /an alias, not a number/);
+});
+
 test('A RESPONSE THAT IDENTIFIES NO FUNCTION IS UNKNOWN, however complete the rest looks', () => {
   /*
     The other half of the completeness guard, and the half a mutation run
