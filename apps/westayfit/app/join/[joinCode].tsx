@@ -6,7 +6,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
-import { describeCallableError } from '../../src/callableErrors';
 import {
   FormShell,
   QuietShell,
@@ -211,7 +210,7 @@ export default function JoinPage() {
         }
         setPreviewState({
           kind: 'error',
-          message: describeCallableError(e, 'We couldn’t load this community. Try again.'),
+          message: PREVIEW_FAILURE_COPY,
         });
       }
     })();
@@ -252,7 +251,7 @@ export default function JoinPage() {
         kind: 'error',
         // The heading of the failure card already says WHAT failed, so the
         // fallback body says what to do rather than repeating it.
-        message: describeCallableError(e, 'Check your connection and try again.'),
+        message: joinFailureCopy(e),
       });
     }
   }, [joinCode, user]);
@@ -570,6 +569,66 @@ export default function JoinPage() {
       />
     </FormShell>
   );
+}
+
+/**
+ * NO SERVER TEXT REACHES THIS SCREEN. EVER.
+ *
+ * `describeCallableError` is deliberately permissive: a sentence the server
+ * wrote for members passes straight through, which is right on the identity
+ * screens where the server is the only thing that knows why (a sole-Champion
+ * refusal, a reset-email failure). It is wrong HERE. This surface is reached
+ * by a stranger holding a link, so anything the callable says is both
+ * unreviewed member-facing copy and a potential oracle. The committed
+ * evidence proved the point: a fixture answering `internal` with the words
+ * "join failed" rendered them verbatim, because that string is neither a bare
+ * code nor developer-shaped and so read as an intentional member sentence.
+ *
+ * So these map the CODE and never look at the message. There is no path from
+ * a callable's text to a rendered pixel on this route.
+ */
+function callableCode(e: unknown): string | null {
+  if (!e || typeof e !== 'object' || !('code' in e)) return null;
+  const raw = (e as { code?: unknown }).code;
+  if (typeof raw !== 'string' || raw === '') return null;
+  return raw.startsWith('functions/') ? raw.slice('functions/'.length) : raw;
+}
+
+/**
+ * The preview's own failure. `not-found` and `resource-exhausted` are their
+ * own screens, so everything that reaches this one genuinely failed to load —
+ * one stable sentence covers it, and it says the thing that matters: the link
+ * itself may be perfectly good.
+ */
+const PREVIEW_FAILURE_COPY =
+  'We couldn’t load this community. The link may still be good — try again.';
+
+/**
+ * A failed join, BY CATEGORY rather than by one sentence.
+ *
+ * The categories are not decoration. `wsfJoinCommunity` refuses a member with
+ * no profile (`failed-precondition`) and a signed-out caller
+ * (`unauthenticated`), and telling either of them "check your connection"
+ * would strand them on a screen whose real blocker is somewhere else. What
+ * they must never get is the server's own wording.
+ *
+ * The default is safe to state as fact: the whole join runs inside
+ * `db.runTransaction`, so a failure commits nothing.
+ */
+const JOIN_FAILURE_COPY: Record<string, string> = {
+  unauthenticated: 'Please sign in again, then try once more.',
+  'failed-precondition': 'Complete your profile before joining a community.',
+  'not-found':
+    'This link is no longer valid. Ask the person who shared it to send you a new one.',
+  'permission-denied': 'This account can’t join with this link.',
+  'resource-exhausted': 'Too many requests in a short time. Wait a moment and try again.',
+};
+
+const JOIN_FAILURE_DEFAULT = 'Nothing was changed. Check your connection and try again.';
+
+function joinFailureCopy(e: unknown): string {
+  const code = callableCode(e);
+  return (code && JOIN_FAILURE_COPY[code]) || JOIN_FAILURE_DEFAULT;
 }
 
 /**

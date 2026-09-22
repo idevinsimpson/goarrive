@@ -241,6 +241,15 @@ test.describe('Batch B — /join/[joinCode] arrives at the top on a short phone'
     return { context, page: await context.newPage() };
   }
 
+  /**
+   * The capture harness waits this long in `shoot()` before the shutter. A
+   * guard that measures the instant a state appears cannot see a layout or
+   * scroll-anchor shift that lands during that interval — it would pass while
+   * the committed frame showed the shift. So every settled assertion below
+   * waits the same interval the evidence does, and measures after it.
+   */
+  const CAPTURE_SETTLE_MS = 700;
+
   /** The offset the route opened at — the document's and every scroller's. */
   async function arrivalOffsets(page: Page): Promise<number[]> {
     return page.evaluate(() => {
@@ -253,6 +262,7 @@ test.describe('Batch B — /join/[joinCode] arrives at the top on a short phone'
   }
 
   async function expectArrivedAtTop(page: Page, heroTestId: string, label: string) {
+    await page.waitForTimeout(CAPTURE_SETTLE_MS);
     const offsets = await arrivalOffsets(page);
     expect(offsets, `${label}: nothing is scrolled on arrival`).toEqual(
       offsets.map(() => 0)
@@ -302,7 +312,18 @@ test.describe('Batch B — /join/[joinCode] arrives at the top on a short phone'
 
       release?.();
       await expect(page.getByTestId('wsf-join-submit-error')).toBeVisible({ timeout: 30_000 });
-      await expectArrivedAtTop(page, 'wsf-join-conditions', 'failed');
+      // SETTLED, not first-paint. This is the exact state the committed
+      // `AFTER-failed-390x640.png` photographs, measured after the same wait.
+      await expectArrivedAtTop(page, 'wsf-join-conditions', 'failed (settled)');
+      // And the whole hero, not just its last line: a shift that pushed the
+      // wordmark off the top while leaving the conditions visible would be
+      // exactly the defect the frame was read as showing.
+      const wordmark = await page.getByTestId('wsf-form-wordmark').boundingBox();
+      expect(wordmark, 'failed (settled): the wordmark exists').not.toBeNull();
+      expect(
+        wordmark!.y,
+        'failed (settled): the top of the hero is still on screen'
+      ).toBeGreaterThanOrEqual(0);
     } finally {
       await context.close();
     }
@@ -326,4 +347,83 @@ test.describe('Batch B — /join/[joinCode] arrives at the top on a short phone'
       }
     });
   }
+});
+
+/**
+ * NO CALLABLE TEXT REACHES THE SCREEN.
+ *
+ * The committed evidence rendered the words "join failed" and "preview
+ * failed" — fixture strings, straight from the callable, printed as member
+ * copy. `describeCallableError` let them through because neither is a bare
+ * code nor developer-shaped, so both read as sentences the server wrote for
+ * members. That is the right default on the identity screens and the wrong
+ * one here, where a stranger holding a link reaches the surface.
+ *
+ * These inject text no member should ever see and assert it is nowhere in the
+ * rendered page — not in the panel, not anywhere else on screen.
+ */
+test.describe('Batch B — /join/[joinCode] never renders server text', () => {
+  const LEAK = 'ZZQX-internal-diagnostic-do-not-render';
+
+  test('a preview failure shows stable recovery copy, not the callable message', async ({
+    page,
+  }) => {
+    await page.route('**/wsfPreviewCommunity**', (route) =>
+      fulfil(route, callableError('INTERNAL', LEAK), 500)
+    );
+    await page.goto(`/join/${JOIN_CODE}`);
+    await expect(page.getByTestId('wsf-join-error')).toBeVisible({ timeout: 30_000 });
+
+    await expect(page.getByTestId('wsf-join-error-why')).toHaveText(
+      'We couldn’t load this community. The link may still be good — try again.'
+    );
+    expect(await page.locator('body').innerText()).not.toContain(LEAK);
+  });
+
+  test('a join failure shows stable recovery copy, not the callable message', async ({ page }) => {
+    await page.route('**/wsfPreviewCommunity**', (route) => fulfil(route, OK_PREVIEW));
+    await signedInMember(page);
+    await page.goto(`/join/${JOIN_CODE}`);
+    await expect(page.getByTestId('wsf-join-submit')).toBeVisible({ timeout: 30_000 });
+
+    await page.route('**/wsfJoinCommunity**', (route) =>
+      fulfil(route, callableError('INTERNAL', LEAK), 500)
+    );
+    await page.getByTestId('wsf-join-submit').click();
+    await expect(page.getByTestId('wsf-join-submit-error')).toBeVisible({ timeout: 30_000 });
+
+    // Truthful as a matter of fact, not reassurance: the callable runs the
+    // whole join inside `db.runTransaction`, so a failure commits nothing.
+    await expect(page.getByTestId('wsf-join-submit-error')).toContainText(
+      'Nothing was changed. Check your connection and try again.'
+    );
+    expect(await page.locator('body').innerText()).not.toContain(LEAK);
+  });
+
+  test('a category the server can really refuse keeps its own actionable reason', async ({
+    page,
+  }) => {
+    /*
+      NOT ONE SENTENCE FOR EVERYTHING. `wsfJoinCommunity` refuses a member
+      with no profile using `failed-precondition`. Answering that with "check
+      your connection" would strand somebody whose real blocker is a profile
+      they can go and complete — so the category keeps its meaning while the
+      server's own wording still never renders.
+    */
+    await page.route('**/wsfPreviewCommunity**', (route) => fulfil(route, OK_PREVIEW));
+    await signedInMember(page);
+    await page.goto(`/join/${JOIN_CODE}`);
+    await expect(page.getByTestId('wsf-join-submit')).toBeVisible({ timeout: 30_000 });
+
+    await page.route('**/wsfJoinCommunity**', (route) =>
+      fulfil(route, callableError('FAILED_PRECONDITION', LEAK), 400)
+    );
+    await page.getByTestId('wsf-join-submit').click();
+    await expect(page.getByTestId('wsf-join-submit-error')).toBeVisible({ timeout: 30_000 });
+
+    await expect(page.getByTestId('wsf-join-submit-error')).toContainText(
+      'Complete your profile before joining a community.'
+    );
+    expect(await page.locator('body').innerText()).not.toContain(LEAK);
+  });
 });
