@@ -254,7 +254,7 @@ eligible staging candidate: OPEN (W4's combined-runtime test SENT, not yet
 picked up). Director passes so far: Rounds 1–5, alignment, execution queue
 `5782379245` — seven, and none of them is a milestone.
 
-**Real-mail operator slot:** reserved for an owner-designated browser operator (Manus), **PENDING its acknowledgment** — recorded from Round 3 `5781782947` §1; not a claim it has received the prompt or begun. Until acknowledged, no Claude session performs the acceptance test. Every Claude container measured so far is denied on the staging hosts by policy. Heavy
+**Real-mail operator slot:** reserved for an owner-designated browser operator (Manus), **PENDING its acknowledgment** — recorded from Round 3 `5781782947` §1; not a claim it has received the prompt or begun. **Evidence 2026-09-22 19:38Z:** the operator is active on GitHub as the Director's image-delivery path — it attached the North Star package at the requested snapshot `e29b9ec` on #392 (`5782795434`), noting the live head had moved. That shows the operator is reachable through the owner; it is **not** an acknowledgment of the email acceptance test, which remains unacknowledged. Until acknowledged, no Claude session performs the acceptance test. Every Claude container measured so far is denied on the staging hosts by policy. Heavy
 emulator/browser suites run in separate containers (W4, W5), so the two-per-
 machine rule is met by construction.
 
