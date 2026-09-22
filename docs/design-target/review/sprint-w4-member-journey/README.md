@@ -4,7 +4,7 @@ Worker: **W4** (Claude Code Remote session)
 Branch: `claude/wsf-sprint-member-journey`, cut from `e609c57319b2cb9f2a6dac044f310c535ec61185` (PR #365 head, `claude/wsf-app-shell`).
 Assignment: PR #365 comment 5781435779, section W4.
 
-Status: **ACKNOWLEDGED** — evidence lands in this directory as it is produced.
+Status: **CHECKPOINT-READY** — first deliverable complete; all three parts are in this directory.
 
 ## Contents
 
