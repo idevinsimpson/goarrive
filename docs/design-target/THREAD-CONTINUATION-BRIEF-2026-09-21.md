@@ -218,6 +218,29 @@ account subscription (five-hour window, not in overage at spawn time); no
 Anthropic API key, Bedrock or Vertex setting is present in the lead's
 environment. Session/weekly usage percentage: UNKNOWN from inside a session.
 
+**Owner usage readings (Director relay `5782829702`, from Devin's Usage
+screen — observed, not estimated; the only supported source):**
+
+| Read (America/New_York, 2026-09-22) | Current session | Weekly · All models | Weekly · Fable only |
+| --- | --- | --- | --- |
+| ~14:35 | 12% | 4% | 4% |
+| ~15:36 | 28% (reset in 3h03m ≈ 18:39 ET) | 8% | 9% |
+
+Both weekly meters reset **Wednesday 2026-09-23 19:00 ET** — four hours
+*before* the sprint delivery deadline (23:00 ET). Usage-credits toggle ON,
+balance 0; auto-reload / spending settings not shown — **not** authorization
+for credits, API billing or any billing change. Planning inference from that
+one interval (different denominators, never added): ≈15.7 session pts/h,
+≈3.9 all-models pts/h, ≈4.9 Fable-only pts/h; at an unchanged rate the
+Fable-only allowance runs out around Wed 10:00 ET and all-models around
+15:00 ET, before the reset. Rule now in force: prioritise useful approved
+production and pre-reset review before Wed 19:00 ET, keep enough pre-reset
+capacity to finish and verify rather than strand work; after the observed
+reset use only the new allowance needed for the already-approved 19:00–23:00
+integration / smoke / fix window; no extension, no deliberate exhaustion of
+next week's allowance, no extra sessions to "reach 100%". Future usage is
+UNKNOWN until another supported reading is supplied.
+
 **Lead → worker messaging — corrected 2026-09-22 18:55Z.** A Routine bound to
 a worker's session id and fired with the assignment as payload does **not**
 fire into that session: every such fire (nine, W1–W5, running or idle target
