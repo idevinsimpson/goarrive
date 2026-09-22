@@ -83,7 +83,7 @@ const NOTES = {
   '/goals/new':
     'Opening a goal — eight states, three phone classes. Target **reviewed and accepted as reference**; NOT implemented. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
   '/join/[joinCode]':
-    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. **Implemented** to the accepted target; awaiting visual/functional review. Its BEFORE was captured first and is frozen; `after/` carries the matched ACTUAL AFTER at all three phone classes.',
   '/start-community':
     'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target **reviewed and accepted as reference**; NOT implemented.',
   '/combined/[setupId]':
@@ -143,7 +143,11 @@ const BATCHES = [
     title: 'The invitation, and what a Champion starts',
     dir: 'batch-b-join-and-setup',
     routes: ['/join/[joinCode]', '/start-community', '/goals/new', '/combined/[setupId]'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    // PARTLY, AND THE WORD MATTERS. One of this batch's four routes is built;
+    // the other three are still reference only. A batch status that said
+    // "implemented" would claim three routes that do not exist yet.
+    status:
+      '**reviewed & accepted** as target reference · `/join/[joinCode]` implemented · the other three NOT implemented',
   },
   {
     key: 'C',
@@ -281,6 +285,9 @@ const IMPLEMENTED = [
   '/reset-password',
   '/verify-email',
   '/profile-setup',
+  // Batch B, first surface only. `/start-community`, `/goals/new` and
+  // `/combined/[setupId]` are NOT implemented and are not listed here.
+  '/join/[joinCode]',
 ];
 
 function routes(dir, prefix = '') {

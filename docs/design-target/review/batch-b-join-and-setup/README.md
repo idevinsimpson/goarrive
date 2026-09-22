@@ -1,9 +1,24 @@
 # Atlas Batch B — the invitation, and what a Champion starts
 
-**TARGET / CONCEPT — NOT IMPLEMENTED.** Nothing in this package has been
-built. No route in it changed. These are destination targets for four routes
-that had none, drawn in real React Native against the real kit and captured
-from the gated preview route `/design-target/join-setup`.
+**TARGET / CONCEPT.** The `TARGET-*` frames are destination targets for four
+routes that had none, drawn in real React Native against the real kit and
+captured from the gated preview route `/design-target/join-setup`. They are
+drawings and every one of them still carries its own strip saying so.
+
+**ONE OF THE FOUR ROUTES IS NOW BUILT.** `/join/[joinCode]` (B1) is
+implemented to its accepted target and is awaiting visual/functional
+acceptance. `/start-community`, `/goals/new` and `/combined/[setupId]` are
+**not implemented** and nothing here should be read as saying they are.
+
+That route's evidence sits in two directories beside the targets:
+
+| | |
+| --- | --- |
+| `before/` | **frozen.** 30 frames — the 10 states × 3 classes as the route rendered BEFORE a line of this work was written. A BEFORE only exists until you implement; these were captured first, deliberately, because this package shipped without any. |
+| `after/` | 30 frames under the SAME ten state names, at the same three classes, each pinned by the same intercept as its BEFORE. Matched pairs: the only difference between `BEFORE-<state>-<class>.png` and `AFTER-<state>-<class>.png` is the implementation. |
+
+`after/` is **not** frozen yet, and that is correct: the freeze list guards
+evidence that has been accepted, and this has not been reviewed.
 
 | | |
 | --- | --- |
@@ -22,7 +37,7 @@ grouped by destination. Then the individual frames.
 
 | | Route | States | What it is |
 | --- | --- | --- | --- |
-| **B1** | `/join/[joinCode]` | 10 | The invitation someone opens from a link |
+| **B1** | `/join/[joinCode]` | 10 | The invitation someone opens from a link — **implemented**, `before/` + `after/` on disk |
 | **B2** | `/start-community` | 7 | Starting a community |
 | **B3** | `/goals/new` | 8 | Opening a goal for that community |
 | **B4** | `/combined/[setupId]` | 5 | Watching a combined goal, read-only |
@@ -31,9 +46,14 @@ grouped by destination. Then the individual frames.
 
 ```
 CONTACT-SHEET-batch-b.png
-TARGET-<state>-<class>.png            the screen on arrival
-TARGET-<state>-<class>-end.png        the same screen scrolled to its end
+TARGET-<state>-<class>.png            the screen on arrival          (a drawing)
+TARGET-<state>-<class>-end.png        the same screen scrolled       (a drawing)
+before/BEFORE-<state>-<class>.png     B1 as it rendered before       (the real route)
+after/AFTER-<state>-<class>.png       B1 as it renders now           (the real route)
 ```
+
+No `AFTER` frame carries a TARGET strip, and none ever should: **a target is
+never an after.**
 
 An `-end` frame exists only where the screen actually overflows the phone —
 39 of the 90. It is the same element at the same size with a different scroll
@@ -192,6 +212,17 @@ EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1 \
 WSF_CAPTURE_FRAMES=1 WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
   npm --prefix apps/westayfit run test:e2e -- tests-e2e/design-target-join-setup-capture.spec.ts
 ```
+
+B1's own two captures, which photograph the real route rather than the
+preview:
+
+```
+WSF_CAPTURE_BEFORE=1 ... test:e2e -- design-batch-b-join-before-capture   # frozen; do not re-run
+WSF_CAPTURE_FRAMES=1 ... test:e2e -- design-batch-b-join-after-capture
+```
+
+Behaviour for B1 is guarded separately, ungated, on every run:
+`tests-e2e/join-batch-b.spec.ts`.
 
 The capture spec is opt-in for the same reason every capture spec here is: it
 asserts nothing about the product, and run in the ordinary suite it would

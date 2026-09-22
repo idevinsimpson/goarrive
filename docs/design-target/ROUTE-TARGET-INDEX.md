@@ -95,7 +95,7 @@ second is operational.
 | User-facing routes | **23** |
 | Routes with a real-RN target | **23** |
 | Routes with no target | **0** |
-| Routes implemented against an approved target | **11** |
+| Routes implemented against an approved target | **12** |
 
 ### Covered — a real-RN target exists
 
@@ -111,7 +111,7 @@ second is operational.
 | `/display/[goalId]` | `review/batch-f-public-display/` | The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/event/[goalId]` | `review/batch-d-event-and-line/` | Standing in the room — eleven states, including the event route's OWN device question (the join route's variant differs and is Batch B). Target **reviewed and accepted as reference**; NOT implemented. |
 | `/goals/new` | `review/batch-b-join-and-setup/` | Opening a goal — eight states, three phone classes. Target **reviewed and accepted as reference**; NOT implemented. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision. |
-| `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. Target **reviewed and accepted as reference**; NOT implemented. |
+| `/join/[joinCode]` | `review/batch-b-join-and-setup/` | The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. **Implemented** to the accepted target; awaiting visual/functional review. Its BEFORE was captured first and is frozen; `after/` carries the matched ACTUAL AFTER at all three phone classes. |
 | `/kiosk/[goalId]` | `review/batch-e-room-screens/` | The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation). |
 | `/move/[goalId]` | `review/batch-g-follow-along/` | The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**; NOT implemented. |
@@ -145,7 +145,7 @@ None. Every user-facing route has a target.
 | Batch | What it covers | Routes | States | Frames | Classes | State |
 | --- | --- | ---: | ---: | ---: | --- | --- |
 | **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | implemented · **awaiting visual/functional review** |
-| **B** | The invitation, and what a Champion starts | 4 | 34 | 154 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
+| **B** | The invitation, and what a Champion starts | 4 | 34 | 154 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · `/join/[joinCode]` implemented · the other three NOT implemented |
 | **C** | The challenge, and the door | 2 | 17 | 67 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
 | **D** | The event and the line, on your own phone | 2 | 24 | 93 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
 | **E** | The screens in the room | 3 | 28 | 29 | 1280x800 · 800x1280 | **reviewed & accepted** as target reference · NOT implemented |

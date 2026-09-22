@@ -77,13 +77,59 @@ function useBox() {
   return { box, onLayout, compact: box !== null && box.height < 700 };
 }
 
-/** The diagonal bands are the wordmark's own slash, enlarged. Not a gradient. */
-function FieldTexture() {
+/**
+ * The diagonal bands are the wordmark's own slash, enlarged. Not a gradient.
+ *
+ * EVERY BOX HERE FITS INSIDE THE FIELD, and that is not cosmetic. The first
+ * version drew each band as a 420 pt rectangle rotated about its own centre
+ * and let the field's `overflow: hidden` clip the tail. Clipping hides the
+ * paint but not the layout: `getBoundingClientRect().right` still reported
+ * ~534-614 on a 390 pt phone, so three decorations sat past the right edge of
+ * the screen and the project's own R1 rule caught them on every route that
+ * renders this shell — `/start-community` included, which no visual work had
+ * touched.
+ *
+ * So the geometry is anchored instead of clipped. Each band rotates about its
+ * LEFT edge, which is the end that is actually visible, and its length is
+ * measured to reach the field's right edge and stop there. The painted stripe
+ * starts at the same point, runs at the same angle and ends at the same edge;
+ * what is gone is the invisible tail that was hanging off the viewport.
+ *
+ * `width` is the measured frame. Before the first layout it is 0, so the
+ * bands have no length and nothing is drawn past anything.
+ */
+const BAND_ANGLE_COS = 0.95106; // cos 18°
+const BAND_ANGLE_SIN = 0.30902; // sin 18°
+const BAND_HEIGHT = 26;
+/** Where each band's visible end sits, and how far its box may reach. */
+const BAND_STARTS = [
+  { left: 130, top: 71 },
+  { left: 170, top: 117 },
+  { left: 210, top: 163 },
+];
+const BAND_EDGE_INSET = 4;
+
+function bandLength(frameWidth: number, left: number): number {
+  const reach =
+    frameWidth - BAND_EDGE_INSET - left - (BAND_HEIGHT / 2) * BAND_ANGLE_SIN;
+  return Math.max(0, reach / BAND_ANGLE_COS);
+}
+
+function FieldTexture({ width }: { width: number }) {
   return (
     <View pointerEvents="none" style={shell.texture}>
-      <View style={[shell.band, shell.band1]} />
-      <View style={[shell.band, shell.band2]} />
-      <View style={[shell.band, shell.band3]} />
+      {BAND_STARTS.map((start, i) => (
+        <View
+          key={start.left}
+          style={[
+            shell.band,
+            i === 1 ? shell.band2 : i === 2 ? shell.band3 : null,
+            { left: start.left, top: start.top, width: bandLength(width, start.left) },
+          ]}
+        />
+      ))}
+      {/* The glow is anchored to the right edge for the same reason: a circle
+          hanging off the corner laid out past the screen. */}
       <View style={shell.glow} />
     </View>
   );
@@ -104,7 +150,10 @@ function FieldTexture() {
 export function FormShell({
   eyebrow,
   heading,
+  meta,
+  metaTestID,
   intro,
+  introTestID,
   children,
   testID,
   tone = 'ordinary',
@@ -114,7 +163,18 @@ export function FormShell({
 }: {
   eyebrow?: string;
   heading: string;
+  /**
+   * A short fact under the heading — the invitation surface uses it for the
+   * community's type, which sits between its name and what joining means.
+   */
+  meta?: string;
+  /** A handle on that fact. `/join` keeps `wsf-join-meta` here, where the
+   *  pre-rebuild screen carried it, so no existing selector moves. */
+  metaTestID?: string;
   intro?: string;
+  /** A handle on the intro line. `/join` puts `wsf-join-conditions` here: the
+   *  joining conditions are a property worth asserting on their own. */
+  introTestID?: string;
   children: ReactNode;
   testID: string;
   tone?: AuthTone;
@@ -160,7 +220,7 @@ export function FormShell({
             fieldMinHeight ? { minHeight: fieldMinHeight } : null,
           ]}
         >
-          <FieldTexture />
+          <FieldTexture width={box?.width ?? 0} />
           <View style={shell.fieldTop}>
             <WsfWordmark
               variant="white"
@@ -185,7 +245,16 @@ export function FormShell({
           </View>
           {eyebrow ? <Text style={shell.fieldEyebrow}>{eyebrow}</Text> : null}
           <Text style={[compact ? display.md : display.lg, shell.fieldTitle]}>{heading}</Text>
-          {intro ? <Text style={shell.fieldIntro}>{intro}</Text> : null}
+          {meta ? (
+            <Text style={shell.fieldMeta} testID={metaTestID}>
+              {meta}
+            </Text>
+          ) : null}
+          {intro ? (
+            <Text style={shell.fieldIntro} testID={introTestID}>
+              {intro}
+            </Text>
+          ) : null}
           {destination ? (
             <View style={shell.destination} testID="wsf-form-destination">
               <Text style={shell.destinationLabel}>{destination.label}</Text>
@@ -229,21 +298,31 @@ const shell = StyleSheet.create({
   texture: { ...StyleSheet.absoluteFillObject },
   band: {
     position: 'absolute',
-    height: 26,
-    width: 420,
+    height: BAND_HEIGHT,
     backgroundColor: 'rgba(145,203,125,0.10)',
+    // Rotating about the LEFT edge is what lets the length be trimmed to the
+    // field without moving the stripe that is actually seen.
+    transformOrigin: 'left center',
     transform: [{ rotate: '-18deg' }],
   },
-  band1: { top: 6, left: 120 },
-  band2: { top: 52, left: 160, backgroundColor: 'rgba(145,203,125,0.07)' },
-  band3: { top: 98, left: 200, backgroundColor: 'rgba(145,203,125,0.05)' },
+  band2: { backgroundColor: 'rgba(145,203,125,0.07)' },
+  band3: { backgroundColor: 'rgba(145,203,125,0.05)' },
+  /*
+    The glow keeps the corner it always hugged, at a diameter that fits.
+
+    It used to be a 230 pt disc pushed 70 pt off the right edge, so its box
+    reached x = width + 70 — the fourth element R1 caught. Anchored at the
+    edge instead, its left extent is what has to match, and 160 pt reaches the
+    same point the old arc did: the silhouette in the corner is the same
+    shape, at one tenth alpha, with nothing hanging off the screen.
+  */
   glow: {
     position: 'absolute',
-    right: -70,
-    top: -90,
-    width: 230,
-    height: 230,
-    borderRadius: 115,
+    right: 0,
+    top: -55,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
     backgroundColor: 'rgba(34,197,94,0.10)',
   },
   fieldTop: {
@@ -270,6 +349,16 @@ const shell = StyleSheet.create({
     textTransform: 'uppercase',
   },
   fieldTitle: { color: ON_NAVY },
+  /*
+    PALE, NOT GREEN. The accepted invitation target sets the community's type
+    in the field's own near-white ink and keeps the green for the eyebrow
+    above it. Two green lines in the same block competed with each other and
+    with the heading between them.
+
+    `meta` is rendered by the join surface alone, so this colour reaches no
+    Batch A screen.
+  */
+  fieldMeta: { color: ON_NAVY, fontSize: 12.5, fontWeight: '800' },
   fieldIntro: { color: ON_NAVY_MUTED, fontSize: 13.5, lineHeight: 19 },
 
   /* the destination a return is carrying */
@@ -298,6 +387,84 @@ const shell = StyleSheet.create({
   sheetCompact: { paddingTop: 14, gap: 9 },
   spacer: { flex: 1, minHeight: 10 },
   foot: { gap: 2, borderTopWidth: 1, borderTopColor: HAIRLINE, paddingTop: 8 },
+});
+
+/**
+ * THE QUIET PAGE: what a link that did not open looks like.
+ *
+ * A DELIBERATELY DIFFERENT COMPOSITION FROM `FormShell`, and the accepted
+ * Batch B target is explicit about it. A refusal gets the cream ground, the
+ * navy wordmark and a single white card carrying the sentence — no navy
+ * field, no step chip, no eyebrow. The navy field is the product presenting
+ * itself, and a dead link is not an occasion for the product to present
+ * itself; putting the brand hero above "This link is not valid." dresses up a
+ * dead end.
+ *
+ * It is a separate export rather than a fifth `AuthTone` so that no identity
+ * route can reach it by accident: the five Batch A screens keep the field in
+ * every tone they have, `error` included, exactly as they were accepted.
+ */
+export function QuietShell({
+  heading,
+  body,
+  bodyTestID,
+  children,
+  testID,
+  foot,
+}: {
+  heading: string;
+  /** The sentence under the heading, inside the same card. */
+  body: string;
+  /**
+   * A handle on that sentence. The refusals use it: what these screens say —
+   * and specifically what they decline to say about WHICH refusal it is — is
+   * a privacy property, and a test that can read the sentence can guard it.
+   */
+  bodyTestID?: string;
+  /** Anything that follows the card — the way on, where there is one. */
+  children?: ReactNode;
+  testID: string;
+  foot?: ReactNode;
+}) {
+  const { onLayout, compact } = useBox();
+  return (
+    <View style={quiet.screen} onLayout={onLayout} testID={testID}>
+      <ScrollView
+        style={kit.scroll}
+        contentContainerStyle={quiet.body}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={quiet.chrome}>
+          <WsfWordmark variant="navy" height={compact ? 18 : 21} testID="wsf-form-wordmark" />
+        </View>
+        <View style={quiet.card}>
+          <Text style={[compact ? display.md : display.lg, quiet.cardTitle]}>{heading}</Text>
+          <Text style={quiet.cardBody} testID={bodyTestID}>
+            {body}
+          </Text>
+        </View>
+        {children}
+        <View style={shell.spacer} />
+        {foot ? <View style={shell.foot}>{foot}</View> : null}
+      </ScrollView>
+    </View>
+  );
+}
+
+const quiet = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: CREAM },
+  body: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 24, gap: 14 },
+  chrome: { alignItems: 'flex-start' },
+  card: {
+    backgroundColor: SURFACE,
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 22,
+    gap: 10,
+    ...elevation.card,
+  },
+  cardTitle: { color: NAVY },
+  cardBody: { color: INK_QUIET, fontSize: 15, lineHeight: 22 },
 });
 
 export function FieldLabel({ children }: { children: ReactNode }) {
@@ -381,6 +548,7 @@ export function SubmitButton({
   disabled,
   testID,
   variant = 'primary',
+  busyLabel,
 }: {
   label: string;
   onPress: () => void;
@@ -388,6 +556,15 @@ export function SubmitButton({
   disabled?: boolean;
   testID: string;
   variant?: SubmitButtonVariant;
+  /**
+   * What the control says WHILE it is working, next to the spinner.
+   *
+   * OPT-IN, so the identity funnel is untouched. Without it the button shows
+   * the spinner alone, exactly as the accepted Batch A screens do. The join
+   * target names the work in progress ("Joining…") because that action can
+   * take a visible moment and a bare spinner does not say what is happening.
+   */
+  busyLabel?: string;
 }) {
   const isDisabled = submitting || disabled;
   const buttonStyle =
@@ -411,7 +588,16 @@ export function SubmitButton({
       accessibilityRole="button"
     >
       {submitting ? (
-        <ActivityIndicator color={NAVY} />
+        busyLabel ? (
+          <View style={field.busyRow}>
+            <ActivityIndicator color={NAVY} />
+            <Text style={[textStyle, variant === 'primary' ? field.primaryTextOff : null]}>
+              {busyLabel}
+            </Text>
+          </View>
+        ) : (
+          <ActivityIndicator color={NAVY} />
+        )
       ) : (
         <Text style={[textStyle, isDisabled && variant === 'primary' ? field.primaryTextOff : null]}>
           {label}
@@ -602,6 +788,8 @@ const field = StyleSheet.create({
     ...elevation.action,
   },
   primaryOff: { backgroundColor: '#CDE8D5' },
+  /** Spinner and the word for what it is doing, on one line. */
+  busyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   primaryText: { color: '#04260F', fontSize: 17, fontWeight: '900' },
   primaryTextOff: { color: '#6B8A76' },
 

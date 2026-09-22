@@ -293,10 +293,28 @@ export default function You() {
       .finally(() => setSigningOut(false));
   }, []);
 
+  /*
+    `wsf-you-identity` IS THE RESOLVED STATE for somebody signed in, and the
+    shell test polls for it by name to know this screen is no longer loading.
+    The rebuild moved the field's contents around and dropped the handle, so
+    that poll had nothing to find and the test sat through its whole timeout —
+    reported as "you at 360 never left its loading state", which read like a
+    narrow-width bug and was neither narrow nor a loading bug.
+  */
   const identity = (profile: Profile, email: string | null) => (
-    <View style={s.field}>
+    <View style={s.field} testID="wsf-you-identity">
       <View style={s.fieldTop}>
-        <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
+        {/* THE WORDMARK GOES HOME, on this destination as on every other.
+            The rebuild left it as a bare image, so the one gesture that
+            gets a member out of a tab did nothing here. */}
+        <Pressable
+          onPress={() => router.replace('/')}
+          accessibilityRole="link"
+          accessibilityLabel="We Stay Fit, go Home"
+          testID="wsf-you-wordmark-home"
+        >
+          <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
+        </Pressable>
         <Text style={s.pageTag} testID="wsf-you-title">You</Text>
       </View>
       <Text style={[display.lg, s.name]} testID="wsf-you-name" accessibilityRole="header">
@@ -334,7 +352,14 @@ export default function You() {
           <>
             <View style={s.fieldShort}>
               <View style={s.fieldTop}>
-                <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
+                <Pressable
+                  onPress={() => router.replace('/')}
+                  accessibilityRole="link"
+                  accessibilityLabel="We Stay Fit, go Home"
+                  testID="wsf-you-wordmark-home"
+                >
+                  <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
+                </Pressable>
                 <Text style={s.pageTag} testID="wsf-you-title">You</Text>
               </View>
               <View style={[s.skelOnNavy, { width: '62%', height: 30 }]} />
@@ -358,7 +383,14 @@ export default function You() {
           <>
             <View style={s.fieldShort}>
               <View style={s.fieldTop}>
-                <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
+                <Pressable
+                  onPress={() => router.replace('/')}
+                  accessibilityRole="link"
+                  accessibilityLabel="We Stay Fit, go Home"
+                  testID="wsf-you-wordmark-home"
+                >
+                  <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
+                </Pressable>
                 <Text style={s.pageTag} testID="wsf-you-title">You</Text>
               </View>
               <Text style={[display.lg, s.name]} accessibilityRole="header">

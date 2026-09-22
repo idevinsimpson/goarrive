@@ -274,9 +274,18 @@ test.describe('D — admission controls in the interface', () => {
       await pageEarly.goto(`/join/${joinCode}`);
       await expect(pageEarly.getByTestId('wsf-join-signed-in')).toBeVisible({ timeout: 20_000 });
       // D6: the preview states the joining conditions and NOT a head count.
-      const meta = await pageEarly.getByTestId('wsf-join-meta').innerText();
-      expect(meta).toContain('Anyone with the invite link can join');
-      expect(meta).not.toMatch(/\d+\s+members?/);
+      //
+      // RE-POINTED, AND STRICTER FOR IT. Both halves used to be read off the
+      // one `wsf-join-meta` line, which carried the type and the conditions
+      // together. The invitation now separates them — the type in the meta
+      // slot, the conditions in their own — so the conditions are read from
+      // the line that states them, and the head-count rule is checked across
+      // the WHOLE invitation instead of one line of it. A count anywhere on
+      // this screen now fails; before, only a count on that line did.
+      const conditions = await pageEarly.getByTestId('wsf-join-conditions').innerText();
+      expect(conditions).toContain('Anyone with the invite link can join');
+      const invitation = await pageEarly.getByTestId('wsf-join-signed-in').innerText();
+      expect(invitation).not.toMatch(/\d+\s+members?/);
       await pageEarly.getByTestId('wsf-join-submit').click();
       await pageEarly.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
       await expectMemberStanding(pageEarly);

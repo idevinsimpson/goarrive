@@ -42,11 +42,11 @@ Evidence: `before/` 24 frozen · `after/` 42
 
 ## Batch B — The invitation, and what a Champion starts
 
-`review/batch-b-join-and-setup/` · `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` · **reviewed & accepted** as target reference · NOT implemented
+`review/batch-b-join-and-setup/` · `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` · **reviewed & accepted** as target reference · `/join/[joinCode]` implemented · the other three NOT implemented
 
 Contact sheet / other: `CONTACT-SHEET-batch-b.png`
 
-Evidence: `before/` 30 frozen
+Evidence: `before/` 30 frozen · `after/` 30
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |

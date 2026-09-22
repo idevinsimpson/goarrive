@@ -162,6 +162,18 @@ export const DEVICE_CHOICE_SHARED_DESCRIPTION =
 export const DEVICE_CHOICE_SHARED_DESCRIPTION_SIGNUP =
   'We won’t make an account on a screen other people use. You’ll go to that screen’s own page instead.';
 
+/**
+ * The same question, on the page where the next step would be CREATING an
+ * account — the join link that carries an event.
+ *
+ * It is a different sentence from `DEVICE_CHOICE_INTRO` because a different
+ * thing is at stake. On the event route the answer changes what happens when
+ * you finish; here it changes whether an account is made at all, and that is
+ * worth saying before somebody answers.
+ */
+export const DEVICE_CHOICE_INTRO_SIGNUP =
+  'It changes what happens next, so we ask before an account is made.';
+
 export const DEVICE_CHOICE_NOTE =
   'Your answer is remembered on this device only. It says nothing about you and is never sent anywhere.';
 
@@ -170,3 +182,22 @@ export const DEVICE_SHARED_BODY =
   'Add your part here, then finish. Nothing about you stays on this screen.';
 export const DEVICE_SHARED_CONTINUE = 'Add your part on this screen';
 export const DEVICE_SHARED_RESET = 'This is my own phone';
+
+/**
+ * What a shared screen actually is, as three checkable facts.
+ *
+ * ADDITIVE, AND ONLY THE SHEET VARIANT READS THEM. The accepted Batch B
+ * target puts the consequences of the standing "shared" answer in a card
+ * rather than a single sentence, so somebody meeting a screen that already
+ * answered can see what that answer costs them and that it is reversible.
+ *
+ * Each line is something the product does, not a reassurance:
+ *   · no sign-in is required to contribute from a kiosk screen,
+ *   · no identity is stored against a shared-screen contribution,
+ *   · `clearDeviceMode` is reachable from this very screen.
+ */
+export const DEVICE_SHARED_FACTS: readonly string[] = [
+  'Anyone can add their part without signing in.',
+  'Nothing identifies the last person who used it.',
+  'You can undo this choice on this screen at any time.',
+];
