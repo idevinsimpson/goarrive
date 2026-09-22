@@ -402,6 +402,78 @@ test.describe('who is here', () => {
   });
 });
 
+/* ── paging ──────────────────────────────────────────────────────────────── */
+
+test.describe('a large directory arrives in pages', () => {
+  test('Show more appends the rest, in one alphabetical order, with no count on the control', async ({
+    page,
+  }) => {
+    /*
+      The server returns a bounded page and a continuation. The version before
+      it applied a single `.limit(500)` to a uid-ordered query and sorted the
+      result by name, so past the limit it presented "the N smallest uids,
+      alphabetised" as a complete list — indistinguishable, in the browser,
+      from the real thing.
+
+      This drives the control a member actually taps and checks the union, so
+      a regression to per-page sorting shows up as names that jump backwards.
+    */
+    const stamp = stampId();
+    const email = `wsf-page-${stamp}@example.test`;
+    const password = 'Str0ng-Passw0rd!';
+    const uid = await seedVerifiedUser(email, password);
+    await seedProfile(uid, 'AAA Viewer');
+    const groupId = `wsfpg${stamp}`.replace(/-/g, '');
+    await seedCommunity({
+      groupId,
+      displayName: 'Big Community',
+      joinPolicy: 'private',
+      members: [{ uid, role: 'member' }],
+    });
+    await seedVisibleMembership(groupId, uid, 'member', 'visible', true);
+
+    const TOTAL = 112; // one full page of 100, plus a partial second
+    await Promise.all(
+      Array.from({ length: TOTAL }, async (_, i) => {
+        const u = `${groupId}-p${i}`;
+        await seedProfile(u, `Member ${String(i).padStart(4, '0')}`);
+        await seedVisibleMembership(groupId, u, 'member', 'visible', true);
+      })
+    );
+
+    await signInVia(page, email, password);
+    await page.goto(`/community/${groupId}/members`);
+    await expect(page.getByTestId('wsf-members-ready')).toBeVisible({ timeout: 25_000 });
+
+    const namesOnScreen = async () =>
+      page.$$eval('[data-testid^="wsf-members-row-"]', (els) =>
+        els.map((e) => (e.textContent ?? '').replace('Champion', '').trim())
+      );
+
+    const firstPage = await namesOnScreen();
+    expect(firstPage).toHaveLength(100);
+
+    const more = page.getByTestId('wsf-members-more');
+    await expect(more).toBeVisible();
+    /*
+      NO COUNT ON THE CONTROL. "Show 13 more" would state how many visible
+      members remain — a number this page never publishes, for the same reason
+      it prints no size beside the community's member count.
+    */
+    await expect(more).toHaveText(/^Show more$/);
+
+    await more.click();
+    await expect(page.getByTestId('wsf-members-more')).toHaveCount(0, { timeout: 20_000 });
+
+    const all = await namesOnScreen();
+    expect(all).toHaveLength(TOTAL + 1);
+    expect(new Set(all).size).toBe(all.length);
+    // ONE GLOBAL ORDER, not sorted within pages.
+    expect(all).toEqual([...all].sort((a, b) => a.localeCompare(b)));
+    expect(all[0]).toBe('AAA Viewer');
+  });
+});
+
 /* ── the arrival sheet ───────────────────────────────────────────────────── */
 
 /**

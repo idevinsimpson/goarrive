@@ -102,7 +102,21 @@ type State =
   | { kind: 'loading' }
   | { kind: 'error' }
   | { kind: 'refused' }
-  | { kind: 'ready'; own: OwnMembership; members: MemberEntry[] };
+  | {
+      kind: 'ready';
+      own: OwnMembership;
+      members: MemberEntry[];
+      /*
+        The continuation from the server, or null when the list is complete.
+        An OFFSET, not a document reference — the callable's comment says why
+        a Firestore cursor here would be a uid in plaintext.
+      */
+      nextCursor: string | null;
+      /** A page request in flight, so the control cannot be double-tapped. */
+      loadingMore: boolean;
+      /** The last page request failed; the list so far is still good. */
+      moreFailed: boolean;
+    };
 
 /** A visibility change in flight, so the control cannot be double-tapped. */
 type Saving = { kind: 'idle' } | { kind: 'saving' } | { kind: 'failed' };
@@ -147,7 +161,10 @@ export default function CommunityMembersScreen() {
           fns,
           'wsfMyCommunities',
         )({}),
-        httpsCallable<{ groupId: string }, { members: MemberEntry[] }>(
+        httpsCallable<
+          { groupId: string },
+          { members: MemberEntry[]; nextCursor: string | null }
+        >(
           fns,
           'wsfCommunityMembers',
         )({ groupId }),
@@ -193,6 +210,9 @@ export default function CommunityMembersScreen() {
         members: Array.isArray(listedResult.value.data?.members)
           ? listedResult.value.data.members
           : [],
+        nextCursor: listedResult.value.data?.nextCursor ?? null,
+        loadingMore: false,
+        moreFailed: false,
       });
     })();
 
@@ -237,6 +257,46 @@ export default function CommunityMembersScreen() {
     [state.kind, saving.kind, groupId],
   );
 
+  /*
+    ONE MORE PAGE, APPENDED. The server returns a bounded page and a
+    continuation, so a big community's directory arrives in pieces rather than
+    being silently cut short — which is what the previous single `.limit(500)`
+    did, and it could not be told apart from a complete list.
+
+    Appended rather than replaced, and the cursor is taken from the response
+    rather than computed here: the client does no arithmetic about how far
+    down the list it is.
+  */
+  const loadMore = useCallback(async () => {
+    if (state.kind !== 'ready' || state.loadingMore || !state.nextCursor || !groupId) return;
+    const cursor = state.nextCursor;
+    setState((s) => (s.kind === 'ready' ? { ...s, loadingMore: true, moreFailed: false } : s));
+    try {
+      const r = await httpsCallable<
+        { groupId: string; cursor: string },
+        { members: MemberEntry[]; nextCursor: string | null }
+      >(
+        getFirebaseFunctions(),
+        'wsfCommunityMembers',
+      )({ groupId, cursor });
+      setState((s) =>
+        s.kind === 'ready'
+          ? {
+              ...s,
+              members: [...s.members, ...(Array.isArray(r.data?.members) ? r.data.members : [])],
+              nextCursor: r.data?.nextCursor ?? null,
+              loadingMore: false,
+            }
+          : s,
+      );
+    } catch {
+      // The names already on screen stay. A failed page is not a failed list.
+      setState((s) =>
+        s.kind === 'ready' ? { ...s, loadingMore: false, moreFailed: true } : s,
+      );
+    }
+  }, [state, groupId]);
+
   const body = (
     <View style={styles.column}>
       <Pressable
@@ -277,6 +337,7 @@ export default function CommunityMembersScreen() {
           state={state}
           saving={saving}
           onSetVisibility={setVisibility}
+          onLoadMore={loadMore}
         />
       )}
     </View>
@@ -378,10 +439,12 @@ function ReadyBody({
   state,
   saving,
   onSetVisibility,
+  onLoadMore,
 }: {
   state: Extract<State, { kind: 'ready' }>;
   saving: Saving;
   onSetVisibility: (next: 'private' | 'visible') => void;
+  onLoadMore: () => void;
 }) {
   return (
     <View style={styles.stateWrap} testID="wsf-members-ready">
@@ -457,7 +520,35 @@ function ReadyBody({
             </View>
           ))
         )}
+
+        {state.nextCursor ? (
+          /*
+            NO COUNT ON THIS CONTROL. "Show 43 more" would state how many
+            visible members remain, and the number of people still to come is
+            not a fact this page publishes — the same reason nothing here
+            prints the size of the list beside the community's member count.
+          */
+          <Pressable
+            onPress={onLoadMore}
+            disabled={state.loadingMore}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: state.loadingMore }}
+            accessibilityLabel="Show more members"
+            style={styles.more}
+            testID="wsf-members-more"
+          >
+            <Text style={styles.moreText}>
+              {state.loadingMore ? 'Loading…' : 'Show more'}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
+
+      {state.moreFailed ? (
+        <Text style={styles.moreFailed} testID="wsf-members-more-failed">
+          More members could not be loaded just now.
+        </Text>
+      ) : null}
 
       {/*
         ONE LINE, and the only explaining the page does about the LIST rather
@@ -526,6 +617,9 @@ const styles = StyleSheet.create({
   },
   empty: { fontSize: 15, lineHeight: 21, color: ON_NAVY_MUTED, paddingVertical: 16 },
 
+  more: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: ON_NAVY_RULE },
+  moreText: { color: ON_NAVY, fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  moreFailed: { fontSize: 14, lineHeight: 20, color: NAVY },
   foot: { fontSize: 13, lineHeight: 19, color: INK_QUIET },
 
   /* The refusal and failure panels keep the ordinary white card. */

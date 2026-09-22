@@ -622,3 +622,36 @@ saying which. The fix is the board's own eyebrow — eleven letterspaced pixels,
 as YOUR COMMUNITY and WHAT WE'RE DOING — not a headline. The version before it used a full
 headline directly above a toggle saying almost the same words: the same sentence twice, which
 is exactly the weight this design sheds.
+
+**A `.limit()` on an unordered query is a silent lie, not a bound.** The member directory
+applied `.limit(500)` to an equality-only query — which Firestore returns in document-id order,
+and on `wsfMemberships` those ids differ only by uid — and then sorted the result by name.
+Past the limit it presented **"the 500 smallest uids, alphabetised"** as a complete
+alphabetical list. Nothing in the response said names were missing, and *which* names went
+missing was decided by uid: by nothing a member did, chose, or could see. Logging that the
+ceiling was reached told the operator; it did not make the list a member reads true.
+
+It is now a bounded page plus a continuation, so the response is never silently short. **The
+cursor is an integer offset into the name-sorted array, never a Firestore document cursor** —
+`startAfter(lastDoc)` on this collection serialises `wsfMemberships/{groupId}_{uid}`, a uid in
+plaintext handed to the client and echoed back on every page, and since there is no pagination
+idiom elsewhere in the file that is exactly what the next person would reach for. A malformed
+cursor is `invalid-argument`, never a silent restart at zero, because a cursor that quietly
+falls back turns a paging bug into a list that repeats its first page forever.
+
+**Sorting by a field in another collection forces a whole-set read; say so rather than
+pretend.** Names live in `wsfMemberProfiles` and the filter lives on `wsfMemberships`, so a
+globally name-ordered page cannot be read ordered — the visible set has to be read and sorted
+before it is cut. That is bounded work only if the visible set is bounded, and **no
+community-size ceiling is enforced anywhere in this product** (the four `resource-exhausted`
+sites in the callables file are all email quotas). Inventing one here would change who may
+JOIN a community, which is not this feature's decision to make. So the guard is a safety valve
+that **throws rather than truncates** — a refusal is honest and visible; a quietly shortened
+list is neither — and the real fix, if communities ever approach it, is to denormalise the sort
+key onto the membership row: a schema change with a backfill, deliberately not smuggled into
+this PR.
+
+**A capture spec must resolve its output from the file, not the working directory.** The
+proposal frames were written with a repo-relative literal while the run's cwd was inside
+`apps/westayfit`, so 24 PNGs landed in a parallel `apps/westayfit/docs/` tree. It looks exactly
+like success — the spec passes, the frames exist — until you list the directory you meant.

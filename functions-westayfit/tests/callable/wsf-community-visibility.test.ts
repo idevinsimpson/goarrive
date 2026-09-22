@@ -238,7 +238,7 @@ describe('wsfCommunityMembers — who appears', () => {
     const r = await tryList(a, { groupId });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value).toEqual({ members: [] });
+    expect(r.value).toEqual({ members: [], nextCursor: null });
   });
 
   test('only the people who chose visible appear, and the caller sees their own entry', async () => {
@@ -422,7 +422,7 @@ describe('wsfCommunityMembers — the payload carries nothing else', () => {
     const r = await tryList(a, { groupId });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(Object.keys(r.value).sort()).toEqual(['members']);
+    expect(Object.keys(r.value).sort()).toEqual(['members', 'nextCursor']);
     for (const item of r.value.members) {
       expect(Object.keys(item).sort()).toEqual(['displayName', 'role']);
     }
@@ -467,15 +467,14 @@ describe('wsfCommunityMembers — the payload carries nothing else', () => {
     const r = await tryList(viewer, { groupId });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    for (const key of [
-      'total',
-      'memberCount',
-      'visibleCount',
-      'hiddenCount',
-      'hasMore',
-      'cursor',
-      'nextCursor',
-    ]) {
+    /*
+      A CONTINUATION IS NOT A COUNT. `nextCursor` is allowed — without it the
+      list silently truncates, which is the worse failure — but it is null
+      here, and every number that would let a reader work out how many people
+      are hiding stays absent.
+    */
+    expect(r.value.nextCursor).toBeNull();
+    for (const key of ['total', 'memberCount', 'visibleCount', 'hiddenCount', 'hasMore']) {
       expect(r.value).not.toHaveProperty(key);
     }
   });
@@ -785,6 +784,195 @@ describe('wsfMyCommunities carries the caller OWN visibility', () => {
     // And no other member's identity came along with it.
     expect(JSON.stringify(mine)).not.toContain('Loud');
     expect(JSON.stringify(mine)).not.toContain(other);
+  });
+});
+
+/* ── one bounded page at a time ──────────────────────────────────────────── */
+
+describe('the directory is paged, and a page is never silently short', () => {
+  /**
+   * THE BUG THIS SUITE EXISTS FOR. The first version applied `.limit(500)` to
+   * an equality-only query — which returns in document-id order, and on this
+   * collection those ids differ only by uid — and then sorted the result by
+   * name. Past the limit it presented "the N smallest uids, alphabetised" as a
+   * complete alphabetical list. Nothing in the response said names were
+   * missing, and which names went missing was decided by uid: by nothing a
+   * member did, chose, or could see.
+   */
+  const PAGE = 100;
+
+  /** A community with `count` visible members, named so the sort is knowable. */
+  async function seedCrowd(count: number): Promise<{ groupId: string; viewer: string; names: string[] }> {
+    const groupId = await seedGroup('Crowded');
+    const viewer = uid('pageViewer');
+    await seedMembership({ groupId, userId: viewer, visibility: 'visible' });
+    // Sorts first, so the viewer is page one's first row whatever else lands.
+    await seedProfile(viewer, 'AAA Viewer');
+    const names = ['AAA Viewer'];
+    await Promise.all(
+      Array.from({ length: count }, async (_, i) => {
+        const u = uid(`crowd_${i}`);
+        // Zero-padded so lexicographic order is knowable and stable.
+        const name = `Member ${String(i).padStart(4, '0')}`;
+        names.push(name);
+        await seedMembership({ groupId, userId: u, visibility: 'visible' });
+        await seedProfile(u, name);
+      })
+    );
+    names.sort((a, b) => a.localeCompare(b));
+    return { groupId, viewer, names };
+  }
+
+  test('a set smaller than a page comes back whole, with no continuation', async () => {
+    const groupId = await seedGroup();
+    const viewer = uid('smallSet');
+    await seedMembership({ groupId, userId: viewer, visibility: 'visible' });
+    await seedProfile(viewer, 'Only Member');
+    const r = await tryList(viewer, { groupId });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.members).toEqual([{ displayName: 'Only Member', role: 'member' }]);
+    expect(r.value.nextCursor).toBeNull();
+  });
+
+  test('A SET LARGER THAN A PAGE IS COMPLETE ACROSS PAGES, IN ONE GLOBAL NAME ORDER', async () => {
+    /*
+      The assertion that would have caught the original bug. Walking the
+      cursor must reproduce the FULL alphabetical list — not an alphabetical
+      first page followed by names that jump backwards, which is what paging a
+      uid-ordered query and sorting each page separately produces.
+    */
+    const { groupId, viewer, names } = await seedCrowd(PAGE + 37);
+
+    const collected: string[] = [];
+    let cursor: string | null | undefined = undefined;
+    let pages = 0;
+    do {
+      const r = await tryList(viewer, cursor ? { groupId, cursor } : { groupId });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.value.members.length).toBeLessThanOrEqual(PAGE);
+      collected.push(...r.value.members.map((m) => m.displayName));
+      cursor = r.value.nextCursor;
+      pages += 1;
+      expect(pages).toBeLessThan(10);
+    } while (cursor);
+
+    expect(collected).toEqual(names);
+    // Globally sorted, not sorted-within-pages.
+    expect(collected).toEqual([...collected].sort((a, b) => a.localeCompare(b)));
+    expect(new Set(collected).size).toBe(collected.length);
+  });
+
+  test('the first page is full and carries a continuation when more remain', async () => {
+    const { groupId, viewer } = await seedCrowd(PAGE + 5);
+    const r = await tryList(viewer, { groupId });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.members).toHaveLength(PAGE);
+    expect(typeof r.value.nextCursor).toBe('string');
+  });
+
+  test('THE CURSOR CARRIES NO UID, NO GROUP ID AND NO NAME', async () => {
+    /*
+      A Firestore `startAfter(lastDoc)` cursor on this collection serialises
+      `wsfMemberships/{groupId}_{uid}` — a uid in plaintext, handed to the
+      client and echoed back on every page. There is no pagination idiom in
+      the file to copy, so that is exactly what the next person would reach
+      for. This proves the token is an offset and nothing else, decoded rather
+      than merely searched, so an encoding change cannot hide a regression.
+    */
+    const { groupId, viewer } = await seedCrowd(PAGE + 3);
+    const r = await tryList(viewer, { groupId });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const token = r.value.nextCursor!;
+    expect(token).not.toContain(viewer);
+    expect(token).not.toContain(groupId);
+    const decoded = Buffer.from(token, 'base64url').toString('utf8');
+    expect(decoded).not.toContain(viewer);
+    expect(decoded).not.toContain(groupId);
+    expect(decoded).not.toContain('Viewer');
+    expect(Object.keys(JSON.parse(decoded)).sort()).toEqual(['o']);
+    expect(JSON.parse(decoded).o).toBe(PAGE);
+  });
+
+  test('a malformed cursor is refused rather than silently restarting', async () => {
+    /*
+      A cursor that quietly falls back to offset zero turns a paging bug into
+      an infinite list that repeats its first page forever — and a caller that
+      trusts `nextCursor` never terminates.
+    */
+    const { groupId, viewer } = await seedCrowd(3);
+    for (const bad of [
+      'not-base64!!',
+      Buffer.from('{}', 'utf8').toString('base64url'),
+      Buffer.from(JSON.stringify({ o: -1 }), 'utf8').toString('base64url'),
+      Buffer.from(JSON.stringify({ o: 1.5 }), 'utf8').toString('base64url'),
+      Buffer.from(JSON.stringify({ o: 999999 }), 'utf8').toString('base64url'),
+      Buffer.from(JSON.stringify({ o: 'x' }), 'utf8').toString('base64url'),
+      42,
+      {},
+      ['x'],
+      true,
+    ]) {
+      const r = await tryList(viewer, { groupId, cursor: bad });
+      expect(r.ok).toBe(false);
+      if (r.ok) continue;
+      expect(r.error.code).toBe('invalid-argument');
+    }
+  });
+
+  test('an absent cursor and an empty-string cursor both mean the first page', async () => {
+    const { groupId, viewer } = await seedCrowd(2);
+    const a = await tryList(viewer, { groupId });
+    const b = await tryList(viewer, { groupId, cursor: '' });
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(b.value.members).toEqual(a.value.members);
+  });
+
+  test('a cursor past the end returns an empty page, not a refusal or a wrap', async () => {
+    const { groupId, viewer, names } = await seedCrowd(2);
+    const cursor = Buffer.from(JSON.stringify({ o: names.length }), 'utf8').toString('base64url');
+    const r = await tryList(viewer, { groupId, cursor });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.members).toEqual([]);
+    expect(r.value.nextCursor).toBeNull();
+  });
+
+  test('paging still refuses a caller who is not a member', async () => {
+    // The gate is above the query, so it applies to page two as much as page
+    // one — a cursor is not a way past it.
+    const { groupId } = await seedCrowd(PAGE + 2);
+    const outsider = uid('pageOutsider');
+    await seedMembership({ groupId: await seedGroup(), userId: outsider });
+    const cursor = Buffer.from(JSON.stringify({ o: PAGE }), 'utf8').toString('base64url');
+    const r = await tryList(outsider, { groupId, cursor });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('permission-denied');
+  });
+
+  test('private members are absent from every page, not just the first', async () => {
+    const { groupId, viewer } = await seedCrowd(PAGE + 10);
+    // A private member whose name sorts last, so a leak would land on page two.
+    const quiet = uid('pageQuiet');
+    await seedMembership({ groupId, userId: quiet, visibility: 'private' });
+    await seedProfile(quiet, 'ZZZ Quiet Person');
+
+    const collected: string[] = [];
+    let cursor: string | null | undefined = undefined;
+    do {
+      const r = await tryList(viewer, cursor ? { groupId, cursor } : { groupId });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      collected.push(...r.value.members.map((m) => m.displayName));
+      cursor = r.value.nextCursor;
+    } while (cursor);
+
+    expect(collected).not.toContain('ZZZ Quiet Person');
   });
 });
 

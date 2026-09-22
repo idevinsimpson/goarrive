@@ -115,7 +115,7 @@ const NOTES = {
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
   '/community/[groupId]/members':
-    'People here — the members of one community who chose to be named, and the member\'s own choice about whether they are, as one toggle. **Implemented, with NO accepted design target**, which is why it is listed here rather than above: the capability was authorised before a frame for it was drawn. Built in the established language (the `/community` card, tokens and header) and awaiting creative review. The privacy properties are enforced in `functions-westayfit` and pinned by `wsf-community-visibility.test.ts`, not by this page.',
+    'Members — the people in one community who chose to be shown, and the member\'s own quiet toggle for whether they are. **Implemented, with NO accepted design target**: the capability was authorised before a frame for it was drawn. Proposal evidence at all three phone classes is committed in `review/page-06-members/`, compared against the owner North Star and the accepted Home/Community targets in that package\'s README, and it stays listed here as uncovered until a target exists or those frames are accepted.',
 };
 
 /**

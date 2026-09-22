@@ -1386,24 +1386,82 @@ export const wsfSetCommunityVisibility = onCall<SetVisibilityRequest>(
 
 /** One listed member. Two fields, and the type is the whitelist. */
 type CommunityMemberEntry = { displayName: string; role: 'foundingChampion' | 'member' };
-type CommunityMembersRequest = { groupId?: unknown };
+type CommunityMembersRequest = { groupId?: unknown; cursor?: unknown };
 
 /**
- * A HARD CEILING, NOT A PAGE SIZE.
+ * ONE PAGE OF THE DIRECTORY.
  *
- * Chosen well above any plausible community rather than tuned to a payload
- * budget, because a truncated directory is a silently wrong one: the limit
- * applies in document-id order — which on this collection is uid order — so
- * the set it would drop is decided by uid, not by anything a member chose or
- * can see, and the in-memory name sort afterwards would make the result look
- * like a complete alphabetical list while being "the N smallest uids,
- * alphabetised".
+ * The response is bounded so it is never silently incomplete — which is what
+ * the previous `.limit(500)` was. That limit applied in DOCUMENT-ID ORDER,
+ * which on this collection is uid order, and the in-memory name sort
+ * afterwards then presented "the 500 smallest uids, alphabetised" as a
+ * complete alphabetical list. Nobody could tell from the response that names
+ * were missing, and the set that went missing was chosen by uid — by nothing
+ * a member did or could see. Logging that the ceiling was reached told the
+ * operator; it did not make the list a member reads true.
  */
-const COMMUNITY_MEMBERS_LIMIT = 500;
+const COMMUNITY_MEMBERS_PAGE = 100;
+
+/**
+ * THE SAFETY VALVE, AND IT REFUSES RATHER THAN TRUNCATES.
+ *
+ * Sorting by name requires every visible member's name, and names live in
+ * `wsfMemberProfiles` rather than on the membership row — so a page cannot be
+ * assembled without reading the whole visible set. That is bounded work only
+ * if the visible set is bounded, and no ceiling on community size is enforced
+ * anywhere in this product (the four `resource-exhausted` sites in this file
+ * are all email quotas). Inventing one here would change who may JOIN a
+ * community, which is not this feature's to decide.
+ *
+ * So this is a guard against unbounded server work, not a product limit, and
+ * reaching it throws. A refusal is honest and visible; a quietly shortened
+ * list is neither. If a real community ever approaches it, the fix is to
+ * denormalise the sort key onto the membership row so the page can be read
+ * ordered — a schema change with a backfill, deliberately not smuggled in
+ * here.
+ */
+const COMMUNITY_MEMBERS_MAX = 2000;
+
+/**
+ * The continuation token: an OFFSET INTO THE NAME-SORTED ARRAY, and nothing
+ * else.
+ *
+ * NOT A FIRESTORE CURSOR. There is no pagination idiom in this file to copy,
+ * so whoever added one would reach for `startAfter(lastDoc)` — and a document
+ * cursor on this collection serialises `wsfMemberships/{groupId}_{uid}`, which
+ * is a uid in plaintext, handed to the client and echoed back on every page.
+ * An integer says only "how far down an alphabetical list you are", which the
+ * caller worked out by reading the page they already have.
+ *
+ * Encoded rather than sent as a bare number so it reads as a token and is not
+ * arithmetic somebody does by hand, and validated on the way back in: a
+ * malformed, negative, fractional or out-of-range cursor is
+ * `invalid-argument`, never a silent restart from zero.
+ */
+function encodeMemberCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
+}
+
+function decodeMemberCursor(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  if (typeof raw !== 'string' || raw.length > 128) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      o?: unknown;
+    };
+    const o = parsed?.o;
+    if (typeof o !== 'number' || !Number.isInteger(o) || o < 0 || o > COMMUNITY_MEMBERS_MAX) {
+      return null;
+    }
+    return o;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The members of one community who have chosen to be named, to a member of
- * that same community.
+ * that same community — one bounded page at a time.
  */
 export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
   // NO `invoker: 'public'`. Fifteen callables in this file carry that marker
@@ -1414,11 +1472,15 @@ export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
   // allowlist for that reason. This surface must never be reachable signed
   // out.
   { region: 'us-central1' },
-  async (request): Promise<{ members: CommunityMemberEntry[] }> => {
+  async (
+    request
+  ): Promise<{ members: CommunityMemberEntry[]; nextCursor: string | null }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const offset = decodeMemberCursor(request.data?.cursor);
+    if (offset === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
 
     const db = getFirestore();
     // THE GATE IS PHYSICALLY ABOVE THE QUERY, and the order is deliberate: a
@@ -1437,15 +1499,18 @@ export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
       .where('groupId', '==', groupId)
       .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
       .where('visibility', '==', VISIBILITY_VISIBLE)
-      .limit(COMMUNITY_MEMBERS_LIMIT)
+      .limit(COMMUNITY_MEMBERS_MAX + 1)
       .get();
 
-    if (snap.size === COMMUNITY_MEMBERS_LIMIT) {
-      // The count alone, and never a groupId, a uid or a name. The operator
-      // needs to know the ceiling was reached; nobody needs to know who was in
-      // the community when it happened. Not surfaced to the client either — a
-      // flag would be another oracle.
-      console.error('[wsfCommunityMembers] visible-member limit reached', snap.size);
+    if (snap.size > COMMUNITY_MEMBERS_MAX) {
+      // The valve. Neither the count nor the groupId nor any name reaches the
+      // client or the log — the operator learns the shape of the problem, and
+      // the member gets a refusal rather than a list that lies.
+      console.error('[wsfCommunityMembers] visible set exceeds the safety valve');
+      throw new HttpsError(
+        'failed-precondition',
+        'This community is too large to list right now.'
+      );
     }
 
     // Keep only rows this product actually wrote, and key the profile lookup
@@ -1479,13 +1544,13 @@ export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
       }
     }
 
-    const members: CommunityMemberEntry[] = [];
+    const all: CommunityMemberEntry[] = [];
     for (const row of rows) {
       const displayName = byUid.get(row.userId);
       // A missing or unusable profile is dropped silently — no log, because a
       // log would name the uid it could not resolve.
       if (!displayName) continue;
-      members.push({
+      all.push({
         displayName,
         // AN ALLOWLIST, NOT A PASSTHROUGH. Only two role values are ever
         // written. A stored `pendingChampion`, `suspended` or `staff` — from
@@ -1497,16 +1562,27 @@ export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
       });
     }
 
-    // SORTED BY NAME, IN MEMORY, BECAUSE QUERY ORDER IS UID ORDER. An
-    // equality-only Firestore query returns in document-id order, and with
-    // groupId fixed those ids differ only by uid — so returning storage order
-    // would publish a total ordering over the uids of every visible member,
-    // usable as a stable cross-community correlation handle. Never sort by a
-    // timestamp either: join order plus a Champion's knowledge of when each
-    // invite went out identifies people about as well as a uid would.
-    members.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    // SORTED BY NAME, ACROSS THE WHOLE SET, BEFORE IT IS CUT INTO PAGES — and
+    // that order is why the whole visible set has to be read rather than a
+    // page of it. An equality-only Firestore query returns in document-id
+    // order, and with groupId fixed those ids differ only by uid, so paging
+    // the query directly would publish a total ordering over the uids of every
+    // visible member: a stable handle that survives name changes and
+    // correlates across communities. Never sort by a timestamp either; join
+    // order plus a Champion's knowledge of when each invite went out
+    // identifies people about as well as a uid would.
+    all.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-    return { members };
+    const page = all.slice(offset, offset + COMMUNITY_MEMBERS_PAGE);
+    const end = offset + page.length;
+    return {
+      members: page,
+      // Present only when there is genuinely more, so a caller can stop. It
+      // says "at least this many so far", which the caller already counted
+      // from the pages it holds — not how many are hidden, which is a
+      // different number and is never returned by anything.
+      nextCursor: end < all.length ? encodeMemberCursor(end) : null,
+    };
   }
 );
 
