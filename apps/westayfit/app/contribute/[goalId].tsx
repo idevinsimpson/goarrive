@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -73,12 +73,11 @@ import {
   statusLine,
   totalOfTargetLabel,
 } from '../../src/ui/progressFormat';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ACTION_GREEN, ON_ACTION, elevation } from '../../src/ui/kit';
 import {
-  MEMBER_TAB_BAR_BODY,
   MEMBER_TAB_MOVE_OVERHANG,
+  shellAppliesTo,
 } from '../../src/ui/MemberTabBar';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -208,18 +207,35 @@ export default function ContributeToGoal() {
   const initialStep: Step = params.mode === 'move' ? 'move' : 'enter';
   const { ready, user } = useWsfAuth();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const safeArea = useSafeAreaInsets();
   /*
-    THE SHELL'S BAR IS NOT PART OF THIS SCREEN, BUT IT COVERS IT.
+    THE SHELL'S BAR IS BELOW THIS SCREEN, NOT OVER IT -- EXCEPT FOR THE RAISED
+    ACTION.
 
-    Persistent chrome renders above the screen, so content that ends at its
-    own padding puts the last control underneath the bar -- and under the
-    raised MOVE circle, which rises further still. At 390x640 that was the
-    entry's primary, the review's Edit, the MOVE-mode primary and the
-    receipt's secondary: reachable only by scrolling past content that looked
-    finished. The screen reserves the bar's real footprint instead.
+    The app shell lays the member tab bar out AFTER the screen in one column,
+    so the screen's box ends where the bar's begins: at every height the
+    scroll view's bottom edge is the bar's top edge, measured. What does reach
+    into the screen is the raised MOVE circle, which rises
+    MEMBER_TAB_MOVE_OVERHANG above that edge and covers the bottom of the
+    scroll view at EVERY scroll position. A control the first screenful
+    happens to place in that band reads as available and hands its tap to
+    MOVE instead. At 390x664 that was the MOVE step's "Skip timer", its label
+    fully visible and its own centre untappable; at 390x640 the same control,
+    peeking from under the circle.
+
+    An earlier version reserved the bar's whole footprint as padding at the
+    END of the content. That kept the last control clear once the member had
+    scrolled all the way down and did nothing for the first screenful,
+    because padding at the end of the content is off screen until then -- and
+    it reserved 88px for a bar body that never overlaps this screen at all.
+    The reservation now sits where the overlap actually is: the scroll view
+    itself stops above the raised action, so the band the circle covers is
+    never scrollable content, at rest or after any scroll, and the content
+    keeps its own ordinary end padding. It is reserved only while the bar is
+    rendered, by the shell's own rule, because without the bar there is
+    nothing to clear.
   */
-  const barInset = MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeArea.bottom;
+  const pathname = usePathname() || '/';
+  const shellBarShown = Boolean(user) && shellAppliesTo(pathname);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
@@ -1109,19 +1125,27 @@ export default function ContributeToGoal() {
    * moment owning the screen.
    */
   const screen = (children: React.ReactNode, testID?: string, tone: 'light' | 'dark' = 'light') => (
-    <ScrollView
-      ref={scrollRef}
-      style={[styles.scroll, tone === 'dark' ? styles.scrollDark : null]}
-      contentContainerStyle={[
-        styles.container,
-        { paddingBottom: barInset + 16 },
-        tone === 'dark' ? styles.containerDark : null,
-      ]}
-      keyboardShouldPersistTaps="handled"
-      testID={testID}
-    >
-      <View style={styles.inner}>{children}</View>
-    </ScrollView>
+    /*
+      The wrapper paints the band below the scroll view in the screen's own
+      tone, so the raised action sits on the page's ground exactly as it did
+      when the scroll view ran underneath it -- the receipt stays navy to the
+      bar's edge -- and only the overlap is gone.
+    */
+    <View style={[styles.screen, tone === 'dark' ? styles.screenDark : null]}>
+      <ScrollView
+        ref={scrollRef}
+        style={[
+          styles.scroll,
+          tone === 'dark' ? styles.scrollDark : null,
+          shellBarShown ? styles.scrollAboveMove : null,
+        ]}
+        contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null]}
+        keyboardShouldPersistTaps="handled"
+        testID={testID}
+      >
+        <View style={styles.inner}>{children}</View>
+      </ScrollView>
+    </View>
   );
 
   if (!wsfAuthEnabled) {
@@ -1998,13 +2022,20 @@ const styles = StyleSheet.create({
   kioskError: { color: '#8A1C1C', fontSize: 15, lineHeight: 21, fontWeight: '700' },
   kioskCountdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
 
+  screen: { flex: 1, backgroundColor: CREAM },
+  screenDark: { backgroundColor: NAVY },
   scroll: { flex: 1, backgroundColor: CREAM },
   scrollDark: { backgroundColor: NAVY },
+  // The scroll view ends where the raised MOVE action begins (see the note at
+  // `shellBarShown`), so nothing scrollable is ever under the circle.
+  scrollAboveMove: { marginBottom: MEMBER_TAB_MOVE_OVERHANG },
   containerDark: { backgroundColor: NAVY },
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 16,
+    // Ordinary end padding. The bar is below the scroll view, not over it,
+    // so the content owes it nothing beyond its own rhythm.
     paddingBottom: 48,
     backgroundColor: CREAM,
   },
