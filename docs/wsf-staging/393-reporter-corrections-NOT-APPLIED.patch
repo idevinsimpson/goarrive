@@ -1,0 +1,1046 @@
+diff --git a/.github/wsf-staging/report-mail-binding.mjs b/.github/wsf-staging/report-mail-binding.mjs
+index de6601b..3c37041 100644
+--- a/.github/wsf-staging/report-mail-binding.mjs
++++ b/.github/wsf-staging/report-mail-binding.mjs
+@@ -1,6 +1,7 @@
+ #!/usr/bin/env node
+ /**
+- * WHICH SECRET VERSION THE DEPLOYED MAIL FUNCTIONS ACTUALLY SERVE.
++ * WHAT THE DEPLOYED MAIL FUNCTIONS' DESCRIBED REVISION CONFIGURES FOR THE
++ * SECRET — and nothing wider than that.
+  *
+  * `report-mail-secret.mjs` says whether WSF_EMAIL_API_KEY exists and has an
+  * enabled version. Its own docstring is careful to say that this is NOT proof
+@@ -15,32 +16,71 @@
+  * would each succeed. If the binding is the evidence wanted, the binding has to
+  * be read.
+  *
+- * "latest" IS AN ANSWER, AND IT IS NOT A NUMBER. A function may reference the
+- * secret by alias. Reporting that as an observed version 2 would be inventing
+- * a fact: the alias is resolved when a revision is created, so the number a
+- * running instance holds is a property of THE SERVING REVISION rather than of
+- * the function's reference. So this reads both, reports the alias as an alias,
+- * and resolves the number from the revision the service is actually serving.
++ * "latest" IS AN ANSWER, AND IT IS NOT A NUMBER — AT EITHER LEVEL.
+  *
+- * FOUR STATES, NEVER COLLAPSED — the same discipline as the sibling script,
++ * An earlier revision of this script said the alias "is resolved when a
++ * revision is created", and resolved the served number from the revision on
++ * that basis. THAT WAS WRONG, and the error mattered: Google documents secret
++ * environment values as resolved at INSTANCE STARTUP, not at revision
++ * creation. A `--set-secrets=SECRET:latest` deploy leaves the literal string
++ * `latest` in the revision's own `secretKeyRef.key`, so the revision resolves
++ * nothing. Reading it and printing `served version latest` under the one label
++ * an operator reads as the answer is how the central question goes unanswered
++ * while the run log looks complete.
++ *
++ * So: a non-numeric value is reported as an alias AT BOTH LEVELS, the observed
++ * string is shown as what it is, and the number stays UNRESOLVED. Neither read
++ * yields a number in that case, and this script does not supply one.
++ *
++ * ONE REVISION IS NOT THE SERVICE. Traffic split is NOT read here — adding a
++ * `run services describe` would widen this script's scope, and the narrower
++ * choice was taken deliberately. Everything below therefore describes THE
++ * DESCRIBED REVISION'S CONFIGURED BINDING, and serving traffic is reported
++ * `unverified`. It is never a claim about every serving instance.
++ *
++ * `key` MEANS TWO DIFFERENT THINGS, which is how a wrong secret read as
++ * verified. On a gen2 SecretEnvVar, `key` is the ENVIRONMENT VARIABLE NAME and
++ * `secret` is the secret RESOURCE. On a Cloud Run `secretKeyRef`, `name` is the
++ * secret resource and `key` is the SECRET VERSION. Matching one against the
++ * other made an env var named WSF_EMAIL_API_KEY fed from RESEND_API_KEY report
++ * as a verified binding. Both halves are now required, separately.
++ *
++ * ABSENCE IS NEVER A MATCH. If the identity metadata needed to tell those apart
++ * is missing — no `secret`, no `projectId` — the answer is `unknown`. A missing
++ * field is not permission to assume the convenient value.
++ *
++ * SIX STATES, NEVER COLLAPSED — the same discipline as the sibling script,
+  * for the same reason: "I could not read it" is not "it is not bound".
+  *
+  *   bound_pinned    the function references the secret at a numeric version
+  *   bound_alias     the function references it by alias (e.g. `latest`)
++ *   mismatch        that environment variable is fed from a DIFFERENT secret
+  *   unbound         the function exists and references no such secret
+  *   absent          gcloud gave a real NOT_FOUND for the function
+- *   unknown         permission, auth, tooling or network failure
++ *   unknown         permission, auth, tooling, network, or metadata too
++ *                   incomplete to answer
+  *
+  * WHAT IT NEVER DOES. No payload: `versions access` is never called, here or
+  * anywhere. No full environment dump — every read is an explicit field
+- * projection, so a variable this script was not asked about cannot be printed
+- * by accident. No IAM change, no deploy, no write of any kind.
++ * projection naming the variable NAME and the secret REFERENCE only, never
++ * `env[].value`, so a plain-text variable this script was not asked about is
++ * not returned to it in the first place. No IAM change, no deploy, no write of
++ * any kind.
+  */
+ import { spawnSync } from 'node:child_process';
+ 
+ const project = process.argv[2];
+ const region = process.argv[3] ?? 'us-central1';
+ const secretName = process.argv[4] ?? 'WSF_EMAIL_API_KEY';
++/*
++  THE ENVIRONMENT VARIABLE NAME, WHICH IS NOT THE SECRET NAME.
++
++  They happen to be spelled the same in this deployment, which is precisely why
++  conflating them went unnoticed. It is an env var rather than a sixth
++  positional argument so the workflow job's argv and the pinned contract tests
++  keep working unchanged.
++*/
++const envName = process.env.WSF_EMAIL_ENV_NAME ?? secretName;
+ const functions = process.argv.slice(5);
+ if (!project || functions.length === 0) {
+   console.error(
+@@ -62,6 +102,8 @@ function run(args) {
+   };
+ }
+ 
++const isNumericVersion = (v) => /^\d+$/.test(String(v));
++
+ /**
+  * NOT_FOUND about the thing asked for is the only absence.
+  *
+@@ -76,9 +118,34 @@ function readsAsAbsent(stderr) {
+   return s.includes('not_found') || s.includes('could not be found');
+ }
+ 
++/** The project segment of a resource name the describe itself returned. */
++function projectOfResourceName(name) {
++  const m = /^projects\/([^/]+)\//.exec(String(name ?? ''));
++  return m ? m[1] : null;
++}
++
++/*
++  PROJECT IDENTITY, ESTABLISHED OR UNRESOLVED — NEVER ASSUMED.
++
++  GCP names a project by id OR by number, and the two are not comparable by
++  string. The only equivalence this script can establish without a further read
++  is against what the describe ITSELF returned, so a `projectId` is accepted
++  when it matches the project asked for, or the project segment of the
++  function's own resource name. Anything else is `unresolved` — not a match,
++  and not a mismatch either, because an id and a number may well name the same
++  project and this script cannot tell.
++*/
++function projectIdentity(observed, describedProject) {
++  if (observed == null || observed === '') return 'absent';
++  const s = String(observed);
++  if (s === project) return 'established';
++  if (describedProject && s === describedProject) return 'established';
++  return 'unresolved';
++}
++
+ /** The secret's binding on one revision, read from that revision alone. */
+ function revisionBinding(revision) {
+-  if (!revision) return { version: null, detail: 'no serving revision reported' };
++  if (!revision) return { version: null, observed: null, detail: 'no serving revision reported' };
+   const r = run([
+     'run',
+     'revisions',
+@@ -86,27 +153,61 @@ function revisionBinding(revision) {
+     revision,
+     `--region=${region}`,
+     `--project=${project}`,
+-    // WHITELISTED PROJECTION. Only the secret references on this revision.
+-    '--format=json(spec.containers[].env)',
++    /*
++      WHITELISTED PROJECTION — VARIABLE NAME AND SECRET REFERENCE ONLY.
++
++      A bare `env` returns every entry whole, including `env[].value` for
++      ordinary plain-text variables. Nothing downstream printed those, but the
++      guarantee then rested on this script's own selection rather than on the
++      read, while the comment here claimed otherwise. Now the values are not
++      returned to this process at all.
++    */
++    '--format=json(spec.containers[].env[].name,spec.containers[].env[].valueFrom.secretKeyRef)',
+   ]);
+   if (r.failedToRun || r.status !== 0) {
+-    return { version: null, detail: 'revision could not be read' };
++    return { version: null, observed: null, detail: 'revision could not be read' };
+   }
+   let parsed;
+   try {
+     parsed = JSON.parse(r.stdout);
+   } catch {
+-    return { version: null, detail: 'revision response was not JSON' };
++    return { version: null, observed: null, detail: 'revision response was not JSON' };
+   }
+   const containers = parsed?.spec?.containers ?? [];
+   for (const c of containers) {
+     for (const e of c?.env ?? []) {
+-      if (e?.name !== secretName) continue;
++      if (e?.name !== envName) continue;
+       const ref = e?.valueFrom?.secretKeyRef;
+-      if (ref?.key) return { version: String(ref.key), detail: '' };
++      if (!ref) continue;
++      // IDENTITY FIRST. `secretKeyRef.name` is the secret resource; absent, the
++      // revision cannot tell us which secret feeds this variable.
++      if (ref.name == null || ref.name === '') {
++        return { version: null, observed: null, detail: 'revision names no secret for this variable' };
++      }
++      if (String(ref.name) !== secretName) {
++        return {
++          version: null,
++          observed: null,
++          detail: 'revision feeds this variable from a different secret',
++        };
++      }
++      if (ref.key == null || ref.key === '') {
++        return { version: null, observed: null, detail: 'revision names no version for this variable' };
++      }
++      const observed = String(ref.key);
++      // AN ALIAS ON THE REVISION IS STILL AN ALIAS. Resolution happens at
++      // instance startup, so there is no number here to report.
++      if (!isNumericVersion(observed)) {
++        return {
++          version: null,
++          observed,
++          detail: `the revision carries the alias ${observed}, which resolves at instance startup`,
++        };
++      }
++      return { version: observed, observed, detail: '' };
+     }
+   }
+-  return { version: null, detail: 'revision carries no reference to this secret' };
++  return { version: null, observed: null, detail: 'revision carries no reference to this secret' };
+ }
+ 
+ const rows = [];
+@@ -128,10 +229,11 @@ for (const fn of functions) {
+     continue;
+   }
+   if (r.status !== 0) {
++    const absent = readsAsAbsent(r.stderr);
+     rows.push({
+       fn,
+-      state: readsAsAbsent(r.stderr) ? 'absent' : 'unknown',
+-      detail: readsAsAbsent(r.stderr) ? 'no such function in this project/region' : 'describe refused',
++      state: absent ? 'absent' : 'unknown',
++      detail: absent ? 'no such function in this project/region' : 'describe refused',
+     });
+     continue;
+   }
+@@ -144,28 +246,117 @@ for (const fn of functions) {
+     continue;
+   }
+ 
+-  const fnState = d?.state ?? 'unknown';
+-  const revision = d?.serviceConfig?.revision ?? null;
+-  const refs = d?.serviceConfig?.secretEnvironmentVariables ?? [];
+-  const ref = refs.find((v) => v?.key === secretName || v?.secret === secretName);
++  /*
++    A SUCCESSFUL EXIT CARRYING `{}` IDENTIFIES NO FUNCTION.
+ 
+-  if (!ref) {
++    Absence of a binding may only be asserted from a response that identified
++    the thing asked about. Partial or malformed metadata is UNKNOWN. A
++    serviceConfig that is present and simply carries no secret references is a
++    legitimate empty binding and still falls through to `unbound` below.
++  */
++  if (
++    !d ||
++    typeof d !== 'object' ||
++    typeof d.name !== 'string' ||
++    d.name === '' ||
++    d.serviceConfig == null
++  ) {
++    rows.push({ fn, state: 'unknown', detail: 'describe response was incomplete' });
++    continue;
++  }
++
++  const fnState = d.state ?? 'unknown';
++  const revision = d.serviceConfig.revision ?? null;
++  const describedProject = projectOfResourceName(d.name);
++  const refs = Array.isArray(d.serviceConfig.secretEnvironmentVariables)
++    ? d.serviceConfig.secretEnvironmentVariables
++    : [];
++
++  /*
++    BOTH HALVES, SEPARATELY. The variable is found by env var name; the secret
++    it is fed from is then checked on its own terms. An OR across the two
++    proves neither.
++  */
++  const named = refs.filter((v) => v?.key === envName);
++  if (named.length === 0) {
+     rows.push({ fn, state: 'unbound', fnState, revision, detail: 'no reference to this secret' });
+     continue;
+   }
+ 
+-  const declared = ref.version == null ? 'unset' : String(ref.version);
+-  const pinned = /^\d+$/.test(declared);
+-  const served = revisionBinding(revision);
++  // Identity is evaluated per candidate, and the first entry that is fully
++  // established wins. Absence is never an established match.
++  let ref = null;
++  let identityDetail = '';
++  for (const v of named) {
++    if (v?.secret == null || v.secret === '') {
++      identityDetail = 'the reference names no secret resource';
++      continue;
++    }
++    if (String(v.secret) !== secretName) {
++      identityDetail = `this variable is fed from ${String(v.secret)}`;
++      continue;
++    }
++    const identity = projectIdentity(v.projectId, describedProject);
++    if (identity === 'absent') {
++      identityDetail = 'the reference names no project';
++      continue;
++    }
++    if (identity === 'unresolved') {
++      identityDetail = 'the reference names a project that could not be matched (id vs number)';
++      continue;
++    }
++    ref = v;
++    break;
++  }
++
++  if (!ref) {
++    /*
++      A NAMED-BUT-UNCONFIRMED BINDING IS NOT A BINDING.
++
++      `mismatch` when the secret is positively a different one; `unknown` when
++      the metadata simply does not say. Neither is `bound_*`, and neither is
++      `unbound` — the variable is there, so claiming the deploy never wired it
++      would misdirect exactly as badly.
++    */
++    const wrongSecret = named.some(
++      (v) => v?.secret != null && v.secret !== '' && String(v.secret) !== secretName
++    );
++    rows.push({
++      fn,
++      state: wrongSecret ? 'mismatch' : 'unknown',
++      fnState,
++      revision,
++      detail: identityDetail || 'the reference could not be identified',
++    });
++    continue;
++  }
++
++  const declared = ref.version == null || ref.version === '' ? 'unset' : String(ref.version);
++  /*
++    `unset` IS MISSING METADATA, NOT AN OBSERVED ALIAS. Calling it bound_alias
++    printed "(an alias, not a number)" about a reference that never named one.
++  */
++  const state = isNumericVersion(declared)
++    ? 'bound_pinned'
++    : declared === 'unset'
++      ? 'unknown'
++      : 'bound_alias';
++  const served =
++    state === 'unknown'
++      ? { version: null, observed: null, detail: 'the reference names no version' }
++      : revisionBinding(revision);
+ 
+   rows.push({
+     fn,
+-    state: pinned ? 'bound_pinned' : 'bound_alias',
++    state,
+     fnState,
+     revision,
+     declared,
++    secret: String(ref.secret),
+     servedVersion: served.version,
++    servedObserved: served.observed,
+     servedDetail: served.detail,
++    detail: state === 'unknown' ? 'the reference names no version' : '',
+   });
+ }
+ 
+@@ -173,21 +364,30 @@ console.log(`WSF MAIL BINDING — read-only, metadata only`);
+ console.log(`  project   ${project}`);
+ console.log(`  region    ${region}`);
+ console.log(`  secret    ${secretName}`);
++console.log(`  variable  ${envName}`);
+ console.log('');
+ for (const row of rows) {
+   console.log(`  ${row.fn}`);
+   console.log(`    binding          ${row.state}${row.detail ? ` (${row.detail})` : ''}`);
+   if (row.fnState) console.log(`    function state   ${row.fnState}`);
+-  if (row.revision) console.log(`    serving revision ${row.revision}`);
+-  if (row.declared) {
+-    console.log(`    declared version ${row.declared}${row.state === 'bound_alias' ? '  (an alias, not a number)' : ''}`);
+-  }
++  if (row.revision) console.log(`    described rev    ${row.revision}`);
++  // The secret the variable is ACTUALLY fed from, printed so the report is
++  // self-evidencing rather than resting on the header above.
++  if (row.secret) console.log(`    fed from secret  ${row.secret}`);
+   if (row.declared) {
+     console.log(
+-      `    served version   ${row.servedVersion ?? 'unresolved'}${
+-        row.servedVersion ? '' : ` (${row.servedDetail})`
+-      }`
++      `    declared version ${row.declared}${row.state === 'bound_alias' ? '  (an alias, not a number)' : ''}`
+     );
++    if (row.servedVersion) {
++      console.log(`    revision version ${row.servedVersion}`);
++    } else {
++      console.log(
++        `    revision version UNRESOLVED${
++          row.servedObserved ? ` (the revision carries the alias ${row.servedObserved})` : ''
++        }${row.servedDetail && !row.servedObserved ? ` (${row.servedDetail})` : ''}`
++      );
++    }
++    console.log(`    serving traffic  unverified (traffic split is not read)`);
+   }
+   console.log('');
+ }
+@@ -197,15 +397,24 @@ for (const row of rows) {
+   const key = row.fn.replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
+   console.log(`WSF_MAIL_BINDING_${key}=${row.state}`);
+   console.log(`WSF_MAIL_BINDING_${key}_DECLARED=${row.declared ?? 'none'}`);
++  console.log(`WSF_MAIL_BINDING_${key}_SECRET=${row.secret ?? 'none'}`);
+   console.log(`WSF_MAIL_BINDING_${key}_SERVED=${row.servedVersion ?? 'unresolved'}`);
+   console.log(`WSF_MAIL_BINDING_${key}_REVISION=${row.revision ?? 'unknown'}`);
++  /*
++    TRAFFIC IS NOT READ, AND THE MACHINE OUTPUT SAYS SO. Without this a later
++    step reading `_SERVED` would treat one revision as the whole service —
++    which is the claim this script is careful never to make in prose.
++  */
++  console.log(`WSF_MAIL_BINDING_${key}_TRAFFIC=unverified`);
+ }
+ 
+ console.log('');
+-console.log('  A version here is what the service REFERENCES and what its serving');
+-console.log('  revision RESOLVED. It is not proof the key works: that is only');
+-console.log('  knowable from the provider, and a delivered message is the only');
+-console.log('  evidence of it. The two facts are reported separately on purpose.');
++console.log('  A version here is what the function REFERENCES and what the DESCRIBED');
++console.log('  REVISION CONFIGURES. Traffic split is not read, so this says nothing');
++console.log('  about every serving instance, and an alias resolves at instance');
++console.log('  startup rather than here. It is not proof the key works either: that');
++console.log('  is only knowable from the provider, and a delivered message is the');
++console.log('  only evidence of it. The facts are reported separately on purpose.');
+ 
+ // A REPORT NEVER FAILS THE RUN. One that exits nonzero becomes a thing people
+ // route around rather than read — the same rule the preflight states.
+diff --git a/.github/wsf-staging/tests/fixtures/fake-gcloud.mjs b/.github/wsf-staging/tests/fixtures/fake-gcloud.mjs
+index 7b70a9c..f213a3a 100755
+--- a/.github/wsf-staging/tests/fixtures/fake-gcloud.mjs
++++ b/.github/wsf-staging/tests/fixtures/fake-gcloud.mjs
+@@ -11,6 +11,14 @@
+  * The record goes to a FILE and not to stdout, because stdout is the channel
+  * the reporter parses as JSON: the first version wrote it there and every
+  * scenario came back "describe response was not JSON".
++ *
++ * THE REVISION FIXTURE MODELS REAL CLOUD RUN, which the first version did not.
++ * It returned a numeric `secretKeyRef.key` for EVERY scenario including the
++ * alias one, so the case that actually occurs — a `:latest` deploy leaving the
++ * literal string `latest` on the revision — was never modelled and the suite
++ * could not see the reporter resolve nothing while printing an answer. The
++ * alias scenario now carries the alias, and a separate scenario covers a
++ * revision that genuinely carries a number.
+  */
+ import { appendFileSync } from 'node:fs';
+ 
+@@ -21,23 +29,41 @@ if (process.env.WSF_FAKE_GCLOUD_CALLS) {
+ }
+ 
+ const REVISION = 'wsfsendverificationemail-00007-abc';
++const PROJECT = 'westayfit-staging';
+ 
+-function fn(version, revision = REVISION) {
++/**
++ * A gen2 function describe. `key` is the ENVIRONMENT VARIABLE NAME and
++ * `secret` is the secret RESOURCE — two different facts that the reporter must
++ * check separately, so the fixture has to be able to disagree about them.
++ */
++function fn(secretEnv, revision = REVISION) {
+   return JSON.stringify({
+-    name: `projects/westayfit-staging/locations/us-central1/functions/${argv[2]}`,
++    name: `projects/${PROJECT}/locations/us-central1/functions/${argv[2]}`,
+     state: 'ACTIVE',
+     serviceConfig: {
+       revision,
+-      secretEnvironmentVariables: [
+-        { key: 'WSF_EMAIL_API_KEY', projectId: 'westayfit-staging', secret: 'WSF_EMAIL_API_KEY', version },
+-      ],
++      secretEnvironmentVariables: secretEnv,
+     },
+   });
+ }
+ 
+-const revisionJson = (key) =>
++const goodEnv = (version) => [
++  { key: 'WSF_EMAIL_API_KEY', projectId: PROJECT, secret: 'WSF_EMAIL_API_KEY', version },
++];
++
++/*
++  THE REVISION'S OWN VIEW. On a Cloud Run secretKeyRef, `name` is the SECRET
++  RESOURCE and `key` is the SECRET VERSION — the opposite sense of `key` from
++  the function describe above. Both are modelled so identity can be asserted at
++  both levels.
++*/
++const revisionJson = (key, name = 'WSF_EMAIL_API_KEY') =>
+   JSON.stringify({
+-    spec: { containers: [{ env: [{ name: 'WSF_EMAIL_API_KEY', valueFrom: { secretKeyRef: { key } } }] }] },
++    spec: {
++      containers: [
++        { env: [{ name: 'WSF_EMAIL_API_KEY', valueFrom: { secretKeyRef: { name, key } } }] },
++      ],
++    },
+   });
+ 
+ const isFunctionDescribe = argv[0] === 'functions' && argv[1] === 'describe';
+@@ -54,13 +80,87 @@ if (isFunctionDescribe) {
+     process.stderr.write('NOT_FOUND: the function could not be found\n');
+     process.exit(1);
+   }
++  // A LEGITIMATE EMPTY BINDING: the response identifies the function and simply
++  // carries no secret references. This must stay `unbound`.
+   if (scenario === 'nosecret') {
++    process.stdout.write(fn([]));
++    process.exit(0);
++  }
++  // MALFORMED: exit 0, valid JSON, and it identifies nothing at all.
++  if (scenario === 'malformed') {
++    process.stdout.write('{}');
++    process.exit(0);
++  }
++  // THE RIGHT SECRET UNDER A DIFFERENT VARIABLE NAME. The variable asked about
++  // is genuinely not here, so this is `unbound` — but an identity check that
++  // matches on EITHER name would find the secret and call it a binding.
++  if (scenario === 'other-variable') {
+     process.stdout.write(
+-      JSON.stringify({ name: 'x', state: 'ACTIVE', serviceConfig: { revision: REVISION, secretEnvironmentVariables: [] } })
++      fn([{ key: 'SOME_OTHER_VAR', projectId: PROJECT, secret: 'WSF_EMAIL_API_KEY', version: '2' }])
+     );
+     process.exit(0);
+   }
+-  process.stdout.write(fn(scenario.startsWith('alias') ? 'latest' : '2'));
++  // A serviceConfig that looks complete, on a response that identifies no
++  // function. The `name` half of the completeness guard is the only thing
++  // between this and a confident answer.
++  if (scenario === 'no-name') {
++    process.stdout.write(
++      JSON.stringify({
++        state: 'ACTIVE',
++        serviceConfig: { revision: REVISION, secretEnvironmentVariables: goodEnv('2') },
++      })
++    );
++    process.exit(0);
++  }
++  // PARTIAL: a name but no serviceConfig — still not enough to assert absence.
++  if (scenario === 'partial') {
++    process.stdout.write(
++      JSON.stringify({ name: `projects/${PROJECT}/locations/us-central1/functions/${argv[2]}`, state: 'ACTIVE' })
++    );
++    process.exit(0);
++  }
++  // THE ENV VAR IS RIGHT AND THE SECRET IS NOT. The substitution the OR match
++  // reported as a verified binding.
++  if (scenario === 'wrong-secret') {
++    process.stdout.write(
++      fn([{ key: 'WSF_EMAIL_API_KEY', projectId: PROJECT, secret: 'RESEND_API_KEY', version: '2' }])
++    );
++    process.exit(0);
++  }
++  if (scenario === 'wrong-project') {
++    process.stdout.write(
++      fn([
++        { key: 'WSF_EMAIL_API_KEY', projectId: 'different-project', secret: 'WSF_EMAIL_API_KEY', version: '2' },
++      ])
++    );
++    process.exit(0);
++  }
++  // PROJECT NUMBER RATHER THAN ID. The two may well name the same project, and
++  // this script cannot establish that — so it must say so, not guess.
++  if (scenario === 'project-number') {
++    process.stdout.write(
++      fn([
++        { key: 'WSF_EMAIL_API_KEY', projectId: '123456789012', secret: 'WSF_EMAIL_API_KEY', version: '2' },
++      ])
++    );
++    process.exit(0);
++  }
++  // IDENTITY METADATA SIMPLY ABSENT. Absence is never a match.
++  if (scenario === 'no-secret-field') {
++    process.stdout.write(fn([{ key: 'WSF_EMAIL_API_KEY', projectId: PROJECT, version: '2' }]));
++    process.exit(0);
++  }
++  if (scenario === 'no-project-field') {
++    process.stdout.write(fn([{ key: 'WSF_EMAIL_API_KEY', secret: 'WSF_EMAIL_API_KEY', version: '2' }]));
++    process.exit(0);
++  }
++  if (scenario === 'no-version') {
++    process.stdout.write(
++      fn([{ key: 'WSF_EMAIL_API_KEY', projectId: PROJECT, secret: 'WSF_EMAIL_API_KEY' }])
++    );
++    process.exit(0);
++  }
++  process.stdout.write(fn(goodEnv(scenario.startsWith('alias') ? 'latest' : '2')));
+   process.exit(0);
+ }
+ 
+@@ -69,6 +169,18 @@ if (isRevisionDescribe) {
+     process.stderr.write('PERMISSION_DENIED: caller lacks run.revisions.get\n');
+     process.exit(1);
+   }
++  // The revision feeds the variable from a different secret than the one asked
++  // about — the identity check at the revision level.
++  if (scenario === 'revision-wrong-secret') {
++    process.stdout.write(revisionJson('2', 'RESEND_API_KEY'));
++    process.exit(0);
++  }
++  // THE REALISTIC ALIAS CASE: `--set-secrets=SECRET:latest` leaves the literal
++  // string on the revision, which resolves at instance startup and not here.
++  if (scenario === 'alias') {
++    process.stdout.write(revisionJson('latest'));
++    process.exit(0);
++  }
+   process.stdout.write(revisionJson('2'));
+   process.exit(0);
+ }
+diff --git a/.github/wsf-staging/tests/mail-binding.test.mjs b/.github/wsf-staging/tests/mail-binding.test.mjs
+index 323e5f7..d8dbaed 100644
+--- a/.github/wsf-staging/tests/mail-binding.test.mjs
++++ b/.github/wsf-staging/tests/mail-binding.test.mjs
+@@ -9,9 +9,16 @@
+  *     the secret, when the truth is that the reader may not look;
+  *   · reporting an alias as a number invents the central fact — "version 2" —
+  *     that this whole exercise exists to establish;
+- *   · resolving the served version from the secret's own version list rather
+- *     than from the serving revision answers a different question: what
+- *     `latest` means NOW, not what this revision pinned when it was created.
++ *   · matching an ENVIRONMENT VARIABLE NAME and calling it a secret reports a
++ *     different secret's version under the requested secret's header;
++ *   · treating a malformed response as an empty one asserts absence from
++ *     metadata that identified nothing.
++ *
++ * EVERY ONE OF THOSE PASSED AN EARLIER VERSION OF THIS SUITE. That is the
++ * reason for the shape of the tests below: several of them assert that a
++ * previously ACCEPTED behaviour is now REJECTED, rather than merely that the
++ * good path still works. A suite that only pins the happy path is how four
++ * defects survived ten green tests.
+  *
+  * No network, no real gcloud, no credentials: a stub on PATH answers each
+  * `describe` from a fixture.
+@@ -58,27 +65,52 @@ function report(scenario, fns = ['wsfSendVerificationEmail']) {
+ 
+ const KEY = 'WSF_MAIL_BINDING_WSFSENDVERIFICATIONEMAIL';
+ 
+-test('a numeric reference is reported as pinned, with the revision that serves it', () => {
++// ── The positive control ────────────────────────────────────────────────────
++// Everything below rejects something. This one proves the reporter still
++// answers the question when the answer is genuinely available — without it,
++// a script that reported `unknown` for every input would pass the whole file.
++
++test('POSITIVE CONTROL: numeric version, matching secret and project, is bound_pinned', () => {
+   const r = report('pinned');
+   assert.equal(r.read(KEY), 'bound_pinned');
+   assert.equal(r.read(`${KEY}_DECLARED`), '2');
++  assert.equal(r.read(`${KEY}_SECRET`), 'WSF_EMAIL_API_KEY');
+   assert.equal(r.read(`${KEY}_SERVED`), '2');
+   assert.equal(r.read(`${KEY}_REVISION`), 'wsfsendverificationemail-00007-abc');
+ });
+ 
+-test('AN ALIAS IS REPORTED AS AN ALIAS, and the number comes from the revision', () => {
++// ── Alias resolution ────────────────────────────────────────────────────────
++
++test('AN ALIAS ON THE REVISION LEAVES THE NUMBER UNRESOLVED, and says so', () => {
+   /*
+-    THE ASSERTION THIS FILE EXISTS FOR. `latest` is resolved when a revision is
+-    created, so the number a running instance holds belongs to the revision,
+-    not to the function's reference. Printing "version 2" off a `latest`
+-    reference would be inventing the exact fact under investigation.
++    THE CORRECTION THIS FILE EXISTS FOR.
++
++    The old test asserted `SERVED=2` for an alias, on the belief that the alias
++    "is resolved when a revision is created". It is not: Cloud Run resolves a
++    secret env value at INSTANCE STARTUP, so a `:latest` deploy leaves the
++    literal string on the revision. The old fixture hid this by returning a
++    numeric key for every scenario, so the case that actually happens was never
++    modelled. Now it is, and the number must stay unresolved.
+   */
+   const r = report('alias');
+   assert.equal(r.read(KEY), 'bound_alias');
+   assert.equal(r.read(`${KEY}_DECLARED`), 'latest');
++  assert.equal(r.read(`${KEY}_SERVED`), 'unresolved',
++    'the alias on the revision was reported as a resolved version');
++  // And the prose must agree with the machine output — it is the prose an
++  // operator reads, and it is where the unqualified `latest` used to appear.
+   assert.match(r.stdout, /an alias, not a number/);
+-  // The served number is resolved from the revision, and it is allowed to
+-  // differ from whatever `latest` would mean today.
++  assert.match(r.stdout, /revision version UNRESOLVED/);
++  assert.doesNotMatch(r.stdout, /revision version latest$/m,
++    'the alias was printed under the label that reads as the answer');
++});
++
++test('an alias whose REVISION carries a number resolves to that number', () => {
++  // The other half: when the revision genuinely pins a version, that is a real
++  // observation and must not be thrown away by the fix above.
++  const r = report('alias-revision-numeric');
++  assert.equal(r.read(KEY), 'bound_alias');
++  assert.equal(r.read(`${KEY}_DECLARED`), 'latest');
+   assert.equal(r.read(`${KEY}_SERVED`), '2');
+ });
+ 
+@@ -89,6 +121,89 @@ test('an alias whose revision cannot be read stays UNRESOLVED, never guessed', (
+   assert.equal(r.read(`${KEY}_SERVED`), 'unresolved');
+ });
+ 
++// ── Binding identity ────────────────────────────────────────────────────────
++
++test('A DIFFERENT SECRET UNDER THE RIGHT VARIABLE NAME IS A MISMATCH, never a binding', () => {
++  /*
++    `key` is the ENV VAR NAME on a gen2 SecretEnvVar and `secret` is the
++    resource. The old `v.key === secretName || v.secret === secretName` matched
++    on either, so a variable named WSF_EMAIL_API_KEY fed from RESEND_API_KEY
++    reported `bound_pinned` and printed that other secret's version under a
++    header reading `secret WSF_EMAIL_API_KEY`. Nothing in the output revealed
++    the substitution.
++  */
++  const r = report('wrong-secret');
++  assert.equal(r.read(KEY), 'mismatch');
++  assert.notEqual(r.read(KEY), 'bound_pinned');
++  assert.match(r.stdout, /fed from RESEND_API_KEY/);
++});
++
++test('the revision-level identity is checked too, not just the function-level one', () => {
++  // The function read agreed; the revision feeds the variable from something
++  // else. The version on it is not this secret's version.
++  const r = report('revision-wrong-secret');
++  assert.equal(r.read(`${KEY}_SERVED`), 'unresolved');
++  assert.match(r.stdout, /different secret/);
++});
++
++test('THE RIGHT SECRET UNDER A DIFFERENT VARIABLE NAME IS UNBOUND, not a binding', () => {
++  /*
++    THE OTHER DIRECTION OF THE SAME CONFLATION, and the one that keeps the
++    `||` from creeping back in. Here the secret IS WSF_EMAIL_API_KEY — it is
++    simply mounted as a different variable, so the variable asked about is not
++    bound. An identity check that matches on either name finds the secret and
++    reports a binding for a variable that does not exist.
++
++    Added after a mutation run: restoring the old `v.key === envName ||
++    v.secret === secretName` filter did NOT fail this file, because every
++    fixture happened to carry the right variable name. A mutation that survives
++    is a missing test, not a harmless mutation.
++  */
++  const r = report('other-variable');
++  assert.equal(r.read(KEY), 'unbound');
++  assert.notEqual(r.read(KEY), 'bound_pinned');
++});
++
++test('A WRONG PROJECT IS NOT A MATCH', () => {
++  const r = report('wrong-project');
++  assert.notEqual(r.read(KEY), 'bound_pinned');
++  assert.equal(r.read(KEY), 'unknown');
++});
++
++test('A PROJECT NUMBER THAT CANNOT BE MATCHED TO THE ID IS UNRESOLVED, not assumed', () => {
++  /*
++    A project id and a project number may well name the same project, and this
++    script cannot establish that from the reads it is allowed. So it says so.
++    Guessing either way would be inventing the identity half of the answer.
++  */
++  const r = report('project-number');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.match(r.stdout, /id vs number/);
++});
++
++test('ABSENT SECRET IDENTITY IS UNKNOWN, NEVER A MATCH', () => {
++  // A missing field is not permission to assume the convenient value.
++  const r = report('no-secret-field');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.notEqual(r.read(KEY), 'bound_pinned');
++});
++
++test('ABSENT PROJECT IDENTITY IS UNKNOWN, NEVER A MATCH', () => {
++  const r = report('no-project-field');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.notEqual(r.read(KEY), 'bound_pinned');
++});
++
++test('A REFERENCE WITH NO VERSION IS UNKNOWN, not an observed alias', () => {
++  // `unset` is missing metadata. Labelling it bound_alias printed "(an alias,
++  // not a number)" about a reference that never named one.
++  const r = report('no-version');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.doesNotMatch(r.stdout, /an alias, not a number/);
++});
++
++// ── Absence versus inability to read ────────────────────────────────────────
++
+ test('PERMISSION DENIED IS UNKNOWN, NEVER ABSENT AND NEVER UNBOUND', () => {
+   /*
+     Google's refusal reads "does not exist or caller lacks access" on purpose,
+@@ -105,11 +220,46 @@ test('a real NOT_FOUND is absent', () => {
+   assert.equal(r.read(KEY), 'absent');
+ });
+ 
+-test('a function that references no such secret is unbound, not unknown', () => {
++test('A MALFORMED RESPONSE IS UNKNOWN, NOT UNBOUND', () => {
++  /*
++    `JSON.parse('{}')` succeeds, so the old code fell through to an empty
++    reference list and reported `unbound` — "the function exists and references
++    no such secret" — from a response that identified no function at all.
++  */
++  const r = report('malformed');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.notEqual(r.read(KEY), 'unbound');
++});
++
++test('a PARTIAL response — a name but no serviceConfig — is also unknown', () => {
++  const r = report('partial');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.notEqual(r.read(KEY), 'unbound');
++});
++
++test('A RESPONSE THAT IDENTIFIES NO FUNCTION IS UNKNOWN, however complete the rest looks', () => {
++  /*
++    The other half of the completeness guard, and the half a mutation run
++    showed was untested: a serviceConfig carrying a perfectly good secret
++    reference, on a response with no `name`. Nothing identifies what was
++    described, so the reference cannot be attributed to the function asked
++    about — and the project half of the identity check has nothing to resolve
++    against either.
++  */
++  const r = report('no-name');
++  assert.equal(r.read(KEY), 'unknown');
++  assert.notEqual(r.read(KEY), 'bound_pinned');
++});
++
++test('A LEGITIMATE EMPTY BINDING IS STILL UNBOUND', () => {
++  // The case the malformed-response fix must NOT swallow: the response
++  // identifies the function and it genuinely references no secret.
+   const r = report('nosecret');
+   assert.equal(r.read(KEY), 'unbound');
+ });
+ 
++// ── Scope of the reads ──────────────────────────────────────────────────────
++
+ test('both mail functions are reported independently', () => {
+   const r = report('pinned', ['wsfSendVerificationEmail', 'wsfSendPasswordResetEmail']);
+   assert.equal(r.read('WSF_MAIL_BINDING_WSFSENDVERIFICATIONEMAIL'), 'bound_pinned');
+@@ -129,6 +279,32 @@ test('NO SECRET PAYLOAD IS EVER REQUESTED', () => {
+   }
+ });
+ 
++test('THE REVISION PROJECTION IS VARIABLE-WIDE, AND THE BARE `env` FORM IS REJECTED', () => {
++  /*
++    THIS ASSERTION REJECTS WHAT THE SUITE PREVIOUSLY ACCEPTED.
++
++    The old rule was "every describe carries a projection", which
++    `--format=json(spec.containers[].env)` satisfies — and that returns every
++    entry whole, including `env[].value` for ordinary plain-text variables.
++    Nothing printed them, but the guarantee rested on the script's own
++    selection rather than on the read, while the comment claimed otherwise.
++    A projection is not narrow merely because it exists.
++  */
++  const r = report('pinned');
++  const revisionCalls = r.calls.filter((c) => c.includes('revisions describe'));
++  assert.ok(revisionCalls.length > 0, 'the revision was never described');
++  for (const call of revisionCalls) {
++    assert.doesNotMatch(call, /--format=json\(spec\.containers\[\]\.env\)/,
++      `the revision read returns every env entry whole, values included: ${call}`);
++    assert.match(call, /valueFrom\.secretKeyRef/,
++      `the revision projection does not name the secret reference: ${call}`);
++    // `value` is a prefix of `valueFrom`, so the negative lookahead is load
++    // bearing: without it this rejects the correct projection.
++    assert.doesNotMatch(call, /env\[\]\.value(?!From)/,
++      `the revision projection asks for plain-text values: ${call}`);
++  }
++});
++
+ test('every read is a whitelisted projection, never a bare describe', () => {
+   // A full describe would print the function's entire environment, which is
+   // how an unrelated variable ends up in a public run log.
+@@ -140,7 +316,24 @@ test('every read is a whitelisted projection, never a bare describe', () => {
+   }
+ });
+ 
++// ── What the report does not claim ──────────────────────────────────────────
++
++test('SERVING TRAFFIC IS REPORTED UNVERIFIED, in prose and in the machine output', () => {
++  /*
++    The described revision is one revision. Traffic split is not read, so a
++    version here is the CONFIGURED binding of that revision and never a claim
++    about every serving instance. A later step reading `_SERVED` without this
++    would make exactly that claim on the reporter's behalf.
++  */
++  const r = report('pinned');
++  assert.equal(r.read(`${KEY}_TRAFFIC`), 'unverified');
++  assert.match(r.stdout, /serving traffic {2}unverified/);
++  assert.match(r.stdout, /DESCRIBED/);
++});
++
+ test('the report never fails the run', () => {
+   assert.equal(report('denied').status, 0);
+   assert.equal(report('missing').status, 0);
++  assert.equal(report('malformed').status, 0);
++  assert.equal(report('wrong-secret').status, 0);
+ });
+diff --git a/.github/wsf-staging/tests/workflow-contract.test.mjs b/.github/wsf-staging/tests/workflow-contract.test.mjs
+index e102451..5e7f482 100644
+--- a/.github/wsf-staging/tests/workflow-contract.test.mjs
++++ b/.github/wsf-staging/tests/workflow-contract.test.mjs
+@@ -321,7 +321,18 @@ function reachedJobs(mode) {
+     'needs.build.result': 'success',
+     'needs.deploy.result': 'success',
+   };
+-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery'];
++  /*
++    THE ORDER IS DERIVED FROM THE WORKFLOW, NOT HARDCODED.
++
++    It used to be a literal list of seven job names. A job added to the YAML was
++    therefore INVISIBLE to this matrix — `assert.deepEqual(reached, {…seven…})`
++    kept passing while the new job ran, and an independent review demonstrated
++    it: an ungated job running `gcloud secrets versions add` against the very
++    secret under investigation passed all 58 assertions. Deriving the list means
++    a new job appears here, and every mode's expectation must then account for
++    it before this file goes green again.
++  */
++  const order = Object.keys(jobs);
+   const reached = {};
+   for (const name of order) {
+     const cond = jobCondition(name);
+@@ -381,6 +392,8 @@ test('player mode reaches only gate, config and the player journey', () => {
+     'hosted-verify': false,
+     'player-journey': true,
+     'cleanup-recovery': false,
++    'mail-preflight': false,
++    'mail-binding': false,
+   });
+ });
+ 
+@@ -419,6 +432,8 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
+     'hosted-verify': true,
+     'player-journey': false,
+     'cleanup-recovery': false,
++    'mail-preflight': false,
++    'mail-binding': false,
+   });
+ });
+ 
+@@ -437,6 +452,8 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', ()
+     'hosted-verify': false,
+     'player-journey': false,
+     'cleanup-recovery': false,
++    'mail-preflight': true,
++    'mail-binding': false,
+   });
+ });
+ 
+@@ -455,6 +472,8 @@ test('mail-binding mode reaches NOTHING that builds, deploys or verifies', () =>
+     'hosted-verify': false,
+     'player-journey': false,
+     'cleanup-recovery': false,
++    'mail-preflight': false,
++    'mail-binding': true,
+   });
+ });
+ 
+@@ -590,6 +609,8 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
+     'hosted-verify': false,
+     'player-journey': false,
+     'cleanup-recovery': true,
++    'mail-preflight': false,
++    'mail-binding': false,
+   });
+ });
+ 
+@@ -717,6 +738,101 @@ test('the modes are gated by equality, so a fourth mode cannot silently start bu
+   }
+ });
+ 
++/*
++  EVERY JOB CARRIES AN `if:` — THE INVARIANT NEITHER THE MATRIX NOR THE
++  STRUCTURAL TEST WAS ACTUALLY ASSERTING.
++
++  An independent review demonstrated the hole rather than describing it. The
++  structural test counts the jobs that NAME a mode, so it catches a second job
++  gated on `mail-binding`. The reach matrix walked a hardcoded list, so it could
++  not see a new job at all. Neither notices a job with NO `if:` key — and
++  GitHub runs an ungated job in EVERY mode, `mail-binding` included. A job
++  running `gcloud secrets versions add` against the secret under investigation
++  passed all 58 assertions.
++
++  The obvious deploy shapes tripped OTHER rules incidentally: the same job
++  written with `npx` was caught by the global npx ban, not by anything about
++  reachability. A privileged step that is not `npx` slipped through entirely.
++  So the invariant is asserted directly here, and the probes below prove the
++  assertion bites rather than merely existing.
++*/
++function jobsOf(src) {
++  const at = src.indexOf('\njobs:');
++  assert.notEqual(at, -1, 'the workflow declares no jobs block');
++  const out = {};
++  let current = null;
++  for (const line of src.slice(at).split('\n')) {
++    const m = /^ {2}([a-z][a-z0-9-]*):\s*$/.exec(line);
++    if (m) {
++      current = m[1];
++      out[current] = [];
++      continue;
++    }
++    if (current) out[current].push(line);
++  }
++  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n')]));
++}
++
++const ungatedJobs = (src) =>
++  Object.entries(jobsOf(src))
++    .filter(([, body]) => !/^ {4}if: /m.test(body))
++    .map(([name]) => name);
++
++const negatedGates = (src) =>
++  Object.entries(jobsOf(src))
++    .filter(([, body]) => {
++      const m = /^ {4}if: (.*)$/m.exec(body);
++      return m ? /inputs\.mode !=/.test(m[1]) : false;
++    })
++    .map(([name]) => name);
++
++// A job appended at end of file lands inside the jobs block, which is the last
++// section of this workflow. The privileged step is a FIXTURE STRING and is
++// never executed by anything: these tests only parse text.
++const withExtraJob = (body) => `${text}\n  rollout-helper:\n    runs-on: ubuntu-latest\n${body}`;
++const BENIGN_UNGATED = withExtraJob('    steps:\n      - run: echo hello\n');
++const PRIVILEGED_UNGATED = withExtraJob(
++  '    steps:\n      - run: gcloud secrets versions add WSF_EMAIL_API_KEY --data-file=- --project westayfit-staging\n'
++);
++
++test('POSITIVE CONTROL: every job in this workflow is gated, and none by negation', () => {
++  // The parser must agree with the one the reach matrix uses, or a green
++  // result here would say nothing about the jobs that actually run.
++  assert.deepEqual(Object.keys(jobsOf(text)), Object.keys(jobs),
++    'the probe parser and the matrix disagree about which jobs exist');
++  assert.ok(Object.keys(jobs).length >= 9, 'the job list looks truncated');
++  assert.deepEqual(ungatedJobs(text), [],
++    'a job carries no if:, so it runs in EVERY mode including the read-only ones');
++  assert.deepEqual(negatedGates(text), [],
++    'a job gates by negation, which admits every future mode');
++});
++
++test('AN UNGATED JOB IS REJECTED, even when its step is harmless', () => {
++  // The mutation that survived the whole suite before this assertion existed.
++  assert.deepEqual(ungatedJobs(BENIGN_UNGATED), ['rollout-helper']);
++});
++
++test('AN UNGATED JOB RUNNING A PRIVILEGED NON-npx STEP IS REJECTED', () => {
++  /*
++    The one that matters. `gcloud secrets versions add` writes a new version of
++    the very secret this mode exists to read, and it is not `npx`, so the
++    global ban that incidentally caught the `firebase deploy` shape does
++    nothing here.
++  */
++  assert.deepEqual(ungatedJobs(PRIVILEGED_UNGATED), ['rollout-helper']);
++  assert.equal(/npx/.test(PRIVILEGED_UNGATED.slice(text.length)), false,
++    'the probe must not be caught by the npx ban — that would prove the wrong thing');
++});
++
++test('a job gated by NEGATION is rejected, whichever job it is', () => {
++  const negated = withExtraJob(
++    "    if: ${{ inputs.mode != 'player-journey' }}\n    steps:\n      - run: echo hello\n"
++  );
++  assert.deepEqual(negatedGates(negated), ['rollout-helper']);
++  // It is gated, so the ungated check alone would have passed it.
++  assert.deepEqual(ungatedJobs(negated), []);
++});
++
+ test('the failure reprint is diagnostic only and can never become a gate', () => {
+   // Runs 37, 38 and 39 were each diagnosed from which capture was MISSING and
+   // how long the step ran, because the assertion message sat in a step the log
