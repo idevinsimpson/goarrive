@@ -3455,7 +3455,7 @@ export default function CommunityPage() {
                       accessibilityRole="button"
                       accessibilityLabel={`${featured.title}: share the public display link`}
                     >
-                      <Text style={styles.heroOutlineButtonText}>
+                      <Text style={styles.shareButtonText}>
                         {shareControlLabel(goalShareRoute, shareStatus)}
                       </Text>
                     </Pressable>
@@ -4191,7 +4191,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 6,
   },
-  heroOutlineButtonText: { color: NAVY, fontSize: 14, fontWeight: '700', textAlign: 'center' },
+  // ON THE NAVY HERO. Both "Try again" controls live inside the hero, so
+  // their label is the hero's light ink. This was NAVY for one pass — the
+  // share control moved out onto the cream page and took the colour with it,
+  // leaving the two retry labels navy on navy: an empty outlined pill, which
+  // is what Board 01's unavailable capture showed. The share control has its
+  // own text style now, below.
+  heroOutlineButtonText: { color: CREAM, fontSize: 14, fontWeight: '700', textAlign: 'center' },
+  shareButtonText: { color: NAVY, fontSize: 14, fontWeight: '700', textAlign: 'center' },
   // W7. The share control sits under the contribution actions, quieter than
   // both, with its disclosure directly beneath it rather than behind a tap.
   shareBlock: { gap: 8, marginTop: 12 },

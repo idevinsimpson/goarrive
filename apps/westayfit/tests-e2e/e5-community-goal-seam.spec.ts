@@ -215,10 +215,15 @@ async function closeManage(page: Page): Promise<void> {
 }
 
 async function signOutVia(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.getByTestId('wsf-home-signout')).toBeVisible({ timeout: 20_000 });
-  await page.getByTestId('wsf-home-signout').click();
-  await expect(page.getByTestId('wsf-home-signout')).toHaveCount(0, { timeout: 20_000 });
+  // From You, where a member actually signs out. `/` is not a place a member
+  // with a community stays: since the app shell landed it opens that
+  // community, and the Home sign-out control this helper used to click was
+  // detached mid-click by the redirect — every test past this point sat
+  // through its whole timeout.
+  await page.goto('/you');
+  await expect(page.getByTestId('wsf-you-signout')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-you-signout').click();
+  await expect(page.getByTestId('wsf-you-signout')).toHaveCount(0, { timeout: 20_000 });
 }
 
 async function signInVia(page: Page, email: string, password: string): Promise<void> {
@@ -407,7 +412,14 @@ test.describe('community goal seam', () => {
 
       // ---- Retry recovers, and the control returns ----
       await page.unroute(callableUrl('wsfListGoals'));
-      await page.getByTestId('wsf-community-goals-retry').click();
+      // The control can be READ, not only found. It sits inside the navy
+      // hero, and for one pass its label was navy too — present in the DOM,
+      // clickable by a test, and an empty pill to a person. The label is the
+      // hero's light ink, asserted as a rendered colour.
+      const goalsRetry = page.getByTestId('wsf-community-goals-retry');
+      await expect(goalsRetry).toHaveText('Try again');
+      await expect(goalsRetry.locator('div').first()).toHaveCSS('color', 'rgb(247, 245, 240)');
+      await goalsRetry.click();
       await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-community-goals-error')).toHaveCount(0);
       await expect(page.getByTestId('wsf-community-start-goal')).toBeVisible();
