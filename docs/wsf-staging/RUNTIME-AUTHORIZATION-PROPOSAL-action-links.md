@@ -1,8 +1,20 @@
 # WSF staging — runtime authorization for Firebase Auth action links (proposal)
 
-**Status: PROPOSAL for the owner's bounded decision. Nothing here has been
-executed.** No IAM binding, role, key, identity change, deploy or send is made
-by this document or by the pull request that carries it.
+**Status: APPROVED, NARROWLY AND CONDITIONALLY, by the owner at 2026-09-22
+19:57:55 UTC** (relayed on PR #365, comment 5783178239): the operator (Manus)
+may apply the §5 one-permission correction **only if the §4 inspection
+establishes a missing allow** for the runtime principal in
+`westayfit-staging`, with the shared-principal scope disclosed, and then run
+one verification and one reset attempt. Any other finding — permission
+already present, effective access not establishable, a deny or organisation
+policy, a wrong target project, custom roles unavailable, or any further
+permission or identity change needed — is a STOP-and-report. The operator's
+acknowledgment of that assignment is pending at the time of writing.
+
+**Nothing here is executed by this document, by the pull request that carries
+it, or by any Claude session.** No Claude worker performs an IAM change or an
+email send; the lead coordinates and records. The approval is not blanket IAM,
+deployment or production authority.
 
 Prepared by the lead (L0) on 2026-09-22 from existing source and the
 operator's receipt, at the Program Director's request
@@ -127,7 +139,14 @@ gcloud services list --enabled --project westayfit-staging --filter='config.name
 
 ## 5 · Proposed smallest correction — only if the inspection shows cause A
 
-**Do not execute without the owner's explicit, bounded approval.**
+**Owner-approved on the condition above; executed by the operator only.**
+Two refinements from the approval: an existing role containing *exactly* this
+one permission may be reused unmodified instead of creating a new one; and the
+binding must be an additive, concurrency-safe update that preserves every
+existing policy entry and condition (`gcloud projects add-iam-policy-binding`
+performs a read-modify-write with the policy's etag). Record the exact role,
+the permission, the before/after binding delta, and a rollback that removes
+only the newly added binding. No pre-existing role is broadened.
 
 Create one custom role in the staging project containing exactly the one
 permission, and bind it to the existing principal at project level:
