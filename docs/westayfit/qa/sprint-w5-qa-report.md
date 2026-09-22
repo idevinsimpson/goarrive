@@ -276,3 +276,64 @@ not re-run #400's own spec's frame capture: `WSF_CAPTURE_FRAMES` and `WSF_CAPTUR
 never set, per my constraints.
 
 No approval or merge recommendation is given for #400.
+
+
+## Verification of W3's #393 corrections
+
+Posted: https://github.com/idevinsimpson/goarrive/pull/393#issuecomment-5783988860
+Harness: `sprint-w5-393-corrections-verify.sh`
+
+The corrections arrived as a **patch against `cb91d78`**, not a pushed head
+(`docs/wsf-staging/393-reporter-corrections-NOT-APPLIED.patch` @ `41ea4dd`,
+sha256 `bfdb5f6652f7fee6cc140ac915987092aa6338033c069c6879853ea06995aeed`).
+Applied to a throwaway detached worktree — `git apply --check` clean, so it is a
+true diff against that commit. `claude/wsf-staging-mail-binding` was never written to.
+
+**Patched tree: 14 suites, 311 assertions, exit 0** — matches W3's figure.
+`workflow-contract` 58→62, `mail-binding` 10→24.
+
+**Verdict: F2, F3, F4, F5 hold; F1 is substantially but not completely closed; F6
+deliberately unaddressed and I concur.**
+
+- **F1** — the derived-order matrix now sees a new job (the failure diff carries
+  `'rollout-helper': true`), and the shipped `ungatedJobs()` predicate, extracted
+  verbatim, returns `["rollout-helper"]` for M7 and `[]` for the real workflow.
+  Critically, `no npx invocation exists in any job` **passes** on the privileged
+  probe, so the catch is the gating invariant itself and not the incidental ban.
+  M6 and M7 both CAUGHT.
+- **F2** — `revision version UNRESOLVED (the revision carries the alias latest)`;
+  no bare `revision version latest`. A numeric revision still resolves.
+- **F3** — projection verified from recorded argv, not from source:
+  `json(spec.containers[].env[].name,spec.containers[].env[].valueFrom.secretKeyRef)`.
+- **F4** — `mismatch (this variable is fed from RESEND_API_KEY)`; revision-level
+  identity checked too.
+- **F5** — six states, six listed; double evaluation gone.
+
+### R1 — moderate, OPEN — four legal job ids the gating regex cannot see
+
+Both parsers use `/^ {2}([a-z][a-z0-9-]*):\s*$/`. Each of these is a GitHub-legal,
+**ungated** job id running `gcloud secrets versions add WSF_EMAIL_API_KEY`, and each
+passes all 62 assertions: `Rollout:`, `rollout-helper:  # temporary helper`,
+`_rollout:`, `rollout_helper:`. The positive control comparing the two parsers cannot
+help — both share the blindness, so they agree and both are wrong.
+
+Validated fix (tested, not guessed): `/^ {2}([A-Za-z_][A-Za-z0-9_-]*):(\s|$)/` names
+all four and is a no-op on the real workflow (9 jobs, `ungated=[]`). Both parsers
+need it.
+
+### Low / trivial
+
+- **N1** — the empty-string `name` half of the completeness guard is untested.
+  Mutated, a describe returning `name: ""` yields `bound_pinned` instead of `unknown`.
+- **N3** — the numeric predicate's anchors are untested. Mutated to `/\d+/`, a
+  declared version `v2-beta` reports as `bound_pinned` instead of `bound_alias`.
+- **N5** — `some`→`every` survives but only relabels one refusal as another. Trivial.
+- **Not a finding:** the revision-level empty-string `name` guard survives mutation
+  but changes no answer — the next comparison catches `''` anyway. Redundant, not a gap.
+
+**F6** — I agree with leaving it. Neither W3 nor I can prove `gcloud` emits those
+phrasings for an IAM-masked gen2 describe, and broadening the absence guard on an
+unproven string turns real NOT_FOUNDs into `unknown` — the same misdirection in the
+other direction. It stays bounded: `absent`, never `unbound`.
+
+No approval or merge recommendation given.
