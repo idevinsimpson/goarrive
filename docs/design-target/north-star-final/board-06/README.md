@@ -12,7 +12,7 @@ nothing loses the standing it already had.** The identity funnel's existing
 acceptance is recorded on the board rather than overwritten by it; see *Three
 provenances* below.
 
-`WE_STAY_FIT_NORTH_STAR_BOARD_06_CREATE_JOIN_AUTH_FINAL.png` · 2560×3980 (1280×3980 @2x)
+`WE_STAY_FIT_NORTH_STAR_BOARD_06_CREATE_JOIN_AUTH_FINAL.png` · 2560×7960 (1280×3980 @2x)
 
 Authorised as W2's packet by the Director's `5783373780` §2 (*"The 00–05 stop
 gate is removed"*), relayed on PR #397 `5783475743`, and confirmed against the
@@ -50,7 +50,7 @@ source review caught the error.
 | --- | --- | --- |
 | `batch-a-identity/after/` | the identity funnel — **ACCEPTED**. `/signin`, `/signup`, `/reset-password`, `/verify-email`, `/profile-setup`, accepted at `3562156` (2026-09-21), recorded in `.github/wsf-staging/approved-candidate.json`. The frames here were **re-baselined afterwards**, at `5cf92e1` (2026-09-22). | `ACCEPTED BUILD · LATER CAPTURE` |
 | `batch-b-join-and-setup/after/` | `/join/[joinCode]` — **implemented, still awaiting its page verdict**. Not in the accepted package label; its `after/` set is deliberately not frozen, because it has not been reviewed. | `CURRENT BUILD · CAPTURED` |
-| `batch-b-join-and-setup/TARGET-*` | `/start-community` — **drawn, never built**. Each frame carries its own TARGET strip burnt into the image. | `TARGET · NOT IMPLEMENTED` |
+| `batch-b-join-and-setup/TARGET-*` | the `/start-community` **artwork** — a redesign that is **not implemented**. The route itself exists (`app/start-community.tsx`); what is unbuilt is this design of it. Each frame carries its own TARGET strip burnt into the image. | `TARGET · NOT IMPLEMENTED` |
 
 Two lessons are recorded rather than quietly fixed. **Freezing is not what makes
 something accepted — the record is.** The freeze list guards what is under
@@ -59,9 +59,14 @@ either way from it was the mistake. And **a later capture of an accepted route
 is still a later capture**: that is a fact about the frame, not a demotion of
 the route.
 
-`/goals/new` and `/combined/[setupId]` are unbuilt as well. They are **named on
-the status panel and not drawn** — opening a goal is Board 08's subject, and a
-board should not annex its neighbour's material to look complete.
+**A third correction, from the Director's pixel review.** An earlier draft
+called `/goals/new` and `/combined/[setupId]` unbuilt. That is wrong: both
+routes exist at this same commit, and `app/goals/new.tsx` is roughly a thousand
+lines, hard-gated to the emulator and staging. The batch-b README's "not
+implemented" is about those **TARGET redesigns**, not about the routes — and
+repeating its framing instead of checking the app was the error. The board now
+says goal setup is covered by Board 08, that its existing route is
+staging/emulator-only, and that this board determines acceptance of neither.
 
 ## Checked against the lock, line by line
 

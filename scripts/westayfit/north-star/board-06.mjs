@@ -28,14 +28,20 @@
  *                             is deliberately not frozen, because it has not
  *                             been reviewed.
  *
- *   TARGET / NOT IMPLEMENTED  `/start-community` -- drawn, never built. These
- *                             frames carry their own TARGET strip burnt into
- *                             the image, and are tagged again here. A target is
- *                             never an after.
+ *   TARGET / NOT IMPLEMENTED  the `/start-community` ARTWORK -- a redesign that
+ *                             is not implemented. The route itself exists
+ *                             (app/start-community.tsx); what is unbuilt is
+ *                             this design of it. These frames carry their own
+ *                             TARGET strip burnt into the image and are tagged
+ *                             again here. A target is never an after.
  *
- * `/goals/new` and `/combined/[setupId]` are also unbuilt. They are named on
- * the seam panel rather than drawn, because this board's lock is create / join
- * / auth and a goal being opened belongs to Board 08.
+ * An earlier draft called `/goals/new` and `/combined/[setupId]` unbuilt. That
+ * was wrong, and the Director's pixel review caught it: both routes exist at
+ * this same commit (app/goals/new.tsx is ~1,000 lines, hard-gated to emulator
+ * and staging). The batch-b README's "not implemented" is about those TARGET
+ * redesigns, not about the routes -- repeating its framing instead of checking
+ * the app was the error. Goal setup belongs to Board 08 and its existing route
+ * is staging/emulator-only; this board decides nothing about either.
  *
  * NO LIVING WE APPEARS ANYWHERE ON THIS BOARD. The lock forbids it on setup and
  * auth surfaces without a confirmed ratio, and not one of these screens has a
@@ -75,7 +81,7 @@ export const html = page({
     <div class="sec-head">
       <div>
         <div class="eyebrow">THE INVITATION · /join/[joinCode] · BUILT, UNDER REVIEW</div>
-        <h3>The link says what joining means before it asks for anything, and it never says whether a community exists.</h3>
+        <h3>The link says what joining means before it asks for anything, and names the community only when the invitation is valid.</h3>
       </div>
       <div class="how">Real captures of the built route at 2× (<b style="color:${NAVY}">batch-b .../after</b>), read in place. Implemented and awaiting visual and functional acceptance — <b style="color:${NAVY}">not</b> an accepted page. Community and names are fixtures.</div>
     </div>
@@ -122,10 +128,10 @@ export const html = page({
   <div>
     <div class="sec-head">
       <div>
-        <div class="eyebrow">WHAT A CHAMPION STARTS · /start-community · DRAWN, NOT BUILT</div>
+        <div class="eyebrow">WHAT A CHAMPION STARTS · /start-community · TARGET REDESIGN, NOT IMPLEMENTED</div>
         <h3>Family and friends is private by default; any other community is anyone-with-the-link; public is opt-in and still not discoverable.</h3>
       </div>
-      <div class="how">These five are <b style="color:${NAVY}">drawings</b> from batch-b, read in place. Each carries its own TARGET strip burnt into the image, and is tagged again here. <b style="color:${NAVY}">A target is never an after.</b></div>
+      <div class="how">These five are <b style="color:${NAVY}">drawings</b> from batch-b, read in place, each carrying its own TARGET strip burnt into the image. <b style="color:${NAVY}">The route exists — this design of it does not.</b> A target is never an after.</div>
     </div>
     <div class="phones" style="gap:26px">
       ${phone({ file: TARGET('TARGET-start-signin-390x844.png'), width: SMALL_W, slot: SMALL_SLOT, tag: 'seam', tagText: DRAWN, title: 'Signed out → Sign in', sub: 'Starting a community needs an account, like joining one does.' })}
@@ -142,7 +148,8 @@ export const html = page({
       <h3>This board grants no acceptance, and it erases none either.</h3>
       <p class="note"><b style="color:${CREAM}">a · The identity implementation is ACCEPTED</b> — /signin, /signup, /reset-password, /verify-email and /profile-setup, at <b style="color:${CREAM}">3562156</b> (2026-09-21), recorded in <b style="color:${CREAM}">.github/wsf-staging/approved-candidate.json</b>. That acceptance stands and this board does not touch it.</p>
       <p class="note" style="margin-top:8px"><b style="color:${CREAM}">b · The identity captures here postdate it.</b> The Batch A AFTER frames were re-baselined at <b style="color:${CREAM}">5cf92e1</b> (2026-09-22). They are a later capture of the accepted route — which is a fact about the frame, not about the route's standing.</p>
-      <p class="note" style="margin-top:8px"><b style="color:${CREAM}">c · /join/[joinCode] is implemented and still awaits its page verdict.</b> It is not in the accepted package label. <b style="color:${CREAM}">d · /start-community</b> is drawn and not built; <b style="color:${CREAM}">/goals/new</b> and <b style="color:${CREAM}">/combined/[setupId]</b> are unbuilt and named rather than drawn, because opening a goal belongs to Board 08.</p>
+      <p class="note" style="margin-top:8px"><b style="color:${CREAM}">c · /join/[joinCode] is implemented and still awaits its page verdict.</b> It is not in the accepted package label. <b style="color:${CREAM}">d · The /start-community artwork here is a TARGET redesign that is not implemented</b> — the route itself exists; what is unbuilt is this design of it.</p>
+      <p class="note" style="margin-top:8px"><b style="color:${CREAM}">Goal setup is covered by Board 08; its existing route is staging/emulator-only.</b> This board does not determine acceptance of the later setup redesign, and it does not reach <b style="color:${CREAM}">/combined/[setupId]</b> either.</p>
       <p class="note" style="margin-top:8px">The lock still governs what this board itself does: <b style="color:${CREAM}">“This board does NOT promote the underlying routes to accepted-page status.”</b> Nothing gains standing by appearing here — and nothing loses the standing it already had.</p>
       <p class="note" style="margin-top:8px"><b style="color:${CREAM}">No Living WE appears on this board.</b> The lock forbids it on setup and auth surfaces without a confirmed ratio, and none of these screens has a shared total to be a ratio of. The wordmark carries the brand instead.</p>
     </div>
