@@ -83,9 +83,15 @@ const ACCEPTED_FRAMES = [
   'docs/design-target/review/batch-a-identity/after',
   'docs/design-target/review/batch-a-identity/TARGET-*.png',
   // Batch B targets are accepted target reference (PR #365: Batches A–G).
-  // Batch B `after/` is deliberately NOT listed: /join/[joinCode] awaits its
-  // page verdict, and this list is only what a review has decided on.
   'docs/design-target/review/batch-b-join-and-setup/TARGET-*.png',
+  // /join/[joinCode] ACCEPTED at a760a4e (PR #417, final page verdict
+  // 5785824472 after the composition PASS 5785419114). The Join AFTER set is
+  // frozen as reviewed. Its three `AFTER-failed-*` frames are HISTORICAL:
+  // they photograph the "Nothing was changed" promise the correction removed,
+  // and are superseded by the three `join-unconfirmed-*` frames below; they
+  // stay byte-frozen as the record of what was reviewed, not as current truth.
+  'docs/design-target/review/batch-b-join-and-setup/after',
+  'docs/design-target/review/join-outcome-correction/*.png',
   'docs/design-target/targets',
   'docs/westayfit/app-shell-2026-09-19',
   'docs/westayfit/visual-baseline-2026-09-19',
