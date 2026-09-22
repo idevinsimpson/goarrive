@@ -14,7 +14,7 @@ station and a public display are fixed canvases with no scroll.
 
 ## Batch A — Identity and onboarding
 
-`review/batch-a-identity/` · `/signin` `/signup` `/verify-email` `/reset-password` `/profile-setup` · implemented · **awaiting visual/functional review**
+`review/batch-a-identity/` · `/signin` `/signup` `/verify-email` `/reset-password` `/profile-setup` · implemented · **accepted** · staged at `3562156`
 
 Contact sheet / other: `CONTACT-SHEET-batch-a.png`
 

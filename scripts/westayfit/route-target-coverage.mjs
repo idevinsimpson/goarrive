@@ -105,11 +105,11 @@ const NOTES = {
   '/move/[goalId]':
     'The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**; NOT implemented.',
   '/signin':
-    'Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented** to the accepted target; awaiting visual/functional review.',
-  '/signup': '**Implemented** to the accepted target; awaiting visual/functional review.',
-  '/verify-email': '**Implemented** to the accepted target; awaiting visual/functional review. One open question on the `unconfigured` outcome is recorded on PR #365.',
-  '/reset-password': '**Implemented** to the accepted target; awaiting visual/functional review.',
-  '/profile-setup': '**Implemented** to the accepted target; awaiting visual/functional review. The owed truth correction it carried is closed in that package.',
+    'Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented, accepted, and staged** at `3562156`.',
+  '/signup': '**Implemented, accepted, and staged** at `3562156`.',
+  '/verify-email': '**Implemented, accepted, and staged** at `3562156`. One open question on the `unconfigured` outcome is recorded on PR #365.',
+  '/reset-password': '**Implemented, accepted, and staged** at `3562156`.',
+  '/profile-setup': '**Implemented, accepted, and staged** at `3562156`. The owed truth correction it carried is closed in that package.',
 };
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
@@ -136,7 +136,7 @@ const BATCHES = [
     title: 'Identity and onboarding',
     dir: 'batch-a-identity',
     routes: ['/signin', '/signup', '/verify-email', '/reset-password', '/profile-setup'],
-    status: 'implemented · **awaiting visual/functional review**',
+    status: 'implemented · **accepted** · staged at `3562156`',
   },
   {
     key: 'B',

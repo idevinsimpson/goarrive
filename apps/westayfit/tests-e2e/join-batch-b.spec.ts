@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Browser, type Page, type Route } from '@playwright/test';
 
 import { seedVerifiedUser, signInVia, stampId, visibleCount } from './helpers/mobile';
 
@@ -208,4 +208,122 @@ test.describe('Batch B — /join/[joinCode]', () => {
     });
     expect(remembered).toBeNull();
   });
+});
+
+/**
+ * THE SHORT PHONE ARRIVES AT THE TOP.
+ *
+ * A review of the 390x640 evidence read `invite-in`, `failed`, `working`,
+ * `too-many` and `load-failed` as opening part-way down, with the invitation
+ * hero above the viewport. Reading a screenshot cannot tell an offset arrival
+ * from a surface that simply is that tall, so this measures the thing itself:
+ * the scroll offset on arrival, and whether the first thing the composition
+ * leads with is actually on screen.
+ *
+ * IT MEASURES RATHER THAN ASSUMES, IN BOTH DIRECTIONS. If any of these states
+ * ever does open scrolled — and `failed` and `working` are the ones that
+ * could, since they are reached by a tap rather than a load — this fails and
+ * names which. Nothing here scrolls the page first; that would answer the
+ * question by erasing it.
+ */
+test.describe('Batch B — /join/[joinCode] arrives at the top on a short phone', () => {
+  const SHORT = { width: 390, height: 640 };
+
+  async function shortPhone(browser: Browser) {
+    const context = await browser.newContext({
+      viewport: SHORT,
+      deviceScaleFactor: 2,
+      isMobile: true,
+      hasTouch: true,
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+    });
+    return { context, page: await context.newPage() };
+  }
+
+  /** The offset the route opened at — the document's and every scroller's. */
+  async function arrivalOffsets(page: Page): Promise<number[]> {
+    return page.evaluate(() => {
+      const offsets = [window.scrollY, document.documentElement.scrollTop];
+      for (const el of Array.from(document.querySelectorAll('*'))) {
+        if (el.scrollTop > 0) offsets.push(el.scrollTop);
+      }
+      return offsets;
+    });
+  }
+
+  async function expectArrivedAtTop(page: Page, heroTestId: string, label: string) {
+    const offsets = await arrivalOffsets(page);
+    expect(offsets, `${label}: nothing is scrolled on arrival`).toEqual(
+      offsets.map(() => 0)
+    );
+    const hero = await page.getByTestId(heroTestId).boundingBox();
+    expect(hero, `${label}: the hero element exists`).not.toBeNull();
+    expect(hero!.y, `${label}: the hero is not above the viewport`).toBeGreaterThanOrEqual(0);
+    expect(
+      hero!.y,
+      `${label}: the hero is inside the ${SHORT.height} pt viewport`
+    ).toBeLessThan(SHORT.height);
+  }
+
+  test('the invitation, the failure and the join in flight all open with the hero on screen', async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const { context, page } = await shortPhone(browser);
+    try {
+      await page.route('**/wsfPreviewCommunity**', (route) => fulfil(route, OK_PREVIEW));
+      await signedInMember(page);
+      await page.goto(`/join/${JOIN_CODE}`);
+      await expect(page.getByTestId('wsf-join-signed-in')).toBeVisible({ timeout: 30_000 });
+      // `wsf-join-conditions` is the LAST line of the hero. If it is on screen,
+      // everything above it — eyebrow, name, type — is too.
+      await expectArrivedAtTop(page, 'wsf-join-conditions', 'invite-in');
+
+      // FAILED AND WORKING ARE REACHED BY A TAP, not a load, which is exactly
+      // where an offset could survive a re-render. Held open first, then
+      // failed, so both are measured on the same page instance a person has.
+      // eslint-disable-next-line prefer-const -- assigned inside the route handler
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route('**/wsfJoinCommunity**', async (route) => {
+        await held;
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify(callableError('INTERNAL', 'join failed')),
+        });
+      });
+      await page.getByTestId('wsf-join-submit').click();
+      await expect(page.getByTestId('wsf-join-submit')).toBeDisabled({ timeout: 30_000 });
+      await expectArrivedAtTop(page, 'wsf-join-conditions', 'working');
+
+      release?.();
+      await expect(page.getByTestId('wsf-join-submit-error')).toBeVisible({ timeout: 30_000 });
+      await expectArrivedAtTop(page, 'wsf-join-conditions', 'failed');
+    } finally {
+      await context.close();
+    }
+  });
+
+  for (const refusal of [
+    { state: 'too-many', status: 429, code: 'RESOURCE_EXHAUSTED', testID: 'wsf-join-rate-limited' },
+    { state: 'load-failed', status: 500, code: 'INTERNAL', testID: 'wsf-join-error' },
+  ]) {
+    test(`the ${refusal.state} refusal opens with its heading on screen`, async ({ browser }) => {
+      const { context, page } = await shortPhone(browser);
+      try {
+        await page.route('**/wsfPreviewCommunity**', (route) =>
+          fulfil(route, callableError(refusal.code, 'refused'), refusal.status)
+        );
+        await page.goto(`/join/${JOIN_CODE}`);
+        await expect(page.getByTestId(refusal.testID)).toBeVisible({ timeout: 30_000 });
+        await expectArrivedAtTop(page, refusal.testID, refusal.state);
+      } finally {
+        await context.close();
+      }
+    });
+  }
 });

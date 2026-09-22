@@ -115,14 +115,14 @@ second is operational.
 | `/kiosk/[goalId]` | `review/batch-e-room-screens/` | The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/move` | `review/page-02-move/` | MOVE entry. **Implemented and accepted**, with the sheet mechanic declared as a difference (it needs a transparent-modal presentation). |
 | `/move/[goalId]` | `review/batch-g-follow-along/` | The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**; NOT implemented. |
-| `/profile-setup` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. The owed truth correction it carried is closed in that package. |
+| `/profile-setup` | `review/batch-a-identity/` | **Implemented, accepted, and staged** at `3562156`. The owed truth correction it carried is closed in that package. |
 | `/queue/[goalId]` | `review/batch-d-event-and-line/` | Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target **reviewed and accepted as reference**; NOT implemented. |
-| `/reset-password` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. |
-| `/signin` | `review/batch-a-identity/` | Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented** to the accepted target; awaiting visual/functional review. |
-| `/signup` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. |
+| `/reset-password` | `review/batch-a-identity/` | **Implemented, accepted, and staged** at `3562156`. |
+| `/signin` | `review/batch-a-identity/` | Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented, accepted, and staged** at `3562156`. |
+| `/signup` | `review/batch-a-identity/` | **Implemented, accepted, and staged** at `3562156`. |
 | `/start-community` | `review/batch-b-join-and-setup/` | Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target **reviewed and accepted as reference**; NOT implemented. |
 | `/station/[goalId]` | `review/batch-e-room-screens/` | The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target **reviewed and accepted as reference**; NOT implemented. |
-| `/verify-email` | `review/batch-a-identity/` | **Implemented** to the accepted target; awaiting visual/functional review. One open question on the `unconfigured` outcome is recorded on PR #365. |
+| `/verify-email` | `review/batch-a-identity/` | **Implemented, accepted, and staged** at `3562156`. One open question on the `unconfigured` outcome is recorded on PR #365. |
 | `/you` | `review/page-05-you/` | You — identity, the community you belong to, and the account actions that really work. **Implemented and accepted.** The truth table in that package is why there is no photo, streak or personal-impact claim. |
 
 ### Not covered — no target of any kind
@@ -144,7 +144,7 @@ None. Every user-facing route has a target.
 
 | Batch | What it covers | Routes | States | Frames | Classes | State |
 | --- | --- | ---: | ---: | ---: | --- | --- |
-| **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | implemented · **awaiting visual/functional review** |
+| **A** | Identity and onboarding | 5 | 17 | 64 | 390x640 · 390x844 · 430x932 | implemented · **accepted** · staged at `3562156` |
 | **B** | The invitation, and what a Champion starts | 4 | 34 | 154 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · `/join/[joinCode]` implemented · the other three NOT implemented |
 | **C** | The challenge, and the door | 2 | 17 | 67 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
 | **D** | The event and the line, on your own phone | 2 | 24 | 93 | 390x640 · 390x844 · 430x932 | **reviewed & accepted** as target reference · NOT implemented |
