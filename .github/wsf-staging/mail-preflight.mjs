@@ -75,6 +75,23 @@ function secretState() {
  * Only the domain is reported. A sender that looks like a key is refused
  * outright and never echoed — that mistake has been made before, and echoing
  * it to prove it happened would put the key in the log.
+ *
+ * A SENDER IS USUALLY `Display Name <local@domain>`, NOT A BARE ADDRESS, and
+ * this read the bare form only. The approved staging sender is
+ * `We Stay Fit <noreply@westay.fit>`; slicing after the last `@` returned
+ * `westay.fit>` — with the closing angle bracket — which matched no verified
+ * domain and reported a correctly configured environment as NOT READY.
+ *
+ * That is the worst thing a diagnostic can do. It does not merely fail to
+ * help: it accuses a correct configuration, and the next operator either
+ * chases a problem that does not exist or learns to disbelieve the report.
+ * Run 35735970775 is the instance.
+ *
+ * So the address is taken from inside the angle brackets when they are there,
+ * and the whole value is the address when they are not. The deploy itself was
+ * never affected — `write-functions-env.mjs` passes this variable through
+ * verbatim and checks only that it contains an `@` — so this was a lying
+ * instrument, not a broken deploy.
  */
 function senderState() {
   const raw = (process.env.WSF_EMAIL_FROM ?? '').trim();
@@ -82,11 +99,15 @@ function senderState() {
   if (/^re_/i.test(raw) || raw.length > 120) {
     return { state: 'refused', domain: null, detail: 'value looks like a key, not an address' };
   }
-  const at = raw.lastIndexOf('@');
-  if (at < 1 || at === raw.length - 1) {
+  // `Display Name <local@domain>` and `<local@domain>` both yield the address;
+  // anything else is treated as the address itself.
+  const angled = /<([^<>]*)>\s*$/.exec(raw);
+  const addr = (angled ? angled[1] : raw).trim();
+  const at = addr.lastIndexOf('@');
+  if (at < 1 || at === addr.length - 1) {
     return { state: 'refused', domain: null, detail: 'not an email address' };
   }
-  return { state: 'present', domain: raw.slice(at + 1).toLowerCase(), detail: '' };
+  return { state: 'present', domain: addr.slice(at + 1).toLowerCase(), detail: '' };
 }
 
 /* ── 3 · the authorized domain ──────────────────────────────────────────── */
