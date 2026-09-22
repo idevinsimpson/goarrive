@@ -134,6 +134,65 @@ if (isFunctionDescribe) {
     );
     process.exit(0);
   }
+  /*
+    MALFORMED SHAPES THAT `!= null` AND `Array.isArray(…) ? … : []` ADMITTED.
+
+    Each is valid JSON, exits 0, and identifies a function — so only the SHAPE
+    tells them apart from a real answer. Each previously reported `unbound`,
+    which is a statement that the deploy never wired the secret.
+  */
+  if (scenario === 'serviceconfig-string') {
+    process.stdout.write(
+      JSON.stringify({
+        name: `projects/${PROJECT}/locations/us-central1/functions/${argv[2]}`,
+        state: 'ACTIVE',
+        serviceConfig: 'invalid',
+      })
+    );
+    process.exit(0);
+  }
+  if (scenario === 'serviceconfig-array') {
+    process.stdout.write(
+      JSON.stringify({
+        name: `projects/${PROJECT}/locations/us-central1/functions/${argv[2]}`,
+        state: 'ACTIVE',
+        serviceConfig: [],
+      })
+    );
+    process.exit(0);
+  }
+  // The reference COLLECTION is an object rather than a list.
+  if (scenario === 'refs-object') {
+    process.stdout.write(
+      JSON.stringify({
+        name: `projects/${PROJECT}/locations/us-central1/functions/${argv[2]}`,
+        state: 'ACTIVE',
+        serviceConfig: {
+          revision: REVISION,
+          secretEnvironmentVariables: { key: 'WSF_EMAIL_API_KEY' },
+        },
+      })
+    );
+    process.exit(0);
+  }
+  // A list whose ENTRY is not an object. Filtering it out silently could hide
+  // a real reference behind it.
+  if (scenario === 'refs-bad-entry') {
+    process.stdout.write(fn(['WSF_EMAIL_API_KEY']));
+    process.exit(0);
+  }
+  // POSITIVE CONTROL for all of the above: a serviceConfig that is a valid
+  // object and simply omits the list. This must stay `unbound`.
+  if (scenario === 'serviceconfig-empty') {
+    process.stdout.write(
+      JSON.stringify({
+        name: `projects/${PROJECT}/locations/us-central1/functions/${argv[2]}`,
+        state: 'ACTIVE',
+        serviceConfig: {},
+      })
+    );
+    process.exit(0);
+  }
   // PARTIAL: a name but no serviceConfig — still not enough to assert absence.
   if (scenario === 'partial') {
     process.stdout.write(
@@ -206,6 +265,24 @@ if (isRevisionDescribe) {
   // N3 at the revision level too: a digit-containing alias is still an alias.
   if (scenario === 'alias-digits') {
     process.stdout.write(revisionJson('v2'));
+    process.exit(0);
+  }
+  /*
+    MALFORMED REVISION STRUCTURES. `for…of` over a non-iterable throws, and the
+    throw was uncaught at top level — so these did not merely lose their own
+    answer, they ended the process and took the other function's row with them.
+    The reporter must degrade to UNRESOLVED and keep reporting.
+  */
+  if (scenario === 'revision-containers-object') {
+    process.stdout.write(JSON.stringify({ spec: { containers: {} } }));
+    process.exit(0);
+  }
+  if (scenario === 'revision-env-object') {
+    process.stdout.write(JSON.stringify({ spec: { containers: [{ env: { name: 'x' } }] } }));
+    process.exit(0);
+  }
+  if (scenario === 'revision-spec-string') {
+    process.stdout.write(JSON.stringify({ spec: 'invalid' }));
     process.exit(0);
   }
   process.stdout.write(revisionJson('2'));

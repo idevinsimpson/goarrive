@@ -104,6 +104,18 @@ function run(args) {
 
 const isNumericVersion = (v) => /^\d+$/.test(String(v));
 
+/*
+  SHAPE IS PART OF THE ANSWER, NOT A DETAIL OF PARSING IT.
+
+  `typeof null === 'object'` and `typeof [] === 'object'`, so a `!= null` test
+  admits a string, a number and an array where an object was meant. That is how
+  `serviceConfig: "invalid"` and `serviceConfig: []` reached the reference
+  lookup, found nothing there, and were reported `unbound` — the report
+  asserting the deploy never wired the secret, from metadata that was not a
+  function description at all.
+*/
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
 /**
  * NOT_FOUND about the thing asked for is the only absence.
  *
@@ -173,9 +185,38 @@ function revisionBinding(revision) {
   } catch {
     return { version: null, observed: null, detail: 'revision response was not JSON' };
   }
-  const containers = parsed?.spec?.containers ?? [];
+  /*
+    VALIDATE BEFORE ITERATING. `for…of` over a non-iterable throws, and this
+    ran at top level — so one malformed revision did not merely lose its own
+    answer, it terminated the whole report and suppressed the OTHER function's
+    row. A reporter that disappears is worse than one that says `unresolved`.
+  */
+  if (!isPlainObject(parsed)) {
+    return { version: null, observed: null, detail: 'revision response was not an object' };
+  }
+  if (parsed.spec !== undefined && !isPlainObject(parsed.spec)) {
+    return { version: null, observed: null, detail: 'revision structure was malformed' };
+  }
+  const containers = parsed.spec?.containers;
+  if (containers === undefined || containers === null) {
+    return { version: null, observed: null, detail: 'revision reported no containers' };
+  }
+  if (!Array.isArray(containers)) {
+    return { version: null, observed: null, detail: 'revision container list was malformed' };
+  }
   for (const c of containers) {
-    for (const e of c?.env ?? []) {
+    if (!isPlainObject(c)) {
+      return { version: null, observed: null, detail: 'revision container was malformed' };
+    }
+    // An omitted env list is ordinary; a non-array one is not.
+    if (c.env === undefined || c.env === null) continue;
+    if (!Array.isArray(c.env)) {
+      return { version: null, observed: null, detail: 'revision env list was malformed' };
+    }
+    for (const e of c.env) {
+      if (!isPlainObject(e)) {
+        return { version: null, observed: null, detail: 'revision env entry was malformed' };
+      }
       if (e?.name !== envName) continue;
       const ref = e?.valueFrom?.secretKeyRef;
       if (!ref) continue;
@@ -211,7 +252,20 @@ function revisionBinding(revision) {
 }
 
 const rows = [];
-for (const fn of functions) {
+/*
+  ONE FUNCTION'S BAD METADATA MUST NOT SUPPRESS THE OTHER'S ROW.
+
+  Every shape this reads is validated below, so the catch should be
+  unreachable — which is precisely why it is here. It costs nothing, and the
+  failure it guards against is the worst kind: an uncaught throw part-way
+  through the loop ends the process, so the run log shows neither function
+  rather than one answer and one `unknown`. A reporter that vanishes tells an
+  operator less than one that admits what it could not read.
+
+  The loop body is the `try` statement itself, which keeps `continue` working
+  as it reads — it continues this loop.
+*/
+for (const fn of functions) try {
   const r = run([
     'functions',
     'describe',
@@ -255,11 +309,10 @@ for (const fn of functions) {
     legitimate empty binding and still falls through to `unbound` below.
   */
   if (
-    !d ||
-    typeof d !== 'object' ||
+    !isPlainObject(d) ||
     typeof d.name !== 'string' ||
     d.name === '' ||
-    d.serviceConfig == null
+    !isPlainObject(d.serviceConfig)
   ) {
     rows.push({ fn, state: 'unknown', detail: 'describe response was incomplete' });
     continue;
@@ -268,9 +321,42 @@ for (const fn of functions) {
   const fnState = d.state ?? 'unknown';
   const revision = d.serviceConfig.revision ?? null;
   const describedProject = projectOfResourceName(d.name);
-  const refs = Array.isArray(d.serviceConfig.secretEnvironmentVariables)
-    ? d.serviceConfig.secretEnvironmentVariables
-    : [];
+
+  /*
+    AN OMITTED LIST IS NOT A MALFORMED ONE, AND THE DIFFERENCE IS THE WHOLE
+    POINT.
+
+    A projected describe omits a field that has no value, so an absent or empty
+    `secretEnvironmentVariables` on an otherwise valid function is a genuine
+    empty binding and must stay `unbound`. Anything else that is not an array —
+    an object, a string — was silently coerced to `[]` and reported as that
+    same `unbound`, which states a fact about the deploy on the strength of
+    metadata nobody could read.
+  */
+  const rawRefs = d.serviceConfig.secretEnvironmentVariables;
+  if (rawRefs !== undefined && rawRefs !== null && !Array.isArray(rawRefs)) {
+    rows.push({
+      fn,
+      state: 'unknown',
+      fnState,
+      revision,
+      detail: 'the secret reference collection was malformed',
+    });
+    continue;
+  }
+  const refs = Array.isArray(rawRefs) ? rawRefs : [];
+  // A non-object entry would be filtered out silently below and could hide a
+  // real reference behind it; unreadable is unknown, not absent.
+  if (refs.some((v) => !isPlainObject(v))) {
+    rows.push({
+      fn,
+      state: 'unknown',
+      fnState,
+      revision,
+      detail: 'a secret reference entry was malformed',
+    });
+    continue;
+  }
 
   /*
     BOTH HALVES, SEPARATELY. The variable is found by env var name; the secret
@@ -358,6 +444,10 @@ for (const fn of functions) {
     servedDetail: served.detail,
     detail: state === 'unknown' ? 'the reference names no version' : '',
   });
+} catch {
+  // Deliberately not re-thrown and deliberately not detailed: the exception
+  // text could carry metadata this script is careful never to print.
+  rows.push({ fn, state: 'unknown', detail: 'the describe response could not be interpreted' });
 }
 
 console.log(`WSF MAIL BINDING — read-only, metadata only`);
