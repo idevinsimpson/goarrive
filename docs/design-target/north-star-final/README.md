@@ -99,6 +99,13 @@ full board.** It is rendered by `scripts/westayfit/north-star/index.mjs`, which
 reads the package directory at render time, so a board appears on it only once
 its PNG exists — the sheet cannot claim a board the directory does not hold.
 
+## Review copies
+
+`review-copies/` holds a 1× render of every board (`WSF_BOARD_SCALE=1`) —
+the same module, the same layout, half the pixel density — for a reviewer
+whose tools cannot decode the 2× original. A review copy is never the
+canonical artifact and is re-rendered by the lead whenever its board changes.
+
 ## Review protocol
 
 Before a reconstructed board is called FINAL:

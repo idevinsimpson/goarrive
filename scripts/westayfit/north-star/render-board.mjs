@@ -60,11 +60,17 @@ writeFileSync(htmlPath, mod.html, 'utf8');
 const browser = await chromium.launch({
   executablePath: process.env.WSF_PLAYWRIGHT_CHROMIUM || undefined,
 });
+/*
+  2x by default, so the board is legible at full size AND at useful zoom,
+  which the review protocol asks for explicitly. WSF_BOARD_SCALE=1 renders
+  the same board at 1x — a readable REVIEW COPY for a reviewer whose tools
+  cannot decode a 2560-wide binary. Same module, same layout, same pixels
+  at half the density; never a different picture.
+*/
+const scale = Number(process.env.WSF_BOARD_SCALE || 2);
 const page = await browser.newPage({
   viewport: { width: mod.width, height: mod.height },
-  // 2x so the board is legible at full size AND at useful zoom, which the
-  // review protocol asks for explicitly.
-  deviceScaleFactor: 2,
+  deviceScaleFactor: scale,
 });
 await page.goto(pathToFileURL(htmlPath).href);
 // Every image must have decoded before the shot: a board that photographs a
@@ -83,4 +89,4 @@ if (missing.length) {
 mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
 await page.screenshot({ path: outPath, fullPage: false });
 await browser.close();
-console.log(`rendered ${outPath} (${mod.width}x${mod.height} @2x)`);
+console.log(`rendered ${outPath} (${mod.width}x${mod.height} @${scale}x)`);
