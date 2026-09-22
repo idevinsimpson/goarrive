@@ -58,6 +58,32 @@ const MEMBERSHIP_ACTIVE = 'active';
 const MEMBERSHIP_REMOVED = 'removed';
 const MEMBERSHIP_DEPARTED = 'departed';
 
+/**
+ * WHETHER THIS MEMBER HAS ASKED TO BE NAMED TO THE OTHER MEMBERS OF THIS ONE
+ * COMMUNITY.
+ *
+ * Stored on the membership, never on the profile, because the answer is
+ * per-community: a person may be happy to be named among the people they
+ * train with on Tuesday and not among a group they joined once.
+ *
+ * PRIVATE IS THE ABSENCE OF A DECISION AS WELL AS A DECISION. Every membership
+ * written before this field existed has no `visibility` at all, and an
+ * equality filter never matches a document missing the field — so legacy rows
+ * are private by the shape of the query rather than by a migration anybody has
+ * to remember to run. New memberships are written private explicitly, and both
+ * reactivation paths reset to private.
+ *
+ * A STRING ENUM RATHER THAN A BOOLEAN, deliberately. `Boolean(x)` publishes on
+ * `1`, `'false'`, `'no'`, `{}` and `[]`; a missing boolean defaults somewhere.
+ * Two named values mean a stored anything-else is not 'visible', and the
+ * setter can refuse a value it does not recognise instead of coercing it into
+ * consent. This is the same lesson the aggregate-display flag learned: a
+ * missing or coerced value must never be read as an instruction to publish.
+ */
+const VISIBILITY_PRIVATE = 'private';
+const VISIBILITY_VISIBLE = 'visible';
+type CommunityVisibility = typeof VISIBILITY_PRIVATE | typeof VISIBILITY_VISIBLE;
+
 function normalizeJoinCode(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
@@ -255,6 +281,10 @@ export const wsfCreateCommunity = onCall<CreateCommunityRequest>(
         userId: uid,
         role: 'foundingChampion',
         membershipStatus: 'active',
+        // Creating a community is not consent to be named inside it. Written
+        // explicitly rather than left absent so the stored row states the
+        // answer instead of relying on a reader inferring it.
+        visibility: VISIBILITY_PRIVATE,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -749,6 +779,19 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
             membershipRef,
             {
               membershipStatus: MEMBERSHIP_ACTIVE,
+              // REACTIVATION RESETS PUBLICATION. `{ merge: true }` preserves
+              // every field it does not name, so a `visibility` of 'visible'
+              // set before this person left would survive their departure and
+              // their return, and they would be listed again without ever
+              // being asked. Consent to be named is not a property of the
+              // membership record; it is something a person does, and leaving
+              // ends it.
+              //
+              // It is reset HERE, on the way back in, rather than in
+              // wsfLeaveCommunity: clearing it on departure would destroy a
+              // setting somebody may want back, and would put the guarantee in
+              // the path that is not the one doing the re-admitting.
+              visibility: VISIBILITY_PRIVATE,
               rejoinedAt: FieldValue.serverTimestamp(),
               updatedAt: FieldValue.serverTimestamp(),
             },
@@ -774,6 +817,9 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
         userId: uid,
         role: 'member',
         membershipStatus: 'active',
+        // Joining is not consent to be named. Nothing about following a link,
+        // creating an account or having a display name is.
+        visibility: VISIBILITY_PRIVATE,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -1079,6 +1125,14 @@ export const wsfReinstateMember = onCall<MembershipActionRequest>(
         targetRef,
         {
           membershipStatus: MEMBERSHIP_ACTIVE,
+          // A CHAMPION-INITIATED STATUS CHANGE MUST NEVER RESTORE A
+          // MEMBER-CHOSEN PUBLICATION. This path is worse than the rejoin one
+          // because the actor is not the subject — `reinstatedByUid` is the
+          // Champion. Without this line, reinstating somebody who had been
+          // visible republishes their name by a unilateral act, which is the
+          // Champion override this feature does not have, arriving through the
+          // back door of a status change.
+          visibility: VISIBILITY_PRIVATE,
           reinstatedAt: FieldValue.serverTimestamp(),
           reinstatedByUid: uid,
           updatedAt: FieldValue.serverTimestamp(),
@@ -1145,6 +1199,285 @@ export const wsfDesignateChampion = onCall<MembershipActionRequest>(
     });
 
     return { groupId, targetUid, membershipStatus: MEMBERSHIP_ACTIVE, role: 'foundingChampion' };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D8 — WHO IS IN THIS COMMUNITY, FOR THE PEOPLE WHO CHOSE TO BE NAMED.
+//
+// THIS IS THE FIRST MECHANISM IN THE PRODUCT THAT RETURNS ONE MEMBER'S NAME TO
+// ANOTHER MEMBER. Until now no callable read `wsfMemberProfiles` for anybody
+// but the caller, and that absence is what made every "no names, no faces, no
+// counting people" guarantee true by construction rather than by care. From
+// here it is true by care, so the care is written down.
+//
+// THE ONE STRUCTURAL PROTECTION, stated first because everything else is
+// detail: `userId` is not in the response and not in the types. A name with no
+// uid beside it is not a handle on anybody — it cannot be joined to a
+// contribution, a goal, a turn, or the Champion family's existing uid oracles.
+// Do not add `uid`, `memberId`, `membershipId`, `key` or `id` "for React
+// keys"; the client keys on the array index.
+//
+// WHAT IS DELIBERATELY ABSENT, each because adding it would leak:
+//
+//   · a total, a visibleCount, a hiddenCount or a hasMore — `memberCount` is
+//     already returned by wsfMyCommunities over ALL active memberships, so any
+//     second number here makes "how many people are hiding" a subtraction the
+//     product performs for the reader. The residual is unavoidable; a stated
+//     feature of it is not.
+//   · a cursor. There is no pagination idiom in this file to copy, so whoever
+//     added one would reach for Firestore's default — and a `startAfter`
+//     cursor on this collection serialises `wsfMemberships/{groupId}_{uid}`,
+//     which is a uid in plaintext. The ABSENCE OF THE PARAMETER IS THE
+//     ENFORCEMENT. If paging is ever needed, page an integer offset into the
+//     name-sorted array, never a document reference.
+//   · `visibility` itself, per entry. Appearing in the list IS the setting;
+//     republishing other people's answers adds nothing and states more.
+//   · any timestamp. When somebody became visible turns a polled list into an
+//     authoritative timeline.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The caller's own membership row, proven to be theirs.
+ *
+ * THE DOCUMENT ID IS NOT THE AUTHORITY — THE FIELDS ARE. Every membership this
+ * product writes lives at `wsfMemberships/{groupId}_{uid}`, and it would be
+ * natural to treat that id as proof of who the row belongs to. firestore.rules
+ * says otherwise: its read predicate is `resource.data.userId ==
+ * request.auth.uid`, and a comment there states the field is the truth and the
+ * doc id is never parsed.
+ *
+ * On a row where the two disagree, keying the gate off the id while keying the
+ * name fan-out off the field means one person's tap publishes a different
+ * person's name. The repo's own privacy audit seeds exactly that shape, so it
+ * is a fixture that already exists rather than a hypothetical.
+ *
+ * Both callables below therefore require the row to agree with the token AND
+ * with the request before anything else happens, and the lister additionally
+ * drops any row whose id and `userId` disagree — a row the product did not
+ * write is not a row it will publish.
+ */
+type OwnMembership = { role: string; visibility: CommunityVisibility };
+
+async function requireOwnActiveMembership(
+  db: FirebaseFirestore.Firestore,
+  groupId: string,
+  uid: string
+): Promise<OwnMembership> {
+  const snap = await db.doc(`wsfMemberships/${groupId}_${uid}`).get();
+  // ONE REFUSAL FOR EVERY NEGATIVE CASE. No such community, never joined,
+  // removed, departed, a blank status, a missing status — all of it is the
+  // same `permission-denied` with the same sentence. A caller supplied the
+  // groupId, so group existence is not the secret being kept here; what must
+  // not differ is the ANSWER, or the pair of refusals becomes a way to
+  // enumerate which community ids are real.
+  //
+  // This is also why neither callable ever reads `wsfCommunityGroups`: a group
+  // read is where a distinguishable not-found would come from.
+  if (!snap.exists) throw new HttpsError('permission-denied', 'Members only.');
+  const data = snap.data() as {
+    userId?: unknown;
+    groupId?: unknown;
+    role?: unknown;
+    membershipStatus?: unknown;
+    visibility?: unknown;
+  };
+  if (data.userId !== uid || data.groupId !== groupId) {
+    throw new HttpsError('permission-denied', 'Members only.');
+  }
+  // `!== active`, never an allowlist of bad statuses. A positive test refuses
+  // 'removed', 'departed', '', a missing field, `true` and 'Active' alike; an
+  // allowlist reopens every one of them the day a new status is added.
+  if (data.membershipStatus !== MEMBERSHIP_ACTIVE) {
+    throw new HttpsError('permission-denied', 'Members only.');
+  }
+  return {
+    role: typeof data.role === 'string' ? data.role : 'member',
+    // Anything unrecognised reads as private. Normalising toward the safe side
+    // is the whole point: a legacy row, an imported row or a typo must not be
+    // a publication.
+    visibility: data.visibility === VISIBILITY_VISIBLE ? VISIBILITY_VISIBLE : VISIBILITY_PRIVATE,
+  };
+}
+
+type SetVisibilityRequest = { groupId?: unknown; visibility?: unknown };
+
+/**
+ * A member changes their OWN visibility in ONE community.
+ *
+ * THERE IS NO `targetUid`, AND THAT ABSENCE IS THE ENFORCEMENT. The Champion
+ * action family sits a few hundred lines above this one, shares the shape
+ * `{ groupId, targetUid }`, and opens each handler with `requireChampion`.
+ * Copying any of those three as a starting point would import both the
+ * parameter and a Champion override of a self-only setting in one paste. This
+ * is modelled on wsfLeaveCommunity instead — the file's one existing callable
+ * that acts on the caller's own membership — which addresses the row with the
+ * uid from the token and takes no target.
+ *
+ * For the same reason nothing here writes a `visibilitySetByUid`. The `*ByUid`
+ * fields elsewhere exist only because the actor differs from the subject, and
+ * here it never can; such a field on this write would be the signature of the
+ * override this callable does not have.
+ */
+export const wsfSetCommunityVisibility = onCall<SetVisibilityRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<{ groupId: string; visibility: CommunityVisibility }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+
+    // THE LITERAL, OR NOTHING. Not `Boolean(...)`, not a truthiness test, not a
+    // default for a missing field. `true`, `1`, `'Visible'`, `' visible'`,
+    // `null`, `{}` and `['visible']` are all refused, and refused without
+    // writing, so a malformed request can never be the reason somebody's name
+    // appears. A missing field is invalid-argument rather than a silent
+    // default in either direction — publishing is something a person does on
+    // purpose or not at all.
+    const requested = request.data?.visibility;
+    if (requested !== VISIBILITY_PRIVATE && requested !== VISIBILITY_VISIBLE) {
+      throw new HttpsError('invalid-argument', "visibility must be 'private' or 'visible'.");
+    }
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    await db.doc(`wsfMemberships/${groupId}_${uid}`).set(
+      { visibility: requested, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+
+    // Idempotent, and the response is the settled value rather than an echo of
+    // the request, so the client renders what is stored and not what it asked
+    // for.
+    return { groupId, visibility: requested };
+  }
+);
+
+/** One listed member. Two fields, and the type is the whitelist. */
+type CommunityMemberEntry = { displayName: string; role: 'foundingChampion' | 'member' };
+type CommunityMembersRequest = { groupId?: unknown };
+
+/**
+ * A HARD CEILING, NOT A PAGE SIZE.
+ *
+ * Chosen well above any plausible community rather than tuned to a payload
+ * budget, because a truncated directory is a silently wrong one: the limit
+ * applies in document-id order — which on this collection is uid order — so
+ * the set it would drop is decided by uid, not by anything a member chose or
+ * can see, and the in-memory name sort afterwards would make the result look
+ * like a complete alphabetical list while being "the N smallest uids,
+ * alphabetised".
+ */
+const COMMUNITY_MEMBERS_LIMIT = 500;
+
+/**
+ * The members of one community who have chosen to be named, to a member of
+ * that same community.
+ */
+export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
+  // NO `invoker: 'public'`. Fifteen callables in this file carry that marker
+  // so a signed-out client can reach them, and the setting is enforced by
+  // Cloud Run IAM at deploy — it is a NO-OP IN THE EMULATOR, so a mistaken
+  // public marker here would pass every local test and first take effect in
+  // front of real people. tests/deploy-config/public-invoker.test.ts pins the
+  // allowlist for that reason. This surface must never be reachable signed
+  // out.
+  { region: 'us-central1' },
+  async (request): Promise<{ members: CommunityMemberEntry[] }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+
+    const db = getFirestore();
+    // THE GATE IS PHYSICALLY ABOVE THE QUERY, and the order is deliberate: a
+    // caller who is not an active member of this community must be refused
+    // before any other member's row is read into this function at all.
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    // ALL THREE EXCLUSIONS HAPPEN AT THE INDEX, never in a branch below.
+    // `visibility == 'visible'` never matches a row missing the field (every
+    // row written before this feature), a row storing 'Visible', `true`, or
+    // ' visible'. A code-side normalisation such as
+    // `String(v).trim().toLowerCase() === 'visible'` would turn several of
+    // those into publications, so there is none anywhere.
+    const snap = await db
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupId)
+      .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+      .where('visibility', '==', VISIBILITY_VISIBLE)
+      .limit(COMMUNITY_MEMBERS_LIMIT)
+      .get();
+
+    if (snap.size === COMMUNITY_MEMBERS_LIMIT) {
+      // The count alone, and never a groupId, a uid or a name. The operator
+      // needs to know the ceiling was reached; nobody needs to know who was in
+      // the community when it happened. Not surfaced to the client either — a
+      // flag would be another oracle.
+      console.error('[wsfCommunityMembers] visible-member limit reached', snap.size);
+    }
+
+    // Keep only rows this product actually wrote, and key the profile lookup
+    // off the `userId` FIELD — the authority — after proving it agrees with
+    // the id.
+    const rows: { userId: string; role: string }[] = [];
+    const seen = new Set<string>();
+    for (const doc of snap.docs) {
+      const d = doc.data() as { userId?: unknown; role?: unknown };
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      if (doc.id !== `${groupId}_${d.userId}`) continue;
+      if (seen.has(d.userId)) continue;
+      seen.add(d.userId);
+      rows.push({ userId: d.userId, role: typeof d.role === 'string' ? d.role : 'member' });
+    }
+
+    // NEVER ZIPPED BY INDEX. `getAll` returns one snapshot per ref including
+    // missing ones, so filtering while zipping against `rows` by position
+    // shifts every later name one place — and publishes it beside somebody
+    // else's role. A map keyed by uid cannot do that.
+    const byUid = new Map<string, string>();
+    const CHUNK = 300;
+    for (let start = 0; start < rows.length; start += CHUNK) {
+      const chunk = rows.slice(start, start + CHUNK);
+      const snaps = await db.getAll(...chunk.map((r) => db.doc(`wsfMemberProfiles/${r.userId}`)));
+      for (const s of snaps) {
+        if (!s.exists) continue;
+        const dn = (s.data() as { displayName?: unknown }).displayName;
+        if (typeof dn !== 'string' || dn.trim() === '') continue;
+        byUid.set(s.id, dn.trim());
+      }
+    }
+
+    const members: CommunityMemberEntry[] = [];
+    for (const row of rows) {
+      const displayName = byUid.get(row.userId);
+      // A missing or unusable profile is dropped silently — no log, because a
+      // log would name the uid it could not resolve.
+      if (!displayName) continue;
+      members.push({
+        displayName,
+        // AN ALLOWLIST, NOT A PASSTHROUGH. Only two role values are ever
+        // written. A stored `pendingChampion`, `suspended` or `staff` — from
+        // an import, a migration or a future feature — would otherwise ride
+        // out verbatim and disclose an internal state about a named person.
+        // Two values in, two values out; anything unknown degrades to the
+        // least informative one.
+        role: row.role === 'foundingChampion' ? 'foundingChampion' : 'member',
+      });
+    }
+
+    // SORTED BY NAME, IN MEMORY, BECAUSE QUERY ORDER IS UID ORDER. An
+    // equality-only Firestore query returns in document-id order, and with
+    // groupId fixed those ids differ only by uid — so returning storage order
+    // would publish a total ordering over the uids of every visible member,
+    // usable as a stable cross-community correlation handle. Never sort by a
+    // timestamp either: join order plus a Champion's knowledge of when each
+    // invite went out identifies people about as well as a uid would.
+    members.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    return { members };
   }
 );
 
@@ -1691,6 +2024,15 @@ type MyCommunityItem = {
   role: string;
   memberCount: number;
   isSample: boolean;
+  // The CALLER'S OWN visibility in this community, never anybody else's. The
+  // Home list is where a member is told, without asking, whether they are
+  // currently named to the people they stand beside — a setting somebody has
+  // to go looking for is a setting they assume is off.
+  //
+  // This is safe to add here precisely because the query above is
+  // `userId == caller`: every row this callable reads is the caller's own, so
+  // no other person's answer is in scope to leak by accident.
+  visibility: CommunityVisibility;
   activeChallenge: {
     id: string;
     title: string;
@@ -1724,6 +2066,7 @@ export const wsfMyCommunities = onCall(
         const membership = membershipDoc.data() as {
           groupId: string;
           role: string;
+          visibility?: unknown;
         };
         const groupSnap = await db
           .doc(`wsfCommunityGroups/${membership.groupId}`)
@@ -1776,6 +2119,16 @@ export const wsfMyCommunities = onCall(
           role: membership.role,
           memberCount: memberCountSnap.data().count,
           isSample: group.isSample === true,
+          // Unrecognised reads as private, exactly as it does in D8, and a row
+          // whose id disagrees with its `userId` reads as private too: such a
+          // row is dropped by wsfCommunityMembers, so the caller is genuinely
+          // not listed and telling them otherwise would be the one lie this
+          // field must never tell.
+          visibility:
+            membershipDoc.id === `${membership.groupId}_${uid}` &&
+            membership.visibility === VISIBILITY_VISIBLE
+              ? VISIBILITY_VISIBLE
+              : VISIBILITY_PRIVATE,
           activeChallenge,
         };
         return item;

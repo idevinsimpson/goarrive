@@ -24,7 +24,17 @@ import {
 } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  deleteDoc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 
 const PROJECT_ID = 'demo-wsf-local';
 const RULES_PATH = resolve(__dirname, '../../../firestore.rules');
@@ -200,6 +210,110 @@ describe('wsfMemberProfiles', () => {
   test('owner cannot delete own profile', async () => {
     const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
     await assertFails(deleteDoc(doc(alice, 'wsfMemberProfiles', ALICE_UID)));
+  });
+});
+
+// ─── the member directory has exactly ONE door ───────────────────────────────
+
+/**
+ * `wsfCommunityMembers` returns names, and it decides who may see them. That
+ * decision is worth nothing if a client can read the same rows directly.
+ *
+ * Nothing in the visibility work changed these rules — the diff on
+ * firestore.rules is empty — and these tests exist so that stays true by
+ * enforcement rather than by intention. Two properties carry the whole model:
+ *
+ *   · A CLIENT CANNOT QUERY `wsfMemberships` BY GROUP. Firestore evaluates
+ *     `resource.data.userId == request.auth.uid` per document, and rejects a
+ *     query it cannot prove satisfiable in advance. A `where('groupId', '==',
+ *     X)` query is therefore refused ENTIRELY — not filtered down to the
+ *     caller's own row, which is the intuition that gets this wrong.
+ *
+ *   · A CLIENT CANNOT READ ANOTHER MEMBER'S PROFILE. Even holding a uid, the
+ *     name behind it is out of reach.
+ *
+ * Together: the only way to learn who is in a community is to ask the
+ * callable, which asks whether that person chose to be named.
+ */
+describe('a client cannot assemble the member directory for itself', () => {
+  test('a member cannot QUERY memberships by group — the query is refused whole', async () => {
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(
+      getDocs(query(collection(alice, 'wsfMemberships'), where('groupId', '==', GROUP_ID)))
+    );
+  });
+
+  test('adding the visibility filter does not make it allowed', async () => {
+    /*
+      The shape a client would reach for after reading the callable's source.
+      It is still refused, because no combination of filters proves every
+      matched document belongs to the caller.
+    */
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(
+      getDocs(
+        query(
+          collection(alice, 'wsfMemberships'),
+          where('groupId', '==', GROUP_ID),
+          where('membershipStatus', '==', 'active'),
+          where('visibility', '==', 'visible')
+        )
+      )
+    );
+  });
+
+  test('an unfiltered collection read is refused', async () => {
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(getDocs(collection(alice, 'wsfMemberships')));
+  });
+
+  test("a member CAN query their OWN memberships — the rule is ownership, not silence", async () => {
+    // The positive control. Without it, the three denials above would also
+    // pass against a rule that simply refused every query on the collection,
+    // and a later widening could not be told apart from this state.
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertSucceeds(
+      getDocs(query(collection(alice, 'wsfMemberships'), where('userId', '==', ALICE_UID)))
+    );
+  });
+
+  test('a member cannot query memberships under ANOTHER uid', async () => {
+    const bob = testEnv.authenticatedContext(BOB_UID, verifiedEmail).firestore();
+    await assertFails(
+      getDocs(query(collection(bob, 'wsfMemberships'), where('userId', '==', ALICE_UID)))
+    );
+  });
+
+  test('a client cannot write its own visibility directly — the callable is the only writer', async () => {
+    /*
+      `allow create, update, delete: if false` on wsfMemberships. A client that
+      could write this field could publish itself while skipping every check in
+      wsfSetCommunityVisibility — and, since the doc id is not the authority,
+      could write a row for somebody else.
+    */
+    const alice = testEnv.authenticatedContext(ALICE_UID, verifiedEmail).firestore();
+    await assertFails(
+      updateDoc(doc(alice, 'wsfMemberships', `${GROUP_ID}_${ALICE_UID}`), {
+        visibility: 'visible',
+      })
+    );
+    await assertFails(
+      setDoc(doc(alice, 'wsfMemberships', `${GROUP_ID}_${BOB_UID}`), {
+        groupId: GROUP_ID,
+        userId: BOB_UID,
+        role: 'member',
+        membershipStatus: 'active',
+        visibility: 'visible',
+      })
+    );
+  });
+
+  test('holding a uid is not holding a name — another profile stays unreadable', async () => {
+    const bob = testEnv.authenticatedContext(BOB_UID, verifiedEmail).firestore();
+    await assertFails(getDoc(doc(bob, 'wsfMemberProfiles', ALICE_UID)));
+    await assertFails(
+      getDocs(query(collection(bob, 'wsfMemberProfiles'), where('displayName', '==', 'Alice')))
+    );
   });
 });
 

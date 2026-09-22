@@ -185,6 +185,8 @@ describe('wsfMyCommunities', () => {
       memberCount: 1,
       activeChallenge: null,
       isSample: false,
+      // A membership seeded without the field is private, not visible.
+      visibility: 'private',
     });
 
     // Whitelist the item shape — a future field that leaked another member's
@@ -200,6 +202,7 @@ describe('wsfMyCommunities', () => {
         'joinPolicy',
         'memberCount',
         'role',
+        'visibility',
       ]);
       if (item.activeChallenge) {
         expect(Object.keys(item.activeChallenge).sort()).toEqual([
