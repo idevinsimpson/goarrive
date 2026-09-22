@@ -424,3 +424,46 @@ fix the annotation started failing and had to go.
 Frozen evidence after the merge: **9 BEFORE and 17 accepted paths, no byte changed** —
 up from 8 and 16, because #400 added `page-02-move/short-phone/{before,after}` to the
 guard. Nothing of #400's evidence was altered by any of my runs.
+
+
+## W3's R1 / N1 / N3 commit — verified, R1 CLOSED
+
+Posted: https://github.com/idevinsimpson/goarrive/pull/393#issuecomment-5784977904
+
+**Head verified: `0092953174b2a3ecf13b1a3179f031d80350c0ac`** on `claude/wsf-sprint-email-staging`.
+Not yet on `claude/wsf-staging-mail-binding` (still `b2a7ad89`), so this verdict is against
+W3's commit awaiting cherry-pick; to be re-confirmed on the picked SHA rather than assumed.
+
+The reporter is untouched — the fix is tests and fixtures only, which is the right shape,
+because N1 and N3 were missing negative tests rather than wrong behaviour.
+
+Suite: **exit 0, 14 suites, 315 assertions, 0 failures** (was 311); `workflow-contract`
+62→64, `mail-binding` 24→26.
+
+- **R1 CLOSED** — all four ids now CAUGHT (`Rollout:`, `rollout-helper:  # temporary helper`,
+  `_rollout:`, `rollout_helper:`). Fixed with a shared
+  `JOB_ID = /^ {2}([A-Za-z_][A-Za-z0-9_-]*):(\s|$)/` used by **both** parsers — the half I
+  flagged as easy to get wrong.
+- **N1 CLOSED**, **N3 CLOSED**. N4 still caught. N5 still survives and is still trivial.
+- Two improvements beyond what I proposed: the positive control tightened from `>= 9` to
+  `=== 9`, and each probe asserts the parser **sees** the id rather than only that
+  `ungatedJobs` flags it.
+
+Three new probes of my own:
+
+- **P1** (narrow only one parser) — CAUGHT, with `the parser did not see job Rollout at all,
+  so no invariant could apply to it`.
+- **P3** (a legitimately gated tenth job) — CAUGHT by the exact-count control, by design.
+- **P2** (a **quoted** job id, `"rollout":`) — **SURVIVED**. Legal YAML, resolves to key
+  `rollout`, ungated, privileged; `yaml.safe_load` confirms 10 jobs with `ungated=['rollout']`,
+  and all 64 assertions pass. Low: nobody quotes a job id by convention and the four unquoted
+  forms are closed. If ever worth closing, the honest fix is to stop hand-rolling the parse,
+  not to add `"` to the character class.
+
+## Base kept current
+
+Merged `claude/wsf-app-shell` `0757379` (#408, four lines guarding Batch B's accepted TARGET
+frames) as `937d67e9`. It touches only `scripts/`, no app source, so the web bundle and the
+two sprint-w5 specs would exercise byte-identical code — re-running them would have been an
+unchanged suite, which this packet was told not to repeat. Evidence guard after the merge:
+**9 frozen / 18 accepted paths, no byte changed** (accepted up from 17 by #408).
