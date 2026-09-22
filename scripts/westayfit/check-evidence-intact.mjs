@@ -82,6 +82,10 @@ const ACCEPTED_FRAMES = [
   // this commit so a routine run cannot change what is under review.
   'docs/design-target/review/batch-a-identity/after',
   'docs/design-target/review/batch-a-identity/TARGET-*.png',
+  // Batch B targets are accepted target reference (PR #365: Batches A–G).
+  // Batch B `after/` is deliberately NOT listed: /join/[joinCode] awaits its
+  // page verdict, and this list is only what a review has decided on.
+  'docs/design-target/review/batch-b-join-and-setup/TARGET-*.png',
   'docs/design-target/targets',
   'docs/westayfit/app-shell-2026-09-19',
   'docs/westayfit/visual-baseline-2026-09-19',
