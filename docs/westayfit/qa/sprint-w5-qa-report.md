@@ -405,3 +405,22 @@ dead only to a tap at rest. That is consistent with W5-M1's severity and is why 
 check, not the keyboard or the tap, is what decides.
 
 Probe stopped, as instructed.
+
+
+## W5-M1 closed on this branch
+
+The base `claude/wsf-app-shell` advanced to **`5356e3cf`**, which carries #400's
+`ff8c880`. Merged into this branch as **`fb728ae6`** with a merge commit — no rebase,
+no amend, no force-push — and the expected-failure annotation on the W5-M1 case removed,
+because the base now actually contains the fix. It was never removed on an older base,
+and W4's checkout was not touched.
+
+Both short-phone specs on the merged head: **10 tests, 10 passed, 0 failed.** The MOVE
+occlusion case — the one that carried `test.fail()` — now passes outright at 390x640 and
+390x664, which is the discriminating check the annotation existed for. That is exactly
+why it was `fail` and not `skip`: the body kept running, so the day the base carried the
+fix the annotation started failing and had to go.
+
+Frozen evidence after the merge: **9 BEFORE and 17 accepted paths, no byte changed** —
+up from 8 and 16, because #400 added `page-02-move/short-phone/{before,after}` to the
+guard. Nothing of #400's evidence was altered by any of my runs.

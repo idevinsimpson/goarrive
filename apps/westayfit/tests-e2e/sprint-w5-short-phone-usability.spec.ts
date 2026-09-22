@@ -201,10 +201,19 @@ test.describe('W5 probe — 390x640 short phone stays operable', () => {
         to something in the shell. That is a control that reads as available
         and hands its tap to the raised MOVE action.
 
-        Measured at `e609c57`, that state exists at 390x664 and not at 390x640,
-        which is why both heights are checked here rather than only the one in
-        this file's title. At 640 the control is below the fold in both the
-        broken and fixed builds; 664 is where the overlap itself shows.
+        Measured at `e609c57`, that state existed at 390x664 and not at
+        390x640, which is why both heights are checked here rather than only
+        the one in this file's title. At 640 the control was below the fold in
+        both the broken and the fixed build; 664 is where the overlap showed.
+
+        W5-M1 IS FIXED, and this case now guards the fix rather than recording
+        the defect. #400 (`ff8c880`) gives the contribution route's scroll view
+        a `marginBottom` of MEMBER_TAB_MOVE_OVERHANG so it ends above the
+        raised circle, and it reached this branch's base in `5356e3cf`. The
+        expected-failure annotation that stood here until then has been
+        removed, which is the whole reason it was `fail` and not `skip`: the
+        body kept running, so the day the base carried the fix the annotation
+        itself started failing and had to go.
 
         A REAL TAP IS NOT THE TEST, and this is worth stating because it is
         the natural thing to reach for. Playwright scrolls an element into its
@@ -213,32 +222,6 @@ test.describe('W5 probe — 390x640 short phone stays operable', () => {
         844. A passing tap therefore says nothing about whether the overlap
         exists; only the geometry does.
       */
-      if (screen.key === 'move') {
-        /*
-          EXPECTED TO FAIL ON THIS BRANCH'S BASE — W5-M1, measured 2026-09-22.
-
-          At `claude/wsf-app-shell` e609c57 the MOVE step's "Skip timer and
-          enter <unit>" control has its centre INSIDE the scroll view's visible
-          box at 390x664 and resolves to `wsf-member-tab-move`: visible at
-          rest, and its own centre hands the tap to the raised MOVE action. At
-          390x640 that control is below the fold instead, so 664 is the height
-          that carries the defect — which is why this case checks both.
-
-          The fix is PR #400 at `ff8c880`, which gives the scroll view a
-          `marginBottom` of MEMBER_TAB_MOVE_OVERHANG so it ends above the
-          raised circle. W5 verified it independently on that head: the scroll
-          view's bottom edge sits exactly 24px above the bar's top at 640, 664
-          and 844, and no control's in-box centre resolves to the shell at any
-          of them.
-
-          This annotation goes the moment that fix reaches this branch's base.
-          It is `fail` rather than `skip` precisely so it cannot be forgotten:
-          the body keeps running, so once the base carries #400 this line
-          starts failing with "expected to fail but passed" and must be
-          deleted.
-        */
-        test.fail();
-      }
       for (const height of [640, 664]) {
         const ctx = await page.context().browser()!.newContext({
           viewport: { width: 390, height },
