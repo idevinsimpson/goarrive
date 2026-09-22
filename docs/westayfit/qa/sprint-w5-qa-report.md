@@ -467,3 +467,28 @@ frames) as `937d67e9`. It touches only `scripts/`, no app source, so the web bun
 two sprint-w5 specs would exercise byte-identical code — re-running them would have been an
 unchanged suite, which this packet was told not to repeat. Evidence guard after the merge:
 **9 frozen / 18 accepted paths, no byte changed** (accepted up from 17 by #408).
+
+
+### Re-confirmed on the cherry-picked head `7ba8dba5`
+
+Posted: https://github.com/idevinsimpson/goarrive/pull/393#issuecomment-5785298896
+
+L0 picked W3's R1 commit onto `claude/wsf-staging-mail-binding` as
+**`7ba8dba52bbd6fbc2b74cc9c082ab4f38e321c42`**. Checked rather than trusting the `-x`:
+worktrees of the picked head and of W3's `0092953`, `diff -ru` across the whole of
+`.github/wsf-staging` — **no difference**; `.github/workflows/` untouched by the pick.
+
+Re-ran anyway, because identical files are not a green run: **exit 0, 315 assertions,
+0 failures**; all four R1 ids CAUGHT; N1 and N3 CAUGHT; N4 caught (control); N5 survives
+(trivial). **Verdict unchanged: R1 CLOSED, N1 CLOSED, N3 CLOSED**, with the quoted-job-id
+residual (P2) low and not blocking.
+
+Every finding from the original review is now closed or explicitly accounted for.
+
+### Base kept current (second advance)
+
+Merged `claude/wsf-app-shell` `181ab04` (#411, W4's Champion Manage sheet capture spec and
+evidence) as `8d2e1e6e`. No product or functions source changed — one new e2e spec owned by
+W4 plus frames — so this branch's two specs exercise byte-identical application code and were
+not re-run. The merged tree typechecks (`tsc --noEmit` clean, W4's new spec included), and the
+evidence guard reports **9 frozen / 18 accepted paths, no byte changed**.
