@@ -53,6 +53,9 @@ import {
 
 const VIEWPORT = { width: 390, height: 640 } as const;
 
+/** The extra contexts this spec opens itself need the base URL passed explicitly. */
+const BASE_URL = process.env.WSF_PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5010';
+
 /** The floor below which a touch target is not reliably hittable. */
 const MIN_TAP_PX = 44;
 
@@ -178,90 +181,141 @@ test.describe('W5 probe — 390x640 short phone stays operable', () => {
       expect(Math.round(moveBox.x + moveBox.width)).toBeLessThanOrEqual(VIEWPORT.width + 1);
     });
 
-    test(`${screen.label} (${screen.path}) at 390x640: scrolled to the end, the tab bar still does not swallow the last control`, async ({
+    test(`${screen.label} (${screen.path}) at 390x640: nothing inside the screen's own scroll view is covered by the shell`, async ({
       page,
     }) => {
       /*
-        THE SILENT FAILURE. A screen whose content ends at its own padding puts
-        its last control under persistent chrome: it renders, it is "visible",
-        and it cannot be tapped. Scrolling to the very end first is what makes
-        the check meaningful — before that, the last control is off-screen for
-        an ordinary reason.
+        THE MEASURE THIS TEST USES, AND WHY IT IS NOT THE OBVIOUS ONE.
+
+        The first version of this check asked whether an interactive control's
+        centre sat below the tab bar's top edge. That is wrong, and measurably
+        so: this route's content lives in its OWN scroll view, whose visible
+        box ends above the bar. A control below that fold is not covered by
+        anything -- it is simply not scrolled to yet, exactly like a control
+        below the fold on any long page. The old metric called that "buried"
+        and would have gone on reporting it after the overlap was fixed.
+
+        What actually constitutes occlusion is narrower: a control whose own
+        centre is INSIDE the scroll view's visible box -- so the member can
+        see it, at rest, without scrolling -- and which nevertheless resolves
+        to something in the shell. That is a control that reads as available
+        and hands its tap to the raised MOVE action.
+
+        Measured at `e609c57`, that state exists at 390x664 and not at 390x640,
+        which is why both heights are checked here rather than only the one in
+        this file's title. At 640 the control is below the fold in both the
+        broken and fixed builds; 664 is where the overlap itself shows.
+
+        A REAL TAP IS NOT THE TEST, and this is worth stating because it is
+        the natural thing to reach for. Playwright scrolls an element into its
+        scroll container before clicking, so a non-forced `.click()` on this
+        control succeeds on the BROKEN build too -- verified at 640, 664 and
+        844. A passing tap therefore says nothing about whether the overlap
+        exists; only the geometry does.
       */
       if (screen.key === 'move') {
         /*
-          KNOWN, MEASURED, AND EXPECTED TO FAIL — W5 finding, 2026-09-22, at
-          claude/wsf-app-shell e609c57.
+          EXPECTED TO FAIL ON THIS BRANCH'S BASE — W5-M1, measured 2026-09-22.
 
-          On /move the secondary control `wsf-contribute-skip-timer` ("Skip
-          timer and enter <unit>") sits under the raised MOVE action, which
-          overhangs the bar by MEMBER_TAB_MOVE_OVERHANG (24px). Measured with
-          document.elementFromPoint at the control's own centre:
+          At `claude/wsf-app-shell` e609c57 the MOVE step's "Skip timer and
+          enter <unit>" control has its centre INSIDE the scroll view's visible
+          box at 390x664 and resolves to `wsf-member-tab-move`: visible at
+          rest, and its own centre hands the tap to the raised MOVE action. At
+          390x640 that control is below the fold instead, so 664 is the height
+          that carries the defect — which is why this case checks both.
 
-            390x844  centre hits the control itself          - reachable
-            390x664  centre hits `wsf-member-tab-move`       - NOT reachable
-            390x640  centre hits the raised MOVE action      - NOT reachable
+          The fix is PR #400 at `ff8c880`, which gives the scroll view a
+          `marginBottom` of MEMBER_TAB_MOVE_OVERHANG so it ends above the
+          raised circle. W5 verified it independently on that head: the scroll
+          view's bottom edge sits exactly 24px above the bar's top at 640, 664
+          and 844, and no control's in-box centre resolves to the shell at any
+          of them.
 
-          The screen does not scroll at any of the three heights
-          (scrollHeight === clientHeight), so nothing can bring it clear.
-
-          It is marked `fail` rather than skipped, and that distinction is the
-          point: the body still runs, so when the occlusion is fixed this
-          annotation starts failing with "expected to fail but passed" and has
-          to be removed. A skip would go quiet instead, and the finding would
-          rot.
-
-          Severity LOW, and only because the PRIMARY control immediately above
-          it -- `wsf-contribute-done` -- calls the very same `onDoneMoving`
-          handler, is hittable at all three heights, and was driven by a real
-          click at each of them, reaching the entry screen every time. Nobody
-          is blocked from recording. What is wrong is a control that reads as
-          available and cannot be pressed.
+          This annotation goes the moment that fix reaches this branch's base.
+          It is `fail` rather than `skip` precisely so it cannot be forgotten:
+          the body keeps running, so once the base carries #400 this line
+          starts failing with "expected to fail but passed" and must be
+          deleted.
         */
         test.fail();
       }
-      await page.goto(screen.path);
-      await expect(page.getByTestId('wsf-member-tabs')).toBeVisible({ timeout: 20_000 });
-      await scrollToEnd(page);
-
-      const bar = page.getByTestId('wsf-member-tabs');
-      const barBox = await bar.boundingBox();
-      expect(barBox).not.toBeNull();
-      if (!barBox) return;
-
-      // Any interactive element whose centre sits under the bar's top edge is
-      // unreachable at this viewport. The bar's own controls are excluded —
-      // they are the chrome, not what it is covering.
-      const buried = await page.evaluate((barTop: number) => {
-        const out: string[] = [];
-        const bar = document.querySelector('[data-testid="wsf-member-tabs"]');
-        const nodes = document.querySelectorAll(
-          'button, a[href], [role="button"], input, select, textarea'
-        );
-        for (const el of Array.from(nodes)) {
-          if (bar && bar.contains(el)) continue;
-          const r = el.getBoundingClientRect();
-          if (r.width === 0 || r.height === 0) continue;
-          const centreY = r.y + r.height / 2;
-          // Only things that are on screen at all; something scrolled far
-          // below the fold is not "buried", it is simply not here yet.
-          if (centreY <= 0 || r.y > window.innerHeight) continue;
-          if (centreY > barTop) {
-            const label =
-              el.getAttribute('data-testid') ||
-              el.getAttribute('aria-label') ||
-              (el.textContent || '').trim().slice(0, 40) ||
-              el.tagName.toLowerCase();
-            out.push(label);
+      for (const height of [640, 664]) {
+        const ctx = await page.context().browser()!.newContext({
+          viewport: { width: 390, height },
+          userAgent: IPHONE_UA,
+          isMobile: true,
+          hasTouch: true,
+          deviceScaleFactor: 3,
+          baseURL: BASE_URL,
+        });
+        const p2 = await ctx.newPage();
+        try {
+          await signInVia(p2, email, password);
+          await p2.goto(screen.path);
+          /*
+            WAIT FOR THE SCREEN, NOT THE SHELL. `wsf-member-tabs` is already
+            visible on the /move resolver, before it redirects into the
+            contribution route, so waiting on the bar can measure the wrong
+            screen entirely.
+          */
+          if (screen.key === 'move') {
+            await expect(p2.getByTestId('wsf-contribute-done')).toBeVisible({ timeout: 25_000 });
           }
-        }
-        return out;
-      }, barBox.y);
+          await expect(p2.getByTestId('wsf-member-tabs')).toBeVisible({ timeout: 20_000 });
+          await p2.waitForTimeout(400);
 
-      expect({ screen: screen.key, controlsUnderTheTabBar: buried }).toEqual({
-        screen: screen.key,
-        controlsUnderTheTabBar: [],
-      });
+          const covered = await p2.evaluate(() => {
+            const bar = document.querySelector('[data-testid="wsf-member-tabs"]');
+            if (!bar) return ['no tab bar'];
+            // Each scrollable region the screen owns, plus the document, so a
+            // screen that does not use a scroll view is still covered.
+            const boxes: DOMRect[] = [];
+            for (const el of Array.from(document.querySelectorAll('*'))) {
+              if (el.scrollHeight > el.clientHeight + 4) boxes.push(el.getBoundingClientRect());
+            }
+            if (boxes.length === 0) {
+              boxes.push(new DOMRect(0, 0, window.innerWidth, window.innerHeight));
+            }
+            const out: string[] = [];
+            const nodes = document.querySelectorAll(
+              'button, a[href], [role="button"], input, select, textarea'
+            );
+            for (const el of Array.from(nodes)) {
+              if (bar.contains(el)) continue;
+              const r = el.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) continue;
+              const cx = r.x + r.width / 2;
+              const cy = r.y + r.height / 2;
+              // Visible to the member right now, inside a region they are
+              // actually looking at.
+              const inSomeBox = boxes.some(
+                (b) => cy >= b.y && cy <= b.y + b.height && cx >= b.x && cx <= b.x + b.width
+              );
+              if (!inSomeBox) continue;
+              const hit = document.elementFromPoint(cx, cy);
+              if (!hit || el === hit || el.contains(hit)) continue;
+              // It resolves to something else. Only the shell counts: an
+              // overlay the screen itself puts up is the screen's own doing.
+              if (!bar.contains(hit)) continue;
+              out.push(
+                el.getAttribute('data-testid') ||
+                  el.getAttribute('aria-label') ||
+                  (el.textContent || '').trim().slice(0, 40) ||
+                  el.tagName.toLowerCase()
+              );
+            }
+            return out;
+          });
+
+          expect({ screen: screen.key, height, coveredByTheShell: covered }).toEqual({
+            screen: screen.key,
+            height,
+            coveredByTheShell: [],
+          });
+        } finally {
+          await ctx.close();
+        }
+      }
     });
   }
 });

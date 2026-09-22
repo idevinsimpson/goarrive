@@ -201,3 +201,78 @@ still puts nothing into any public, kiosk or display payload.
 `e609c57`. No `PRIVACY ESCALATION` was raised, because none was warranted.**
 
 No approval or merge recommendation is given for #390 or any other PR.
+
+
+## W5-M1 revisited — verification of PR #400, and two corrections to my own finding
+
+Assignment: PR #395 comment 5782616705
+https://github.com/idevinsimpson/goarrive/pull/395#issuecomment-5782616705
+
+Head tested: **`ff8c880598d7684d68cc259129d129fc2a32c9d7`** (`claude/wsf-fix-contribute-skip-timer`,
+a direct child of `e609c57`). Reviewed and run read-only; nothing was pushed to that branch.
+Emulators were rebuilt and restarted **from that head's own worktree**, so the functions, the
+rules and the web bundle under test all came from `ff8c880`.
+
+### Two corrections to what I reported first — mine, not the fix's
+
+1. **"The screen does not scroll" was wrong.** I read `scrollHeight`/`clientHeight` off
+   `document.scrollingElement`, which never scrolls on this route; the screen's own
+   `ScrollView` does. Measured: 794px of content in a 540px box at 390x640. The lead's
+   correction is right, and my sentence "nothing can bring it clear" did not hold.
+2. **My "buried" metric was too broad.** It counted any interactive control whose centre fell
+   below the tab bar's top edge, which also catches a control that is merely below the scroll
+   view's fold — covered by nothing. On the fixed build that metric would have gone on
+   reporting the same control forever.
+
+What did hold: the `elementFromPoint` table reproduced exactly on both heads, and the
+occlusion itself was real.
+
+### The measure that actually discriminates
+
+A control is occluded when its own centre is **inside the scroll view's visible box** — so the
+member can see it at rest, without scrolling — **and still resolves to the shell**. Measured at
+rest with the same spec run unchanged on both heads:
+
+| height | `e609c57` (before) | `ff8c880` (after) |
+|---|---|---|
+| 390x640 | centre below the fold; not occluded | centre below the fold; not occluded |
+| **390x664** | **centre INSIDE the box, resolves to `wsf-member-tab-move`** | centre below the fold; covered by nothing |
+| 390x844 | resolves to itself | resolves to itself |
+
+So the true defect sat at **390x664**, not at 640 — at 640 the control was already below the
+fold. And on the fixed head the scroll view's bottom edge sits exactly
+**24px (`MEMBER_TAB_MOVE_OVERHANG`) above the bar's top at 640, 664 and 844**, so the band the
+raised circle covers is never scrollable content at any scroll position. **The fix holds.**
+
+### A real tap does not decide this, and that matters
+
+The acceptance criterion I was given was a real, non-forced tap on the fixed head. It passes —
+`TAP-OK` at 640, 664 and 844. But I ran the identical tap on the **broken** head and it passes
+there too, at all three heights, because Playwright scrolls an element into its scroll
+container before clicking. A passing tap is therefore necessary but not sufficient: it cannot
+distinguish the fixed build from the broken one. The geometry above is what does.
+
+### My probe, corrected
+
+`sprint-w5-short-phone-usability.spec.ts` now uses the in-box-centre-resolves-to-the-shell
+measure, checks **both 640 and 664**, and waits for `wsf-contribute-done` rather than
+`wsf-member-tabs` so it cannot measure the `/move` resolver before its redirect. Proven to
+discriminate:
+
+- unannotated on `e609c57`: **1 failed, 5 passed** — the failure names
+  `wsf-contribute-skip-timer` at `height: 664`;
+- unannotated on `ff8c880`: **6 passed, 0 failed**.
+
+The `test.fail()` annotation therefore stays for now — this branch's base is still `e609c57`,
+which does not carry the fix. It is retargeted onto the corrected case and says plainly that it
+goes the moment #400 reaches the base; because it is `fail` and not `skip`, the body keeps
+running and it will start failing with "expected to fail but passed" if it is ever left behind.
+
+### On #400's own diff
+
+Its change to `check-evidence-intact.mjs` only **adds** paths — `page-02-move/short-phone/before`
+to the frozen list and `.../after` to the accepted list. It weakens no existing guard. I have
+not re-run #400's own spec's frame capture: `WSF_CAPTURE_FRAMES` and `WSF_CAPTURE_BEFORE` were
+never set, per my constraints.
+
+No approval or merge recommendation is given for #400.
