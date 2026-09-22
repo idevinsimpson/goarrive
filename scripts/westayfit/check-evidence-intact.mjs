@@ -44,6 +44,12 @@ const FROZEN_BEFORE = [
   // The package had NO before/ at all; once the route is built to the
   // target this screen stops existing and no later run can recover it.
   'docs/design-target/review/batch-b-join-and-setup/before',
+  // The contribution route on a short phone, shot against the e609c57 build
+  // BEFORE its scroll view was kept out from under the raised MOVE action
+  // (W5-M1). The producer runs in the ordinary suite as a regression test and
+  // writes frames only under WSF_CAPTURE_FRAMES=1 WSF_SHORT_PHONE_SET=before;
+  // the fix makes that state unreproducible, so these are frozen.
+  'docs/design-target/review/page-02-move/short-phone/before',
 ];
 
 /**
@@ -59,6 +65,9 @@ const ACCEPTED_FRAMES = [
   'docs/design-target/review/page-01-home/AFTER-*.png',
   'docs/design-target/review/page-02-move/TARGET-*.png',
   'docs/design-target/review/page-02-move/after',
+  // Same route, same build class, after the W5-M1 fix. Self-checked by the
+  // spec that produces them; independent review pending.
+  'docs/design-target/review/page-02-move/short-phone/after',
   'docs/design-target/review/page-03-community/TARGET-*.png',
   'docs/design-target/review/page-03-community/PROPOSAL-*.png',
   'docs/design-target/review/page-03-community/after',
