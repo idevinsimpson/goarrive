@@ -88,7 +88,7 @@ jobs:
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_07_CHAMPION_MANAGEMENT_FINAL_REVIEW_1x.png', 'Board 07 · 1x review copy'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
-          TOTAL_MAX = 24 * 1024 * 1024
+          TOTAL_MAX = 32 * 1024 * 1024
           out = 'wsf-visual-review'
           rows, total = [], 0
           for rel, label in allow:
