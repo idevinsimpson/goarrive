@@ -19,7 +19,7 @@ const AFTER = (f) => path.join(REPO, 'docs/design-target/review/page-02-move/aft
 const CAP = (f) => path.join(REPO, 'docs/design-target/north-star-final/board-02/captures', f);
 
 export const width = 1280;
-export const height = 2470;
+export const height = 2560;
 
 const SMALL_W = 200;
 const SMALL_SLOT = Math.round((844 / 390) * SMALL_W);
@@ -99,6 +99,7 @@ export const html = page({
         <div class="eyebrow quiet">WHERE THE ACCEPTED BUILD READS DIFFERENTLY FROM THE LOCK’S FIXTURE</div>
         <table>
           <tr><td class="k">Numbers</td><td class="d">The lock’s illustrative fixture was 241 → 261 of 500 and own credit 120 → 140. The accepted evidence carries the accepted fixture, 1,847 → 1,867 of 5,000; the two new confirmations use 500-target fixtures so the reached and post-target states are exact.</td></tr>
+          <tr><td class="k">Fixture communities</td><td class="d">Two synthetic communities appear, because the frames come from two capture sets: the nine accepted frames carry <b style="color:${NAVY}">Alpharetta Morning Movers</b>, the two new confirmations <b style="color:${NAVY}">Smyrna Strong</b>. Neither is a real community, and no frame continues another.</td></tr>
           <tr><td class="k">Crossing claim</td><td class="d">The receipt contract carries <code>crossedTarget</code> but the server does not raise it yet, so the member whose attempt crossed reads the state truth “Our goal is reached.” and no “this one took us past” line. The frame shows what the product says.</td></tr>
           <tr><td class="k">Not on this board</td><td class="d">No predicted total, no per-person counting from the timer, no kiosk or event chrome, no celebration copy beyond the exact result.</td></tr>
         </table>

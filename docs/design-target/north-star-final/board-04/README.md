@@ -29,3 +29,28 @@ Five frames, all the **accepted Page 4 AFTER evidence** (`docs/design-target/rev
 ## One state inside another frame
 
 The lock names **Nothing finished yet**. The accepted evidence has no standalone frame for it; it is on the board inside the partial-read frame, which the page renders with 0 finished goals. Flagged on the board rather than captured anew, because the accepted evidence is the source this board is built from.
+
+## Repair pass — 2026-09-22 (W2, packet P-2)
+
+Authorised by PR #365 comment [`5782379245`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5782379245) §3, from canonical `e9ad923`.
+
+The independent audit reported the `Running and finished` frame as a clipping
+defect: the card below the finished goal is sliced through its first line and
+the floating MOVE button sits on the remaining words.
+
+**Checking the source changed what the repair had to be.**
+`AFTER-rows-390x844.png` is 1170×2532 — exactly 390×844 at 3× — and
+`board-04.mjs` renders it whole into a slot of the same aspect. Nothing crops
+it. So the slice is not a rendering fault: it is **the real fold**, what the
+first viewport of `/activity` actually shows, with the page continuing under
+the tab bar.
+
+There is therefore nothing to repair in the pixels, and inventing one would
+mean cropping the tab bar away or re-cutting the viewport — passing an altered
+frame off as a product capture. **Not done, and not doable honestly.**
+
+What was wrong is the caption, which described the content as though it were
+all visible and never said the viewport ended there. It now states that the
+frame is the whole first 390×844 viewport, uncropped, that the page scrolls on
+under the tab bar, and that the same card reads in full on
+`Nothing recorded yet`. **No frame changed; the board is the same size.**
