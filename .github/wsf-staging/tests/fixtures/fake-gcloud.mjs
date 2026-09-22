@@ -112,6 +112,28 @@ if (isFunctionDescribe) {
     );
     process.exit(0);
   }
+  // N1 — `name` PRESENT BUT EMPTY. Distinct from `no-name`: the key exists, so
+  // a completeness guard written as a presence check rather than a value check
+  // would pass it and attribute the reference to a function nothing identified.
+  if (scenario === 'empty-name') {
+    process.stdout.write(
+      JSON.stringify({
+        name: '',
+        state: 'ACTIVE',
+        serviceConfig: { revision: REVISION, secretEnvironmentVariables: goodEnv('2') },
+      })
+    );
+    process.exit(0);
+  }
+  // N3 — A VERSION THAT CONTAINS A DIGIT BUT IS NOT A NUMBER. `v2` is an alias.
+  // A looser numeric test than `^\d+$` — anything matching `\d`, or a parseInt
+  // — reads it as version 2 and invents the fact under investigation.
+  if (scenario === 'alias-digits') {
+    process.stdout.write(
+      fn([{ key: 'WSF_EMAIL_API_KEY', projectId: PROJECT, secret: 'WSF_EMAIL_API_KEY', version: 'v2' }])
+    );
+    process.exit(0);
+  }
   // PARTIAL: a name but no serviceConfig — still not enough to assert absence.
   if (scenario === 'partial') {
     process.stdout.write(
@@ -179,6 +201,11 @@ if (isRevisionDescribe) {
   // string on the revision, which resolves at instance startup and not here.
   if (scenario === 'alias') {
     process.stdout.write(revisionJson('latest'));
+    process.exit(0);
+  }
+  // N3 at the revision level too: a digit-containing alias is still an alias.
+  if (scenario === 'alias-digits') {
+    process.stdout.write(revisionJson('v2'));
     process.exit(0);
   }
   process.stdout.write(revisionJson('2'));

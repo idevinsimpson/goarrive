@@ -25,12 +25,26 @@ const test = (n, f) => { f(); passed += 1; console.log(`  ok  ${n}`); };
 
 // A small YAML reader is deliberate: no dependency, and these checks are
 // structural enough to do on the parsed-enough shape below.
+/*
+  THE JOB-ID PATTERN MUST ADMIT EVERY LEGAL ID, not just the ones this file
+  happens to use.
+
+  It was `/^  ([a-z][a-z0-9-]*):\s*$/`. GitHub accepts an id starting with a
+  letter or `_` and containing letters, digits, `-` and `_`, and a job header
+  may carry a trailing comment. So `Rollout:`, `_rollout:`, `rollout_helper:`
+  and `rollout-helper:  # temporary helper` are all legal jobs that this
+  pattern skipped — and a job the parser never sees is a job the "every job is
+  gated" invariant silently exempts. Widening it is a no-op on this workflow
+  (the same nine jobs, none ungated) and closes that hole.
+*/
+const JOB_ID = /^ {2}([A-Za-z_][A-Za-z0-9_-]*):(\s|$)/;
+
 function jobBlocks() {
   const jobs = {};
   const lines = text.split('\n');
   let current = null;
   for (let i = 0; i < lines.length; i += 1) {
-    const m = /^  ([a-z][a-z0-9-]*):\s*$/.exec(lines[i]);
+    const m = JOB_ID.exec(lines[i]);
     if (m && /^jobs:/m.test(text.slice(0, text.indexOf(lines[i])))) {
       current = m[1];
       jobs[current] = [];
@@ -762,7 +776,10 @@ function jobsOf(src) {
   const out = {};
   let current = null;
   for (const line of src.slice(at).split('\n')) {
-    const m = /^ {2}([a-z][a-z0-9-]*):\s*$/.exec(line);
+    // The same widened pattern as jobBlocks. Two parsers disagreeing about
+    // what a job is would put the invariant and the matrix out of step, which
+    // is the shape of the hole this closes.
+    const m = JOB_ID.exec(line);
     if (m) {
       current = m[1];
       out[current] = [];
@@ -800,7 +817,11 @@ test('POSITIVE CONTROL: every job in this workflow is gated, and none by negatio
   // result here would say nothing about the jobs that actually run.
   assert.deepEqual(Object.keys(jobsOf(text)), Object.keys(jobs),
     'the probe parser and the matrix disagree about which jobs exist');
-  assert.ok(Object.keys(jobs).length >= 9, 'the job list looks truncated');
+  // Exact, not a lower bound: widening the id pattern must not start matching
+  // something that is not a job, and a genuinely new job must be noticed here
+  // rather than slide in under a `>=`.
+  assert.equal(Object.keys(jobs).length, 9,
+    `expected the workflow's nine jobs, parsed ${Object.keys(jobs).join(', ')}`);
   assert.deepEqual(ungatedJobs(text), [],
     'a job carries no if:, so it runs in EVERY mode including the read-only ones');
   assert.deepEqual(negatedGates(text), [],
@@ -822,6 +843,47 @@ test('AN UNGATED JOB RUNNING A PRIVILEGED NON-npx STEP IS REJECTED', () => {
   assert.deepEqual(ungatedJobs(PRIVILEGED_UNGATED), ['rollout-helper']);
   assert.equal(/npx/.test(PRIVILEGED_UNGATED.slice(text.length)), false,
     'the probe must not be caught by the npx ban — that would prove the wrong thing');
+});
+
+/*
+  R1 — EVERY LEGAL JOB ID, NOT JUST THE CONVENTIONAL ONES.
+
+  An independent review found that the invariant above was only as wide as the
+  pattern that feeds it: an ungated job whose id the parser did not recognise
+  was not caught, it was never seen. The four ids below are all legal GitHub
+  job ids that the old `[a-z][a-z0-9-]*` with `\s*$` rejected — a capital, a
+  leading underscore, an internal underscore, and a trailing comment on the
+  header line. Each probe carries the privileged step, so a miss is not
+  cosmetic: it is an ungated job that writes a new version of the secret this
+  mode exists to read.
+*/
+const LEGAL_ID_PROBES = [
+  ['Rollout:', 'Rollout', 'a capital first letter'],
+  ['rollout-helper:  # temporary helper', 'rollout-helper', 'a trailing comment on the header'],
+  ['_rollout:', '_rollout', 'a leading underscore'],
+  ['rollout_helper:', 'rollout_helper', 'an internal underscore'],
+];
+
+test('R1: an ungated job is caught under EVERY legal job id', () => {
+  for (const [header, id, why] of LEGAL_ID_PROBES) {
+    const mutant =
+      `${text}\n  ${header}\n    runs-on: ubuntu-latest\n` +
+      '    steps:\n      - run: gcloud secrets versions add WSF_EMAIL_API_KEY --data-file=- --project westayfit-staging\n';
+    assert.ok(Object.keys(jobsOf(mutant)).includes(id),
+      `${why}: the parser did not see job ${id} at all, so no invariant could apply to it`);
+    assert.deepEqual(ungatedJobs(mutant), [id],
+      `${why}: an ungated job named ${id} was not rejected`);
+  }
+});
+
+test('R1: widening the id pattern is a no-op on the real workflow', () => {
+  // The fix must close a hole without inventing jobs. Stated separately from
+  // the positive control because this is the half that could regress quietly.
+  assert.deepEqual(ungatedJobs(text), []);
+  assert.deepEqual(Object.keys(jobsOf(text)), [
+    'gate', 'config', 'build', 'deploy', 'hosted-verify',
+    'player-journey', 'cleanup-recovery', 'mail-preflight', 'mail-binding',
+  ]);
 });
 
 test('a job gated by NEGATION is rejected, whichever job it is', () => {
