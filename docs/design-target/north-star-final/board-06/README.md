@@ -116,3 +116,16 @@ on these frames are synthetic. No real community, person or invite link appears.
 Every claim on the board is either a quotation from the lock or a property
 visible in the frame it captions. Where the lock did not settle something, it is
 not asserted.
+
+## Independent board review — PASSED 2026-09-22
+
+Creative Director verdict on PR #404, comment `5784845039`: a pixel review of
+the exported original at head `d6aba97` (run `35788582424`, artifact
+`10721560350`; ZIP sha256 `bbe72e9a…`; PNG git blob `3f0b556` matched to the
+PR head) — *accepted reconstructed Board 06 for the canonical DRAFT visual
+package.* Status 3 in the manifest is now REVIEWED. Status-only: the PNG
+bytes are exactly the reviewed bytes; its footer's "SELF-CHECKED · INDEPENDENT
+REVIEW PENDING" is historical submission labelling and was deliberately not
+re-rendered. The verdict accepts the reference artifact only: it grants no
+Join page acceptance, no new auth, visibility or legal policy, no main merge
+and no staging deployment.
