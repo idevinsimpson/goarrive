@@ -9,7 +9,7 @@
  * Which boards exist is read from disk at render time, so this sheet cannot
  * claim a board the directory does not hold.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO, header, footer, page, pngSize, NAVY, CREAM, INK_QUIET, TEXT_MUTED, HAIRLINE, PROGRESS_GREEN, SURFACE } from './lib.mjs';
@@ -31,12 +31,33 @@ function boardPng(num) {
   return f ? path.join(dir, f) : null;
 }
 
+/*
+   THE STATUS COMES FROM THE MANIFEST, NEVER FROM THE FILENAME.
+
+   `_FINAL` in a filename is the lock verdict's canonical name for the
+   artifact, not an acceptance status -- the manifest says so in three places,
+   and W2's audit (D-IX.1) caught this sheet printing FINAL for five boards the
+   manifest lists as SELF-CHECKED with independent review pending. The word
+   under each thumbnail is now read from the manifest's status column at
+   render time, so the two cannot disagree; a board with a PNG but no manifest
+   row says so rather than borrowing a word.
+*/
+const MANIFEST = path.join(ROOT, 'README.md');
+function manifestStatus(num) {
+  const rows = readFileSync(MANIFEST, 'utf8').split('\n');
+  const row = rows.find((l) => l.startsWith(`| ${num} |`));
+  if (!row) return 'NOT IN MANIFEST';
+  const cells = row.split('|').map((c) => c.trim());
+  // | # | Title | Status | ...
+  return (cells[3] || 'NOT IN MANIFEST').replace(/\*\*/g, '').trim();
+}
+
 const CELL_W = 176;
 const THUMB_H = 200;
 
 function cell([num, title]) {
   const png = boardPng(num);
-  const status = png ? (png.endsWith('_FINAL.png') ? 'FINAL' : 'PRECISION REVIEW') : 'PENDING';
+  const status = png ? manifestStatus(num) : 'PENDING';
   let thumb;
   if (png) {
     const { w, h } = pngSize(png);
@@ -50,7 +71,7 @@ function cell([num, title]) {
     ${thumb}
     <div class="num">BOARD ${num}</div>
     <div class="ttl">${title}</div>
-    <div class="st ${status === 'PENDING' ? 'p' : status === 'FINAL' ? 'f' : 'r'}">${status}</div>
+    <div class="st ${status === 'PENDING' ? 'p' : /REVIEWED|ACCEPTED/.test(status) ? 'f' : 'r'}">${status}</div>
   </div>`;
 }
 

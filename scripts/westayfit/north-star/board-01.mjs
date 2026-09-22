@@ -115,8 +115,16 @@ const PHONES = [
   {
     file: 'phone-member-multiple-goals-390x844.png',
     css: { w: 390, h: 844 },
-    title: 'Member · a second goal under way',
-    sub: 'One Living WE, on the featured goal only · the roll-up counts goals, never people',
+    /* A SCROLLED VIEW, AND LABELLED AS ONE. The capture spec centres the
+       second goal's card (`bring()` → scrollIntoView block:center), so this
+       frame opens below the hero: the wordmark, the community identity and
+       the featured goal's Living WE are above it and not in it. The earlier
+       caption asserted that mark; the frame cannot show it (W2, D-01.1). It is
+       not presented as the arrival state and is not re-shot -- the capture is
+       the product, unchanged. */
+    scrolled: true,
+    title: 'Member · a second goal under way (scrolled)',
+    sub: 'Continued view, scrolled to the second goal — the hero and its Living WE sit above this frame. The second goal gets a compact card: figures, no mark. The roll-up counts goals, never people',
   },
   {
     file: 'phone-champion-building-390x844.png',
@@ -321,7 +329,7 @@ export const html = `<!doctype html>
       ${PHONES.map(
         (p) => `<div class="phone">
           <div class="slot"><div class="shell">${scaled(p.file, p.css, PHONE_W)}</div></div>
-          <div><span class="tag real">CURRENT BUILD · CAPTURED</span></div>
+          <div><span class="tag real">CURRENT BUILD · CAPTURED</span>${p.scrolled ? ' <span class="tag real">SCROLLED VIEW</span>' : ''}</div>
           <div class="cap">${p.title}</div>
           <div class="sub">${p.sub}</div>
         </div>`

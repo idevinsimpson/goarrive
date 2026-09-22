@@ -87,7 +87,7 @@ const STATES = [
   { key: 'building', ratio: 241 / 500, label: '241 of 500', note: '48.2% · area-calibrated' },
   { key: 'near', ratio: 461 / 500, label: '461 of 500', note: '92.2% · near goal' },
   { key: 'reached', ratio: 1, label: '500 of 500', note: '100% · fully filled' },
-  { key: 'overshoot', ratio: 515 / 500, label: '515 of 500', note: '103% · numbers keep the overshoot' },
+  { key: 'overshoot', ratio: 515 / 500, label: '515 of 500', note: '100% shown · the total keeps the overshoot' },
   { key: 'no-goal', ratio: null, label: 'no goal', note: 'no denominator' },
 ];
 
@@ -161,7 +161,7 @@ export const html = `<!doctype html>
   /*
      A fixed mark row and a fixed label row, so a two-line note under one state
      cannot lift that state's label off the baseline the others share — which
-     is what 103%'s longer caption did.
+     is what the overshoot's longer caption did.
   */
   .state { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px }
   .state .mark-slot { height: 84px; display: flex; align-items: flex-end; justify-content: center }
@@ -197,8 +197,13 @@ export const html = `<!doctype html>
   .rules .r p { font-size: 13px; line-height: 18px; color: ${TEXT_MUTED} }
   .rules .r b { color: ${NAVY} }
 
-  footer { margin-top: auto; display: flex; justify-content: space-between; align-items: center;
+  footer { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 48px;
            font-size: 11px; letter-spacing: 0.6px; color: ${INK_QUIET} }
+  /* The right-hand line now carries the reconstruction caveat (W2, D-00.2)
+     and wraps; the filename never does, and the two never meet. Same rule as
+     lib.mjs's footer(). */
+  footer span:first-child { white-space: nowrap }
+  footer span:last-child { text-align: right; max-width: 720px; line-height: 15px }
 </style></head>
 <body><div class="board">
 
@@ -327,7 +332,7 @@ export const html = `<!doctype html>
 
   <footer>
     <span>WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL</span>
-    <span>LOCKED · PR #365 comment 5770785512 · governing constitution for boards 01–17</span>
+    <span>LOCK VERDICT · PR #365 comment 5770785512 · governing constitution for boards 01–17 · RECONSTRUCTED REFERENCE, self-checked · independent board review pending</span>
   </footer>
 
 </div></body></html>`;
