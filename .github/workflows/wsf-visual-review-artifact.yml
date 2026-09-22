@@ -1,0 +1,72 @@
+# WSF — package the canonical North Star images as a workflow artifact.
+#
+# Why this exists: the Program Director's reviewer can open a native file it
+# downloads from a workflow-run artifact, and cannot open a PNG served as
+# base64 text or a raw/attachment URL. This packages the EXACT existing PNGs
+# from ONE immutable source commit, with a manifest that pins each file (git
+# blob, bytes, sha256, dimensions), and uploads them. Nothing is rendered,
+# resized, built, installed, deployed or fetched from the network.
+#
+# Smallest possible surface, on purpose: manual dispatch only, no schedule,
+# contents:read, no id-token, no environment, no secrets, pinned actions (the
+# same pins the staging deploy workflow uses), short retention. The allowlist
+# of files lives in scripts/westayfit/north-star/package-visual-review.py.
+name: WSF visual-review artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Full 40-hex commit to package (the canonical package head). The run refuses anything else.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsf-visual-review-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package the pinned canonical images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse anything but a full commit SHA
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          case "$SOURCE_SHA" in
+            *[!0-9a-f]*|"") echo "source_sha must be 40 lowercase hex characters" >&2; exit 1 ;;
+          esac
+          [ "${#SOURCE_SHA}" -eq 40 ] || { echo "source_sha must be 40 characters" >&2; exit 1; }
+
+      - name: Check out exactly that commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Package original bytes with a pinned manifest
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -eu
+          [ "$(git rev-parse HEAD)" = "$SOURCE_SHA" ] || { echo "checked-out HEAD is not the requested SHA" >&2; exit 1; }
+          python3 scripts/westayfit/north-star/package-visual-review.py "wsf-visual-review-${SOURCE_SHA:0:12}" "$SOURCE_SHA"
+          cat "wsf-visual-review-${SOURCE_SHA:0:12}/MANIFEST.md"
+
+      - name: Upload the package as a workflow artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: wsf-visual-review-${{ inputs.source_sha }}
+          path: wsf-visual-review-*
+          if-no-files-found: error
+          retention-days: 7
+          # The PNGs are already compressed; keep the bytes verbatim inside the zip.
+          compression-level: 0
