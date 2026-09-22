@@ -13,6 +13,25 @@ Repository: `idevinsimpson/goarrive`
 Primary product/visual PR: #365
 Branch: `claude/wsf-app-shell`
 
+## Canonical review gate — as of 2026-09-22
+
+The one gate on visual work now is **the Program Director's independent visual
+review of North Star Boards 00–05 + INDEX**, tracked in the canonical package
+manifest, not in this brief:
+
+- `docs/design-target/north-star-final/README.md` — status 3, *Independent
+  board review*, per board (statuses 1–4 are kept separate there on purpose).
+- PR #392 (`claude/wsf-north-star-canonical`) carries the boards; W2's
+  independent audit is `north-star-final/review-audit-w2/` (PR #397).
+- Until that gate clears: no bulk Boards 06–11, no 12–17 (Round 1,
+  `5781435779`). Boards 06–11 then split across design slots, one writer per
+  board, and that release is recorded explicitly.
+
+The two 2026-09-21 sections below — *Page 5 target-only* and *atlas first* —
+are kept as the record of what governed on that date and are marked
+HISTORICAL where they no longer do. This is not a second tracker: statuses
+live in the manifest and the roster at the end of this file.
+
 ## Current governing creative system
 The owner-approved visual reset is active.
 
@@ -67,15 +86,25 @@ Current latest accepted Progress behavior:
 - bounded parallel reads and disclosed partial failure
 - private-history callable remains a documented seam only; not authorized for implementation
 
-Page 5 You/Profile:
-- TARGET ONLY
-- not implemented yet
+Page 5 You/Profile — **HISTORICAL (2026-09-21); superseded 2026-09-22.**
+`/you` is implemented to its reviewed second-revision target and stopped for
+visual acceptance (`docs/design-target/review/page-05-you/README.md`:
+"Implemented … stops for the fourth"); PR #365's own checklist records it
+"ACCEPTED at `7e788a9`". The rules below still hold; the two status lines do not.
+- ~~TARGET ONLY~~ (historical)
+- ~~not implemented yet~~ (historical)
 - current route is `/you`, not `/profile`
 - truthful reachable profile data today includes displayName and createdAt from the member's own profile
 - do not invent photo, quote, streak, dated recent activity, contribution count-by-week, or causal “you moved us from X to Y” claims
 
-## CURRENT GATE — atlas first before more implementation
-Devin's newer explicit instruction controls what happens next:
+## GATE AS OF 2026-09-21 — atlas first before more implementation (HISTORICAL; superseded 2026-09-22)
+**Superseded** by the canonical review gate above: the atlas batches A–G were
+accepted as target reference (PR #365 body), the canonical North Star package
+(Boards 00–05 + INDEX) is rendered and self-checked on #392, and the live gate
+is the Director's independent review of those boards. The batches listed here
+stay as the record of atlas coverage; do not start work from this section.
+
+On 2026-09-21 Devin's explicit instruction controlled what happened next:
 
 **Do not implement Page 5 or any later page until the missing Visual North Star Atlas is complete and visually reviewed.**
 
@@ -139,8 +168,8 @@ State matrix:
 
 No individual identity unless separately authorized.
 
-## Atlas acceptance
-Before more implementation, PR #365 must show:
+## Atlas acceptance (HISTORICAL — see the canonical review gate above)
+Before more implementation, PR #365 had to show:
 - atlas overview/contact sheet
 - exact target paths by batch
 - updated route → target mapping
@@ -202,16 +231,28 @@ session; W3/W4 19:30Z, W5 19:49Z). A worker that stops with no check-in armed
 (W1) is unreachable; its follow-up transfers back to the lead explicitly.
 The poke Routines are deleted.
 
-| ID | Mechanism / session | Branch · starting SHA | Allowed files | First deliverable | Status / evidence | Blocker | Next gate |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| L0 | lead — `session_017cby7B21o4bFbnpsa1ciRV` | `claude/wsf-north-star-canonical` @ `4f43973`; integrates to `#365` / `#392` | manifest, INDEX, review-copies, this brief, integration | 00–05 + INDEX landed (`4fe51f0`); statuses separated (`e29b9ec`); #398 integrated (`4f43973`) | EXECUTING | — | director's visual review of 00–05 |
-| W1 | CCR `session_01YA6WdVgb2NJosUL3Mu9D6n` — idle since 18:44Z, no check-in armed, **unreachable** | `claude/wsf-sprint-north-star-home` from `d072aa6` — PR #398 | `board-01/**`, `north-star/board-01.mjs` (follow-up written by L0 on the canonical branch) | the two Round-2 corrections — **delivered** at `8b3707b` and **INTEGRATED** at `4f43973`. Round-3/4 narrow follow-up **done by L0** (transfer recorded 18:55Z): the stale TARGET inset now carries the confirmed Living WE at 241/500 composed from the owner assets + calibration table; "photograph-only" wording softened in module and README; the drawn cell's caption aligned with the captured cells'; nothing else touched | CHECKPOINT-READY · INTEGRATED · follow-up LANDED (L0) | no inbound channel | independent visual review (W2 + director) |
-| W2 | CCR `session_01KqnSmxM55Y5FXUe53kmD6V` — visual evidence auditor, running | `claude/wsf-sprint-north-star-core` from `e29b9ec` — PR #397 | `north-star-final/review-audit-w2/**` only | property-by-property visual audit of 00–05 + INDEX; then #398's corrected Board 01 at `4f43973` (posted on #397 — the poke never reached it) | ACKNOWLEDGED → EXECUTING (#397 `0cb18fa`) | — | director's visual review of 00–05 |
-| W3 | CCR `session_01J1CepL52CKS8SqaGSZFfLc` — idle since 18:29Z; self check-in 19:30Z | `claude/wsf-sprint-email-staging` (PR #396 `514d450`) + **owns `claude/wsf-staging-mail-binding` (#393)** | `.github/wsf-staging/report-mail-binding.mjs`, its tests, `workflow-contract.test.mjs`, `docs/wsf-staging/EMAIL-ACCEPTANCE-OPERATOR-HANDOFF.md` | #396 packet **delivered** (second-machine receipt; reachability NOT REACHABLE, same policy; handoff doc). **The #393 corrections have NOT started** — the handoff never reached its session; it still holds its original do-not-touch-#393 constraint. Lifted and re-assigned by comment on #396 (`5782125908`): director's four corrections + W5's F1 + Round-4 caveats + handoff edits (owner-designated operator wording; retain messages) | CHECKPOINT-READY (#396) · SENT (#393, by PR comment, awaiting 19:30Z check-in) | no inbound channel until its own check-in | W5 verification of the corrected head → director re-review → recorded merge |
-| W4 | CCR `session_014VhZAgvNzjfA9ahZas8eX5` — idle since 18:29Z; self check-in 19:30Z | `claude/wsf-sprint-member-journey` from `e609c57` — PR #394 `1a192d8` | `review/sprint-w4-member-journey/**`, `tests-e2e/sprint-w4-*.spec.ts` | packet 1 **delivered and accepted by the director**: 61/61 across 8 specs on `e609c57`, retry-colour fix verified, Progress/Home corrections verified, #390 trial merge conflict-free + combined typecheck, no product defect. Next (posted on #394, `5782119754` — the poke never reached it): isolated combined-runtime test of `e609c57` + `e982ddc` in its own container, no port allocation needed, guards intact | CHECKPOINT-READY (packet 1) · SENT (packet 2, by PR comment) | waiting on its own 19:30Z check-in | any proved defect → lead assigns a bounded patch |
-| W5 | CCR `session_01G4FfDv5vKhCNNkSg3JgXGL` — idle since 18:48Z; self check-in 19:49Z | `claude/wsf-sprint-independent-qa` from `e609c57` — PR #395 | `tests-e2e/sprint-w5-*.spec.ts`, `tests/callable/sprint-w5-*.test.ts` | #393 review at `cb91d78` **delivered** (`5781811012`: F1/F2/F4 moderate, F3/F6 low, F5 trivial; 9 mutations; no privacy defect); member QA done on its own packet. Next (posted on #395, `5782122312` — the pokes never reached it): verify W3's corrected head incl. its M6/M7 probes | CHECKPOINT-READY (parts 1–2) · SENT (verification, by PR comment) | waiting on W3's commit and its own check-in | director closes #393 review |
+| ID | Session · reachability | Branch · head | Allowed files | Current packet | Next executable packet | Blocked on | Latest worker-authored acknowledgment | Actual checkpoint / commit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| L0 | lead — `session_017cby7B21o4bFbnpsa1ciRV` | `claude/wsf-north-star-canonical` (integrates to #365 / #392); fix child `claude/wsf-fix-contribute-skip-timer` | manifest, INDEX, review-copies, Board 00/01 modules + renderer lib, this brief, integration; the W5-M1 fix route + its spec | **W5-M1 short-phone fix — DELIVERED**: PR #400 `ff8c880`, child of `e609c57`; reproduced on the old build (5/7 failing, allocation 564 > 547 at 640), 7/7 on the fix, 71/71 across contribute/shell/follow-along/a11y; before/after frames frozen; W5 to verify | review W2's #399 (P-2 / P-4 / P-6) and integrate it into canonical; then Board 01 P-1 (label column 2 as continued/scrolled or swap a full-screen capture; caption must not claim what the frame does not show), Board 00 P-5 + D-00.2, INDEX P-3 (status derived from the manifest, never the `_FINAL` filename); then one re-cut of `review-copies/` (00, 01, 02, 04, 05) + INDEX | Director's visual verdict on 00–05 (M4) | this brief (lead-authored) | #400 `ff8c880`; canonical at this commit |
+| W1 | CCR `session_01YA6WdVgb2NJosUL3Mu9D6n` — idle since 18:44Z, no check-in armed, **unreachable**; role retired in place | `claude/wsf-sprint-north-star-home` — PR #398 (`8b3707b`) | — (its follow-up files are now L0's) | none — its two corrections INTEGRATED at `4f43973`; the narrow follow-up was transferred to L0 and landed at `e9ad923` | none. The slot may be reused only after an explicit ownership transfer (queue `5782379245` §2); no overlapping writer on `board-01.mjs` | — | #398 body at `8b3707b` (18:44Z) | `4f43973` (integrated) |
+| W2 | CCR `session_01KqnSmxM55Y5FXUe53kmD6V` — running; reads #397; **picked up the Director's queue directly** (`5782382385` → ack `5782436746`, 19:12Z) | `claude/wsf-sprint-north-star-core` — PR #397 `1bf2b23` (audit, frozen); repair child `claude/wsf-sprint-north-star-boards-repair` — **PR #399** from canonical `e9ad923` | audit: `review-audit-w2/**`; repair packet: `board-02/**`, `board-04/**`, `board-05/**` + their modules only (Board 00/01, `lib.mjs`, renderer, manifest, INDEX, review-copies, product files excluded) | bounded repairs P-2 / P-4 / P-6 — **DELIVERED** as #399 (`5782555549`, 19:21Z): captions/provenance only, no pixel edits to captures, three boards re-rendered from a byte-identical control render; Board 02 now 2560px tall | none until L0 / Director review of #399; **WAITING** with its self-check armed. After the 00–05 gate clears: 06–11 split, one writer per board, recorded explicitly | L0's review of #399; then L0 re-cuts `review-copies/` 02/04/05 + INDEX (flagged by W2, not touched) | #397 `5782555549` (19:21Z) | #399 head (see its PR); audit `1bf2b23` |
+| W3 | CCR `session_01J1CepL52CKS8SqaGSZFfLc` — idle since 18:29Z; self check-in 19:30Z; reads #396 | `claude/wsf-sprint-email-staging` — PR #396 `514d450`; **owns `claude/wsf-staging-mail-binding` (#393 `cb91d78`)** | `report-mail-binding.mjs`, its tests, `workflow-contract.test.mjs`, `docs/wsf-staging/EMAIL-ACCEPTANCE-OPERATOR-HANDOFF.md` | #393 corrections — **SENT / WAITING** (posted on #396 `5782125908`; queue relay posted 19:2xZ): reporter + all-job gating fixes, ONE tested head, notify W5 on #395 | handoff edits (owner-designated operator wording; retain messages) while review is pending | its own 19:30Z check-in; no worker acknowledgment yet | #396 body at `514d450` (18:26Z) | `514d450`; #393 unchanged at `cb91d78` |
+| W4 | CCR `session_014VhZAgvNzjfA9ahZas8eX5` — idle since 18:29Z; self check-in 19:30Z; reads #394 | `claude/wsf-sprint-member-journey` — PR #394 `1a192d8` | `review/sprint-w4-member-journey/**`, `tests-e2e/sprint-w4-*.spec.ts` | isolated combined-runtime test of `e609c57` + `e982ddc` — **SENT / WAITING** (posted on #394 `5782119754`; queue relay posted 19:2xZ) | integration delta / test receipt for the latest *accepted* app patch (#400 is under review, not an input yet); Join imagery to accompany the functional evidence | its own 19:30Z check-in; no worker acknowledgment yet | #394 body at `1a192d8` (18:17Z) | `1a192d8` |
+| W5 | CCR `session_01G4FfDv5vKhCNNkSg3JgXGL` — idle since 18:48Z; self check-in 19:49Z; reads #395 | `claude/wsf-sprint-independent-qa` — PR #395 `fe1b27d` | `tests-e2e/sprint-w5-*.spec.ts`, `tests/callable/sprint-w5-*.test.ts`, `docs/westayfit/qa/**` | #393 review **DELIVERED** (`5781811012`); member QA delivered (W5-M1 found). **SENT / WAITING**: verify W3's corrected head when it exists, else verify #400 `ff8c880` (posted on #395, 19:2xZ) | remove its `test.fail()` only when a real non-forced tap passes on the verified head | its own 19:49Z check-in; W3's head for packet (1) | #395 body at `fe1b27d` (18:48Z) | `fe1b27d` |
 
 Cap: six sessions including the lead; all six are open (L0, W1, W2, W3, W4, W5).
+
+**Milestones (alignment `5782184088`, 2026-09-22).** The original delivery
+milestones stay the record; review-pass numbers are tracked apart and clear
+none of them. **M4** — 00–05 delivered AND visually reviewed: OPEN (delivered
+on #392; W2's independent audit in; Director's visual verdict not yet).
+**M5** — real verification/reset acceptance, or the exact blocker with an
+acknowledged accountable operator: OPEN (blocker: staging hosts denied by
+policy in every Claude container, measured twice; operator slot reserved,
+below, not yet acknowledged). **M6** — combined member runtime reviewed /
+eligible staging candidate: OPEN (W4's combined-runtime test SENT, not yet
+picked up). Director passes so far: Rounds 1–5, alignment, execution queue
+`5782379245` — seven, and none of them is a milestone.
 
 **Real-mail operator slot:** reserved for an owner-designated browser operator (Manus), **PENDING its acknowledgment** — recorded from Round 3 `5781782947` §1; not a claim it has received the prompt or begun. Until acknowledged, no Claude session performs the acceptance test. Every Claude container measured so far is denied on the staging hosts by policy. Heavy
 emulator/browser suites run in separate containers (W4, W5), so the two-per-
