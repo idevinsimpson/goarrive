@@ -46,7 +46,7 @@ the notes column and left out.** Gaps are not filled from memory.
 | # | Title | Status | Lock verdict | Capability shown | PNG | Last-reviewed SHA | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 00 | Brand foundation | **FINAL** | `5770785512` | accepted build | [`board-00/…BOARD_00_BRAND_FOUNDATION_FINAL.png`](board-00/WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL.png) | `3c7c7d3` | Governing constitution for 01–17. Rendered from the repo's own brand assets and Living WE area calibration; see `board-00/README.md` for the line-by-line check against the lock. |
-| 01 | Home | PENDING | `5770964377`, corrected by `5771119797`, precision holds `5771373306` + `5771398679` | accepted build | — | — | Creative direction locked; needs the final precision pass before FINAL. |
+| 01 | Home | **PRECISION REVIEW** | `5770964377`, corrected by `5771119797`, precision holds `5771373306` + `5771398679` | accepted build + labelled visibility seam | [`board-01/…BOARD_01_HOME_CANDIDATE.png`](board-01/WE_STAY_FIT_NORTH_STAR_BOARD_01_HOME_CANDIDATE.png) | `39ee522` | Creative direction locked. Every phone and lifecycle state is a **real capture** of the build (`north-star-board-01-capture.spec.ts`), asserted before it was shot; the member-visibility seam is a labelled composition. See `board-01/README.md` for the nine corrections line by line. Takes the `_FINAL` name when the precision review clears. |
 | 02 | MOVE | PENDING | `5771235529` | accepted build | — | — | |
 | 03 | Community | PENDING | `5771275765` | accepted build | — | — | |
 | 04 | Progress | PENDING | `5771310017` | accepted build | — | — | Phase A only; private dated history remains an unbuilt seam. |
