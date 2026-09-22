@@ -76,6 +76,14 @@ type Membership = {
   displayName: string;
   memberCount: number;
   role: string;
+  /*
+    THE CALLER'S OWN answer in this community, never anybody else's — the
+    callable's query is `userId == caller`, so no other person's choice is in
+    scope here. It is carried so a member can be TOLD whether they are named
+    without having to go looking for a setting; a privacy control somebody has
+    to find is one they assume is off.
+  */
+  visibility?: 'private' | 'visible';
 };
 
 type Goal = {
@@ -449,6 +457,28 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
         {memberCountLabel(item.memberCount)}
       </Text>
 
+      {/*
+        WHO IS HERE, and the member's own answer to it, on one line. The count
+        above is a roll over every active member; this is the door to the
+        people who chose to be NAMED, which is a different and much smaller
+        thing. The two sit together so the difference is visible rather than
+        implied — but no number is printed for the second, because
+        `memberCount` minus a visible count is "how many are hiding", a
+        subtraction the product refuses to perform.
+      */}
+      <Pressable
+        onPress={() => router.push(`/community/${item.groupId}/members`)}
+        accessibilityRole="link"
+        accessibilityLabel={`See who is named in ${item.displayName}, and choose whether you are`}
+        style={styles.whoIsHere}
+        testID="wsf-community-index-who"
+      >
+        <Text style={styles.whoIsHereText}>Who is here</Text>
+        <Text style={styles.whoIsHereMine}>
+          {item.visibility === 'visible' ? 'Your name is shown' : 'Your name is not shown'}
+        </Text>
+      </Pressable>
+
       <View style={styles.currentRule} />
 
       <Text style={styles.eyebrowDark}>WHAT WE&apos;RE DOING</Text>
@@ -658,6 +688,27 @@ const styles = StyleSheet.create({
   currentName: { color: ON_NAVY },
   currentMeta: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
   currentRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 4 },
+  /*
+    ON THE NAVY PANEL, so every colour here comes from the ON_NAVY set rather
+    than the page's ink. A quiet outlined row, not a button: it opens a page,
+    it does not perform an action, and it must not compete with the goal and
+    the Living WE below it — those are what this panel is for.
+  */
+  whoIsHere: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: ON_NAVY_RULE,
+  },
+  whoIsHereText: { color: ON_NAVY, fontSize: 14, lineHeight: 19, fontWeight: '600' },
+  whoIsHereMine: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
   currentUnavailable: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
   currentGoalRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   currentGoalText: { flex: 1, gap: 3 },

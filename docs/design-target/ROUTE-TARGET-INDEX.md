@@ -92,9 +92,9 @@ second is operational.
 
 | | |
 | --- | --- |
-| User-facing routes | **23** |
+| User-facing routes | **24** |
 | Routes with a real-RN target | **23** |
-| Routes with no target | **0** |
+| Routes with no target | **1** |
 | Routes implemented against an approved target | **12** |
 
 ### Covered — a real-RN target exists
@@ -127,7 +127,9 @@ second is operational.
 
 ### Not covered — no target of any kind
 
-None. Every user-facing route has a target.
+| Route | What it is |
+| --- | --- |
+| `/community/[groupId]/members` | Who is here — the members of one community who chose to be named, and the member's own choice about whether they are. **Implemented, with NO accepted design target**, which is why it is listed here rather than above: the capability was authorised before a frame for it was drawn. Built in the established language (the `/community` card, tokens and header) and awaiting creative review. The privacy properties are enforced in `functions-westayfit` and pinned by `wsf-community-visibility.test.ts`, not by this page. |
 
 <!-- END GENERATED ROUTES -->
 

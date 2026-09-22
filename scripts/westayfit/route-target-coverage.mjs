@@ -114,6 +114,8 @@ const NOTES = {
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
 const WHAT = {
+  '/community/[groupId]/members':
+    'Who is here — the members of one community who chose to be named, and the member\'s own choice about whether they are. **Implemented, with NO accepted design target**, which is why it is listed here rather than above: the capability was authorised before a frame for it was drawn. Built in the established language (the `/community` card, tokens and header) and awaiting creative review. The privacy properties are enforced in `functions-westayfit` and pinned by `wsf-community-visibility.test.ts`, not by this page.',
 };
 
 /**

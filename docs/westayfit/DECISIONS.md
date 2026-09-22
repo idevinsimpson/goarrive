@@ -465,3 +465,73 @@ one image being the wrong one.
 whether anything is wider than the sheet that holds it, and whether the document scrolls
 sideways, are assertions that run at every width. Written, then mutation-tested by forcing an
 element to 3000 px, because a guard that cannot fail is decoration.
+
+**Privacy is the default because the QUERY says so, not because the code checks.** The member
+directory filters `visibility == 'visible'` at the index, with three equality clauses and no
+branch anywhere below it. A row missing the field — which is every membership written before
+the feature existed — simply does not match, and so does a row storing `'Visible'`, `true` or
+`' visible'`. The alternative, a code-side `String(v).trim().toLowerCase() === 'visible'`,
+looks more forgiving and is the exact shape that turns a legacy absence into a publication of
+the entire existing member base, retroactively, without one person having agreed to it.
+
+**A `{ merge: true }` write is where a privacy setting comes back from the dead.** A merge
+preserves every field it does not name, so a visibility chosen before somebody left survives
+their departure and their return. Rejoin and reinstate therefore reset to private explicitly,
+on the way back IN rather than on the way out — clearing it on departure would destroy a
+setting somebody may want back, and would put the guarantee in the path that is not doing the
+re-admitting. Reinstate matters more than rejoin, because there the actor is not the subject:
+without it, a Champion reinstating a member who had been visible republishes that person's
+name by a unilateral act, which is the Champion override this feature does not have arriving
+through the back door of a status change.
+
+**The document id is not the authority; the `userId` field is.** `firestore.rules` reads
+`resource.data.userId == request.auth.uid` and never parses the id, so a row at
+`{groupId}_{someoneElse}` carrying `userId: victim` is a row the product never wrote. Keying
+the permission gate off one and the name fan-out off the other means one person's tap
+publishes a different person's name. Both callables require the two to agree and the lister
+drops any row where they do not. The profile fan-out is a `Map` keyed by uid for the same
+family of reason: `getAll` returns a snapshot per ref including missing ones, so filtering
+while zipping by position shifts every later name one place — beside somebody else's role.
+
+**The absent field is the enforcement.** `wsfSetCommunityVisibility` has no `targetUid`, and
+`wsfCommunityMembers` has no cursor. The Champion action family sits a few hundred lines above,
+shares `{ groupId, targetUid }`, and opens each handler with `requireChampion` — copying one
+as a starting point would import both the parameter and an override in a single paste. And a
+`startAfter` cursor on `wsfMemberships` serialises a document id, which is a uid in plaintext;
+whoever added paging would reach for Firestore's default because there is no other idiom in
+the file to copy.
+
+**Two refusals that differ are an oracle, in the client as much as the server.** The server
+answers `permission-denied` identically for a community that does not exist and one the caller
+is not in. The screen renders ONE refusal for that one code — splitting it into "you are not a
+member" and "no such community" would rebuild in the browser the enumeration the server was
+careful to prevent. What the screen may do, and initially failed to do, is tell that refusal
+apart from a failed read: rendering a permission refusal as "could not be loaded just now"
+tells a stranger nothing is wrong and offers a retry that can never succeed.
+
+**"Nobody has chosen to be named" is not "nobody is here", and the copy has to say so.** An
+empty directory in a community with eleven members is a fact about consent, not about
+attendance. The empty state states the true sentence explicitly rather than leaving a reader
+to infer the false one, and no count of the list is ever printed beside `memberCount` —
+subtracting the two is "how many people are hiding", and a product that performs that
+subtraction for its reader has published it.
+
+**`invoker: 'public'` is a no-op in the emulator, so it needs a source-level guard.** It is
+enforced only by Cloud Run IAM at deploy, which means a stray `public` passes every local
+test and first takes effect in front of real people — and the two callables nearest the new
+directory are both public. `tests/deploy-config/public-invoker.test.ts` pins the allowlist by
+name. It strips comments before matching, because its first version read the comment saying
+this callable must never be public and reported it as public: a guard that reads prose cannot
+tell a promise from a breach of it.
+
+**A directory page belongs to Community even when it lives under a community's path.** The tab
+bar splits by what a destination IS, not by URL shape: Home is the community a member is in
+and what it is doing, Community is the people side. `/community/<id>/members` is reached from
+the Community tab, so the prefix match that lights Home for every `/community/` route lit the
+wrong one, and told a member they were somewhere they were not.
+
+**A capability can be authorised before a frame for it exists, and the index must say so.**
+`/community/[groupId]/members` is the only implemented route with no accepted design target.
+It is built in the established language and recorded as UNCOVERED rather than quietly claimed,
+because a route index that counts it as covered is the same stale-by-hand table the generator
+was introduced to end.
