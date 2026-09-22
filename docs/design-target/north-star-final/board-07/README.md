@@ -116,3 +116,48 @@ and no injected failure is presented as an organic one.
 Every claim on the board is either a quotation from the lock, a property visible
 in the frame it captions, or a fact read out of the repository at a named SHA.
 Where the lock did not settle something, it is not asserted.
+
+## Independent board review — PASSED 2026-09-22
+
+Creative / Product Director verdict on PR #416, comment `5785727716`: a pixel
+review of the exported original at head `fe82c1e` (run `35795219165`, artifact
+`10723837867`; ZIP sha256 `df667d32…`; PNG git blob `df1a5870` matched to the
+PR head), all six contiguous inspection sections opened alongside Board 00 and
+both exact owner references — **PASS as the canonical CURRENT-BUILD /
+RECONSTRUCTED REFERENCE at this source.** L0 may integrate these exact bytes
+into the canonical DRAFT and update the status, index and review copy.
+
+The verdict accepts the reference artifact only: **no new app, hosting, privacy
+or release acceptance is implied.** The submission footer's
+`SELF-CHECKED · INDEPENDENT REVIEW PENDING` is historical submission labelling
+and was deliberately not re-rendered — the PNG bytes are exactly the reviewed
+bytes.
+
+The unshown expanded-details, QR and `Screens at this event` paths were read as
+**explicitly disclosed rather than falsely pictured**. They remain evidence gaps
+in the underlying management journey, not a reason to redraw this reference.
+
+### Two annotations that travel with this board
+
+These are **product findings recorded in the integration record**. They are not
+permission to repaint source screenshots, and they do not open a further pixel
+cycle on this artifact.
+
+1. **The not-built quote is scoped to `5356e3c`, and erases nothing.** The
+   lock's `member directory` line, quoted on the navy boundary panel, is the
+   not-built list *at this board's source SHA*. It says nothing about work
+   authorized elsewhere. PR **#390** — `claude/wsf-community-visibility` into
+   `claude/wsf-app-shell`, open and unmerged, review-gate accepted at `e982ddc`,
+   nothing deployed — implements the bounded, self-only, per-community naming
+   choice that is the first mechanism in the product returning one member's name
+   to another. That is a different, unshipped branch with its own authorization,
+   and this board's quotation must not be read as retiring it.
+2. **Accepting this image does not canonise this composition.** The sheet
+   photographed here is the existing **event-first, dense utility** arrangement:
+   it opens on `Your event`, and Goals, Members and invites and Advanced follow
+   below the fold. Accepting a faithful reference to it does **not** make that
+   composition the final premium standard, and it does not override the
+   member-first priority. Nor does it bless the copy: the
+   **invite-not-ready sentence still incorrectly describes a usable link**
+   (finding 3 above). Both remain open product questions against the build, and
+   neither is fixed by editing this board.
