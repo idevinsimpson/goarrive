@@ -58,6 +58,16 @@ owner direction asked explicitly that Board 08 not inherit the wording.
 | `docs/design-target/review/page-02-move/before/BEFORE-goal-new-390x{844,640}.png` | a frozen **photograph of the route rendering**, committed in `02e24df` — the same commit as the batch-b README that calls the route unimplemented |
 | `apps/westayfit/tests-e2e/e5-goal-form.spec.ts` | exercises the form end to end: defaults, every validation message, the focus on the first refused field, Custom dates, the absent zone picker, the stored goal and the created screen's links |
 
+**Independently corroborated by the Director.** This board was authored from
+the sources above; the Director then reached the same reading from the same
+commit, in the Board 06 pixel verdict
+[`5784588305`](https://github.com/idevinsimpson/goarrive/pull/404#issuecomment-5784588305)
+(2026-09-22 21:37Z): *"the lower status panel still says /goals/new is unbuilt.
+At THIS SAME source commit, app/goals/new.tsx contains the working
+staging/emulator-gated goal-creation route, consistent with Board08 lock
+5771436211."* Board 06's own caption correction is W2's to make; nothing here
+was applied to it.
+
 What **is** unbuilt is the batch-b *redesign* of the route — the `TARGET-goal-*`
 drawings. They were never implemented, and in three places they are not what the
 lock locked either (below). Conflating "the drawing was never built" with "the
