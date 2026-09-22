@@ -14,6 +14,7 @@ Status: **CHECKPOINT-READY** — first deliverable complete; all three parts are
 | `journey-regression.md` | Join acceptance package: focused journey regression results, pinned to the source SHA. |
 | `e609c57-verification.md` | Verification of the hero "Try again" colour fix and the existing Progress/Home corrections. |
 | `pr-390-integration-plan.md` | Scratch integration test *plan* for PR #390 — prepared, not executed against any release branch. |
+| `combined-runtime-e609c57-e982ddc.md` | Deliverable 4: the isolated combined-runtime test of app `e609c57` + visibility `e982ddc`, and the one defect it found. |
 
 ## Rules this worker operates under
 
