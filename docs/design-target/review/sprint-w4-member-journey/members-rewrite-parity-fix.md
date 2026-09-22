@@ -119,9 +119,27 @@ and `/_expo/static/js` Content-Type rules the emulator config lacks:
 | `/_expo/static/js` bundles — Content-Type `application/javascript; charset=utf-8` | yes | **no** |
 
 This **predates** the members drift and is outside the bounded packet, so the parity test scopes
-to rewrites and says so in a closing comment rather than silently widening. Extending it to
-headers is a one-line change once the divergence is judged — but it should be judged, not
-assumed: the emulator may be serving different Content-Types than production for the JS bundles.
+to rewrites and says so in a closing comment rather than silently widening.
+
+**Judged, and closed as a seam.** The Product Director's acceptance of this fix
+(`5784102622`) rules: *do not widen #405 to repair the pre-existing `hosting.headers`
+divergence; record the missing emulator parity for the `/index.html` and
+`/_expo/static/js/**` headers as a known integration seam for **M10** unless it produces an
+observed failure.* No observed failure exists today — every check in this packet is green, and
+the divergence affects Content-Type headers the emulator omits, not routing. So it stays
+recorded here and in the parity test's closing comment, and the parity test stays scoped to
+rewrites. Extending it to headers remains a one-line change if M10 or an observed failure calls
+for it.
+
+## Status after review
+
+**#405 accepted for integration into the #390 visibility DRAFT branch only** (Product Director,
+`5784102622`), at this exact head `b1fc01b`. Integration is **L0's** to perform; W4 pushes
+nothing further to this branch. The acceptance authorizes no main merge, staging deploy, privacy
+release, rules/index/IAM change or production action.
+
+W4's next packet — the Join review-evidence set for `/join/[joinCode]` — is **gated**: it may
+begin only after L0 records the integration receipt. Not started.
 
 ## Constraints held
 
