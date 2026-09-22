@@ -49,12 +49,14 @@ board gets treated as accepted when only its source screens were:
    checked it line by line against the lock verdict (recorded in the board's
    README).
 3. **Independent board review** — the Program Director has visually reviewed
-   the rendered board itself. **Boards 00–06 + INDEX have it as of
+   the rendered board itself. **Boards 00–07 + INDEX have it as of
    2026-09-22** — Boards 00–05 + INDEX by Program Director verdict
    `5783373780`, a pixel review of the commit-pinned 1× review copies at
    `a912773` (*PASS as the canonical reconstructed 00–05 package*); Board 06
    by Creative Director verdict `5784845039` on PR #404, a pixel review of the
-   exported original at `d6aba97`. It clears this status for these
+   exported original at `d6aba97`; Board 07 by Creative Director verdict
+   `5785727716` on PR #416, a pixel review of the exported original at
+   `fe82c1e` (artifact `10723837867`, blob `df1a587`). It clears this status for these
    reconstructed artifacts only; it does not newly accept or stage the
    underlying app pages, and it authorises no deployment.
 
@@ -99,7 +101,7 @@ unaffected.
 | 04 | Progress | **REVIEWED** · independent board review passed 2026-09-22 (`5783373780`) | `5771310017` | accepted build (Phase A); dated history seam | [`board-04/…BOARD_04_PROGRESS_FINAL.png`](board-04/WE_STAY_FIT_NORTH_STAR_BOARD_04_PROGRESS_FINAL.png) | `a912773` | Five accepted Page 4 AFTER frames read in place. "Nothing finished yet" has no standalone accepted frame and is shown inside the partial-read frame, flagged. **2026-09-22 (W2, #399):** the `Running and finished` caption states the frame is the whole first viewport, uncropped, and why the card beneath is cut (P-2). No pixel changed. |
 | 05 | You | **REVIEWED** · independent board review passed 2026-09-22 (`5783373780`) | `5771338856` | accepted build | [`board-05/…BOARD_05_YOU_FINAL.png`](board-05/WE_STAY_FIT_NORTH_STAR_BOARD_05_YOU_FINAL.png) | `a912773` | Six accepted Page 5 AFTER frames read in place; every lock state has one. **2026-09-22 (W2, #399):** the board's own lead line no longer claims a *dominant* mark; the lock's quoted wording is unaltered and a differences panel records the gap (P-4). |
 | 06 | Create / join / auth | **REVIEWED** · independent board review passed 2026-09-22 (`5784845039`) | `5771368550` | current build review — identity accepted at `3562156` and captured later; `/join/[joinCode]` awaiting its page verdict; `/start-community` target redesign drawn, not implemented | [`board-06/…BOARD_06_CREATE_JOIN_AUTH_FINAL.png`](board-06/WE_STAY_FIT_NORTH_STAR_BOARD_06_CREATE_JOIN_AUTH_FINAL.png) | `d6aba97` | W2 (PR #404); reviewed from the exported original (artifact `10721560350`, blob `3f0b556`); the PNG's own footer still reads its submission label. |
-| 07 | Champion management | PENDING | `5771412585` | current Manage-sheet truth | — | — | Champion administration beyond the current sheet is an unbuilt seam. |
+| 07 | Champion management | **REVIEWED** · independent board review passed 2026-09-22 (`5785727716`) | `5771412585` | current Manage-sheet truth — the three Home frames are the accepted Page 1 captured later; the fourteen sheet frames are current build; the expanded-details / QR / screens paths are disclosed, not pictured | [`board-07/…BOARD_07_CHAMPION_MANAGEMENT_FINAL.png`](board-07/WE_STAY_FIT_NORTH_STAR_BOARD_07_CHAMPION_MANAGEMENT_FINAL.png) | `ee4e4f8` | W2 (PR #416); reviewed from the exported original (artifact `10723837867`, blob `df1a587`); the PNG's own footer still reads its submission label. Two annotations travel with it (board README): the lock's "member directory not built" line is source-scoped to `5356e3c` and does not retire the separate #390 work; the event-first dense sheet and its invite-not-ready caveat remain product findings, not a premium standard. Champion administration beyond the current sheet is an unbuilt seam. |
 | 08 | Goal setup | PENDING | `5771436211` | staging-only current-build truth | — | — | |
 | 09 | Lifecycle / history | PENDING | `5771469193` | lifecycle truth | — | — | |
 | 10 | Public display family | PENDING | `5771496484` | target | — | — | Device classes are design targets, not installed hardware. |
