@@ -1592,5 +1592,32 @@ Emulators only (`demo-wsf-local`), Chromium only.
 - **After every run:** artifacts and `test-results` cleaned.
 - **Logs:** retained, unfiltered, in the session's evidence directory (not committed).
 
-**Next:** L0's combined candidate (W4's Q3 head ⊕ W9's Q2 head ⊕ W8's
-freshness head on `f2f901a`), checked as one tree (`5800787974` §2).
+## 14.11 · A preview of the combined candidate, and SEAM-2c
+
+To find instrument surprises before the real candidate exists, I composed a
+local preview: `f2f901a` ⊕ W9 `a87cd3b` ⊕ W8 `eff65b0` ⊕ W4 `5c28e45`, as
+merge commits, never pushed (`6c98f485`, tree `77129e6a`). Results:
+
+- **SEAM-2 and SEAM-2b PASS** with W9's fix.
+- **SEAM-1 ×8 (390×844, 430×932), SEAM-3 and SEAM-4 still FAIL,** each at its own assertion. W4's successor had not landed.
+- **W9's `sprint-w9-community-list-address` and W8's `sprint-w8-community-freshness` both pass.**
+
+**A new test, SEAM-2c: Back and Forward around the click.** A fix for the address
+must not be bought with history. The test requires three things:
+
+1. the click adds exactly one entry;
+2. Back returns to the unconfirmed screen;
+3. Forward returns to the **list**, not to a bare `/` that opens the remembered older community.
+
+| build | result |
+|---|---|
+| old shell `05d2aef9` | PASS 2/2 |
+| BEFORE `5c28e45` | **FAIL 2/2**: Forward lands in `/community/<older>`, a further consequence of Q2 |
+| preview | PASS 2/2 |
+
+On the preview the click writes `pushState /?view=communities`, then
+`replaceState /?view=communities`, and `history.length` goes up by exactly 1.
+That is W9's `setParams` committing the address without adding an entry.
+
+**Next:** L0's combined candidate (W4's successor ⊕ W9's `a87cd3b` ⊕ W8's
+`eff65b0` on `f2f901a`), checked as one tree (`5800787974` §2, `5801193038`).

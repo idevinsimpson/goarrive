@@ -49,6 +49,8 @@ import {
  *   SEAM-1 390x640, 4 press methods          PASS ×4     PASS ×4          PASS  (see below)
  *   SEAM-2  list opt-in survives the click    PASS        FAIL             PASS  (Q2 — W9's)
  *   SEAM-2b reload with a remembered group    PASS        FAIL             PASS  (Q2 — W9's)
+ *   SEAM-2c Back / Forward around the click   PASS 2/2    FAIL 2/2         PASS  (Q2 — W9's; Forward
+ *                                                                               opens the older group)
  *   SEAM-3  unverified gate way out           PASS        FAIL             PASS  (M4 — ruling pending)
  *   SEAM-4  leaving mid-create                FAIL        FAIL             PASS  (M5 — ruling pending)
  *   SEAM-1 CONTROL ×8 (reader can see a pass)  —           PASS ×8          PASS
@@ -58,6 +60,11 @@ import {
  *                                             top bar)
  *   FRAMES calibration on d467754             PASS        PASS             PASS
  *   FRAMES delivery (WSF_W7_DELIVERY_SHA)     —           PASS on 5c28e45  PASS
+ *
+ * PREVIEW (local, never pushed): f2f901a ⊕ W9 a87cd3b ⊕ W8 eff65b0 ⊕ 5c28e45
+ * (6c98f485, tree 77129e6a). SEAM-2, 2b and 2c PASS there with W9's fix;
+ * SEAM-1 at 390x844 / 430x932, SEAM-3 and SEAM-4 still FAIL, as W4's
+ * successor has not landed. W9's and W8's own specs pass on it.
  *
  * SEAM-1 at 390x640 cannot fail first: at every scroll position where the
  * whole Create button is on screen, the name field's bottom is at y ≤ −84, so
@@ -469,6 +476,57 @@ test.describe('SEAM-2/3/4', () => {
     await page.waitForTimeout(2_500);
     expect(new URL(page.url()).pathname, 'the reload opened the remembered older community').toBe('/');
     await expect(page.getByTestId('wsf-home-my-list').last()).toBeVisible({ timeout: 25_000 });
+  });
+
+  /**
+   * SEAM-2c — BACK AND FORWARD AROUND THE CLICK. The fix for Q2 must not buy
+   * the address with history: the click adds exactly one entry, Back returns
+   * to the unconfirmed screen the member left (its "Check your communities"
+   * still there), and Forward returns to the LIST — not to a bare "/" that
+   * opens the remembered older community. History writes are traced.
+   */
+  test('SEAM-2c after the click, Back returns to the unconfirmed screen and Forward to the list', async ({ page }) => {
+    test.setTimeout(300_000);
+    await page.addInitScript(() => {
+      const w = window as unknown as { __w7hist: string[] };
+      w.__w7hist = [];
+      for (const m of ['pushState', 'replaceState'] as const) {
+        const orig = History.prototype[m];
+        History.prototype[m] = function (this: History, ...args: [unknown, string, (string | URL | null)?]) {
+          w.__w7hist.push(`${m} ${String(args[2] ?? '')}`);
+          return orig.apply(this, args as never);
+        };
+      }
+    });
+    const me = await person('s2c');
+    const stamp = stampId();
+    const older = `w7bl-old-${stamp}`;
+    await seedCommunity({ groupId: older, displayName: 'Older Community', joinPolicy: 'private', members: [{ uid: me.uid, role: 'member' }] });
+    await seedCommunity({ groupId: `w7bl-new-${stamp}`, displayName: 'Newer Community', joinPolicy: 'private', members: [{ uid: me.uid, role: 'member' }] });
+    await signInVia(page, me.email, me.password);
+    await page.evaluate(({ uid, gid }) => localStorage.setItem(`wsf.currentCommunity.${uid}`, gid), { uid: me.uid, gid: older });
+    await openForm(page);
+    await toUnconfirmed(page, 'W7 Barless Back Forward');
+    const before = await page.evaluate(() => history.length);
+    await page.evaluate(() => {
+      (window as unknown as { __w7hist: string[] }).__w7hist.length = 0;
+    });
+    await page.getByTestId('wsf-start-check-communities').click();
+    await expect(page.getByTestId('wsf-home-my-list').last()).toBeVisible({ timeout: 25_000 });
+    await page.waitForTimeout(1_500);
+    const ops = await page.evaluate(() => (window as unknown as { __w7hist: string[] }).__w7hist);
+    test.info().annotations.push({ type: 'history', description: JSON.stringify(ops) });
+    expect(await page.evaluate(() => history.length), `the click added other than one entry: ${JSON.stringify(ops)}`).toBe(before + 1);
+
+    await page.goBack();
+    await expect(page.getByTestId('wsf-start-check-communities').last()).toBeVisible({ timeout: 20_000 });
+    expect(new URL(page.url()).pathname, 'Back did not return to the unconfirmed screen').toBe('/start-community');
+
+    await page.goForward();
+    await page.waitForTimeout(2_500);
+    expect(new URL(page.url()).pathname, 'Forward opened a community instead of the list').toBe('/');
+    expect(new URL(page.url()).search, 'Forward lost the list opt-in').toBe('?view=communities');
+    await expect(page.getByTestId('wsf-home-my-list').last()).toBeVisible({ timeout: 20_000 });
   });
 
   /**
