@@ -256,6 +256,57 @@ test.describe('390x844 short and blurred', () => {
   });
 });
 
+/**
+ * R1 — THE COMMUNITY A MEMBER LEFT MID-CREATE, SHOWN WHEN THEY START AGAIN.
+ * ONE FRAME, 390x844 ONLY (Director `5803218763`: capture only the changed
+ * outcome). The real journey: Create, "Back to home" while the create is held,
+ * the create commits, then Home's "Start a community".
+ */
+test.describe('390x844 created after leaving', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the community left mid-create is shown by name when the member starts again', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await signedIn(page, true);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
+
+    const gate: { release: () => void } = { release: () => {} };
+    const held = new Promise<void>((resolve) => {
+      gate.release = resolve;
+    });
+    await page.route(CREATE_URL, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await held;
+      await route.continue().catch(() => undefined);
+    });
+    await page.getByTestId('wsf-start-name').fill(NAME);
+    await page.getByTestId('wsf-start-submit').click();
+    await page.waitForTimeout(400);
+    await page.getByTestId('wsf-start-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+    gate.release();
+    await expect(page.getByTestId('wsf-start-created')).toHaveCount(1, { timeout: 30_000 });
+    await page.unroute(CREATE_URL);
+
+    await page.getByTestId('wsf-home-start').last().click();
+    const card = page.locator('[data-testid="wsf-start-created"]:visible');
+    await expect(card).toBeVisible({ timeout: 25_000 });
+    await expect(card).toContainText('It was created after you left this page.');
+    await expect(page.locator('[data-testid="wsf-start-open"]:visible')).toHaveText(`Open ${NAME}`);
+    await expect(page.locator('[data-testid="wsf-start-another"]:visible')).toHaveText(
+      'Start another community',
+    );
+    await expect(page.locator('[data-testid="wsf-start-submit"]:visible')).toHaveCount(0);
+    await toTop(page);
+    await saveFrame(page, path.join(OUT, 'AFTER-start-created-after-leaving-390x844.png'));
+  });
+});
+
 test.afterAll(() => {
   if (!CAPTURE_FRAMES) {
     // eslint-disable-next-line no-console

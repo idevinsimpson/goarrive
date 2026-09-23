@@ -29,8 +29,15 @@ export type CreateOutcome =
   | { kind: 'refused'; message: string; recover: 'form' | 'profile' }
   /** No answer we can trust. The community may or may not exist. */
   | { kind: 'unconfirmed' }
-  /** The callable returned a usable id; only getting there failed. */
-  | { kind: 'created'; groupId: string; displayName: string };
+  /**
+   * The callable returned a usable id, and the member is looking at this card
+   * rather than at the community. `via` says why, because the card must not
+   * claim a failure that did not happen:
+   * - `unopened`: they stayed, and getting them there failed;
+   * - `left`: they left this page before the create landed, so nothing tried
+   *   to open it (R1).
+   */
+  | { kind: 'created'; groupId: string; displayName: string; via: 'unopened' | 'left' };
 
 /**
  * The code the server named, or null.
@@ -136,4 +143,74 @@ export function nameProblem(raw: string): 'short' | 'long' | null {
   if (length < NAME_MIN_LENGTH) return 'short';
   if (length > NAME_MAX_LENGTH) return 'long';
   return null;
+}
+
+/**
+ * R1 — A CONFIRMED COMMUNITY THE MEMBER HAS NOT SEEN YET.
+ *
+ * A member who leaves mid-create stays where they went (M5), so the create can
+ * land with nobody looking. Home read its list before the commit and still
+ * offers "Start a community", and without this the form it opens is blank: a
+ * silent second community. So a confirmed create that landed while its form
+ * was not the screen in front of the member is remembered here, and a
+ * /start-community for the SAME account shows that community by name before
+ * it offers a blank form.
+ *
+ * - Confirmed only. An unconfirmed or refused attempt never lands here; the
+ *   uncertainty and no-auto-retry behaviour is unchanged.
+ * - One account, one sign-in. It is remembered only if the account that asked
+ *   is still the one signed in when the confirmation arrives, it is read only
+ *   for that uid, and it is dropped on any sign-out or account change, so it
+ *   can never be shown across accounts or resurface later as if current.
+ * - Memory only. Module state, never persisted. A reload clears it, and a
+ *   reload is also what makes Home read its list again.
+ * - Cleared by the member: opening the community, or deliberately starting
+ *   another one.
+ */
+type UnacknowledgedCreate = { uid: string; groupId: string; displayName: string };
+
+let unacknowledged: UnacknowledgedCreate | null = null;
+const listeners = new Set<() => void>();
+
+export function rememberUnacknowledgedCreate(entry: UnacknowledgedCreate): void {
+  unacknowledged = { ...entry };
+  for (const listener of Array.from(listeners)) listener();
+}
+
+/** The confirmed community `uid` has not acknowledged yet, or null. */
+export function unacknowledgedCreateFor(
+  uid: string | null,
+): { groupId: string; displayName: string } | null {
+  if (!unacknowledged || uid === null) return null;
+  if (unacknowledged.uid !== uid) {
+    // Another account is here. Its creator's result is dropped, not kept for
+    // later, so it cannot be shown to anyone else.
+    unacknowledged = null;
+    return null;
+  }
+  return { groupId: unacknowledged.groupId, displayName: unacknowledged.displayName };
+}
+
+/**
+ * Drops the note unless it belongs to `uid`, the account signed in now (null
+ * when signed out). Called on every sign-in change, so a note lives only while
+ * the account that made it stays signed in.
+ */
+export function dropUnacknowledgedCreateUnlessFor(uid: string | null): void {
+  if (unacknowledged && unacknowledged.uid !== uid) unacknowledged = null;
+}
+
+/** Clears the note — only if it is `groupId`'s, when one is given. */
+export function forgetUnacknowledgedCreate(groupId?: string): void {
+  if (!unacknowledged) return;
+  if (groupId !== undefined && unacknowledged.groupId !== groupId) return;
+  unacknowledged = null;
+}
+
+/** Called whenever a new note is remembered. Returns the unsubscribe. */
+export function subscribeUnacknowledgedCreate(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }

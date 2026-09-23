@@ -514,6 +514,82 @@ test.describe('start-community outcomes', () => {
     expect(await page.getByTestId('wsf-start-outcome').count()).toBe(0);
     expect(await page.getByTestId('wsf-start-error').count()).toBe(0);
   });
+
+  /**
+   * R1 — A COMMUNITY CREATED AFTER THE MEMBER LEFT (Director `5803218763`).
+   *
+   * W7's journey (#434 `5803189254`): a member with no community presses
+   * Create, leaves by "Back to home" while the create is held, and the create
+   * commits. M5 keeps them on Home, and Home, read before the commit, still
+   * offers "Start a community". On 9f27c6e that opened a BLANK form, which made
+   * a second community. Now the community that exists is shown, by name,
+   * before any blank form can submit; there is one write until the member
+   * deliberately starts another, which is then an ordinary second community.
+   * Not proved by Start vanishing: Home is not changed, and Start is pressed.
+   */
+  test('after leaving mid-create, Start shows the confirmed community by name before any blank form; a second is only deliberate', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    const me = await member(true);
+    const creates = countCreates(page);
+    await signInVia(page, me.email, me.password);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
+
+    const gate: { release: () => void } = { release: () => {} };
+    const held = new Promise<void>((resolve) => {
+      gate.release = resolve;
+    });
+    await page.route(CREATE_URL, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await held;
+      await route.continue().catch(() => undefined);
+    });
+
+    await fillValid(page, 'Left Then Told');
+    await page.getByTestId('wsf-start-submit').click();
+    await page.waitForTimeout(400);
+    await page.getByTestId('wsf-start-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+    gate.release();
+    // The form they left has received the confirmation (it is hidden, under Home).
+    await expect(page.getByTestId('wsf-start-created')).toHaveCount(1, { timeout: 30_000 });
+    await page.unroute(CREATE_URL);
+
+    // M5 is preserved: nothing moved them, and one create went.
+    expect(new URL(page.url()).pathname, 'the late success moved the member after they left').toBe('/');
+    expect(creates()).toBe(1);
+    expect(await communityNames(me.uid)).toEqual(['Left Then Told']);
+
+    // What Home offers next, pressed as a member would.
+    await page.getByTestId('wsf-home-start').last().click();
+    const card = page.locator('[data-testid="wsf-start-created"]:visible');
+    await expect(card, 'a blank form was offered instead of the community that exists').toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(card).toContainText('It was created after you left this page.');
+    await expect(card).not.toContainText('open it automatically');
+    await expect(page.locator('[data-testid="wsf-start-open"]:visible')).toHaveText('Open Left Then Told');
+    await expect(
+      page.locator('[data-testid="wsf-start-submit"]:visible'),
+      'a blank Create is offered beside the community that exists',
+    ).toHaveCount(0);
+    expect(creates(), 'showing the community sent something').toBe(1);
+    expect(await communityNames(me.uid), 'more than one community exists').toEqual(['Left Then Told']);
+
+    // A second community, only on purpose.
+    await page.locator('[data-testid="wsf-start-another"]:visible').click();
+    const name = page.locator('[data-testid="wsf-start-name"]:visible');
+    await expect(name).toHaveValue('');
+    await name.fill('Second On Purpose');
+    await page.locator('[data-testid="wsf-start-submit"]:visible').click();
+    await page.waitForURL(/\/community\/[^/]+$/, { timeout: 30_000 });
+    expect(creates()).toBe(2);
+    expect((await communityNames(me.uid)).sort()).toEqual(['Left Then Told', 'Second On Purpose']);
+  });
 });
 
 /*

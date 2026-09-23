@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   callableCode,
   classifyCreateFailure,
+  forgetUnacknowledgedCreate,
   nameLongMessage,
+  rememberUnacknowledgedCreate,
   nameProblem,
   usableGroupId,
   NAME_MAX_LENGTH,
@@ -31,7 +33,25 @@ import {
  */
 
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
-vi.mock('../src/firebase', () => ({ getFirebaseFunctions: () => ({}) }));
+vi.mock('../src/firebase', () => ({
+  getFirebaseFunctions: () => ({}),
+  // The live signed-in user, which R1 reads when a confirmation arrives.
+  getFirebaseAuth: () => ({ currentUser: authUser ? { uid: authUser.uid } : null }),
+}));
+/** Sign-in listeners the route registers; tests call them to sign out or switch. */
+const signInListeners: ((u: { uid: string } | null) => void)[] = [];
+vi.mock('firebase/auth', () => ({
+  onAuthStateChanged: (_auth: unknown, listener: (u: { uid: string } | null) => void) => {
+    signInListeners.push(listener);
+    listener(authUser ? { uid: authUser.uid } : null);
+    return () => {};
+  },
+}));
+/** The device's signed-in account changes: what the route sees, and what it is told. */
+function signInAs(uid: string | null): void {
+  authUser = uid ? { uid, emailVerified: true } : null;
+  for (const listener of signInListeners) listener(authUser ? { uid: authUser.uid } : null);
+}
 
 const replace = vi.fn();
 /*
@@ -76,6 +96,8 @@ beforeEach(() => {
   callable.mockReset();
   authUser = { uid: 'member-1', emailVerified: true };
   focused = true;
+  // R1's note is module memory, like the real page's; each test starts clean.
+  forgetUnacknowledgedCreate();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -498,6 +520,296 @@ describe('leaving the name field short', () => {
     expect(look('wsf-start-name'), 'the press explained the name but did not mark the field').toBe(invalid);
     expect(document.activeElement?.getAttribute('data-testid')).toBe('wsf-start-name');
     expect(callable).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  R1 — A COMMUNITY CREATED AFTER THE MEMBER LEFT (Director `5803218763`).
+
+  M5 keeps a member who left mid-create where they went. The create can then
+  land with nobody looking, and Home, read before the commit, still offers
+  "Start a community". These tests stand a SECOND, fresh form beside the first
+  (which stays mounted and hidden, as on the real stack) and require the
+  confirmed community to be shown by name before a blank form can submit, and
+  only to the account that made it. On e653330 the fresh form is blank.
+*/
+describe('R1: a community created after the member left', () => {
+  const extras: { root: Root; container: HTMLDivElement }[] = [];
+
+  afterEach(() => {
+    for (const e of extras.splice(0)) {
+      act(() => e.root.unmount());
+      e.container.remove();
+    }
+  });
+
+  type Screen = {
+    q: (id: string) => HTMLElement | null;
+    type: (id: string, value: string) => void;
+    click: (id: string) => Promise<void>;
+    text: () => string;
+  };
+
+  /** Another /start-community, mounted beside the first. */
+  function openAnother(): Screen {
+    const c = document.createElement('div');
+    document.body.appendChild(c);
+    const r = createRoot(c);
+    extras.push({ root: r, container: c });
+    act(() => {
+      r.render(<StartCommunity />);
+    });
+    const q = (id: string) => c.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+    return {
+      q,
+      type: (id, value) => {
+        const el = q(id) as HTMLInputElement | null;
+        if (!el) throw new Error(`${id} is not rendered`);
+        act(() => {
+          Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(el, value);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      },
+      click: async (id) => {
+        const el = q(id);
+        if (!el) throw new Error(`${id} is not rendered`);
+        await act(async () => {
+          el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+      },
+      text: () => c.textContent ?? '',
+    };
+  }
+
+  /** The first form: press Create, leave, and let the create land. */
+  async function createThenLeave(name = 'Left First', groupId = 'grp-first'): Promise<void> {
+    let settle: (v: unknown) => void = () => {};
+    callable.mockReturnValueOnce(new Promise((r) => { settle = r; }));
+    render();
+    type('wsf-start-name', name);
+    await click('wsf-start-submit');
+    focused = false; // "Back to home": still mounted, no longer in front.
+    await act(async () => { settle({ data: { groupId } }); await Promise.resolve(); });
+    focused = true; // whatever is opened next is in front
+  }
+
+  it('a fresh form for the same account shows that community by name, with Open, and no blank Create', async () => {
+    await createThenLeave();
+    const again = openAnother();
+    expect(again.q('wsf-start-created'), 'the fresh form was blank: a silent second community').not.toBeNull();
+    expect(again.q('wsf-start-open')?.textContent).toContain('Open Left First');
+    expect(again.text()).toContain('Left First');
+    expect(again.q('wsf-start-submit'), 'a blank Create was offered before the community was shown').toBeNull();
+    expect(callable, 'showing it sent anything').toHaveBeenCalledTimes(1);
+    expect(replace, 'the member was moved').not.toHaveBeenCalled();
+  });
+
+  it('says truthfully why it is showing the card, on the new form and on the one they left', async () => {
+    await createThenLeave();
+    // The form they left, as browser Back finds it (R1b).
+    const left = byTestId('wsf-start-created')?.textContent ?? '';
+    expect(left, 'the card claims an open that nothing attempted').not.toMatch(/couldn.t open it automatically/i);
+    expect(left).toContain('It was created after you left this page.');
+    const again = openAnother();
+    const shown = again.q('wsf-start-created')?.textContent ?? '';
+    expect(shown, 'the new form did not show the card at all').toContain('It was created after you left this page.');
+  });
+
+  it('is never shown to another account, and another account finding it drops it', async () => {
+    await createThenLeave();
+    authUser = { uid: 'member-2', emailVerified: true };
+    const other = openAnother();
+    expect(other.q('wsf-start-created'), 'another account was shown this community').toBeNull();
+    expect(other.q('wsf-start-submit')).not.toBeNull();
+    authUser = { uid: 'member-1', emailVerified: true };
+    const back = openAnother();
+    expect(back.q('wsf-start-created'), 'the note survived another account reading it').toBeNull();
+  });
+
+  it('is cleared by Open: the form after that is an ordinary blank one', async () => {
+    await createThenLeave();
+    const again = openAnother();
+    await again.click('wsf-start-open');
+    expect(replace).toHaveBeenCalledWith('/community/grp-first');
+    const later = openAnother();
+    expect(later.q('wsf-start-created')).toBeNull();
+    expect(later.q('wsf-start-submit')).not.toBeNull();
+  });
+
+  it('a deliberate "Start another community" gives an empty form, and that second create goes', async () => {
+    await createThenLeave();
+    const again = openAnother();
+    await again.click('wsf-start-another');
+    expect((again.q('wsf-start-name') as HTMLInputElement | null)?.value).toBe('');
+    callable.mockReturnValueOnce(Promise.resolve({ data: { groupId: 'grp-second' } }));
+    again.type('wsf-start-name', 'Second On Purpose');
+    await again.click('wsf-start-submit');
+    expect(callable, 'the deliberate second create did not go').toHaveBeenCalledTimes(2);
+    expect(replace).toHaveBeenCalledWith('/community/grp-second');
+    // And the note is gone: a third form is blank.
+    expect(openAnother().q('wsf-start-created')).toBeNull();
+  });
+
+  it('on the form they left, "Start another community" releases the held guard, so Create works', async () => {
+    await createThenLeave();
+    await click('wsf-start-another');
+    // The form that still held 'Left First' is the one where clearing matters.
+    expect((byTestId('wsf-start-name') as HTMLInputElement | null)?.value, 'the old name was left in the form').toBe('');
+    callable.mockReturnValueOnce(Promise.resolve({ data: { groupId: 'grp-again' } }));
+    type('wsf-start-name', 'Back Then Again');
+    await click('wsf-start-submit');
+    expect(callable, 'Create was dead after a deliberate choice').toHaveBeenCalledTimes(2);
+  });
+
+  it('a form already open when the confirmation lands switches to the community before it can submit', async () => {
+    let settle: (v: unknown) => void = () => {};
+    callable.mockReturnValueOnce(new Promise((r) => { settle = r; }));
+    render();
+    type('wsf-start-name', 'Came Back Early');
+    await click('wsf-start-submit');
+    focused = false;
+    const early = openAnother(); // opened while the first create is still out
+    expect(early.q('wsf-start-submit')).not.toBeNull();
+    await act(async () => { settle({ data: { groupId: 'grp-early' } }); await Promise.resolve(); });
+    expect(early.q('wsf-start-created'), 'the open form stayed blank after the community was confirmed').not.toBeNull();
+    expect(early.q('wsf-start-open')?.textContent).toContain('Open Came Back Early');
+    expect(early.q('wsf-start-submit')).toBeNull();
+    expect(callable, 'showing it sent anything').toHaveBeenCalledTimes(1);
+  });
+
+  it('a form whose own create is out is left to its own result', async () => {
+    let settleFirst: (v: unknown) => void = () => {};
+    let settleSecond: (v: unknown) => void = () => {};
+    callable
+      .mockReturnValueOnce(new Promise((r) => { settleFirst = r; }))
+      .mockReturnValueOnce(new Promise((r) => { settleSecond = r; }));
+    render();
+    type('wsf-start-name', 'First Out');
+    await click('wsf-start-submit');
+    focused = false;
+    const second = openAnother();
+    second.type('wsf-start-name', 'Second Out');
+    await second.click('wsf-start-submit');
+    await act(async () => { settleFirst({ data: { groupId: 'grp-a' } }); await Promise.resolve(); });
+    expect(second.q('wsf-start-created'), 'a form with its own create out was taken over').toBeNull();
+    focused = true;
+    await act(async () => { settleSecond({ data: { groupId: 'grp-b' } }); await Promise.resolve(); });
+    expect(replace).toHaveBeenCalledWith('/community/grp-b');
+  });
+
+  it('a confirmation after the form is gone (browser Back) paints nothing, and the next form shows it', async () => {
+    let settle: (v: unknown) => void = () => {};
+    callable.mockReturnValueOnce(new Promise((r) => { settle = r; }));
+    const gone = openAnother();
+    gone.type('wsf-start-name', 'Gone Before');
+    await gone.click('wsf-start-submit');
+    const leaving = extras.pop()!;
+    act(() => leaving.root.unmount());
+    leaving.container.remove();
+    await act(async () => { settle({ data: { groupId: 'grp-gone' } }); await Promise.resolve(); });
+    expect(replace, 'the member was moved after the form was gone').not.toHaveBeenCalled();
+    const next = openAnother();
+    expect(next.q('wsf-start-created'), 'the next form was blank: the confirmation was lost with the form').not.toBeNull();
+    expect(next.q('wsf-start-open')?.textContent).toContain('Open Gone Before');
+  });
+
+  it('only a confirmed create is carried: an unconfirmed one leaves the next form blank', async () => {
+    let fail: (e: unknown) => void = () => {};
+    callable.mockReturnValueOnce(new Promise((_, rej) => { fail = rej; }));
+    render();
+    type('wsf-start-name', 'Unknown Fate');
+    await click('wsf-start-submit');
+    focused = false;
+    await act(async () => { fail(callableError('unavailable')); await Promise.resolve(); });
+    focused = true;
+    expect(openAnother().q('wsf-start-created')).toBeNull();
+  });
+
+  it('a press in the moment before the open form re-renders sends nothing and shows the community', async () => {
+    const early = openAnother();
+    early.type('wsf-start-name', 'Pressed Too Soon');
+    // The first form's confirmation lands (as its own continuation would
+    // record it) and, before React has shown it here, the member presses.
+    rememberUnacknowledgedCreate({ uid: 'member-1', groupId: 'grp-race', displayName: 'Left Race' });
+    await early.click('wsf-start-submit');
+    expect(callable, 'the press sent a second create past the confirmed first').not.toHaveBeenCalled();
+    expect(early.q('wsf-start-open')?.textContent).toContain('Open Left Race');
+  });
+
+  it('once shown on the screen in front, it is acknowledged: the next Start is an ordinary blank form', async () => {
+    await createThenLeave();
+    expect(openAnother().q('wsf-start-created')).not.toBeNull();
+    const next = openAnother();
+    expect(next.q('wsf-start-created'), 'the same card came back after the member had seen it').toBeNull();
+    expect(next.q('wsf-start-submit')).not.toBeNull();
+  });
+
+  /*
+    THE ACCOUNT BOUNDS, INCLUDING AN OLD REQUEST THAT COMPLETES AFTER AN
+    ACCOUNT CHANGE (Director `5803485378`). The note is remembered only if the
+    account that asked is still the one signed in when the confirmation
+    arrives; any sign-out or account change drops a note already kept.
+  */
+  it('a confirmation that arrives after another account signed in is kept for nobody', async () => {
+    let settle: (v: unknown) => void = () => {};
+    callable.mockReturnValueOnce(new Promise((r) => { settle = r; }));
+    render();
+    type('wsf-start-name', 'Asked By One');
+    await click('wsf-start-submit');
+    focused = false;
+    signInAs('member-2');
+    act(() => {
+      root.render(<StartCommunity />);
+    });
+    await act(async () => { settle({ data: { groupId: 'grp-one' } }); await Promise.resolve(); });
+    // Back to the account that asked, with nothing opened in between: the old
+    // request must not surface now as if it were current.
+    signInAs('member-1');
+    expect(openAnother().q('wsf-start-created'), 'the old request resurfaced for its account later').toBeNull();
+    signInAs('member-2');
+    expect(openAnother().q('wsf-start-created'), 'the new account was shown the old account’s community').toBeNull();
+  });
+
+  it('the same after the form is gone: a late confirmation for a signed-out account is kept for nobody', async () => {
+    let settle: (v: unknown) => void = () => {};
+    callable.mockReturnValueOnce(new Promise((r) => { settle = r; }));
+    const gone = openAnother();
+    gone.type('wsf-start-name', 'Gone Then Switched');
+    await gone.click('wsf-start-submit');
+    const leaving = extras.pop()!;
+    act(() => leaving.root.unmount());
+    leaving.container.remove();
+    signInAs('member-2');
+    await act(async () => { settle({ data: { groupId: 'grp-gone2' } }); await Promise.resolve(); });
+    signInAs('member-1');
+    expect(openAnother().q('wsf-start-created'), 'the old request resurfaced for its account later').toBeNull();
+    signInAs('member-2');
+    expect(openAnother().q('wsf-start-created'), 'the new account was shown the old account’s community').toBeNull();
+  });
+
+  it('signing out drops a note already kept, so it does not come back on the next sign-in', async () => {
+    await createThenLeave();
+    signInAs(null);
+    signInAs('member-1');
+    expect(openAnother().q('wsf-start-created'), 'the note outlived the sign-out').toBeNull();
+  });
+
+  it('another account signing in drops a note already kept, before any form is opened', async () => {
+    await createThenLeave();
+    signInAs('member-2');
+    signInAs('member-1');
+    expect(openAnother().q('wsf-start-created'), 'the note outlived another account’s sign-in').toBeNull();
+  });
+
+  it('the navigation-failure card keeps its own copy and offers no second create', async () => {
+    replace.mockImplementation(() => {
+      throw new Error('router is not mounted');
+    });
+    await submitWith(Promise.resolve({ data: { groupId: 'grp-stayed' } }));
+    expect(byTestId('wsf-start-created')?.textContent).toContain('We couldn’t open it automatically.');
+    expect(byTestId('wsf-start-another')).toBeNull();
+    // The member stayed, so nothing is remembered for a later form.
+    expect(openAnother().q('wsf-start-created')).toBeNull();
   });
 });
 
