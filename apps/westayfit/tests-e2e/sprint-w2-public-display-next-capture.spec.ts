@@ -230,9 +230,16 @@ for (const [cls, viewport, expectedLayout] of [
 /* ──────────────────── PROPOSED TARGET — the gated preview ─────────────────── */
 
 test.describe('PROPOSED TARGET · the gated preview', () => {
-  // Wide enough that a 1920 frame is laid out at its real width rather than
-  // squeezed: the frame is screenshotted by testID, not by viewport.
-  test.use({ viewport: { width: 2100, height: 1200 }, deviceScaleFactor: 1 });
+  /*
+    THE VIEWPORT MUST CONTAIN THE TALLEST FRAME, not merely the widest.
+
+    At 1200 tall the 1280-tall portrait frame was taller than the window, and
+    Playwright's element screenshot returned the overflow as a blank white
+    band — the seam block was laid out correctly and simply never painted.
+    That looked exactly like a clipped layout and was not one, so the height
+    is now larger than any frame and the precondition is asserted below.
+  */
+  test.use({ viewport: { width: 2100, height: 1500 }, deviceScaleFactor: 1 });
 
   test('six proposed frames, each asserted before it is photographed', async ({ page }) => {
     test.setTimeout(240_000);
@@ -250,6 +257,9 @@ test.describe('PROPOSED TARGET · the gated preview', () => {
         expect(box, `${treatment}/${cls} must have a box`).not.toBeNull();
         expect(Math.round(box!.width)).toBe(size.width);
         expect(Math.round(box!.height)).toBe(size.height);
+        // A frame taller than the window comes back with an unpainted band.
+        const view = page.viewportSize()!;
+        expect(size.height, 'the viewport must contain the whole frame').toBeLessThanOrEqual(view.height);
 
         if (treatment === 'refused') {
           // No context, no total, no mark, no list, and no seam: there is
