@@ -209,7 +209,7 @@ export default function PrivacySettingsScreen() {
             */}
             {!nameOn && activityOn ? (
               <Text style={st.note} testID={`wsf-privacy-note-${r.groupId}`}>
-                Your activity appears as “A member.” Your effort still counts toward the total.
+                Your activity appears as “Anonymous member.” Your effort still counts toward the total.
               </Text>
             ) : null}
             {!activityOn ? (

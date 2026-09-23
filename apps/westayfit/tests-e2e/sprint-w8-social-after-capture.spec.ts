@@ -3,7 +3,6 @@ import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 
 import {
-  firestoreWrite,
   seedActiveGoal,
   seedCommunity,
   seedMembership,
@@ -11,8 +10,11 @@ import {
   seedVerifiedUser,
   signInVia,
   stampId,
-  tsField,
 } from './helpers/mobile';
+import {
+  seedContribution,
+  seedMembershipWithVisibility,
+} from './sprint-w8-social-fixture';
 
 /**
  * ACTUAL IMPLEMENTATION AFTER for the social/community presence lane.
@@ -45,56 +47,6 @@ test.skip(
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
   '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-
-/**
- * A membership carrying an EXPLICIT privacy choice.
- *
- * Written with the same field names and literal values `wsfSetCommunityVisibility`
- * writes, because a fixture in any other shape would be evidence of a screen
- * reading data the product never produces.
- */
-async function seedMembershipWithVisibility(
-  groupId: string,
-  uid: string,
-  role: 'foundingChampion' | 'member',
-  vis: { name?: 'visible' | 'private'; activity?: 'visible' | 'private' },
-): Promise<void> {
-  const now = new Date();
-  const fields: Record<string, unknown> = {
-    groupId: { stringValue: groupId },
-    userId: { stringValue: uid },
-    role: { stringValue: role },
-    membershipStatus: { stringValue: 'active' },
-    createdAt: tsField(now),
-    updatedAt: tsField(now),
-  };
-  if (vis.name) fields.communityNameVisibility = { stringValue: vis.name };
-  if (vis.activity) fields.communityActivityVisibility = { stringValue: vis.activity };
-  await firestoreWrite(`wsfMemberships/${groupId}_${uid}`, fields as never);
-}
-
-/** A contribution, written exactly the way wsfContribute writes one. */
-async function seedContribution(
-  groupId: string,
-  goalId: string,
-  uid: string,
-  count: number,
-  minutesAgo: number,
-): Promise<void> {
-  const attemptId = stampId();
-  const at = new Date(Date.now() - minutesAgo * 60_000);
-  await firestoreWrite(`wsfContributions/${goalId}_${uid}_${attemptId}`, {
-    goalId: { stringValue: goalId },
-    attemptId: { stringValue: attemptId },
-    userId: { stringValue: uid },
-    count: { integerValue: String(count) },
-    shardIndex: { integerValue: '0' },
-    unit: { stringValue: 'squats' },
-    communityGroupId: { stringValue: groupId },
-    crossedTarget: { booleanValue: false },
-    createdAt: tsField(at),
-  } as never);
-}
 
 test('the social surfaces, as the product actually renders them', async ({
   browser,

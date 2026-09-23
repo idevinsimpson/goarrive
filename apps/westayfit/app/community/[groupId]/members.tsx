@@ -45,11 +45,19 @@ import { MEMBER_TAB_BAR_BODY } from '../../../src/ui/MemberTabBar';
  * privacy was the page title, the first card and the footer. The guarantee does
  * not need proving on screen; it is enforced in the callable.
  *
- * THE COUNT LINE STATES *THAT* SOME MEMBERS ARE UNLISTED, NEVER *HOW MANY*.
- * `memberCount` covers every active member including the private ones, so the
- * difference between it and the rows is derivable — that residual is
- * unavoidable in any directory. What the product declines to do is perform that
- * subtraction for the reader and label its result.
+ * THE PAGE DOES NOT TALK ABOUT PRIVACY WHILE IT IS INHABITED. The subtitle is
+ * the member count and nothing else: `memberCount` covers every active member
+ * including the private ones, so the difference between it and the rows stays
+ * derivable — that residual is unavoidable in any directory — but the product
+ * neither performs that subtraction for the reader nor narrates it.
+ *
+ * An earlier revision carried `· some choose not to be listed` here and a
+ * `Your visibility here · Settings` row beneath the list. Both were removed on
+ * the Director's AFTER review: privacy language was defining a page whose
+ * subject is people, and the settings path belongs to You. The ONE place the
+ * subject really is absence — every member private, so the list is empty — keeps
+ * a single quiet explanation, because there a silent empty panel would be the
+ * confusing thing.
  *
  * NOT DRAWN, each because it would leak or mislead: no count beside Show more;
  * no joined date; no tap target on a row (there is nothing behind a person);
@@ -151,13 +159,6 @@ export default function MembersScreen() {
     }
   }, [cursor, groupId, loadingMore]);
 
-  /*
-    Shown only when somebody is actually unlisted. Saying it unconditionally
-    would be narration; saying it when the list is complete would be false.
-  */
-  const someUnlisted =
-    memberCount !== null && cursor === null && members.length < memberCount;
-
   return (
     <ScrollView style={st.screen} contentContainerStyle={st.body} testID="wsf-members-screen">
       <View style={st.chrome}>
@@ -177,12 +178,11 @@ export default function MembersScreen() {
       </View>
 
       <View style={st.identity}>
-        <Text style={st.eyebrow}>Members</Text>
-        <Text style={st.title}>Who moves here</Text>
+        <Text style={st.eyebrow}>Community</Text>
+        <Text style={st.title}>Members</Text>
         {memberCount !== null ? (
           <Text style={st.sub} testID="wsf-members-count">
             {memberCountLabel(memberCount)}
-            {someUnlisted ? ' · some choose not to be listed' : ''}
           </Text>
         ) : null}
       </View>
@@ -249,17 +249,6 @@ export default function MembersScreen() {
         </Pressable>
       ) : null}
 
-      {phase === 'ready' ? (
-        <Pressable
-          onPress={() => router.push('/settings/privacy')}
-          accessibilityRole="link"
-          style={st.quietLink}
-          testID="wsf-members-own-visibility"
-        >
-          <Text style={st.quietLinkText}>Your visibility here · Settings</Text>
-          <Text style={st.chevron}>›</Text>
-        </Pressable>
-      ) : null}
     </ScrollView>
   );
 }

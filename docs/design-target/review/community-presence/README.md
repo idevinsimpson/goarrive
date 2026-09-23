@@ -545,3 +545,97 @@ authenticated specs timed out while a signed-out probe passed, because that
 path returns early on every render and never changes the count. The hook now
 sits above every early return, and the fix took the regression suite from
 2.0 minutes with four timeouts to 48 seconds green.
+
+---
+
+# 9 · The Director's AFTER review — Settings PASS, Community/Members corrected
+
+Review `5789105772`: **Settings/Privacy PASSED and is preserved unchanged.**
+Community and Members were held for one social-hierarchy correction — the data
+was proved but the page still read as "the old private product page with social
+information appended". §D forbade reopening the contract, and **no callable,
+payload, default, read-time rule, index or test contract was touched.**
+
+## Community
+
+| Asked | Done |
+| --- | --- |
+| Community name visually proud again | 26/31 → **30/35/-0.7**, the accepted HomeTarget's own h1 register rather than an invented size |
+| Presence row directly under the identity | unchanged — already there |
+| Say simply `6 members`; privacy belongs in Settings | the clause is gone from the primary surface |
+| `N people moved today` in the presence block **above** the hero | moved up out of the feed card; null still renders nothing |
+| Living WE dominant, `Start moving` full width | both kept |
+| First momentum row **visible** at 390×844 | recovered through spacing and hero composition |
+| 390×640: presence + moved-today above the fold, feed next in scroll order | both hold |
+| `Anonymous member` for name-private/activity-visible | shipped, replacing `A member` |
+
+**Zero is not rendered.** `null` means the server could not prove the count;
+`0` means it proved nobody has moved yet in this goal's own day. That is true
+and also the single most discouraging sentence the screen could open with, and
+the quiet feed below already says it. The line starts at one.
+
+## Members
+
+Heading is now **`Members`** — it maps to membership rather than participation,
+so §C's exception does not apply and nothing implies every listed member moved
+today. `· some choose not to be listed` is gone from the subtitle and the
+`Your visibility here · Settings` row is gone with it; You owns that path. The
+all-private empty state keeps its one quiet explanation, which is the only place
+the subject genuinely is absence.
+
+## How the fold requirement became a permanent guard
+
+The Director asked for a pixel outcome, so it is asserted rather than re-checked
+by eye: `sprint-w8-social-privacy.spec.ts` measures the first momentum row
+against the **tab bar's** top edge, in the ordinary suite, on every run.
+
+Three instrument errors were found and fixed while building it, each of which
+would have reported safety that was not there:
+
+1. **It measured against 844 instead of the tab bar.** The member tab bar floats
+   *over* the page rather than shortening it, so a row at y=770 is inside the
+   viewport by arithmetic and completely hidden in practice. "Inside the
+   viewport" and "visible" are different claims.
+2. **It ran in a bare browser context** while the evidence was captured on an
+   emulated iPhone — the same page measured on two different phones.
+3. **Its fixture was the easy case** (one community, four members, no
+   moved-today line), so it passed while the real capture had the row below the
+   fold. The fixture is now shared with the capture spec, and the guard asserts
+   that the taller identity block it depends on is actually on screen.
+
+A fourth was a race rather than a threshold: the assertions read the DOM before
+the activity call resolved, so a privacy assertion could pass because the data
+had not arrived — the worst kind of green. Both social reads are now awaited.
+
+## Height recovered, and from where
+
+Hero frame padding 14→10 and gap 6→4; `weWrap` 8/4→4/2; the recessed facts panel
+10/11→8/9 with marginTop 4→2; container paddingTop 16→12; section gap 12→8;
+actions gap 10→8; momentum card padding 12→6; momentum row padding 8→6; and the
+Living WE from 198 to **152** at 390 wide. The mark remains the largest object in
+the hero and is still the screen's centre of gravity — it was not reduced to an
+icon, and no action was hidden. Measured, not estimated: the first row's bottom
+went 835 → 800 → 781 → 773 → clear of the tab bar at 768.
+
+## Image hashes
+
+| File | Versus the pre-correction capture |
+| --- | --- |
+| `AFTER-community-390x844` / `-390x640` | changed — the correction |
+| `AFTER-members-390x844` / `-390x640` | changed — the correction |
+| `AFTER-settings-390x844` | **byte-identical**, which also validates the comparison |
+| `AFTER-settings-privacy-390x844` / `-390x640` | changed, and the reason is a real shared dependency: the screen quotes the feed's own words, so `A member` → `Anonymous member` |
+| `AFTER-you-390x844` | changed **only** in the per-run fixture email (`mudkis5u…` → `mudmkc9i…`); the layout is identical and no You code changed in this pass |
+
+## The F2 carry
+
+`functions-westayfit/src/index.ts`, the station-enrolment header comment. It
+claimed a station "cannot record a contribution" and that "nothing here writes
+wsfContributions, wsfGoalCounters or wsfGoalMemberTotals". Verified against the
+code rather than taken on report: `wsfCompleteTurn` is station-authorized and
+reaches `completeTurnEntry`, which calls `performContribution` — the same
+function `wsfContribute` uses. The comment now says so, and says what actually
+keeps it narrow: the station supplies no identity, the uid comes from the turn
+entry of the member who joined the line, and the station can only complete the
+attempt it is serving. **It credits a person it cannot name.** Comment only, no
+behaviour change.

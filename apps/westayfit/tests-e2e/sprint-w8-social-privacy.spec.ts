@@ -1,7 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import {
-  firestoreWrite,
   seedActiveGoal,
   seedCommunity,
   seedMembership,
@@ -9,8 +8,11 @@ import {
   seedVerifiedUser,
   signInVia,
   stampId,
-  tsField,
 } from './helpers/mobile';
+import {
+  seedContribution,
+  seedMembershipWithVisibility,
+} from './sprint-w8-social-fixture';
 
 /**
  * THE PRIVACY PROPERTIES, ASSERTED IN A REAL BROWSER.
@@ -24,47 +26,6 @@ import {
  * These run in the ORDINARY suite, every time. The capture spec beside them is
  * opt-in evidence generation; this is the guard.
  */
-
-async function seedMembershipWithVisibility(
-  groupId: string,
-  uid: string,
-  role: 'foundingChampion' | 'member',
-  vis: { name?: 'visible' | 'private'; activity?: 'visible' | 'private' },
-): Promise<void> {
-  const now = new Date();
-  const fields: Record<string, unknown> = {
-    groupId: { stringValue: groupId },
-    userId: { stringValue: uid },
-    role: { stringValue: role },
-    membershipStatus: { stringValue: 'active' },
-    createdAt: tsField(now),
-    updatedAt: tsField(now),
-  };
-  if (vis.name) fields.communityNameVisibility = { stringValue: vis.name };
-  if (vis.activity) fields.communityActivityVisibility = { stringValue: vis.activity };
-  await firestoreWrite(`wsfMemberships/${groupId}_${uid}`, fields as never);
-}
-
-async function seedContribution(
-  groupId: string,
-  goalId: string,
-  uid: string,
-  count: number,
-  minutesAgo: number,
-): Promise<void> {
-  const attemptId = stampId();
-  await firestoreWrite(`wsfContributions/${goalId}_${uid}_${attemptId}`, {
-    goalId: { stringValue: goalId },
-    attemptId: { stringValue: attemptId },
-    userId: { stringValue: uid },
-    count: { integerValue: String(count) },
-    shardIndex: { integerValue: '0' },
-    unit: { stringValue: 'squats' },
-    communityGroupId: { stringValue: groupId },
-    crossedTarget: { booleanValue: false },
-    createdAt: tsField(new Date(Date.now() - minutesAgo * 60_000)),
-  } as never);
-}
 
 type Fixture = {
   groupId: string;
@@ -122,6 +83,31 @@ async function buildFixture(): Promise<Fixture> {
   await seedContribution(groupId, goalId, namePrivate, 25, 60);
   await seedContribution(groupId, goalId, activityPrivate, 15, 90);
 
+  /*
+    THE FIXTURE IS THE WORST CASE ON PURPOSE, because the viewport assertion
+    below is only worth as much as the page it measures. Two more visible
+    members push the presence row to its full five, and a SECOND community
+    makes `otherCommunityCount` non-zero, which is what renders the `Switch`
+    chip and makes the identity block its tallest. An earlier version of this
+    fixture had one community and four members, the assertion passed, and the
+    real capture — six members, two communities — still had the first momentum
+    row below the fold. A guard that only holds for the easy case is worse than
+    none, because it reports safety.
+  */
+  const extraA = `w8p-extra-a-${stamp}`;
+  const extraB = `w8p-extra-b-${stamp}`;
+  await seedMembership(groupId, extraA, 'foundingChampion');
+  await seedMembership(groupId, extraB, 'member');
+  await seedProfile(extraA, 'Another Champion');
+  await seedProfile(extraB, 'Yet Another Member');
+
+  await seedCommunity({
+    groupId: `${groupId}-second`,
+    displayName: 'A Second Community',
+    joinPolicy: 'private',
+    members: [{ uid: meUid, role: 'member' }],
+  });
+
   return { groupId, goalId, email, password, meUid, named, namePrivate, activityPrivate };
 }
 
@@ -130,8 +116,28 @@ async function pageBlob(page: Page): Promise<string> {
   return page.evaluate(() => document.documentElement.outerHTML);
 }
 
-async function phone(browser: Browser, fx: Fixture) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+/**
+ * THE SAME PHONE THE AFTER CAPTURE USES.
+ *
+ * Matched deliberately: a plain 390x844 desktop context lays this page out
+ * slightly differently from an emulated iPhone, and the viewport measurement
+ * below is only meaningful if it measures the context the evidence was shot
+ * in. The guard passed under a bare context while the capture came back with
+ * the momentum card below the fold — the same page, measured on two different
+ * phones.
+ */
+const IPHONE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
+  '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+
+async function phone(browser: Browser, fx: Fixture, height = 844) {
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height },
+    deviceScaleFactor: 2,
+    userAgent: IPHONE_UA,
+    isMobile: true,
+    hasTouch: true,
+  });
   const page = await ctx.newPage();
   await signInVia(page, fx.email, fx.password);
   return { ctx, page };
@@ -148,8 +154,19 @@ test('the community surface names only the visible, and never leaks a uid', asyn
   try {
     await page.goto(`/community/${fx.groupId}`);
     await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 40_000 });
-    // The social reads are a second round trip; wait for the row they produce.
+    /*
+      WAIT FOR BOTH SOCIAL READS, NOT JUST THE FIRST.
+
+      The directory and the activity feed are two independent round trips, and
+      the presence row appears as soon as the directory lands. Capturing the DOM
+      there raced the feed: the assertions read a page whose momentum rows had
+      not arrived, and the run's verdict depended on which call won. Waiting for
+      a momentum row too makes the measurement deterministic — and a privacy
+      assertion that passes because data had not loaded yet is the worst kind of
+      green.
+    */
     await expect(page.getByTestId('wsf-presence-row')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-momentum-row').first()).toBeVisible({ timeout: 40_000 });
 
     const blob = await pageBlob(page);
 
@@ -158,8 +175,52 @@ test('the community surface names only the visible, and never leaks a uid', asyn
     // An explicit private choice is absent from the DOCUMENT, not merely
     // hidden by a style.
     expect(blob).not.toContain('Secret Identity');
-    // Activity privacy hides the row; the name was never eligible anyway.
+    /*
+      The activity-private member has NO feed row, so their name never reaches
+      this page — and note precisely why, because the reason is not that their
+      name is private. It is not: they are listed in the directory and their
+      initials are in the presence row above. The Community page simply renders
+      initials rather than names, and the only place it prints a full name is a
+      momentum row, which this member does not have.
+    */
     expect(blob).not.toContain('Quiet Contributor');
+
+    /*
+      THE DIRECTOR'S VIEWPORT REQUIREMENT, AS A PERMANENT GUARD.
+
+      The AFTER review asked that the first real momentum ROW be VISIBLE in the
+      initial 390x844 viewport, not merely the card's top edge. Asserted here
+      rather than re-checked by eye on every recapture: spacing drifts, and a
+      screenshot proves it only for the day it was taken.
+
+      MEASURED AGAINST THE TAB BAR, NOT AGAINST 844. The member tab bar FLOATS
+      OVER the page rather than shortening it, so a row can sit at y=770 —
+      inside the viewport by arithmetic — and be completely hidden behind the
+      bar. An earlier version of this assertion compared against the viewport
+      height, passed, and the capture came back with the row invisible under the
+      tab bar. "Inside the viewport" and "visible" are different claims, and the
+      Director asked for the second one.
+    */
+    /*
+      THE WORST CASE IS PROVEN, NOT ASSUMED. The fixture seeds contributions
+      inside the goal's own day, so the moved-today line MUST be on screen; if
+      it ever stops rendering, this fixture has quietly become the easy case and
+      the measurement below would be reporting safety for a shorter page than
+      the one a member sees.
+    */
+    await expect(
+      page.getByTestId('wsf-community-contributors-today'),
+      'the fixture must produce the taller identity block it is measuring',
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('wsf-community-hero-switch')).toBeVisible();
+
+    const firstRow = page.getByTestId('wsf-momentum-row').first();
+    const box = (await firstRow.boundingBox())!;
+    const tabBar = (await page.getByTestId('wsf-member-tabs').boundingBox())!;
+    expect(
+      box.y + box.height,
+      'the first momentum row must be visible above the tab bar at 390x844',
+    ).toBeLessThanOrEqual(tabBar.y);
 
     // NO UID ANYWHERE. Not in text, not in an attribute, not in a serialised
     // prop — this is the assertion a server-side test cannot make.
@@ -188,7 +249,7 @@ test('an anonymous momentum row keeps the amount and loses the identity', async 
     const text = (await card.innerText()).replace(/\s+/g, ' ');
 
     // The name-private member's CONTRIBUTION is still represented, anonymously.
-    expect(text).toContain('A member');
+    expect(text).toContain('Anonymous member');
     expect(text).toContain('25');
     expect(text).not.toContain('Secret Identity');
 
@@ -243,7 +304,7 @@ test('turning a name off removes it from activity that already happened', async 
     });
     const after = await pageBlob(page);
     expect(after).not.toContain('Viewing Member');
-    expect(after).toContain('A member');
+    expect(after).toContain('Anonymous member');
   } finally {
     await ctx.close();
   }
