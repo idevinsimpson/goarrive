@@ -452,13 +452,20 @@ test.describe('start-community outcomes', () => {
     expect(await communityNames(me.uid), 'the create did not commit exactly once').toEqual([
       'Left Before It Landed',
     ]);
-    // Nothing from the form is painted where the member is. VISIBLE, not
-    // counted: the left form is still in the DOM, hidden, by design — which
-    // is also what lets a member who comes back find Open instead of a fresh
-    // form that would make a second community.
-    for (const id of ['wsf-start-created', 'wsf-start-outcome', 'wsf-start-error']) {
-      expect(await page.getByTestId(id).and(page.locator(':visible')).count(), `${id} is painted on Home`).toBe(0);
-    }
+    // Nothing from the form is painted where the member is. The created card
+    // is checked VISIBLE rather than counted: the left form is still in the
+    // DOM, hidden, and becomes that card by design — which is what lets a
+    // member who comes back find Open instead of a fresh form that would make
+    // a second community.
+    expect(
+      await page.getByTestId('wsf-start-created').and(page.locator(':visible')).count(),
+      'wsf-start-created is painted on Home',
+    ).toBe(0);
+    // The failure cards have no business existing anywhere after a success,
+    // hidden or not — counted across the whole DOM, as the guard this test
+    // replaced counted them.
+    expect(await page.getByTestId('wsf-start-outcome').count()).toBe(0);
+    expect(await page.getByTestId('wsf-start-error').count()).toBe(0);
   });
 });
 
