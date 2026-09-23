@@ -247,6 +247,9 @@ test.describe('Community data is current on a genuine return', () => {
         { timeout: 30_000 },
       );
       await expect(card.getByTestId('wsf-momentum-row')).toHaveCount(0);
+      await expect(
+        visibleCommunity(page).getByTestId(`wsf-community-goal-total-${fx.goalId}`).first(),
+      ).toHaveText(/^0\s+of 5,000 squats$/);
       await mark(page);
 
       await page.getByTestId(`wsf-community-goal-link-${fx.goalId}`).click();
@@ -265,6 +268,14 @@ test.describe('Community data is current on a genuine return', () => {
       );
       await expect(card.getByTestId('wsf-momentum-row').first()).toContainText('Devin Simpson');
       await expect(card.getByTestId('wsf-momentum-row').first()).toContainText('added 20 squats');
+      // The SHARED total, not only the member's own part. The pulse is cached
+      // server-side for 2 s, so a single read made the moment the member lands
+      // back can return the pre-contribution total and never correct it (W1B
+      // measured exactly that on #453: "You've added 20" beside an unchanged
+      // total, still wrong at 15 s).
+      await expect(
+        visibleCommunity(page).getByTestId(`wsf-community-goal-total-${fx.goalId}`).first(),
+      ).toHaveText(/^20\s+of 5,000 squats$/, { timeout: 15_000 });
     } finally {
       await context.close();
     }
