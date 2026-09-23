@@ -560,7 +560,27 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     await expect(goalLink).toBeVisible({ timeout: 40_000 });
 
     expect(await markMountedContext(page, CONTEXT), 'the mount marker was planted').toBe(true);
-    const scrolled = await contextScroll(page, CONTEXT);
+    /*
+      SET THE OFFSET BEFORE LEAVING, AND COMPARE THE CLAMPED VALUE.
+
+      W1B's residual (#436 `5792137856`), accepted: an earlier revision of mine
+      read `contextScroll` on ARRIVAL, before anything had scrolled, so the
+      recorded pair was 0/0 and proved nothing in either direction — harmless
+      while it was only logged, and exactly wrong now that step 4 asserts it.
+      The browser clamps to the content's own maximum, so the clamped value is
+      read back and that is what the comparison uses.
+    */
+    const scrolled = await page.evaluate((id) => {
+      let el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+      while (el) {
+        if (el.scrollHeight > el.clientHeight + 1) {
+          el.scrollTop = 240;
+          return el.scrollTop;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    }, CONTEXT);
 
     await goalLink.click();
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
@@ -601,63 +621,42 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     expect(hit, 'an ordinary member can reach their way back').toBe(true);
 
     /*
-      4 · IT REACHES THE MEMBER CONTEXT — AND ONLY THAT, BECAUSE ONLY THAT IS
-      TRUE TODAY.
+      4 · IT RETURNS TO THE EXACT MOUNTED TAB, NOT TO A COPY OF IT.
 
-      W1B's block (#436 `5790685545`) asserts here that Back RESTORES the still
-      -mounted Community tab with its scroll, and instructs that if the control
-      cannot deliver it the shortfall is reported rather than relaxed. L0
-      authorised exactly that fallback in #443 `5790520240`: "let the assertion
-      state only what the `href` proves, with the discriminating weight on the
-      absence set — the Director decides; do not claim the first while shipping
-      the second."
+      W1B's step 6, now asserted rather than recorded. The previous revision
+      could only record it: `wsf-contribute-back` was a link to
+      `/community/<groupId>`, and following it pushed a SECOND community screen
+      while leaving the original mounted but hidden — measured as two instances
+      with the visible one carrying no marker. The Director released the
+      bounded fix for that (`5792030574`), so Back now pops the focused route
+      and reveals the instance underneath, and this states the strong property.
 
-      MEASURED, and this is the shortfall being reported, not assumed:
-      `wsf-contribute-back` is a `ButtonLink` to `/community/<groupId>`
-      (app/contribute/[goalId].tsx), and following it leaves TWO community
-      screens in the document — the original still carrying this test's mount
-      marker but HIDDEN, and a NEW one, unmarked, visible. It navigates to the
-      route; it does not return to the mounted tab. The same root cause as the
-      duplicate community detail the You page's own wordmark link produces.
-
-      So this asserts what the href proves — the member lands back on their own
-      community, for the right group — and the mount reading is RECORDED rather
-      than asserted, so the run itself carries the evidence either way. The
-      scoping weight stays on the absence set in step 1, which is untouched and
-      is the whole positive claim that the kiosk fix stayed scoped.
-
-      When the return becomes a real restore, W1B's two lines replace these and
-      this comment goes with them.
+      `:visible` rather than `.first()`: if the defect ever returns, the first
+      match is the stale hidden screen and `.first()` would wait on a hidden
+      element instead of failing on the claim.
     */
     await back.click();
-    /*
-      `:visible`, NOT `.first()`. After Back there are two instances of this
-      control and the FIRST is the original — still in the document, still
-      carrying the marker, and hidden behind the new one. `.first()` therefore
-      waits forever on a hidden element, which is itself a reading of the
-      defect rather than a flaw in the check.
-    */
     await expect(
       page.locator(`[data-testid="${CONTEXT}"]:visible`).first(),
-      'Back lands the member back on their community',
+      'Back returns the member to their community',
     ).toBeVisible({ timeout: 40_000 });
-    expect(page.url(), 'Back lands the member on their own community').toContain(
-      `/community/${fx.groupId}`,
-    );
-    const instances = await page.getByTestId(CONTEXT).count();
-    const anyMarked = await mountMarkSurvives(page, CONTEXT);
-    const restored = await visibleMarkSurvives(page, CONTEXT);
-    const scrollBack = await contextScroll(page, CONTEXT);
-    // eslint-disable-next-line no-console
-    console.log(
-      `[W9→Director] /contribute Back: the VISIBLE community screen carries the ` +
-        `mount marker = ${restored}; any instance still carries it = ${anyMarked}; ` +
-        `community screens in the document = ${instances}; ` +
-        `scroll before = ${scrolled}, after = ${scrollBack}. ` +
-        'restored=false with anyMarked=true and instances=2 is the measured ' +
-        'shortfall: the link pushed a NEW community screen and left the ' +
-        'original mounted but hidden behind it.',
-    );
+    expect(page.url(), 'and to the right one').toContain(`/community/${fx.groupId}`);
+
+    expect(
+      await page.getByTestId(CONTEXT).count(),
+      'Back left more than one community screen in the document, so it pushed a copy rather than popping',
+    ).toBe(1);
+    expect(
+      await visibleMarkSurvives(page, CONTEXT),
+      'the community screen on show is not the one the member came from',
+    ).toBe(true);
+    expect(
+      await contextScroll(page, CONTEXT),
+      'its scroll did not come back with it',
+    ).toBe(scrolled);
+
+    await page.waitForTimeout(500);
+    await saveFrame(page, frame('ordinary-contribution-returns-to-its-tab-tablet-800x1280.png'));
   });
 
   test('a repeated ?kiosk parameter is one verdict, not two', async ({ page }) => {
