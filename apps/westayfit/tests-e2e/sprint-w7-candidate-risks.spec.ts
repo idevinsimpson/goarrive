@@ -259,7 +259,8 @@ async function backSteps(page: Page, text: string): Promise<Array<Record<string,
 
 /**
  * The deliberate second, by the ordinary routes a member has: a blank form
- * already on screen, else Home's "Start a community", else the route itself.
+ * already on screen, else the acknowledgment's "Start another community",
+ * else Home's "Start a community", else the route itself (a page load).
  * Returns whether an EMPTY name field was reached.
  */
 async function startDeliberateSecond(page: Page): Promise<{ reached: boolean; via: string }> {
@@ -268,7 +269,11 @@ async function startDeliberateSecond(page: Page): Promise<{ reached: boolean; vi
     (await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue()) === '';
   if (await blank()) return { reached: true, via: 'the form on screen' };
   let via = 'the route';
-  if (new URL(page.url()).pathname === '/' && (await visibleCount(page, 'wsf-home-start')) > 0) {
+  if ((await visibleCount(page, 'wsf-start-another')) > 0) {
+    // The acknowledgment's own "Start another community" (W4 7a4b2710).
+    await page.locator('[data-testid="wsf-start-another"]:visible').first().click();
+    via = 'Start another community';
+  } else if (new URL(page.url()).pathname === '/' && (await visibleCount(page, 'wsf-home-start')) > 0) {
     await page.getByTestId('wsf-home-start').last().click();
     via = "Home's Start a community";
   } else {
@@ -318,6 +323,7 @@ test.describe('Candidate risks, measured', () => {
         blankFormVisible: await visibleCount(page, 'wsf-start-name'),
         nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue().catch(() => null),
         createdCardVisible: await visibleCount(page, 'wsf-start-created'),
+        createVisible: await visibleCount(page, 'wsf-start-submit'),
       };
     }
     test.info().annotations.push({ type: 'acknowledgment', description: JSON.stringify({ ack, onStart }) });
