@@ -72,6 +72,10 @@ import {
  *   Both: 2 Community roots, 1 tab bar (W9's duplicate).
  * So on this path the stale total is not a bounded cache interval: it lasts
  * until the member leaves and returns, or reloads.
+ * Baseline 6c98f485 (old exits): the same. X5 showed 0 against 20 (first read
+ * 379 ms after the last pre-write poll), and X5s held the sentinel 15 s until
+ * the round trip, with 2 roots and 2 tab bars. PRE-EXISTING, like the
+ * duplicate it follows from.
  */
 
 test.use({ viewport: { width: 390, height: 844 } });

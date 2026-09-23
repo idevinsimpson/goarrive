@@ -1926,13 +1926,57 @@ the arrival frame. After the change it fails on `063747b9` and passes on
 - **R1acct, the account-bound control.** The same journey, then an in-app sign-out and sign-in as another member, with no page load.
   - **PASS on `9f27c6ea`:** nothing of the first account is shown on Home, on Start, or at either Back step.
   - **Recorded, not asserted:** the first account's name stays in one **unrendered** `wsf-start-summary` node.
+
+  It also passes on `6c98f485` and `0bf8f427`.
+- **R1acct-late: the Director's clarification (`5803485378`).** The first account's create is still **held** when the account changes in the app, and it completes after the next account's Home has resolved.
+
+  **PASS on `0bf8f427`** (its R1-relevant route is `9f27c6e`'s) **and on `6c98f485`**:
+  - the first account's create commits;
+  - the next account gets no history write and stays on `/`;
+  - nothing of the community is shown on Home, on Start (blank) or at either Back step.
 - **Harness.** Under three workers, R1 once saw Home redirect into the new community. A slowed `wsfMyCommunities` read had landed after the commit: a race with Home's ordinary resolution, not the late success, and never seen serially. The harness now waits for Home's read to answer before the create starts.
 
-## 17.5 · Bound and hygiene
+## 17.5 · Addendum: the stale-total consequence (L0 #434 `5803105016` bound 3)
+
+This measures only the consequence. The duplicate itself is W9's measurement
+(#458 `5802502922`), recorded and deferred by the Director (`5802767529` §3),
+and is not relabelled here.
+
+**The journey.** A Champion's first goal:
+1. From the Community, go to Goal Setup and use the receipt's "Open the contribute page". That link names no community, so the exits read "Back to home".
+2. Record 20.
+3. Press "Back to home". On a warm arrival this mounts a **second, fresh** Community.
+
+**Why it can be stale.** W8's settle re-read runs on a **return**, not on a
+mount. `wsfGoalPulse` answers from a 2 s server cache that a contribution does
+not invalidate. The review screen polls the pulse every 2 s until the write.
+
+Specs: `sprint-w7-contribute-exits-verify.spec.ts` X5 and X5s, run serially.
+Each asserts the server's total within the settle bound (4.5 s), holding.
+
+| test | `9f27c6e` (candidate) | `6c98f485` (old exits) |
+|---|---|---|
+| **X5, no stub**: Submit straight after a poll, "Back to home" at once | **FAIL.** The fresh screen's first pulse left **374 ms** after the last pre-write poll, inside the cache window. It showed **0** while the server held **20**. No further pulse; still 0 at 10 s | **FAIL**, the same (379 ms; 0 against 20) |
+| **X5s**: every pulse until 1.5 s after landing answered with a sentinel 7 | **FAIL.** 7 shown at +257 ms and **still shown at 15 s**, with no pulse after landing. A Progress → Home round trip corrected it to 20 **329 ms** after the return | **FAIL**, the same (corrected 308 ms after the round trip) |
+| DOM | 2 Community roots, 1 tab bar | 2 roots, 2 tab bars |
+
+**Consequence.** On this path the stale total is **not a bounded cache
+interval**. After a success receipt it lasts until the member leaves and
+returns, or reloads. It is **pre-existing**, like the duplicate it follows
+from.
+
+- **Without a stub,** it needs the fresh read inside 2 s of the last pre-write poll. The harness hit that by pressing at once; a member does only by pressing "Back to home" quickly.
+- **Any other reader of the same goal inside that window** would also leave the pre-write total in the cache. That case is inferred from source, not measured.
+
+It bears on the Director's queued W9 option 1 (`5803510323`: a refresh on a
+genuine return, and the warm Goal Setup journey), and it makes no release
+claim. Whether it gates anything is the Director's call.
+
+## 17.6 · Bound and hygiene
 
 Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 
-- **Verification builds:** local and never pushed (`0bf8f427` built exactly).
+- **Verification builds:** local and never pushed (`0bf8f427` built exactly; `6c98f485` for the baseline column).
 - **Edits:** no product edit; no other worker's spec edited. W4's spec and unit file were run from the successor's own tree.
 - **After every run:** artifacts and `test-results` cleaned.
 - **Checks:** `ts:check` 0; guard 9 / 20.

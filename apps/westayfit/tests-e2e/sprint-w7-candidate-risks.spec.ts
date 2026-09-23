@@ -39,6 +39,10 @@ import {
  *       load, so nothing held in memory is lost); nothing of the first
  *       account's community is SHOWN on Home, on Start or at any Back step.
  *       A hidden DOM copy is recorded, not asserted.
+ *   R1acct-late THE DIRECTOR'S CLARIFICATION (#365 `5803485378`): the first
+ *       account's create is still HELD when the account changes in-app; it
+ *       completes after the next account's Home has resolved. Nothing of it
+ *       may move, acknowledge or show anything to the next account.
  *   R1b browser Back after the same journey: the card's copy.
  *   R2  A WARM "BACK TO HOME". From the member's mounted Community, a goal
  *       whose screen fails to load offers "Back to home". Does the member come
@@ -53,14 +57,18 @@ import {
  * MEASURED:
  *
  *   test    9f27c6ea (candidate)                     6c98f485 (W4 5c28e45 route, old exits)
- *   R1      FAIL: nothing names the community on      FAIL at no-yank (Check 16: the
- *           Home (still "Start a community") or on    late success moved the member
- *           Start's blank form; "/", 1 create         into the new community)
+ *   R1      FAIL: nothing names the community on      FAIL at no-yank: a replaceState
+ *           Home (still "Start a community") or on    into the new community 4 s
+ *           Start's blank form; "/", 1 create         after the release
  *   R1m     +4 s and +30 s: "/", Start offered, not named, no Home re-read;
  *           after Progress → Home: the same; after a reload: Home opens the
  *           community and names it. 1 create, 1 community throughout
  *   R1acct  PASS: shown nowhere, Back ×2 stays on "/"; HELD in one unrendered
- *           wsf-start-summary node
+ *           wsf-start-summary node. Also PASS on 6c98f485 and 0bf8f427
+ *   R1acct-late  PASS on 0bf8f427 (the R1-relevant route is 9f27c6ea's; the
+ *           successor changed only the name styling): no history write, "/",
+ *           shown nowhere, Start blank, Back ×2 on "/"; the same held node.
+ *           Also PASS on 6c98f485
  *   R1b     FAIL: "We couldn't open it automatically." (pre-existing copy,
  *           both builds)
  *   R2      FAIL: 2 Community roots, 1 tab bar      FAIL: 2 Community roots, 2 tab bars
@@ -210,6 +218,45 @@ async function heldCopies(page: Page, text: string): Promise<Array<{ testId: str
   }, text);
 }
 
+/** Sign out from Home and in as `who`, inside the app: no page load, so nothing in memory is lost. */
+async function switchAccountInApp(page: Page, who: { email: string; password: string }): Promise<void> {
+  // From Home when it is on screen, else from You (where a member signs out
+  // anywhere in the app); both replace to a signed-out Home.
+  if ((await visibleCount(page, 'wsf-home-signout')) > 0) await page.getByTestId('wsf-home-signout').last().click();
+  else {
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-you-signout').last().click();
+  }
+  await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-home-signin').last().click();
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-signin-email').fill(who.email);
+  await page.getByTestId('wsf-signin-password').fill(who.password);
+  const read = page.waitForResponse((r) => /\/us-central1\/wsfMyCommunities/.test(r.url()) && r.request().method() === 'POST', { timeout: 30_000 });
+  await page.getByTestId('wsf-signin-submit').click();
+  await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+  await read;
+  await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+}
+
+/** Browser Back, step by step, until it leaves the app or stops moving; what each step shows. */
+async function backSteps(page: Page, text: string): Promise<Array<Record<string, unknown>>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < 4; i += 1) {
+    const before = page.url();
+    await page.goBack().catch(() => undefined);
+    await page.waitForTimeout(1_500);
+    if (!page.url().startsWith('http://127.0.0.1')) {
+      out.push({ step: i + 1, left: page.url() });
+      break;
+    }
+    out.push({ step: i + 1, path: new URL(page.url()).pathname, shown: await shownByName(page, text), createdCard: await visibleCount(page, 'wsf-start-created') });
+    if (page.url() === before) break;
+  }
+  return out;
+}
+
 /**
  * The deliberate second, by the ordinary routes a member has: a blank form
  * already on screen, else Home's "Start a community", else the route itself.
@@ -331,15 +378,7 @@ test.describe('Candidate risks, measured', () => {
     const next = await member('r1n');
     // Sign out and in again inside the app, so nothing held in memory is lost
     // to a page load.
-    await page.getByTestId('wsf-home-signout').last().click();
-    await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId('wsf-home-signin').last().click();
-    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId('wsf-signin-email').fill(next.email);
-    await page.getByTestId('wsf-signin-password').fill(next.password);
-    await page.getByTestId('wsf-signin-submit').click();
-    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
-    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await switchAccountInApp(page, next);
     await page.waitForTimeout(2_000);
     const onHome = { shown: await shownByName(page, NAME), held: await heldCopies(page, NAME) };
     await page.getByTestId('wsf-home-start').last().click();
@@ -379,6 +418,55 @@ test.describe('Candidate risks, measured', () => {
     // HELD, NOT SHOWN, is recorded above and not asserted: on 9f27c6ea the
     // previous account's name stays in one unrendered wsf-start-summary node
     // (a Start screen kept mounted), which no screen and no Back step shows.
+  });
+
+  test('R1acct-late an old create that completes AFTER an account change reaches nothing of the next account (Director 5803485378)', async ({ page }) => {
+    test.setTimeout(300_000);
+    await traceHistory(page);
+    const NAME = 'W7 Risk Late';
+    const first = await member('r1l');
+    await signInVia(page, first.email, first.password);
+    const homeRead = page.waitForResponse((r) => /\/us-central1\/wsfMyCommunities/.test(r.url()) && r.request().method() === 'POST', { timeout: 30_000 });
+    await page.goto('/');
+    await homeRead;
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
+    const creates = await holdCreates(page);
+    await page.getByTestId('wsf-start-name').fill(NAME);
+    await page.getByTestId('wsf-start-submit').click();
+    await page.waitForTimeout(400);
+    await page.getByTestId('wsf-start-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+
+    // The create is still held. Change account inside the app.
+    const next = await member('r1m');
+    await switchAccountInApp(page, next);
+    expect(creates.count(), 'precondition: the first account\'s create was sent once').toBe(1);
+    const releasedAt = Date.now();
+    creates.release();
+    await expect.poll(() => communitiesOf(first.uid), { timeout: 30_000 }).toEqual([NAME]);
+    await page.waitForTimeout(4_000);
+
+    const opsSinceRelease = (await historyOps(page)).filter((o) => o.at >= releasedAt);
+    const onHome = { path: new URL(page.url()).pathname, shown: await shownByName(page, NAME), held: await heldCopies(page, NAME) };
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.locator('[data-testid="wsf-start-name"]:visible').first()).toBeVisible({ timeout: 25_000 });
+    await page.waitForTimeout(2_000);
+    const onStart = {
+      shown: await shownByName(page, NAME),
+      createdCard: await visibleCount(page, 'wsf-start-created'),
+      nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue(),
+    };
+    const backs = await backSteps(page, NAME);
+    test.info().annotations.push({ type: 'the next account, after the old create landed', description: JSON.stringify({ opsSinceRelease, onHome, onStart, backs }) });
+    expect(onHome.path, 'the old create moved the next account').toBe('/');
+    expect(opsSinceRelease.filter((o) => o.path.startsWith('/community/')), 'the old create navigated the next account into a community').toEqual([]);
+    expect(onHome.shown.shown, "the first account's community is SHOWN on the next account's Home").toBe(false);
+    expect(onStart.shown.shown, "the first account's community is SHOWN on the next account's Start").toBe(false);
+    expect(onStart.createdCard, "the next account's Start shows a created card").toBe(0);
+    expect(onStart.nameValue).toBe('');
+    for (const b of backs) expect((b.shown as Named | undefined)?.shown ?? false, `browser Back showed the first account's community: ${JSON.stringify(b)}`).toBe(false);
+    expect(await communitiesOf(next.uid)).toEqual([]);
   });
 
   test('R1b the same journey, then browser Back: what the member sees', async ({ page }) => {
