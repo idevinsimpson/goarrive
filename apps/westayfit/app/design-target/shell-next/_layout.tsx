@@ -3,7 +3,7 @@ import { Text, View } from 'react-native';
 
 import { CREAM, TEXT_MUTED } from '../../../src/ui/kit';
 import { shellNextPreviewAllowed } from '../../../src/ui/shellNext/shellNextGate';
-import { useReducedMotion } from '../../../src/ui/shellNext/useReducedMotion';
+import { useReducedMotion } from '../../../src/ui/useReducedMotion';
 
 /**
  * THE PROTOTYPE'S OUTER STACK. PROTOTYPE ONLY — no production route is
