@@ -46,9 +46,10 @@ every frozen BEFORE or accepted TARGET/AFTER image.
 
 | Path | What it is |
 | --- | --- |
-| `ARCHITECTURE.md` | Deliverable (A). True Tabs vs the minimum-change shell, decided with code and measurements — including the one place the proposal is measurably worse than today. |
+| `ARCHITECTURE.md` | Deliverable (A). True Tabs vs the minimum-change shell, decided with code and measurements. §3.1's regression is **resolved in packet 2**. |
+| `BACK-PATH-SPIKE.md` | Packet 2. The Back-path spike: all five Director properties measured together, the five navigation methods and all six `backBehavior` modes, and what the fix costs. |
 | `CONFLICT-MAP.md` | Deliverable (E). The production files W9 *would* reserve, and every dependency on W8 / W4 / W6 / W2 / W1B. Nothing in it is reserved yet. |
-| `before/` | Current-build frames and `chrome-geometry.json`, captured from the **real** member routes at this branch's start SHA — not reused from an accepted package, so there is no stale-blob question. |
+| `before/` | Current-build frames and `chrome-geometry.json`, captured from the **real** member routes at this branch's start SHA — not reused from an accepted package, so there is no stale-blob question. **Do not re-run its producer casually** — see the note below. |
 | `target/` | Deliverable (C). Proposed frames at 390×844 and 390×640 for Home → Community → Progress → You → MOVE open → MOVE close, plus a contact sheet. Each frame carries a PROPOSED / NOT ACCEPTED strip **inside** the image. |
 
 ## The code and the checks
@@ -64,12 +65,28 @@ every frozen BEFORE or accepted TARGET/AFTER image.
 
 ## Results at the head of this branch
 
-- `sprint-w9-*` e2e — **11 passed / 0 failed**.
+- `sprint-w9-*` e2e — **15 passed / 0 failed**.
 - `sprint-w9-shell-geometry` vitest — **11 passed / 0 failed**.
 - Regression baseline `ui-app-shell`, `ui-kiosk`, `ui-matrix` — **8 passed / 0 failed**.
 - `ts:check` clean; `check-evidence-intact.mjs` frozen 9 / accepted 20 intact.
 - An ordinary run without `WSF_CAPTURE_FRAMES` writes **zero bytes**: 24 files
   in this package, sha256 identical before and after.
+
+## The BEFORE producer is non-deterministic in its pixels
+
+`sprint-w9-current-shell-before.spec.ts` seeds a member, a community and a goal
+with a fresh stamp on every run, so the rendered display name and ids differ
+run to run and the PNGs come back a few hundred bytes different while showing
+the same thing. Re-running it **gated** therefore rewrites frames that have
+already been exported and reviewed (#444, artifact `10731246963`, reviewed at
+`ebae2d9`), which is churn on accepted evidence rather than new information.
+
+What the review actually depends on — the measured chrome geometry — is stable:
+`before/chrome-geometry.json` came back **byte-identical** across runs. So the
+rule is: run the BEFORE producer **ungated** whenever you like (it asserts, and
+writes nothing), and gate it only when you intend to replace those frames on
+purpose. The five PNGs a packet-2 run had rewritten were restored to their
+reviewed bytes.
 
 ## The headline numbers
 
@@ -82,4 +99,5 @@ every frozen BEFORE or accepted TARGET/AFTER image.
 | Leave a tab and come back | rebuilt from scratch | **0** remounts, still mounted |
 | History added by 3 tab switches | — | **1** entry |
 | Bar under the MOVE page | present, raised MOVE and all | occluded; MOVE has no tab route |
-| Back from a community detail | returns to the list | **leaves the app** — see ARCHITECTURE.md §3.1 |
+| Back from a community detail | returns to the list | **returns to the list**, still mounted, state and scroll intact |
+| History added by 3 tab switches *(the fix's cost)* | — | **2**, up from 1 — see BACK-PATH-SPIKE.md |
