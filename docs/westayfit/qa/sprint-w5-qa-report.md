@@ -1433,3 +1433,38 @@ the missing fact instead of hanging for five minutes.
 Worth writing down because it generalises: **a tripwire only works if its failure mode is a
 failed assertion.** One that hangs reports as a broken run, which is exactly the confusion
 between a harness problem and a finding that this report has already had to correct twice.
+
+
+## Base advance to `d86620cc` — #436 landed, and the last three tripwires retired
+
+`claude/wsf-app-shell` moved `ba774eff` → **`d86620cc`**, which merges #436 (`84acea5`): the kiosk
+idle-Finish contract this suite verified PASSING at that head in packet 2. Merged here by merge
+commit.
+
+K13, K15 and K16 were pinned ahead of it and failing on purpose. They are **retired**: the
+`test.fail()` markers are gone and **nothing in any of the three cases was changed to get there**
+— the assertions are the same ones that passed at `84acea5`, now met by the base. K16's timeout
+is restored to the 300 s the real elapsed-deadline wait needs, from the 200 s that only capped
+the cost of failing fast while the feature was absent.
+
+    17 cases, 17 passed, 0 unexpected
+    no test.fail() anywhere in the file
+
+The suite is now entirely ordinary positive coverage on the branch's own base: the escape-control
+contract, the flag-shape agreement, the bounded states, the legibility floors, the failed
+sign-out and its recovery, the idle-Finish contract in full, and the two controls — the ordinary
+member's navigation and the ordinary member never being timed out.
+
+**The one case still worth reading with care is K1.** It passes by early return, because with the
+shell gone there is nothing to tap. It stays exactly as written as the historical record of the
+defect, and it is **not** safety evidence. K4 is what holds that line, and K4 is a positive
+assertion.
+
+### The tripwire pattern, end to end
+
+Five cases in this suite were written to fail against a product that did not yet have the
+behaviour they describe, and all five have now retired by the base catching up: W5-K1 and K4 when
+the seam closed, K13, K15 and K16 when the idle-Finish contract landed. None was ever skipped,
+and none was softened to make a run go green. The discipline that made that work is one line:
+**a tripwire must fail by assertion, never by hanging** — the correction K16 forced, and the
+eighth of the instrument errors recorded in this report.

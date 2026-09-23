@@ -1540,17 +1540,8 @@ test('a load failure over an unresolved attempt says what it can do, and Finish 
   page,
 }) => {
   test.setTimeout(300_000);
-  /*
-    PINNED AHEAD OF ITS PRODUCT. This case asserts the idle-Finish contract
-    introduced by #436 (`84acea5`), which is verified and PASSING there but is
-    deliberately NOT in this branch's base yet. On the base it fails because
-    the behaviour does not exist, which is not a regression and not a defect.
-
-    `test.fail()` rather than a skip or a softened assertion: the body still
-    runs, the assertions are the same ones that passed at `84acea5`, and this
-    retires itself the moment the base carries the change.
-  */
-  test.fail();
+  // RETIRED at base `d86620cc`, which carries #436 (`84acea5`): ordinary
+  // passing coverage now. Nothing in the case was changed to get here.
   const fx = await seedBase('loaderr-unresolved');
   await walkUpAndSignIn(page, fx);
   await leaveUnresolvedAttempt(page, fx, '17');
@@ -1705,17 +1696,8 @@ test('closed, missing and unloadable goals each carry the existing 90s deadline,
   page,
 }) => {
   test.setTimeout(300_000);
-  /*
-    PINNED AHEAD OF ITS PRODUCT. This case asserts the idle-Finish contract
-    introduced by #436 (`84acea5`), which is verified and PASSING there but is
-    deliberately NOT in this branch's base yet. On the base it fails because
-    the behaviour does not exist, which is not a regression and not a defect.
-
-    `test.fail()` rather than a skip or a softened assertion: the body still
-    runs, the assertions are the same ones that passed at `84acea5`, and this
-    retires itself the moment the base carries the change.
-  */
-  test.fail();
+  // RETIRED at base `d86620cc`, which carries #436 (`84acea5`): ordinary
+  // passing coverage now. Nothing in the case was changed to get here.
   const fx = await seedBase('settled');
   await walkUpAndSignIn(page, fx);
   const closedGoalId = `w5kn-settled-closed-${fx.stamp}`;
@@ -1791,18 +1773,9 @@ test('closed, missing and unloadable goals each carry the existing 90s deadline,
 test('the deadline detaches the account by itself, and a failed sign-out on a settled screen says so', async ({
   page,
 }) => {
-  test.setTimeout(200_000);
-  /*
-    PINNED AHEAD OF ITS PRODUCT. This case asserts the idle-Finish contract
-    introduced by #436 (`84acea5`), which is verified and PASSING there but is
-    deliberately NOT in this branch's base yet. On the base it fails because
-    the behaviour does not exist, which is not a regression and not a defect.
-
-    `test.fail()` rather than a skip or a softened assertion: the body still
-    runs, the assertions are the same ones that passed at `84acea5`, and this
-    retires itself the moment the base carries the change.
-  */
-  test.fail();
+  test.setTimeout(300_000);
+  // RETIRED at base `d86620cc`, which carries #436 (`84acea5`): ordinary
+  // passing coverage now. Nothing in the case was changed to get here.
   const fx = await seedBase('deadline');
   await walkUpAndSignIn(page, fx);
 
