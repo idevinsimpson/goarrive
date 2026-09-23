@@ -4185,6 +4185,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 10,
+    /*
+      44, MEASURED RATHER THAN ASSUMED. 10 + 10 of padding around a chevron
+      line box of about 23 came to 43 — one pixel under the touch-target floor,
+      and `ui-a11y` R3 and `ui-a11y-fixes` (d) both reported it, on the base
+      build as well as here. The Director released the correction into this
+      branch (`5795101998`) because the file is reserved to W9 during the
+      migration. It is a minimum, not a height: the row still sizes to its own
+      content wherever that is taller, and nothing about the copy, the
+      hierarchy, the data or the destination changes.
+    */
+    minHeight: 44,
   },
   peopleLinkText: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   peopleLinkChevron: { color: INK_QUIET, fontSize: 20, fontWeight: '700' },
