@@ -216,6 +216,42 @@ for (const { w, h } of CLASSES) {
   });
 }
 
+/**
+ * THE SHORT-AND-BLURRED STATE — ONE FRAME, 390x844 ONLY (L0 `5802483357`,
+ * Director `5802474258`).
+ *
+ * Q3 made leaving the name field short change the border's colour and nothing
+ * else: no sentence, nothing moved. None of the 24 frames above shows that
+ * state, so this one does. It is evidence for the eyes, not an accessibility
+ * claim — colour alone is not accessible validation.
+ */
+test.describe('390x844 short and blurred', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('a one-character name, once the field loses focus, shows the border and no sentence', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await signedIn(page, true);
+    await openStart(page);
+
+    const field = page.getByTestId('wsf-start-name');
+    await field.fill('a');
+    await field.blur();
+    await expect(field).not.toBeFocused();
+
+    // The state, asserted before it is photographed: no sentence anywhere on
+    // the page, and the border the browser actually paints is ERROR_RED.
+    await expect(page.getByTestId('wsf-start-name-error')).toHaveCount(0);
+    await expect
+      .poll(() => field.evaluate((el) => getComputedStyle(el).borderTopColor))
+      .toBe('rgb(180, 35, 44)');
+
+    await frameOn(page, 'wsf-start-name');
+    await saveFrame(page, path.join(OUT, 'AFTER-start-name-too-short-blurred-390x844.png'));
+  });
+});
+
 test.afterAll(() => {
   if (!CAPTURE_FRAMES) {
     // eslint-disable-next-line no-console
