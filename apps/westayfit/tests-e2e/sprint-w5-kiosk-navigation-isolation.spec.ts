@@ -340,6 +340,30 @@ async function escapeControls(page: Page, roots: string[]): Promise<string[]> {
       const href = el.getAttribute('href');
       if (href != null && !/^\/contribute\//.test(href) && !/^\/kiosk\//.test(href)) {
         out.push(`${id}->${href}`);
+        continue;
+      }
+      // A CONTROL THAT CLAIMS TO BE A LINK AND CARRIES NO DESTINATION.
+      //
+      // The check above reads `href`, which is the whole of what this probe
+      // can see about where a control goes. Under the member shell a chrome
+      // control was converted from a `ButtonLink` to a `Pressable` that calls
+      // `router.back()` / `router.replace(...)`, and React Native Web renders
+      // `accessibilityRole="link"` as `role="link"` on a plain `div` — a real
+      // navigation control with no anchor and no `href`.
+      //
+      // The collection above still SEES such a control, because it enumerates
+      // ARIA roles and not only `a[href]`. The destination check does not: a
+      // null `href` fell through as if the control led nowhere. So a router
+      // -driven link inside the kiosk screen would have passed silently.
+      //
+      // `role="link"` is the element's own assertion that it navigates. If it
+      // makes that claim and states no destination, this probe cannot verify
+      // where it goes, and an unverifiable destination on a kiosk screen is
+      // reported rather than passed. `role="button"` is deliberately NOT
+      // included: a button asserts an action, not navigation, and Finish is
+      // exactly that.
+      if (href == null && el.getAttribute('role') === 'link') {
+        out.push(`${id}@link-role-without-destination`);
       }
     }
     return out;
@@ -1936,4 +1960,84 @@ test('an ordinary member on a closed, missing or unloadable goal keeps navigatio
     type: 'ordinary-member-settled-screens',
     description: SETTLED_SCREENS.map((s) => `${s}: ${observed[s]}`).join(' | '),
   });
+});
+
+// ---- CASE 18 --------------------------------------------------------------
+/*
+  THE CONTROL FOR THE DESTINATION CHECK ITSELF.
+
+  W5-K18. A probe that cannot fail certifies nothing, and this file has been
+  wrong that way before: the public-surface derivation matched its own prose
+  and reported two unexposed callables as public, because the instrument had
+  no control of its own. So the escape probe's new clause gets one here.
+
+  The clause exists because the shell migration converted a chrome control
+  from a `ButtonLink` to a `Pressable` calling `router.replace(...)`. React
+  Native Web renders `accessibilityRole="link"` as `role="link"` on a plain
+  `div`: a navigation control with no anchor and no `href`. `escapeControls`
+  still COLLECTS it — it enumerates ARIA roles, not only `a[href]` — but the
+  destination half read `href` alone, so a null `href` fell through as if the
+  control led nowhere.
+
+  This proves three things in order, on the real kiosk screen:
+    1. the screen is clean as it stands (no such control today);
+    2. planting one IS reported — so the clause discriminates;
+    3. removing it returns the screen to clean — so the report was the plant
+       and not something the plant merely revealed.
+
+  Step 2 is the one that matters. Without it the clause could be dead code
+  and every future run would pass for the wrong reason.
+*/
+test('the escape probe reports a link-role control that states no destination', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('linkrole');
+  await walkUpAndSignIn(page, fx);
+
+  const roots = [
+    '[data-testid="wsf-contribute-entry-screen"]',
+    '[data-testid="wsf-contribute-context"]',
+  ];
+
+  // 1. The screen as the product actually renders it.
+  const before = await escapeControls(page, roots);
+  expect(
+    before,
+    'precondition: the kiosk contribution screen carries no unverifiable link today'
+  ).toEqual([]);
+
+  // 2. Plant exactly the shape the migration introduced — a link role, a real
+  //    hit-testable box, no href — INSIDE the screen's own root, where the
+  //    allow-list would otherwise wave it through.
+  const planted = await page.evaluate((rootSel) => {
+    const root = document.querySelector(rootSel);
+    if (!root) return false;
+    const el = document.createElement('div');
+    el.setAttribute('role', 'link');
+    el.setAttribute('data-testid', 'w5k18-planted-link');
+    el.style.cssText =
+      'position:fixed;left:8px;top:8px;width:120px;height:44px;z-index:2147483647;background:#fff';
+    el.textContent = 'planted';
+    root.appendChild(el);
+    return true;
+  }, roots[0]);
+  expect(planted, 'the plant needs the screen root to exist to be planted inside it').toBe(true);
+
+  const withPlant = await escapeControls(page, roots);
+  test.info().annotations.push({
+    type: 'planted-link-role',
+    description: withPlant.length ? withPlant.join(' | ') : 'none',
+  });
+  expect(
+    withPlant,
+    'a link-role control with no destination inside the kiosk screen must be reported'
+  ).toContain('w5k18-planted-link@link-role-without-destination');
+
+  // 3. And the screen is clean again once it is gone.
+  await page.evaluate(() => {
+    document.querySelector('[data-testid="w5k18-planted-link"]')?.remove();
+  });
+  const after = await escapeControls(page, roots);
+  expect(after, 'removing the plant returns the screen to clean').toEqual([]);
 });

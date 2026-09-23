@@ -1596,3 +1596,90 @@ first was covering six of seventeen while claiming every; this one is a derivati
 comments as code. The lesson I take is narrower than "derive rather than list": **a derivation is
 itself an instrument, and needs its own control — the first version of it was more confidently
 wrong than the hardcoded list it replaced.**
+
+---
+
+## INSTRUMENT CORRECTION 11 — the escape probe could see the shell's new control, but not where it went
+
+Found while reading W9's shell candidate `74661589c21d80c2d0d7f3c548edbbbb192a4614`
+as source, not as a run. Nothing was driven against that head: the Director's
+`5795073803` §4 gives the successor QA to W7 and says "no duplicate shell run".
+The fix and its proof are on my own branch, against my own base
+`37367fd256c4df4cbaed0f8f78c6ae5226f53929`.
+
+### What W1B found, and why it pointed at me too
+
+W1B recorded (`5795221257`) that `expectNoMemberNavigation`'s `a[href]` sweep
+can no longer see the contribution screen's chrome control, because the
+migration converted it from a `ButtonLink` to a `Pressable` calling
+`router.back()` / `router.replace(...)`. An element that navigates through the
+router is not an anchor and carries no `href`.
+
+That is a statement about W1B's helper. The honest question for me was whether
+`escapeControls` had the same hole. The answer turned out to be **half**, and
+the two halves point opposite ways — which is exactly why it had to be checked
+rather than assumed in either direction.
+
+### Verified in the source, not inferred
+
+`app/contribute/[goalId].tsx` at that head declares the control
+`accessibilityRole="link"`. React Native Web's `createDOMProps` assigns
+`domProps['role'] = role`, and `propsToAccessibilityComponent`'s
+`roleComponents` map has **no** `link` entry — so the element renders as a
+plain `div` carrying `role="link"`, with no anchor and no `href`.
+
+- **Collection: not blind.** `escapeControls` enumerates `[role="link"]` and
+  `[role="button"]` alongside `a[href]`, so the converted control is still
+  picked up and still hit-tested. A control of this shape sitting OUTSIDE the
+  kiosk screen's roots was, and is, reported as `@outside-screen`.
+- **Destination: blind.** The second half read `el.getAttribute('href')` and
+  flagged only a non-null href pointing somewhere other than `/contribute/` or
+  `/kiosk/`. A null href fell through as though the control led nowhere. So a
+  router-driven navigation control INSIDE the allowed roots would have passed
+  in silence.
+
+Harmless today, for the reason W1B gives: a kiosk session renders `Finish`,
+`showBack` is false, and neither branch of the converted control is reachable
+in kiosk mode. It is a bound on the instrument, not a product defect, and it is
+recorded as the former.
+
+### The fix, and its own control
+
+The clause added: inside the allowed roots, an element whose `role` is `link`
+and which carries no `href` is reported as
+`@link-role-without-destination`. `role="link"` is the element's own claim that
+it navigates; if it makes that claim and states no destination, this probe
+cannot verify where it goes, and an unverifiable destination on a kiosk screen
+is reported rather than passed. `role="button"` is deliberately excluded — a
+button asserts an action, not navigation, and `Finish` is exactly that.
+
+**K18** is the control, because a clause that cannot fire certifies nothing —
+the mistake correction 10 was made of. It proves the screen is clean as the
+product renders it, plants exactly the shape the migration introduced inside
+the screen's own root, asserts it is reported, then removes it and asserts the
+screen is clean again.
+
+**Mutated:** with the clause disabled (`if (false && …)`), K18 fails at its
+`toContain` and **no other case fails** — the mutation is caught by its own
+test and by nothing else. Clause restored, both affected cases green.
+
+### Result at `37367fd2` (my base; product source unchanged since `9a65324c`)
+
+```
+sprint-w5-kiosk-navigation-isolation.spec.ts   18 passed, 0 unexpected
+  (K1–K17 as before, plus K18 the destination-check control)
+check:evidence                                 intact — 9 frozen / 20 accepted
+tsc --noEmit (app + tests-e2e)                 0 errors
+```
+
+No `test.fail()` anywhere in the file.
+
+### What this is and is not
+
+It is a strengthening of my own instrument, proven on my own base. It is **not**
+a verification of `7466158`, **not** a defect report against W9, and **not** a
+claim about the shell candidate's behaviour — the Back control it concerns is
+unreachable in kiosk mode, which is the product's own doing and W1B's to speak
+for. The clause matters *before* something on a kiosk-reachable screen converts
+the same way, which is the point W1B made and the reason it was worth closing
+now rather than after.
