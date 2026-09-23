@@ -334,19 +334,29 @@ spec file was added — instead of the total the run itself printed.
 | `e2e-gate.log` | **396** | 348 + 7 + 41 = 396 |
 | `e2e-gate2.log` | **396** | 350 + 5 + 41 = 396 |
 | `e2e-gate3.log` | **399** | 355 + 3 + 41 = 399 |
+| `e2e-gate4.log` | **400** | 357 + 2 + 41 = 400 |
+| `e2e-gate5.log` | **400** | 356 + 3 + 41 = 400 |
 
 No skipped-versus-counted discrepancy and no duplicate id: the totals are the
 totals. The headings that said 392 and 397 were wrong by one and by one.
 
 ### Every failure in the successor run, named
 
-`e2e-gate3.log`, sorted into the three bins L0 asked for:
+`e2e-gate5.log`, sorted into the three bins L0 asked for:
 
 | Bin | Count | Which |
 |---|---|---|
 | The accepted `?groupId=` seam | **0** | it has a narrow regression now (`expectCommunityUrl`), so it fails nothing |
 | Real defects | **0** | — |
-| Non-reproducing | **3** | `event-return:230`, `ui-a11y` R1 maxima, `ui-contribute-guide:356` — all three re-run serially in one command and **all three passed** |
+| Non-reproducing | **3** | `move-follow-along:298`, `sprint-w9-shell-capture`, `ui-contribute-guide:356` — all three re-run serially in one command and **all three passed** |
+
+Two earlier runs had a fourth kind, and it was real: both `sprint-w9-shell-production`
+tests failed on the restored scroll, by exactly 58 px each. That was the page
+enriching itself after it painted and Chrome's scroll anchoring adjusting
+`scrollTop` underneath the planted value — the proof was measuring the
+enrichment rather than the shell. It is fixed rather than re-run: the offset is
+planted after the late content is on screen and read until two consecutive
+reads agree, and the restored offset still has to equal it exactly.
 
 ### What the tested build carried
 
@@ -383,21 +393,16 @@ Every number below is the count the suite's own run printed, not a tally by eye.
 
 | Run | Result |
 |---|---|
-| **Whole e2e suite** (399 tests) | **355 passed / 3 failed / 41 skipped**, 19.7 min |
+| **Whole e2e suite** (`e2e-gate5.log`) | runner printed **400**: **356 passed / 3 failed / 41 skipped**, 18.7 min |
 | — standing failures | **0** |
-| — parallel-load flakes | **3** — `event-return`, `ui-a11y` R1 maxima, `ui-contribute-guide` — all three re-run serially and **passing** |
-| `sprint-w9-*` e2e (eleven files) | **22 passed / 0 failed** |
+| — parallel-load flakes | **3** — `move-follow-along:298`, `sprint-w9-shell-capture`, `ui-contribute-guide:356` — all three re-run serially in one command and **all three passed** |
+| `sprint-w9-*` e2e (eleven files) | **23 passed / 0 failed** |
 | `sprint-w9-shell-geometry` vitest | **11 passed / 0 failed** |
 | Whole vitest suite | **821 passed / 0 failed**, 48 files |
 | `sprint-w1b-kiosk-confinement` / `-idle-finish` | **10 / 0** and **9 / 0** |
-| `ui-mobile-acceptance` + `ui-contribute-short-phone` | **15 passed / 0 failed** |
 | Ordinary `npm run build:web` | **exit 0**, no ERROR line, no tree deletion, 9 route-group duplicates skipped |
 | `ts:check` | clean |
 | `check-evidence-intact.mjs` | frozen **9** / accepted **20** intact |
-
-The two failures that stood at the previous head were the base build's 43 px
-members link. The Director released that correction into this branch, so the
-suite now has **no standing failure at all**.
 
 ### The Director's gate, item by item
 
