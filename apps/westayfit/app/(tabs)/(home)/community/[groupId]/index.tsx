@@ -117,7 +117,6 @@ import {
   totalOfTargetLabel,
   totalOfTargetParts,
 } from '../../../../../src/ui/progressFormat';
-import { WsfWordmark } from '../../../../../src/ui/WsfWordmark';
 
 type GroupDoc = {
   displayName: string;
@@ -3229,18 +3228,12 @@ export default function CommunityPage() {
       <View style={styles.inner}>
         {/* Product chrome: the full wordmark, compact; Champion tools behind one quiet control. */}
         <View style={styles.productHeader}>
-          {/* SHELL. The wordmark is the way Home on every member surface. */}
-          <Pressable
-            onPress={() => router.replace('/')}
-            accessibilityRole="link"
-            accessibilityLabel="We Stay Fit, go Home"
-            testID="wsf-community-wordmark-home"
-            // The mark is 22px tall; a 22px tap target is not a tap target.
-            // The padding makes the touchable 44 without moving the mark.
-            style={styles.wordmarkTouch}
-          >
-            <WsfWordmark variant="navy" height={17} testID="wsf-community-wordmark" />
-          </Pressable>
+          {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar
+              carries it and its tap is the one gesture that goes Home. A copy
+              here stacked a second wordmark under the bar, and its own Home
+              gesture navigated INTO the tab tree from inside it, which pushed a
+              new screen instead of revealing the mounted one. The Champion
+              control beside it is untouched. */}
           {isChampion ? (
             <Pressable
               onPress={() => setManageOpen(true)}
@@ -4340,7 +4333,6 @@ const styles = StyleSheet.create({
     borderLeftColor: PROGRESS_GREEN,
     ...elevation.card,
   },
-  wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1, marginVertical: -5 },
   // SLICE 2. The identity band: the community's name, then the one presence
   // fact, separated from the goal below by a hairline rather than a gap, so
   // the hero reads as one object and not two stacked cards.

@@ -23,7 +23,6 @@ import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFunctions } from '../../../../../src/firebase';
 import { CARD_BORDER, CREAM, SURFACE, TEXT_MUTED, kit } from '../../../../../src/ui/kit';
 import { ButtonLink } from '../../../../../src/ui/ButtonLink';
-import { WsfWordmark } from '../../../../../src/ui/WsfWordmark';
 
 // Response shapes mirror wsfListChallenge / wsfCheckIn in functions-westayfit.
 // Kept narrow on purpose: the whitelist here is what a member is allowed to
@@ -300,9 +299,10 @@ export default function ChallengePage() {
   return (
     <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
       <View style={kit.column} testID="wsf-challenge">
-        {/* Product chrome: the wordmark, compact, same as Community Home. */}
+        {/* THE WORDMARK IS THE SHELL'S NOW — the persistent member top bar
+            carries it. The way back to the community stays: it is this
+            screen's own destination, not chrome. */}
         <View style={kit.chrome}>
-          <WsfWordmark variant="navy" height={22} testID="wsf-challenge-wordmark" />
           <ButtonLink
             href={`/community/${groupId}`}
             style={kit.chromeLink}
