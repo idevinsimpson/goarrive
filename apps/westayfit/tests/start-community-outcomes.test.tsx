@@ -365,28 +365,44 @@ describe('the duplicate guard', () => {
     await act(async () => { settle({ data: { groupId: 'grp-once' } }); await Promise.resolve(); });
   });
 
-  it('after a CONFIRMED create, the form cannot send another while navigation is pending', async () => {
+  /*
+    TWO WINDOWS, BOTH OPEN ON 5c28e45, whose `finally` released the guard and
+    re-enabled Create before the navigation had landed. Navigation here
+    neither throws nor leaves, so the member is still looking at the form.
+    Each test REQUIRES the button to be there and presses it; neither can pass
+    by finding nothing to press.
+  */
+  async function confirmedAndStillHere(): Promise<void> {
     vi.useFakeTimers();
-    // Navigation neither throws nor leaves: the member is still looking at
-    // the form during the grace period. The old `finally` re-enabled it here.
     replace.mockImplementation(() => undefined);
     callable.mockReturnValue(Promise.resolve({ data: { groupId: 'grp-held' } }));
     render();
     type('wsf-start-name', 'Held Guard');
     await click('wsf-start-submit');
     expect(callable).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledWith('/community/grp-held');
+  }
 
-    // Mid-grace, a second press on whatever is still under the finger.
-    await act(async () => { vi.advanceTimersByTime(400); });
-    const again = byTestId('wsf-start-submit');
-    if (again) {
-      await act(async () => { again.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    }
+  it('window 1 — right after confirmation, while the navigation lands, a second press sends nothing', async () => {
+    await confirmedAndStillHere();
+    // No time has passed: the create has returned and replace has been
+    // called, and this is the transition a second tap falls into.
+    await click('wsf-start-submit');
+    expect(callable, 'a confirmed create was followed by a second one').toHaveBeenCalledTimes(1);
+  });
+
+  it('window 2 — late in the 1.5 s grace period, a second press sends nothing, then the created card', async () => {
+    await confirmedAndStillHere();
+    await act(async () => { vi.advanceTimersByTime(1400); });
+    await click('wsf-start-submit');
     expect(callable, 'a confirmed create was followed by a second one').toHaveBeenCalledTimes(1);
 
-    // And once the grace period ends, the form is the created card.
-    await act(async () => { vi.advanceTimersByTime(1600); });
+    // Once the grace period ends, the form is the created card: Open, and no
+    // Create to press.
+    await act(async () => { vi.advanceTimersByTime(200); });
     expect(byTestId('wsf-start-created-title')?.textContent).toBe('Your community is ready.');
+    expect(byTestId('wsf-start-submit')).toBeNull();
+    expect(callable).toHaveBeenCalledTimes(1);
   });
 
   it('a refusal releases the guard, so the member can correct and try again', async () => {
