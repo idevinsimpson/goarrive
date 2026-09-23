@@ -190,6 +190,51 @@ export function kioskCountdownLabel(seconds: number): string {
  */
 export type KioskOutcome = 'confirmed' | 'refused' | 'unresolved' | 'none';
 
+/**
+ * WHETHER A KIOSK SESSION MAY END BY ITSELF FROM THE SCREEN IT IS ON.
+ *
+ * A session ends unattended only from a screen it has come to REST on. Entry,
+ * review and the movement screen have somebody standing at them mid-thought, so
+ * a deadline there would finish a session out from under a person who is still
+ * using it. A receipt, a refusal and an unresolved attempt do not.
+ *
+ * NEITHER DOES A SETTLED LOAD, WHICH IS WHY THIS FUNCTION EXISTS. A goal that
+ * closed, one that cannot be found, and a load that failed are all screens
+ * where nothing further will happen without somebody acting -- and until now
+ * they carried a manual Finish and no deadline at all, so a shared device left
+ * on one of them stayed as the last visitor left it. They are rest states too.
+ *
+ * IN FLIGHT IS NEVER REST. Signing out from under a request that has not
+ * answered is precisely how an outcome becomes unknowable, so an attempt still
+ * out -- a submission, or a stored row still in `sending` -- refuses the
+ * deadline whatever else is true. This is the fail-closed direction: the worst
+ * case of getting it wrong here is a device that waits for a person instead of
+ * a person who loses their contribution.
+ *
+ * Pure, and kept beside the rest of the kiosk's rules so it can be read and
+ * tested without mounting a screen.
+ */
+export type KioskRestInput = {
+  /** What this session's attempt has settled as, if it made one. */
+  outcome: KioskOutcome;
+  /** A contribution or replay is still out and has not answered. */
+  attemptInFlight: boolean;
+  /** The goal itself is settled: closed, missing, or it failed to load. */
+  loadSettled: boolean;
+};
+
+export function kioskMayFinishUnattended(input: KioskRestInput): boolean {
+  if (input.attemptInFlight) return false;
+  switch (input.outcome) {
+    case 'confirmed':
+    case 'refused':
+    case 'unresolved':
+      return true;
+    case 'none':
+      return input.loadSettled;
+  }
+}
+
 export type KioskFinishPlan = {
   /** Whether Finish may remove this account's stored attempt record. */
   clearPendingDraft: boolean;
