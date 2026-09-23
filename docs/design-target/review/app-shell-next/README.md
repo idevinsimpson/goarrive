@@ -159,7 +159,7 @@ A bounded trade, not permission for query drift: a new parameter, a different
 id, or a fragment all fail. If a later router version stops emitting the copy,
 every claim still holds unchanged.
 
-## `wsf-community-members-link` is 43 px, and it is not this branch's
+## `wsf-community-members-link` — not this branch's defect, fixed in this branch by ruling
 
 `ui-a11y` R3 and `ui-a11y-fixes` (d) both report one control under the 44 px
 minimum on Community Home and in the Manage sheet:
@@ -179,9 +179,24 @@ peopleLinkChevron: { color: INK_QUIET, fontSize: 20, fontWeight: '700' },
 ```
 
 The height is self-contained — 10 + 10 of padding around a chevron line box of
-about 23 — and nothing the shell adds or removes touches it. The one-line
-patch is `minHeight: 44` on `peopleLink`; it belongs to whoever owns that
-surface, and W9 has not applied it.
+about 23 — and nothing the shell adds or removes touches it.
+
+**The Director released the correction into this branch** (`5795101998`),
+because the community-detail file is reserved to W9 while the migration is in
+flight and handing the same file back mid-flight would be worse. `peopleLink`
+gains `minHeight: 44` — a minimum, not a height, so the row still sizes to its
+own content wherever that is taller. No copy, hierarchy, social-data or
+navigation change.
+
+Both sweeps are kept and now pass, and
+`sprint-w9-members-link-target.spec.ts` is the direct measurement the ruling
+asked for: it names the control, prints what it measured, and asks the harder
+question a sweep does not — that the top, middle and bottom of the box all
+belong to this pressable rather than to an ancestor with padding. (It scrolls
+the row clear of the raised MOVE control first: at the arrival scroll that
+overhang covers its lower edge, and a hit test there measures the bar.)
+Proven discriminating: with `minHeight` mutated to 43 it fails and reports the
+measured 43.
 
 ## The Champion's goal hero — RULED, and fixed by moving Manage into the shell
 
@@ -263,6 +278,47 @@ itself as the menu closes, because a chosen row is gone), and
 `ui-mobile-acceptance` — which may only tap by coordinates — makes the two taps
 a thumb makes.
 
+## MOVE — HELD on the Director's actual-pixel review, then made a real sheet
+
+The pixel review (`5795268359`) passed the shell direction and held one thing:
+the migrated MOVE frame was an opaque cream screen with no visible Close. The
+outer stack was already presenting `/move` as a transparent modal — the
+finding was that the screen then painted cream across the whole viewport, so
+the tab underneath was mounted and invisible. It also still reserved
+`MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG`, chrome belonging to a screen
+it is no longer part of, which is where the large empty lower field came from.
+
+`apps/westayfit/app/move/index.tsx` was released to W9 for presentation and
+navigation only. Every goal-resolution path, callable, ordering, no-goal and
+error meaning, destination URL, the one-goal auto-resolution and the
+contribution handoff are untouched, and so is every word on the screen.
+
+- **A scrim and a bounded panel.** The scrim covers the viewport, which is what
+  keeps the tab bar — and the covered tab's top bar — from being touched while
+  the sheet is open, as well as what dims the context. The panel stops at 88 %,
+  so the screen it opened over stays identifiable behind it.
+- **One explicit Close**, 44×44, top right, in the same place in every state.
+  `back()` to the exact mounted tab with its scroll and loaded state; on a cold
+  or deep-linked `/move`, where nothing was covered, it resolves to the
+  canonical member destination instead of being a dead control. The scrim
+  dismisses too, because that is what a scrim is.
+- **The obsolete bottom-bar reservation is gone**; the sheet pads to the
+  device's own safe area.
+- **No top bar inside MOVE.** The one visible belongs to the tab underneath and
+  is behind the scrim with it.
+- **Reduced motion** is unchanged and still removes the travel: the entrance is
+  the Stack screen's `animation: reduced ? 'none' : 'slide_from_bottom'`, and
+  the screen adds no travel of its own.
+
+The proofs are in `sprint-w9-shell-production.spec.ts`, and they are about what
+can be SEEN and TOUCHED rather than what is in the document: opened from Home
+and from You the tab underneath keeps a planted mark; the panel is bounded and
+the scrim is translucent, so there is context to see; neither the tab bar nor
+the top bar resolves to itself at **nine points across its own width**; Close
+is 44×44 and returns to that exact screen with its non-vacuous planted scroll;
+and a cold `/move` closes to the canonical member destination. The twelve
+successor frames are re-shot on it.
+
 ## Three per-page AFTER capture specs still name wordmarks that no longer exist
 
 `design-community-after-capture`, `design-progress-after-capture` and
@@ -280,19 +336,21 @@ Every number below is the count the suite's own run printed, not a tally by eye.
 
 | Run | Result |
 |---|---|
-| **Whole e2e suite** (397 tests) | **350 passed / 5 failed / 41 skipped**, 18.4 min |
-| — standing failures | **2**, both the base build's 44 px control (below) |
-| — parallel-load flakes | **3** — `station-enrollment` ×2, `ui-journey` — each re-run serially and **passing** |
-| — and one more seen once | `sprint-w9-shell-capture` timed out at 240 s in one targeted run and passes in 2.6 s alone; it is green in the suite run above |
-| `sprint-w9-*` e2e (nine files) | **20 passed / 0 failed** |
+| **Whole e2e suite** (399 tests) | **355 passed / 3 failed / 41 skipped**, 19.7 min |
+| — standing failures | **0** |
+| — parallel-load flakes | **3** — `event-return`, `ui-a11y` R1 maxima, `ui-contribute-guide` — all three re-run serially and **passing** |
+| `sprint-w9-*` e2e (eleven files) | **22 passed / 0 failed** |
 | `sprint-w9-shell-geometry` vitest | **11 passed / 0 failed** |
 | Whole vitest suite | **821 passed / 0 failed**, 48 files |
-| `sprint-w1b-kiosk-confinement` | **10 passed / 0 failed** |
-| `sprint-w1b-kiosk-idle-finish` | **9 passed / 0 failed** |
+| `sprint-w1b-kiosk-confinement` / `-idle-finish` | **10 / 0** and **9 / 0** |
 | `ui-mobile-acceptance` + `ui-contribute-short-phone` | **15 passed / 0 failed** |
-| Ordinary `npm run build:web` | **exit 0**, no ERROR line, no tree deletion, 9 route-group duplicates skipped, 12 dynamic routes aliased |
+| Ordinary `npm run build:web` | **exit 0**, no ERROR line, no tree deletion, 9 route-group duplicates skipped |
 | `ts:check` | clean |
 | `check-evidence-intact.mjs` | frozen **9** / accepted **20** intact |
+
+The two failures that stood at the previous head were the base build's 43 px
+members link. The Director released that correction into this branch, so the
+suite now has **no standing failure at all**.
 
 ### The Director's gate, item by item
 
@@ -301,10 +359,11 @@ Every number below is the count the suite's own run printed, not a tally by eye.
 | 1 | ordinary `build:web`, no export-tree deletion | run above; `dist/` intact, 9 duplicates skipped |
 | 2 | same-tab reselect: zero navigation, zero reload, no remount | `sprint-w9-shell-production` — `history.length` unchanged, a `window` mark and a DOM-node mark both survive, scroll preserved |
 | 3 | four tabs stay mounted and restore state | `sprint-w9-shell-production` — each tab marked, each still the same node when returned to |
-| 4 | MOVE over the mounted prior tab, bar unreachable, Close returns to it | `sprint-w9-shell-production` (opened from You, not Home) and `sprint-w9-shell-successor-capture` |
+| 4 | MOVE over the mounted prior tab, bar unreachable, Close returns to it | `sprint-w9-shell-production` — both tests, opened from Home AND from You, with the sheet bounded, the scrim translucent, neither bar reachable at nine points across its width, Close 44×44, and a cold `/move` fallback |
 | 5 | ordinary contribution Back/Close, six-point proof at a non-vacuous 390×640 scroll fixture | `sprint-w1b-kiosk-confinement` |
 | 6 | Champion hamburger Manage opens the existing sheet and disappears on route/role change | `sprint-w9-shell-manage-action` |
-| 7 | 12 successor frames, MIGRATED BUILD / NOT ACCEPTED, one masthead, no duplicate page chrome | `successor/`, re-shot on this head |
+| 7 | 12 successor frames, MIGRATED BUILD / NOT ACCEPTED, one masthead, no duplicate page chrome, explicit Close on MOVE, no obsolete bottom-bar spacing | `successor/`, re-shot on this head |
+| + | the members link is a 44 px touch target | `sprint-w9-members-link-target`, plus the two sweeps that first reported it |
 
 An ordinary run without `WSF_CAPTURE_FRAMES` still writes zero bytes of this
 package's evidence; the guard above is what proves it after every pass.

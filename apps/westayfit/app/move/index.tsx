@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
@@ -12,11 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import {
-  MEMBER_TAB_BAR_BODY,
-  MEMBER_TAB_MOVE_OVERHANG,
-} from '../../src/ui/MemberTabBar';
-import {
   ACTION_GREEN,
+  CARD_BORDER,
   CREAM,
   HAIRLINE,
   INK_QUIET,
@@ -53,6 +50,15 @@ import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progres
  *
  * It replaces rather than pushes, so MOVE never leaves a trail of itself in
  * the back stack.
+ *
+ * AND IT IS A SHEET, NOT A PAGE. The outer stack presents this route as a
+ * transparent modal, so the tab the member pressed MOVE from is still mounted
+ * and still on screen behind it. This screen therefore paints a scrim and a
+ * panel rather than an opaque surface: the context stays legible, the tab bar
+ * underneath is covered and cannot be touched, and there is one explicit
+ * Close. Painting cream across the whole viewport -- which is what it used to
+ * do -- made the transparent presentation invisible and the whole thing read
+ * as another page.
  */
 
 type ListedGoal = {
@@ -95,8 +101,6 @@ function actionableGoals(goals: ListedGoal[]): ListedGoal[] {
 export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
   const safeArea = useSafeAreaInsets();
-  /* The shell's bar covers this screen too; reserve what it actually takes. */
-  const barInset = MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeArea.bottom;
   const [state, setState] = useState<Resolution>({ kind: 'working' });
 
   useEffect(() => {
@@ -169,17 +173,68 @@ export default function MoveResolver() {
   }, [ready, user]);
 
   /*
-    THE COMPOSITION, AND WHERE IT DIFFERS FROM THE TARGET.
-
-    The approved target draws MOVE entry as a SHEET rising over the dimmed
-    Home. Doing that truthfully needs a transparent-modal presentation so the
-    real Home stays mounted underneath -- a router and shell change outside
-    this slice, and a sheet floating above a tab bar that is still visible
-    would be incoherent. So the implementation composes the same content as a
-    screen, in the same language: a navy field carrying the question and the
-    community, then the open goals on cream. The sheet stays an approved idea
-    with a router change owing, and this AFTER says so rather than faking it.
+    THE COMPOSITION. The approved target draws MOVE entry as a sheet rising
+    over the dimmed tab the member was on, and that is now what it is: the
+    router change the earlier note here said was owing has landed, so this
+    renders a scrim and a panel over a screen that is genuinely still mounted.
+    The content inside is unchanged -- a navy field carrying the question and
+    the community, then the open goals on cream.
   */
+
+  /*
+    CLOSE GOES BACK, AND FALLS BACK RATHER THAN DYING.
+
+    A sheet opened from a tab has somewhere to return to, and `back()` returns
+    to that exact screen with its scroll and its loaded state. A cold or
+    deep-linked `/move` has no such entry -- nothing was covered, because
+    nothing was there -- so Close resolves to the canonical member destination
+    instead of being a control that does nothing.
+  */
+  const close = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/');
+  };
+
+  /*
+    THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
+    bar underneath from being touched while this is open as well as what dims
+    the context, and it is pressable because dismissing a sheet by its scrim is
+    what a sheet is. The panel is bounded -- it does not fill the screen -- so
+    the tab behind stays identifiable, and its bottom padding is the device's
+    own safe area. It used to reserve MEMBER_TAB_BAR_BODY plus the raised
+    control's overhang: chrome belonging to a screen this one is no longer part
+    of, and the empty lower field that reservation left behind.
+  */
+  const sheet = (children: ReactNode) => (
+    <View style={s.sheetRoot} testID="wsf-move-screen">
+      <Pressable
+        style={s.scrim}
+        onPress={close}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        testID="wsf-move-scrim"
+      />
+      <View style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]} testID="wsf-move-sheet">
+        <View style={s.sheetHead}>
+          <View pointerEvents="none" style={s.grabber} />
+          <Pressable
+            onPress={close}
+            style={s.close}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            testID="wsf-move-close"
+          >
+            <Text style={s.closeText}>Close</Text>
+          </Pressable>
+        </View>
+        <ScrollView contentContainerStyle={s.body}>{children}</ScrollView>
+      </View>
+    </View>
+  );
+
   const field = (eyebrow: string | null, title: string, intro: string) => (
     <View style={s.field}>
       <View pointerEvents="none" style={s.fieldGlow} />
@@ -190,126 +245,163 @@ export default function MoveResolver() {
   );
 
   if (state.kind === 'choose') {
-    return (
-      <ScrollView style={s.screen} contentContainerStyle={[s.body, { paddingBottom: barInset + 16 }]}>
-        <View testID="wsf-move-choose" style={s.stack}>
-          {field(
-            state.community,
-            'What are you moving toward?',
-            `${state.goals.length} goals are open here. Pick the one this counts toward.`,
-          )}
-          {state.goals.map((g) => (
-            <View key={g.goalId} style={s.card}>
-              <View style={s.cardRow}>
-                <View style={s.cardText}>
-                  <Text style={s.cardTitle}>{g.title}</Text>
-                  {/*
-                    NEVER A FABRICATED ZERO. If this caller was not given the
-                    shared total, the row says what the goal is FOR rather
-                    than inventing a number for where it stands.
-                  */}
-                  <Text style={s.cardMeta} testID={`wsf-move-total-${g.goalId}`}>
-                    {typeof g.sharedTotal === 'number'
-                      ? totalOfTargetLabel(g.sharedTotal, g.target, g.unit)
-                      : `Target ${formatCount(g.target)} ${g.unit}`}
-                  </Text>
-                </View>
-                <ButtonLink
-                  href={`/contribute/${g.goalId}?groupId=${encodeURIComponent(
-                    state.groupId,
-                  )}&mode=move`}
-                  style={s.cardAction}
-                  textStyle={s.cardActionText}
-                  testID={`wsf-move-choose-${g.goalId}`}
-                  label="Move"
-                  accessibilityLabel={`Move toward ${g.title}`}
+    return sheet(
+      <View testID="wsf-move-choose" style={s.stack}>
+        {field(
+          state.community,
+          'What are you moving toward?',
+          `${state.goals.length} goals are open here. Pick the one this counts toward.`,
+        )}
+        {state.goals.map((g) => (
+          <View key={g.goalId} style={s.card}>
+            <View style={s.cardRow}>
+              <View style={s.cardText}>
+                <Text style={s.cardTitle}>{g.title}</Text>
+                {/*
+                  NEVER A FABRICATED ZERO. If this caller was not given the
+                  shared total, the row says what the goal is FOR rather
+                  than inventing a number for where it stands.
+                */}
+                <Text style={s.cardMeta} testID={`wsf-move-total-${g.goalId}`}>
+                  {typeof g.sharedTotal === 'number'
+                    ? totalOfTargetLabel(g.sharedTotal, g.target, g.unit)
+                    : `Target ${formatCount(g.target)} ${g.unit}`}
+                </Text>
+              </View>
+              <ButtonLink
+                href={`/contribute/${g.goalId}?groupId=${encodeURIComponent(
+                  state.groupId,
+                )}&mode=move`}
+                style={s.cardAction}
+                textStyle={s.cardActionText}
+                testID={`wsf-move-choose-${g.goalId}`}
+                label="Move"
+                accessibilityLabel={`Move toward ${g.title}`}
+              />
+            </View>
+            {/*
+              WHERE THE COMMUNITY ALREADY IS, on the row you would join. The
+              track is filled by fillRatio -- the same ratio the Living WE
+              fills by -- so the two can never disagree. A goal whose shared
+              total this caller is not told renders no track at all rather
+              than a track at nothing, which would read as zero progress.
+            */}
+            {typeof g.sharedTotal === 'number' ? (
+              <View style={s.track}>
+                <View
+                  style={[
+                    s.trackFill,
+                    { width: `${fillRatio(g.sharedTotal, g.target) * 100}%` },
+                  ]}
                 />
               </View>
-              {/*
-                WHERE THE COMMUNITY ALREADY IS, on the row you would join. The
-                track is filled by fillRatio -- the same ratio the Living WE
-                fills by -- so the two can never disagree. A goal whose shared
-                total this caller is not told renders no track at all rather
-                than a track at nothing, which would read as zero progress.
-              */}
-              {typeof g.sharedTotal === 'number' ? (
-                <View style={s.track}>
-                  <View
-                    style={[
-                      s.trackFill,
-                      { width: `${fillRatio(g.sharedTotal, g.target) * 100}%` },
-                    ]}
-                  />
-                </View>
-              ) : null}
-            </View>
-          ))}
-          <Text style={s.note}>
-            Nothing is recorded until you choose a goal and confirm an amount.
-          </Text>
-        </View>
-      </ScrollView>
+            ) : null}
+          </View>
+        ))}
+        <Text style={s.note}>
+          Nothing is recorded until you choose a goal and confirm an amount.
+        </Text>
+      </View>,
     );
   }
 
   if (state.kind === 'noGoal') {
-    return (
-      <ScrollView style={s.screen} contentContainerStyle={[s.body, { paddingBottom: barInset + 16 }]}>
-        <View testID="wsf-move-no-goal" style={s.stack}>
-          {field(
-            state.community,
-            'Nothing is running right now',
-            'When a Champion opens a goal, this is where you will record what you did.',
-          )}
-          <View style={s.quiet}>
-            <Text style={s.quietTitle}>What is still here</Text>
-            <Text style={s.quietBody}>
-              Anything you already recorded toward past goals stays in Progress. New
-              contributions need an open goal.
-            </Text>
-          </View>
-          <ButtonLink
-            href={`/community/${state.groupId}`}
-            style={s.ghost}
-            textStyle={s.ghostText}
-            testID="wsf-move-no-goal-community"
-            label="Go to your community"
-          />
+    return sheet(
+      <View testID="wsf-move-no-goal" style={s.stack}>
+        {field(
+          state.community,
+          'Nothing is running right now',
+          'When a Champion opens a goal, this is where you will record what you did.',
+        )}
+        <View style={s.quiet}>
+          <Text style={s.quietTitle}>What is still here</Text>
+          <Text style={s.quietBody}>
+            Anything you already recorded toward past goals stays in Progress. New
+            contributions need an open goal.
+          </Text>
         </View>
-      </ScrollView>
+        <ButtonLink
+          href={`/community/${state.groupId}`}
+          style={s.ghost}
+          textStyle={s.ghostText}
+          testID="wsf-move-no-goal-community"
+          label="Go to your community"
+        />
+      </View>,
     );
   }
 
-  return (
-    <ScrollView style={s.screen} contentContainerStyle={[s.body, { paddingBottom: barInset + 16 }]}>
-      <View style={s.stack}>
-        {state.kind === 'error' ? (
-          <>
-            {field(null, 'Something went wrong', state.message)}
-            <Text style={s.hiddenProbe} testID="wsf-move-error">
-              {state.message}
-            </Text>
-            <ButtonLink
-              href="/"
-              style={s.cardAction}
-              textStyle={s.cardActionText}
-              testID="wsf-move-error-home"
-              label="Go Home"
-            />
-          </>
-        ) : (
-          <Text style={kit.statusText} testID="wsf-move-working">
-            Finding what you are moving toward…
+  return sheet(
+    <View style={s.stack}>
+      {state.kind === 'error' ? (
+        <>
+          {field(null, 'Something went wrong', state.message)}
+          <Text style={s.hiddenProbe} testID="wsf-move-error">
+            {state.message}
           </Text>
-        )}
-      </View>
-    </ScrollView>
+          <ButtonLink
+            href="/"
+            style={s.cardAction}
+            textStyle={s.cardActionText}
+            testID="wsf-move-error-home"
+            label="Go Home"
+          />
+        </>
+      ) : (
+        <Text style={kit.statusText} testID="wsf-move-working">
+          Finding what you are moving toward…
+        </Text>
+      )}
+    </View>,
   );
 }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: CREAM },
-  body: { flexGrow: 1, padding: 20 },
+  /* The route's own ground is transparent -- set on the Stack screen -- so the
+     sheet sits at the bottom of the viewport with the covered tab above it. */
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  /* Full-bleed on purpose: this is what makes the tab bar underneath
+     unreachable while the sheet is open, as well as what dims the context. */
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,31,53,0.42)' },
+  sheet: {
+    /* Bounded, so the screen it opened over stays identifiable behind it. */
+    maxHeight: '88%',
+    backgroundColor: CREAM,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    borderColor: CARD_BORDER,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    ...elevation.hero,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    minHeight: 44,
+  },
+  grabber: {
+    position: 'absolute',
+    top: 6,
+    left: '50%',
+    marginLeft: -22,
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: HAIRLINE,
+  },
+  /* 44x44 with the label centred in it: the target is the control, not the
+     word. Top right, so it is in the same place in every state. */
+  close: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeText: { color: NAVY, fontSize: 15, fontWeight: '800' },
+  body: { paddingTop: 6, paddingBottom: 4 },
   stack: { gap: 14 },
 
   field: {
