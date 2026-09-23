@@ -1,8 +1,8 @@
 # WSF — visual-review export for PR #443's app-shell / navigation checkpoint 1:
-# the 36 PNGs W9 adds under docs/design-target/review/app-shell-next/ (ten
+# the 37 PNGs W9 adds under docs/design-target/review/app-shell-next/ (ten
 # CURRENT-BUILD BEFORE captures of the real member routes at start SHA c8f38e3,
 # twelve PROPOSED / NOT ACCEPTED captures of the gated shell prototype plus
-# their contact sheet, and — at the successor 41f80f3 — twelve
+# their contact sheet, and — at the successor (product 41f80f3, evidence fca3326) — thirteen
 # MIGRATED BUILD / NOT ACCEPTED captures of the migrated shell on the real
 # routes: Home, Community, Progress, You, MOVE open and contributing at
 # 390x844 and 390x640, plus their contact sheet), exported at their source commit as a
@@ -61,9 +61,9 @@ jobs:
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
           SN = 'docs/design-target/review/app-shell-next'
-          # THE EXACT ALLOWLIST: the 36 PNGs PR #443 adds under app-shell-next/ — W9's CURRENT-BUILD
+          # THE EXACT ALLOWLIST: the 37 PNGs PR #443 adds under app-shell-next/ — W9's CURRENT-BUILD
           # BEFOREs (real routes at c8f38e3), PROPOSED / NOT ACCEPTED prototype captures, and the
-          # MIGRATED BUILD / NOT ACCEPTED successor captures at 41f80f3 — none an AFTER — at the PR
+          # MIGRATED BUILD / NOT ACCEPTED successor captures (product 41f80f3, evidence fca3326) — none an AFTER — at the PR
           # head this job checks out, original committed bytes only.
           allow = [
               (f'{SN}/before/CURRENT-BUILD-activity-390x640.png', 'BEFORE · actual current build, captured from the real member routes at start SHA c8f38e3 · CURRENT-BUILD-activity-390x640.png'),
@@ -89,19 +89,20 @@ jobs:
               (f'{SN}/target/PROPOSED-e-move-open-390x844.png', 'PROPOSED · NOT ACCEPTED · gated shell prototype capture (persistent top bar, real tabs, MOVE as a focus flow) · PROPOSED-e-move-open-390x844.png'),
               (f'{SN}/target/PROPOSED-f-move-closed-390x640.png', 'PROPOSED · NOT ACCEPTED · gated shell prototype capture (persistent top bar, real tabs, MOVE as a focus flow) · PROPOSED-f-move-closed-390x640.png'),
               (f'{SN}/target/PROPOSED-f-move-closed-390x844.png', 'PROPOSED · NOT ACCEPTED · gated shell prototype capture (persistent top bar, real tabs, MOVE as a focus flow) · PROPOSED-f-move-closed-390x844.png'),
-              (f'{SN}/successor/MIGRATED-a-home-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-a-home-390x640.png'),
-              (f'{SN}/successor/MIGRATED-a-home-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-a-home-390x844.png'),
-              (f'{SN}/successor/MIGRATED-b-community-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-b-community-390x640.png'),
-              (f'{SN}/successor/MIGRATED-b-community-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-b-community-390x844.png'),
-              (f'{SN}/successor/MIGRATED-c-progress-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-c-progress-390x640.png'),
-              (f'{SN}/successor/MIGRATED-c-progress-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-c-progress-390x844.png'),
-              (f'{SN}/successor/MIGRATED-d-you-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-d-you-390x640.png'),
-              (f'{SN}/successor/MIGRATED-d-you-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-d-you-390x844.png'),
-              (f'{SN}/successor/MIGRATED-e-move-open-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-e-move-open-390x640.png'),
-              (f'{SN}/successor/MIGRATED-e-move-open-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-e-move-open-390x844.png'),
-              (f'{SN}/successor/MIGRATED-f-contribute-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-f-contribute-390x640.png'),
-              (f'{SN}/successor/MIGRATED-f-contribute-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor 41f80f3 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-f-contribute-390x844.png'),
-              (f'{SN}/successor/MIGRATED-contact-sheet.png', 'CONTACT SHEET · MIGRATED BUILD / NOT ACCEPTED · successor 41f80f3 captures side by side · MIGRATED-contact-sheet.png'),
+              (f'{SN}/successor/MIGRATED-a-home-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-a-home-390x640.png'),
+              (f'{SN}/successor/MIGRATED-a-home-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-a-home-390x844.png'),
+              (f'{SN}/successor/MIGRATED-b-community-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-b-community-390x640.png'),
+              (f'{SN}/successor/MIGRATED-b-community-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-b-community-390x844.png'),
+              (f'{SN}/successor/MIGRATED-c-progress-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-c-progress-390x640.png'),
+              (f'{SN}/successor/MIGRATED-c-progress-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-c-progress-390x844.png'),
+              (f'{SN}/successor/MIGRATED-d-you-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-d-you-390x640.png'),
+              (f'{SN}/successor/MIGRATED-d-you-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-d-you-390x844.png'),
+              (f'{SN}/successor/MIGRATED-e-move-open-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-e-move-open-390x640.png'),
+              (f'{SN}/successor/MIGRATED-e-move-open-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-e-move-open-390x844.png'),
+              (f'{SN}/successor/MIGRATED-f-contribute-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-f-contribute-390x640.png'),
+              (f'{SN}/successor/MIGRATED-f-contribute-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 — capture of the migrated shell on the real member routes (not an AFTER; MOVE as a focus sheet with Close, members link 44 px) · MIGRATED-f-contribute-390x844.png'),
+              (f'{SN}/successor/MIGRATED-contact-sheet.png', 'CONTACT SHEET · MIGRATED BUILD / NOT ACCEPTED · successor (product 41f80f3, evidence fca3326) captures side by side · MIGRATED-contact-sheet.png'),
+              (f'{SN}/successor/MIGRATED-g-champion-menu-open-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · successor: product 41f80f3, evidence fca3326 · Champion hamburger open: contextual Manage row + Settings · MIGRATED-g-champion-menu-open-390x640.png'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
