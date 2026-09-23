@@ -320,7 +320,41 @@ async function expectNoMemberNavigation(page: Page): Promise<void> {
       `a kiosk screen offered ${href}`
     ).toBe(false);
   }
+  // The anchor sweep is blind to the other way this app navigates: a
+  // `Pressable` whose `onPress` calls the router renders no `href` at all
+  // (the contribution screen's own Back and the member tabs are built that
+  // way). So read every control the page exposes to assistive technology, by
+  // role, and reject any whose accessible name is a member destination. This
+  // is the name a person hears and reads, so a renamed testID cannot hide it.
+  const controls = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(
+        'a, button, [role="link"], [role="button"], [role="tab"], [role="menuitem"], [role="navigation"], nav'
+      )
+    ).map((el) => {
+      const labelled = el.getAttribute('aria-label');
+      const name = (labelled ?? (el as HTMLElement).innerText ?? el.textContent ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return { role: el.getAttribute('role') ?? el.tagName.toLowerCase(), name };
+    })
+  );
+  for (const { role, name } of controls) {
+    expect(
+      role === 'navigation' || role === 'nav' || MEMBER_DESTINATION_NAME.test(name),
+      `a kiosk screen offered a ${role} named "${name}"`
+    ).toBe(false);
+  }
 }
+
+/**
+ * Every name the member shell and the contribution screen give a way into the
+ * visitor's account: the four tabs (with the tab bar's ", current" suffix),
+ * MOVE, the screen's own returns, and the utilities under You. Matched whole,
+ * so "Finish", "Stay" or "Review" can never collide with it.
+ */
+const MEMBER_DESTINATION_NAME =
+  /^(home|community|communities|progress|you|move|move: .*|back|back to (community|home)|settings|members|start a community)(, current)?$/i;
 
 /** The way out is present, and it can be read. */
 async function expectFinishUsable(page: Page): Promise<void> {
@@ -745,6 +779,66 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     // `wsf-you` is visible while the profile is still loading -- W5 corrected
     // its own instrument for exactly this and said so, so the wait is for the
     // name itself rather than for the container.
+    await expect(page.getByTestId('wsf-you')).toContainText(VISITOR, { timeout: 40_000 });
+  });
+
+  test('the guard itself: a router-driven control with no href is still an escape it catches', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await seedKiosk('h');
+    await walkUpToEntry(page, fx);
+    // The real kiosk entry screen is clean before anything is planted, so the
+    // rejections below are the planted control's and nothing else's.
+    await expectNoMemberNavigation(page);
+
+    // The shapes react-native-web renders for a `Pressable` that calls the
+    // router: a focusable element with a role and no href, named by its text
+    // or its accessibilityLabel. Each is a way into the visitor's account that
+    // the anchor sweep and the testID list both pass.
+    const plants = [
+      { role: 'link', text: 'Back to community' },
+      { role: 'button', text: 'You' },
+      { role: 'link', label: 'Progress, current' },
+      { role: 'button', label: 'Move: record what you did' },
+      { tag: 'button', text: 'Home' },
+      { tag: 'nav', label: 'Main' },
+    ];
+    for (const plant of plants) {
+      await page.evaluate((p) => {
+        const el = document.createElement(p.tag ?? 'div');
+        if (p.role) el.setAttribute('role', p.role);
+        if (p.label) el.setAttribute('aria-label', p.label);
+        el.textContent = p.text ?? '';
+        el.tabIndex = 0;
+        el.id = 'w1b-planted-escape';
+        // Reachable, not decorative: pressing it leaves for the member app,
+        // the way `router.push` would.
+        el.addEventListener('click', () => window.location.assign('/you'));
+        document.body.appendChild(el);
+      }, plant);
+      await expect(
+        expectNoMemberNavigation(page),
+        `the guard missed a planted ${JSON.stringify(plant)}`
+      ).rejects.toThrow(/a kiosk screen offered/);
+      await page.evaluate(() => document.getElementById('w1b-planted-escape')?.remove());
+    }
+    // Removing the plant clears the verdict: the guard reacts to the control,
+    // not to anything the planting left behind.
+    await expectNoMemberNavigation(page);
+
+    // And the planted shape really is a way out: one press lands on the
+    // visitor's own page, which is the defect this guard exists to catch.
+    await page.evaluate(() => {
+      const el = document.createElement('div');
+      el.setAttribute('role', 'button');
+      el.textContent = 'You';
+      el.id = 'w1b-planted-escape';
+      el.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;padding:12px;background:#fff';
+      el.addEventListener('click', () => window.location.assign('/you'));
+      document.body.appendChild(el);
+    });
+    await page.locator('#w1b-planted-escape').click();
     await expect(page.getByTestId('wsf-you')).toContainText(VISITOR, { timeout: 40_000 });
   });
 });
