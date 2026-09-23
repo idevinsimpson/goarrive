@@ -2226,3 +2226,59 @@ ops head. #452 is HELD; nothing here is accepted, integrated or staged.
   SHA anyway.
 - **The three new cases leave `wsf-v-*` temp directories behind,** as the suite's existing cases
   already do.
+
+## PACKET — K1–K18 on release candidate `9f27c6ea` (L0 `5802407526`, Director `5802482930`)
+
+**Head:** `9f27c6eae26beebd610779a61fb458bd18266f27` = `f2f901a` ⊕ W4 `7f37e2a` ⊕ W8 `eff65b0` ⊕ W9
+`cd02949`. It was run in its own worktree, with a fresh build and with the emulators started from
+that tree. Hosting served that build's entry bundle, `entry-dc5b357e…`.
+
+- **Blobs:**
+  - `app/contribute/[goalId].tsx` is `253278fb`, identical to W9's `cd02949`; `f2f901a` had `8f506c6b`.
+  - `src/kioskSession.ts` is `6f69d0ae`.
+  - The spec's blob is `20440579`, unchanged from the `dd86721` run.
+- **Protected paths:** no change against `f2f901a`, so the identity suites are carried and not rerun.
+- **Result:** Chromium, one worker, **18 passed / 0 failed**; there is no `test.fail()` call in the
+  file. W9's new labelled exits do not reach any kiosk state (K4, K9, K11, K18). Idle-Finish and its
+  real deadline hold (K14–K16), and the ordinary member keeps a way out without being timed out (K5,
+  K17).
+- **Evidence guard:** 9 frozen / 20 accepted, intact after the run. Receipt: #395 `5802569443`.
+
+**Status:** tested. The Director's visual PASS covers the 24 frames. The candidate is not
+functionally accepted, not integrated and not staged, and this is not an approval.
+
+## PACKET — #450 F1 + F2 follow-up, W3 `d690435a` (L0 `5802077885`, Director `5802482930`)
+
+**Reviewed:** `d690435a9418dcc0d4643507ba3176e2c5662066` (parent `30bb8e0b`). It was also reviewed as a
+clean `-x` cherry-pick onto `main` `13accc50` (local commit `6696565d`, not pushed). Every changed
+line of the cherry-pick is identical to the original.
+
+- **Scope:** exactly three files — `check-hosting-routes.mjs` (+31/−12), `check-hosting-routes.test.mjs` (+64)
+  and `workflow-contract.test.mjs` (+28).
+  - The helper change is `samplesFor`: a one-segment and a two-segment sample per `**` rule, and one
+    failure per rule. Four route cases and one liveness case are added.
+  - Nothing outside F1/F2 changed. F3, F4 and F5 are not touched, as the release specified.
+- **Harness** (`sprint-w5-hosting-route-check-verify.mjs`, helper and contract from the cherry-pick):
+  **G1–G7 all CLOSED.**
+  - All **13** control and matrix rows are OK: A1–A7, B0 (66 passed), B1, and the four real-config
+    cells, which are unchanged.
+  - Those four cells are: `f2f901a` against the old ops config failed (4) and against current ops
+    passed; `c8f38e3` failed (2) and then passed.
+- **Liveness mutants,** each failing at the new case with its own message:
+  - the step commented out;
+  - `continue-on-error: true` on the step;
+  - `if: ${{ false }}`;
+  - `|| true` appended;
+  - `run: echo node …`;
+  - job-level `continue-on-error: true`.
+- **Fail-first, re-derived on unfixed `13accc50`:**
+  - **F2:** the new test file run against the old helper fails at its first SHADOWING case.
+  - **F1:** a `continue-on-error` mutant passes the old contract (65 passed, exit 0) and fails the new
+    one.
+- **`run-all` on the cherry-pick:** exit 0, **14 suites, 258 + 66 = 324** (W3 reported 324 / 14).
+  `check-hosting-routes` has 16 cases and `workflow-contract` 66.
+- **Recorded and excluded:** `/tmp/wsf-routes-*` fixtures still accumulate (1,134 on this box). This is
+  F3/F4-class cleanup and outside the release.
+
+**Verdict: PASS** on the bounded delta. It is not CI-gated, and not accepted, integrated or staged.
+L0 carries it with `-x` under the standing ruling.
