@@ -92,16 +92,23 @@ async function seedShards(goalId: string, total: number): Promise<void> {
   }
 }
 
-async function seedGoal(groupId: string, ownerUid: string, goalId: string, total: number): Promise<void> {
+async function seedGoal(
+  groupId: string,
+  ownerUid: string,
+  goalId: string,
+  total: number,
+  status: 'active' | 'closed' = 'active'
+): Promise<void> {
   const now = new Date();
-  const endsInMs = 3 * 24 * 60 * 60_000;
+  // A closed goal's window is in the past; an active one's is still open.
+  const endsInMs = status === 'closed' ? -1 * 24 * 60 * 60_000 : 3 * 24 * 60 * 60_000;
   await firestoreWrite(`wsfGoals/${goalId}`, {
     ownerUid: { stringValue: ownerUid },
     communityGroupId: { stringValue: groupId },
     title: { stringValue: 'Squats together this week' },
     target: { integerValue: '500' },
     unit: { stringValue: 'squats' },
-    status: { stringValue: 'active' },
+    status: { stringValue: status },
     startsAt: tsField(new Date(now.getTime() + endsInMs - 14 * 24 * 60 * 60_000)),
     endsAt: tsField(new Date(now.getTime() + endsInMs)),
     timezone: { stringValue: 'America/New_York' },
@@ -155,6 +162,8 @@ type Fx = {
   stamp: string;
   password: string;
   goalId: string;
+  groupId: string;
+  championUid: string;
   memberEmail: string;
   memberName: string;
   memberUid: string;
@@ -191,6 +200,8 @@ async function seedBase(tag: string): Promise<Fx> {
     stamp,
     password,
     goalId,
+    groupId,
+    championUid,
     memberEmail,
     memberName,
     memberUid,
@@ -333,6 +344,103 @@ async function escapeControls(page: Page, roots: string[]): Promise<string[]> {
     }
     return out;
   }, roots);
+}
+
+/**
+ * CONTRAST, MEASURED THE WAY A READER ACTUALLY SEES IT.
+ *
+ * Two things a naive reading gets wrong, and both of them here:
+ *
+ * TRANSLUCENT TEXT. A caption at `rgba(247,245,240,0.78)` is not that colour on
+ * screen — it is that colour composited over whatever is behind it. Comparing
+ * the raw value against the background reports a ratio nobody experiences.
+ * The alpha is composited before the luminance is taken.
+ *
+ * THE FLOOR DEPENDS ON THE TEXT. WCAG AA is 3:1 for large text (>=24px, or
+ * >=18.66px when bold) and 4.5:1 for everything else. A countdown at 14px does
+ * not get to be judged by the headline's standard, so the floor is chosen per
+ * control from its own computed size and weight rather than fixed at the most
+ * forgiving number.
+ */
+type ContrastReading = {
+  present: boolean;
+  ratio: number;
+  fontSize: number;
+  weight: number;
+  floor: number;
+  fg: string;
+  bg: string;
+};
+
+async function measureContrast(page: Page, testIds: string[]): Promise<Record<string, ContrastReading>> {
+  return page.evaluate((ids) => {
+    const parse = (c: string): [number, number, number, number] => {
+      const m = c.match(/-?[\d.]+/g);
+      if (!m) return [0, 0, 0, 1];
+      return [Number(m[0]), Number(m[1]), Number(m[2]), m[3] === undefined ? 1 : Number(m[3])];
+    };
+    const over = (
+      fg: [number, number, number, number],
+      bg: [number, number, number, number]
+    ): [number, number, number] => [
+      fg[3] * fg[0] + (1 - fg[3]) * bg[0],
+      fg[3] * fg[1] + (1 - fg[3]) * bg[1],
+      fg[3] * fg[2] + (1 - fg[3]) * bg[2],
+    ];
+    const lum = ([r, g, b]: [number, number, number]) => {
+      const f = (v: number) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const out: Record<string, ContrastReading> = {};
+    for (const id of ids) {
+      const host = document.querySelector(`[data-testid="${id}"]`);
+      if (!host) {
+        out[id] = { present: false, ratio: 0, fontSize: 0, weight: 0, floor: 0, fg: '', bg: '' };
+        continue;
+      }
+      // The colour lives on the text node's element; a Pressable is a
+      // transparent wrapper around it.
+      const textEl =
+        host.textContent && host.children.length
+          ? (Array.from(host.querySelectorAll('*')).find((n) => n.textContent?.trim()) ?? host)
+          : host;
+      const cs = getComputedStyle(textEl);
+      const fg = parse(cs.color);
+      // The first ancestor that actually paints something, composited down in
+      // case that one is itself translucent.
+      let node: Element | null = textEl;
+      let bg: [number, number, number] = [255, 255, 255];
+      const stack: [number, number, number, number][] = [];
+      while (node) {
+        const c = parse(getComputedStyle(node).backgroundColor);
+        if (c[3] > 0) {
+          stack.push(c);
+          if (c[3] === 1) break;
+        }
+        node = node.parentElement;
+      }
+      for (let i = stack.length - 1; i >= 0; i -= 1) bg = over(stack[i], [...bg, 1] as [number, number, number, number]);
+      const painted = over(fg, [...bg, 1] as [number, number, number, number]);
+      const fontSize = parseFloat(cs.fontSize) || 0;
+      const weight = Number(cs.fontWeight) || 400;
+      const large = fontSize >= 24 || (fontSize >= 18.66 && weight >= 700);
+      const a = lum(painted);
+      const b = lum(bg);
+      out[id] = {
+        present: true,
+        ratio: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100,
+        fontSize,
+        weight,
+        floor: large ? 3 : 4.5,
+        fg: cs.color,
+        bg: `rgb(${bg.map((v) => Math.round(v)).join(',')})`,
+      };
+    }
+    return out;
+  }, testIds);
 }
 
 /** The walk-up, up to the point a visitor is signed in and looking at the
@@ -912,7 +1020,7 @@ test('a failed sign-out keeps the device attached and says so, and Finish still 
   This runs the same contract across those states and the confirmed receipt, so
   a patch cannot be verified on the happy path alone.
 */
-test('no kiosk state offers a way out: missing goal, load error and the confirmed receipt', async ({
+test('no kiosk state offers a way out: receipt, missing goal, closed goal and load error', async ({
   page,
 }) => {
   test.setTimeout(300_000);
@@ -945,6 +1053,28 @@ test('no kiosk state offers a way out: missing goal, load error and the confirme
     '[data-testid="wsf-contribute-load-error"]',
   ]);
 
+  // -- a CLOSED goal ---------------------------------------------------------
+  const closedGoalId = `w5kn-closed-${fx.stamp}`;
+  await seedGoal(fx.groupId, fx.championUid, closedGoalId, 500, 'closed');
+  await page.goto(`/contribute/${closedGoalId}?kiosk=1`);
+  await expect
+    .poll(
+      async () =>
+        (await page.getByTestId('wsf-contribute-entry-screen').count()) +
+        (await page.getByTestId('wsf-contribute-not-found').count()) +
+        (await page.getByTestId('wsf-contribute-load-error').count()) +
+        (await page.getByTestId('wsf-contribute-refused').count()),
+      { timeout: 30_000, intervals: [200] }
+    )
+    .toBeGreaterThan(0);
+  found.closedGoal = await escapeControls(page, [
+    '[data-testid="wsf-contribute-entry-screen"]',
+    '[data-testid="wsf-contribute-context"]',
+    '[data-testid="wsf-contribute-not-found"]',
+    '[data-testid="wsf-contribute-load-error"]',
+    '[data-testid="wsf-contribute-refused"]',
+  ]);
+
   // -- the goal cannot be loaded at all --------------------------------------
   await page.route(/wsfGoalPulse/, (route) => route.abort('connectionfailed'));
   await page.goto(`/contribute/${fx.goalId}?kiosk=1`);
@@ -971,76 +1101,125 @@ test('no kiosk state offers a way out: missing goal, load error and the confirme
   expect(found, 'no kiosk state may offer a control that leaves the session').toEqual({
     receipt: [],
     missingGoal: [],
+    closedGoal: [],
     loadError: [],
   });
 });
 
 // ---- CASE 10 --------------------------------------------------------------
 /*
-  FINISH HAS TO BE LEGIBLE, not merely rendered.
+  EVERY KIOSK CONTROL HAS TO BE LEGIBLE, ON BOTH TONES.
 
-  W1B reported the chrome Finish invisible on dark receipts. The source agrees:
-  `renderChrome`'s non-kiosk Back applies `chromeLinkTextDark` (cream) when the
-  tone is dark, and the kiosk branch beside it applies `chromeLinkText` (navy)
-  with no dark variant — so on a receipt whose tone is 'dark' the kiosk's own
-  way out is navy on navy.
+  W1B reported the chrome Finish invisible on dark receipts. `toBeVisible()`
+  passes for navy on navy, so this measures contrast instead — composited for
+  translucency, and against the floor each control's own size and weight earns
+  (3:1 for large text, 4.5:1 otherwise) rather than the most forgiving number.
 
-  `toBeVisible()` passes for that, which is exactly why this measures contrast
-  instead. The threshold is WCAG AA for large text (3:1) — deliberately the
-  lenient one, so this cannot be dismissed as a strict-standard quibble; the
-  measured value today is far below even that.
+  Both tones, because a fix that only repaints the dark receipt leaves the same
+  controls on the light terminal states, and the unresolved notice lives there.
+  The sign-out warning is reached the only way it can be — by injecting the
+  storage fault, exactly as W5-K8 does.
 */
-test('the kiosk Finish in the chrome is legible on the dark receipt', async ({ page }) => {
+const DARK_SURFACE_CONTROLS = [
+  'wsf-kiosk-finish-chrome',
+  'wsf-kiosk-finish',
+  'wsf-kiosk-finish-explainer',
+  'wsf-kiosk-countdown',
+  'wsf-kiosk-stay',
+];
+
+function belowFloor(readings: Record<string, ContrastReading>): string[] {
+  return Object.entries(readings)
+    .filter(([, r]) => r.present && r.ratio < r.floor)
+    .map(([id, r]) => `${id}(ratio=${r.ratio} floor=${r.floor} ${r.fontSize}px/${r.weight} fg=${r.fg} bg=${r.bg})`);
+}
+
+test('every kiosk control is legible on the dark receipt and on the light terminal states', async ({
+  page,
+}) => {
   test.setTimeout(300_000);
-  // W5-K10. Expected to fail until the dark tone reaches the kiosk branch.
+  // W5-K10. Expected to fail until the dark tone reaches the kiosk controls.
   test.fail();
   const fx = await seedBase('legible');
   await walkUpAndSignIn(page, fx);
+
+  // ---- the DARK surface: the confirmed receipt ----------------------------
   await page.getByTestId('wsf-contribute-entry').fill('6');
   await page.getByTestId('wsf-contribute-review').click();
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 40_000 });
-  await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toBeVisible();
+  const dark = await measureContrast(page, DARK_SURFACE_CONTROLS);
 
-  const contrast = await page.evaluate(() => {
-    const parse = (c: string): [number, number, number] => {
-      const m = c.match(/-?[\d.]+/g);
-      if (!m) return [0, 0, 0];
-      return [Number(m[0]), Number(m[1]), Number(m[2])];
+  // The sign-out warning only exists once sign-out has actually failed.
+  await page.evaluate(() => {
+    const proto = IDBDatabase.prototype as IDBDatabase & {
+      __wsfOriginalTransaction?: IDBDatabase['transaction'];
     };
-    const lum = ([r, g, b]: [number, number, number]) => {
-      const f = (v: number) => {
-        const s = v / 255;
-        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-      };
-      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-    };
-    const el = document.querySelector('[data-testid="wsf-kiosk-finish-chrome"]')!;
-    // The label carries the colour; the pressable itself is transparent.
-    const label = el.querySelector('*') ?? el;
-    const fg = parse(getComputedStyle(label).color);
-    // Walk up for the first ancestor that actually paints a background.
-    let node: Element | null = el;
-    let bg: [number, number, number] = [255, 255, 255];
-    while (node) {
-      const c = getComputedStyle(node).backgroundColor;
-      if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) {
-        bg = parse(c);
-        break;
+    proto.__wsfOriginalTransaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function patched(
+      this: IDBDatabase,
+      names: string | string[] | DOMStringList,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions
+    ): IDBTransaction {
+      const list = typeof names === 'string' ? [names] : Array.from(names as string[]);
+      if (mode === 'readwrite' && list.includes('firebaseLocalStorage')) {
+        throw new DOMException('injected storage fault', 'InvalidStateError');
       }
-      node = node.parentElement;
+      return proto.__wsfOriginalTransaction!.call(this, names as string[], mode, options);
+    } as typeof IDBDatabase.prototype.transaction;
+  });
+  await page.getByTestId('wsf-kiosk-finish').click();
+  await expect(page.getByTestId('wsf-kiosk-finish-error')).toBeVisible({ timeout: 40_000 });
+  const warning = await measureContrast(page, ['wsf-kiosk-finish-error']);
+  await page.evaluate(() => {
+    const proto = IDBDatabase.prototype as IDBDatabase & {
+      __wsfOriginalTransaction?: IDBDatabase['transaction'];
+    };
+    if (proto.__wsfOriginalTransaction) {
+      IDBDatabase.prototype.transaction = proto.__wsfOriginalTransaction;
+      delete proto.__wsfOriginalTransaction;
     }
-    const a = lum(fg);
-    const b = lum(bg);
-    const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-    return { ratio: Math.round(ratio * 100) / 100, fg, bg };
   });
 
-  test.info().annotations.push({
-    type: 'kiosk-finish-chrome-contrast',
-    description: `ratio=${contrast.ratio} fg=${contrast.fg.join(',')} bg=${contrast.bg.join(',')}`,
+  // ---- the LIGHT surface: an unresolved attempt ---------------------------
+  const fx2 = await seedBase('legible-light');
+  await walkUpAndSignIn(page, fx2);
+  await page.route(CONTRIBUTE_CALLABLE, async (route) => {
+    await route.fetch();
+    await route.abort('connectionfailed');
   });
-  expect(contrast.ratio, 'the kiosk chrome Finish must be readable on the receipt it sits on').toBeGreaterThanOrEqual(3);
+  await page.getByTestId('wsf-contribute-entry').fill('5');
+  await page.getByTestId('wsf-contribute-review').click();
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+  await page.unroute(CONTRIBUTE_CALLABLE);
+  const light = await measureContrast(page, [
+    ...DARK_SURFACE_CONTROLS,
+    'wsf-kiosk-unresolved-note',
+  ]);
+
+  const describe = (label: string, r: Record<string, ContrastReading>) =>
+    `${label}: ` +
+    Object.entries(r)
+      .map(([id, v]) => (v.present ? `${id}=${v.ratio}/${v.floor}` : `${id}=absent`))
+      .join(' ');
+  test.info().annotations.push({
+    type: 'kiosk-control-contrast',
+    description: [describe('dark', dark), describe('warning', warning), describe('light', light)].join(
+      ' | '
+    ),
+  });
+
+  // Finish must exist on both tones — a legible control that is not there is
+  // not a pass.
+  expect(dark['wsf-kiosk-finish-chrome'].present, 'chrome Finish on the receipt').toBe(true);
+  expect(light['wsf-kiosk-finish'].present, 'Finish on the light terminal state').toBe(true);
+  expect({
+    dark: belowFloor(dark),
+    warning: belowFloor(warning),
+    light: belowFloor(light),
+  }).toEqual({ dark: [], warning: [], light: [] });
 });
 
 // ---- CASE 11 --------------------------------------------------------------
