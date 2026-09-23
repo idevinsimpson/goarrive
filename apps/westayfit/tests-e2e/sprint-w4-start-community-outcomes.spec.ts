@@ -127,6 +127,8 @@ async function wheelUntilInView(page: Page, testId: string, maxSteps = 40): Prom
 /** #22C55E and #91CB7D, as a browser reports them. */
 const ACTION_GREEN_RGB = 'rgb(34, 197, 94)';
 const PROGRESS_GREEN_RGB = 'rgb(145, 203, 125)';
+/** `ERROR_RED` (#B4232C) as the browser paints it. */
+const ERROR_RED_RGB = 'rgb(180, 35, 44)';
 
 /**
  * The colour a control is actually painted, walking up from the labelled node
@@ -315,6 +317,51 @@ test.describe('start-community outcomes', () => {
         () => document.activeElement?.getAttribute('data-testid') ?? null,
       ),
     ).toBe('wsf-start-name');
+  });
+
+  /**
+   * NEVER COLOUR ALONE (Director `5802873607`, L0 `5802880683`).
+   *
+   * A short name left behind by a blur is not yet something the member has
+   * asked about, so the field stays exactly as it was: no sentence and no
+   * red. The first Create press is what asks, and on that ONE activation the
+   * sentence, the invalid styling and the focus all arrive together. On
+   * 7f37e2a this fails at the blur: the border turned red with no sentence
+   * beside it, a message told in colour only.
+   */
+  test('a short name left by blur stays neutral; the first Create press explains, marks and focuses it', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    const me = await member(true);
+    const creates = countCreates(page);
+    await signInVia(page, me.email, me.password);
+    await openStart(page);
+
+    const field = page.getByTestId('wsf-start-name');
+    const border = () => field.evaluate((el) => getComputedStyle(el).borderTopColor);
+    // The field's own resting colour, read before anything is typed.
+    const neutral = await border();
+    expect(neutral, 'the resting border is already the error colour').not.toBe(ERROR_RED_RGB);
+
+    await field.fill('a');
+    await field.blur();
+    await expect(field).not.toBeFocused();
+    await expect(page.getByTestId('wsf-start-name-error')).toHaveCount(0);
+    expect(await border(), 'the blur alone turned the field red, with no sentence beside it').toBe(
+      neutral,
+    );
+
+    // The first Create press: exactly one activation.
+    await page.getByTestId('wsf-start-submit').click();
+    await expect(page.getByTestId('wsf-start-name-error')).toHaveText(
+      'Give your community a name.',
+    );
+    await expect(field).toBeFocused();
+    await expect
+      .poll(border, { message: 'the press explained the name but did not mark the field' })
+      .toBe(ERROR_RED_RGB);
+    expect(creates(), 'an invalid name was sent to the server').toBe(0);
   });
 
   test('two taps in one frame create one community', async ({ page }) => {
