@@ -1670,3 +1670,58 @@ alternative W4 rejected.
 
 **Next:** L0's combined candidate (W4's successor ⊕ W9's `a87cd3b` ⊕ W8's
 `eff65b0` on `f2f901a`), checked as one tree (`5800787974` §2, `5801193038`).
+
+---
+
+# Check 15 — W8's Progress-copy packet, #451 `90f8e74`: **PASS**
+
+Routed by L0 in `5800714161` and taken in a gap before W4's successor
+(ACK `5801844186`). Read-only; nothing in W8's spec or product was touched.
+The SHA was re-derived: `90f8e74e0b3cd84c115f81ee2b4ee979120e3670` is one
+commit on `f2f901a`, with the nine files as routed.
+
+**Verdict: PASS on `90f8e74`**, with one wording point for L0 and one
+pre-existing observation that is not W8's.
+
+## 15.1 · Results
+
+| | measured on `90f8e74` | on the parent `f2f901a` |
+|---|---|---|
+| W7 `sprint-w7-progress-copy-verify` C1–C5 | 5/5, twice | 5/5 FAIL, each at a copy assertion |
+| W8 `sprint-w8-progress-copy` | 3/3, twice | 3/3 FAIL (subtitle / headline / clarification) |
+| `ui-app-shell` "Activity shows…" (the `:230` update) | 1/1, twice | not run (its new lines are this packet's) |
+
+## 15.2 · Item by item
+
+1. **Subtitle and clarification.** The subtitle "Your recorded contributions, by goal." is present in the populated, empty, error and loading states. The clarification appears **exactly once** in the populated and empty states: its testID count is 1, and a whole-page text count is also 1. None of the eight retired assurances appears anywhere on the page. W8's sweep covers `wsf-activity` only; mine covers the whole body.
+
+   **Wording point for L0.** The packet says the error state also carries "exactly one quiet clarification". The build shows **none** there, and instead says one reassurance sentence exactly once. That matches W8's README ("Empty + populated foot"), W8's own spec (`toHaveCount(0)` in the error state) and the Director-passed error frame, which I viewed and which shows no clarification. I verified the accepted design; if one was intended in the error state, this row fails.
+2. **States preserved.** The partial-failure note stays beside the goals that did load (one community's `wsfListGoals` aborted). The loading state renders under the subtitle. On `f2f901a` both tests got past these assertions before failing at the new subtitle, so the states exist on both builds.
+3. **History, units and summary retained.** The finished goal shows REACHED and the Living WE. Each row carries its own unit (33 squats, 7 laps, no cross-unit text). The summary counts goals ("3 goals you have added to"). Each running row leads with the member's own number, and the goal's shared total follows as context ("2,222 of 5,000 squats"), as in the passed frame.
+
+   In the error state, **Try again** is the green primary (`rgb(34, 197, 94)`) and **retries**: the reads are let through, then clicking it renders the rows. Go to Home and Start moving are present in the error state; Start moving is also present in the empty state.
+4. **Reachability at 390×640, empty state.** Start moving sits at y = 333..378 (45 px tall), above the tab bar's top at 564. `elementFromPoint` at its centre returns `wsf-activity-start`. The headline wraps to **three lines**, as accepted.
+5. **The `:230` update holds**, and **W8's retired-phrase guard can fail.**
+
+   I first tried the parent build `f2f901a` as the mutant, but it doesn't reach the guard: W8's tests stop at the missing subtitle first. So I used a mutant of the local build output. I backed up the 90f8e74 bundle, changed "WHAT YOU'RE PART OF NOW" to "Nothing was lost", ran the tests and restored the bundle byte-identical (`cmp`). W8's populated test then failed at its own guard, `retired assurance "Nothing was lost" is still on screen` (its line 167), and my C1 failed at its retired-phrase assertion.
+6. **Scope.** `activity.tsx` is the only non-test, non-doc file changed. Its diff is copy, one `PersonalNote` component and one style: no router, handler, effect, callable or default. There is no diff under `functions-westayfit`, rules, indexes, firebase configs, `.github`, `src/` or either layout. All **29 Page 04 files are byte-identical**, and `check-evidence-intact` at `90f8e74` exits 0 (9 frozen / 20 accepted).
+
+## 15.3 · Observed, not W8's: a vacuous shell assertion
+
+`ui-app-shell.spec.ts` asserts `not.toContainText('1,847')`, with a comment saying the goal's shared total "must never appear on this private screen". This line is unchanged by #451. The design shows shared totals in running rows: the passed frame reads "1,847 of 5,000 squats".
+
+The assertion passes because that test first records the member's own 20, so the total is no longer 1,847. This is **reasoned from the fixture, not measured.** The comment's property is not what the line proves. Low severity; recorded only.
+
+## 15.4 · My errors in this check
+
+- **C1 first asserted that shared totals never appear on Progress.** That is wrong about the accepted design, and it failed on `90f8e74` for that reason. It was replaced with the design's actual rule: the member's own number leads each row.
+- **The spec header first said the preserved-state tests pass on `f2f901a`.** They fail there, at the new subtitle, after passing their preserved-state assertions. Corrected before commit.
+
+## 15.5 · Bound and hygiene
+
+- Chromium only; Safari/WebKit is **CANNOT-MEASURE**.
+- Emulators only.
+- W8's reported 3/3 + 52 regression was not replayed wholesale, as the packet instructs.
+- No product source edit. The mutant was local build output, restored byte-identical.
+- Artifacts and `test-results` cleaned after every run.
+- `ts:check` 0; guard 9 / 20.
