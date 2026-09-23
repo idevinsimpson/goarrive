@@ -21,8 +21,9 @@ wsfcommunitymembers        ABSENT
 wsfcommunityactivity       ABSENT
 ```
 
-`verify-deployment.mjs:182` computes `after.filter((n) => !EXPECTED.includes(n))` and
-`:186` turns a non-empty result into `present but not expected: …`, a **failure**. A
+In **that blob** — line numbers are quoted here only because the blob is pinned above —
+`:182` computes `after.filter((n) => !EXPECTED.includes(n))` and `:186` turns a non-empty
+result into `present but not expected: …`, a **failure**. A
 correct 49-function deploy therefore fails verification. Proven by the first new fixture,
 which runs the verifier with no approved additions against a 49-function project and
 asserts exit 1 — the defect first, then the fix.
@@ -140,16 +141,36 @@ so no separate workflow can authenticate. Anything operational has to land on `m
 4. **Pin the candidate**: `approvedAppSha` = the social SHA, `expectedPriorFunctions` stays
    **46** (§3), `candidateAddedFunctions` = exactly
    `["wsfsetcommunityvisibility", "wsfcommunitymembers", "wsfcommunityactivity"]`.
-5. **Dispatch `deploy`.** Expected receipt: `INVENTORY_BEFORE=46`, `INVENTORY_AFTER=49`,
-   `CREATED_THIS_DEPLOY=` the three, `APPROVED_ADDITIONS=` the three, `EXPECTED_INVENTORY=49`,
-   `VERIFY=pass`.
-6. **Read the transport line, and expect it to be bad.** `CANDIDATE_SERVICE_TRANSPORT` will
-   report each new service. The fifteen turn callables arrived **shut** because the deploy
-   service account has no `run.services.setIamPolicy`; there is no reason these three will
-   not. That is reported, never asserted open, and a fixture pins it. Opening them is a
-   separate approval.
-7. **A narrow member / non-member / privacy smoke**, and only then any claim about the
-   feature. Application-level authorization is not transport.
+5. **Dispatch `deploy`** — and only once all four preconditions below hold. The three
+   services do not exist yet, so **no transport measurement of them is possible before this
+   step**; anything claiming one would be describing services that have not been created.
+
+   | Precondition of dispatch | |
+   | --- | --- |
+   | the single index | **READY**, with the receipt of §4 of `SINGLE-INDEX-OPERATOR-PROCEDURE.md` |
+   | the operational side | reviewed and pinned: the verifier change, the rewrites, the approval |
+   | the candidate | reviewed and pinned at the social SHA |
+   | the operator | **a named, legitimate, already-existing operator** holding the applicable access, with an agreed post-deploy handoff |
+
+   The operator row is a precondition, not a request: the narrow staging authority is
+   already granted and recorded (#365 `5797657663` and `5797754279`, ordering `5798443901`),
+   and the handoff itself lives in `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md`
+   (#448, `ae44b0eef14150eb99528a7828915eb52638ed00`, blob `a2ebbb4c`), which defers the
+   index command to `SINGLE-INDEX-OPERATOR-PROCEDURE.md` and leaves the operator
+   **unassigned**. Naming that operator is the open item; nothing here asks for scope again
+   and nothing here duplicates that document's own operations.
+
+   Expected receipt: `INVENTORY_BEFORE=46`, `INVENTORY_AFTER=49`, `CREATED_THIS_DEPLOY=` the
+   three, `APPROVED_ADDITIONS=` the three, `EXPECTED_INVENTORY=49`, `VERIFY=pass`.
+6. **AFTER the deploy, measure the three transports** — this is the first moment the
+   measurement exists. `CANDIDATE_SERVICE_TRANSPORT` reports each one. Expect **shut**: the
+   fifteen turn callables arrived that way, and nothing about these three differs. It is
+   reported, never asserted open, and a fixture pins that.
+7. **Only if shut**, the already-authorized narrow per-service correction, performed through
+   that same named operator — then a **read-back** confirming what changed, and only then
+   authenticated **member / non-member / privacy** smokes. `VERIFY=pass` with the transports
+   shut establishes a deploy, **not a working member feature**, and no feature-ready claim
+   may be made until those smokes pass. No IAM action is authorized by this document.
 8. **Cleanup** as the existing suite does it. **Rollback — corrected, see below.** A
    rollback re-pin that leaves the three services deployed must **retain the exact
    `candidateAddedFunctions` list**, and `expectedPriorFunctions` must describe the
@@ -164,8 +185,9 @@ so no separate workflow can authenticate. Anything operational has to land on `m
 was meant to rescue.**
 
 Removing the key restores `EXPECTED` to the 46-name base while the project still holds
-**49** deployed services. `verify-deployment.mjs:182` then reports all three as
-`present but not expected` and the run fails — the verifier working exactly as designed,
+**49** deployed services. The **`present but not expected` guard** in
+`verify-deployment.mjs` (blob `b75ea3ff3692e77c37978d089bb6791fb0602a17`, the version this
+document ships with) then reports all three and the run fails — the verifier working exactly as designed,
 on a procedure that asked for the impossible. Setting `expectedPriorFunctions` to 49 does
 **not** rescue it either: that value is checked against the BEFORE inventory by
 `read-inventory.mjs` and has no effect on `EXPECTED`. The two are separate mechanisms and
