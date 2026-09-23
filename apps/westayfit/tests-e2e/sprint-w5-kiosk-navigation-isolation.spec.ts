@@ -1341,3 +1341,136 @@ test('the shell and the screen agree on kiosk mode for every shape of the flag',
     lostKioskMode: [],
   });
 });
+
+// ---- CASE 12 --------------------------------------------------------------
+/*
+  THE UNRESOLVED NOTICE, AFTER THE COPY CORRECTION.
+
+  The old sentence — "Your attempt is saved to your account; check it from your
+  own device." — promised portability the product cannot keep: the record that
+  makes the SAME attempt replayable lives in this browser's localStorage, keyed
+  to that uid, so another device signing into the same account finds nothing to
+  replay. The replacement points at the only place the recovery actually
+  exists, and names the cost of the alternative.
+
+  This is a DELTA case, and it checks the thing a copy change can quietly break
+  as well as the copy itself: that the screen carrying the new sentence still
+  offers the recovery it now points at, still lets the visitor finish, and still
+  keeps their record when they do.
+
+  TWO VIEWPORTS, because the sentence got longer. A notice that wraps onto more
+  lines pushes what is under it, and what is under it is Finish. 800x1280 is the
+  tablet a kiosk actually stands on; 390x640 is the short phone that has already
+  caught one control disappearing under the shell in this sprint.
+*/
+const UNRESOLVED_NOTICE_AT_6690370 =
+  'You can try to confirm this contribution here before you finish. ' +
+  'Entering it again elsewhere could count it twice.';
+
+const KIOSK_VIEWPORTS = [
+  { name: 'tablet-800x1280', width: 800, height: 1280 },
+  { name: 'short-phone-390x640', width: 390, height: 640 },
+] as const;
+
+test('the unresolved notice makes no portability claim, and Finish survives it on both sizes', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('notice');
+  await walkUpAndSignIn(page, fx);
+
+  // The request leaves and is served; the answer never comes back.
+  await page.route(CONTRIBUTE_CALLABLE, async (route) => {
+    await route.fetch();
+    await route.abort('connectionfailed');
+  });
+  await page.getByTestId('wsf-contribute-entry').fill('11');
+  await page.getByTestId('wsf-contribute-review').click();
+  await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+  await page.unroute(CONTRIBUTE_CALLABLE);
+
+  // 1. THE SENTENCE ITSELF, exactly.
+  await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
+    UNRESOLVED_NOTICE_AT_6690370
+  );
+
+  // 2. NO PORTABILITY CLAIM ANYWHERE ON THE SCREEN — not just in that one
+  //    element. A promise moved into a neighbouring caption is still a promise.
+  const screenText = await page.getByTestId('wsf-contribute-screen').innerText();
+  for (const claim of [
+    /your own device/i,
+    /check it from/i,
+    /saved to your account/i,
+    /another device/i,
+    /any device/i,
+  ]) {
+    expect(screenText, `the unresolved screen must not promise portability (${claim})`).not.toMatch(
+      claim
+    );
+  }
+  // And it still does not claim the attempt was recorded — the fact nobody has.
+  for (const claim of [/we recorded/i, /has been recorded/i, /was counted/i, /confirmed\b/i]) {
+    expect(screenText, `the unresolved screen must not claim an outcome (${claim})`).not.toMatch(
+      claim
+    );
+  }
+
+  // 3. THE RECOVERY THE SENTENCE POINTS AT IS ACTUALLY THERE.
+  await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible();
+  await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveText('Confirm this contribution');
+
+  // 4. FINISH SURVIVES THE LONGER SENTENCE, at both sizes.
+  for (const vp of KIOSK_VIEWPORTS) {
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
+      UNRESOLVED_NOTICE_AT_6690370
+    );
+    const finish = page.getByTestId('wsf-kiosk-finish');
+    await expect(finish).toBeVisible();
+    const box = (await finish.boundingBox())!;
+    // Reachable: a real touch target, wholly on screen, and resolving to
+    // itself where a thumb would land rather than to something over it.
+    expect(box.height, `${vp.name}: Finish is a real touch target`).toBeGreaterThanOrEqual(44);
+    expect(box.y, `${vp.name}: Finish's top is on screen`).toBeGreaterThanOrEqual(0);
+    expect(
+      box.y + box.height,
+      `${vp.name}: Finish's bottom is on screen, not pushed off by the notice`
+    ).toBeLessThanOrEqual(vp.height);
+    const onTop = await page.evaluate(
+      ([x, y]) => {
+        const hit = document.elementFromPoint(x as number, y as number);
+        const el = document.querySelector('[data-testid="wsf-kiosk-finish"]');
+        return Boolean(hit && el && (el === hit || el.contains(hit)));
+      },
+      [box.x + box.width / 2, box.y + box.height / 2]
+    );
+    expect(onTop, `${vp.name}: Finish is under the thumb, not merely in the DOM`).toBe(true);
+    // Legible where it sits, by the floor its own size and weight earn.
+    const readings = await measureContrast(page, ['wsf-kiosk-finish', 'wsf-kiosk-unresolved-note']);
+    test.info().annotations.push({
+      type: `kiosk-unresolved-${vp.name}`,
+      description: Object.entries(readings)
+        .map(([id, r]) => `${id}=${r.ratio}/${r.floor}`)
+        .join(' '),
+    });
+    expect(belowFloor(readings), `${vp.name}: every control on this screen is legible`).toEqual([]);
+  }
+
+  // 5. AND THE RECORD IS STILL KEPT WHEN THEY FINISH. The copy change points
+  //    at a recovery, so the artefact that recovery depends on has to survive
+  //    the way out — this is K3's rule, asserted on the screen the new sentence
+  //    is printed on.
+  const pendingKey = `wsf.pendingContribution.${fx.goalId}.${fx.memberUid}`;
+  expect((await readStorage(page)).local).toContain(pendingKey);
+  await page.getByTestId('wsf-kiosk-finish').click();
+  await page.waitForURL(new RegExp(`/kiosk/${fx.goalId}$`), { timeout: 25_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 25_000 });
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 20_000, intervals: [200] })
+    .toBe(0);
+  const atRest = await readStorage(page);
+  expect(atRest.session).not.toContain('wsf.kioskReturnGoalId');
+  expect(atRest.local, 'the unresolved record survives Finish').toContain(pendingKey);
+});
