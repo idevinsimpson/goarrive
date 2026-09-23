@@ -7,6 +7,7 @@ import {
   PROJECT_ID,
   seedActiveGoal,
   seedCommunity,
+  seedMembership,
   seedProfile,
   seedVerifiedUser,
   signInVia,
@@ -912,5 +913,182 @@ test.describe('W9 contribution exits, independent instruments', () => {
     test.info().annotations.push({ type: 'X7e measured', description: JSON.stringify(m) });
     expect(r.marked, 'the return did not land on the same Community').toBe(true);
     expect(m.at12s, `stale progress stays in view after a return: ${JSON.stringify(m)}`).toBe(SEEDED + 20);
+  });
+
+  /*
+    X7f — ACCOUNT ISOLATION OF THE SETTLE (Director #462 `5804115569`; W8's
+    source reading `5804147831`: the settle effect's cleanup is keyed to its
+    token only, and the Community stays mounted through an in-app sign-out).
+    A and B are members of the same community. B has recorded 5, A 20. A's
+    RETURN settle (the pulse + own-credit pair issued 2.6 s after a return) is
+    HELD; meanwhile A signs out and B signs in, inside the app; B's figures
+    load on the community; then A's held answers are released. B's own part
+    must read B's 5 before and after the release, never A's 20. The shared
+    total is the same for both, so it cannot prove isolation; own credit can.
+  */
+  test('X7f an old account\'s settle answer released after the next account loaded the same goal does not become that account\'s own figure', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x7f');
+    const b = { email: `w7ex-x7fb-${fx.groupId}@example.com`, password: `Aa1!${randomBytes(6).toString('hex')}`, uid: '' };
+    b.uid = await seedVerifiedUser(b.email, b.password);
+    await seedProfile(b.uid, 'Sam Field');
+    await seedMembership(fx.groupId, b.uid, 'member');
+    // B records 5, then A records 20 (each sign-in is a full load).
+    await arrive(page, { ...fx, email: b.email, password: b.password, uid: b.uid });
+    await page.getByTestId(`wsf-community-goal-link-${fx.goalId}`).last().click();
+    await expect(page.getByTestId('wsf-contribute-move-screen').last()).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-contribute-done').last().click();
+    await page.getByTestId('wsf-contribute-entry').last().fill('5');
+    await page.getByTestId('wsf-contribute-review').last().click();
+    await page.getByTestId('wsf-contribute-submit').last().click();
+    await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
+    await arrive(page, fx);
+    await markVisibleCommunity(page);
+    await contributeFromCommunity(page, fx);
+    expect(await serverTotal(fx.goalId)).toBe(SEEDED + 25);
+    await pressLabelledExit(page, 'Back to community');
+    await expect(page.locator(`[data-testid="wsf-community-goal-total-${fx.goalId}"]:visible`).first()).toContainText((SEEDED + 25).toLocaleString('en-US'), { timeout: 15_000 });
+    await page.waitForTimeout(4_000);
+    expect(await ownPart(page, fx.goalId), "precondition: A's own part").toMatch(/\b20\b/);
+
+    // Hold A's return settle: every pulse / own-credit request issued 2.0–3.6 s
+    // after the return is answered only after HOLD_MS, unchanged.
+    const HOLD_MS = 14_000;
+    let armedAt = Number.POSITIVE_INFINITY;
+    const held: Array<{ name: string; issuedMs: number; releasedMs: number }> = [];
+    await page.route(/\/us-central1\/(wsfGoalPulse|wsfMyContribution)$/, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const now = Date.now();
+      if (now - armedAt < 2_000 || now - armedAt > 3_600) return route.continue();
+      const name = /\/(wsf[A-Za-z]+)$/.exec(route.request().url())![1]!;
+      const entry = { name, issuedMs: now - armedAt, releasedMs: -1 };
+      held.push(entry);
+      await new Promise((r) => setTimeout(r, HOLD_MS));
+      entry.releasedMs = Date.now() - armedAt;
+      await route.continue().catch(() => undefined);
+    });
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1_000);
+    armedAt = Date.now();
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(3_700); // the settle's requests are now issued and held
+
+    // Switch to B inside the app.
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-you-signout').last().click();
+    await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-home-signin').last().click();
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-signin-email').fill(b.email);
+    await page.getByTestId('wsf-signin-password').fill(b.password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe(`/community/${fx.groupId}`);
+    await expect.poll(() => ownPart(page, fx.goalId), { timeout: 30_000 }).toMatch(/\b5\b/);
+    const bLoadedAt = Date.now() - armedAt;
+    const sameInstance = (await reading(page)).marked;
+    const beforeRelease = await ownPart(page, fx.goalId);
+    // Wait past the release, sampling B's own part.
+    const samples: string[] = [];
+    while (Date.now() - armedAt < 3_600 + HOLD_MS + 4_000) {
+      samples.push(`${Date.now() - armedAt}ms:${await ownPart(page, fx.goalId)}`);
+      await page.waitForTimeout(500);
+    }
+    const afterRelease = await ownPart(page, fx.goalId);
+    const m = { held, bLoadedAtMs: bLoadedAt, sameInstance, beforeRelease, afterRelease, samples: samples.filter((x, i, a) => i === 0 || x.split(':')[1] !== a[i - 1]!.split(':')[1]) };
+    test.info().annotations.push({ type: 'X7f measured', description: JSON.stringify(m) });
+    expect(held.length, "precondition: A's settle requests were held").toBeGreaterThan(0);
+    expect(held.every((h) => h.releasedMs > bLoadedAt), "precondition: the hold was released only after B's figure had loaded").toBe(true);
+    expect(beforeRelease, "B's own part before the release").toMatch(/\b5\b/);
+    expect(afterRelease, `A's own credit reached B's screen: ${JSON.stringify(m)}`).toMatch(/\b5\b/);
+    expect(afterRelease).not.toMatch(/\b20\b/);
+  });
+
+  /*
+    X6b — HOME'S RETURN RE-READ ACROSS AN ACCOUNT CHANGE (W9 option 1,
+    `945d6736`; Director #434 `5804129224`: "one held Home-return read crossing
+    an in-app account switch should verify no prior-account list/card result
+    appears"). A asked for the list; a genuine return issues Home's re-read
+    (wsfMyCommunities, then wsfListGoals per card). Those answers are HELD
+    while A signs out and B signs in inside the app; B belongs to two other
+    communities, so B's Home shows B's list; then A's held answers are
+    released. B's list must still be B's: A's community never appears.
+    On 7ee70e4f Home has no return re-read, so nothing is held there and the
+    precondition fails: the path is W9's, not inherited.
+  */
+  test('X6b an old account\'s held Home re-read, released after the next account\'s list loaded, puts nothing of it on that list', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x6b');
+    const id = stampId();
+    const b = { email: `w7ex-x6bb-${id}@example.com`, password: `Aa1!${randomBytes(6).toString('hex')}`, uid: '' };
+    b.uid = await seedVerifiedUser(b.email, b.password);
+    await seedProfile(b.uid, 'Sam Field');
+    const bGroups = [`w7ex-x6b-b1-${id}`, `w7ex-x6b-b2-${id}`];
+    await seedCommunity({ groupId: bGroups[0]!, displayName: 'W7 Other Movers One', joinPolicy: 'private', members: [{ uid: b.uid, role: 'member' }] });
+    await seedCommunity({ groupId: bGroups[1]!, displayName: 'W7 Other Movers Two', joinPolicy: 'private', members: [{ uid: b.uid, role: 'member' }] });
+
+    await signInVia(page, fx.email, fx.password);
+    await page.goto('/?view=communities');
+    await expect(page.locator(`[data-testid="wsf-home-community-${fx.groupId}"]:visible`).first()).toContainText(SEEDED.toLocaleString('en-US'), { timeout: 40_000 });
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1_000);
+
+    const HOLD_MS = 14_000;
+    let armedAt = Number.POSITIVE_INFINITY;
+    const held: Array<{ name: string; issuedMs: number; releasedMs: number }> = [];
+    await page.route(/\/us-central1\/(wsfMyCommunities|wsfListGoals)$/, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const now = Date.now();
+      // Only the return's own reads (the first 3 s after the return) are held.
+      if (now < armedAt || now - armedAt > 3_000) return route.continue();
+      const name = /\/(wsf[A-Za-z]+)$/.exec(route.request().url())![1]!;
+      const entry = { name, issuedMs: now - armedAt, releasedMs: -1 };
+      held.push(entry);
+      await new Promise((r) => setTimeout(r, HOLD_MS));
+      entry.releasedMs = Date.now() - armedAt;
+      await route.continue().catch(() => undefined);
+    });
+    armedAt = Date.now();
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(3_200);
+
+    // Switch to B inside the app; B's Home shows B's list (two communities).
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-you-signout').last().click();
+    await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-home-signin').last().click();
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-signin-email').fill(b.email);
+    await page.getByTestId('wsf-signin-password').fill(b.password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+    for (const g of bGroups) await expect(page.locator(`[data-testid="wsf-home-community-${g}"]:visible`).first()).toBeVisible({ timeout: 40_000 });
+    const bLoadedAt = Date.now() - armedAt;
+    const listOf = () =>
+      page.evaluate(() => {
+        const list = Array.from(document.querySelectorAll('[data-testid="wsf-home-my-list"]')).find((el) => (el as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+        return {
+          cards: Array.from(list?.querySelectorAll('[data-testid^="wsf-home-community-"]') ?? []).map((c) => (c as HTMLElement).dataset.testid!.replace('wsf-home-community-', '')),
+          text: (list?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+          aAnywhere: document.body.textContent?.includes('W7 Exit Movers') ?? false,
+        };
+      });
+    const before = await listOf();
+    const samples: string[] = [];
+    while (Date.now() - armedAt < 3_000 + HOLD_MS + 4_000) {
+      samples.push(`${Date.now() - armedAt}ms:${(await listOf()).cards.join('+')}`);
+      await page.waitForTimeout(500);
+    }
+    const after = await listOf();
+    const m = { held, bLoadedAtMs: bLoadedAt, before, after, samples: samples.filter((x, i, a) => i === 0 || x.split(':')[1] !== a[i - 1]!.split(':')[1]) };
+    test.info().annotations.push({ type: 'X6b measured', description: JSON.stringify(m) });
+    expect(held.length, "precondition: A's return re-read was issued and held (none on a build with no return re-read)").toBeGreaterThan(0);
+    expect(held.every((h) => h.releasedMs > bLoadedAt), "precondition: released only after B's list had loaded").toBe(true);
+    expect(before.cards.sort(), "B's list before the release").toEqual([...bGroups].sort());
+    expect(after.cards.sort(), `A's held answer changed B's list: ${JSON.stringify(m)}`).toEqual([...bGroups].sort());
+    expect(after.aAnywhere, "A's community name is on B's screen").toBe(false);
   });
 });
