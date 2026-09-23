@@ -1410,12 +1410,19 @@ test('the unresolved notice makes no portability claim, and Finish survives it o
       claim
     );
   }
-  // And it still does not claim the attempt was recorded — the fact nobody has.
-  for (const claim of [/we recorded/i, /has been recorded/i, /was counted/i, /confirmed\b/i]) {
-    expect(screenText, `the unresolved screen must not claim an outcome (${claim})`).not.toMatch(
-      claim
-    );
-  }
+  /*
+    AND IT STILL SAYS PLAINLY THAT NOBODY KNOWS.
+
+    My first version of this asserted the screen must not match /confirmed/ and
+    friends. That was a bad instrument, not a finding: the screen's CORRECT
+    wording is built out of that very word — "NOT CONFIRMED YET", "We couldn't
+    confirm your contribution yet" — so a ban on it fails the honest copy and
+    would pass copy that said "recorded!" instead. Banning vocabulary is not the
+    same as banning a claim. The uncertainty is asserted positively instead,
+    which is the property that actually matters.
+  */
+  expect(screenText).toMatch(/not confirmed yet/i);
+  expect(screenText).toMatch(/don[’']t know whether this effort was recorded/i);
 
   // 3. THE RECOVERY THE SENTENCE POINTS AT IS ACTUALLY THERE.
   await expect(page.getByTestId('wsf-contribute-reconcile')).toBeVisible();
