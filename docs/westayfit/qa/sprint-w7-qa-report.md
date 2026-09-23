@@ -1123,6 +1123,176 @@ re-run was 22/22 passed. The failed run is reported as what it was.
 
 ---
 
-# Check 13 — further checkpoints
+# Check 13 — packet 10 on W9's final review head `fca3326`
+
+**Supersede** — L0 `5798259144`, pinned by `5798471416`. ACK `5799110819`.
+Both routings landed **while check 12 was in flight**, so `5798509746` is a
+report on the superseded head `41f80f3`; this check takes the new one.
+
+**Verdict: PASS.** Both shortfalls named in check 12 are closed by the delta,
+and the review points hold — with **one latent vacuity gap** recorded against
+`settleScroll`, and **one state** (error) that W9 does not assert and W7 has
+now covered.
+
+## 13.1 · (d) Product identity, proved with tree hashes
+
+A tree object hash covers every file and path beneath it, so this is stronger
+than "no files differ":
+
+| path | `41f80f3` | `fca3326` |
+|---|---|---|
+| `apps/westayfit/app` | `0bbf51b07e8f` | **identical** |
+| `apps/westayfit/src` | `896a5bb5bb02` | **identical** |
+| `functions-westayfit` | `0abf78552b20` | **identical** |
+| `scripts/westayfit` | `dc4bd289a24e` | **identical** |
+
+`firestore.rules`, both hosting configs, both `package.json`s, `app.json` and
+`tsconfig.json`: identical. **So every product-side result in check 12 carries
+forward on an unchanged product tree**, and nothing is reused across a head
+whose product moved.
+
+**The tip, re-derived:** `fca3326..75f6cbc` is
+`docs/design-target/review/app-shell-next/README.md` **+15 / −10 and nothing
+else**. Pinned to `fca3326` as routed.
+
+**The delta:** `sprint-w9-shell-production.spec.ts` (+130),
+`sprint-w9-shell-successor-capture.spec.ts` (+90), the README, seven re-shot
+frames, and `MIGRATED-g-champion-menu-open-390x640.png` **added**. No app, src,
+functions, config or scripts.
+
+## 13.2 · (a) `settleScroll` — the one that mattered
+
+`settleScroll` reads until two consecutive reads agree, and the planting is now
+preceded by waiting for `wsf-community-hero-presence` — the page's **own**
+enrichment, not an arbitrary value. That is the correct fix and it is the same
+diagnosis W7 reached independently in check 12.
+
+**Property 3 — a remount still fails — established by demonstration, not by
+reading the helper.** A reload rebuilds every host node and resets every
+scroller, so it is a remount by construction. W7 plants a mark and a real
+offset, reloads, and measures both guards:
+
+| guard | after a remount |
+|---|---|
+| host-node mark | **gone** (`markSurvives` false) |
+| scroll offset | **0**, not the planted 160 |
+
+Either alone fails the shipping proof, and `markSurvives` is asserted **before**
+the scroll comparison in W9's test, so a remount cannot reach the comparison at
+all. **A settled-scroll comparison cannot hide a remount here.**
+
+**THE GAP, recorded.** `settleScroll` is used twice, and only one use guards
+against a zero:
+
+| line | assertion |
+|---|---|
+| 448 (`MOVE opens as a sheet…`) | `not.toBeNull()` **and** `toBeGreaterThan(40)` |
+| 187 (`the active tab is a no-op…`) | `not.toBeNull()` **only** |
+
+If Home ever settled at 0 — a shorter viewport, a lighter fixture, less content
+— line 187's later `toBe(planted)` becomes `toBe(0)`, which a page that never
+scrolled satisfies trivially. It is **latent**, not live: Home planted and
+returned a real 160 in every run here. But it is exactly the vacuity the review
+point asks about, and it is one line to close. W7's own equivalent asserts
+`toBeGreaterThan(40)` for this reason.
+
+## 13.3 · (b) and the flake, re-measured
+
+The Close proof now presses the **named control** rather than `page.goBack()`,
+in W9's file as well as W7's.
+
+**The flake reported in check 12 is fixed.** `sprint-w9-shell-production.spec.ts`'s
+active-tab test, which at `41f80f3` failed **2 of 4** serial attempts on
+`Expected: 160  Received: 218`:
+
+| head | serial runs | full parallel suite |
+|---|---|---|
+| `41f80f3` | **2 failures in 4** | failed |
+| `fca3326` | **5 passed, 0 failed** | **passed** |
+
+## 13.4 · (c) The sheet's other states
+
+| state | asserted at `fca3326`? |
+|---|---|
+| chooser | yes, W9 |
+| no-goal | **yes — new at `fca3326`**, with the scrim, a bounded panel and the Close each measured |
+| loading | **no, and declined with a stated reason** — it exists only between the two reads that resolve it, so a test waiting for it would be timing a callable rather than photographing a screen. Reasonable. |
+| error | **no — neither asserted nor explained. W7 covers it below.** |
+
+**W7's error-state test.** The fault is installed **after** Home has loaded, on
+purpose: my first version routed the callable before navigating and the test
+failed with Home itself never rendering — `wsfMyCommunities` is the read Home
+depends on too, so breaking it up front starves the very screen the sheet opens
+over. With the context established and only MOVE's own read failing, the error
+state is **the same sheet**: scrim present, panel bounded away from the top of
+the viewport, Close ≥44×44 and reachable at its own centre, the tab bar
+unreachable beneath it, and Close returning to the **same instance** of the tab.
+
+**And a correction I own.** My first leak assertion used an opaque marker and
+failed — I had to check whether that was a product defect, and it is not.
+`src/callableErrors.ts` deliberately lets a **callable's own** `internal`
+message through when it does not look like developer text, because such a
+message often is a real member sentence; my marker was not developer-shaped, so
+it passed through exactly as the documented rule says it should. The test now
+uses a genuinely developer-shaped message
+(`wsfMyCommunities failed: groupId must be a string`) and asserts the rule the
+product actually states: the message is **suppressed**, the function name never
+appears on screen, and the member is shown the transport sentence instead.
+
+Worth noting the contrast with check 10: `/start-community` maps the **code and
+never the message**, a stricter rule that route adopted because creating a
+community is expensive to repeat. MOVE uses the shared, deliberately more
+permissive helper. Both are consistent with their own stated contracts.
+
+## 13.5 · The thirteenth frame
+
+`MIGRATED-g-champion-menu-open-390x640.png` **exists** at **390×658** — device
+height plus the 18px strip, matching the other twelve.
+
+- Its producer creates a **second, Champion account**, opens the shell menu and
+  **asserts** `wsf-member-topbar-menu-manage-community` and
+  `wsf-member-topbar-menu-settings` are visible **before** shooting. Asserted,
+  not merely photographed.
+- Decoded against the plain Home frame of the same class, it differs on **144
+  rows** between y=62 and y=558, so it is not a duplicate.
+- In the region the menu sheet must occupy (`top: 52`, `right: 8`,
+  `minWidth: 208` → x 174–382, y 72–300) it reads **74% CREAM with NAVY text
+  pixels**; the plain Home frame reads 51% cream over varied content. The panel
+  is there.
+
+## 13.6 · (e) Counts, kept apart
+
+| | `41f80f3` | `fca3326` |
+|---|---|---|
+| whole e2e | 404 — 359 / 4 / 41 | **408 — 366 / 1 / 41** |
+| W9's own suite | 22/22 | **23/23** |
+| unit | 821/821 | **821/821**, 48 files |
+| W7's own spec | 6/6 | **8/8** |
+
+**Reconciled exactly.** 404 + 1 (W9's new no-goal test) + 3 (W7's additions) =
+**408**. Non-skipped: 363 + 4 = **367** = 366 + 1.
+
+**The single first-run failure:** `sprint-w9-shell-capture.spec.ts:83` — the
+**prototype** capture spec, not the shipping shell — timed out after 4.0m under
+parallel load waiting for `wsf-shell-next-page-community` inside the stage
+iframe. **Serial rerun: passed in 2.3s.** Load-related, matching W9's stated
+pattern.
+
+**Unmeasured, stated rather than implied:** the loading sheet state (declined,
+with W9's reason accepted); and `settleScroll`'s zero-guard gap is recorded as
+**latent**, since Home never settled at 0 in any run here.
+
+## 13.7 · Bound and hygiene
+
+Emulators only, 49 callables. Ordinary `build:web` exit 0 at this head.
+`ts:check` exit 0. `check-evidence-intact` exit 0 at every checkpoint — **9
+frozen / 20 accepted**. Artifacts and `test-results` cleaned; nothing committed.
+Product tree verified **identical to `fca3326`** after every run. Verification
+only: **no product edit retained, no edit to any W9 test, no capture written, no
+frame rebaselined.** Complete result logs retained, unfiltered.
+
+---
+
+# Check 14 — further checkpoints
 
 Awaiting L0's routing. The W4-on-accepted-shell seam check follows W9's PASS.

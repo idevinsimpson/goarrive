@@ -42,6 +42,22 @@ import {
 
 const PHONE = { width: 390, height: 844 };
 const MIN_TARGET = 44;
+/**
+ * A DEVELOPER-SHAPED server message, matched to the rule the product actually
+ * states.
+ *
+ * `src/callableErrors.ts` deliberately lets a CALLABLE's own `internal`
+ * message through when it reads like a member sentence, because such a message
+ * often is one; it replaces the message only when it looks like a note to a
+ * developer. My first marker here was an opaque token, which that heuristic
+ * correctly judged harmless and passed through — so the test failed and the
+ * product was right. This marker names a function and carries a
+ * "<field> must be …" validation shape, which is exactly what the rule
+ * undertakes to suppress.
+ */
+const DEV_LEAK = 'wsfMyCommunities failed: groupId must be a string';
+/** What a member is shown instead, for a transport-class code. */
+const NETWORK_SENTENCE = 'We couldn’t reach the server. Check your connection and try again.';
 
 /* ── instruments ─────────────────────────────────────────────────────────── */
 
@@ -522,6 +538,141 @@ test.describe('W7 · item 2 — MOVE is a focus sheet, measured by hit test', ()
     expect(
       await markSurvives(page, 'wsf-community', 'rm'),
       'reduced motion rebuilt the tab behind the sheet',
+    ).toBe(true);
+  });
+  /**
+   * REVIEW POINT (a), PROPERTY 3 — A REMOUNT STILL FAILS, demonstrated rather
+   * than argued.
+   *
+   * `settleScroll` (added at `fca3326`) compares the restored offset against
+   * the offset the page SETTLED at rather than the one it was handed. That is
+   * the right fix — it is the same diagnosis W7 reached independently — but it
+   * moves the comparison's reference point, so the question L0 asks is whether
+   * it can now hide a remount or a state loss.
+   *
+   * It cannot, and this shows why with a real remount rather than a reading of
+   * the helper. A reload rebuilds every host node and resets every scroller, so
+   * it is a remount by construction. Both guards in the shipping proof have to
+   * notice it: the mark planted on the host node must be gone, AND the scroll
+   * must come back 0 rather than the planted value. Either alone would fail the
+   * shipping test; this measures both.
+   */
+  test('a remounted screen loses the mark and the scroll, so neither guard can hide it', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    const sc = await scene('remount');
+    await signInVia(page, sc.email, sc.password);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-community').last()).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-community-goal-hero').last()).toBeVisible({
+      timeout: 40_000,
+    });
+    await page.waitForTimeout(800);
+
+    expect(await markNode(page, 'wsf-community', 'remount')).toBe(true);
+    const planted = await setScroll(page, 'wsf-community', 160);
+    expect(planted, 'Home had nowhere to scroll').not.toBeNull();
+    /*
+      NON-ZERO, EXPLICITLY. A comparison against a planted 0 is satisfied by a
+      page that never scrolled, which is the exact vacuity this property is
+      about — so the reference value is asserted to be a real offset first.
+      Worth stating plainly because the shipping proof asserts this in one of
+      its two uses of `settleScroll` and not in the other.
+    */
+    expect(
+      planted,
+      'the planted offset was zero, so the comparison would be vacuous',
+    ).toBeGreaterThan(40);
+
+    // A reload: every host node rebuilt, every scroller reset.
+    await page.reload();
+    await expect(page.getByTestId('wsf-community').last()).toBeVisible({ timeout: 40_000 });
+
+    expect(
+      await markSurvives(page, 'wsf-community', 'remount'),
+      'the mark survived a reload, so it cannot detect a remount',
+    ).toBe(false);
+    const after = await scrollOf(page, 'wsf-community');
+    expect(after, 'the scroll survived a reload, so it cannot detect a remount').not.toBe(planted);
+    expect(after ?? 0, 'a rebuilt screen did not come back at the top').toBe(0);
+  });
+
+  /**
+   * REVIEW POINT (c) — THE ERROR STATE, which W9's suite does not assert.
+   *
+   * The routing asks for the no-goal, error and loading presentations where the
+   * route stays open. W9 covers the chooser, adds no-goal at `fca3326`, and
+   * declines the loading state for a stated and reasonable reason — it exists
+   * only between the two reads that resolve it. The ERROR state is neither
+   * asserted nor explained, so W7 measures it here: a sheet that is a sheet in
+   * two states and a page in the third is not a sheet.
+   */
+  test('the MOVE error state is the same sheet, with the same way out', async ({ page }) => {
+    test.setTimeout(300_000);
+    const sc = await scene('err');
+    await signInVia(page, sc.email, sc.password);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-community').last()).toBeVisible({ timeout: 40_000 });
+    expect(await markNode(page, 'wsf-community', 'err')).toBe(true);
+
+    /*
+      THE FAULT IS INSTALLED AFTER HOME HAS LOADED, ON PURPOSE. My first version
+      routed the callable before navigating and the test failed with Home
+      itself never rendering — `wsfMyCommunities` is the read Home depends on
+      too, so breaking it up front starves the very screen the sheet is
+      supposed to open OVER, and the error state was never reached. The point
+      here is the SHEET's behaviour in the error state, so the context is
+      established first and only MOVE's own read is made to fail.
+    */
+    await page.route('**/wsfMyCommunities', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { status: 'INTERNAL', message: DEV_LEAK } }),
+      });
+    });
+
+    await openMoveSheet(page);
+    await expect(page.getByTestId('wsf-move-error').last()).toBeAttached({ timeout: 40_000 });
+
+    // THE SAME THREE THINGS THAT MAKE THE CHOOSER A SHEET.
+    await expect(
+      page.getByTestId('wsf-move-scrim').last(),
+      'the error state has no scrim',
+    ).toBeVisible();
+    const sheetBox = (await page.getByTestId('wsf-move-sheet').last().boundingBox())!;
+    expect(
+      Math.round(sheetBox.y),
+      'the error sheet starts at the top of the viewport, so nothing is behind it',
+    ).toBeGreaterThan(0);
+
+    // The same one way out, and it is a real target.
+    const closeBox = (await page.getByTestId('wsf-move-close').last().boundingBox())!;
+    expect(closeBox.width).toBeGreaterThanOrEqual(MIN_TARGET);
+    expect(closeBox.height).toBeGreaterThanOrEqual(MIN_TARGET);
+    expect(await reachableAtCentre(page, 'wsf-move-close')).toBe(true);
+    for (const key of ['home', 'you', 'move']) {
+      expect(
+        await reachableAtCentre(page, `wsf-member-tab-${key}`),
+        `the ${key} tab is touchable under the error sheet`,
+      ).toBe(false);
+    }
+
+    // THE RULE THE PRODUCT STATES, EXERCISED. The developer-shaped message is
+    // suppressed, and what the member is shown instead is the sentence for the
+    // transport class — not a bare code, and not our field names.
+    expect(await page.locator('body').innerText()).not.toContain(DEV_LEAK);
+    expect(await page.locator('body').innerText()).not.toContain('wsfMyCommunities');
+    await expect(page.getByTestId('wsf-move-error').last()).toHaveText(NETWORK_SENTENCE);
+
+    // And Close still returns to the tab it opened over, same instance.
+    await page.getByTestId('wsf-move-close').last().click();
+    await expect(page.getByTestId('wsf-move-sheet')).toHaveCount(0, { timeout: 30_000 });
+    expect(
+      await markSurvives(page, 'wsf-community', 'err'),
+      'Close from the error state rebuilt the tab instead of returning to it',
     ).toBe(true);
   });
 });
