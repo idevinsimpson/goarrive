@@ -66,6 +66,11 @@ every frozen BEFORE or accepted TARGET/AFTER image.
 | `apps/westayfit/tests-e2e/sprint-w9-shell-nav.spec.ts` | Deliverable (D) and the deep-link / history contract. Asserts, so it runs in the ordinary suite and writes nothing. |
 | `apps/westayfit/tests-e2e/sprint-w9-current-shell-before.spec.ts` | Produces the frozen `before/` frames and `chrome-geometry.json`. Its live assertions were the owner's complaint as an inequality; with the shell landed they are the AFTER of the same measurements — one wordmark, one top-bar box on all four destinations, MOVE no longer wearing the bar. |
 | `apps/westayfit/tests-e2e/sprint-w9-shell-successor-capture.spec.ts` | Produces `successor/`, and asserts what each frame claims: one top bar on four tabs, MOVE open over a still-attached tab with the bar unreachable, and no member chrome on the contribution route. |
+| `apps/westayfit/tests-e2e/sprint-w9-shell-manage-action.spec.ts` | The relocation of Champion tools into the persistent menu: who is offered it, that it opens the sheet that did not move, the 220 px budget it buys back, and every way it is withdrawn. |
+| `apps/westayfit/tests-e2e/sprint-w9-community-url-seam.spec.ts` | The community address from both entry points and across a cold load, with the ruled `?groupId=` seam asserted narrowly. |
+| `apps/westayfit/tests-e2e/sprint-w9-shell-production.spec.ts` | The shell's own promises on the routes that SHIP: the active tab as a no-op, four tabs that stay mounted with their scroll, and MOVE opening over the tab the member was on and closing back onto it. |
+| `apps/westayfit/src/ui/memberShellActions.tsx` | The route-scoped action registry the shell provides and the focused screen writes to. Holds no sheet state. |
+| `apps/westayfit/tests-e2e/helpers/memberShell.ts`, `helpers/communityUrl.ts` | Opening Champion tools where they now live, and the narrow community-address assertion. |
 | `apps/westayfit/tests-e2e/sprint-w9-shell-capture.spec.ts` | Produces `target/`, and asserts each frame's device size and its label. |
 | `apps/westayfit/tests/sprint-w9-shell-geometry.test.ts` | The geometry contract and the shipping shell's own rules, as unit checks. |
 
@@ -90,7 +95,7 @@ surfaced only after those were fixed, and are in the table above: W1B's
 scroll-restore claim, re-made at a height where the page has a scroll, and the
 Champion hero.
 
-## The `?groupId=` artifact: what it is, and why it is not patched here
+## The `?groupId=` seam — ACCEPTED by ruling, and guarded narrowly
 
 Opening a community **from the Community tab** lands on
 `/community/<id>?groupId=<id>` — the same id, twice, once as the path segment
@@ -135,8 +140,24 @@ a quiet patch either: hoisting the detail out of the `(home)` stack into the
 tab navigator itself changes what Back means and invalidates the packet-2
 spike's measurements.
 
-**This is a ruling, not a patch**, so the three assertions are left failing and
-naming the truth rather than being widened to accept it.
+**The Director ruled on it** (`5795072805`): accept it as a known Expo Router
+serialisation seam; do not hoist the detail, mutate browser history, or add a
+second router to hide it; and keep a NARROW regression in place of the bare-URL
+assertions.
+
+That regression is `expectCommunityUrl`, and it is four claims rather than one:
+the pathname is exactly `/community/<id>`; the only query parameter that may
+appear at all is `groupId`; its value is the same id the path carries; and no
+fragment is added. `sprint-w9-community-url-seam.spec.ts` carries the rest —
+both entry points, one community rendered and named by the path, and the
+address surviving a cold load both as produced and in its bare form. It
+exercises the seam on purpose: the cross-tab entry goes first, because arriving
+at a community detail before crossing produces no query at all, and a draft
+that did so recorded "(no query)" and would have guarded nothing.
+
+A bounded trade, not permission for query drift: a new parameter, a different
+id, or a fragment all fail. If a later router version stops emitting the copy,
+every claim still holds unchanged.
 
 ## `wsf-community-members-link` is 43 px, and it is not this branch's
 
@@ -162,7 +183,7 @@ about 23 — and nothing the shell adds or removes touches it. The one-line
 patch is `minHeight: 44` on `peopleLink`; it belongs to whoever owns that
 surface, and W9 has not applied it.
 
-## The Champion's goal hero is 42 px past the 220 px budget
+## The Champion's goal hero — RULED, and fixed by moving Manage into the shell
 
 `ui-mobile-acceptance`'s Eastern-time journey ends by returning from a created
 goal to Community Home and asking that the goal hero starts within 220 px of
@@ -172,7 +193,7 @@ two full-suite runs, **226** in two consecutive solo runs, and passed in two
 others. The budget is exhausted for the Champion view, and which side of the
 line a run lands on is decided by whether the identity band's presence line has
 rendered when the measurement is taken. A verdict that depends on a render race
-is not a verdict, which is why this is reported rather than papered over with a
+is not a verdict, which is why it was reported rather than papered over with a
 second screen-specific budget.
 
 The 52 px are the bar's, and the measurement says so exactly. On the base, the
@@ -189,19 +210,58 @@ because it still holds Manage. So a Champion now pays for two rows where they
 used to pay for one. An ordinary member pays for one and lands at 204 — which
 is why the empty-row fix above was worth making and is not enough on its own.
 
-Two ways out, and both are somebody's call rather than mine:
+**The Director ruled** (`5795072805`): do not widen the 220 px budget — remove
+the duplicate management row by making Manage a context action in the
+persistent hamburger, for an authorized Champion only.
 
-1. **Manage joins the shell.** The top bar already carries a menu on the
-   right; Champion tools belong there far more than in a row of their own, and
-   the page row disappears entirely: an ordinary member, who has no such row,
-   measures 204 — 16 px inside the budget, with the presence line rendered.
-   It is member chrome, so it is W9 work, but it changes a Champion's surface
-   and the Manage sheet's state lives in the page, so it needs plumbing and a
-   release rather than a quiet patch.
-2. **A screen-specific budget**, the way B.3 gave "Start your community" 224 px
-   at 390×844. This one would need 264, which is not a pixel of headroom — it
-   is a different composition — so it should not be granted without (1) having
-   been considered first.
+That is what landed. `src/ui/memberShellActions.tsx` is a registry the shell
+provides and the focused screen writes to — a key, a label and a callback. It
+holds no sheet state and there is no second Manage: Community Home keeps its
+sheet, its state and its behaviour, and what travels through the registry is a
+callback that flips the same `manageOpen`. The row is deleted, with its styles.
+
+Stale actions are the whole design, because tabs stay mounted on purpose:
+registration rides `useFocusEffect`, so it is withdrawn on a tab switch, a push
+or an unmount; a scope of account and community rebuilds it when either
+changes; and the provider empties outright when the account does.
+
+Measured at 390×844 with the presence line rendered:
+
+```
+before the ruling   Champion 226-262 (race) · member 204
+after               Champion 204            · member 204
+```
+
+The budget is met deterministically, on the ordinary 220 px, with no
+screen-specific exception. `sprint-w9-shell-manage-action.spec.ts` guards all
+of it: no row on the page, a 44 px menu row that opens the sheet that did not
+move, the hero inside the budget with the presence line on screen, and the
+action withdrawn on a tab switch, on leaving for a focused flow, and when the
+next account signs in on the same device.
+
+### One colour moved with the row
+
+Deleting the row exposed a contrast violation that was always there. The
+hero's presence line is `INK_QUIET` (#6B7C93) on cream — **3.9:1**, where WCAG
+AA wants 4.5:1 at that size. axe could not say so before: the line sat at
+y=209, overlapping the navy hero that starts at 210, and an overlap makes the
+contrast check INCOMPLETE rather than a violation. Lifting the line onto plain
+cream let the check finish, and `ui-a11y` R7a failed on it. It now uses
+`TEXT_MUTED` (#5A6B85), the design system's own muted token, which measures
+**5.0:1** on the same cream — an existing token, not a new colour.
+
+### What it cost the rest of the suite
+
+Forty-one call sites across nineteen specs opened the sheet by tapping the
+page's own row. Each now goes through `openMemberManage`, which opens the bar's
+menu and chooses Manage community; nothing inside the sheet changed. The "this
+person is not offered Champion tools" assertions became `manageOffered(page)
+=== false`, which asks the question where the way in now lives. Three needed
+more than that: `ui-a11y`'s Tab walk expects the shell's menu button, its
+Escape test expects focus back on that button (the bar hands focus back to
+itself as the menu closes, because a chosen row is gone), and
+`ui-mobile-acceptance` — which may only tap by coordinates — makes the two taps
+a thumb makes.
 
 ## Three per-page AFTER capture specs still name wordmarks that no longer exist
 
@@ -220,19 +280,31 @@ Every number below is the count the suite's own run printed, not a tally by eye.
 
 | Run | Result |
 |---|---|
-| **Whole e2e suite** (392 tests) | **343 passed / 9 failed / 41 skipped**, 19.5 min |
-| — of those 9, standing failures | **6**: three `?groupId=`, two base-build 44 px, one Champion hero |
-| — of those 9, parallel-load flakes | **3**: `event-return`, `ui-contribute:465`, `ui-mobile-acceptance:387` — each re-run serially and **passing** |
-| `sprint-w9-*` e2e (six files) | **16 passed / 0 failed** |
+| **Whole e2e suite** (397 tests) | **350 passed / 5 failed / 41 skipped**, 18.4 min |
+| — standing failures | **2**, both the base build's 44 px control (below) |
+| — parallel-load flakes | **3** — `station-enrollment` ×2, `ui-journey` — each re-run serially and **passing** |
+| — and one more seen once | `sprint-w9-shell-capture` timed out at 240 s in one targeted run and passes in 2.6 s alone; it is green in the suite run above |
+| `sprint-w9-*` e2e (nine files) | **20 passed / 0 failed** |
 | `sprint-w9-shell-geometry` vitest | **11 passed / 0 failed** |
 | Whole vitest suite | **821 passed / 0 failed**, 48 files |
 | `sprint-w1b-kiosk-confinement` | **10 passed / 0 failed** |
 | `sprint-w1b-kiosk-idle-finish` | **9 passed / 0 failed** |
-| `ui-app-shell` + `ui-kiosk` + `ui-matrix` + `ui-contribute-short-phone` | **15 passed / 0 failed** |
-| `ui-mobile-acceptance` (whole file) | **8 passed / 0 failed** |
-| Ordinary `npm run build:web` | **exit 0**, no ERROR line, 9 route-group duplicates skipped, 12 dynamic routes aliased |
+| `ui-mobile-acceptance` + `ui-contribute-short-phone` | **15 passed / 0 failed** |
+| Ordinary `npm run build:web` | **exit 0**, no ERROR line, no tree deletion, 9 route-group duplicates skipped, 12 dynamic routes aliased |
 | `ts:check` | clean |
 | `check-evidence-intact.mjs` | frozen **9** / accepted **20** intact |
+
+### The Director's gate, item by item
+
+| # | Gate | Where it is asserted |
+|---|---|---|
+| 1 | ordinary `build:web`, no export-tree deletion | run above; `dist/` intact, 9 duplicates skipped |
+| 2 | same-tab reselect: zero navigation, zero reload, no remount | `sprint-w9-shell-production` — `history.length` unchanged, a `window` mark and a DOM-node mark both survive, scroll preserved |
+| 3 | four tabs stay mounted and restore state | `sprint-w9-shell-production` — each tab marked, each still the same node when returned to |
+| 4 | MOVE over the mounted prior tab, bar unreachable, Close returns to it | `sprint-w9-shell-production` (opened from You, not Home) and `sprint-w9-shell-successor-capture` |
+| 5 | ordinary contribution Back/Close, six-point proof at a non-vacuous 390×640 scroll fixture | `sprint-w1b-kiosk-confinement` |
+| 6 | Champion hamburger Manage opens the existing sheet and disappears on route/role change | `sprint-w9-shell-manage-action` |
+| 7 | 12 successor frames, MIGRATED BUILD / NOT ACCEPTED, one masthead, no duplicate page chrome | `successor/`, re-shot on this head |
 
 An ordinary run without `WSF_CAPTURE_FRAMES` still writes zero bytes of this
 package's evidence; the guard above is what proves it after every pass.
