@@ -235,7 +235,11 @@ export default function ContributeToGoal() {
     nothing to clear.
   */
   const pathname = usePathname() || '/';
-  const shellBarShown = Boolean(user) && shellAppliesTo(pathname);
+  // The kiosk flag is part of the answer: the shell does not render over a
+  // kiosk session (src/ui/MemberTabBar.tsx), so there is no raised action to
+  // clear and reserving space for one would leave a band of nothing at the
+  // bottom of a screen that has no bar.
+  const shellBarShown = Boolean(user) && shellAppliesTo(pathname, { kiosk: params.kiosk });
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
@@ -1047,7 +1051,14 @@ export default function ContributeToGoal() {
           style={styles.chromeLink}
           testID="wsf-kiosk-finish-chrome"
         >
-          <Text style={styles.chromeLinkText}>{kioskFinishing ? 'Finishing…' : 'Finish'}</Text>
+          {/* NAVY ON NAVY WAS INVISIBLE. The ordinary Back link below already
+              switches to the dark colourway; the kiosk's Finish did not, so on
+              the navy receipt the one control in the chrome rendered at the
+              background's exact colour. Measured on the delivered frame: the
+              whole right half of the chrome band was rgb(11,31,58). */}
+          <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
+            {kioskFinishing ? 'Finishing…' : 'Finish'}
+          </Text>
         </Pressable>
       ) : showBack ? (
         <ButtonLink
@@ -1065,7 +1076,7 @@ export default function ContributeToGoal() {
   // session can come to rest on. It carries the countdown that performs the
   // same Finish when nobody is standing there, and — when the outcome is
   // UNKNOWN — the one sentence the visitor needs before they walk away.
-  const renderKioskFinish = (outcome: KioskOutcome) =>
+  const renderKioskFinish = (outcome: KioskOutcome, tone: 'light' | 'dark' = 'light') =>
     kiosk ? (
       <View style={styles.kioskBar} testID="wsf-kiosk-finish-bar">
         {outcome === 'unresolved' ? (
@@ -1099,11 +1110,23 @@ export default function ContributeToGoal() {
             style={styles.tertiaryButton}
             testID="wsf-kiosk-stay"
           >
-            <Text style={styles.tertiaryButtonText}>Stay</Text>
+            {/* On the navy receipt this was navy on navy: present, focusable
+                and operable, and invisible. Measured at a contrast ratio of
+                1:1 on the delivered Board 11 frames. */}
+            <Text style={[styles.tertiaryButtonText, tone === 'dark' ? styles.tertiaryButtonTextDark : null]}>
+              Stay
+            </Text>
           </Pressable>
         </View>
+        {/* The one string on a shared device that has to be read: the device
+            did not sign the last visitor out. At #8A1C1C on navy it measured
+            1.47:1 -- present, and barely readable. */}
         {kioskError ? (
-          <Text style={styles.kioskError} testID="wsf-kiosk-finish-error" aria-live="polite">
+          <Text
+            style={[styles.kioskError, tone === 'dark' ? styles.kioskErrorDark : null]}
+            testID="wsf-kiosk-finish-error"
+            aria-live="polite"
+          >
             {kioskError}
           </Text>
         ) : null}
@@ -1194,13 +1217,19 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-load-error">
           <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
-          <ButtonLink
-            href="/"
-            style={styles.secondaryButton}
-            textStyle={styles.secondaryButtonText}
-            testID="wsf-contribute-home"
-            label="Back to home"
-          />
+          {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
+              account signed in right now, so on a kiosk it is a door out of the
+              session and into somebody's account for whoever walks up next. The
+              kiosk's one way out is Finish, in the chrome above. */}
+          {kiosk ? null : (
+            <ButtonLink
+              href="/"
+              style={styles.secondaryButton}
+              textStyle={styles.secondaryButtonText}
+              testID="wsf-contribute-home"
+              label="Back to home"
+            />
+          )}
         </View>
       </>
     );
@@ -1430,7 +1459,7 @@ export default function ContributeToGoal() {
         {/* The receipt carries its own numbers; the anchor would repeat them. */}
         <View style={styles.actions}>
           {kiosk ? (
-            renderKioskFinish('confirmed')
+            renderKioskFinish('confirmed', 'dark')
           ) : (
             <>
             {/*
@@ -1615,13 +1644,19 @@ export default function ContributeToGoal() {
           <Text style={styles.body}>
             This goal doesn’t exist or isn’t available to this account.
           </Text>
-          <ButtonLink
-            href="/"
-            style={styles.secondaryButton}
-            textStyle={styles.secondaryButtonText}
-            testID="wsf-contribute-home"
-            label="Back to home"
-          />
+          {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
+              account signed in right now, so on a kiosk it is a door out of the
+              session and into somebody's account for whoever walks up next. The
+              kiosk's one way out is Finish, in the chrome above. */}
+          {kiosk ? null : (
+            <ButtonLink
+              href="/"
+              style={styles.secondaryButton}
+              textStyle={styles.secondaryButtonText}
+              testID="wsf-contribute-home"
+              label="Back to home"
+            />
+          )}
         </View>
       </>
     );
@@ -1734,13 +1769,18 @@ export default function ContributeToGoal() {
         {ownCreditLine(ownCredit, unit)}
         <Text style={styles.body}>It is no longer taking contributions.</Text>
         <View style={styles.actions}>
-          <ButtonLink
-            href={backHref}
-            style={styles.primaryButton}
-            textStyle={styles.primaryButtonText}
-            testID="wsf-contribute-back"
-            label={backLabel}
-          />
+          {/* Same door, same reason. A goal can close while somebody is
+              standing at the kiosk, and this link goes to the community of the
+              account that is signed in. Finish stays in the chrome. */}
+          {kiosk ? null : (
+            <ButtonLink
+              href={backHref}
+              style={styles.primaryButton}
+              textStyle={styles.primaryButtonText}
+              testID="wsf-contribute-back"
+              label={backLabel}
+            />
+          )}
         </View>
         {renderTestNote()}
       </>,
@@ -2323,6 +2363,11 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   chromeLinkTextDark: { color: CREAM },
+  /* The dark colourways for the kiosk's end-of-session controls. The light
+     ones are unchanged: the unresolved and refusal screens are cream, and
+     what reads there must keep reading there. */
+  tertiaryButtonTextDark: { color: CREAM },
+  kioskErrorDark: { color: '#FFB4AE' },
 
   /* ---- the confirmed receipt: the whole page is the moment --------------- */
   receipt: { alignItems: 'center', gap: 6, paddingTop: 6 },
