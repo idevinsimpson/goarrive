@@ -1029,3 +1029,131 @@ its error, not just its status.
 **Reporting shape.** As four separate assertions the first failure hid the rest, so a patch
 fixing the disagreement would have revealed `lostKioskMode` only on the following run. The four
 groups are now one assertion and the whole verdict lands at once.
+
+
+## FIX VERIFICATION — product `50806fa`: PASS, with the margins stated
+
+**Verification head** `199d767e5a57c10d25a3febe22b3ecc15f791ac5` — a local merge of my tests at
+`297d33a7` with product `50806fae45fccca74e82b64735a299204e664d42`. Built and driven; **not
+pushed**, because this QA branch must not carry another worker's product edits. The reproducible
+fact is the pair of parents, since a merge commit's own hash depends on when it was made.
+
+The three product files were confirmed byte-identical to `50806fa` by blob hash before the
+bundle was built — not assumed from the merge succeeding:
+
+    src/kioskSession.ts        b9d2f4d728f72509649575c043a343a420e6bc08
+    src/ui/MemberTabBar.tsx    0b14df9519e4a60fb10d17f808413f2f474ae120
+    app/contribute/[goalId].tsx d2ccd90e872643aba6227527dc7d383555d9c3d2
+
+Functions compiled and the web bundle rebuilt from that head with
+`EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1`; emulators live on
+8080/9099/5001/5010 and confirmed up before and after.
+
+### Result: 11 cases, 11 ordinary passes, no tripwires, no fixture collapse
+
+    expected 11, unexpected 0, flaky 0
+
+Every `test.fail()` is gone from the file — the five self-retiring cases retired, and none of
+them was softened to get there.
+
+**K1 is NOT counted as safety evidence, and the reason is recorded.** With the bar gone it takes
+its early return and passes *because there is nothing to tap* — a weak pass by construction. It
+is left exactly as written, as the historical record of the defect. **W5-K4 is what holds that
+line now**, and K4 is a positive assertion: every reachable interactive element on the kiosk
+contribution screen belongs to the kiosk session. So: **ten substantive passes, plus one retired
+baseline kept for the record.**
+
+### 1. Kiosk flag, every shape — agreement, no escape, usable Finish
+
+    single                screenKiosk=true   shell=false  back=false  escapes=0
+    repeated-same         screenKiosk=true   shell=false  back=false  escapes=0
+    repeated-mixed-forms  screenKiosk=true   shell=false  back=false  escapes=0
+    explicitly-off        screenKiosk=false  shell=true   back=true   escapes=6
+
+All four K11 clauses empty: `disagreements`, `kioskWithEscapes`, `stranded`, `lostKioskMode`.
+
+The repeated parameter that defeated the screen at `d0477cc` no longer does. `isKioskFlag` in
+`src/kioskSession.ts` now owns the normalisation (`Array.isArray(value) → value.some(...)`) and
+both readers call that one predicate, so there is no second copy to drift. `?kiosk=0` still
+resolves to a whole member surface — shell and Back — which is the clause that stops "hide
+everything" counting as a fix, and it holds.
+
+### 2. In-app exits, across every bounded state
+
+    receipt=[none]  missingGoal=[none]  closedGoal=[none]  loadError=[none]
+
+plus the entry screen through K4 (`escape-controls: none`). The `wsf-contribute-home->/` links
+that were reachable on missing-goal and load-error are gone in kiosk mode, and the closed goal's
+Back is gated too.
+
+**One correction of mine, not a product finding.** K9's closed-goal step timed out on the first
+verification run. That was my enumeration gap: the closed goal renders `wsf-contribute-closed`,
+a state my poll had simply never named. Listed now. I report it because a timed-out step inside a
+`test.fail()` case looks identical to a defect, and this is the second time that hazard has bitten
+this suite.
+
+### 3. Legibility of every kiosk control, both tones, size-appropriate floors
+
+    dark receipt   chrome Finish 15.16  Finish 7.15  explainer 9.62  countdown 9.62  Stay 15.16
+    warning        sign-out error 9.75
+    light terminal chrome Finish 15.16  Finish 7.15  explainer 4.97  countdown 4.97  Stay 15.16
+                   unresolved note 15.16
+
+Every control is measured against **4.5:1** here, not the lenient large-text 3:1 — the floor is
+chosen per control from its own computed size and weight, and none of these qualified as large
+text. Contrast is measured on the composited colour: translucent foregrounds are blended over the
+resolved background, and translucent backgrounds are composited down the ancestor chain first, so
+a caption at 78% opacity is judged as it is actually seen. The chrome Finish that measured
+**1.00** at `d0477cc` now measures **15.16**.
+
+**The margin is worth naming rather than burying:** the explainer and the countdown on the light
+terminal state sit at **4.97 against a 4.5 floor**. That passes, and it is the thinnest margin in
+the set — a later change to that caption's colour or opacity has about half a point of headroom.
+
+### 4. Failed sign-out — still protected, and still recoverable
+
+K8 passes unchanged against the new product. With the readwrite fault injected on
+`firebaseLocalStorage`: the product's own error appears, the resting screen is not revealed
+(`wsf-kiosk-screen` hidden, URL still `/contribute/…?kiosk=1`), Finish stays enabled, and the
+account is observed still attached **through a successful readonly probe**. Fault removed in
+place, Finish pressed again → start screen, auth to zero, kiosk key gone, next visitor at the
+gate.
+
+### 5. Account-scoped unknown attempt, and the next visitor
+
+K3 passes: `wsf.pendingContribution.<goalId>.<uid>` survives the visitor leaving and the device
+returning to rest, while kiosk-owned state goes; the next visitor's gate and entry screen carry
+no trace of it and `wsf-contribute-reconcile` is absent for them. K2 passes: second synthetic
+visitor signs in to their own session with nothing of the first visitor's on screen.
+
+### 6. Ordinary personal contribution keeps member navigation
+
+K5 passes — the control case, and the likeliest way this patch could have gone wrong. Signed in
+without the flag, `/contribute/<goalId>` still wears the shell and `wsf-contribute-back`, carries
+no kiosk control, and You and Progress still navigate and still wear the shell. No collateral
+damage.
+
+### 7. Browser back and the URL boundary — scope stated
+
+K6 passes: the history entry behind the kiosk's contribution screen is the kiosk's own start
+screen, and arriving there resets the device (auth to zero, kiosk key gone, nobody named).
+**No claim is made, here or anywhere in this suite, that a browser can be prevented from going
+elsewhere or that the device is locked down.** A kiosk in a browser has no such power and the
+feature never claimed it.
+
+### Limitations, stated rather than left to be assumed
+
+- **The verification head is local.** It is named by its parents and was not pushed; my branch
+  carries tests and this report only.
+- **`b24da91f` was never built or driven by me.** My earlier note predicted a stranded surface
+  there from reading the diff. That prediction is now moot — the shared normalisation in
+  `50806fa` removes the disagreement at its source — and it is retired as a prediction, never
+  upgraded into a measurement.
+- **Emulator fixtures only.** Synthetic accounts, one local browser, one viewport class. No
+  staging, no live account, no device.
+- **No pixel review.** Contrast here is computed from the DOM; matched-pixel review is the
+  Director's and is not replaced by these numbers.
+
+No product file was edited, nothing was deployed, and no approval or merge recommendation is
+given. Shared/unattended kiosk use remains HELD as far as this report is concerned — that
+disposition is not mine.
