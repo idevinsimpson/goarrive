@@ -795,4 +795,152 @@ test('the preflight never reads a secret payload or prints a token', () => {
   assert.match(src, /process\.exit\(0\)/, 'the preflight can exit nonzero');
 });
 
+
+// ── the staging hosting config's rewrites ─────────────────────────────────
+//
+// WHY THESE LIVE HERE rather than in a suite of their own: run-all.mjs carries
+// a hardcoded list of suites, and a new file that is not added to it is a test
+// that never runs. That file is not reserved to this packet, so the cases go
+// where they are already executed.
+//
+// WHAT THEY PIN. `firebase.westayfit.staging.json` is an OPERATIONAL file: the
+// workflow copies it into the candidate checkout (`cp ../ops/… .`) and both the
+// hosting and functions deploys use it. The app's `firebase.westayfit.json` is
+// the production site's config and the staging deploy never reads it — so a
+// rewrite added there does nothing for staging, and the two files' own comment
+// ("Keep the two in sync") is enforced by nothing but a person. These cases are
+// that enforcement for the community routes.
+
+const STAGING_HOSTING = JSON.parse(
+  fs.readFileSync('firebase.westayfit.staging.json', 'utf8')
+);
+const stagingRewrites = STAGING_HOSTING.hosting.rewrites;
+
+/**
+ * Firebase Hosting glob matching, enough of it to decide these cases:
+ * `*` matches within ONE path segment, `**` matches across segments, and the
+ * FIRST matching rewrite wins. Written out rather than imported so the rule the
+ * assertions rely on is visible at the point of use.
+ */
+function firstMatch(rewrites, urlPath) {
+  for (const r of rewrites) {
+    const rx = new RegExp(
+      '^' +
+        r.source
+          .split(/(\*\*|\*)/)
+          .map((part) =>
+            part === '**' ? '.*' : part === '*' ? '[^/]*' : part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          )
+          .join('') +
+        '$'
+    );
+    if (rx.test(urlPath)) return r;
+  }
+  return null;
+}
+
+await test('the members route has its own rewrite, and it wins over the catch-all', () => {
+  const hit = firstMatch(stagingRewrites, '/community/abc123/members');
+  assert.ok(hit, '/community/{id}/members matches no rewrite at all');
+  assert.equal(hit.source, '/community/*/members');
+  assert.equal(hit.destination, '/community/__dynamic/members.html');
+  // Order, stated as order and not merely as presence: a members rule placed
+  // after the catch-all would never be reached.
+  const members = stagingRewrites.findIndex((r) => r.source === '/community/*/members');
+  const catchAll = stagingRewrites.findIndex((r) => r.source === '/community/**');
+  assert.ok(members >= 0 && catchAll >= 0);
+  assert.ok(members < catchAll, 'the members rule must precede /community/**');
+});
+
+await test('THE DEFECT: without that rule the same URL resolves to the community home', () => {
+  // The rewrite list exactly as it stood on main 340e141, so the case proves
+  // what was wrong rather than only what is now right. A members request did
+  // NOT 404 — it silently served the community home document.
+  const before = stagingRewrites.filter((r) => r.source !== '/community/*/members');
+  const hit = firstMatch(before, '/community/abc123/members');
+  assert.equal(hit.source, '/community/**');
+  assert.equal(hit.destination, '/community/__dynamic.html');
+});
+
+await test('the challenge rule is unchanged and still precedes the catch-all', () => {
+  const hit = firstMatch(stagingRewrites, '/community/abc123/challenge');
+  assert.equal(hit.source, '/community/*/challenge');
+  assert.equal(hit.destination, '/community/__dynamic/challenge.html');
+  const challenge = stagingRewrites.findIndex((r) => r.source === '/community/*/challenge');
+  const catchAll = stagingRewrites.findIndex((r) => r.source === '/community/**');
+  assert.ok(challenge < catchAll, 'the challenge rule must precede /community/**');
+});
+
+await test('the community home itself still resolves to the catch-all', () => {
+  // The members rule must not capture the community page: `*` is one segment.
+  const hit = firstMatch(stagingRewrites, '/community/abc123');
+  assert.equal(hit.source, '/community/**');
+  assert.equal(hit.destination, '/community/__dynamic.html');
+});
+
+await test('no rewrite was removed and the site and codebase are untouched', () => {
+  for (const source of ['/community/*/challenge', '/community/**', '/join/**', '/contribute/**',
+    '/display/**', '/kiosk/**', '/station/**', '/event/**', '/queue/**', '/combined/**']) {
+    assert.ok(stagingRewrites.some((r) => r.source === source), `${source} was removed`);
+  }
+  assert.equal(STAGING_HOSTING.hosting.site, 'westayfit-staging');
+  assert.equal(STAGING_HOSTING.functions.length, 1);
+  assert.equal(STAGING_HOSTING.functions[0].codebase, 'westayfit');
+});
+
+await test('the /move dynamic route has its rewrite', () => {
+  // This case REPLACES a temporary one that asserted the absence of this rule.
+  // A test whose success requires the defect is a test that has to be deleted
+  // the moment the defect is fixed, so it is gone rather than inverted in place.
+  const hit = firstMatch(stagingRewrites, '/move/some-goal');
+  assert.ok(hit, '/move/{goalId} matches no rewrite');
+  assert.equal(hit.source, '/move/**');
+  assert.equal(hit.destination, '/move/__dynamic.html');
+});
+
+await test('THE DEFECT: the main 340e141 list matched /move/{goalId} with nothing at all', () => {
+  // The rewrite list exactly as it stood on main 340e141 — no /move rule and no
+  // catch-all that could stand in for one. Unlike the members case, which was
+  // quietly served the wrong document, this one had no match at all, so a
+  // direct load or refresh fell through to Hosting's 404.
+  //
+  // SOURCE-DERIVED, NOT OBSERVED: no request was made to the staging site from
+  // here. This asserts what the config does, which is the only thing a config
+  // test can assert.
+  const before = stagingRewrites.filter((r) => r.source !== '/move/**' && r.source !== '/community/*/members');
+  assert.equal(firstMatch(before, '/move/some-goal'), null);
+});
+
+await test('bare /move is not what this rule is for, and static content decides it', () => {
+  // apps/westayfit/app/move/index.tsx exports a static document, and Firebase
+  // Hosting applies a rewrite only when no static file matches the request. So
+  // /move is served by that document whether or not this pattern would also
+  // match it — which is why the app's own config has carried the identical
+  // `/move/**` rule all along. Pinned as a statement about the rule's shape:
+  // it is the dynamic child route that needs the rewrite.
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal').destination, '/move/__dynamic.html');
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal/deeper').destination, '/move/__dynamic.html');
+});
+
+await test('the app config on THIS branch cannot be used to cross-check, and that is the finding', () => {
+  // The obvious test — assert the staging list matches the app's
+  // firebase.westayfit.json — cannot be written where this suite runs.
+  //
+  // MEASURED: that file carries 0 rewrites on main and 0 on this branch, and
+  // 12 only on the app-shell lineage (37367fd). The rules live on the
+  // CANDIDATE, the operational copy lives on main, and no single checkout holds
+  // both. That is precisely why the two files' own "Keep the two in sync"
+  // comment is enforced by nothing, and why two rules went missing here while
+  // being present there.
+  //
+  // So this case pins the asymmetry rather than pretending to close it: if the
+  // app config on this branch ever gains rewrites, a real cross-check becomes
+  // possible and this case should be replaced by one.
+  const app = JSON.parse(fs.readFileSync('firebase.westayfit.json', 'utf8'));
+  assert.deepEqual(app.hosting.rewrites ?? [], [],
+    'the app config now carries rewrites on this branch — replace this case with a real cross-check');
+  assert.equal(STAGING_HOSTING.hosting.site, 'westayfit-staging');
+  assert.notEqual(app.hosting.site, STAGING_HOSTING.hosting.site);
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);
