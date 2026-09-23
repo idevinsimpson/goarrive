@@ -302,6 +302,12 @@ type GoalProgress =
 
 type MyContributionResponse = { ownCredit: number; unit: string; repeatPolicy?: unknown };
 
+/**
+ * Just past `wsfGoalPulse`'s 2 s server cache (functions-westayfit
+ * PULSE_CACHE_TTL_MS), with margin for the round trip that filled it.
+ */
+const PULSE_SETTLE_MS = 2_600;
+
 export default function CommunityPage() {
   const params = useLocalSearchParams<{ groupId: string }>();
   const groupId = params.groupId;
@@ -334,6 +340,33 @@ export default function CommunityPage() {
   } | null>(null);
   const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
+  /*
+    A GENUINE RETURN TO THIS SCREEN. Bumped by the focus effect below on every
+    focus except the first (the mount, which every read already covers).
+
+    This screen stays mounted under whatever the member opens from it, so a
+    history Back lands on the SAME instance with whatever it read before the
+    member left. Without this, a Champion who creates a goal and goes Back is
+    told "No goal running yet" — on the unknown create outcome, the exact
+    prompt to make a duplicate — and a member who has just moved comes back
+    to "0 people moved today". Reselecting the tab already in view is not a
+    focus change, so it stays a no-op.
+  */
+  const [returnToken, setReturnToken] = useState(0);
+  /*
+    THE SECOND LOOK, once the pulse cache has certainly expired.
+
+    `wsfGoalPulse` serves a shared total from a 2 s server cache
+    (PULSE_CACHE_TTL_MS). The contribution screen reads the pulse while the
+    member is there, so a return straight from the receipt can re-read inside
+    that window and be handed the total from BEFORE the contribution: "You've
+    added 20" beside an unchanged shared total, and nothing ever corrects it.
+    So a return also schedules one quiet re-read just past the window. It
+    only replaces figures that were already on screen, never shows loading,
+    and a failure leaves what is there.
+  */
+  const [settleToken, setSettleToken] = useState(0);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /*
     WHO IS HERE, AND WHAT HAS JUST HAPPENED.
@@ -410,7 +443,7 @@ export default function CommunityPage() {
     return () => {
       cancelled = true;
     };
-  }, [readyForSocial, groupId, socialFeaturedGoalId]);
+  }, [readyForSocial, groupId, socialFeaturedGoalId, returnToken]);
 
   const [progress, setProgress] = useState<Record<string, GoalProgress>>({});
   const [progressReloadToken, setProgressReloadToken] = useState(0);
@@ -967,6 +1000,48 @@ export default function CommunityPage() {
     };
   }, [ready, user, groupId, goalsReloadToken]);
 
+  /*
+    THE GOAL LIST, RE-READ QUIETLY ON A RETURN.
+
+    Deliberately NOT the effect above: that one resets to `loading` so a
+    different account or community can never show the previous one's goals,
+    and on a return that reset would blank a page the member is already
+    looking at and throw away their scroll. Here nothing is cleared. A
+    successful read replaces the list (and, through it, re-reads progress); a
+    failed one leaves what is on screen standing and re-reads progress alone,
+    exactly as a return did before. A list that is still loading is left to
+    the read already in flight.
+  */
+  const handledReturn = useRef(0);
+  useEffect(() => {
+    if (!wsfAuthEnabled) return;
+    if (!ready || !user || !groupId) return;
+    if (returnToken === 0 || returnToken === handledReturn.current) return;
+    handledReturn.current = returnToken;
+    if (goalsState.kind === 'loading') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const fn = httpsCallable<
+          { groupId: string; includeHistory: boolean },
+          ListGoalsResponse
+        >(getFirebaseFunctions(), 'wsfListGoals');
+        const result = await fn({ groupId, includeHistory: true });
+        if (cancelled) return;
+        setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
+      } catch (e) {
+        if (cancelled) return;
+        console.warn('[wsf] goal list refresh failed', e);
+        setProgressReloadToken((n) => n + 1);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, groupId, returnToken, goalsState.kind]);
+
   // Confirmed progress for every listed goal, from the same aggregate the
   // contribution and display screens use (wsfGoalPulse admits an active
   // member), plus the member's own credit for open goals (wsfMyContribution).
@@ -985,8 +1060,18 @@ export default function CommunityPage() {
     // itself — `includeHistory` carries its confirmed shared total — so a
     // pulse read for one would be a request whose answer nothing renders.
     const openGoals = goalsState.goals.filter((g) => g.status === 'active');
-    setProgress(
-      Object.fromEntries(openGoals.map((g) => [g.goalId, { kind: 'loading' as const }]))
+    // A goal whose figures are already on screen KEEPS them while this read
+    // runs: on a return, resetting to the loading skeleton shortened the page
+    // under the member and threw away their scroll. A goal with nothing shown
+    // yet still says it is loading. (A change of account or community empties
+    // `progress` above, so nothing carries across.)
+    setProgress((prev) =>
+      Object.fromEntries(
+        openGoals.map((g) => {
+          const shown = prev[g.goalId];
+          return [g.goalId, shown && shown.kind === 'ok' ? shown : { kind: 'loading' as const }];
+        })
+      )
     );
     for (const goal of openGoals) {
       (async () => {
@@ -1015,7 +1100,10 @@ export default function CommunityPage() {
           }));
         } catch {
           if (cancelled) return;
-          setProgress((prev) => ({ ...prev, [goal.goalId]: { kind: 'failed' } }));
+          // A failed re-read does not take down figures already on screen.
+          setProgress((prev) =>
+            prev[goal.goalId]?.kind === 'ok' ? prev : { ...prev, [goal.goalId]: { kind: 'failed' } }
+          );
         }
       })();
     }
@@ -1023,6 +1111,57 @@ export default function CommunityPage() {
       cancelled = true;
     };
   }, [ready, user, groupId, goalsState, progressReloadToken]);
+
+  // The settle read (see `settleToken`). Same two callables as above, for the
+  // open goals whose figures are already on screen; it never writes `loading`
+  // or `failed`, so it cannot blank or downgrade anything.
+  useEffect(() => {
+    if (!wsfAuthEnabled) return;
+    if (settleToken === 0) return;
+    if (!ready || !user || !groupId || goalsState.kind !== 'loaded') return;
+    let cancelled = false;
+    const functions = getFirebaseFunctions();
+    for (const goal of goalsState.goals.filter((g) => g.status === 'active')) {
+      (async () => {
+        try {
+          const pulseFn = httpsCallable<{ goalId: string }, PulseTotals>(functions, 'wsfGoalPulse');
+          const ownFn = httpsCallable<{ goalId: string }, MyContributionResponse>(
+            functions,
+            'wsfMyContribution'
+          );
+          const [pulseResult, ownResult] = await Promise.all([
+            pulseFn({ goalId: goal.goalId }),
+            ownFn({ goalId: goal.goalId }).catch(() => null),
+          ]);
+          if (cancelled) return;
+          setProgress((prev) => {
+            const shown = prev[goal.goalId];
+            if (!shown || shown.kind !== 'ok') return prev;
+            return {
+              ...prev,
+              [goal.goalId]: {
+                kind: 'ok',
+                pulse: pulseResult.data,
+                ownCredit: ownResult ? ownResult.data.ownCredit : shown.ownCredit,
+                repeatPolicy: ownResult
+                  ? resolveRepeatPolicy(ownResult.data.repeatPolicy)
+                  : shown.repeatPolicy,
+                at: new Date(),
+              },
+            };
+          });
+        } catch {
+          // The figures on screen stand.
+        }
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately keyed on the token alone: the read is a one-off, not a
+    // subscription to the goal list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settleToken]);
 
   // Coming back to this screen (from a contribution, say) re-reads progress.
   // The first focus is the mount, which the effect above already covers.
@@ -1057,13 +1196,28 @@ export default function CommunityPage() {
 
   useFocusEffect(
     useCallback(() => {
-      if (focusedBefore.current) setProgressReloadToken((n) => n + 1);
+      // A return re-reads the goal list first; progress follows from it
+      // (or directly, if that read fails), so progress is read once, not twice.
+      if (focusedBefore.current) {
+        setReturnToken((n) => n + 1);
+        if (settleTimer.current) clearTimeout(settleTimer.current);
+        settleTimer.current = setTimeout(() => {
+          settleTimer.current = null;
+          setSettleToken((n) => n + 1);
+        }, PULSE_SETTLE_MS);
+      }
       focusedBefore.current = true;
       // Leaving the screen closes the Champion tools sheet. The sheet is a
       // portal over the whole window, and the stack keeps this screen
       // mounted underneath the next one, so an open sheet would otherwise
       // sit on top of the screen being navigated to.
-      return () => setManageOpen(false);
+      return () => {
+        setManageOpen(false);
+        if (settleTimer.current) {
+          clearTimeout(settleTimer.current);
+          settleTimer.current = null;
+        }
+      };
     }, [])
   );
 
