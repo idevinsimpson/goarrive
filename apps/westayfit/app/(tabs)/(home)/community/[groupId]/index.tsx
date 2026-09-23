@@ -334,6 +334,19 @@ export default function CommunityPage() {
   } | null>(null);
   const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
+  /*
+    A GENUINE RETURN TO THIS SCREEN. Bumped by the focus effect below on every
+    focus except the first (the mount, which every read already covers).
+
+    This screen stays mounted under whatever the member opens from it, so a
+    history Back lands on the SAME instance with whatever it read before the
+    member left. Without this, a Champion who creates a goal and goes Back is
+    told "No goal running yet" — on the unknown create outcome, the exact
+    prompt to make a duplicate — and a member who has just moved comes back
+    to "0 people moved today". Reselecting the tab already in view is not a
+    focus change, so it stays a no-op.
+  */
+  const [returnToken, setReturnToken] = useState(0);
 
   /*
     WHO IS HERE, AND WHAT HAS JUST HAPPENED.
@@ -410,7 +423,7 @@ export default function CommunityPage() {
     return () => {
       cancelled = true;
     };
-  }, [readyForSocial, groupId, socialFeaturedGoalId]);
+  }, [readyForSocial, groupId, socialFeaturedGoalId, returnToken]);
 
   const [progress, setProgress] = useState<Record<string, GoalProgress>>({});
   const [progressReloadToken, setProgressReloadToken] = useState(0);
@@ -967,6 +980,48 @@ export default function CommunityPage() {
     };
   }, [ready, user, groupId, goalsReloadToken]);
 
+  /*
+    THE GOAL LIST, RE-READ QUIETLY ON A RETURN.
+
+    Deliberately NOT the effect above: that one resets to `loading` so a
+    different account or community can never show the previous one's goals,
+    and on a return that reset would blank a page the member is already
+    looking at and throw away their scroll. Here nothing is cleared. A
+    successful read replaces the list (and, through it, re-reads progress); a
+    failed one leaves what is on screen standing and re-reads progress alone,
+    exactly as a return did before. A list that is still loading is left to
+    the read already in flight.
+  */
+  const handledReturn = useRef(0);
+  useEffect(() => {
+    if (!wsfAuthEnabled) return;
+    if (!ready || !user || !groupId) return;
+    if (returnToken === 0 || returnToken === handledReturn.current) return;
+    handledReturn.current = returnToken;
+    if (goalsState.kind === 'loading') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const fn = httpsCallable<
+          { groupId: string; includeHistory: boolean },
+          ListGoalsResponse
+        >(getFirebaseFunctions(), 'wsfListGoals');
+        const result = await fn({ groupId, includeHistory: true });
+        if (cancelled) return;
+        setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
+      } catch (e) {
+        if (cancelled) return;
+        console.warn('[wsf] goal list refresh failed', e);
+        setProgressReloadToken((n) => n + 1);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, groupId, returnToken, goalsState.kind]);
+
   // Confirmed progress for every listed goal, from the same aggregate the
   // contribution and display screens use (wsfGoalPulse admits an active
   // member), plus the member's own credit for open goals (wsfMyContribution).
@@ -1057,7 +1112,9 @@ export default function CommunityPage() {
 
   useFocusEffect(
     useCallback(() => {
-      if (focusedBefore.current) setProgressReloadToken((n) => n + 1);
+      // A return re-reads the goal list first; progress follows from it
+      // (or directly, if that read fails), so progress is read once, not twice.
+      if (focusedBefore.current) setReturnToken((n) => n + 1);
       focusedBefore.current = true;
       // Leaving the screen closes the Champion tools sheet. The sheet is a
       // portal over the whole window, and the stack keeps this screen
