@@ -49,8 +49,6 @@ import {
   wsfCancelTurn,
   wsfChallengePulse,
   wsfCombinedGoalPulse,
-  wsfCommunityActivity,
-  wsfCommunityMembers,
   wsfCompleteTurn,
   wsfContribute,
   wsfGoalPulse,
@@ -68,23 +66,89 @@ import {
 /**
  * EVERY `invoker: 'public'` CALLABLE, READ FROM THE SOURCE RATHER THAN LISTED.
  *
- * This function is a correction. The first version of this probe walked a
- * HARDCODED list of six surfaces, and the report it fed said it covered "every
- * `invoker: 'public'` surface". That was not true: the head it ran against
- * already had seventeen, so eleven public callables were never driven at all.
+ * This function is a correction, twice over.
  *
- * It is also exactly the defect I raised against somebody else's work in #393
- * (F1: a reach matrix walking a hardcoded array of job names rather than one
- * derived from the parsed workflow, so an added job is invisible to it). A
- * list that has to be kept in step by hand falls out of step, and the thing it
- * stops covering is precisely the thing that was just added.
+ * FIRST: the original probe walked a HARDCODED list of six surfaces while the
+ * report it fed said it covered "every `invoker: 'public'` surface". It did
+ * not. That is the same defect I raised against somebody else's work in #393
+ * (F1: a reach matrix walking a hardcoded array rather than one derived from
+ * the parsed source), and a list kept in step by hand stops covering exactly
+ * what was just added.
  *
- * So the set is derived from `src/index.ts` and the coverage test below fails
- * when a public callable is not driven here. A new public surface now breaks
- * this probe until somebody points it at the surface.
+ * SECOND, AND WORSE: the first derivation matched the raw file, so it matched
+ * PROSE. The comment above `wsfCommunityMembers` says "NO `invoker: 'public'`"
+ * — a sentence forbidding the marker contains the marker — and the comment on
+ * `wsfCommunityActivity` refers back to it. Both were counted as public. They
+ * are not: they are declared `{ region: 'us-central1' }` with no invoker at
+ * all, so Cloud Run IAM does not expose them, and the anonymous refusal I
+ * measured came from the in-code `request.auth` check UNDER that. Reported as
+ * "public but clean", it inverted the security story on a release-gating
+ * record. Seventeen was wrong; the number is FIFTEEN.
+ *
+ * So the source is stripped of comments before it is matched, and the stripper
+ * has its own control test below — a scanner that can be fooled by a sentence
+ * about itself is not a scanner. W8's `sprint-w8-social-invoker.test.ts` hit
+ * the same trap in its own first version and carries a comment-stripping
+ * control; the approach is reused here, deliberately not the file.
  */
+function stripComments(src: string): string {
+  type Mode = 'code' | 'line' | 'block' | 'single' | 'double' | 'template';
+  let out = '';
+  let mode: Mode = 'code';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (mode === 'code') {
+      if (c === '/' && d === '/') { mode = 'line'; i += 2; continue; }
+      if (c === '/' && d === '*') { mode = 'block'; i += 2; continue; }
+      if (c === "'" || c === '"' || c === '`') {
+        mode = c === "'" ? 'single' : c === '"' ? 'double' : 'template';
+        out += c;
+        i += 1;
+        continue;
+      }
+      out += c;
+      i += 1;
+      continue;
+    }
+    if (mode === 'line') {
+      if (c === '\n') { mode = 'code'; out += c; }
+      i += 1;
+      continue;
+    }
+    if (mode === 'block') {
+      if (c === '*' && d === '/') { mode = 'code'; i += 2; continue; }
+      if (c === '\n') out += c;
+      i += 1;
+      continue;
+    }
+    // inside a string literal: copy verbatim, honouring escapes
+    if (c === '\\') { out += c + (d ?? ''); i += 2; continue; }
+    if (
+      (mode === 'single' && c === "'") ||
+      (mode === 'double' && c === '"') ||
+      (mode === 'template' && c === '`')
+    ) {
+      mode = 'code';
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+function indexSource(): string {
+  return readFileSync(path.resolve(__dirname, '../../src/index.ts'), 'utf8');
+}
+
+/** Every `export const <name> = ` in a source, whatever follows it. */
+function exportedNames(src: string): string[] {
+  return [...src.matchAll(/\nexport const ([A-Za-z0-9_]+)\s*=\s*/g)].map((m) => m[1]).sort();
+}
+
 function declaredPublicCallables(): string[] {
-  const src = readFileSync(path.resolve(__dirname, '../../src/index.ts'), 'utf8');
+  const src = stripComments(indexSource());
   const found: string[] = [];
   const parts = src.split(/\nexport const ([A-Za-z0-9_]+)\s*=\s*/);
   for (let i = 1; i < parts.length; i += 2) {
@@ -282,21 +346,15 @@ describe('W5 probe — public/kiosk/display payloads carry no member identity', 
       call: () => wsfStationState.run(anonRequest({ stationId: groupId, secret: 'w5-probe-secret' })),
     },
     /*
-      THE SOCIAL SURFACES. These are the two the community-presence work added,
-      and they are the reason the hardcoded list had to go: they resolve member
-      display names by design, for authenticated members of that community, and
-      they carry `invoker: 'public'` — which governs who may reach the Cloud Run
-      service, not who the function will answer. A real `groupId` is passed so
-      the call does the work rather than bouncing on a missing argument.
+      THE SOCIAL CALLABLES ARE NOT HERE, AND THAT IS THE CORRECTION.
+
+      `wsfCommunityMembers` and `wsfCommunityActivity` are declared
+      `{ region: 'us-central1' }` with NO invoker, so Cloud Run IAM does not
+      expose them at all. This probe is about the surfaces a signed-out
+      stranger can reach; they are not among them, and driving them here
+      implied they were. Their behaviour for AUTHENTICATED members is a
+      different question and is W8's to test.
     */
-    {
-      name: 'wsfCommunityMembers',
-      call: () => wsfCommunityMembers.run(anonRequest({ groupId })),
-    },
-    {
-      name: 'wsfCommunityActivity',
-      call: () => wsfCommunityActivity.run(anonRequest({ groupId, goalId })),
-    },
     /*
       THE REST OF THE DECLARED PUBLIC SET, never driven by the first version of
       this probe. Several need pairing or turn state this file does not build,
@@ -372,6 +430,43 @@ describe('W5 probe — public/kiosk/display payloads carry no member identity', 
     const driven = surfaces().map((s) => s.name).sort();
     expect(declared.length).toBeGreaterThan(0);
     expect(declared.filter((n) => !driven.includes(n))).toEqual([]);
+  });
+
+  /*
+    THE STRIPPER'S OWN CONTROL. The derivation was wrong once because it read a
+    comment as a declaration — and the comment in question was a sentence
+    FORBIDDING the marker it contains. A scanner that can be fooled by prose
+    about itself is not a scanner, so this proves it discards the comment forms
+    that actually appear in the source and keeps the real option.
+  */
+  test('the comment stripper discards prose and keeps declarations', () => {
+    const sample = [
+      "// NO `invoker: 'public'`. That marker is a NO-OP IN THE EMULATOR",
+      '/* invoker:\'public\' described in a block comment */',
+      "export const wsfReal = onCall({ region: 'us-central1', invoker: 'public' },",
+      "export const wsfQuiet = onCall({ region: 'us-central1' },",
+      "const notAComment = \"invoker: 'public' inside a string\";",
+    ].join('\n');
+    const stripped = stripComments(sample);
+    expect(stripped).not.toContain('NO-OP IN THE EMULATOR');
+    expect(stripped).not.toContain('described in a block comment');
+    // A declaration survives, and so does a string literal — stripping must not
+    // eat code just because it mentions the marker.
+    expect(stripped).toContain("region: 'us-central1', invoker: 'public'");
+    expect(stripped).toContain('inside a string');
+  });
+
+  /*
+    AND A GUARD ON THE STRIPPER ITSELF. A mis-parse that swallowed part of the
+    file would quietly shrink the derived set — the same silent-undercount
+    failure this whole correction is about. Every export the raw file declares
+    must still be there after stripping.
+  */
+  test('stripping comments loses no export from the source', () => {
+    const raw = exportedNames(indexSource());
+    const stripped = exportedNames(stripComments(indexSource()));
+    expect(raw.length).toBeGreaterThan(0);
+    expect(raw.filter((n) => !stripped.includes(n))).toEqual([]);
   });
 
   test('the identity detector actually detects — keys, values and nesting', () => {

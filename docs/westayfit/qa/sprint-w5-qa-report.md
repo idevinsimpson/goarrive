@@ -1533,3 +1533,66 @@ tested it.
 That is nine instrument corrections recorded in this report. This one is the most consequential:
 the others would have misreported a single case, and this one overstated the reach of the probe
 the sprint has been reading as the privacy line.
+
+
+## CORRECTION TO THE CORRECTION — the derivation read prose, and inverted a security story
+
+L0 relayed W8's evidence (#395 `5791139717`, W8 on #365 `5790688899`) that
+`wsfCommunityMembers` and `wsfCommunityActivity` do **not** carry `invoker: 'public'`.
+**They are right, and I have verified it in the source myself rather than on their word.**
+
+At `9a65324c`, `functions-westayfit/src/index.ts:9336` reads:
+
+    // NO `invoker: 'public'`. That marker is a NO-OP IN THE EMULATOR and enforced …
+
+and line 9568 refers back to it for the second callable. **A sentence forbidding the marker
+contains the marker**, and my derivation matched the raw file, so it matched the prose. Both
+callables are declared `{ region: 'us-central1' }` with no invoker at all.
+
+### What that means, stated as plainly as the original claim
+
+The **measured behaviour** was right — an anonymous drive returns no name, uid or address. The
+**classification was wrong, and the wrong way round.** I reported the two as "public but clean".
+They are not public: Cloud Run IAM does not expose them, and the refusal I saw came from the
+in-code `request.auth` check sitting *underneath* that. Describing an unexposed surface as a
+public one that happens to behave is not a small mislabel on a release-gating record — it makes
+the protection sound like a payload check when it is an access boundary. **Seventeen was wrong;
+the number is fifteen.**
+
+    wsfCallNext  wsfCancelTurn  wsfChallengePulse  wsfCombinedGoalPulse
+    wsfCompleteTurn  wsfGoalPulse  wsfGoalRecentAdditions  wsfPreviewCommunity
+    wsfSendPasswordResetEmail  wsfStartTurn  wsfStationClaimPairing
+    wsfStationPairingStatus  wsfStationRequestPairing  wsfStationState  wsfTurnState
+
+### Fixed, with the scanner's own fallibility guarded
+
+- The source is **stripped of comments** before it is matched. The stripper honours string
+  literals so a declaration is never eaten for mentioning the marker.
+- **A control test for the stripper**, because a scanner that can be fooled by a sentence about
+  itself is not a scanner: it proves the comment forms that actually appear in this file are
+  discarded, that a real declaration survives, and that a string literal survives.
+- **A guard against over-stripping**: every `export const` in the raw file must still be present
+  after stripping. A mis-parse that swallowed part of the file would silently shrink the derived
+  set — the same undercount failure this whole thread is about.
+- The two social callables are **removed from the driven set**. This probe is about surfaces a
+  signed-out stranger can reach; they are not among them, and driving them here implied they
+  were. Their behaviour for authenticated members is W8's to test.
+
+W8's `sprint-w8-social-invoker.test.ts` hit the same trap in its own first version and carries a
+comment-stripping control. Per the packet I reused **the approach, not the file**.
+
+### Result at `9a65324c` (product unchanged by the `740a7637` base merge)
+
+    public-surface-identity    19 passed  (15 surfaces, coverage guard, detector self-test,
+                                           stripper control, no-export-lost guard)
+    pending-reconcile-identity  6 passed
+                               25 passed, 0 failed
+
+**One run was discarded**: the first attempt reported 25 failures with the emulators down between
+turns. That is hazard (a) on my own list and not a result; it was repeated against a live stack.
+
+This is the tenth instrument correction in this report, and the second on the same probe. The
+first was covering six of seventeen while claiming every; this one is a derivation that read
+comments as code. The lesson I take is narrower than "derive rather than list": **a derivation is
+itself an instrument, and needs its own control — the first version of it was more confidently
+wrong than the hardcoded list it replaced.**
