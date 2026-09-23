@@ -29,13 +29,25 @@ import {
  *      replaces itself with the contribution screen, so the screen beneath is
  *      that tab. "Back to community" still has to land on the community, and
  *      on the instance the Home tab already holds.
- *   4. "BACK TO HOME" follows the same rule. On a cold arrival it opens Home,
- *      which resolves the member's community, and replaces rather than
- *      pushes. W1B's cold case could press this label too, in the moment
- *      before the screen's community context verifies.
+ *   4. "BACK TO HOME". On a cold arrival it opens Home, which resolves the
+ *      member's community, and replaces rather than pushes. W1B's cold case
+ *      could press this label too, in the moment before the screen's
+ *      community context verifies. On a WARM arrival (a Champion's first
+ *      contribution from Goal Setup's receipt, whose link names no
+ *      community) it returns to the Home tab as it stands. It does not open
+ *      Home's index over the mounted community, where Home's own redirect
+ *      would build a second copy of it.
+ *   5. A COLD "BACK TO COMMUNITY" replaces as well, once the context has
+ *      verified and the label says so.
  *
- * The committed total the member returns to is read too. That checks what
- * the screen already re-reads on focus; it is not W8's goal-list freshness.
+ * WHAT DEPENDS ON W8. The committed total, and the new goal after Goal
+ * Setup, are only current on the mounted screen once W8's Community freshness
+ * is present (`claude/wsf-community-freshness`). `wsfGoalPulse` answers from
+ * a two-second cache, so the one re-read on focus returns the old total
+ * unless the screen reads again once that cache has expired; the goal list
+ * does not re-read on focus at all. Those assertions are therefore the LAST
+ * thing each test checks, so that on this branch alone every other claim
+ * still runs, and they fail on the stale value rather than passing on it.
  *
  * Kiosk sessions never reach these exits (every kiosk rest state renders
  * Finish). They stay pinned by W1B's and W5's kiosk suites.
@@ -49,7 +61,10 @@ const ADDED = 20;
 
 type Fx = { email: string; password: string; groupId: string; goalId: string };
 
-async function seed(tag: string): Promise<Fx> {
+async function seed(
+  tag: string,
+  opts: { role?: 'member' | 'foundingChampion'; goal?: boolean } = {},
+): Promise<Fx> {
   const stamp = `${stampId()}${tag}`;
   const email = `wsf-w9-exit-${stamp}@example.com`;
   const password = 'Sup3rSecret!23';
@@ -60,9 +75,10 @@ async function seed(tag: string): Promise<Fx> {
     groupId,
     displayName: 'Alpharetta Morning Movers',
     joinPolicy: 'private',
-    members: [{ uid, role: 'member' }],
+    members: [{ uid, role: opts.role ?? 'member' }],
   });
   const goalId = `w9exitgoal-${stamp}`;
+  if (opts.goal === false) return { email, password, groupId, goalId };
   await seedActiveGoal({
     goalId,
     groupId,
@@ -160,16 +176,16 @@ async function expectBackOnTheCommunityWeLeft(
   page: Page,
   fx: Fx,
   at: string,
-  opts: { scroll?: number; total?: number },
+  opts: { scroll?: number; label?: string } = {},
 ): Promise<void> {
   const back = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
   await expect(back, `${at}: the exit is on screen`).toBeVisible();
-  await expect(back, `${at}: the exit says where it goes`).toHaveText('Back to community');
+  await expect(back, `${at}: the exit says where it goes`).toHaveText(opts.label ?? 'Back to community');
   await back.click();
   await expect
     .poll(() => new URL(page.url()).pathname, { timeout: 40_000, message: `${at}: the community's address` })
     .toBe(`/community/${fx.groupId}`);
-  await expect(page.getByTestId('wsf-community-goal-hero').last()).toBeVisible({ timeout: 40_000 });
+  await expect(page.locator('[data-testid="wsf-community"]:visible').first()).toBeVisible({ timeout: 40_000 });
   // Long enough for a pushed copy to finish mounting, so a slow second
   // instance cannot be missed by reading too early.
   await page.waitForTimeout(800);
@@ -182,12 +198,30 @@ async function expectBackOnTheCommunityWeLeft(
       opts.scroll,
     );
   }
-  if (opts.total !== undefined) {
-    await expect(
-      page.locator(`[data-testid="wsf-community-goal-total-${fx.goalId}"]:visible`).first(),
-      `${at}: the community shows the committed total`,
-    ).toContainText(opts.total.toLocaleString('en-US'), { timeout: 30_000 });
-  }
+  /*
+    AND WHAT THE MEMBER SEES IS THE COMMUNITY, read by hit-testing rather
+    than by counting nodes. Tabs stay mounted on purpose, so a tab the member
+    left is still in the document, hidden from assistive tech, and Playwright
+    still reports its nodes as visible. The question is asked of the point a
+    thumb would land on.
+  */
+  const onTop = await page.evaluate(() => {
+    const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+    return {
+      community: Boolean(hit?.closest('[data-testid="wsf-community"]')),
+      you: Boolean(hit?.closest('[data-testid="wsf-you"]')),
+    };
+  });
+  expect(onTop.community, `${at}: the screen on top is not the community`).toBe(true);
+  expect(onTop.you, `${at}: the member was left on You`).toBe(false);
+}
+
+/** W8-dependent, so always the last thing a test asks (see the header). */
+async function expectCommittedTotal(page: Page, fx: Fx, at: string, total: number): Promise<void> {
+  await expect(
+    page.locator(`[data-testid="wsf-community-goal-total-${fx.goalId}"]:visible`).first(),
+    `${at}: the community shows the committed total`,
+  ).toContainText(total.toLocaleString('en-US'), { timeout: 30_000 });
 }
 
 /** Answer the contribution callable with a refusal of this code. */
@@ -218,10 +252,8 @@ test.describe('contribution exits land on the mounted community', () => {
     await recordTwenty(page);
     await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
 
-    await expectBackOnTheCommunityWeLeft(page, fx, 'receipt', {
-      scroll: planted,
-      total: SEEDED_TOTAL + ADDED,
-    });
+    await expectBackOnTheCommunityWeLeft(page, fx, 'receipt', { scroll: planted });
+    await expectCommittedTotal(page, fx, 'receipt', SEEDED_TOTAL + ADDED);
   });
 
   test('from a refusal: "Back to community" returns the same way', async ({ page }) => {
@@ -239,7 +271,7 @@ test.describe('contribution exits land on the mounted community', () => {
     await expect(page.getByTestId('wsf-contribute-refused').last()).toBeVisible({ timeout: 40_000 });
     await page.unroute('**/wsfContribute');
 
-    await expectBackOnTheCommunityWeLeft(page, fx, 'refusal', { scroll: planted, total: SEEDED_TOTAL });
+    await expectBackOnTheCommunityWeLeft(page, fx, 'refusal', { scroll: planted });
   });
 
   test('a signed-out refusal keeps its own destination: Sign in', async ({ page }) => {
@@ -325,29 +357,90 @@ test.describe('contribution exits land on the mounted community', () => {
     await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('wsf-member-tab-move').last().click();
     await expect(page.getByTestId('wsf-contribute-move-screen').last()).toBeVisible({ timeout: 40_000 });
+    // THE PREMISE, asserted rather than assumed: this is MOVE's one-goal
+    // handoff, and the sheet replaced itself, so what is beneath is You.
+    expect(new URL(page.url()).searchParams.get('mode'), 'MOVE handed off in move mode').toBe('move');
+    await expect(page.getByTestId('wsf-move-sheet'), 'the MOVE sheet replaced itself').toHaveCount(0);
     await page.getByTestId('wsf-contribute-done').last().click();
     await recordTwenty(page);
     await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
 
-    await expectBackOnTheCommunityWeLeft(page, fx, 'MOVE from You', {
-      scroll: planted,
-      total: SEEDED_TOTAL + ADDED,
-    });
+    await expectBackOnTheCommunityWeLeft(page, fx, 'MOVE from You', { scroll: planted });
+    await expectCommittedTotal(page, fx, 'MOVE from You', SEEDED_TOTAL + ADDED);
+  });
+
+  test('a cold "Back to community", once the context verifies, replaces rather than pushes', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('v');
+    await signInVia(page, fx.email, fx.password);
+    await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}`);
+    await expect(page.getByTestId('wsf-contribute-entry-screen').last()).toBeVisible({ timeout: 40_000 });
+    await recordTwenty(page);
+    await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
+    const back = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
+    // The label is the proof the context verified: before that it says Home.
+    await expect(back).toHaveText('Back to community', { timeout: 30_000 });
+    const before = await page.evaluate(() => window.history.length);
+    await back.click();
+    await expect
+      .poll(() => new URL(page.url()).pathname, { timeout: 40_000, message: 'the community' })
+      .toBe(`/community/${fx.groupId}`);
+    await expect(page.locator('[data-testid="wsf-community"]:visible').first()).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(800);
+    expect(
+      await page.evaluate(() => window.history.length),
+      'the dead-end contribution screen was left in the history',
+    ).toBe(before);
+    const r = await communityReading(page);
+    expect(r.instances, 'one Community screen').toBe(1);
+    expect(r.tabNavigators, 'one tab navigator').toBe(1);
+  });
+
+  test('a warm "Back to home" from Goal Setup returns to the mounted Home tab, not a copy of it', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    // A Champion with a community and no goal yet: the first goal's journey.
+    const fx = await seed('g', { role: 'foundingChampion', goal: false });
+    await signInVia(page, fx.email, fx.password);
+    await page.goto(`/community/${fx.groupId}`);
+    const start = page.getByTestId('wsf-community-start-goal').last();
+    await expect(start).toBeVisible({ timeout: 40_000 });
+    expect(await markCommunity(page), 'the Community screen was marked').toBe(true);
+
+    await start.click();
+    await expect(page.getByTestId('wsf-new-goal-form').last()).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-new-goal-title').last().fill('Squats together this week');
+    await page.getByTestId('wsf-new-goal-target').last().fill('500');
+    await page.getByTestId('wsf-new-goal-unit').last().fill('squats');
+    await page.getByTestId('wsf-new-goal-submit').last().click();
+    const created = page.getByTestId('wsf-new-goal-created').last();
+    await expect(created).toBeVisible({ timeout: 40_000 });
+    const newGoalId = (await created.getAttribute('data-goal-id')) ?? '';
+    expect(newGoalId, 'the receipt names the goal the server made').not.toBe('');
+
+    // Goal Setup's link names no community, so this contribution's exits
+    // say Home: the path the review traced to a second Community.
+    await page.getByTestId('wsf-new-goal-goto-contribute').last().click();
+    await expect(page.getByTestId('wsf-contribute-entry-screen').last()).toBeVisible({ timeout: 40_000 });
+    await recordTwenty(page);
+    await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
+
+    await expectBackOnTheCommunityWeLeft(page, fx, 'Goal Setup, Back to home', { label: 'Back to home' });
     /*
-      AND WHAT THE MEMBER SEES IS THE COMMUNITY, read by hit-testing, not by
-      counting nodes. The You tab stays mounted underneath, hidden from
-      assistive tech, because the shell keeps tabs mounted on purpose.
-      Playwright still reports its nodes as visible, so the question is asked
-      of the point a thumb would land on.
+      W8-dependent, last: the mounted page shows the goal that now exists.
+      Read by its title in the visible screen's hero, as W8's own spec does.
+      Not by its record control: Goal Setup's default repeat policy is
+      "once", so after this contribution the member has no record control
+      for it, and waiting for one would measure the policy, not freshness.
     */
-    const onTop = await page.evaluate(() => {
-      const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
-      return {
-        community: Boolean(hit?.closest('[data-testid="wsf-community"]')),
-        you: Boolean(hit?.closest('[data-testid="wsf-you-identity"]')),
-      };
-    });
-    expect(onTop.community, 'MOVE from You: the screen on top is not the community').toBe(true);
-    expect(onTop.you, 'MOVE from You: the member was left on You').toBe(false);
+    const visible = page.locator('[data-testid="wsf-community"]:visible').first();
+    await expect(
+      visible.getByTestId('wsf-community-goal-hero'),
+      'Goal Setup, Back to home: the new goal is on the community the member returned to',
+    ).toContainText('Squats together this week', { timeout: 30_000 });
+    await expect(visible.getByTestId('wsf-community-no-goal')).toHaveCount(0);
   });
 });
