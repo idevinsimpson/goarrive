@@ -963,3 +963,69 @@ K1 remains untouched as the immutable historical baseline. K4, K9 and K10 each f
 statement of intent rather than on a locator, so each becomes ordinary passing coverage on the
 day the patch makes its statement true — and none of them can be satisfied by renaming or
 hiding a testID.
+
+
+### W5-K11 — the input shape: the two readers, and what a repeated parameter really does
+
+Added on the Director's instruction (#395 comment 5786966553) while W1B corrects `b24da91f`.
+Scope held: this is the input-shape and repeated-query guard only, in my own suite. No product
+file touched, no re-run of the old matrix to pass the time.
+
+**The disagreement, confirmed in W1B's source at `b24da91f2609fd7493886994a337118c13a25cc2`.**
+The shell now reads the flag and fails closed on an array —
+`if (Array.isArray(value)) return value.some((entry) => isKioskFlag(entry))` in
+`MemberTabBar.tsx` — while `app/contribute/[goalId].tsx:203` still calls
+`isKioskFlag(params.kiosk)`, and `isKioskFlag` is scalar-only
+(`value === '1' || value === 'true'`). Two components decide kiosk mode from one URL, by
+different rules.
+
+**What the test asserts**, in a form that does not presume how anyone fixes it:
+
+| clause | meaning |
+|---|---|
+| `disagreements` | the screen is in kiosk mode exactly when the shell is absent |
+| `kioskWithEscapes` | a kiosk surface offers no control that leaves the session |
+| `stranded` | a surface that is NOT a kiosk is a *whole* member surface — shell and Back |
+| `lostKioskMode` | a URL carrying the flag actually reached kiosk mode |
+
+The third clause is what stops "hide everything" from counting as a fix. The fourth exists
+because the first three compare the two readers **against each other**, and two readers wrong in
+the same direction agree perfectly.
+
+**Measured at `d0477cc`**, in a real browser, signed in, per URL shape:
+
+    single                screenKiosk=true   shell=true   back=false  escapes=5
+    repeated-same         screenKiosk=false  shell=true   back=true   escapes=6
+    repeated-mixed-forms  screenKiosk=false  shell=true   back=true   escapes=6
+    explicitly-off        screenKiosk=false  shell=true   back=true   escapes=6
+
+    disagreements    = [single]
+    kioskWithEscapes = [single → the five member-tab controls]
+    lostKioskMode    = [repeated-same, repeated-mixed-forms]
+    stranded         = []
+
+**The repeated parameter is not theoretical.** `?kiosk=1&kiosk=1` and `?kiosk=true&kiosk=1`
+really do defeat the screen's detection in the browser: `screenKiosk=false`, and the surface
+renders as an ordinary member contribution screen — `wsf-contribute-back` into the signed-in
+member's community, no Finish, and no idle countdown, on a device standing in a room. This is a
+defect **at `d0477cc`, independent of W1B's patch**, and it is the half of the Director's
+source-supported finding that can be shown rather than argued.
+
+**What I have NOT measured, said plainly.** `stranded` is empty here only because this head's
+shell renders regardless of the flag. At `b24da91f` the shell fails closed on the array while
+the screen still does not, so the predicted result is `stranded=[repeated-*]` — bar gone, Finish
+absent, ordinary Back present. **That is a prediction from reading the diff, not a run.** I have
+not built or driven `b24da91f`, and I will not present a read of someone's diff as my own
+measurement. It can be measured on request before the corrected head arrives; otherwise the
+corrected SHA's verification will settle it.
+
+**One harness lesson, recorded because it nearly produced a false result.** The emulators died
+between turns, and the first run of this case "passed" — as an *expected failure* whose cause was
+`TypeError: fetch failed` in the fixture seed, not the product. A `test.fail()` case reports a
+harness collapse and a real defect identically. The run was discarded and repeated against live
+emulators; the numbers above are from that run. Any future tripwire result has to be read with
+its error, not just its status.
+
+**Reporting shape.** As four separate assertions the first failure hid the rest, so a patch
+fixing the disagreement would have revealed `lostKioskMode` only on the following run. The four
+groups are now one assertion and the whole verdict lands at once.

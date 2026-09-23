@@ -1042,3 +1042,125 @@ test('the kiosk Finish in the chrome is legible on the dark receipt', async ({ p
   });
   expect(contrast.ratio, 'the kiosk chrome Finish must be readable on the receipt it sits on').toBeGreaterThanOrEqual(3);
 });
+
+// ---- CASE 11 --------------------------------------------------------------
+/*
+  THE SHELL AND THE SCREEN HAVE TO AGREE ABOUT WHAT ROUTE THIS IS.
+  And what a repeated query parameter actually does, measured rather than
+  assumed.
+
+  Kiosk mode is decided twice, by two components reading the same URL:
+  `MemberTabBar` decides whether to render, and the contribution screen decides
+  whether to show Finish instead of Back. Two readers of one input is two
+  chances to disagree, and a disagreement here is not cosmetic — it produces a
+  surface that is NEITHER: no bar, no Finish, and an ordinary Back into the
+  signed-in member's community, on a device that is standing in a room.
+
+  WHAT THIS ASSERTS, in a form that does not presume how anyone fixes it:
+
+    agreement   the screen is in kiosk mode exactly when the shell is absent
+    if kiosk    no control leads out of the session, and Finish is reachable
+    if member   it is a COHERENT member surface — shell AND Back — so nobody
+                is stranded on a screen with no way anywhere
+
+  The third clause is what stops "hide everything" counting as a fix.
+
+  ON THE DUPLICATED PARAMETER. Whether `?kiosk=1&kiosk=1` even reaches the app
+  as an array is a property of the router and the static export, not something
+  to be taken on faith from the source of either reader. So this measures the
+  observable consequence for each URL shape and records it. If repeated
+  parameters never arrive as arrays here, that is worth knowing plainly, and
+  this test is how it gets known rather than argued.
+*/
+const KIOSK_URL_SHAPES = [
+  { name: 'single', query: 'kiosk=1', kioskIntended: true },
+  { name: 'repeated-same', query: 'kiosk=1&kiosk=1', kioskIntended: true },
+  { name: 'repeated-mixed-forms', query: 'kiosk=true&kiosk=1', kioskIntended: true },
+  { name: 'explicitly-off', query: 'kiosk=0', kioskIntended: false },
+] as const;
+
+test('the shell and the screen agree on kiosk mode for every shape of the flag', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  // W5-K11. Expected to fail while the seam is open: at this head the shell
+  // does not read the flag at all, so it renders over `?kiosk=1` and the two
+  // readers disagree on the product's own URL.
+  test.fail();
+  const fx = await seedBase('shapes');
+  await walkUpAndSignIn(page, fx);
+
+  const observed: Record<string, string> = {};
+  const disagreements: string[] = [];
+  const stranded: string[] = [];
+  const kioskWithEscapes: string[] = [];
+  const lostKioskMode: string[] = [];
+
+  for (const shape of KIOSK_URL_SHAPES) {
+    await page.goto(`/contribute/${fx.goalId}?${shape.query}`);
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 30_000 });
+
+    const screenKiosk =
+      (await page.getByTestId('wsf-kiosk-finish-chrome').count()) +
+        (await page.getByTestId('wsf-kiosk-finish-bar').count()) >
+      0;
+    const shell = (await page.getByTestId('wsf-member-tabs').count()) > 0;
+    const memberBack = (await page.getByTestId('wsf-contribute-back').count()) > 0;
+    const escapes = await escapeControls(page, [
+      '[data-testid="wsf-contribute-entry-screen"]',
+      '[data-testid="wsf-contribute-context"]',
+    ]);
+
+    observed[shape.name] =
+      `screenKiosk=${screenKiosk} shell=${shell} back=${memberBack} escapes=${escapes.length}`;
+
+    // 1. The two readers agree about what this route is.
+    if (screenKiosk === shell) disagreements.push(`${shape.name}(${observed[shape.name]})`);
+    // 2. A kiosk surface has no way out of the session.
+    if (screenKiosk && escapes.length > 0) {
+      kioskWithEscapes.push(`${shape.name}=[${escapes.join(', ')}]`);
+    }
+    // 3. A member surface is a WHOLE member surface. Neither-nor is the
+    //    failure this case exists for: no Finish and no member chrome leaves a
+    //    visitor on a shared device with nothing that ends or leaves anything.
+    if (!screenKiosk && !(shell && memberBack)) {
+      stranded.push(`${shape.name}(${observed[shape.name]})`);
+    }
+    // 4. A URL THAT SAYS KIOSK IS A KIOSK. The clauses above compare the two
+    //    readers against each other, and two readers that are wrong in the
+    //    same direction agree perfectly: a duplicated parameter that neither
+    //    one recognises produces a tidy, consistent MEMBER screen on a device
+    //    standing in a room — no Finish, no idle countdown, and a Back into
+    //    the signed-in member's community. Agreement is not the same as being
+    //    right, so the intent of each URL is asserted separately.
+    if (shape.kioskIntended && !screenKiosk) {
+      lostKioskMode.push(`${shape.name}(${observed[shape.name]})`);
+    }
+  }
+
+  test.info().annotations.push({
+    type: 'kiosk-flag-shapes',
+    description: Object.entries(observed)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(' | '),
+  });
+
+  /*
+    ONE ASSERTION CARRYING ALL FOUR, deliberately. As four separate `expect`s
+    the first failure ended the test and hid the rest — so a patch that fixed
+    the disagreement would reveal the lost-kiosk-mode finding only on the NEXT
+    run, which is how a reviewer ends up chasing one defect at a time. The
+    whole verdict lands at once instead:
+
+      disagreements    the two readers disagree about the same URL
+      kioskWithEscapes a kiosk surface offers a way out of the session
+      stranded         a non-kiosk surface is not a whole member surface
+      lostKioskMode    a URL carrying the flag did not reach kiosk mode
+  */
+  expect({ disagreements, kioskWithEscapes, stranded, lostKioskMode }).toEqual({
+    disagreements: [],
+    kioskWithEscapes: [],
+    stranded: [],
+    lostKioskMode: [],
+  });
+});
