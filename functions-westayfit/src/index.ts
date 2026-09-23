@@ -1691,6 +1691,16 @@ type MyCommunityItem = {
   role: string;
   memberCount: number;
   isSample: boolean;
+  /**
+   * The CALLER'S OWN visibility in this community, so Settings can render what
+   * is stored rather than guess it.
+   *
+   * Safe on this callable precisely because its query is `userId == caller`:
+   * every row it touches is the caller's own. Publishing anybody else's answers
+   * would state more than appearing in the directory already does.
+   */
+  nameVisibility: Vis;
+  activityVisibility: Vis;
   activeChallenge: {
     id: string;
     title: string;
@@ -1724,7 +1734,7 @@ export const wsfMyCommunities = onCall(
         const membership = membershipDoc.data() as {
           groupId: string;
           role: string;
-        };
+        } & Record<string, unknown>;
         const groupSnap = await db
           .doc(`wsfCommunityGroups/${membership.groupId}`)
           .get();
@@ -1776,6 +1786,10 @@ export const wsfMyCommunities = onCall(
           role: membership.role,
           memberCount: memberCountSnap.data().count,
           isSample: group.isSample === true,
+          // Resolved through the same three-way rule the social reads use, so
+          // Settings cannot disagree with the directory about what is stored.
+          nameVisibility: resolveVisibility(membership[FIELD_NAME_VIS]),
+          activityVisibility: resolveVisibility(membership[FIELD_ACTIVITY_VIS]),
           activeChallenge,
         };
         return item;
@@ -9049,5 +9063,696 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
     });
 
     return readTurnState(authorized, lineId, Date.now());
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// W8 — THE SOCIAL LAYER: COMMUNITY PRESENCE, WITH MEMBER-CONTROLLED PRIVACY
+//
+// The owner's decision of 2026-09-22: the member experience must visibly feel
+// like a community, so presence is COMMUNITY-VISIBLE BY DEFAULT — and that
+// means visible to authenticated ACTIVE MEMBERS OF THAT COMMUNITY and nobody
+// else. It does not mean internet-public. Every public, kiosk, station and
+// display path in this file is untouched by this block, and the public
+// wsfGoalRecentAdditions payload above is not widened: it still publishes
+// { amount, unit, at } and nothing that names anyone.
+//
+// NO firestore.rules CHANGE SUPPORTS THIS BLOCK, and that is a property rather
+// than an omission. wsfMemberProfiles is owner-only, wsfMemberships is
+// owner-only, and wsfContributions has no match block at all so it falls to the
+// catch-all deny. Every read below is an Admin-SDK read behind a membership
+// gate, so the feature adds NO new client read surface.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const VIS_PRIVATE = 'private';
+const VIS_VISIBLE = 'visible';
+type Vis = typeof VIS_PRIVATE | typeof VIS_VISIBLE;
+
+/**
+ * TWO SETTINGS, STORED UNDER TWO NEW NAMES.
+ *
+ * `communityNameVisibility`  — may my NAME be shown to other members here.
+ * `communityActivityVisibility` — may my CONTRIBUTIONS appear in this
+ *                                 community's activity.
+ *
+ * DELIBERATELY NOT REUSING `visibility`, the field name PR #390 used. #390
+ * asked the same question under the OPPOSITE default, so a row written by
+ * either generation of the code would be indistinguishable while silently
+ * meaning something different. New names cannot collide.
+ *
+ * STRING ENUMS, NOT BOOLEANS — #390's lesson, and it survives the reversal.
+ * `Boolean(x)` is true for `1`, `'false'`, `'no'`, `{}` and `[]`, and a missing
+ * boolean defaults somewhere. Two named values mean a stored anything-else can
+ * be RECOGNISED as neither, which is what the resolver below depends on.
+ */
+const FIELD_NAME_VIS = 'communityNameVisibility';
+const FIELD_ACTIVITY_VIS = 'communityActivityVisibility';
+
+/**
+ * THE DEFAULT, AND THE FIRESTORE TRAP IT WALKS INTO.
+ *
+ * #390 made private-the-default true by making `visibility == 'visible'` an
+ * INDEX FILTER with no branch below it: a row missing the field could not
+ * match. Reversing that default CANNOT be done by inverting the filter —
+ *
+ *   A Firestore inequality (`!=`, `not-in`) ALSO fails to match documents that
+ *   are MISSING the field. `where('visibility','!=','private')` would silently
+ *   exclude exactly the legacy rows the owner's rule says must be visible, and
+ *   today that is EVERY membership row, because no row carries the field yet.
+ *
+ * So resolution lives here, in code, where the safe side has flipped with the
+ * default. It is THREE-WAY, not a boolean:
+ *
+ *   'private'            -> private   an explicit choice
+ *   'visible'            -> visible   an explicit choice
+ *   absent/undefined/null-> VISIBLE   the owner's rule
+ *   anything else        -> PRIVATE   an unrecognised value is not a decision
+ *                                     to publish. wsfSetCommunityVisibility
+ *                                     cannot write one, so this arises only
+ *                                     from an import or a hand-edit — and
+ *                                     those must never publish a name.
+ */
+function resolveVisibility(stored: unknown): Vis {
+  if (stored === undefined || stored === null) return VIS_VISIBLE;
+  if (stored === VIS_VISIBLE) return VIS_VISIBLE;
+  return VIS_PRIVATE;
+}
+
+type OwnMembership = { role: string; name: Vis; activity: Vis };
+
+/**
+ * The caller's own membership row, proven to be theirs.
+ *
+ * THE DOCUMENT ID IS NOT THE AUTHORITY — THE FIELDS ARE. firestore.rules reads
+ * `resource.data.userId == request.auth.uid` and states that the doc id is
+ * never parsed. On a row where the two disagree, keying the gate off the id
+ * while keying the name fan-out off the field means one person's tap publishes
+ * a different person's name.
+ *
+ * ONE REFUSAL FOR EVERY NEGATIVE CASE. No such community, never joined,
+ * removed, departed, a blank status, a missing status — all the same
+ * `permission-denied` with the same sentence, so the pair of refusals cannot be
+ * used to enumerate which community ids are real. This is also why nothing here
+ * reads wsfCommunityGroups: that is where a distinguishable not-found would
+ * come from.
+ */
+async function requireOwnActiveMembership(
+  db: FirebaseFirestore.Firestore,
+  groupId: string,
+  uid: string
+): Promise<OwnMembership> {
+  const snap = await db.doc(`wsfMemberships/${groupId}_${uid}`).get();
+  if (!snap.exists) throw new HttpsError('permission-denied', 'Members only.');
+  const data = snap.data() as Record<string, unknown>;
+  if (data.userId !== uid || data.groupId !== groupId) {
+    throw new HttpsError('permission-denied', 'Members only.');
+  }
+  // `!== active`, never an allowlist of bad statuses: a positive test refuses
+  // 'removed', 'departed', '', a missing field, `true` and 'Active' alike.
+  if (data.membershipStatus !== MEMBERSHIP_ACTIVE) {
+    throw new HttpsError('permission-denied', 'Members only.');
+  }
+  return {
+    role: typeof data.role === 'string' ? data.role : 'member',
+    name: resolveVisibility(data[FIELD_NAME_VIS]),
+    activity: resolveVisibility(data[FIELD_ACTIVITY_VIS]),
+  };
+}
+
+type SetVisibilityRequest = {
+  groupId?: unknown;
+  name?: unknown;
+  activity?: unknown;
+};
+
+/**
+ * A member changes their OWN visibility in ONE community.
+ *
+ * THERE IS NO `targetUid`, AND THAT ABSENCE IS THE ENFORCEMENT. The Champion
+ * action family (wsfRemoveMember, wsfReinstateMember, wsfDesignateChampion)
+ * shares the shape `{ groupId, targetUid }` and opens each handler with a
+ * Champion check; copying one as a starting point would import both the
+ * parameter and a Champion override of a self-only setting in a single paste.
+ * This is modelled on wsfLeaveCommunity instead — the file's one existing
+ * callable that acts on the caller's own membership.
+ *
+ * For the same reason nothing here writes a `*ByUid` field. Those exist only
+ * because the actor differs from the subject, and here it never can; such a
+ * field on this write would be the signature of the override this callable
+ * does not have.
+ *
+ * PER COMMUNITY, so a member may be visible at church and private at work.
+ */
+export const wsfSetCommunityVisibility = onCall<SetVisibilityRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<{ groupId: string; name: Vis; activity: Vis }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+
+    // THE LITERAL, OR NOTHING. Not `Boolean(...)`, not a truthiness test.
+    // `true`, `1`, `'Visible'`, `' visible'`, `{}` and `['visible']` are all
+    // refused, and refused WITHOUT WRITING, so a malformed request can never be
+    // the reason somebody's name appears or disappears.
+    const patch: Record<string, unknown> = {};
+    for (const [key, field] of [
+      ['name', FIELD_NAME_VIS],
+      ['activity', FIELD_ACTIVITY_VIS],
+    ] as const) {
+      const v = (request.data as Record<string, unknown> | undefined)?.[key];
+      if (v === undefined) continue; // absent means "leave this one alone"
+      if (v !== VIS_PRIVATE && v !== VIS_VISIBLE) {
+        throw new HttpsError('invalid-argument', `${key} must be 'private' or 'visible'.`);
+      }
+      patch[field] = v;
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new HttpsError('invalid-argument', 'name or activity is required.');
+    }
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    await db
+      .doc(`wsfMemberships/${groupId}_${uid}`)
+      .set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+    // Re-read so the response is the SETTLED stored value rather than an echo
+    // of the request: the client renders what is stored, not what it asked for.
+    const settled = await requireOwnActiveMembership(db, groupId, uid);
+    return { groupId, name: settled.name, activity: settled.activity };
+  }
+);
+
+/*
+  NOTHING IS WRITTEN AT CREATE, JOIN, REJOIN OR REINSTATEMENT — ON PURPOSE.
+  #390 wrote `visibility: 'private'` on create and RESET it on both
+  reactivation paths. Under the owner's new rule those resets are not merely
+  unnecessary, they would be the bug: absence already means visible, and both
+  reactivation writes are `{ merge: true }`, which preserves every field it does
+  not name. So a member who explicitly chose privacy, left, and came back stays
+  private, and a Champion reinstating them CANNOT republish their name by a
+  unilateral act. The no-Champion-override guarantee is preserved by writing no
+  code at all in those paths, which is why there is no diff in them.
+*/
+
+/** One listed member. Two fields, and the type is the whitelist. */
+type CommunityMemberEntry = { displayName: string; role: string };
+type CommunityMembersRequest = { groupId?: unknown; cursor?: unknown };
+
+const MEMBERS_PAGE = 50;
+/**
+ * A guard against unbounded server work, NOT a product limit on community size.
+ * Names live in wsfMemberProfiles rather than on the membership row, so a
+ * name-ordered page cannot be read ordered — the set is read and sorted before
+ * it is cut. Reaching this THROWS rather than truncating: a refusal is honest
+ * and visible, a quietly shortened list is neither.
+ */
+const MEMBERS_MAX = 2000;
+
+/**
+ * The continuation token: AN OFFSET INTO THE NAME-SORTED ARRAY, and nothing
+ * else.
+ *
+ * NOT A FIRESTORE CURSOR. `startAfter(lastDoc)` on wsfMemberships serialises
+ * `{groupId}_{uid}` — a uid in plaintext, handed to the client and echoed back
+ * on every page. An integer says only "how far down an alphabetical list you
+ * are", which the caller worked out by reading the page it already has.
+ */
+function encodeOffsetCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
+}
+
+function decodeOffsetCursor(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  if (typeof raw !== 'string' || raw.length > 128) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      o?: unknown;
+    };
+    const o = parsed?.o;
+    if (typeof o !== 'number' || !Number.isInteger(o) || o < 0 || o > MEMBERS_MAX) return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The members of one community who are visible in it, to a member of that same
+ * community — one bounded page at a time.
+ *
+ * THE ONE STRUCTURAL PROTECTION, stated first: `userId` is not in the response
+ * and not in the type. A name with no uid beside it is not a handle on anybody
+ * — it cannot be joined to a contribution, a goal or a turn. Do not add `uid`,
+ * `memberId`, `membershipId` or `id` "for React keys"; the client keys on the
+ * array index.
+ *
+ * ALSO DELIBERATELY ABSENT: any total, visibleCount, hiddenCount or hasMore —
+ * memberCount is already returned by wsfMyCommunities over ALL active
+ * memberships, so a second number here would make "how many people are hiding"
+ * a subtraction the product performs for the reader. The residual is
+ * unavoidable; a stated feature of it is not. Also no per-entry visibility
+ * (appearing in the list IS the setting) and no timestamps (when somebody
+ * became visible turns a polled list into an authoritative timeline).
+ */
+export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
+  // NO `invoker: 'public'`. That marker is a NO-OP IN THE EMULATOR and enforced
+  // only by Cloud Run IAM at deploy, so a mistaken one here would pass every
+  // local test and first take effect in front of real people.
+  { region: 'us-central1' },
+  async (
+    request
+  ): Promise<{ members: CommunityMemberEntry[]; nextCursor: string | null }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const offset = decodeOffsetCursor(request.data?.cursor);
+    if (offset === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
+
+    const db = getFirestore();
+    // THE GATE IS PHYSICALLY ABOVE THE QUERY: a caller who is not an active
+    // member is refused before any other member's row is read into this
+    // function at all.
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    // EQUALITY ONLY, so Firestore serves this by merging single-field indexes
+    // and no composite index is required. The visibility decision cannot live
+    // here — see resolveVisibility for why an inequality would be wrong.
+    const snap = await db
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupId)
+      .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+      .limit(MEMBERS_MAX + 1)
+      .get();
+
+    if (snap.size > MEMBERS_MAX) {
+      // Neither the count nor the groupId nor any name reaches the client or
+      // the log: the operator learns the shape, the member gets a refusal
+      // rather than a list that lies.
+      console.error('[wsfCommunityMembers] active set exceeds the safety valve');
+      throw new HttpsError(
+        'failed-precondition',
+        'This community is too large to list right now.'
+      );
+    }
+
+    // Keep only rows this product actually wrote, and key the profile lookup
+    // off the `userId` FIELD — the authority — after proving it agrees with
+    // the id.
+    const rows: { userId: string; role: string }[] = [];
+    const seen = new Set<string>();
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      if (doc.id !== `${groupId}_${d.userId}`) continue;
+      if (seen.has(d.userId)) continue;
+      if (resolveVisibility(d[FIELD_NAME_VIS]) !== VIS_VISIBLE) continue;
+      seen.add(d.userId);
+      rows.push({ userId: d.userId, role: typeof d.role === 'string' ? d.role : 'member' });
+    }
+
+    // NEVER ZIPPED BY INDEX. getAll returns one snapshot per ref INCLUDING
+    // missing ones, so filtering while zipping against `rows` by position
+    // shifts every later name one place — and publishes it beside somebody
+    // else's role. A map keyed by uid cannot do that.
+    const byUid = new Map<string, string>();
+    const CHUNK = 300;
+    for (let start = 0; start < rows.length; start += CHUNK) {
+      const chunk = rows.slice(start, start + CHUNK);
+      const snaps = await db.getAll(...chunk.map((r) => db.doc(`wsfMemberProfiles/${r.userId}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const dn = (sn.data() as { displayName?: unknown }).displayName;
+        if (typeof dn !== 'string' || dn.trim() === '') continue;
+        byUid.set(sn.id, dn.trim());
+      }
+    }
+
+    const all: CommunityMemberEntry[] = [];
+    for (const row of rows) {
+      const displayName = byUid.get(row.userId);
+      if (displayName === undefined) continue; // no name is not a listable member
+      all.push({ displayName, role: row.role });
+    }
+    all.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    const page = all.slice(offset, offset + MEMBERS_PAGE);
+    const next = offset + MEMBERS_PAGE;
+    return {
+      members: page,
+      nextCursor: next < all.length ? encodeOffsetCursor(next) : null,
+    };
+  }
+);
+
+/**
+ * THE WALL-CLOCK OFFSET OF A ZONE AT AN INSTANT, in milliseconds.
+ *
+ * Derived by asking the runtime what the wall clock reads in that zone at that
+ * instant and subtracting the instant. There is no offset table to go stale and
+ * no hard-coded DST rule to be wrong twice a year.
+ */
+function zoneOffsetMs(utcMs: number, timeZone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(new Date(utcMs));
+    const get = (t: string): number => {
+      const p = parts.find((x) => x.type === t);
+      return p ? Number(p.value) : Number.NaN;
+    };
+    let hour = get('hour');
+    // Some ICU builds render midnight as hour 24 under hour12:false.
+    if (hour === 24) hour = 0;
+    const y = get('year');
+    const mo = get('month');
+    const d = get('day');
+    const mi = get('minute');
+    const se = get('second');
+    if (![y, mo, d, hour, mi, se].every(Number.isFinite)) return null;
+    return Date.UTC(y, mo - 1, d, hour, mi, se) - utcMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE INSTANT AT WHICH THE CURRENT LOCAL DAY BEGAN, IN A GIVEN ZONE.
+ *
+ * REQUIRED BY THE DIRECTOR'S SECOND CORRECTION: "today" must be the goal's
+ * OWN stored timezone, never Cloud Functions host time, never accidental UTC,
+ * and never the caller device's arbitrary local day — otherwise a member in one
+ * place changes what "today" means for everyone else in the community.
+ *
+ * Computed twice on purpose. The zone's offset AT MIDNIGHT can differ from its
+ * offset NOW — that is exactly what a DST transition is — so the first estimate
+ * is re-measured at the candidate instant and corrected. Getting this wrong
+ * moves the boundary by an hour on two days a year, which is precisely when a
+ * "people moved today" count would be quietly wrong and nobody would notice.
+ *
+ * Returns null when the zone cannot be resolved. The caller renders NOTHING on
+ * null; it never falls back to a different clock.
+ */
+function zonedDayStartMs(utcMs: number, timeZone: string): number | null {
+  const off1 = zoneOffsetMs(utcMs, timeZone);
+  if (off1 === null) return null;
+  const wall = new Date(utcMs + off1);
+  const midnightWall = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate());
+  const candidate = midnightWall - off1;
+  const off2 = zoneOffsetMs(candidate, timeZone);
+  if (off2 === null) return null;
+  return off2 === off1 ? candidate : midnightWall - off2;
+}
+
+type ActivityEntry = {
+  /**
+   * The contributor's name, or null for a member whose ACTIVITY is visible
+   * while their NAME is not.
+   *
+   * NULL IS A STATE THE UI RENDERS, not an error to filter out: that member
+   * still moved the shared total, and dropping their row would under-report the
+   * community's activity to make the feed tidier.
+   */
+  displayName: string | null;
+  amount: number;
+  unit: string;
+  /** Minute-level. Second-level time is never published. */
+  at: string;
+};
+
+type CommunityActivityRequest = {
+  groupId?: unknown;
+  goalId?: unknown;
+  cursor?: unknown;
+};
+
+const ACTIVITY_PAGE = 20;
+/** How far back one call will read to try to prove the day window. */
+const ACTIVITY_SCAN_MAX = 400;
+
+/**
+ * The activity cursor carries A TIME AND A TIE-BREAKER, never a document.
+ *
+ * `startAfter(lastDoc)` on wsfContributions would serialise
+ * `{goalId}_{uid}_{attemptId}` — a uid in plaintext — which is the same trap
+ * #390 identified on the membership collection. A millisecond plus "how many
+ * rows sharing that exact millisecond you have already seen" is exact across a
+ * page boundary and names nobody.
+ */
+function encodeActivityCursor(beforeMs: number, skip: number): string {
+  return Buffer.from(JSON.stringify({ b: beforeMs, s: skip }), 'utf8').toString('base64url');
+}
+
+function decodeActivityCursor(raw: unknown): { b: number; s: number } | null {
+  if (raw === undefined || raw === null || raw === '') return { b: Number.MAX_SAFE_INTEGER, s: 0 };
+  if (typeof raw !== 'string' || raw.length > 256) return null;
+  try {
+    const p = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      b?: unknown;
+      s?: unknown;
+    };
+    if (typeof p?.b !== 'number' || !Number.isFinite(p.b) || p.b < 0) return null;
+    if (typeof p?.s !== 'number' || !Number.isInteger(p.s) || p.s < 0 || p.s > ACTIVITY_SCAN_MAX) {
+      return null;
+    }
+    return { b: p.b, s: p.s };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ONE BOUNDED PAGE OF A COMMUNITY'S RECENT MOVEMENT, to a member of it.
+ *
+ * Read over the REAL contribution ledger. wsfContributions already carries
+ * userId, communityGroupId, count, unit and a server createdAt on every row, so
+ * this needs no new write path, no duplicated counter and no denormalised
+ * identity snapshot — which is the seam the direction asked to be proven before
+ * one was invented.
+ *
+ * PRIVACY IS EVALUATED AT READ TIME, FROM THE CURRENT MEMBERSHIP ROW. No
+ * display name is ever written into contribution history to render a feed, so
+ * turning a name off removes identity from OLD activity too — the retroactive
+ * property the owner's decision requires.
+ *
+ * THE FIELD WHITELIST IS THE TYPE. Never returned: userId, email, attemptId,
+ * shardIndex, crossedTarget, member totals, tokens, private profile fields, or
+ * second-level time.
+ */
+export const wsfCommunityActivity = onCall<CommunityActivityRequest>(
+  // NO `invoker: 'public'`, for the reason stated on wsfCommunityMembers.
+  { region: 'us-central1' },
+  async (
+    request
+  ): Promise<{
+    entries: ActivityEntry[];
+    contributorsToday: number | null;
+    nextCursor: string | null;
+  }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const goalId = normalizeStringId(request.data?.goalId);
+    const cursor = decodeActivityCursor(request.data?.cursor);
+    if (cursor === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    /*
+      REQUIRES THE COMPOSITE INDEX
+        wsfContributions (communityGroupId ASC, createdAt DESC)
+      declared in firestore.indexes.json on this branch and NOT DEPLOYED here.
+      The emulator does not enforce indexes, so this query passes locally with
+      or without it; that is exactly why the declaration is written down and
+      pinned by a test rather than discovered in front of real people.
+    */
+    let q = db
+      .collection('wsfContributions')
+      .where('communityGroupId', '==', groupId)
+      .orderBy('createdAt', 'desc');
+    if (cursor.b !== Number.MAX_SAFE_INTEGER) {
+      q = q.where('createdAt', '<=', Timestamp.fromMillis(cursor.b));
+    }
+    const snap = await q.limit(ACTIVITY_SCAN_MAX).get();
+
+    type Row = { userId: string; amount: number; unit: string; ms: number; goalId: string };
+    const scanned: Row[] = [];
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      const createdAt = d.createdAt;
+      if (!(createdAt instanceof Timestamp)) continue; // an unwritten server time is not a fact
+      const amount = d.count;
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) continue;
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      scanned.push({
+        userId: d.userId,
+        amount,
+        unit: typeof d.unit === 'string' ? d.unit : '',
+        ms: createdAt.toMillis(),
+        goalId: typeof d.goalId === 'string' ? d.goalId : '',
+      });
+    }
+    // Skip the rows at the boundary millisecond the previous page already
+    // returned, so a tie across a page edge neither repeats nor drops a row.
+    const afterSkip = cursor.s > 0 ? scanned.slice(cursor.s) : scanned;
+
+    // Every distinct contributor in this scan, resolved ONCE from their CURRENT
+    // membership row in THIS community.
+    const uids = [...new Set(afterSkip.map((r) => r.userId))];
+    const nameVis = new Map<string, Vis>();
+    const activityVis = new Map<string, Vis>();
+    const CHUNK = 300;
+    for (let i = 0; i < uids.length; i += CHUNK) {
+      const chunk = uids.slice(i, i + CHUNK);
+      const snaps = await db.getAll(
+        ...chunk.map((u) => db.doc(`wsfMemberships/${groupId}_${u}`))
+      );
+      for (const sn of snaps) {
+        const d = sn.exists ? (sn.data() as Record<string, unknown>) : undefined;
+        // A contributor who is no longer an active member of this community is
+        // not shown by name. Their effort still counts in the shared total.
+        const active = d !== undefined && d.membershipStatus === MEMBERSHIP_ACTIVE;
+        const owner = sn.id.slice(groupId.length + 1);
+        nameVis.set(owner, active ? resolveVisibility(d?.[FIELD_NAME_VIS]) : VIS_PRIVATE);
+        activityVis.set(owner, active ? resolveVisibility(d?.[FIELD_ACTIVITY_VIS]) : VIS_PRIVATE);
+      }
+    }
+
+    // Names, for the contributors who are showing both.
+    const wanted = [
+      ...new Set(
+        afterSkip
+          .filter(
+            (r) => activityVis.get(r.userId) === VIS_VISIBLE && nameVis.get(r.userId) === VIS_VISIBLE
+          )
+          .map((r) => r.userId)
+      ),
+    ];
+    const names = new Map<string, string>();
+    for (let i = 0; i < wanted.length; i += CHUNK) {
+      const chunk = wanted.slice(i, i + CHUNK);
+      const snaps = await db.getAll(...chunk.map((u) => db.doc(`wsfMemberProfiles/${u}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const dn = (sn.data() as { displayName?: unknown }).displayName;
+        if (typeof dn !== 'string' || dn.trim() === '') continue;
+        names.set(sn.id, dn.trim());
+      }
+    }
+
+    /*
+      ACTIVITY PRIVACY OMITS THE ROW; NAME PRIVACY ONLY REMOVES THE NAME.
+
+      Walked with the RAW index kept, because the continuation token has to be
+      expressed in the scan's own ordering. Paging off the filtered list would
+      mean the next call skipped a number of rows counted in a sequence it will
+      never see, and every hidden row at the boundary millisecond would shift
+      the page edge by one.
+    */
+    const entries: ActivityEntry[] = [];
+    let lastRawIndex = -1;
+    for (let i = 0; i < afterSkip.length && entries.length < ACTIVITY_PAGE; i += 1) {
+      const r = afterSkip[i]!;
+      if (activityVis.get(r.userId) !== VIS_VISIBLE) continue;
+      entries.push({
+        displayName:
+          nameVis.get(r.userId) === VIS_VISIBLE ? (names.get(r.userId) ?? null) : null,
+        amount: r.amount,
+        unit: r.unit,
+        at: isoMinute(r.ms),
+      });
+      lastRawIndex = i;
+    }
+
+    /*
+      "X PEOPLE MOVED TODAY" — THE LINE MOST LIKELY TO BE A LIE, SO THE MOST
+      GUARDED. It is returned only when ALL of this holds:
+
+        · a goalId was given and that goal belongs to THIS community;
+        · the goal carries a resolvable IANA timezone, so "today" is the goal's
+          own local day rather than host time, UTC or a caller's device clock;
+        · the goal's own active window can be read; and
+        · THE SCAN PROVABLY REACHED BACK PAST THE WINDOW START — either it
+          returned fewer rows than its cap, or its oldest row predates the
+          start. A scan that stopped inside the window can only under-count, and
+          an under-count presented as a count is a lie.
+
+      Otherwise it is null and the UI renders NOTHING: never "at least N", never
+      an estimate, and never the row count standing in for a person count.
+
+      Members whose ACTIVITY is private are still counted here. It is an
+      aggregate, like the shared total and the member count, and the settled
+      rule is that private members remain counted in aggregates with their
+      identity hidden.
+    */
+    let contributorsToday: number | null = null;
+    if (goalId !== null && cursor.b === Number.MAX_SAFE_INTEGER) {
+      const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+      const goal = goalSnap.exists ? (goalSnap.data() as GoalDoc) : null;
+      if (goal !== null && goal.communityGroupId === groupId) {
+        const tz = normalizeIanaTimezone(goal.timezone);
+        const startsAt = goal.startsAt instanceof Timestamp ? goal.startsAt.toMillis() : null;
+        const endsAt = goal.endsAt instanceof Timestamp ? goal.endsAt.toMillis() : null;
+        const nowMs = Date.now();
+        if (tz !== null && startsAt !== null && endsAt !== null) {
+          const dayStart = zonedDayStartMs(nowMs, tz);
+          if (dayStart !== null) {
+            // The goal's own active-window semantics bound the day: a goal that
+            // began at noon has no "today" before noon, and one that has ended
+            // counts nothing after its end.
+            const from = Math.max(dayStart, startsAt);
+            const to = Math.min(nowMs, endsAt);
+            const covered = scanned.length < ACTIVITY_SCAN_MAX || (scanned.at(-1)?.ms ?? 0) < from;
+            if (covered && from <= to) {
+              const movers = new Set(
+                scanned
+                  .filter((r) => r.goalId === goalId && r.ms >= from && r.ms <= to)
+                  .map((r) => r.userId)
+              );
+              contributorsToday = movers.size;
+            }
+          }
+        }
+      }
+    }
+
+    /*
+      A CURSOR ONLY WHEN THERE IS PROVABLY SOMETHING AFTER IT: either raw rows
+      remain in this scan, or the scan hit its cap and the rest is unread. A
+      cursor emitted at a true end costs the caller one empty round trip and
+      makes "no more activity" indistinguishable from "ask again".
+
+      `skip` is how many rows sharing the boundary millisecond have ALREADY been
+      consumed across all pages — the ones at or before the boundary in this
+      scan, plus the ones an earlier page skipped at that same millisecond.
+      Firestore breaks ties on the document key, so that ordering is stable and
+      the next page resumes exactly where this one stopped.
+    */
+    let nextCursor: string | null = null;
+    const moreRaw = lastRawIndex >= 0 && lastRawIndex + 1 < afterSkip.length;
+    const scanCapped = scanned.length >= ACTIVITY_SCAN_MAX;
+    if (lastRawIndex >= 0 && (moreRaw || scanCapped)) {
+      const boundaryMs = afterSkip[lastRawIndex]!.ms;
+      let skip = 0;
+      for (let i = 0; i <= lastRawIndex; i += 1) {
+        if (afterSkip[i]!.ms === boundaryMs) skip += 1;
+      }
+      if (boundaryMs === cursor.b) skip += cursor.s;
+      nextCursor = encodeActivityCursor(boundaryMs, skip);
+    }
+
+    return { entries, contributorsToday, nextCursor };
   }
 );
