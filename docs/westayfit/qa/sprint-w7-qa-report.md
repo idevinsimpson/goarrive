@@ -1725,3 +1725,130 @@ The assertion passes because that test first records the member's own 20, so the
 - No product source edit. The mutant was local build output, restored byte-identical.
 - Artifacts and `test-results` cleaned after every run.
 - `ts:check` 0; guard 9 / 20.
+
+---
+
+# Check 16 — the combined release candidate `9f27c6ea`: **PASS on every routed item**, with one candidate-introduced product finding (R1)
+
+Routed by L0 in #434 `5802410201` (check shape `5802080266`; Director
+`5802056978`). ACK `5802450373` / `5802471942`; interim `5802976626`. The
+candidate is `9f27c6eae26beebd610779a61fb458bd18266f27` on
+`claude/wsf-release-candidate-round-2`: `f2f901a` ⊕ W4 `7f37e2a` ⊕ W8 `eff65b0`
+⊕ W9 `cd02949`.
+
+## 16.1 · What was tested, exactly
+
+- **Tree identity.** `9f27c6ea`'s root tree is `b275b42c`, identical to W7's
+  local composition `495419b7` (the same four inputs, merge commits, never
+  pushed), built the moment W4 delivered. `git diff 495419b7 9f27c6ea` is empty.
+- **Build identity.** The routed suite ran on the `495419b7` build. I then built
+  `9f27c6ea` itself: 119 files each, the same file set, and **0 files differ**
+  once the commit stamp, build time and content-hash names are normalised (90
+  differ raw, by those alone). Every later run is on the exact `9f27c6ea` build.
+- **Scope, re-derived.** 37 files, +3,439 / −67 against `f2f901a`; six product
+  files, one of them the gated `leave-for-list.tsx` fixture. No change under any
+  protected path, and no frozen or accepted evidence path touched. Each product
+  file is byte-identical to its owner's head:
+
+  | file | candidate blob | from |
+  |---|---|---|
+  | `start-community.tsx` | `4eb34043` | W4 |
+  | `(home)/community/[groupId]/index.tsx` | `76e2483a` | W8 |
+  | `contribute/[goalId].tsx` | `253278fb` | W9 |
+  | `(home)/index.tsx` | `3990af8c` | W9 |
+
+## 16.2 · Per routed item
+
+| # | item | result | evidence (all Chromium, emulators) |
+|---|---|---|---|
+| 1 | **Q3**: first invalid press | **PASS** | SEAM-1 at 390×844 and 430×932, mouse 5 / 120 ms and touch 80 / 150 ms: 8/8, where `5c28e45` gave 0/8. The risky position (field on screen) is now **asserted** as reached: 4× per run at those classes and 0× at 390×640, which is the regression guard (4/4). SEAM-1b (blur moves nothing) 2/2 plus its control 2/2. **SEAM-1c** measures W4's signal: blurred short → red border `rgb(180, 35, 44)` with no sentence; corrected → normal `rgb(230, 226, 218)`; too long → red plus its sentence while typing. On W4's old route it fails (blur shows the sentence, no red). SEAM-1 controls 8/8 |
+| 2 | **M4** | **PASS** | SEAM-3, plus **SEAM-3n** by name at 390×640 and 390×844: `wsf-start-unverified-back`, 44 px, hit-tested at its own centre, `href="/"`, and the press lands on `/`. SEAM-3n fails on the old route (no such control) |
+| 3 | **M5** | **PASS** (routed contract) | SEAM-4's four assertions (path `/`, one request, one community by server query, no created card) plus its control. **Scope:** measured for the "Back to home" link with the create held before the server. Browser Back, and a commit that lands before Home reads, are not claimed. See R1 for what M5 leaves the member with |
+| 3b | **item 4**: duplicate-create guard | **PASS** by unit test; e2e **CANNOT-MEASURE** | W4's unit file on `5c28e45`'s route (separate worktree): 5 fail / 32 pass, the five exactly the new tests; both windows fail with "called 2 times". On the candidate it passes within vitest 858/858. On web the window closes before a press can land (`submitting` stays true; the router drops the form first) |
+| 4 | **Q2** | **PASS** | SEAM-2, 2b, 2c; W9 `list-address` 1/1; W4 `outcomes` 27/27 |
+| 5 | **W8** | **PASS** | W8 4/4; W7 F1–F4 4/4. **X1s** is new: the first pulse after a return is answered with a sentinel stale total (1,848). The page shows it, then **W8's settle** re-reads at +2,577 ms (labelled exit) and +2,609 ms (browser Back), corrects to the server's 1,867 within 4.5 s, and holds at 10 s. On the old-exit baseline the labelled-exit leg **fails** (stale total never corrected: a fresh mount gets no settle); the browser-Back leg passes there too, as the settle is in both |
+| 6 | **the exits** | **PASS** | W9 5/5; W1B 3/3; W7's exit spec 8/8 on the exact build (16.3); W1B's kiosk suites **22/22** (confinement 10, idle-finish 9, `ui-kiosk` 3) with all seven changed exits statically in non-kiosk branches. "Sign in unchanged" rests on W9's own test and the static diff |
+| 7 | **fixture independence** | **PASS** | the emulator holds **1,125** groups, and one list page returns 150; W4's `communityNames` is a server-filtered `runQuery`; no unfiltered paged read left in `tests-e2e`; W4 `outcomes` 27/27 on this emulator |
+| 8 | **shell, units, frames** | **PASS** | `shell-production` 3/3, `ui-app-shell` 3/3, W9 back-behaviour / URL seam / nav / Members link / Manage action 14/14, W7 `shell-successor` 8/8, vitest 858/858, tsc 0, guard 9 / 20. FRAMES delivery passes. **Limit:** it cannot tell `7f37e2a`'s frames from `5c28e45`'s. Git shows 7 blobs changed (the three unverified-gate frames about +1.5 KB each, carrying "Back to home") and none changed between `7f37e2a` and `9f27c6ea` |
+| — | **Safari / WebKit** | **CANNOT-MEASURE** | only Chromium is installed; touch presses use CDP |
+
+The routed e2e set on the equivalent build gave 134 passed, 1 failed. The
+failure was my colour census's calibration anchor (the shell's MOVE disc, absent
+on the barless route by design). It is re-anchored on the route's own recovery
+primary and is 9/9 on the exact build (`4e25f04f`).
+
+## 16.3 · The exits, with W7's own instruments
+
+These tests are in `sprint-w7-contribute-exits-verify.spec.ts`: 8/8 on
+`9f27c6ea`. On the baseline `6c98f485` (W4 `5c28e45` + W8 + W9's Q2 only, i.e.
+the old `ButtonLink` exits), X1, the labelled-exit leg of X1s, and X4 fail.
+
+- **X1, the ordinary `/` arrival.** Receipt → "Back to community".
+  - The exit is hit-tested at its own centre before the press.
+  - It lands on the **same** Community (a mark on the visible root survives), at the planted scroll (160), with one root and one tab bar.
+  - The history writes are `go(-1)` then `replaceState`, with **no push** and no change in history length.
+  - The total equals the server's shard sum (1,867).
+  - **Forward** re-opens `/contribute/<goal>` only as a **fresh** start screen: no receipt, no review with Submit, and no `wsfContribute` sent in 3 s. Back after the exit goes where Back from the Community went before (here, out of the app); that is correct history semantics, not a defect.
+  - On the baseline: `pushState`, a second Community and **two tab bars**.
+- **X1s**: see item 5.
+- **X2, MOVE from You.** The exit lands on the Home tab's Community (marked, one root, one bar), and the point under the thumb is Community. The first Back afterwards changes nothing on screen, because the You entry was overwritten. Recorded.
+- **X3 / X3b / X3c, the chrome arrow keeps `back()`.**
+  - X3: in-app, it returns to the same instance.
+  - X3b: from MOVE on You it returns to **You**, while reading "Back to community" (label/destination note, 16.5).
+  - X3c: on a cold arrival it **replaces**: no push, history length unchanged, and Back does not return to the contribution.
+- **X4, a cold "Back to home".** The writes are `replaceState /` then `replaceState /community/<g>`: Home resolved first, nothing pushed, history length unchanged, and Back does not reach the dead-end screen. On the baseline it writes `pushState /`.
+
+## 16.4 · Product findings, measured (outside the routed contracts)
+
+These came from a read-only adversarial review of this check (four lenses plus a
+synthesis). Each was measured on the exact build and on the baseline
+(`sprint-w7-candidate-risks.spec.ts`).
+
+- **R1 — introduced by the candidate's M5 fix.** The journey: a first-community member presses Create, then "Back to home" while the create is in flight, and the create commits. M5 correctly does not move them. But:
+  - Home read the community list before the commit, so it still offers **"Start a community"** and does not list the new community, while the server holds it.
+  - Pressing it opens a **blank form**: empty name, no created card, no note.
+  - Submitting it **created a second community**: the server then held "W7 Risk First" and "W7 Risk Second".
+
+  On the baseline the late success moved the member into the new community, so they saw it. The candidate trades that for silence and a possible silent duplicate. W4's comment "a member who comes back finds Open" holds only for browser Back.
+- **R1b — pre-existing copy.** On the same journey, browser Back shows the created card saying "We couldn't open it automatically.". On the candidate the app did not try to open it; on the baseline it did. The same sentence appears on both.
+- **R2 — pre-existing, narrower on the candidate.** From the member's mounted Community, a goal screen that fails to load offers "Back to home". Pressing it mounts a **second** Community; the one left stays hidden beneath with its state.
+
+  | build | Community roots | tab bars |
+  |---|---|---|
+  | candidate | 2 | 1 |
+  | baseline | 2 | 2 |
+
+  The same class covers the own-only receipt and other context-less "Back to home" exits (from source; not measured separately).
+
+Routing and any fix are L0's and the Director's. None of these is in the routed
+scope, and W7 edits no product code.
+
+## 16.5 · Follow-up candidates, recorded (from source; not measured)
+
+- **Exits that land on a newly mounted Community skip W8's settle.** Examples: "Back to community" after MOVE on the Challenge or Members page, or with Home showing the list. A stale pulse can then persist.
+- **The arrow's label and destination disagree.** From MOVE on You, the arrow reads "Back to community" and returns to You (measured in X3b).
+- **An account change releases the duplicate guard unconditionally.** A sign-out / sign-in in another tab during a create re-enables Create.
+- **Two communities in one browser.** An exit can swap the mounted Community's params A → B; the settle skips if B's list has not loaded, and A's presence can remain under B's name.
+
+## 16.6 · Instrument corrections, mine
+
+- **The colour census anchor.** Its calibration was the shell's MOVE disc, absent on the barless route. Re-anchored on the route's own recovery primary.
+- **X4's Back check.** It could not fail on a not-found arrival. It now asserts a history trace, an unchanged history length, and a Back path outside `/contribute`.
+- **X4's "Home resolved afresh".** This now rests on the history order (`/` then `/community`), because `wsfMyCommunities` is also called by the Community page. The callable count is kept as recorded evidence only.
+- **X3.** It could not tell `back()` from `dismissTo`. It is retitled, and X3b and X3c now test the difference.
+- **SEAM-1's field-visible condition.** It is now asserted, not only annotated.
+- **SEAM-3.** It accepted any second control. SEAM-3n names the control.
+- **The exit spec header** wrongly said W5's K1–K18 run "on the same SHA" from this tree. Corrected: W5's suite is W5's, and W1B's kiosk suites were run here.
+
+## 16.7 · Bound and hygiene
+
+Chromium only; Safari is CANNOT-MEASURE. Emulators only.
+
+- **Verification builds:** local, never pushed (`495419b7`, `6c98f485`).
+- **Edits:** no product edit; no other worker's spec edited.
+- **After every run:** artifacts and `test-results` cleaned.
+- **Checks:** `ts:check` 0; guard 9 / 20.
+- **Diagnostics:** the diagnostic specs are kept in the session's evidence directory, not committed.
+
+Everything here is **tested** on the candidate. Nothing is accepted, integrated
+or staged by W7.

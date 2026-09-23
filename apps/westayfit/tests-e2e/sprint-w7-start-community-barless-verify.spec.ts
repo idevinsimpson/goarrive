@@ -55,6 +55,8 @@ import {
  *   SEAM-4  leaving mid-create                FAIL        FAIL             PASS  (M5 — ruling pending)
  *   SEAM-1b blur by keyboard moves nothing     not run     FAIL ×2 (+52 px) PASS  (W4's stated design;
  *     (its valid-name CONTROL: PASS ×2)                                           see note below)
+ *   SEAM-1c blur marks red, no sentence        —           FAIL (sentence)  PASS on 9f27c6ea
+ *   SEAM-3n the way out, by name, goes Home    —           FAIL (none) ×2   PASS ×2 on 9f27c6ea
  *   SEAM-1 CONTROL ×8 (reader can see a pass)  —           PASS ×8          PASS
  *   SEAM-4 CONTROL (assertions satisfiable)    —           PASS             PASS
  *   BARLESS ×4 states                         FAIL        PASS             PASS
@@ -62,6 +64,11 @@ import {
  *                                             top bar)
  *   FRAMES calibration on d467754             PASS        PASS             PASS
  *   FRAMES delivery (WSF_W7_DELIVERY_SHA)     —           PASS on 5c28e45  PASS
+ *
+ * SEAM-1c and SEAM-3n: the BEFORE column is the preview below (W4's 5c28e45
+ * route); the candidate column is 9f27c6ea (QA report, Check 16). On
+ * 9f27c6ea the whole file passes, with SEAM-1's risky position reached 4×
+ * at 390x844 and 430x932 and 0× at 390x640 (now asserted).
  *
  * PREVIEW (local, never pushed): f2f901a ⊕ W9 a87cd3b ⊕ W8 eff65b0 ⊕ 5c28e45
  * (6c98f485, tree 77129e6a). SEAM-2, 2b and 2c PASS there with W9's fix;
@@ -354,6 +361,10 @@ for (const vp of [
         // NON-VACUOUS: at least one real press happened, and the report states
         // whether the risky condition (field still on screen) was reached.
         test.info().annotations.push({ type: 'risky-positions', description: String(pressedWithFieldVisible) });
+        // The risky condition is REACHED where it exists and absent where it
+        // cannot exist, so this test cannot pass by never meeting it.
+        if (vp.height === 640) expect(pressedWithFieldVisible, '390x640 unexpectedly has a pressable position with the field on screen').toBe(0);
+        else expect(pressedWithFieldVisible, 'no pressable position had the field on screen — the test would be vacuous').toBeGreaterThan(0);
         expect(pressed, `no pressable position was found at all: ${rows.join(' | ')}`).toBeGreaterThan(0);
         expect(bad, `first presses that did not submit and show the error`).toEqual([]);
       });
@@ -416,6 +427,55 @@ for (const vp of [
     }
   });
 }
+
+/**
+ * SEAM-1c — THE SIGNAL THE Q3 FIX GIVES INSTEAD OF MOVING THINGS. W4's design
+ * (#394 `5801525555`): leaving the field short turns its border red and shows
+ * no sentence; a corrected name returns it to normal; a too-long name keeps
+ * showing its sentence while typing, as before. No delivered frame shows the
+ * blurred-short state, so it is measured here. The normal colour is read from
+ * a validly named field, not assumed.
+ */
+test.describe('SEAM-1c', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test('leaving the field short marks it red without a sentence; correcting it clears the red', async ({ page }) => {
+    test.setTimeout(240_000);
+    const me = await person('s1c');
+    await signInVia(page, me.email, me.password);
+    await openForm(page);
+    const field = page.getByTestId('wsf-start-name');
+    const border = () => field.evaluate((el) => getComputedStyle(el).borderTopColor);
+    const sentence = () => visibleCount(page, 'wsf-start-name-error');
+    await field.fill('W7 Valid Name');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(300);
+    const normal = await border();
+    await field.click();
+    await field.fill('a');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(300);
+    const shortBlurred = { border: await border(), sentence: await sentence() };
+    await field.click();
+    await field.fill('Ab');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(300);
+    const corrected = { border: await border(), sentence: await sentence() };
+    await field.click();
+    await field.fill('x'.repeat(81));
+    await page.waitForTimeout(300);
+    const tooLongTyping = {
+      border: await border(),
+      sentence: (await page.locator('[data-testid="wsf-start-name-error"]:visible').innerText().catch(() => '')).trim(),
+    };
+    test.info().annotations.push({ type: 'border states', description: JSON.stringify({ normal, shortBlurred, corrected, tooLongTyping }) });
+    expect(normal, 'a valid name shows the error red').not.toBe('rgb(180, 35, 44)');
+    expect(shortBlurred.border, 'leaving the field short did not mark it').toBe('rgb(180, 35, 44)');
+    expect(shortBlurred.sentence, 'leaving the field short inserted a sentence (the Q3 mechanism)').toBe(0);
+    expect(corrected.border, 'a corrected name stayed red').toBe(normal);
+    expect(corrected.sentence).toBe(0);
+    expect(tooLongTyping.sentence, 'a too-long name no longer says so while typing').toMatch(/80 characters or fewer/);
+  });
+});
 
 /**
  * SEAM-1 POSITIVE CONTROL — the instrument can read SUBMITTED on this build.
@@ -625,6 +685,41 @@ test.describe('SEAM-2/3/4', () => {
     const others = reachable.filter((c) => c.id !== 'wsf-start-unverified-verify' && c.h >= 44);
     expect(others, 'the only way off the unverified gate is to verify').not.toEqual([]);
   });
+
+  /**
+   * SEAM-3n — THE WAY OUT, BY NAME. SEAM-3 accepts any second reachable
+   * control; this names it: `wsf-start-unverified-back`, a real touch target
+   * hit-tested at its own centre, a link to "/", and pressing it lands Home.
+   * Absent on 5c28e45 (W4's own unit test there fails "offers Back to home
+   * beside Verify email").
+   */
+  for (const vp of [{ width: 390, height: 640 }, { width: 390, height: 844 }]) {
+    test(`SEAM-3n the unverified gate's way out is "Back to home", pressable, and goes Home @${vp.width}x${vp.height}`, async ({ page }) => {
+      test.setTimeout(240_000);
+      await page.setViewportSize(vp);
+      const me = await unverifiedPerson(`s3n${vp.height}`);
+      await signInLoosely(page, me);
+      await page.goto('/start-community');
+      await expect(page.getByTestId('wsf-start-unverified')).toBeVisible({ timeout: 25_000 });
+      const back = page.locator('[data-testid="wsf-start-unverified-back"]:visible').first();
+      await expect(back, 'no named way out on the gate').toBeVisible();
+      await back.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      const probe = await back.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        let hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) as HTMLElement | null;
+        while (hit && !hit.dataset?.testid) hit = hit.parentElement;
+        const link = el.closest('a') ?? (el.tagName === 'A' ? el : null);
+        return { h: Math.round(r.height), hit: hit?.dataset.testid ?? '-', href: link?.getAttribute('href') ?? null, text: (el as HTMLElement).innerText.trim() };
+      });
+      test.info().annotations.push({ type: 'way out', description: JSON.stringify(probe) });
+      expect(probe.hit, 'something covers the way out').toBe('wsf-start-unverified-back');
+      expect(probe.h, 'the way out is smaller than a touch target').toBeGreaterThanOrEqual(44);
+      expect(probe.href, 'the way out is not a link to Home').toBe('/');
+      await back.click();
+      await expect.poll(() => new URL(page.url()).pathname, { timeout: 20_000 }).toBe('/');
+    });
+  }
 
   /**
    * SEAM-4 (M5) — LEAVING MID-CREATE DOES NOT NAVIGATE THE MEMBER AFTERWARDS.
