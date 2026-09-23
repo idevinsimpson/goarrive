@@ -1082,13 +1082,53 @@ export default function ContributeToGoal() {
           </Text>
         </Pressable>
       ) : showBack ? (
-        <ButtonLink
-          href={backHref}
+        /*
+          BACK POPS THE FOCUSED FLOW; IT DOES NOT NAVIGATE TO A COPY OF WHERE
+          YOU CAME FROM.
+
+          This was a `ButtonLink` to `/community/<groupId>`. Under the member
+          shell the contribution screen is a focused route presented OVER the
+          tab navigator, so following that href pushed a SECOND community
+          screen and left the original mounted but hidden behind it — measured:
+          two instances in the document, the visible one without the marker the
+          test had planted on the tab the member actually came from. The member
+          did not come back to their community; they arrived at another copy of
+          it, with its scroll and its loaded state reset.
+
+          So when there is a focused route to pop, this pops it and reveals the
+          exact instance underneath. `router.canGoBack()` is the question that
+          distinguishes the two journeys, and it is asked at press time rather
+          than at render, because whether there is something to go back to is a
+          property of the moment the member presses.
+
+          THE COLD / DEEP-LINK JOURNEY KEEPS ITS EXPLICIT DESTINATION. Somebody
+          who opened this URL directly has nothing beneath it, so `canGoBack()`
+          is false and the fallback navigates to the canonical destination —
+          `replace`, not `push`, because a contribution screen arrived at cold
+          is not somewhere a member should have to press back through.
+
+          NOTHING ABOUT KIOSK CHANGES. A kiosk session renders `Finish` instead
+          of this control (`showBack` is false there), so neither branch is
+          reachable in kiosk mode and the confinement, deadline and
+          unresolved-attempt behaviour are untouched.
+        */
+        <Pressable
           style={styles.chromeLink}
-          textStyle={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}
           testID="wsf-contribute-back"
-          label={backLabel}
-        />
+          accessibilityRole="link"
+          accessibilityLabel={backLabel}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+              return;
+            }
+            router.replace(backHref as never);
+          }}
+        >
+          <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
+            {backLabel}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
