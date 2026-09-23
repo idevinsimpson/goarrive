@@ -185,6 +185,7 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
     await expect(page.getByTestId('wsf-community-hero-presence')).toBeVisible({ timeout: 30_000 });
     const planted = await settleScroll(page, 'wsf-community', 160);
     expect(planted, 'Home has somewhere to scroll to').not.toBeNull();
+    expect(planted!, 'the planted Home scroll is not vacuous').toBeGreaterThan(40);
     const historyBefore = await page.evaluate(() => window.history.length);
 
     await page.getByTestId('wsf-member-tab-home').last().click();
