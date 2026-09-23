@@ -236,6 +236,30 @@ async function shoot(page: Page, name: string): Promise<void> {
   await saveFrame(page, path.join(OUT, `${name}.png`), { fullPage: false });
 }
 
+/*
+ * The Check-again successor frames live apart from the accepted AFTER set, which
+ * stays byte-identical as the historical record of the PROGRESS_GREEN control.
+ */
+const CHECK_AGAIN_OUT = path.resolve(__dirname, '../../../docs/design-target/review/display-responsive/check-again-green');
+
+async function shootCheckAgain(page: Page, name: string): Promise<void> {
+  if (CAPTURE_FRAMES) mkdirSync(CHECK_AGAIN_OUT, { recursive: true });
+  await saveFrame(page, path.join(CHECK_AGAIN_OUT, `${name}.png`), { fullPage: false });
+}
+
+/** Board 00: ACTION_GREEN #22C55E for actions; PROGRESS_GREEN #91CB7D is reserved for confirmed progress. */
+async function expectCheckAgainIsAnAction(page: Page): Promise<void> {
+  const control = page.getByTestId('wsf-display-recheck');
+  await expect(control).toBeVisible();
+  const painted = await control.evaluate((el) => {
+    let opacity = 1;
+    for (let n: Element | null = el; n; n = n.parentElement) opacity *= Number(getComputedStyle(n).opacity);
+    return { background: getComputedStyle(el).backgroundColor, opacity };
+  });
+  expect(painted.background, 'Check again is an action: ACTION_GREEN, not the progress green').toBe('rgb(34, 197, 94)');
+  expect(painted.opacity, 'painted at full strength, not faded into another colour').toBe(1);
+}
+
 /* ───────────────────────── the tier boundaries ───────────────────────────── */
 
 test.describe('tier boundaries', () => {
@@ -464,7 +488,8 @@ for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE
       }
       await expectAnonymous(page, fx);
       await expectNoJoinUi(page);
-      await shoot(page, `AFTER-refused-${size}`);
+      await expectCheckAgainIsAnAction(page);
+      await shootCheckAgain(page, `CHECK-AGAIN-GREEN-refused-${size}`);
     });
 
     test('an unreachable first load invents nothing, and a recent-list failure touches only that list', async ({ page }) => {

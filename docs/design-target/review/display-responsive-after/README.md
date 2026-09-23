@@ -142,11 +142,23 @@ reader prove appearance.**
 
 Eight, all from one run against one seeded fixture at `f22bded`:
 
-The `1fd669f` correction touches only the generic loading/unavailable/
-unreachable canvas at the booth tier, which no frame here photographs. I
-recorded the eight hashes, rebuilt and re-ran the producer at `1fd669f`, and
-all eight came back **byte-identical** — so these are the frames of the
-current head, not stale ones.
+**These eight frames are the historical accepted record** (Director
+`5788288648` §2). They are frozen here byte-identical. The producer no longer
+writes the refused pair to this directory: it goes to
+`review/display-responsive/check-again-green/`, where `Check again` is painted
+ACTION_GREEN (Director `5796783829`, released `5800718059`). In the two
+`AFTER-refused-*` frames below, the control is the pre-ruling PROGRESS_GREEN.
+
+**Correction (23 Sep).** An earlier version of this section said I re-ran the
+producer at `1fd669f` and all eight frames came back byte-identical. That was
+wrong. The run after the `1fd669f` correction was ungated, so it wrote nothing.
+The hashes were unchanged only because nothing overwrote them. Six of the eight
+frames also carry a live wall clock ("Confirmed 1:48 AM"), so no later capture
+can match them byte-for-byte. What is true: the `1fd669f` correction touched only
+the generic canvas at the booth tier, which no frame here photographs. The first
+real reproduction was on 23 Sep (#365 `5800564889`), at both `8165b52` and
+`dd86721`. The two refused frames matched byte-for-byte, and the other six
+differed only inside the clock text, identically at both SHAs.
 
 ```
 AFTER-progress-800x1280.png              AFTER-progress-1920x1080.png
