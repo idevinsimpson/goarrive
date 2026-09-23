@@ -155,7 +155,7 @@ so no separate workflow can authenticate. Anything operational has to land on `m
    The operator row is a precondition, not a request: the narrow staging authority is
    already granted and recorded (#365 `5797657663` and `5797754279`, ordering `5798443901`),
    and the handoff itself lives in `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md`
-   (#448, `ae44b0eef14150eb99528a7828915eb52638ed00`, blob `a2ebbb4c`), which defers the
+   (#448, `dfcce291426aa45c69a6faf3835cd4a4d3f29c2c`, blob `7cae9186`), which defers the
    index command to `SINGLE-INDEX-OPERATOR-PROCEDURE.md` and leaves the operator
    **unassigned**. Naming that operator is the open item; nothing here asks for scope again
    and nothing here duplicates that document's own operations.
