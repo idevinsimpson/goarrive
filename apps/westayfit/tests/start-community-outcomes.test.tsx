@@ -459,19 +459,43 @@ describe('leaving the name field short', () => {
     });
   }
 
-  it('inserts no sentence on blur, only marks the field', () => {
+  /** Everything the route controls about how the field looks. */
+  const look = (id: string): string => {
+    const el = byTestId(id);
+    if (!el) throw new Error(`${id} is not rendered`);
+    return `${el.className}|${el.getAttribute('style') ?? ''}`;
+  };
+
+  /*
+    NEVER COLOUR ALONE (Director `5802873607`). This used to be "inserts no
+    sentence on blur, only marks the field", and it asserted only the first
+    half. The ruling makes the second half wrong: a red border with no
+    sentence beside it is a message told in colour only. So the blur must
+    leave the field EXACTLY as it was. Fails on 7f37e2a, whose blur added the
+    invalid styling.
+  */
+  it('changes nothing on blur: no sentence, and the field looks exactly as it did', () => {
     render();
     type('wsf-start-name', 'H');
+    const before = look('wsf-start-name');
     blur('wsf-start-name');
     expect(byTestId('wsf-start-name-error'), 'the blur inserted a sentence above the button').toBeNull();
+    expect(look('wsf-start-name'), 'the blur restyled the field with no sentence beside it').toBe(before);
   });
 
-  it('the press that finds it short shows the sentence and puts focus on the field', async () => {
+  it('the press that finds it short shows the sentence, marks the field and puts focus on it', async () => {
     render();
+    // The invalid look, read from a state whose sentence always shows: a name
+    // over the ceiling. The press must produce exactly that, not merely some
+    // change.
+    type('wsf-start-name', 'x'.repeat(81));
+    const invalid = look('wsf-start-name');
     type('wsf-start-name', 'H');
     blur('wsf-start-name');
+    expect(look('wsf-start-name'), 'the short name was marked before any press').not.toBe(invalid);
     await click('wsf-start-submit');
     expect(byTestId('wsf-start-name-error')?.textContent).toBe('Give your community a name.');
+    expect(look('wsf-start-name'), 'the press explained the name but did not mark the field').toBe(invalid);
     expect(document.activeElement?.getAttribute('data-testid')).toBe('wsf-start-name');
     expect(callable).not.toHaveBeenCalled();
   });

@@ -123,9 +123,9 @@ const NAVIGATION_GRACE_MS = 1500;
 export default function StartCommunity() {
   const { ready, user } = useWsfAuth();
   const [name, setName] = useState('');
-  // Two separate facts, because Q3 needs them apart. Leaving the field short
-  // turns its border red and moves NOTHING; the sentence waits for a press.
-  const [nameBlurred, setNameBlurred] = useState(false);
+  // Whether a Create press has found the name wrong. Leaving the field short
+  // records nothing: the sentence, and the red that goes with it, wait for a
+  // press (Q3, and the Director's non-colour ruling below).
   const [triedSubmit, setTriedSubmit] = useState(false);
   const [groupType, setGroupType] = useState<GroupType>('familyFriends');
   const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>(defaultJoinPolicyFor('familyFriends'));
@@ -252,11 +252,16 @@ export default function StartCommunity() {
     button moved ~52 px between press and release, the release landed on the
     summary line, and the press did nothing at all (W7, 16/16 at each class).
 
-    So leaving the field short now changes only the border's COLOUR — the same
-    1.5 px width, so no layout moves — and the sentence arrives with the press
-    that asks for it, which also puts focus on the field. That removes the
-    movement by construction: no timing, no scroll anchoring, and no reliance
-    on which element the browser gives focus to on a click.
+    So leaving the field short now changes NOTHING, and the sentence arrives
+    with the press that asks for it, which also puts focus on the field. That
+    removes the movement by construction: no timing, no scroll anchoring, and
+    no reliance on which element the browser gives focus to on a click.
+
+    NEVER COLOUR ALONE (Director `5802873607`). A red border with no sentence
+    beside it is a message told in colour only, so the invalid styling is tied
+    to the sentence itself: the field is red exactly while a validation
+    sentence is on screen, never before and never without one. The same
+    1.5 px width, so turning red moves nothing either.
 
     The ceiling message is unchanged: it appears while typing, when no press is
     in flight, and the count is only useful while they can still see what to
@@ -268,7 +273,7 @@ export default function StartCommunity() {
       : problem === 'short' && triedSubmit
         ? NAME_SHORT_MESSAGE
         : null;
-  const nameLooksWrong = problem !== null && (nameBlurred || triedSubmit || problem === 'long');
+  const nameLooksWrong = nameMessage !== null;
 
   const typeLabel = GROUP_TYPE_OPTIONS.find((o) => o.value === groupType)?.label ?? '';
   const policyLabel = JOIN_POLICY_OPTIONS.find((o) => o.value === joinPolicy)?.label ?? '';
@@ -466,7 +471,6 @@ export default function StartCommunity() {
         ref={nameRef}
         value={name}
         onChangeText={setName}
-        onBlur={() => setNameBlurred(true)}
         style={nameLooksWrong ? card.fieldInvalid : undefined}
         autoCapitalize="words"
         returnKeyType="done"
