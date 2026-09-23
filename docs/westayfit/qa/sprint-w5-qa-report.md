@@ -2192,3 +2192,37 @@ These are documented, not measured, because no runner was available:
 Production Firebase Hosting's glob semantics are not measurable offline; only the emulator matcher was
 compared, and it diverges from the helper on six edge shapes that no real config uses. "Deployable"
 in item 4 means passing **this step only**; other deploy gates were not assessed.
+
+## PACKET — SHA-independent pre-review of pin PR #452 at `ed8649ec` (L0 `5801807119`)
+
+**Reviewed:** `ed8649ecb65e96d4ce2d2e9d99d8c533a14ee94c` (`claude/wsf-staging-pin-f2f901a`, one commit on
+`main` `9df7e09a`). Also reviewed on the tree it would produce now: a local merge onto `main`
+`13accc508ec28bd820eabaf0f089968a9531e0a6` (which carries #450), merge `fac65c27`, not pushed.
+Harness: `docs/westayfit/qa/sprint-w5-pin-452-preview-verify.mjs` — **22 / 22 CONTROL rows OK on both
+trees.**
+
+**Status:** a pre-review of the parts that do not change with the SHA. It is not the pin review. The
+final review is the `approvedAppSha` and notes delta on the successor SHA, on the final composed
+ops head. #452 is HELD; nothing here is accepted, integrated or staged.
+
+| item | result |
+| --- | --- |
+| `run-all` | pin head: exit 0, 13 suites, 242 + 66 = **308** (the PR body's figure). Merge onto `13accc5`: exit 0, **14** suites, 255 + 66 = **321** = merged `main`'s 319 + the 2 new live cases. `verify-deployment` has 30 cases on both trees. |
+| #450's effect on the pin | **none.** The two change **zero** files in common (#450's five vs `approved-candidate.json` + `verify-deployment.test.mjs`); every suite passes on the merge. |
+| legacy restructure | all **16** legacy cases run through `opsCheckout(dir, NO_ADDITIONS)`. **Isolated:** six mutations of the live approval, plus replacing it with malformed JSON, leave all 16 green (A1–A6, B2). **Necessary:** reverting the runner to the live approval fails the suite at a legacy case (B1), exactly as the file's comment says. |
+| live cases + tripwire | each of these fails the suite: dropping one name, adding a fourth, removing the key, `expectedPriorFunctions` 49, a short SHA (A1–A5). |
+| 46 BEFORE / 49 AFTER | kept distinct through the real verifier. BEFORE 46 / AFTER 49 passes with `beforeCount` 46 and `createdThisDeploy` exactly the three (C1). Two of three deployed fails, naming the missing one (C2). |
+| the preflight gate | `read-inventory` accepts staging at 46 (R1). It **fails closed** at 49, a re-dispatch after success (R2), and at 47, an earlier partial deploy (R3). |
+| rollback | a retaining rollback (key **kept**, prior 49, staging 49) passes and creates nothing, in both the verifier (C4) and the preflight (R4). With the key **removed** while the three stay, it fails `EXPECTED_INVENTORY=46`, naming all three (C5). |
+| `resolve-candidate` | resolves `CANDIDATE=f2f901acbe31…` (D1). The approved SHA is accepted as a request (D2); the old served `c8f38e3` is **refused** (D3). |
+| three deployed SHUT | `VERIFY` passes (C3). The approval notes already say so: "VERIFY=pass with the three SHUT is not a working feature". Transport is a post-deploy measurement, not a verifier result. |
+
+**Observations (low, none blocking):**
+- **The tripwire is order-sensitive (A6).** The same three names in another order fail the suite,
+  though the verifier treats the list as a set. That strictness is harmless but will surprise a future
+  edit.
+- **One claim in the notes is stale after #450's merge.** `packageLabel` says the hosting-route check is
+  "(PR #450, under review)"; it merged as `13accc5`. The notes are rewritten at the successor
+  SHA anyway.
+- **The three new cases leave `wsf-v-*` temp directories behind,** as the suite's existing cases
+  already do.
