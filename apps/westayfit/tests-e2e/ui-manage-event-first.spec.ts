@@ -33,6 +33,7 @@ import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
 
 // A full sign-up, a community, two goals and then the sheet re-laid out at
 // seven presentations. The default budget does not cover it.
@@ -214,7 +215,7 @@ async function startGoal(page: Page, groupId: string, title: string, unit: strin
 }
 
 async function openManage(page: Page): Promise<void> {
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
 }
 

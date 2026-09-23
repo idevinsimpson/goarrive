@@ -33,6 +33,7 @@ import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 import { clearVerifyGate } from './helpers/mobile';
+import { manageOffered, openMemberManage } from './helpers/memberShell';
 
 // Re-laying the Manage sheet out at four viewports is real work on top of a
 // full sign-up, two goals and a community, and the default 30 s budget is not
@@ -161,7 +162,7 @@ async function championWithTwoGoals(
 }
 
 async function openManage(page: Page): Promise<void> {
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -377,7 +378,10 @@ test('a Champion combines two activities, and the address opens cold, reloads, a
   );
 
   // ── 4. NO AUTHORITY ON THE URL ───────────────────────────────────────────
-  await expect(screen.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(screen),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
   await expect(screen.getByTestId(`wsf-goal-display-auth-toggle-${goalA}`)).toHaveCount(0);
   await expect(screen.getByTestId('wsf-combined-submit')).toHaveCount(0);
   await expect(screen.getByTestId('wsf-contribute-submit')).toHaveCount(0);

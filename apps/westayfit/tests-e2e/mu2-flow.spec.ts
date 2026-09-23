@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
+import { expectCommunityUrl } from './helpers/communityUrl';
 
 /**
  * M-U2 end-to-end: signup → verify email → profile setup → HOME → start
@@ -65,10 +67,7 @@ const KNOWN_GAPS = [
  * rows are unchanged.
  */
 async function openChampionDetails(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -213,9 +212,14 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await expect(page.getByTestId('wsf-community-invite-copy')).toBeVisible();
 
   const communityUrl = page.url();
-  expect(communityUrl, 'router should land on /community/<groupId>').toMatch(
-    /\/community\/[A-Za-z0-9_-]+$/
-  );
+  /*
+    The pathname is exactly /community/<id>, and the only query the cross-tab
+    migration seam may add is a redundant `groupId` carrying that same id. The
+    earlier form of this assertion was a regular expression anchored on the end
+    of the whole URL, which the seam breaks without anything being wrong: see
+    `expectCommunityUrl` and the Director's ruling `5795072805`.
+  */
+  expectCommunityUrl(communityUrl);
 
   // ---- the cold-load fix --------------------------------------------------
   const cold = await page.goto(communityUrl);

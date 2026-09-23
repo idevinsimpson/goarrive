@@ -60,22 +60,51 @@ function countCreates(page: Page): () => number {
   return () => n;
 }
 
-/** The member's communities, straight from Firestore — not from the screen. */
+/**
+ * The member's communities, straight from Firestore — not from the screen.
+ *
+ * A SERVER-SIDE QUERY, NOT A PAGE OF THE COLLECTION. This used to list
+ * `wsfCommunityGroups?pageSize=300` and filter by creator in the browser, which
+ * silently depends on collection size: a long-lived emulator holding 878
+ * groups returned only the first 300, so a community that really had been
+ * created was reported missing and three tests failed intermittently for a
+ * reason that had nothing to do with the route. Filtering on
+ * `createdByUserId` in the query makes the answer the same at 8 groups or
+ * 8,000 — the same `documents:runQuery` form the other emulator specs use.
+ *
+ * `Bearer owner` reads past the rules; without it the query is refused, and
+ * an empty result would make every assertion below pass for the wrong reason.
+ * So a refusal throws rather than returning [].
+ */
 async function communityNames(uid: string): Promise<string[]> {
-  // `Bearer owner` is how the emulator helpers read past the rules; without it
-  // the listing is refused and every assertion below silently reads an empty
-  // array, which would make this file pass for the wrong reason.
   const res = await fetch(
-    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/wsfCommunityGroups?pageSize=300`,
-    { headers: { authorization: 'Bearer owner' } },
+    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`,
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'wsfCommunityGroups' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'createdByUserId' },
+              op: 'EQUAL',
+              value: { stringValue: uid },
+            },
+          },
+        },
+      }),
+    },
   );
-  if (!res.ok) throw new Error(`community listing failed: ${res.status}`);
-  const body = (await res.json()) as {
-    documents?: Array<{ fields?: Record<string, { stringValue?: string }> }>;
-  };
-  return (body.documents ?? [])
-    .filter((d) => d.fields?.createdByUserId?.stringValue === uid)
-    .map((d) => d.fields?.displayName?.stringValue ?? '');
+  if (!res.ok) throw new Error(`community query failed: ${res.status} ${await res.text()}`);
+  // An empty result is one row carrying only `readTime`, so rows without a
+  // document are dropped rather than read as a nameless community.
+  const rows = (await res.json()) as {
+    document?: { fields?: Record<string, { stringValue?: string }> };
+  }[];
+  return rows
+    .filter((row) => row.document)
+    .map((row) => row.document!.fields?.displayName?.stringValue ?? '');
 }
 
 /**
@@ -371,34 +400,271 @@ test.describe('start-community outcomes', () => {
     expect(await page.getByTestId('wsf-start-error').count()).toBe(0);
   });
 
-  test('leaving the page while a create is open leaves no stray outcome', async ({ page }) => {
-    test.setTimeout(150_000);
+  /**
+   * M5 — A MEMBER WHO LEAVES MID-CREATE STAYS WHERE THEY WENT.
+   *
+   * This REPLACES a test that used `page.goto`: a full document reload, which
+   * destroys the JavaScript realm, so the guard it claimed to prove was never
+   * exercised and the test passed with the guard deleted. The real journey is
+   * the route's own "Back to home", which is a PUSH: the form stays mounted,
+   * hidden, under the Home the member went to, and a `router.replace` with no
+   * source replaces the FOCUSED route — that Home. On 5c28e45 the late success
+   * therefore pulled the member off Home into the new community.
+   *
+   * The request may still finish server-side; that is fine. What must not
+   * happen is the member being moved, or anything being painted where they are.
+   */
+  test('leaving by Back to home mid-create leaves the member on Home when the create lands', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
     const me = await member(true);
+    const creates = countCreates(page);
     await signInVia(page, me.email, me.password);
-    await openStart(page);
-    await fillValid(page, 'Unmounted Mid Flight');
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
 
     const gate: { release: () => void } = { release: () => {} };
     const held = new Promise<void>((resolve) => {
       gate.release = resolve;
     });
     await page.route(CREATE_URL, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
       await held;
-      await route.abort('failed').catch(() => undefined);
+      await route.continue().catch(() => undefined);
     });
 
+    await fillValid(page, 'Left Before It Landed');
     await page.getByTestId('wsf-start-submit').click();
-    await page.goto('/you');
-    await expect(page.getByTestId('wsf-start')).toHaveCount(0);
+    await page.waitForTimeout(400);
+    await page.getByTestId('wsf-start-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
 
     gate.release();
-    await page.waitForTimeout(1500);
+    // Long enough for the create to settle AND for the 1.5 s navigation grace.
+    await page.waitForTimeout(4_000);
     await page.unroute(CREATE_URL);
-    // The abandoned call does not paint anything onto the page that replaced it.
+
+    expect(new URL(page.url()).pathname, 'the late success moved the member after they left').toBe('/');
+    expect(creates(), 'more than one create left the browser').toBe(1);
+    expect(await communityNames(me.uid), 'the create did not commit exactly once').toEqual([
+      'Left Before It Landed',
+    ]);
+    // Nothing from the form is painted where the member is. The created card
+    // is checked VISIBLE rather than counted: the left form is still in the
+    // DOM, hidden, and becomes that card by design — which is what lets a
+    // member who comes back find Open instead of a fresh form that would make
+    // a second community.
+    expect(
+      await page.getByTestId('wsf-start-created').and(page.locator(':visible')).count(),
+      'wsf-start-created is painted on Home',
+    ).toBe(0);
+    // The failure cards have no business existing anywhere after a success,
+    // hidden or not — counted across the whole DOM, as the guard this test
+    // replaced counted them.
     expect(await page.getByTestId('wsf-start-outcome').count()).toBe(0);
     expect(await page.getByTestId('wsf-start-error').count()).toBe(0);
   });
 });
+
+/*
+  M4 — THE BARLESS UNVERIFIED GATE HAS A WAY OUT.
+
+  On W9's shell this gate has no tabs, and "Verify email" is forward progress,
+  not an exit. Hit-tested at the control's own centre, at rest, because a link
+  that exists but sits under something is not a way out.
+*/
+test.describe('the unverified gate', () => {
+  test.use({ viewport: { width: 390, height: 640 } });
+
+  test('offers Back to home at a real touch size, reachable at its own centre', async ({ page }) => {
+    test.setTimeout(150_000);
+    const email = `wsf-sc-${stampId()}@example.com`;
+    const password = `Pw-${randomBytes(9).toString('base64url')}`;
+    const res = await fetch(
+      'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key',
+      {
+        method: 'POST',
+        headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true }),
+      },
+    );
+    if (!res.ok) throw new Error(`emulator signUp failed: ${res.status}`);
+    await page.goto('/signin');
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-signin-email').fill(email);
+    await page.getByTestId('wsf-signin-password').fill(password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL(/\/verify-email/, { timeout: 20_000 });
+
+    await page.goto('/start-community');
+    await expect(page.getByTestId('wsf-start-unverified')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
+
+    await wheelUntilInView(page, 'wsf-start-unverified-back');
+    const back = await elementState(page, { testId: 'wsf-start-unverified-back' });
+    expect(back.inView, 'Back to home is not in view').toBe(true);
+    expect(back.covered, 'something covers Back to home at its own centre').toBe(false);
+    expect(back.box.h, 'Back to home is under the 44 px touch minimum').toBeGreaterThanOrEqual(44);
+
+    await page.getByTestId('wsf-start-unverified-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+  });
+});
+
+/*
+  Q3 — THE FIRST INVALID PRESS DOES WHAT IT SAYS.
+
+  W7's reproducer, on the positions W7 measured: the name field still partly
+  on screen when Create community is pressed. On 5c28e45 the blur inserted the
+  sentence ABOVE the button, the button moved ~52 px between press and release,
+  and the press did nothing — 16/16 at 390x844 and 16/16 at 430x932. The
+  instrument is W7's, deliberately: placement relative to the route's own
+  scroller, the pointer verified on the button before pressing, and SUBMITTED
+  read from focus() calls on the field or focus now on it — never from the
+  error's presence, which the blur alone used to produce.
+
+  390x640 cannot fail first: wherever the whole button is on screen there, the
+  field is already above the viewport. It stays as a regression guard and says
+  how many risky positions it reached (none).
+*/
+async function watchFieldFocus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __w4fc: number };
+    w.__w4fc = 0;
+    const orig = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function (this: HTMLElement, ...a: unknown[]) {
+      if (this.dataset?.testid === 'wsf-start-name') w.__w4fc += 1;
+      return orig.apply(this, a as []);
+    };
+  });
+}
+
+async function placeSubmitAt(
+  page: Page,
+  scrollTop: number,
+): Promise<{ scrollTop: number; max: number; inputBottom: number; cx: number; cy: number; valid: boolean }> {
+  return page.evaluate((st) => {
+    const btn = document.querySelector('[data-testid="wsf-start-submit"]') as HTMLElement;
+    let sc: HTMLElement | null = btn;
+    while (sc && !(sc.scrollHeight > sc.clientHeight + 1)) sc = sc.parentElement;
+    if (!sc) throw new Error('no scroller above the submit');
+    sc.scrollTop = st;
+    const s = sc.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    const i = (document.querySelector('[data-testid="wsf-start-name"]') as HTMLElement).getBoundingClientRect();
+    const cx = b.left + b.width / 2;
+    const cy = b.top + b.height / 2;
+    let n = document.elementFromPoint(cx, cy) as HTMLElement | null;
+    while (n && !n.dataset?.testid) n = n.parentElement;
+    return {
+      scrollTop: Math.round(sc.scrollTop),
+      max: sc.scrollHeight - sc.clientHeight,
+      inputBottom: Math.round(i.bottom),
+      cx,
+      cy,
+      valid: b.top >= s.top && b.bottom <= s.bottom && !!n && n.dataset.testid === 'wsf-start-submit',
+    };
+  }, scrollTop);
+}
+
+type FirstPress = { kind: 'mouse' | 'touch'; ms: number };
+
+async function pressOnce(page: Page, press: FirstPress, x: number, y: number): Promise<void> {
+  if (press.kind === 'mouse') {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(press.ms);
+    await page.mouse.up();
+    return;
+  }
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(press.ms);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}
+
+for (const vp of [
+  { width: 390, height: 844, risky: true },
+  { width: 430, height: 932, risky: true },
+  { width: 390, height: 640, risky: false },
+]) {
+  for (const press of [
+    { kind: 'mouse', ms: 5 },
+    { kind: 'mouse', ms: 120 },
+    { kind: 'touch', ms: 80 },
+    { kind: 'touch', ms: 150 },
+  ] as FirstPress[]) {
+    test.describe(`Q3 first invalid press @${vp.width}x${vp.height} ${press.kind} ${press.ms} ms`, () => {
+      test.use(
+        press.kind === 'touch'
+          ? { viewport: vp, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
+          : { viewport: vp },
+      );
+
+      test(`validates and shows the error on that same press, field partly visible`, async ({ page }) => {
+        test.setTimeout(300_000);
+        const me = await member(true);
+        await signInVia(page, me.email, me.password);
+        await openStart(page);
+        const max = await page.evaluate(() => {
+          const b = document.querySelector('[data-testid="wsf-start-submit"]') as HTMLElement;
+          let sc: HTMLElement | null = b;
+          while (sc && !(sc.scrollHeight > sc.clientHeight + 1)) sc = sc.parentElement;
+          return sc ? sc.scrollHeight - sc.clientHeight : 0;
+        });
+        const stops = [...new Set([max - 60, max - 20, max].map((v) => Math.max(0, v)))];
+
+        const rows: string[] = [];
+        const bad: string[] = [];
+        let pressed = 0;
+        let risky = 0;
+        for (const st of stops) {
+          await openStart(page);
+          await watchFieldFocus(page);
+          // Focus stays in the field: the press must blur it, as a member's does.
+          await page.getByTestId('wsf-start-name').fill('a');
+          const p = await placeSubmitAt(page, st);
+          await page.waitForTimeout(150);
+          if (!p.valid) {
+            rows.push(`scrollTop ${p.scrollTop}/${p.max}: button clipped or covered, not pressed`);
+            continue;
+          }
+          pressed += 1;
+          if (p.inputBottom > 0) risky += 1;
+          await pressOnce(page, press, p.cx, p.cy);
+          await page.waitForTimeout(600);
+          const o = await page.evaluate(() => {
+            const fc = (window as unknown as { __w4fc: number }).__w4fc;
+            const a = document.activeElement as HTMLElement | null;
+            const active = a?.dataset?.testid ?? a?.tagName.toLowerCase() ?? 'null';
+            const err = document.querySelector('[data-testid="wsf-start-name-error"]') as HTMLElement | null;
+            const r = err?.getBoundingClientRect();
+            return {
+              submitted: fc > 0 || active === 'wsf-start-name' || active === 'wsf-start-name-error',
+              exposed: !!r && r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight,
+              active,
+            };
+          });
+          const verdict = !o.submitted ? 'SWALLOWED' : !o.exposed ? 'ERROR-OFFSCREEN' : 'SUBMITTED';
+          const row = `scrollTop ${p.scrollTop}/${p.max} fieldBottom=${p.inputBottom} -> ${verdict} (focus=${o.active})`;
+          rows.push(row);
+          if (verdict !== 'SUBMITTED') bad.push(row);
+        }
+        test.info().annotations.push({ type: 'positions', description: rows.join(' | ') });
+        test.info().annotations.push({ type: 'risky-positions', description: String(risky) });
+        expect(pressed, `no pressable position was found: ${rows.join(' | ')}`).toBeGreaterThan(0);
+        // NOT VACUOUS: at the classes where the defect lived, the field really
+        // was on screen for at least one press.
+        if (vp.risky) expect(risky, `never pressed with the field on screen: ${rows.join(' | ')}`).toBeGreaterThan(0);
+        expect(bad, 'first presses that did not validate and show the error').toEqual([]);
+      });
+    });
+  }
+}
 
 /**
  * The surface has to stay usable, not only correct: the shared navigation is
@@ -409,7 +675,22 @@ test.describe('start-community outcomes', () => {
 test.describe('start-community stays a usable form', () => {
   test.use({ viewport: { width: 390, height: 640 } });
 
-  test('the member tabs remain, and the submit is hit-testable on a short phone', async ({
+  /**
+   * BARLESS ON THE INTEGRATED SHELL.
+   *
+   * This used to assert the member tabs were present, because the shell drew
+   * them over every page. W9's shell makes `/start-community` a focused flow
+   * presented ABOVE the tab navigator (`app/_layout.tsx`), so it is barless by
+   * where it sits in the tree — and the Director ruled that is the final
+   * composition. The assertion is inverted rather than deleted: a bar
+   * reappearing here would be a regression.
+   *
+   * The rest of what this test proves matters more now, not less. The bar used
+   * to TAKE 62 px as a flex sibling; with it gone the composition moves, so
+   * reachability is re-measured rather than assumed, and the space the bar
+   * held must not survive as a blank reservation.
+   */
+  test('no member tabs on this focused route, and the submit is reachable at rest and by keyboard', async ({
     page,
   }) => {
     test.setTimeout(150_000);
@@ -417,10 +698,39 @@ test.describe('start-community stays a usable form', () => {
     await signInVia(page, me.email, me.password);
     await openStart(page);
 
-    // The prototype drew no tab bar. That was a drawing, not permission to
-    // remove the shell.
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+    // No bar on a flow a member is inside.
+    await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
 
+    // One masthead. The shell's stack runs with `headerShown: false`, so the
+    // route's own navy header is the only one — two would mean the shell had
+    // started drawing a header over a page that already has one.
+    //
+    // Counted across the WHOLE page, by the wordmark's testID. Scoping this to
+    // `wsf-start` could never catch a masthead the shell draws, which is the
+    // case that matters; and counting `img` as well double-counts, because the
+    // wordmark's testID sits on a wrapper around its own image.
+    expect(
+      await page.locator('[data-testid*="wordmark"]').count(),
+      'the page does not carry exactly one masthead',
+    ).toBe(1);
+
+    // No reservation: the scrolling surface runs to the bottom of the
+    // viewport. A leftover 62 px strip would end it short.
+    const gap = await page.evaluate(() => {
+      const scrollers = Array.from(document.querySelectorAll('*')).filter((el) => {
+        const cs = getComputedStyle(el);
+        return (cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 1;
+      });
+      scrollers.sort((a, b) => b.scrollHeight - a.scrollHeight);
+      const main = scrollers[0];
+      return main ? Math.round(window.innerHeight - main.getBoundingClientRect().bottom) : null;
+    });
+    expect(gap, 'no scrolling surface found').not.toBeNull();
+    expect(gap!, 'a blank strip is still reserved below the page').toBeLessThanOrEqual(2);
+
+    // At rest: wheel-scrolled the way a member scrolls, then measured without
+    // touching the page again. Playwright auto-scrolls before it taps, so a
+    // passing `.click()` proves nothing about this.
     await fillValid(page, 'Short Phone');
     await wheelUntilInView(page, 'wsf-start-submit');
     const submit = await elementState(page, { testId: 'wsf-start-submit' });
@@ -429,13 +739,25 @@ test.describe('start-community stays a usable form', () => {
     expect(submit.covered, 'something covers the submit at rest').toBe(false);
     expect(submit.box.h, 'the submit is under the 44px touch minimum').toBeGreaterThanOrEqual(44);
 
-    // The field a member types into is reachable with the keyboard open: the
-    // viewport shrinks, so re-measure after focusing rather than assuming.
+    // By keyboard: from the name field, Tab reaches the submit, and it is in
+    // view when it does. Nothing is pressed — this is reachability, not a
+    // create.
     await wheelUntilInView(page, 'wsf-start-name');
     await page.getByTestId('wsf-start-name').focus();
     const field = await elementState(page, { testId: 'wsf-start-name' });
     expect(field.covered, 'the name field is covered while focused').toBe(false);
     expect(field.box.h).toBeGreaterThanOrEqual(44);
+    let reached = false;
+    for (let i = 0; i < 20 && !reached; i += 1) {
+      await page.keyboard.press('Tab');
+      reached = await page.evaluate(
+        () => document.activeElement?.getAttribute('data-testid') === 'wsf-start-submit',
+      );
+    }
+    expect(reached, 'Tab never reaches the submit').toBe(true);
+    await page.getByTestId('wsf-start-submit').scrollIntoViewIfNeeded();
+    const focusedSubmit = await elementState(page, { testId: 'wsf-start-submit' });
+    expect(focusedSubmit.covered, 'the focused submit is covered').toBe(false);
   });
 });
 

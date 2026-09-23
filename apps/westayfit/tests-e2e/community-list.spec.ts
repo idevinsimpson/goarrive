@@ -12,6 +12,7 @@ import {
   signInVia,
   stampId,
 } from './helpers/mobile';
+import { expectCommunityUrl } from './helpers/communityUrl';
 
 /**
  * COMMUNITY (`/community`) — BEHAVIOUR.
@@ -233,7 +234,15 @@ test('choosing a community remembers it and opens that community Home', async ({
   await page.getByTestId(`wsf-community-index-row-${fx.westside}`).click();
 
   // It opened THAT community's Home...
-  await expect(page).toHaveURL(new RegExp(`/community/${fx.westside}$`), { timeout: 30_000 });
+  // The address is asserted through `expectCommunityUrl`, which is narrower
+  // than a regular expression on the whole URL: the pathname must be exactly
+  // this community, and the only query the cross-tab migration seam may add is
+  // a redundant `groupId` carrying the SAME id. See its docblock, and the
+  // Director's ruling `5795072805`.
+  await expect
+    .poll(() => new URL(page.url()).pathname, { timeout: 30_000 })
+    .toBe(`/community/${fx.westside}`);
+  expectCommunityUrl(page.url(), fx.westside);
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 40_000 });
 
   // ...and remembered the choice, which is what makes it stick across a reload.
@@ -265,7 +274,15 @@ test('switching from the current community opens the one that was tapped', async
   );
 
   await page.getByTestId(`wsf-community-index-row-${fx.sunrise}`).click();
-  await expect(page).toHaveURL(new RegExp(`/community/${fx.sunrise}$`), { timeout: 30_000 });
+  // The address is asserted through `expectCommunityUrl`, which is narrower
+  // than a regular expression on the whole URL: the pathname must be exactly
+  // this community, and the only query the cross-tab migration seam may add is
+  // a redundant `groupId` carrying the SAME id. See its docblock, and the
+  // Director's ruling `5795072805`.
+  await expect
+    .poll(() => new URL(page.url()).pathname, { timeout: 30_000 })
+    .toBe(`/community/${fx.sunrise}`);
+  expectCommunityUrl(page.url(), fx.sunrise);
   const remembered = await page.evaluate((k) => window.localStorage.getItem(k), REMEMBER_KEY(fx.uid));
   expect(remembered).toBe(fx.sunrise);
 

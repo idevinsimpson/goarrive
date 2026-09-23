@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { manageOffered, openMemberManage } from './helpers/memberShell';
 
 /**
  * JOIN BY QR — the Champion's copy of the invite link, as something a phone
@@ -162,10 +163,7 @@ async function signInVia(page: Page, email: string, password: string): Promise<v
 }
 
 async function openManage(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
 }
 
 /**
@@ -285,7 +283,10 @@ test('Q-2: an ordinary member has the Invite card and its QR, never the Champion
 
   // The Champion tools entry point is not rendered for them, so the sheet and
   // everything in it is unreachable — not merely hidden.
-  await expect(member.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(member),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
   await expect(member.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
   await expect(member.getByTestId('wsf-community-qr-section')).toHaveCount(0);
   await expect(member.getByTestId('wsf-community-qr-toggle')).toHaveCount(0);
