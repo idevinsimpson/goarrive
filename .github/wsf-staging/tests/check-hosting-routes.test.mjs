@@ -122,6 +122,70 @@ await test('PRECEDENCE: a specific rule placed after the catch-all is caught, th
   assert.match(r.err, /\/community\/\*\/members resolves to \/community\/__dynamic\.html operationally \(via \/community\/\*\*\)/);
 });
 
+await test('SHADOWING, ONE SEGMENT: a /move/* rule ahead of /move/** is caught', async () => {
+  // Every real MOVE address has ONE segment after the prefix: /move/<goalId>.
+  // A rule matching exactly that shape, placed ahead of the candidate's
+  // /move/**, serves every real MOVE page something else. Asking only a
+  // two-segment sample never reaches it, which is how this passed before.
+  const t = tree({
+    candidateRewrites: C8_REWRITES,
+    opsRewrites: [C8_REWRITES[0], C8_REWRITES[1], { source: '/move/*', destination: '/index.html' }, C8_REWRITES[2]],
+    pages: PAGES_C8,
+  });
+  const r = run(t);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.err, /\/move\/\*\* resolves to \/index\.html operationally \(via \/move\/\*\) for \/move\/__seg__, but the candidate declares \/move\/__dynamic\.html/);
+});
+
+await test('SHADOWING, ONE SEGMENT: a single /*/* ahead of every ** rule is caught for each', async () => {
+  // One broad rule mis-serves the one-segment address of every ** route at
+  // once. Each must be named, not just the first.
+  const t = tree({
+    candidateRewrites: C8_REWRITES,
+    opsRewrites: [{ source: '/*/*', destination: '/index.html' }, ...C8_REWRITES],
+    pages: PAGES_C8,
+  });
+  const r = run(t);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.err, /\/community\/\*\* resolves to \/index\.html operationally \(via \/\*\/\*\) for \/community\/__seg__/);
+  assert.match(r.err, /\/move\/\*\* resolves to \/index\.html operationally \(via \/\*\/\*\) for \/move\/__seg__/);
+});
+
+await test('SHADOWING, TWO SEGMENTS: a rule capturing only deeper addresses is still caught', async () => {
+  // The two-segment sample is kept alongside the one-segment one. Drop it and
+  // a rule like /move/*/* placed ahead of /move/** goes unasked.
+  const t = tree({
+    candidateRewrites: C8_REWRITES,
+    opsRewrites: [C8_REWRITES[0], C8_REWRITES[1], { source: '/move/*/*', destination: '/index.html' }, C8_REWRITES[2]],
+    pages: PAGES_C8,
+  });
+  const r = run(t);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.err, /\/move\/\*\* resolves to \/index\.html operationally \(via \/move\/\*\/\*\) for \/move\/__seg_a__\/__seg_b__/);
+});
+
+await test('a rule that fails in both shapes is counted once, not once per shape', async () => {
+  // The count is part of the receipt: the real-config matrix reads failed (2)
+  // for c8f38e3 against the old operational config, and asking two shapes
+  // must not turn one missing /move/** into two findings.
+  const t = tree({
+    candidateRewrites: C8_REWRITES,
+    opsRewrites: [C8_REWRITES[0], C8_REWRITES[1], { source: '/move/**', destination: '/index.html' }],
+    pages: PAGES_C8,
+  });
+  const r = run(t);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.err, /ROUTES=failed \(2\)/);
+  assert.equal((r.err.match(/\/move\/\*\* resolves to/g) || []).length, 1);
+
+  // And a rule matched by nothing at all: the DEFECT 2 shape, which is the
+  // c8f38e3 cell of the real matrix.
+  const missing = run(tree({ candidateRewrites: C8_REWRITES, opsRewrites: [C8_REWRITES[0], C8_REWRITES[1]], pages: PAGES_C8 }));
+  assert.equal(missing.code, 1, missing.out);
+  assert.match(missing.err, /ROUTES=failed \(2\)/);
+  assert.equal((missing.err.match(/matches no operational rewrite/g) || []).length, 1);
+});
+
 await test('a destination that differs between the two files is caught', async () => {
   const t = tree({
     candidateRewrites: C8_REWRITES,

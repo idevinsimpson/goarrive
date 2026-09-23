@@ -124,13 +124,25 @@ function firstMatch(rewrites, urlPath) {
 }
 
 /**
- * A URL that the given pattern matches, built from tokens no real rule would
+ * URLs that the given pattern matches, built from tokens no real rule would
  * also match. A sample like `/community/x/members` would be captured by a MORE
  * SPECIFIC operational rule and report a false mismatch; the point is to ask
  * what this pattern's own traffic resolves to, not to collide with a sibling.
+ *
+ * A `**` is asked in TWO shapes, one segment and two. Every real dynamic
+ * address has one (`/move/<goalId>`), and a rule matching exactly that shape
+ * placed ahead of the candidate's `**` rule (`/move/` plus one star, or a
+ * broad two-star-segment rule) serves every real page something else, and a
+ * two-segment sample alone never reaches it. The two-segment shape stays, so
+ * a rule that captures only deeper addresses is still asked about.
  */
-function sampleFor(source) {
-  return source.replace(/\*\*/g, '__seg_a__/__seg_b__').replace(/(?<!\*)\*(?!\*)/g, '__seg__');
+function samplesFor(source) {
+  const single = (s) => s.replace(/(?<!\*)\*(?!\*)/g, '__seg__');
+  if (!source.includes('**')) return [single(source)];
+  return [
+    single(source.replace(/\*\*/g, '__seg__')),
+    single(source.replace(/\*\*/g, '__seg_a__/__seg_b__')),
+  ];
 }
 
 /** Every built file whose path carries the dynamic-route marker. */
@@ -160,16 +172,23 @@ for (const destination of built) {
 // Presence is not enough: a specific rule placed after a catch-all that would
 // swallow it is present and unreachable. Asking what a sample URL resolves to
 // answers presence, destination and precedence in one question.
+// One failure per declared rule, naming the first sample that went wrong: a
+// rule missing outright fails every shape, and counting it once per shape
+// would change nothing but the number.
 for (const wanted of candidateRewrites) {
-  const sample = sampleFor(wanted.source);
-  const got = firstMatch(opsRewrites, sample);
-  if (!got) {
-    failures.push(`${wanted.source} is declared by the candidate and matches no operational rewrite`);
-  } else if (got.destination !== wanted.destination) {
-    failures.push(
-      `${wanted.source} resolves to ${got.destination} operationally (via ${got.source}), ` +
-        `but the candidate declares ${wanted.destination}`
-    );
+  for (const sample of samplesFor(wanted.source)) {
+    const got = firstMatch(opsRewrites, sample);
+    if (!got) {
+      failures.push(`${wanted.source} is declared by the candidate and matches no operational rewrite (for ${sample})`);
+      break;
+    }
+    if (got.destination !== wanted.destination) {
+      failures.push(
+        `${wanted.source} resolves to ${got.destination} operationally (via ${got.source}) for ${sample}, ` +
+          `but the candidate declares ${wanted.destination}`
+      );
+      break;
+    }
   }
 }
 
