@@ -197,6 +197,17 @@ test.describe('the proposal', () => {
         for (const id of PROPOSED) {
           const frame = page.getByTestId(`wsf-frame-scnext-${id}-${c}`);
           await expect(frame).toBeVisible();
+
+          // The refusal offers the way FORWARD, not the action that just
+          // refused: the server will refuse this same request until the
+          // profile exists.
+          if (id === 'start-next-refused') {
+            await expect(frame.getByText('Complete your profile').first()).toBeVisible();
+            expect(
+              await frame.getByText('Create community').count(),
+              'the refusal still offers the action the server just refused',
+            ).toBe(0);
+          }
           // The strip is what stops one of these being mistaken for shipped
           // UI three weeks from now, so it is asserted, not assumed.
           await expect(page.getByTestId(`wsf-frame-banner-scnext-${id}-${c}`)).toBeVisible();
@@ -230,7 +241,16 @@ test.describe('the proposal', () => {
               scrolled,
               'the demoted retry is below the fold and no end frame was taken',
             ).toBe(true);
-            await expect(page.getByText('Create it again').first()).toBeVisible();
+            // The retry says what it STARTS, and the duplicate risk is next to
+            // it rather than in the banner the scroll has just left behind.
+            await expect(frame.getByText('Start another community')).toBeVisible();
+            await expect(
+              frame.getByText('This starts a new, separate community.', { exact: false }),
+            ).toBeVisible();
+            expect(
+              await frame.getByText('Create it again').count(),
+              'the retry still reads as a replay of the request that was lost',
+            ).toBe(0);
           }
           if (scrolled) {
             await page.waitForTimeout(120);

@@ -143,3 +143,104 @@ never tells the member the problem is length.
 
 **Drawn as** `start-next-name-too-long`, stating the ceiling the callable
 actually enforces, before a request is sent.
+
+---
+
+## The deliberate mapping — which codes are a refusal and which are not
+
+Asked for at `5787041281`. Not every error is a definitive refusal, and the
+split is not a judgement call: it is whether the **server answered**.
+
+| What `wsfCreateCommunity` / the SDK produces | The server answered? | Presentation |
+|---|---|---|
+| `unauthenticated` | yes | the existing **signed-out gate** — unchanged, still its own frame |
+| `failed-precondition` · *"Verify your email…"* | yes | the existing **unverified gate** — unchanged, still its own frame |
+| `failed-precondition` · *"Complete your profile…"* | yes | **refusal** → `start-next-refused`. Thrown inside the transaction, so no gate catches it first and it lands in the form |
+| `invalid-argument` (name, groupType, joinPolicy) | yes | **refusal** in the form. The length case is stated client-side first (`start-next-name-too-long`) so it does not need a round trip |
+| `permission-denied`, `not-found`, `resource-exhausted`, `already-exists` | yes | **refusal** in the form, with the existing `CODE_SENTENCES` wording |
+| `deadline-exceeded`, `unknown`, `cancelled`, `aborted`, `data-loss` | **no** | **unconfirmed** → `start-next-unconfirmed` |
+| `unavailable` | **no** | **unconfirmed**. It usually means the request never left, but the client cannot prove that, and the cost of being wrong is a duplicate community |
+| callable `internal` carrying a member sentence | yes | **refusal**, sentence passed through as today |
+| callable `internal` carrying only the bare code | **no** | **unconfirmed** — this is the SDK's transport failure wearing a server code |
+| a throw **after** the awaited call resolved | n/a — it already succeeded | **created** → `start-next-created` |
+
+The two existing gates stay distinct and untouched. Nothing here renders
+server-provided developer text; `looksLikeDeveloperText` keeps doing that job.
+
+---
+
+## F5 — there is no way to send a member to the profile step and back to creation
+
+**Severity: LOW as a defect, but it bounds what `start-next-refused` may promise.**
+
+The Director's correction asks the profile-precondition refusal to offer "a
+return to creation using existing navigation support". **That support does not
+exist.** `apps/westayfit/app/profile-setup.tsx:157` finishes with:
+
+```ts
+router.replace(nextRouteAfterAuth('/') as never);
+```
+
+and `apps/westayfit/src/pendingJoinCode.ts:96-104` resolves exactly three
+stored returns — a pending join code, an event return, a kiosk return goal —
+falling back to the caller's string. There is no slot for `/start-community`,
+and `profile-setup` reads only an `edit` param. No route in
+`apps/westayfit/app` takes a generic `next` / `returnTo` / `from` param
+(searched; zero matches).
+
+Adding one would be a fourth stored return — **new storage**, which this packet
+rules out. So the frame draws the profile step as the way forward and
+**promises nothing about coming back or about the form being kept**. After the
+profile step the member lands on Home, as they do today.
+
+**If a return is wanted**, the smallest honest shape is a fourth resolver
+alongside the existing three, written and consumed the same way. That is a
+product change to files outside this worker's set, and it is not proposed here
+— only costed.
+
+---
+
+## F6 — "Check your communities" has no destination that reliably shows the list
+
+**Severity: MEDIUM, and it blocks half of the second correction.**
+
+The correction asks that the action reach "the EXISTING member community list
+rather than merely `/`". The list exists — `MyCommunitiesList`,
+`apps/westayfit/app/index.tsx:416`, under the eyebrow "Choose a community" —
+but it is rendered **only** by `/`, and only when `/` decides not to open a
+community instead:
+
+```ts
+const openable = resolveCurrentCommunity(user?.uid ?? null, items.map(i => i.groupId));
+useEffect(() => { if (openable) router.replace(`/community/${openable}`); }, [openable]);
+```
+
+`resolveCurrentCommunity` (`src/currentCommunity.ts:51-65`) returns a community
+when a remembered id is still in `memberOf`, **or** when there is exactly one.
+No other route renders the list: `/you` resolves to a single community and
+shows a `pickCommunity` state when it cannot, and `/activity` aggregates across
+communities without listing them as destinations. Nothing takes a param that
+suppresses the auto-open.
+
+**What `/` actually does after an unconfirmed create**, by case:
+
+| The member had | The create in fact | `/` shows | Verdict |
+|---|---|---|---|
+| no communities | succeeded | opens the new community (`memberOf` is now 1) | **resolves the uncertainty** |
+| no communities | did not happen | "You're not in a community yet" | **resolves the uncertainty** |
+| one or more | succeeded | opens the **remembered** community | **fails** — the member cannot tell whether the new one exists |
+| one or more | did not happen | opens the remembered community | **fails** — same screen as the row above |
+
+So `/` is right in the two cases where the member had nothing, and wrong in
+exactly the case the uncertainty matters most: the member already has a
+community, and the two outcomes are indistinguishable.
+
+**Smallest fix that uses what is there**, for the lead to assign if wanted: a
+query param on `/` that skips the auto-open for that navigation — one condition
+on the existing `openable` effect, no new route, no storage, no backend, no
+sync. It is a change to `app/index.tsx`, which is outside this worker's set,
+so it is reported rather than written.
+
+**The drawing stands either way**: the label and the hierarchy are what the
+frame proposes. Its destination is this finding, and it should not be
+implemented against bare `/` while the third row of that table is true.
