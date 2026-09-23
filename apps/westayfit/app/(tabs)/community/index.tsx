@@ -29,7 +29,6 @@ import {
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
 import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../../src/ui/progressFormat';
-import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.
@@ -211,15 +210,12 @@ export default function CommunityIndexScreen() {
 
   const body = (
     <View style={styles.column}>
-      <Pressable
-        onPress={() => router.replace('/')}
-        accessibilityRole="link"
-        accessibilityLabel="We Stay Fit, go Home"
-        style={styles.wordmarkTap}
-        testID="wsf-community-index-wordmark-home"
-      >
-        <WsfWordmark variant="navy" height={22} testID="wsf-community-index-wordmark" />
-      </Pressable>
+        {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar in
+            app/(tabs)/_layout.tsx carries it, and its tap is the one gesture
+            that goes Home. A second copy here stacked two wordmarks down the
+            page and gave the member two different Home gestures -- and this
+            one navigated INTO the tab tree from inside it, which pushed a new
+            community screen instead of returning to the mounted one. */}
       <Text style={[display.md, styles.pageTitle]} testID="wsf-community-index-title">
         Community
       </Text>
@@ -622,7 +618,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: CREAM },
   page: { paddingHorizontal: 18, paddingTop: 10 },
   column: { gap: 14 },
-  wordmarkTap: { minHeight: 44, justifyContent: 'center' },
   pageTitle: { color: NAVY, marginTop: -2 },
   note: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   stateWrap: { gap: 14 },

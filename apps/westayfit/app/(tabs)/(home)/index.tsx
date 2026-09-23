@@ -19,7 +19,6 @@ import { wsfTheme } from '../../../src/theme';
 import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
 import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
-import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 type MyCommunityItem = {
   groupId: string;
@@ -177,10 +176,12 @@ export default function BrandShell() {
       testID="wsf-home"
     >
       <View style={kit.column}>
-        {/* Product chrome: the full wordmark, compact. It replaces the old text eyebrow. */}
-        <View style={kit.chrome}>
-          <WsfWordmark variant="navy" height={22} testID="wsf-home-wordmark" />
-        </View>
+        {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar in
+            app/(tabs)/_layout.tsx carries it, and its tap is the one gesture
+            that goes Home. A second copy here stacked two wordmarks down the
+            page and gave the member two different Home gestures -- and this
+            one navigated INTO the tab tree from inside it, which pushed a new
+            community screen instead of returning to the mounted one. */}
 
         {!wsfAuthEnabled ? (
           <>

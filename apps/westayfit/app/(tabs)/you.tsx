@@ -11,7 +11,6 @@ import { resolveCurrentCommunity } from '../../src/currentCommunity';
 import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions } from '../../src/firebase';
 import { memberCountLabel, roleCardLabel } from '../../src/labels';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
-import { WsfWordmark } from '../../src/ui/WsfWordmark';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -304,17 +303,12 @@ export default function You() {
   const identity = (profile: Profile, email: string | null) => (
     <View style={s.field} testID="wsf-you-identity">
       <View style={s.fieldTop}>
-        {/* THE WORDMARK GOES HOME, on this destination as on every other.
-            The rebuild left it as a bare image, so the one gesture that
-            gets a member out of a tab did nothing here. */}
-        <Pressable
-          onPress={() => router.replace('/')}
-          accessibilityRole="link"
-          accessibilityLabel="We Stay Fit, go Home"
-          testID="wsf-you-wordmark-home"
-        >
-          <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
-        </Pressable>
+        {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar in
+            app/(tabs)/_layout.tsx carries it, and its tap is the one gesture
+            that goes Home. A second copy here stacked two wordmarks down the
+            page and gave the member two different Home gestures -- and this
+            one navigated INTO the tab tree from inside it, which pushed a new
+            community screen instead of returning to the mounted one. */}
         <Text style={s.pageTag} testID="wsf-you-title">You</Text>
       </View>
       <Text style={[display.lg, s.name]} testID="wsf-you-name" accessibilityRole="header">
@@ -370,14 +364,6 @@ export default function You() {
           <>
             <View style={s.fieldShort}>
               <View style={s.fieldTop}>
-                <Pressable
-                  onPress={() => router.replace('/')}
-                  accessibilityRole="link"
-                  accessibilityLabel="We Stay Fit, go Home"
-                  testID="wsf-you-wordmark-home"
-                >
-                  <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
-                </Pressable>
                 <Text style={s.pageTag} testID="wsf-you-title">You</Text>
               </View>
               <View style={[s.skelOnNavy, { width: '62%', height: 30 }]} />
@@ -401,14 +387,6 @@ export default function You() {
           <>
             <View style={s.fieldShort}>
               <View style={s.fieldTop}>
-                <Pressable
-                  onPress={() => router.replace('/')}
-                  accessibilityRole="link"
-                  accessibilityLabel="We Stay Fit, go Home"
-                  testID="wsf-you-wordmark-home"
-                >
-                  <WsfWordmark variant="white" height={17} testID="wsf-you-wordmark" />
-                </Pressable>
                 <Text style={s.pageTag} testID="wsf-you-title">You</Text>
               </View>
               <Text style={[display.lg, s.name]} accessibilityRole="header">

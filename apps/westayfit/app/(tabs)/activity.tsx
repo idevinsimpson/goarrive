@@ -31,7 +31,6 @@ import {
   percentLabel,
   totalOfTargetLabel,
 } from '../../src/ui/progressFormat';
-import { WsfWordmark } from '../../src/ui/WsfWordmark';
 import { formatEndedOn } from '../../src/ui/dates';
 
 /**
@@ -254,15 +253,12 @@ export default function ActivityScreen() {
       testID="wsf-activity"
     >
       <View style={styles.column}>
-        <Pressable
-          onPress={() => router.replace('/')}
-          accessibilityRole="link"
-          accessibilityLabel="We Stay Fit, go Home"
-          style={styles.wordmarkTap}
-          testID="wsf-activity-wordmark-home"
-        >
-          <WsfWordmark variant="navy" height={22} testID="wsf-activity-wordmark" />
-        </Pressable>
+        {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar in
+            app/(tabs)/_layout.tsx carries it, and its tap is the one gesture
+            that goes Home. A second copy here stacked two wordmarks down the
+            page and gave the member two different Home gestures -- and this
+            one navigated INTO the tab tree from inside it, which pushed a new
+            community screen instead of returning to the mounted one. */}
         <Text style={[display.md, styles.pageTitle]} testID="wsf-activity-title">
           Your progress
         </Text>
@@ -575,7 +571,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: CREAM },
   page: { flexGrow: 1, paddingHorizontal: 18, paddingTop: 10 },
   column: { flexGrow: 1, gap: 14 },
-  wordmarkTap: { minHeight: 44, justifyContent: 'center' },
   pageTitle: { color: NAVY, marginTop: -2 },
   privacy: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   note: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
