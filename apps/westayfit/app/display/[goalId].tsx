@@ -410,12 +410,26 @@ export default function DisplayGoal() {
 
           The ready wide canvas is `space-between` because it has a header, a
           body and a footer to push apart. The generic states have neither, so
-          the same style pinned "Nothing to show here" to the top edge of a
-          booth or a 1920 and left two thirds of the glass empty under it.
-          They get a centred canvas of their own; the phone's was already
-          centred, and is untouched.
+          the same style pinned "Nothing to show here" to the top edge and left
+          two thirds of the glass empty under it. The COLLECTIVE tier gets a
+          centred canvas of its own.
+
+          THE BOOTH DELIBERATELY DOES NOT. A first cut applied this to every
+          wide tier, which silently changed 1280x800 and 1440x900 — a
+          composition this packet preserves and whose own evidence claimed it
+          was untouched. Centring it may well be better; it is not this
+          packet's to change, and saying one thing while doing another is
+          worse than either. The phone and portrait canvases were already
+          centred and are unaffected.
         */
-        style={[styles.canvas, wide ? styles.canvasGenericWide : styles.canvasPhone]}
+        style={[
+          styles.canvas,
+          tier === 'collective'
+            ? styles.canvasGenericWide
+            : wide
+              ? styles.canvasWide
+              : styles.canvasPhone,
+        ]}
         testID={copy.testID}
         {...({ dataSet: { layout: wide ? 'wide' : 'phone', tier } } as Record<string, unknown>)}
       >

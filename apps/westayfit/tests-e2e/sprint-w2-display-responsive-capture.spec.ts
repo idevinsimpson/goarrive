@@ -317,6 +317,65 @@ test.describe('tier boundaries', () => {
   });
 });
 
+/* ─────────── the generic states, which carry no mark to measure ─────────── */
+
+test.describe('generic states, per tier', () => {
+  /*
+    A DISCRIMINATING CHECK, BECAUSE THE MARK TEST CANNOT SEE THIS.
+
+    Loading, unreachable and the one refusal render no Living WE, so the
+    mark-width regression above is blind to them — which is exactly how a
+    first cut of this change centred the booth's generic states while its own
+    evidence said 1280x800 was untouched. The Director caught it in the source
+    (`5787628430`).
+
+    So this measures where the block actually sits: the booth keeps the
+    shipped top-pinned layout, and only the collective centres.
+  */
+  test('only the collective centres the generic block; the booth keeps its shipped placement', async ({ browser }) => {
+    test.setTimeout(240_000);
+    const fx = await seedCommunity('generic');
+    const refusedId = await seedGoal(fx, { key: 'generic', target: 500, unit: 'squats', total: 241, authorized: false });
+
+    const cases = [
+      { viewport: { width: 1280, height: 800 }, centred: false, why: 'the booth, preserved' },
+      { viewport: { width: 1440, height: 900 }, centred: false, why: 'what the existing suite exercises' },
+      { viewport: COLLECTIVE, centred: true, why: 'the room, where the sentence is the screen' },
+      { viewport: PORTRAIT, centred: true, why: 'portrait was already centred' },
+      { viewport: { width: 390, height: 844 }, centred: true, why: 'the phone was already centred' },
+    ];
+
+    for (const c of cases) {
+      const ctx = await browser.newContext({ viewport: c.viewport, deviceScaleFactor: 1 });
+      const page = await ctx.newPage();
+      try {
+        await page.goto(`/display/${refusedId}`);
+        const root = page.getByTestId('wsf-display-not-available');
+        await expect(root).toBeVisible({ timeout: 30_000 });
+        const offsets = await root.evaluate((el) => {
+          const block = el.firstElementChild as HTMLElement;
+          const r = el.getBoundingClientRect();
+          const b = block.getBoundingClientRect();
+          return { fromTop: b.top - r.top, fromBottom: r.bottom - b.bottom };
+        });
+        // Centred means the block sits at a comparable distance from both
+        // edges; top-pinned means it does not.
+        const balanced = Math.abs(offsets.fromTop - offsets.fromBottom) < 40;
+        expect(
+          balanced,
+          `${c.viewport.width}×${c.viewport.height} — ${c.why}: top ${Math.round(offsets.fromTop)} vs bottom ${Math.round(offsets.fromBottom)}`
+        ).toBe(c.centred);
+        // Whatever the placement, a refusal still leaks nothing.
+        for (const id of ['wsf-display-community', 'wsf-display-total-line', 'wsf-display-we']) {
+          await expect(page.getByTestId(id)).toHaveCount(0);
+        }
+      } finally {
+        await ctx.close();
+      }
+    }
+  });
+});
+
 /* ──────────────── the confirmed truth, at the two new classes ─────────────── */
 
 for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE]] as const) {
