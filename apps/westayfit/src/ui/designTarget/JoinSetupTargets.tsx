@@ -1008,6 +1008,284 @@ export function StartVerifyTarget() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   B2-NEXT · /start-community — PROPOSED, NOT ACCEPTED
+   ════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * FOUR DRAWINGS, NOT AN IMPLEMENTATION AND NOT AN ACCEPTED TARGET.
+ *
+ * Everything above this banner is accepted and stays byte-for-byte as it is.
+ * These four carry NEW IDS (`start-next-*`), render on their own gated route,
+ * and are captured by their own producer into
+ * `docs/design-target/review/start-community-next/target/`. No accepted frame,
+ * no accepted producer and no accepted contact sheet can move because of them.
+ *
+ * THEY DELIBERATELY DUPLICATE `StartForm` RATHER THAN PARAMETERISE IT. A prop
+ * added to the accepted component — even one defaulted to today's behaviour —
+ * would put every accepted `TARGET-start-*` frame downstream of a proposal
+ * that has not been ruled on. Forty duplicated lines are cheaper than that
+ * coupling, and they disappear when a verdict lands either way.
+ *
+ * ── WHAT THEY PROPOSE, AND THE PRIMARY SOURCE FOR EACH ────────────────────
+ *
+ * A REFUSAL AND AN UNCONFIRMED RESULT ARE NOT THE SAME EVENT.
+ *   `app/start-community.tsx` has one catch (line 171) and one sentence for
+ *   both. When the server ANSWERS with a refusal, nothing was created and the
+ *   screen may say so. When the transport fails, the client learns nothing
+ *   about what the server did: `wsfCreateCommunity` carries no attempt key, so
+ *   a `deadline-exceeded` is equally consistent with a community that exists.
+ *   Today both render "We couldn't reach the server. Check your connection and
+ *   try again." (src/callableErrors.ts:23), and the ACCEPTED target is
+ *   stronger still — "Nothing was created." — which is a claim about the
+ *   server's state that the client cannot observe. That is the single reason
+ *   this refresh exists.
+ *
+ * A CONFIRMED CREATION THAT FAILS TO NAVIGATE IS A SUCCESS.
+ *   `router.replace()` sits inside the same try as the awaited call
+ *   (start-community.tsx:170), so a navigation throw is rendered as a create
+ *   failure for a community that exists. The proposal draws that outcome as
+ *   what it is, with the returned `groupId` as the way in.
+ *
+ * NO AUTOMATIC SECOND CREATE, AND NO PROMISE THAT RETRYING IS SAFE.
+ *   The unconfirmed frame promotes "Check your communities" and DEMOTES the
+ *   retry to a secondary the member has to choose. Nothing here claims the
+ *   callable is idempotent, because it is not: this is a frontend recovery
+ *   proposal only, and it asks for no new backend field.
+ *
+ * THE 80-CHARACTER CEILING IS STATED WHERE IT IS ENFORCED.
+ *   The form has `NAME_MIN_LENGTH = 2` and no maximum; the callable refuses
+ *   over 80 (functions-westayfit/src/index.ts:134) with a developer string
+ *   that `describeCallableError` correctly suppresses — leaving the member
+ *   "Something about this didn't look right", which never names the length.
+ *
+ * WHAT THEY DO NOT INVENT: no members, no faces, no discovery, no approval
+ * workflow, no progress number, no Living WE. Two community types and three
+ * admission choices, with the meanings and defaults the route already has;
+ * admission is not personal name visibility.
+ */
+
+/**
+ * The B2 field again, at the same arm's length, for the one frame whose field
+ * must not say "Give it a name": the community already has one.
+ */
+function StartFieldNext({
+  compact,
+  frameHeight,
+  eyebrow,
+  title,
+  intro,
+}: {
+  compact: boolean;
+  frameHeight: number;
+  eyebrow: string;
+  title: string;
+  intro?: string;
+}) {
+  return (
+    <Field compact={compact} grow={0.26} frameHeight={frameHeight} chip="New community" chipTone="action">
+      <Text style={s.fieldEyebrow}>{eyebrow}</Text>
+      <Text style={[compact ? display.md : display.lg, s.fieldTitle]}>{title}</Text>
+      {intro ? <Text style={s.fieldIntro}>{intro}</Text> : null}
+    </Field>
+  );
+}
+
+/** The B2 form again, frozen at arm's length from the accepted one. `submit`
+ * is the whole reason it exists: the unconfirmed frame has to demote it. */
+function StartFormNext({
+  variant,
+  nameValue,
+  nameError,
+  nameInvalid,
+  submit,
+}: {
+  variant: 'familyFriends' | 'custom';
+  nameValue?: string;
+  nameError?: string;
+  nameInvalid?: boolean;
+  submit?: React.ReactNode;
+}) {
+  const family = variant === 'familyFriends';
+  return (
+    <>
+      <FormField
+        label="Community name"
+        value={nameValue}
+        placeholder="The Henderson Family"
+        invalid={nameInvalid ?? Boolean(nameError)}
+        error={nameError}
+      />
+      <Text style={s.groupLabel}>Community type</Text>
+      <Option
+        label="Family &amp; friends"
+        description="For people you already know."
+        selected={family}
+      />
+      <Option
+        label="Other community"
+        description="For a church, workplace, neighborhood, group, or another existing community."
+        selected={!family}
+      />
+      <Text style={s.groupLabel}>Who can join?</Text>
+      <Option
+        label="Public"
+        description="Anyone with the invite link can join. The community is not listed or searchable anywhere, so people need the link."
+      />
+      <Option
+        label="Anyone with the link"
+        description="Anyone with the invite link can join, including anyone it is forwarded to, until you create a new link."
+        selected={!family}
+      />
+      <Option
+        label="Private"
+        description="No one can join by link and there is no way to add members, so the community is just you."
+        selected={family}
+      />
+      <View style={s.summary}>
+        <Text style={s.summaryEyebrow}>You are creating</Text>
+        <Text style={s.summaryLine}>
+          {(nameValue || 'Your community') +
+            ' · ' +
+            (family ? 'Family & friends' : 'Other community') +
+            ' · ' +
+            (family ? 'Private' : 'Anyone with the link')}
+        </Text>
+      </View>
+      {submit ?? <Primary label="Create community" />}
+    </>
+  );
+}
+
+/**
+ * THE CEILING, STATED BEFORE THE SERVER HAS TO. The button stays tappable —
+ * the accepted grammar sends the member back to the field rather than dimming
+ * the way out — but the rule is on screen while they are still typing, and it
+ * is the rule the callable actually enforces.
+ */
+export function StartNextNameTooLongTarget() {
+  return (
+    <Frame id="start-next-name-too-long">
+      {({ compact, frameHeight }) => (
+        <>
+          <StartField compact={compact} frameHeight={frameHeight} />
+          <Sheet compact={compact}>
+            <StartFormNext
+              variant="familyFriends"
+              nameValue="The Henderson Family Reunion Walking and Stretching Group of Greater Portland, Maine"
+              nameError="Use 80 characters or fewer. This name is 84."
+            />
+            <Foot>
+              <Secondary label="Back to home" quiet />
+            </Foot>
+          </Sheet>
+        </>
+      )}
+    </Frame>
+  );
+}
+
+/**
+ * A REFUSAL: the server answered, so the screen may say plainly that nothing
+ * was created. The sentence under it is the server's own member-facing text,
+ * passed through unchanged — `describeCallableError` keeps it because it names
+ * no identifier. It is drawn here and nowhere else in the batch: the two gates
+ * cover signed-out and unverified, and this is the third precondition, thrown
+ * inside the transaction where no gate can catch it first.
+ */
+export function StartNextRefusedTarget() {
+  return (
+    <Frame id="start-next-refused">
+      {({ compact, frameHeight }) => (
+        <>
+          <StartField compact={compact} frameHeight={frameHeight} />
+          <Sheet compact={compact}>
+            <Banner
+              tone="error"
+              title="We couldn’t create your community."
+              body="Complete your profile before creating a community."
+            />
+            <StartFormNext variant="familyFriends" nameValue="The Henderson Family" />
+            <Foot>
+              <Secondary label="Back to home" quiet />
+            </Foot>
+          </Sheet>
+        </>
+      )}
+    </Frame>
+  );
+}
+
+/**
+ * AN UNCONFIRMED RESULT. The screen states exactly what it knows — that it
+ * does not know — and does not offer the reassurance it cannot back. There is
+ * no "nothing was created", no "safe to try again", and no second create sent
+ * on the member's behalf. The resolving action is promoted; the retry that
+ * might duplicate is a secondary they have to choose, with everything they
+ * typed still under it.
+ */
+export function StartNextUnconfirmedTarget() {
+  return (
+    <Frame id="start-next-unconfirmed">
+      {({ compact, frameHeight }) => (
+        <>
+          <StartField compact={compact} frameHeight={frameHeight} />
+          <Sheet compact={compact}>
+            <Banner
+              tone="error"
+              title="We couldn’t confirm your community was created."
+              body="It may have been created anyway. Check your communities before you start another one."
+            />
+            <Primary label="Check your communities" />
+            <StartFormNext
+              variant="familyFriends"
+              nameValue="The Henderson Family"
+              submit={<Secondary label="Create it again" />}
+            />
+            <Foot>
+              <Secondary label="Back to home" quiet />
+            </Foot>
+          </Sheet>
+        </>
+      )}
+    </Frame>
+  );
+}
+
+/**
+ * CREATED, AND STILL HERE. The callable returned a `groupId`; only the
+ * navigation to it failed. That is a success with one thing left to do, so it
+ * is drawn in the note tone with the community named in the action, and the
+ * create form is gone — there is nothing left to create.
+ */
+export function StartNextCreatedTarget() {
+  return (
+    <Frame id="start-next-created">
+      {({ compact, frameHeight }) => (
+        <>
+          <StartFieldNext
+            compact={compact}
+            frameHeight={frameHeight}
+            eyebrow="Created"
+            title="The Henderson Family"
+          />
+          <Sheet compact={compact}>
+            <Banner
+              tone="note"
+              title="Your community is ready."
+              body="We couldn’t open it automatically."
+            />
+            <Primary label="Open The Henderson Family" />
+            <Foot>
+              <Secondary label="Back to home" quiet />
+            </Foot>
+          </Sheet>
+        </>
+      )}
+    </Frame>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    B3 · /goals/new — OPENING A GOAL
    ════════════════════════════════════════════════════════════════════════ */
 
