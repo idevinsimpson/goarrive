@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { expect, test, type Page, type Route } from '@playwright/test';
 
+import { KIOSK_IDLE_MS } from '../src/kioskSession';
 import { saveFrame } from './helpers/capture';
 import {
   firestoreWrite,
@@ -79,6 +80,68 @@ const NEW_TOTAL = START_TOTAL + ADDED;
 const VISITOR = 'Alex Rivera';
 
 const DAY = 24 * 60 * 60_000;
+
+/**
+ * A MOUNT MARKER, NOT A RE-RENDER GUESS. React replaces the host node when a
+ * screen remounts, so an attribute planted on that node survives exactly when
+ * the screen did. Returns false when it could not be planted — a probe that
+ * cannot measure must never report the safe answer, which is the failure this
+ * sprint has now caught in a contrast probe, an auth probe and a fold probe.
+ */
+async function markMountedContext(page: Page, testId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) return false;
+    el.setAttribute('data-w1b-mounted', '1');
+    return el.getAttribute('data-w1b-mounted') === '1';
+  }, testId);
+}
+
+async function mountMarkSurvives(page: Page, testId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    return Boolean(el && el.getAttribute('data-w1b-mounted') === '1');
+  }, testId);
+}
+
+/**
+ * THE MARKER ON THE INSTANCE THE MEMBER IS ACTUALLY LOOKING AT.
+ *
+ * `mountMarkSurvives` above reads `document.querySelector`, which returns the
+ * FIRST match. Measured on this build, that is a false positive: after Back,
+ * the original marked screen is still in the document but HIDDEN behind a new
+ * unmarked one, so the marker "survives" while the member is looking at a
+ * screen that was just built. The marker proves a node persisted; it does not
+ * prove that node is the one on screen.
+ *
+ * So this reads the marker on the VISIBLE instance, and the caller records the
+ * instance count beside it. Reported to W1B, whose block this extends rather
+ * than replaces — the limit they stated ("it proves the host node persisted")
+ * turns out to have this sharper edge.
+ */
+async function visibleMarkSurvives(page: Page, testId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const all = Array.from(document.querySelectorAll(`[data-testid="${id}"]`));
+    const shown = all.find((el) => (el as HTMLElement).offsetParent !== null) ?? null;
+    return Boolean(shown && shown.getAttribute('data-w1b-mounted') === '1');
+  }, testId);
+}
+
+/**
+ * The offset of whichever ancestor actually scrolls, or `null` when nothing
+ * does — so an unscrollable page is reported as unmeasured rather than as a
+ * tidy zero that would match any other zero.
+ */
+async function contextScroll(page: Page, testId: string): Promise<number | null> {
+  return page.evaluate((id) => {
+    let el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+    while (el) {
+      if (el.scrollHeight > el.clientHeight + 1) return el.scrollTop;
+      el = el.parentElement;
+    }
+    return null;
+  }, testId);
+}
 
 function frame(name: string): string {
   mkdirSync(OUT, { recursive: true });
@@ -478,34 +541,162 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     await expectLegible(page, 'wsf-kiosk-finish-error');
   });
 
-  test('ordinary personal contribution is untouched and keeps its tabs', async ({ page }) => {
+  test('ordinary personal contribution is untouched: no kiosk semantics, and its own way back', async ({
+    page,
+  }) => {
     test.setTimeout(240_000);
+    await page.clock.install();
     const fx = await seedKiosk('d');
-    // The same route and the same account, WITHOUT the kiosk flag: a member on
-    // their own phone. The correction is scoped to the kiosk context, and this
-    // is what proves it.
+
+    // The same route and the same account WITHOUT the kiosk flag — reached the
+    // way a member actually reaches it, FROM a mounted Community tab. A cold
+    // `goto` would leave nothing to return to, and a return-assertion that
+    // cannot fail is not a control. This is the part the shell migration makes
+    // load-bearing: tabs are no longer on this screen to tell the two apart.
     await signInVia(page, fx.email, fx.password);
-    await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}`);
+    await page.goto(`/community/${fx.groupId}`);
+    const CONTEXT = `wsf-community-goal-record-${fx.goalId}`;
+    const goalLink = page.getByTestId(CONTEXT);
+    await expect(goalLink).toBeVisible({ timeout: 40_000 });
+
+    expect(await markMountedContext(page, CONTEXT), 'the mount marker was planted').toBe(true);
+    await goalLink.click();
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
 
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
-    for (const key of ['home', 'community', 'activity', 'you', 'move']) {
-      await expect(page.getByTestId(`wsf-member-tab-${key}`)).toBeVisible();
+    // 1 · NONE of the kiosk semantics. With no tab bar on any /contribute this
+    //     absence set is the whole positive claim that the fix stayed scoped.
+    for (const id of [
+      'wsf-kiosk-finish-chrome',
+      'wsf-kiosk-finish-bar',
+      'wsf-kiosk-finish',
+      'wsf-kiosk-countdown',
+      'wsf-kiosk-stay',
+    ]) {
+      await expect(page.getByTestId(id)).toHaveCount(0);
     }
-    // Present is not the same as reachable: the bar has to own the point a
-    // thumb actually lands on, which is how W5 measured it.
-    const box = await page.getByTestId('wsf-member-tab-you').boundingBox();
-    expect(box, 'the You tab has a box').not.toBeNull();
+
+    // 2 · and no deadline: the whole 90 seconds pass and the member is still
+    //     here, on the same screen, still signed in. The duration is the
+    //     product's own; only the clock is driven.
+    await page.clock.runFor(KIOSK_IDLE_MS + 5_000);
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible();
+    expect(page.url()).toContain('/contribute/');
+
+    // 3 · its own way back, present and reachable where a thumb lands — the
+    //     same elementFromPoint method the tab assertion used, because present
+    //     is not reachable.
+    const back = page.getByTestId('wsf-contribute-back');
+    await expect(back).toBeVisible();
+    const box = await back.boundingBox();
+    expect(box, 'the back control has a box').not.toBeNull();
     const hit = await page.evaluate(
       ({ x, y }) => {
         const el = document.elementFromPoint(x, y);
-        return Boolean(el?.closest('[data-testid="wsf-member-tabs"]'));
+        return Boolean(el?.closest('[data-testid="wsf-contribute-back"]'));
       },
       { x: (box?.x ?? 0) + (box?.width ?? 0) / 2, y: (box?.y ?? 0) + (box?.height ?? 0) / 2 }
     );
-    expect(hit, 'an ordinary member can still reach their own tabs').toBe(true);
+    expect(hit, 'an ordinary member can reach their way back').toBe(true);
+
+    /*
+      4 · IT RETURNS TO THE EXACT MOUNTED TAB, NOT TO A COPY OF IT.
+
+      W1B's step 6, now asserted rather than recorded. The previous revision
+      could only record it: `wsf-contribute-back` was a link to
+      `/community/<groupId>`, and following it pushed a SECOND community screen
+      while leaving the original mounted but hidden — measured as two instances
+      with the visible one carrying no marker. The Director released the
+      bounded fix for that (`5792030574`), so Back now pops the focused route
+      and reveals the instance underneath, and this states the strong property.
+
+      `:visible` rather than `.first()`: if the defect ever returns, the first
+      match is the stale hidden screen and `.first()` would wait on a hidden
+      element instead of failing on the claim.
+    */
+    await back.click();
+    await expect(
+      page.locator(`[data-testid="${CONTEXT}"]:visible`).first(),
+      'Back returns the member to their community',
+    ).toBeVisible({ timeout: 40_000 });
+    expect(page.url(), 'and to the right one').toContain(`/community/${fx.groupId}`);
+
+    expect(
+      await page.getByTestId(CONTEXT).count(),
+      'Back left more than one community screen in the document, so it pushed a copy rather than popping',
+    ).toBe(1);
+    expect(
+      await visibleMarkSurvives(page, CONTEXT),
+      'the community screen on show is not the one the member came from',
+    ).toBe(true);
+    /*
+      5 · AND ITS SCROLL COMES BACK WITH IT — ASKED WHERE THERE IS A SCROLL TO
+      ASK ABOUT.
+
+      At 800x1280 this community page does not scroll at all — it fits, with
+      nothing to restore — and it had about thirty pixels of travel before the
+      empty chrome row came out of it. Thirty pixels is inside what a single
+      re-flow can clamp away on the way back: measured, the page came back at 0
+      from a 30, and comes back at 294 from a 294 when there is real travel. An
+      equality asserted at the tablet class would therefore be reporting the
+      re-flow, or nothing at all, and an inequality would be the weaker claim
+      W1B has already caught me making quietly.
+
+      W1B's residual (#436 `5792137856`), accepted, is inside this: an earlier
+      revision of mine read the offset on ARRIVAL, before anything had
+      scrolled, so the recorded pair was 0/0 and proved nothing in either
+      direction. The offset is planted, and the browser's own clamp of it read
+      back, before the member leaves.
+
+      So the journey is made again at a phone height, on the SAME mounted
+      screen — the viewport is resized rather than re-entered, so nothing is
+      remounted and the marker planted at the top of this test still applies —
+      and the claim is exact there: 430px of travel, the offset planted, the
+      clamped value read back, and the value after Back equal to it.
+    */
+    await page.setViewportSize({ width: 390, height: 640 });
     await page.waitForTimeout(500);
-    await saveFrame(page, frame('ordinary-contribution-keeps-its-tabs-tablet-800x1280.png'));
+    const phoneScrolled = await page.evaluate((id) => {
+      let el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+      while (el) {
+        if (el.scrollHeight > el.clientHeight + 1) {
+          el.scrollTop = 240;
+          return el.scrollTop;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    }, CONTEXT);
+    expect(
+      phoneScrolled,
+      'the community page has real travel at a phone height, so the scroll claim can fail',
+    ).toBeGreaterThanOrEqual(100);
+
+    await page.getByTestId(CONTEXT).first().click();
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-contribute-back').click();
+    await expect(
+      page.locator(`[data-testid="${CONTEXT}"]:visible`).first(),
+      'phone height: Back returns the member to their community',
+    ).toBeVisible({ timeout: 40_000 });
+    expect(
+      await page.getByTestId(CONTEXT).count(),
+      'phone height: Back pushed a copy rather than popping',
+    ).toBe(1);
+    expect(
+      await visibleMarkSurvives(page, CONTEXT),
+      'phone height: the community screen on show is not the one the member came from',
+    ).toBe(true);
+    expect(
+      await contextScroll(page, CONTEXT),
+      'its scroll did not come back with it',
+    ).toBe(phoneScrolled);
+
+    // And back to the class this test's frame is taken at.
+    await page.setViewportSize({ width: 800, height: 1280 });
+    await page.waitForTimeout(400);
+
+    await page.waitForTimeout(500);
+    await saveFrame(page, frame('ordinary-contribution-returns-to-its-tab-tablet-800x1280.png'));
   });
 
   test('a repeated ?kiosk parameter is one verdict, not two', async ({ page }) => {
@@ -528,8 +719,15 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     // failing closed must not mean treating every duplicate as a kiosk.
     await page.goto(`/contribute/${fx.goalId}?kiosk=0&kiosk=no`);
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+    /*
+      The bar assertion that used to sit here is gone, not weakened:
+      `/contribute` is barless for everyone now, so it discriminated nothing.
+      The line below already carried "this is ordinary" on its own — a
+      duplicate `?kiosk` with no recognised value must NOT be read as a kiosk,
+      and the absence of the Finish chrome is exactly that claim.
+    */
     await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-contribute-back'), 'and it keeps its ordinary way back').toBeVisible();
   });
 
   test('the boundary: this is in-app confinement, not a device lockdown', async ({ page }) => {

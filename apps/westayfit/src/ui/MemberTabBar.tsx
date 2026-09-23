@@ -1,7 +1,6 @@
-import { usePathname, useGlobalSearchParams, useRouter } from 'expo-router';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Fragment } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isKioskFlag } from '../kioskSession';
 import { ACTION_GREEN, CARD_BORDER, CREAM, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
@@ -42,11 +41,21 @@ import { TabGlyph } from './TabGlyph';
  * PROGRESS KEEPS THE /activity ROUTE. The destination is renamed, not rebuilt;
  * renaming the route as well would be a redirect and a migration for a label.
  */
+/**
+ * THE FOUR DESTINATIONS, AND THE NAVIGATOR ROUTE EACH ONE IS.
+ *
+ * `name` is the route inside the `(tabs)` group, not a URL: the navigator
+ * decides which tab is focused, so the bar no longer has to infer it from the
+ * pathname. `match` and `href` are kept because they are the honest statement
+ * of which addresses belong to which destination — Home covers `/` AND
+ * `/community/<id>`, because `/` resolves to the member's community and the
+ * detail IS Home — and because tests and callers still read them.
+ */
 export const MEMBER_TABS = [
-  { key: 'home', label: 'Home', href: '/', match: (p: string) => p === '/' || p.startsWith('/community/') },
-  { key: 'community', label: 'Community', href: '/community', match: (p: string) => p === '/community' },
-  { key: 'activity', label: 'Progress', href: '/activity', match: (p: string) => p.startsWith('/activity') },
-  { key: 'you', label: 'You', href: '/you', match: (p: string) => p.startsWith('/you') },
+  { key: 'home', name: '(home)', label: 'Home', href: '/', match: (p: string) => p === '/' || p.startsWith('/community/') },
+  { key: 'community', name: 'community', label: 'Community', href: '/community', match: (p: string) => p === '/community' },
+  { key: 'activity', name: 'activity', label: 'Progress', href: '/activity', match: (p: string) => p.startsWith('/activity') },
+  { key: 'you', name: 'you', label: 'You', href: '/you', match: (p: string) => p.startsWith('/you') },
 ] as const;
 
 /** Where the raised control in the middle of the bar goes. */
@@ -56,17 +65,22 @@ export const MOVE_HREF = '/move';
  * The surfaces the shell belongs on. Everything else is either an event
  * surface, a public screen, or a step on the way to having an account.
  */
-const SHELL_PREFIXES = ['/community', '/contribute', '/goals', '/activity', '/you', '/start-community', '/join'];
+const SHELL_PREFIXES = ['/community', '/activity', '/you'];
 /**
- * `/move` EXACTLY, AND NEVER `/move/<goalId>`.
+ * NOTHING IS AN EXACT-MATCH MEMBER SURFACE ANY MORE.
  *
- * The resolver at /move is a member surface and wears the shell. The player at
- * /move/<goalId> is an event surface and must not: a tab bar over the player
- * puts four ways to leave under a person's thumb in the middle of a round.
- * Adding '/move' to the prefix list would have covered both, which is why it
- * is an exact match instead.
+ * `/move` used to be listed here, which is why the bar was drawn over the MOVE
+ * resolver and the raised MOVE control rendered BENEATH the MOVE page — a
+ * control offering to take a member where they already were. MOVE is a focused
+ * flow now, presented over the tab navigator, and `/contribute`, `/goals`,
+ * `/start-community` and `/join` left the prefix list for the same reason:
+ * they are flows a member is inside, not destinations they navigate between.
+ *
+ * The list stays rather than being deleted because `shellAppliesTo` is still
+ * the shared statement of which addresses are member destinations, and an
+ * empty exact-match list is a fact worth reading rather than an absence.
  */
-const SHELL_EXACT = ['/move'];
+const SHELL_EXACT: string[] = [];
 
 /**
  * A KIOSK SESSION IS NOT A MEMBER SURFACE, WHATEVER ITS PATH.
@@ -94,6 +108,17 @@ const SHELL_EXACT = ['/move'];
  */
 export type ShellRouteParams = { kiosk?: unknown };
 
+/**
+ * WHAT THIS PREDICATE IS FOR NOW.
+ *
+ * The bar is rendered by the tab navigator, so a route outside the `(tabs)`
+ * group structurally cannot have one — no predicate decides it any more. That
+ * makes this DEFENCE IN DEPTH rather than the only guard, and it is kept
+ * deliberately: it is the shared statement of which addresses are member
+ * destinations, the kiosk rule it carries was hardened in response to a real
+ * measured exposure, and deleting a predicate another lane hardened is not a
+ * cleanup. Its tests are unchanged.
+ */
 export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boolean {
   if (isKioskFlag(params?.kiosk)) return false;
   if (pathname === '/') return true;
@@ -101,31 +126,50 @@ export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boo
   return SHELL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
-  const pathname = usePathname() || '/';
-  // The bar lives in the root layout, above every screen, so the route's OWN
-  // parameters are not in scope here -- `useGlobalSearchParams` is the hook
-  // that reports the focused route's parameters to chrome rendered outside it.
-  const params = useGlobalSearchParams();
-  const router = useRouter();
+/**
+ * THE BAR IS A react-navigation `tabBar` NOW, NOT A VIEW OVER A FLAT STACK.
+ *
+ * That is the substantive change, and two of the owner's findings fall
+ * directly out of the line it replaces. The bar used to live in the ROOT
+ * layout above a flat Stack and move between destinations with
+ * `router.replace(tab.href)`:
+ *
+ *   RELOAD ON RESELECT. `replace` was called unconditionally, including when
+ *   the pressed tab was already showing. Replacing a route with itself tears
+ *   the screen down and builds it again, so the page reloaded, the scroll
+ *   position was lost and every read on that screen ran a second time. The
+ *   member tapped the icon for the page they were already looking at and the
+ *   app threw the page away.
+ *
+ *   NOTHING SURVIVED A TAB SWITCH EITHER. A flat Stack holds one screen, so
+ *   Home -> Community -> Home unmounted Home, mounted Community, unmounted
+ *   Community and mounted a brand-new Home — which is why coming back showed a
+ *   skeleton rather than the page the member left.
+ *
+ * A real tab navigator fixes both at the root: each tab is its own screen,
+ * kept mounted once visited, and the handler below simply does not navigate
+ * when the pressed tab is already focused.
+ *
+ * WHAT A SECOND TAP DOES NOT DO. It does not scroll to top and it does not
+ * refresh. react-navigation's default `tabPress` pops the focused tab's stack
+ * to its root, which is a navigation, so the default is suppressed rather than
+ * inherited: the active tab is a NO-OP that preserves scroll and loaded state.
+ *
+ * MOVE IS NOT ONE OF THE ROUTES IN THIS LIST. It is handed in as `onMove`
+ * rather than being a tab screen, which is what makes it structurally
+ * incapable of ever rendering a selected state.
+ */
+export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBarProps & { onMove: () => void }) {
   const { width } = useWindowDimensions();
-  // SAFE AREA, FROM THE PLATFORM RATHER THAN A GUESS. The previous version
-  // hard-coded 20px of bottom padding for "a modern phone", which is wrong on
-  // every device that is not that phone. `react-native-safe-area-context` is
-  // already a dependency and reports the real inset (0 in a browser).
-  const insets = useSafeAreaInsets();
   /**
    * AT 200% TEXT ZOOM THE FOUR DESTINATIONS WRAP INSTEAD OF CLIPPING.
    *
    * At ~195px of usable width each tab gets about 48px, and "Community" does
    * not fit in 48px at any weight — it is one word, so it cannot wrap inside
-   * its own tab. The first version of this bar simply overflowed the right
-   * edge, which the 195px accessibility check caught. Below 260px the bar
-   * becomes two rows of two: all four destinations stay reachable and nothing
-   * runs off the screen.
+   * its own tab. Below 260px the bar becomes two rows of two: all four
+   * destinations stay reachable and nothing runs off the screen.
    */
   const narrow = width < 260;
-  if (!signedIn || !shellAppliesTo(pathname, params)) return null;
   return (
     <View
       style={[styles.bar, { paddingBottom: 10 + insets.bottom }, narrow ? styles.barWrapped : null]}
@@ -134,13 +178,33 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
       accessibilityLabel="Main"
     >
       {MEMBER_TABS.map((tab, index) => {
-        const active = tab.match(pathname);
+        const routeIndex = state.routes.findIndex((r) => r.name === tab.name);
+        const route = state.routes[routeIndex];
+        const active = state.index === routeIndex;
         return (
           <Fragment key={tab.key}>
           <Pressable
-            // `replace`, not `push`: a tab bar that stacks history gives the
-            // back button a trail of tab presses instead of the way home.
-            onPress={() => router.replace(tab.href)}
+            onPress={() => {
+              /**
+               * THE NO-OP, STATED ONCE AND EARLY. Pressing the tab you are on
+               * does nothing at all: no navigation, no event emitted, no
+               * pop-to-top. Everything below is skipped, so there is no path
+               * by which a second tap can reach the router.
+               */
+              if (active) return;
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route?.key,
+                canPreventDefault: true,
+              });
+              if (event.defaultPrevented) return;
+              /**
+               * `navigate`, not `push` and not `replace`. Within a tab
+               * navigator `navigate` moves focus to a sibling that is already
+               * mounted; it does not stack an entry of its own.
+               */
+              navigation.navigate(route?.name ?? tab.name);
+            }}
             style={[styles.tab, narrow ? styles.tabHalf : null]}
             testID={`wsf-member-tab-${tab.key}`}
             accessibilityRole="link"
@@ -158,8 +222,7 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
               ACTIVE IS SAID THREE WAYS: a filled pill behind the glyph, the
               glyph and label in navy rather than muted, and the label at a
               heavier weight. Shape and weight both carry it, so the current
-              destination survives greyscale and colour-blindness — the 3px
-              rule this replaces carried it in colour alone.
+              destination survives greyscale and colour-blindness.
             */}
             <View style={[styles.glyphWrap, active ? styles.glyphWrapActive : null]}>
               <TabGlyph name={tab.key} color={active ? NAVY : TEXT_MUTED} />
@@ -169,17 +232,15 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
           {/*
             The raised control's slot. Without it the circle overlapped the
             destinations either side of the middle, because four tabs spread
-            evenly leave a gap narrower than the control. An empty View of the
-            control's width holds the space open and keeps the four tabs
-            evenly weighted.
+            evenly leave a gap narrower than the control.
           */}
           {!narrow && index === 1 ? (
             <View style={styles.moveSlot}>
               <Pressable
-                onPress={() => router.replace(MOVE_HREF)}
+                onPress={onMove}
                 style={styles.move}
                 testID="wsf-member-tab-move"
-                accessibilityRole="link"
+                accessibilityRole="button"
                 accessibilityLabel="Move: record what you did"
               >
                 <Text style={styles.moveText}>MOVE</Text>

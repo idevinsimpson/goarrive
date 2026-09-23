@@ -499,7 +499,14 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('wsf-contribute-home')).toBeVisible();
     await expect(page.getByTestId('wsf-kiosk-finish-bar')).toHaveCount(0);
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+    /*
+      The member-bar assertion that used to sit here is gone, not weakened:
+      `/contribute` is a focused flow with no bar for anybody now, so it
+      discriminated nothing. The two lines above are this case's real
+      discriminators -- the screen's own way on, and no kiosk Finish bar -- and
+      they are untouched. (Director ruling 2, `5789966395`; the occurrence was
+      found by W1B, `5789870757`, after my own reservation missed it.)
+    */
 
     await page.goto(`/contribute/${fx.closedGoalId}`);
     await expect(page.getByTestId('wsf-contribute-closed')).toBeVisible({ timeout: 40_000 });
