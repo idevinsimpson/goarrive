@@ -527,15 +527,30 @@ export function GoalNextRefusedTarget({ compact }: { compact: boolean }) {
   return (
     <Screen compact={compact} testID="wsf-gsnext-refused">
       <ScrolledFrom label="3 · How members take part — one contribution per member" />
+      {/*
+        THE CLAIM IS SCOPED TO WHAT WAS DEMONSTRATED, not spread over every
+        unhappy path. It is safe HERE and only here: `permission-denied` is
+        raised inside `runTransaction` before `tx.set`, so the server answered
+        AND answered before it wrote. The sentence names the refusal that
+        makes it true rather than asserting the outcome on its own, which is
+        what keeps it from becoming the blanket "nothing was created" the
+        unconfirmed state must never inherit.
+      */}
       <Banner
         tone="error"
         title="We couldn’t start your goal."
-        body="Only a Champion of this community can start a goal here. Nothing was started."
+        body="Only a Champion of this community can start a goal here. The server refused this request, so no goal was created."
       />
       <CommitPanel
         compact={compact}
         submit={
           <>
+            {/*
+              ACTIONABLE, and pointed at the one thing that can change the
+              answer. The control the server just refused is NOT redrawn: it
+              would refuse the identical request again until this account is a
+              Champion here.
+            */}
             <Secondary label="Back to community" onNavy />
             <Text style={s.commitNote}>
               Starting a goal here needs a Champion of {COMMUNITY}.
@@ -548,17 +563,39 @@ export function GoalNextRefusedTarget({ compact }: { compact: boolean }) {
 }
 
 /**
- * UNCONFIRMED. The client did not get an answer, so it says exactly that and
- * nothing more: no "nothing was started", no "safe to try again", and no
- * second create sent on the Champion's behalf. The action that RESOLVES the
- * uncertainty is promoted; the one that might duplicate is demoted to a
- * secondary the Champion has to choose, with the consequence written next to
- * it rather than left in a banner they have scrolled past.
+ * UNCONFIRMED — THE RECOVERY STATE, TO THE DIRECTOR'S CONTRACT (`5787676653`).
  *
- * NO IDEMPOTENCY IS CLAIMED, because there is none: `wsfCreateGoal` takes no
- * attempt key and the route enforces no one-open-goal rule, so a create
- * retried after a lost response makes a second goal. That is a finding, not
- * something this target quietly designs around.
+ * The client did not get an answer, so it says exactly that and nothing more:
+ * no "nothing was created", no "safe to try again", and no second create
+ * sent on the Champion's behalf.
+ *
+ * W7 measured this independently in a browser at `a193b43` (evidence
+ * `e6a208a`, checkpoint `5787648446`): abort-before-send and
+ * commit-with-lost-response render the IDENTICAL sentence word for word while
+ * the server holds 0 goals in one case and 1 in the other — so a Champion who
+ * obeys "Please try again." after a committed-but-unconfirmed submit ends up
+ * with two goals, two ids, one title. That is not a hypothesis about the code
+ * any more; it is a photographed outcome.
+ *
+ * THE FOUR THINGS THIS FRAME IS REQUIRED TO GET RIGHT:
+ *
+ *   1. The sentence is the unknown one, verbatim.
+ *   2. The primary RESOLVES the uncertainty and is community-level:
+ *      `Check community goals` -> `/community/<groupId>`, using the groupId
+ *      the route already validated from its own param. W7 confirmed that page
+ *      already links to the goal that was created, so this is a real way back
+ *      to it and not a promise the product cannot keep. NO id is inferred
+ *      from the title and NO matching-name goal is selected automatically.
+ *   3. Any fresh create is `Start another goal` — its own words, subordinate,
+ *      deliberate, never an automatic retry, with the duplicate consequence
+ *      beside it rather than in a banner already scrolled past.
+ *   4. Nothing here promises the draft or the receipt survives a reload,
+ *      because nothing in the route makes that true.
+ *
+ * NO IDEMPOTENCY IS CLAIMED and no attempt key is asked for: `wsfCreateGoal`
+ * writes a fresh auto-id per call and the route enforces no one-open-goal
+ * rule. The frontend answer to a backend gap is to stop asserting what it
+ * cannot observe, not to design around it.
  */
 export function GoalNextUnconfirmedTarget({ compact }: { compact: boolean }) {
   return (
@@ -566,17 +603,18 @@ export function GoalNextUnconfirmedTarget({ compact }: { compact: boolean }) {
       <ScrolledFrom label="3 · How members take part — one contribution per member" />
       <Banner
         tone="unknown"
-        title="We couldn’t confirm your goal was started."
-        body="It may have been started anyway. Check your community’s goals before you start another one."
+        title="We couldn’t confirm your goal was created."
+        body="It may have been created anyway. Starting another one could create a duplicate."
       />
-      <Primary label="Check your community’s goals" />
+      {/* -> /community/<groupId>, the route's own validated param. */}
+      <Primary label="Check community goals" />
       <CommitPanel
         compact={compact}
         submit={
           <>
-            <Secondary label="Start this goal anyway" onNavy />
+            <Secondary label="Start another goal" onNavy />
             <Text style={s.commitNote}>
-              This starts a new, separate goal. If the first one was started, your community will
+              This starts a new, separate goal. If the first one was created, your community will
               have two.
             </Text>
           </>
@@ -596,6 +634,14 @@ export function GoalNextUnconfirmedTarget({ compact }: { compact: boolean }) {
  * cream, never in progress green, and there is no ratio, bar or count
  * anywhere on it: nobody has contributed yet, and a Living WE here would be
  * a picture of a number that does not exist.
+ *
+ * THE ID ON THIS SCREEN IS THE SERVER'S. `Open the contribute page` resolves
+ * to `/contribute/<goalId>` from the callable's own response, held while this
+ * confirmed receipt is in memory. Nothing here infers an id from the title or
+ * picks a goal whose name happens to match, and nothing promises the receipt
+ * survives a reload — the route keeps it in component state and a reload
+ * loses it. Recovery after a reload is the unconfirmed frame's job, through
+ * the community, not this screen's through a guess.
  */
 export function GoalNextCreatedTarget({ compact }: { compact: boolean }) {
   return (

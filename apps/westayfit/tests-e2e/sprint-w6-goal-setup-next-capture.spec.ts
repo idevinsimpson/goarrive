@@ -84,12 +84,13 @@ test.describe('the /goals/new proposal', () => {
 
       // ---- the claims these drawings exist to make -----------------------
 
-      // ONE. The unconfirmed state exists at all, and states uncertainty.
-      // The per-frame checks below prove it does not also assert an outcome.
+      // ONE. The unconfirmed state exists at all, and states uncertainty in
+      // the Director's own words (`5787676653`). The per-frame checks below
+      // prove it does not also assert an outcome it cannot observe.
       await expect(
-        page.getByText('We couldn’t confirm your goal was started.').first(),
+        page.getByText('We couldn’t confirm your goal was created.', { exact: true }).first(),
       ).toBeVisible();
-      await expect(page.getByText('Check your community’s goals').first()).toBeVisible();
+      await expect(page.getByText('Check community goals', { exact: true }).first()).toBeVisible();
       await expect(
         page.getByText('This starts a new, separate goal.', { exact: false }).first(),
       ).toBeVisible();
@@ -113,9 +114,9 @@ test.describe('the /goals/new proposal', () => {
       // and the control that starts the goal is INSIDE it — the whole point
       // of the commit panel.
       const commit = page.getByTestId('wsf-gsnext-commit').first();
-      await expect(commit.getByText('Check it over')).toBeVisible();
+      await expect(commit.getByText('Check it over', { exact: true })).toBeVisible();
       await expect(commit.getByText('This is what your community will see.')).toBeVisible();
-      await expect(commit.getByText('Start this goal')).toBeVisible();
+      await expect(commit.getByText('Start this goal', { exact: true })).toBeVisible();
 
       // FIVE. No Living WE anywhere in setup, and no contributed total: a
       // goal that does not exist yet has no confirmed shared total, and one
@@ -126,7 +127,7 @@ test.describe('the /goals/new proposal', () => {
       ).toBe(0);
 
       // SIX. The created state is a success and is worded as one.
-      await expect(page.getByText('Your goal is live').first()).toBeVisible();
+      await expect(page.getByText('Your goal is live', { exact: true }).first()).toBeVisible();
 
       await saveFrame(
         page.getByTestId('wsf-contact-gsnext'),
@@ -154,7 +155,7 @@ test.describe('the /goals/new proposal', () => {
               not at 390x640: that viewport ends inside the third field.
             */
             const fold = await frameFoldY(frame);
-            const payoff = await bottomY(frame.getByText('30,000 squats'));
+            const payoff = await bottomY(frame.getByText('30,000 squats', { exact: true }));
             // eslint-disable-next-line no-console
             console.log(`[gsnext] ${c} payoff bottom ${Math.round(payoff)} / fold ${Math.round(fold)}`);
             expect(
@@ -185,14 +186,16 @@ test.describe('the /goals/new proposal', () => {
               frame is about, so the fold is measured rather than eyeballed.
             */
             const fold = await frameFoldY(frame);
-            const button = await bottomY(frame.getByText('Start this goal', { exact: true }));
+            const button = await bottomY(
+              frame.getByText('Start this goal', { exact: true }),
+            );
             // eslint-disable-next-line no-console
             console.log(`[gsnext] ${c} submit bottom ${Math.round(button)} / fold ${Math.round(fold)}`);
             expect(
               button,
               `the commit control is clipped at ${c}, which is the defect this frame claims to fix`,
             ).toBeLessThan(fold);
-            await expect(frame.getByText('Harbor Walkers')).toBeVisible();
+            await expect(frame.getByText('Harbor Walkers', { exact: true })).toBeVisible();
             await expect(frame.getByText('One contribution per member').first()).toBeVisible();
           }
 
@@ -204,46 +207,89 @@ test.describe('the /goals/new proposal', () => {
               await frame.getByText('Starts today at', { exact: false }).count(),
               'the Custom frame draws a derived start line the route does not render in Custom',
             ).toBe(0);
-            await expect(frame.getByText('Ends Sunday, Nov 15 at 6:00 PM')).toBeVisible();
+            await expect(frame.getByText('Ends Sunday, Nov 15 at 6:00 PM', { exact: true })).toBeVisible();
           }
 
           if (id === 'refused') {
             // The server answered and will answer the same way again, so the
             // action it refused is not offered a second time.
-            await expect(frame.getByText('Only a Champion of this community', { exact: false })).toBeVisible();
+            await expect(
+              frame.getByText('Only a Champion of this community', { exact: false }).first(),
+            ).toBeVisible();
             expect(
               await frame.getByText('Start this goal', { exact: true }).count(),
               'the refusal still offers the action the server just refused',
             ).toBe(0);
+            // The refusal stays SEPARATE and ACTIONABLE, and its claim is
+            // tied to the refusal that makes it true rather than floated as
+            // a blanket statement about every unhappy path.
+            await expect(
+              frame.getByText('The server refused this request, so no goal was created.', {
+                exact: false,
+              }).first(),
+            ).toBeVisible();
+            await expect(frame.getByText('Back to community', { exact: true })).toBeVisible();
+            expect(
+              await frame.getByText('Start another goal', { exact: false }).count(),
+              'the refusal offers a fresh create the server has already refused',
+            ).toBe(0);
           }
 
           if (id === 'unconfirmed') {
-            // The retry says what it STARTS, and the duplicate risk sits
-            // beside it rather than in a banner the reader has scrolled past.
-            await expect(frame.getByText('Start this goal anyway')).toBeVisible();
+            /*
+              THE DIRECTOR'S RECOVERY CONTRACT (`5787676653`), asserted point
+              by point so a later edit cannot soften any of it back.
+              W7 measured the defect it answers in a browser: evidence
+              `e6a208a`, checkpoint `5787648446`.
+            */
+            // The uncertainty is stated in the words the Director gave.
             await expect(
-              frame.getByText('you will', { exact: false }).or(frame.getByText('will have two', { exact: false })).first(),
+              frame.getByText('We couldn’t confirm your goal was created.', { exact: true }),
             ).toBeVisible();
+            // The resolving action is promoted, and it is COMMUNITY-level:
+            // it must not name a goal, because no id may be inferred.
+            await expect(frame.getByText('Check community goals', { exact: true })).toBeVisible();
+            // A fresh create is its own deliberate thing, in its own words.
+            await expect(frame.getByText('Start another goal', { exact: true })).toBeVisible();
+            await expect(frame.getByText('will have two', { exact: false }).first()).toBeVisible();
             expect(
               await frame.getByText('Try again', { exact: false }).count(),
               'the retry still reads as a free replay of the request that was lost',
             ).toBe(0);
-            // The sentence the REFUSAL is allowed to say and this frame is
-            // not: the client did not get an answer, so it knows nothing
-            // about the server's state.
-            expect(
-              await frame.getByText('Nothing was started', { exact: false }).count(),
-              'the unconfirmed frame asserts an outcome the client cannot observe',
-            ).toBe(0);
+            /*
+              THE SENTENCES ONLY A DEMONSTRATED REFUSAL MAY SAY. The client
+              did not get an answer here, so it knows nothing about the
+              server's state and may not imply that it does — in either
+              direction. Each is named exactly rather than matched loosely,
+              so this fails on the wording it is about and not on a phrase
+              that merely contains the same words.
+            */
+            for (const forbidden of [
+              'Nothing was created',
+              'Nothing was started',
+              'no goal was created',
+              'no goal was started',
+            ]) {
+              expect(
+                await frame.getByText(forbidden, { exact: false }).count(),
+                `the unconfirmed frame claims "${forbidden}", which it cannot observe`,
+              ).toBe(0);
+            }
             expect(
               await frame.getByText('safe to', { exact: false }).count(),
               'the unconfirmed frame promises the retry is safe; the callable has no attempt key',
             ).toBe(0);
+            // Nothing here may promise the draft or receipt survives a
+            // reload: the route holds both in component state.
+            expect(
+              await frame.getByText('saved', { exact: false }).count(),
+              'the unconfirmed frame promises persistence the route does not have',
+            ).toBe(0);
           }
 
           if (id === 'created') {
-            await expect(frame.getByText('Open the contribute page')).toBeVisible();
-            await expect(frame.getByText('Your goal is live')).toBeVisible();
+            await expect(frame.getByText('Open the contribute page', { exact: true })).toBeVisible();
+            await expect(frame.getByText('Your goal is live', { exact: true })).toBeVisible();
           }
 
           await saveFrame(frame, path.join(TARGET_OUT, `PROPOSED-${id}-${c}.png`));
