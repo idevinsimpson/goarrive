@@ -1683,3 +1683,94 @@ unreachable in kiosk mode, which is the product's own doing and W1B's to speak
 for. The clause matters *before* something on a kiosk-reachable screen converts
 the same way, which is the point W1B made and the reason it was worth closing
 now rather than after.
+
+---
+
+## PACKET — the staging verifier's candidate-addition change (L0 `5797498066`)
+
+**Verification head** `b81d6c654e5f7df15e3be27317cf2320a5a32a37`
+(`claude/wsf-staging-verifier-social-inventory`), W3's source
+`d794c61e42eb5442b59ae5d28afc2c1a76de53a5`, operational base `main`
+`340e1417a8c0a2c9c9a4b0a3a414f3d96b5574bc`. All printed by `rev-parse` this
+session; the three files are blob-identical between the two heads
+(`b75ea3ff…`, `d19333738…`, `c07e9b8d…`), and `approved-candidate.json`
+(`700c3cf0…`), `read-inventory.mjs` (`1cb729f1…`) and
+`workflow-contract.test.mjs` (`d2791bdd…`) are byte-identical to `main`.
+
+Harness: `docs/westayfit/qa/sprint-w5-verifier-social-inventory-verify.mjs`,
+written from the verifier's own contract rather than from W3's test file, and
+driving **both** the old verifier (`5e40cf7d…`) and the new one — a suite that
+exercises only the new script cannot establish a difference between them.
+
+### Result: 24 cases, 0 FAIL
+
+Items 1, 2, 3 and 4 PASS. Item 4a **confirms** the Director's rollback
+concern rather than refuting it.
+
+### The rollback answer (item 4)
+
+Dropping `candidateAddedFunctions` while the three services remain deployed
+gives `EXPECTED_INVENTORY=46` against `INVENTORY_AFTER=49` and is **rejected**
+(`present but not expected: wsfcommunityactivity, wsfcommunitymembers,
+wsfsetcommunityvisibility`). `expectedPriorFunctions: 49` alone does **not**
+widen the expected inventory — measured at 46. So a rollback re-pin must
+either keep the key, or actually remove the three services; removing them is
+itself caught as a loss (`present before this deploy and now gone`), which is
+the check working.
+
+### The instrument was wrong first, and the control caught it
+
+The first run reported **3 FAIL, including case 1a — the control**, which
+asserts the OLD verifier passes the clean 46-set. A failing control means the
+harness is wrong, not the subject. `startMock` derived the Cloud Run service
+list from a function list that had **already** been mapped to API resources,
+so every service name came out malformed and the verifier correctly reported
+the whole inventory missing. Names in, mapped once, fixed; the control then
+passed and the two real cases with it. Had the control been omitted, the two
+genuine passes would have been reported as verifier defects.
+
+### Mutation-proved
+
+| Mutation of the verifier | Caught by | Other cases affected |
+| --- | --- | --- |
+| drop the "authorized addition did not deploy" loop | 2b | none |
+| a parse error returns `[]` instead of exiting | 2i-1, 2i-2 | none |
+| drop the service-name regex | 2i-5 | none |
+| resolve the approval from the working directory | 3a | none |
+
+### Release blockers (item 5) — all three confirmed from `main` source
+
+1. `firebase deploy --only functions:westayfit` — the whole codebase, **no
+   per-function selection**.
+2. The workflow never deploys Firestore indexes. Stated carefully because a
+   careless grep contradicts it: the `--only firestore` at line 260 is
+   `emulators:exec --only firestore` for the GoArrive rules regression, not a
+   deploy. The only `firebase deploy` is the functions one; Hosting goes
+   through `hosting:channel:deploy`.
+3. `firebase.westayfit.staging.json` has **no** `/community/*/members`
+   rewrite. `/community/*/challenge` is index 0 and `/community/**` is index
+   1, so `/community/<id>/members` falls through the catch-all to the
+   community home — **not a 404**, exactly as reported. A new rewrite must sit
+   ahead of the catch-all.
+
+### Item 7 — reproduced, and the counts reconciled to the right head
+
+`run-all.mjs` exits **0**, "all suites passed", on both heads. The packet's
+expected "14 suites, 335 assertions" belongs to **`d794c61e`**, not to
+`b81d6c6`:
+
+| head | suites | self-counted + node:test | exit |
+| --- | --- | --- | --- |
+| `d794c61e` (W3's branch) | 14 | 240 + 95 = **335** | 0 |
+| `b81d6c6` (the main-based draft) | 13 | 231 + 66 = **297** | 0 |
+
+The difference is exactly one suite, `mail-binding.test.mjs`, which arrives
+with #393 and is not on `main`. W3's figures are right for its own branch; the
+packet attached them to a head that cannot produce them. Not a defect.
+
+### Not established
+
+`VERIFY=pass` with the new callables' transport reported SHUT does **not**
+establish a working member feature (item 6) — that needs the separately
+authorized transport step and a member / non-member / privacy smoke. No live
+call, secret, deploy or dispatch was made, and nothing here folds into #393.
