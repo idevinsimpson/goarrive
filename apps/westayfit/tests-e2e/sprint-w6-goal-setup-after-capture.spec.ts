@@ -146,6 +146,28 @@ async function scrollFormToEnd(page: Page): Promise<void> {
   await page.waitForTimeout(150);
 }
 
+/**
+ * Board 00 gives primary actions ACTION_GREEN and reserves PROGRESS_GREEN for
+ * confirmed progress — the colour the Living WE speaks in. The Director ruled
+ * on it for this route (F6), so the fill is asserted rather than left to a
+ * pixel review: a later edit that reaches for `kit.primaryButton` here fails
+ * before a frame is written.
+ */
+const ACTION_GREEN_RGB = 'rgb(34, 197, 94)';
+const PROGRESS_GREEN_RGB = 'rgb(145, 203, 125)';
+
+async function backgroundOf(page: Page, testId: string): Promise<string> {
+  return page
+    .getByTestId(testId)
+    .evaluate((el: Element) => getComputedStyle(el as HTMLElement).backgroundColor);
+}
+
+async function expectActionGreen(page: Page, testId: string, at: string): Promise<void> {
+  const bg = await backgroundOf(page, testId);
+  expect(bg, `${at}: ${testId} is not the action green`).toBe(ACTION_GREEN_RGB);
+  expect(bg, `${at}: ${testId} wears the confirmed-progress green`).not.toBe(PROGRESS_GREEN_RGB);
+}
+
 async function shoot(page: Page, name: string): Promise<void> {
   await saveFrame(page, path.join(OUT, `${name}.png`));
 }
@@ -253,6 +275,7 @@ for (const [cls, viewport] of [
       await expect(summary).toContainText('One contribution per member');
       const submit = page.getByTestId('wsf-new-goal-submit');
       await expect(submit).toHaveText('Start this goal');
+      await expectActionGreen(page, 'wsf-new-goal-submit', cls);
       // Whole, not clipped: the control that agrees to the review is on
       // screen with it, which is the defect the target exists to fix.
       await expect(submit).toBeInViewport();
@@ -343,6 +366,13 @@ for (const [cls, viewport] of [
       await expect(check).toHaveText('Check community goals');
       await expect(check).toHaveAttribute('href', `/community/${fx.groupId}`);
       await expect(check).toBeInViewport();
+      await expectActionGreen(page, 'wsf-new-goal-check-goals', cls);
+      // And the demoted retry is still NOT an action: promoting it with the
+      // same fill would undo the whole point of demoting it.
+      expect(
+        await backgroundOf(page, 'wsf-new-goal-submit'),
+        `${cls}: the deliberate second create is dressed as a primary action`,
+      ).not.toBe(ACTION_GREEN_RGB);
       // A fresh create is its own deliberate thing, with the consequence
       // beside it — and it is NOT sent on the Champion's behalf.
       await expect(page.getByTestId('wsf-new-goal-submit')).toHaveText('Start another goal');
@@ -396,6 +426,7 @@ for (const [cls, viewport] of [
         'href',
         `/contribute/${goalId}`,
       );
+      await expectActionGreen(page, 'wsf-new-goal-goto-contribute', cls);
       await expect(created).toContainText('Your goal is live');
       await expect(created).toContainText('30,000 squats');
       // The phrase is the TARGET, not a total: nobody has contributed yet.

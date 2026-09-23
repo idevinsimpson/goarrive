@@ -135,7 +135,8 @@ duration pills, the review-and-commit as one navy object, and the three truthful
 a foot reserve so nothing on this route ends under the floating member tab bar. Two things the
 drawings did not settle were decided in code and are written up in `findings.md` F1: which
 failure codes count as a refusal rather than an unknown result, and which refusals take the
-submit control away. The route keeps its current `PROGRESS_GREEN` primary until F6 is ruled on.
+submit control away. F6 has since been ruled on (`5788849410`) and the three primary calls to
+action carry `ACTION_GREEN`, as the accepted target drew them.
 
 ## The producer writes nothing unless asked
 

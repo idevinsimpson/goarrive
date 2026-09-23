@@ -7,10 +7,11 @@ below now also says what actually happened to it.
 
 | | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 |
 |---|---|---|---|---|---|---|---|---|
-| | fixed | fixed | fixed | fixed | fixed | **held — awaiting the F6 ruling** | still reported | still reported |
+| | fixed | fixed | fixed | fixed | fixed | fixed | still reported | still reported |
 
-F6 is deliberately not fixed: the release said to keep the route's current fill until the
-Director rules on it. F7 and F8 are outside what this packet was released to change.
+F6 was held at the route's current fill while it was unruled, then ruled on in the AFTER verdict
+(`5788849410`) and fixed: the three primary calls to action carry `ACTION_GREEN`. F7 and F8 are
+outside what this packet was released to change.
 
 ## F1 — a lost response makes a second goal, and nothing on the client can tell
 
@@ -140,9 +141,20 @@ restate what the Living WE is saying about the shared total"*. This route has no
 it, so nothing is wrong on this screen today — but the token contract is not being kept, and
 `/goals/new` is where a Champion's eye is trained on what green means.
 
-**Drawn as:** `ACTION_GREEN` with `ON_ACTION` ink on every primary in the proposal. **This is
-the one token substitution in the checkpoint** and it is called out here so a verdict can accept
-the layout and refuse this, or the reverse.
+**Drawn as:** `ACTION_GREEN` with `ON_ACTION` ink on every primary in the proposal, called out
+so a verdict could accept the layout and refuse this, or the reverse.
+
+**Ruled and implemented.** The Director confirmed it in the AFTER verdict (`5788849410`): Board
+00 reserves the progress green for confirmed progress, and primary actions take `ACTION_GREEN`
+`#22C55E`. All three primaries on this route now carry it — **Start this goal**, **Check
+community goals**, **Open the contribute page** — on a route-local style, not an edit to
+`kit.primaryButton`. The fill is asserted by the producer, so it cannot regress silently.
+
+**One primary was deliberately left alone:** `wsf-new-goal-home` (*Go to your communities*), the
+arrival guard shown when the route is opened with no community. The ruling enumerated three
+CTAs, the release said "no other visual change", and that state has no TARGET or AFTER frame —
+so changing it would move a surface nobody reviewed. It is the one control on this route still
+wearing the progress green, and it is a one-line change whenever that is wanted.
 
 ## F7 — the signed-out state carries no `testID`
 
