@@ -501,3 +501,229 @@ test('an unresolved attempt survives the visitor leaving, and kiosk-owned state 
   // B never sees A's row, and the reconcile offer is A's alone.
   await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveCount(0);
 });
+
+// ---- CASE 4 ---------------------------------------------------------------
+/*
+  THE CONTRACT, NOT THE LOCATOR.
+
+  The obvious way to "fix" the seam is to stop rendering the shell over
+  /contribute, and the obvious way to verify that is to assert the bar's
+  testID is gone. Both are traps: the first breaks ordinary member navigation
+  (CASE 5 is the control that catches it), and the second passes for any
+  rename, any restyle, and any bar that is merely moved offscreen while still
+  reachable by a tab press.
+
+  So this asks the question the contract is actually about: from the kiosk's
+  contribution screen, is there ANY hit-testable control that is not part of
+  the kiosk session? It enumerates every interactive element on the page,
+  keeps the ones a thumb can actually reach, and allows only the screen's own
+  content and the kiosk's own controls. A bar under another name, a drawer, a
+  wordmark that navigates — all of them fail this, and none of them fail a
+  locator check.
+*/
+test('nothing hit-testable on the kiosk contribution screen leads out of the kiosk session', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  // W5-K4. Expected to fail while the seam is open; `fail`, not `skip`, so the
+  // body runs and this becomes ordinary passing coverage the day a patch lands.
+  test.fail();
+  const fx = await seedBase('contract');
+  await walkUpAndSignIn(page, fx);
+
+  const offenders = await page.evaluate(() => {
+    const within = (el: Element, sel: string) => Boolean(el.closest(sel));
+    // The screen's own content, and the two controls the kiosk owns. The
+    // wordmark is allowed because it is a static mark on this route — if it
+    // ever becomes a link, it is an escape and this list must not excuse it,
+    // so it is matched on its own testID rather than by tag.
+    const allowed = [
+      '[data-testid="wsf-contribute-entry-screen"]',
+      '[data-testid="wsf-contribute-context"]',
+      '[data-testid="wsf-kiosk-finish-chrome"]',
+      '[data-testid="wsf-kiosk-finish-bar"]',
+    ];
+    const interactive = Array.from(
+      document.querySelectorAll(
+        'a[href], button, input, select, textarea, [role="link"], [role="button"], [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    const out: string[] = [];
+    for (const el of interactive) {
+      if (allowed.some((sel) => within(el, sel))) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) continue;
+      // Reachable by a thumb, not merely present: the point a press would
+      // land on has to resolve to this control.
+      const hit = document.elementFromPoint(cx, cy);
+      if (!hit || !(el === hit || el.contains(hit))) continue;
+      const id = el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.tagName;
+      out.push(`${id}@${Math.round(cx)},${Math.round(cy)}`);
+    }
+    return out;
+  });
+
+  test.info().annotations.push({
+    type: 'kiosk-escape-controls',
+    description: offenders.length ? offenders.join(' | ') : 'none',
+  });
+  expect(
+    offenders,
+    'every reachable control on a kiosk contribution screen belongs to the kiosk session'
+  ).toEqual([]);
+});
+
+// ---- CASE 5 ---------------------------------------------------------------
+/*
+  THE CONTROL CASE, and the reason CASE 4 cannot be trusted on its own.
+
+  The shell is supposed to be on an ordinary member's contribution screen —
+  that is a member surface, reached from their own community, and the bar is
+  how they leave it. A patch that closes the kiosk seam by dropping
+  /contribute from the shell's prefixes would turn CASE 4 green and take this
+  with it. This must pass BEFORE the patch and AFTER it; it is the half of the
+  contract that says what must not change.
+*/
+test('the shell is unchanged for an ordinary member: /contribute without the kiosk flag still wears it', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('ordinary');
+
+  // The ordinary way in. Signing in from a bare /contribute/<goalId> does NOT
+  // return there — with no kiosk handoff key there is nothing for
+  // nextRouteAfterAuth() to read, so the member lands on their community, the
+  // way any member arriving without a destination does. That is the ordinary
+  // journey, so this follows it and then opens the goal the way a member
+  // would, rather than asserting a return that the product never promised.
+  await page.goto(`/contribute/${fx.goalId}`);
+  await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-contribute-signin-link').click();
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-signin-email').fill(fx.memberEmail);
+  await page.getByTestId('wsf-signin-password').fill(fx.password);
+  await page.getByTestId('wsf-signin-submit').click();
+  await page.waitForURL(/\/community\//, { timeout: 30_000 });
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 25_000, intervals: [200] })
+    .toBeGreaterThan(0);
+
+  await page.goto(`/contribute/${fx.goalId}`);
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 30_000 });
+  expect(page.url()).not.toMatch(/kiosk=/);
+
+  // The member's own chrome: the shell, and the Back the kiosk deliberately
+  // replaces. Neither is a kiosk control.
+  await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+  await expect(page.getByTestId('wsf-contribute-back')).toBeVisible();
+  await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-kiosk-finish')).toHaveCount(0);
+
+  // And the four destinations still work as destinations for the member whose
+  // screen this is.
+  await page.getByTestId('wsf-member-tab-you').click();
+  await page.waitForURL(/\/you\b/, { timeout: 25_000 });
+  await expect
+    .poll(async () => page.getByTestId('wsf-you-identity').count(), {
+      timeout: 25_000,
+      intervals: [100],
+    })
+    .toBeGreaterThan(0);
+  await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+  await page.getByTestId('wsf-member-tab-activity').click();
+  await page.waitForURL(/\/activity\b/, { timeout: 25_000 });
+  await expect(page.getByTestId('wsf-activity')).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+});
+
+// ---- CASE 6 ---------------------------------------------------------------
+/*
+  BROWSER BACK, WITH ITS ACTUAL SCOPE.
+
+  What is claimed: the history entry behind the kiosk's contribution screen is
+  the kiosk's own start screen, and arriving there resets the device.
+
+  What is NOT claimed, and what this test must not be read as: that a browser
+  can be prevented from going anywhere else, that a visitor cannot type a URL,
+  or that the device is locked down. A kiosk in a browser has no such power
+  and this feature never claims it. The reset is what holds, not the cage.
+*/
+test('browser Back from the kiosk contribution screen lands on the start screen and resets it', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('back');
+  await walkUpAndSignIn(page, fx);
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+
+  await page.goBack();
+  await page.waitForURL(new RegExp(`/kiosk/${fx.goalId}$`), { timeout: 25_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 25_000 });
+
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 20_000, intervals: [200] })
+    .toBe(0);
+  expect((await readStorage(page)).session).not.toContain('wsf.kioskReturnGoalId');
+  const startText = await page.getByTestId('wsf-kiosk-screen').innerText();
+  expect(startText).not.toContain(fx.memberName);
+  expect(startText).not.toContain(fx.memberEmail);
+});
+
+// ---- CASE 7 ---------------------------------------------------------------
+/*
+  FINISH IS REACHABLE, AND THE START SCREEN IS NEVER REACHED WHILE ATTACHED.
+
+  Two halves of one rule. Finish has to be on the screens a kiosk session can
+  come to rest on — a patch that hides the shell but also loses Finish has not
+  fixed anything — and the device may only arrive back at its start screen
+  when the account has actually gone.
+
+  WHAT THIS CANNOT ESTABLISH, stated rather than implied. `runKioskFinish`
+  reports a FAILED sign-out and keeps the visitor on the receipt with
+  "We couldn't sign you out" (`wsf-kiosk-finish-error`) instead of a start
+  screen that lies. Firebase's web `signOut` clears local persistence and does
+  not depend on a reachable server, so this harness has no way to make it fail
+  without editing product code, which this branch does not do. The rule is
+  asserted as the coupling it produces — start screen implies detached — and
+  the failure branch's own unit coverage is in tests/kiosk-session.test.ts.
+*/
+test('Finish is reachable on a kiosk screen, and the start screen is only reached detached', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('finish');
+  await walkUpAndSignIn(page, fx);
+
+  // Reachable where a thumb lands, on the screen the session is resting on.
+  const chromeFinish = page.getByTestId('wsf-kiosk-finish-chrome');
+  await expect(chromeFinish).toBeVisible();
+  const box = (await chromeFinish.boundingBox())!;
+  const reachable = await page.evaluate(
+    ([x, y]) => {
+      const hit = document.elementFromPoint(x as number, y as number);
+      const finish = document.querySelector('[data-testid="wsf-kiosk-finish-chrome"]');
+      return Boolean(hit && finish && (finish === hit || finish.contains(hit)));
+    },
+    [box.x + box.width / 2, box.y + box.height / 2]
+  );
+  expect(reachable, 'Finish is under the thumb, not merely in the DOM').toBe(true);
+
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+  await chromeFinish.click();
+  await page.waitForURL(new RegExp(`/kiosk/${fx.goalId}$`), { timeout: 25_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 25_000 });
+
+  // THE COUPLING. The device is at its start screen, so the account must be
+  // gone — not "gone shortly", and not "gone from the screen".
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 20_000, intervals: [200] })
+    .toBe(0);
+  await expect(page.getByTestId('wsf-kiosk-finish-error')).toHaveCount(0);
+  const atRest = await readStorage(page);
+  expect(atRest.session).not.toContain('wsf.kioskReturnGoalId');
+  // Nothing was submitted this session, so there is no attempt to preserve.
+  expect(atRest.local.some((k) => k.startsWith('wsf.pendingContribution.'))).toBe(false);
+});

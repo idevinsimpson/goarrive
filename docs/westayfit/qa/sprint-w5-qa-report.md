@@ -824,3 +824,57 @@ carries that today.
 
 Evidence guard after the run: **9 frozen / 20 accepted paths, no byte changed.** No artifacts
 or test-results committed.
+
+
+### Patch-verification assertions, prepared while the fix is pending
+
+The Director accepted the finding as real and bounded, assigned the app-shell patch to W1B
+(#423), and asked me to prepare the discriminating assertions in my own files rather than
+re-run the unchanged defect. Four cases added at `d0477cc`; **7 of 7 as expected**.
+
+**W5-K4 — the contract, not the locator.** The obvious fix is to stop rendering the shell over
+`/contribute`, and the obvious verification is that the bar's testID is gone. Both are traps.
+So K4 enumerates every interactive element on the kiosk contribution screen, keeps the ones
+whose centre actually resolves to themselves under `elementFromPoint`, and allows only the
+screen's own content and the kiosk's own controls. Today it names exactly what is wrong:
+
+    wsf-member-tab-home@43,805 | wsf-member-tab-community@120,805 | wsf-member-tab-move@195,782
+    | wsf-member-tab-activity@270,805 | wsf-member-tab-you@347,805
+
+A renamed bar, a restyled bar, a drawer, or a wordmark that starts navigating all fail this and
+none of them fail a locator check. `test.fail()`, so it becomes ordinary passing coverage the
+day a patch lands.
+
+**W5-K5 — the control case, and the reason K4 cannot be trusted alone.** The shell *belongs* on
+an ordinary member's contribution screen. A patch that closes the seam by dropping `/contribute`
+from `SHELL_PREFIXES` turns K4 green and breaks ordinary member navigation. K5 passes **now**
+and must pass **after**: signed in without the kiosk flag, `/contribute/<goalId>` wears the
+shell and `wsf-contribute-back`, carries no kiosk control, and the destinations still navigate.
+
+One thing K5 taught me about the product rather than the patch: signing in from a bare
+`/contribute/<goalId>` does **not** return there. With no kiosk handoff key there is nothing for
+`nextRouteAfterAuth()` to read, so the member lands on their community. My first draft asserted
+a return the product never promised and timed out on it. The test now follows the ordinary
+journey instead of inventing one.
+
+**W5-K6 — browser Back, with its scope stated.** What is claimed: the history entry behind the
+kiosk's contribution screen is the kiosk's own start screen, and arriving there resets the
+device (auth to zero, kiosk key gone, nobody named). What is **not** claimed, and must not be
+read into it: that a browser can be prevented from going elsewhere, or that the device is locked
+down. A kiosk in a browser has no such power and the feature never claims it. Passes now.
+
+**W5-K7 — Finish reachable, and the start screen only reached detached.** Finish is
+hit-testable where a thumb lands on the screen the session rests on, and after pressing it the
+device is at its start screen **and** the account is gone — asserted as a coupling, with no
+`wsf-kiosk-finish-error` on screen. A patch that hides the shell but loses Finish fails this.
+
+**What K7 cannot establish, said rather than implied.** `runKioskFinish` reports a FAILED
+sign-out and keeps the visitor on the receipt with "We couldn't sign you out" instead of a start
+screen that lies. Firebase's web `signOut` clears local persistence and does not depend on a
+reachable server, so this harness cannot make it fail without editing product code, which this
+branch does not do. The failure branch's own coverage is `tests/kiosk-session.test.ts`; claiming
+browser coverage of it would be claiming a test I do not have.
+
+Result at `d0477cc`: `expected 7, unexpected 0` — W5-K1 and W5-K4 are the two self-retiring
+tripwires; K2, K3, K5, K6, K7 pass. The historical failing baseline stays as K1, untouched, so
+the record of what was wrong survives the fix.
