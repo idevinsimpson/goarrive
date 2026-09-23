@@ -2062,3 +2062,133 @@ identity suites                                NOT re-run — functions-westayfi
 
 No `test.fail()` anywhere in the file (the single grep hit is prose in a
 comment). No artifacts or test-results committed.
+
+---
+
+## PACKET — the staging hosting-route check, #450 at `6f70c171` (L0 `5800340328`)
+
+**Reviewed:** `6f70c171cb0ba63b8fe91595d78364faf4356cb8` (`claude/wsf-staging-hosting-route-check`,
+draft PR #450; parent `47c32ba4`; cherry-pick `-x` of W3's `d3605cdf`). Also reviewed on the tree
+`main` will actually hold after merge: a local merge onto `main` `9df7e09a` (merge `75e21642`), whose
+patch over `main` is byte-identical to the reviewed patch.
+
+**Method.** Four independent reviewers ran in parallel, one per group of packet items. Each result then
+went to an adversarial skeptic whose brief was to refute it, and a completeness critic reviewed the
+whole. Every load-bearing number was reproduced by at least two agents. No PASS was overturned on the
+facts; the skeptics corrected labels, wording and several of the reviewers' own instrument errors (see
+below). Harness: `docs/westayfit/qa/sprint-w5-hosting-route-check-verify.mjs`.
+
+### Status, stated precisely
+
+`6f70c171` is **implemented and pushed**, and **tested locally** on both trees. It is **not CI-gated**:
+no workflow invokes `run-all.mjs` or any `wsf-staging/tests` file, so its 12 cases and 2 contract cases
+are worker gates only, and at deploy time only the helper runs. It is **not accepted, not integrated**
+(not on `main`), and **not staged**.
+
+### Verdicts
+
+| Item | Verdict |
+| --- | --- |
+| (1) registration + prior cases retained | **PASS** — registered and running: **14 suites**. Every prior case retained by name (multiset diff, runtime and static). Exactly one replaced. 12 of 13 prior suite files blob-identical. |
+| (2) placement | **PASS** — `deploy` step 5: after Confirm (4), before Authenticate (7). Parsed as YAML, not grepped. The wording defect is finding F5. |
+| (3) reads only its inputs, no network, candidate-relative | **PASS** on those claims. Verified statically, by an fs/net guard preload, and at the syscall level with `strace`. Fail-closed on missing inputs. Resolution gap: finding F2. |
+| (4) candidate + rollback compatibility | **PASS** — all four cells re-derived with modelled dist **and** with **real exports of both candidates**, in emulator and staging-mode builds, under node 20 and 22. Identical everywhere. |
+| (5) replaced case + two new contract cases | **PASS** — sound in intent, one assertion lost (F3). The new case pins order, not liveness (F1). |
+| (6) no other diff | **PASS** — exactly five files. The cherry-pick is faithful to `d3605cdf`: both new-file blobs and every changed line are identical. |
+
+### Findings — none blocks today's configs
+
+Every real configuration passes or fails exactly as it should. F1 and F2 are gaps in what the check
+**guarantees**, not errors in what it currently **reports**.
+
+**F1 (moderate) — the contract case pins the step's ORDER, not that it is LIVE.** Each of these leaves
+every suite green while the check does nothing: step commented out; `continue-on-error: true`;
+`if: ${{ false }}`; `|| true` appended; `run: echo node ops/…`. A deploy would then proceed with an
+operational config missing rewrites — the defect this commit exists to stop. The suite already pins
+this pattern for the gate job at `workflow-contract.test.mjs` lines 729–730.
+
+**F2 (moderate) — single-segment shadowing passes.** `sampleFor` expands `**` into **two** path
+segments (`/move/__seg_a__/__seg_b__`). Every real dynamic URL is **one** segment (`/move/<goalId>`),
+so a rule that captures the one-segment shape ahead of the candidate's rule is never exercised.
+Examples measured on the REAL candidate config and REAL dist, each printing `ROUTES=pass`, exit 0:
+`/move/* → /index.html` ahead of `/move/**`; a single `/*/*` → `/index.html` placed first, which
+mis-serves every one-segment URL of all ten `**` routes at once. The Hosting emulator's own matcher
+(superstatic 10.0.0) confirms the mis-serving. The existing contract cases backstop this only for
+`/move` and `/community`, and only when `run-all` is run locally. **A fix exists without disturbing
+anything:** sampling each rule at both a one-segment and a two-segment shape closes all three harness
+gaps with every control and all four real-config matrix cells unchanged.
+
+**F3 (low) — the replaced case lost an unrelated guard.** Its
+`notEqual(app.hosting.site, STAGING_HOSTING.hosting.site)` is now covered by nothing. Setting the app
+config's site to the staging site is caught at `47c32ba4` and not at `6f70c171`. That field has a
+consumer: `apps/westayfit/package.json` `deploy:staging`.
+
+**F4 (low) — invariants no test pins.** Each of these mutants survives all 12 cases:
+- a missing **candidate** config read as "no rewrites", which turns an error into `ROUTES=pass`; all three fail-closed cases target the operational config;
+- the `__dynamic` filter dropped, which yields 76 errors on the real inputs and blocks every correct deploy (fails closed);
+- `*` allowed to cross segments.
+
+The no-network guard is a substring denylist, so `node:https`, `node:net`, fs writes, an env-var
+redirect of the ops root, and a dynamically assembled `child_process` import all pass it. The helper
+itself is clean today.
+
+**F5 (low) — the credential wording overclaims.** The step comment says no credential is present, and
+the test title says the check runs "BEFORE any credential exists". In fact the `config` job
+authenticates to Google (its step 3) before the `deploy` job starts, and `deploy` holds
+`id-token: write` from its first step. Accurate: *"runs before the deploy job authenticates, in a job
+that can mint an OIDC token"*. The workflow's own header (lines 4–8) already says this.
+
+**F6 (observation, for the Director) — a deliberate operational omission can no longer be expressed.**
+On 2026-09-19 `/move/**` was removed from the operational config **on purpose** (`3b8142fa`: *"bd4bfec
+carries the OLD 35-second player"*). Under this check, the same decision for a candidate that builds
+`/move/__dynamic.html` hard-fails the deploy, with no exemption path. That kind of omission only ever
+removed direct-load reachability, not the client route, so it was a partial control. Whether to keep
+that capability is a policy call.
+
+**Out of model.** Operational `redirects` and `hosting.ignore` are not considered. Both can make pages
+unreachable while the check prints `ROUTES=pass`. None of the six real configs uses either today. The
+helper header's *"Exit 0 only when every page this candidate builds is reachable"* is broader than what
+it checks.
+
+### Record corrections
+
+- **"13 suites" is 14** (L0 `5800169170`, PR #450 body): the new file is registered and runs. L0 posted
+  at 18:01Z, before #448 merged at 18:14Z, so for the tree it described only the suite count was wrong.
+- **After merge, `main` holds 319** (253 + 66), not 307. The 307 (241 + 66) is the exact SHA's total;
+  #448's 12 verifier cases are on `main` but not under `47c32ba4`.
+- **"workflow-contract 73 → 74" and "344 → 359" are W3-lineage figures.** Measured at `d3605cdf`:
+  15 suites, 262 + 95 = **357**, workflow-contract 74, so the commit message's 359 is wrong by
+  measurement, not only by relay. On this tree the figures are 64 → 65 and 294 → 307.
+- **L0's "hunks byte-identical"** holds for every changed line. The hunks themselves differ in offsets,
+  and W3's `run-all` hunk carries `mail-binding.test.mjs` as context. This is not a defect.
+- **The test fixture labelled** *"The rewrite list the served candidate `c8f38e3` declares"* holds 3 of
+  its 11 rewrites.
+- **The section comment at `workflow-contract.test.mjs` 805–812** still says the deploy never reads the
+  app's `firebase.westayfit.json`. After this change it does.
+- **The new suite never removes its `mkdtemp` fixtures**, so `/tmp/wsf-routes-*` accumulate on every
+  run.
+
+### Instrument errors — mine and my reviewers', all caught before reporting
+
+- **Mine (13):** the harness first copied only `.github`. The unmutated contract suite then failed in
+  the copy, so every neutering mutation "failed" for that reason alone, which would have reported four
+  real gaps as **CLOSED**. Control **B0** caught it; the harness now copies the whole tree.
+- **Reviewers', caught by the skeptic layer:**
+  - one mutant was a syntax error, recorded as "caught by all 12" — a clean mutant is caught by 6;
+  - "superstatic is not installed" was false (10.0.0 is present), and the chosen proxy was the wrong minimatch major;
+  - a blob count of "11 of 13" is actually 12;
+  - "byte-for-byte against L0's matrix" was unsupportable — L0's table paraphrases the error lines.
+
+The adversarial layer is what kept each of these out of the verdict.
+
+### Limits
+
+These are documented, not measured, because no runner was available:
+- step-skip semantics after a failure;
+- the default `bash -e` shell;
+- runner token exposure;
+- the `upload-artifact` layout that yields `app/apps/westayfit/dist`, which was simulated.
+
+Production Firebase Hosting's glob semantics are not measurable offline; only the emulator matcher was
+compared, and it diverges from the helper on six edge shapes that no real config uses. "Deployable"
+in item 4 means passing **this step only**; other deploy gates were not assessed.
