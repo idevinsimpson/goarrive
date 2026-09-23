@@ -178,34 +178,93 @@ async function expectNoMemberEscape(page: Page): Promise<void> {
   await expect(page.getByTestId('wsf-contribute-back')).toHaveCount(0);
 }
 
-async function authRecords(page: Page): Promise<string[]> {
+/**
+ * INSPECTING THE AUTH STORE, FAIL-CLOSED.
+ *
+ * The first version of this helper turned every failure — a refused
+ * `indexedDB.open`, a read error, a blocked upgrade — into `[]`, which is
+ * exactly the value the tests then assert as "signed out". An unreadable store
+ * is UNKNOWN, not empty, and a probe that cannot tell those apart can certify
+ * the safety property for the wrong reason: the sign-out assertions would have
+ * passed on a browser whose IndexedDB was simply broken.
+ *
+ * So every failure is reported as a failure, the read is bounded so a request
+ * that never answers cannot hang instead of failing, and an observed absence is
+ * a distinct result from an inspection error.
+ *
+ * READONLY, DELIBERATELY. The sign-out-failure injection breaks READWRITE
+ * transactions on this store only; this probe must keep working under it, which
+ * is what lets that test assert the account is still attached.
+ */
+type AuthProbe = { ok: true; keys: string[] } | { ok: false; reason: string };
+
+async function inspectAuthStore(page: Page): Promise<AuthProbe> {
   return page.evaluate(
     () =>
-      new Promise<string[]>((resolve) => {
-        const req = indexedDB.open('firebaseLocalStorageDb');
-        req.onerror = () => resolve([]);
+      new Promise<AuthProbe>((resolve) => {
+        const fail = (reason: string) => resolve({ ok: false, reason });
+        // A bound, so an inspection that never answers is reported rather than
+        // waited on: silence is not absence either.
+        const bail = setTimeout(() => fail('inspection timed out'), 5_000);
+        const done = (r: AuthProbe) => {
+          clearTimeout(bail);
+          resolve(r);
+        };
+        let req: IDBOpenDBRequest;
+        try {
+          req = indexedDB.open('firebaseLocalStorageDb');
+        } catch (e) {
+          done({ ok: false, reason: `open threw: ${String(e)}` });
+          return;
+        }
+        req.onerror = () => done({ ok: false, reason: 'open failed' });
+        req.onblocked = () => done({ ok: false, reason: 'open blocked' });
         req.onsuccess = () => {
           const db = req.result;
+          // Opening a database that does not exist creates an empty one. That
+          // is a genuine observation of "nobody is signed in", not an error.
           if (!db.objectStoreNames.contains('firebaseLocalStorage')) {
             db.close();
-            resolve([]);
+            done({ ok: true, keys: [] });
             return;
           }
-          const all = db
-            .transaction('firebaseLocalStorage', 'readonly')
-            .objectStore('firebaseLocalStorage')
-            .getAllKeys();
+          let all: IDBRequest;
+          try {
+            all = db
+              .transaction('firebaseLocalStorage', 'readonly')
+              .objectStore('firebaseLocalStorage')
+              .getAllKeys();
+          } catch (e) {
+            db.close();
+            done({ ok: false, reason: `readonly transaction threw: ${String(e)}` });
+            return;
+          }
           all.onsuccess = () => {
             db.close();
-            resolve((all.result as unknown[]).map(String));
+            done({ ok: true, keys: (all.result as unknown[]).map(String) });
           };
           all.onerror = () => {
             db.close();
-            resolve([]);
+            done({ ok: false, reason: 'read failed' });
           };
         };
       })
   );
+}
+
+/** Observed to be empty — never merely unreadable. */
+async function expectSignedOut(page: Page): Promise<void> {
+  const probe = await inspectAuthStore(page);
+  expect(probe.ok, `auth store was not readable: ${probe.ok ? '' : probe.reason}`).toBe(true);
+  expect(probe.ok && probe.keys, 'the device carries no account').toEqual([]);
+}
+
+/** Observed to hold a record. Asserted BEFORE an expiry, so the empty result
+ *  afterwards is a transition this run actually watched happen. */
+async function expectStillAttached(page: Page): Promise<void> {
+  const probe = await inspectAuthStore(page);
+  expect(probe.ok, `auth store was not readable: ${probe.ok ? '' : probe.reason}`).toBe(true);
+  expect(probe.ok && probe.keys.length, 'the visitor is still signed in').toBeGreaterThan(0);
 }
 
 async function pendingKeys(page: Page): Promise<string[]> {
@@ -301,7 +360,7 @@ test.describe('kiosk idle finish · the behaviour', () => {
     expect(renewed).toBeGreaterThanOrEqual(85);
     // It did not finish while the visitor was still reading.
     await expect(page.getByTestId('wsf-contribute-closed')).toBeVisible();
-    expect(await authRecords(page)).not.toEqual([]);
+    await expectStillAttached(page);
 
     // ── AND THEN NOBODY TOUCHES IT ────────────────────────────────────────
     await passTheDeadline(page);
@@ -309,7 +368,8 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await expect
       .poll(async () => page.url(), { timeout: 40_000 })
       .toContain(`/kiosk/${fx.closedGoalId}`);
-    expect(await authRecords(page), 'sign-out precedes the return to rest').toEqual([]);
+    // Signed out FIRST, then the return to rest.
+    await expectSignedOut(page);
   });
 
   test('a failed sign-out at the deadline stays protected and offers a retry', async ({ page }) => {
@@ -346,7 +406,7 @@ test.describe('kiosk idle finish · the behaviour', () => {
     );
     // It did NOT return to rest with the account still attached.
     expect(page.url()).toContain('/contribute/');
-    expect(await authRecords(page)).not.toEqual([]);
+    await expectStillAttached(page);
     await expect(page.getByTestId('wsf-kiosk-finish')).toBeEnabled();
     await expectNoMemberEscape(page);
     await page.waitForTimeout(400);
@@ -368,6 +428,14 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await page.getByTestId('wsf-contribute-submit').click();
     await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
     expect(await pendingKeys(page)).toHaveLength(1);
+    // Where the retry IS offered, the accepted copy stands and the control is
+    // really there — the variant below must not have displaced it.
+    await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveText(
+      'Confirm this contribution'
+    );
+    await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
+      'You can try to confirm this contribution here before you finish. Entering it again elsewhere could count it twice.'
+    );
 
     // Now the goal itself stops loading. THE ERROR BRANCH RETURNS BEFORE THE
     // PENDING ONE, so this is the screen that renders while an unresolved
@@ -378,13 +446,40 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await expect(page.getByTestId('wsf-contribute-load-error')).toBeVisible({ timeout: 40_000 });
     await expectFinishTreatment(page);
     // The live outcome travels with the screen: this is an unresolved session.
-    await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toBeVisible();
+    // But THIS screen has no reconcile control, so it must not point at one.
+    await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
+      'We couldn’t load this goal to confirm your contribution. Entering it again elsewhere could count it twice.'
+    );
+    // The whole page, not one testID: the load-error branch does not set
+    // `wsf-contribute-screen`, and the claim is that the promise appears
+    // NOWHERE on this screen.
+    const errorText = await page.evaluate(() => document.body.innerText);
+    expect(errorText).not.toContain('confirm this contribution here');
     await page.waitForTimeout(400);
     await saveFrame(page, frame('kiosk-load-error-with-unresolved-tablet-800x1280.png'));
 
+    // Observed attached before the deadline, so the empty store afterwards is a
+    // transition this run watched happen rather than a value it assumed.
+    await expectStillAttached(page);
+
+    // The same state at the short class, where the longer sentence and the way
+    // out have the least room. Captured for reachability, not re-litigation.
+    await page.setViewportSize(SHORT_PHONE);
+    await page.getByTestId('wsf-kiosk-finish').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500);
+    await saveFrame(page, frame('kiosk-load-error-with-unresolved-short-phone-390x640.png'));
+    await expect(page.getByTestId('wsf-kiosk-finish')).toBeVisible();
+    await expect(page.getByTestId('wsf-kiosk-finish')).toBeEnabled();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1
+    );
+    expect(overflow, 'no sideways scroll at the short class').toBe(false);
+    await page.setViewportSize(TABLET);
+
     await passTheDeadline(page);
     await expect.poll(async () => page.url(), { timeout: 40_000 }).toContain('/kiosk/');
-    expect(await authRecords(page), 'still signed out').toEqual([]);
+    await expectSignedOut(page);
     const kept = await pendingKeys(page);
     expect(kept, 'the unresolved reminder is the member’s, not the device’s').toHaveLength(1);
     expect(kept[0]).toContain(fx.uid);
@@ -415,8 +510,55 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await passTheDeadline(page);
     await expect(page.getByTestId('wsf-contribute-closed')).toBeVisible();
     expect(page.url()).toContain('/contribute/');
-    expect(await authRecords(page), 'an ordinary member is never signed out by a timer').not.toEqual(
-      []
+    await expectStillAttached(page);
+  });
+
+  test('the probe itself cannot mistake an unreadable auth store for an empty one', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await page.clock.install();
+    const fx = await seedFixture('h');
+    await signInVia(page, fx.email, fx.password);
+    await page.goto(kioskUrl(fx.missingGoalId));
+    await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 40_000 });
+
+    // Signed in, and observed to be.
+    await expectStillAttached(page);
+
+    // Now break the READONLY inspection the probe depends on. The first
+    // version of this helper turned exactly this into `[]` — the same value it
+    // reports for "signed out" — so a broken browser would have satisfied every
+    // sign-out assertion in this file.
+    await page.evaluate(() => {
+      const proto = IDBDatabase.prototype;
+      const original = proto.transaction;
+      proto.transaction = function patched(
+        this: IDBDatabase,
+        names: string | string[] | DOMStringList,
+        mode?: IDBTransactionMode,
+        options?: IDBTransactionOptions
+      ): IDBTransaction {
+        const list = typeof names === 'string' ? [names] : Array.from(names as string[]);
+        if (list.includes('firebaseLocalStorage')) {
+          throw new DOMException('injected inspection fault', 'InvalidStateError');
+        }
+        return original.call(this, names as string[], mode, options);
+      } as typeof proto.transaction;
+    });
+
+    const probe = await inspectAuthStore(page);
+    expect(probe.ok, 'an unreadable store is reported as unreadable').toBe(false);
+    expect(probe.ok === false && probe.reason).toContain('readonly transaction threw');
+    // And the assertion built on it refuses to pass.
+    let signedOutPassed = true;
+    try {
+      await expectSignedOut(page);
+    } catch {
+      signedOutPassed = false;
+    }
+    expect(signedOutPassed, 'a failed inspection cannot satisfy a signed-out assertion').toBe(
+      false
     );
   });
 
@@ -432,7 +574,7 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await expect(page.getByTestId('wsf-kiosk-countdown')).toHaveCount(0);
     await passTheDeadline(page);
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible();
-    expect(await authRecords(page)).not.toEqual([]);
+    await expectStillAttached(page);
 
     // Now a contribution that has left and not answered. Signing out from
     // under it is exactly how an outcome becomes unknowable.
@@ -457,7 +599,7 @@ test.describe('kiosk idle finish · the behaviour', () => {
     await expect(page.getByTestId('wsf-contribute-recording')).toBeVisible();
     await expect(page.getByTestId('wsf-kiosk-countdown')).toHaveCount(0);
     expect(page.url()).toContain('/contribute/');
-    expect(await authRecords(page), 'in flight is never a rest state').not.toEqual([]);
+    await expectStillAttached(page);
 
     // Let it land, and the ordinary receipt deadline takes over as before.
     release();
@@ -506,7 +648,7 @@ test.describe('kiosk idle finish · the behaviour', () => {
     );
     expect(left, 'the unresolved screen gets a whole deadline of its own').toBeGreaterThan(30);
     // Still signed in, and the reminder is stored.
-    expect(await authRecords(page)).not.toEqual([]);
+    await expectStillAttached(page);
     expect(await pendingKeys(page)).toHaveLength(1);
     release();
     await page.unroute('**/wsfContribute');
