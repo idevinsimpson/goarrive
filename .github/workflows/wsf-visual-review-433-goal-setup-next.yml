@@ -1,4 +1,5 @@
-# WSF — visual-review export for PR #433's /goals/new TARGET checkpoint: the 13
+# WSF — visual-review export for PR #433's /goals/new TARGET checkpoint and its
+# implementation AFTERs: the 13
 # PNGs W6 adds under docs/design-target/review/goal-setup-next/target/ (twelve
 # PROPOSED / NOT ACCEPTED drawings at 390x844 and 390x640 plus one contact
 # sheet) together with the 16 frozen BEFORE frames of the real route under
@@ -65,6 +66,8 @@ jobs:
           # W6's drawings, every one carrying a PROPOSED / NOT ACCEPTED strip inside the image, none an
           # AFTER — and the 16 frozen BEFORE frames under goal-setup-current/ they are drawn against,
           # at the PR head this job checks out, original committed bytes only.
+          # Plus the 14 AFTER captures under goal-setup-next/after/ from the implementation — actual
+          # build, not accepted until W7's verification and the Director's matched AFTER verdict.
           allow = [
               (f'{GS}/goal-setup-next/target/CONTACT-SHEET-goal-setup-next.png', 'CONTACT SHEET · PROPOSED / NOT ACCEPTED drawings side by side · CONTACT-SHEET-goal-setup-next.png'),
               (f'{GS}/goal-setup-next/target/PROPOSED-form-top-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-form-top-390x844.png'),
@@ -95,6 +98,20 @@ jobs:
               (f'{GS}/goal-setup-current/form-submitting-INJECTED-DELAY-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · form-submitting-INJECTED-DELAY-390x844.png'),
               (f'{GS}/goal-setup-current/no-community-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · no-community-390x844.png'),
               (f'{GS}/goal-setup-current/signed-out-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · signed-out-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-created-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-created-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-created-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-created-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-custom-window-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-custom-window-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-custom-window-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-custom-window-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-form-top-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-form-top-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-form-top-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-form-top-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-refused-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-refused-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-refused-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-refused-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-summary-commit-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-summary-commit-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-summary-commit-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-summary-commit-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-INJECTED-NETWORK-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-INJECTED-NETWORK-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-INJECTED-NETWORK-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-INJECTED-NETWORK-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-retry-INJECTED-NETWORK-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-retry-INJECTED-NETWORK-390x640.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-retry-INJECTED-NETWORK-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-retry-INJECTED-NETWORK-390x844.png'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
