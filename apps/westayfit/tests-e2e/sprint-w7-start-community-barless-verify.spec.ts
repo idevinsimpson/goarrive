@@ -55,7 +55,8 @@ import {
  *   SEAM-4  leaving mid-create                FAIL        FAIL             PASS  (M5 — ruling pending)
  *   SEAM-1b blur by keyboard moves nothing     not run     FAIL ×2 (+52 px) PASS  (W4's stated design;
  *     (its valid-name CONTROL: PASS ×2)                                           see note below)
- *   SEAM-1c blur marks red, no sentence        —           FAIL (sentence)  PASS on 9f27c6ea
+ *   SEAM-1c neutral blur, then first press     —           —                FAIL on 9f27c6ea (red on
+ *                                                                               blur); PASS on 0bf8f427
  *   SEAM-3n the way out, by name, goes Home    —           FAIL (none) ×2   PASS ×2 on 9f27c6ea
  *   SEAM-1 CONTROL ×8 (reader can see a pass)  —           PASS ×8          PASS
  *   SEAM-4 CONTROL (assertions satisfiable)    —           PASS             PASS
@@ -64,11 +65,18 @@ import {
  *                                             top bar)
  *   FRAMES calibration on d467754             PASS        PASS             PASS
  *   FRAMES delivery (WSF_W7_DELIVERY_SHA)     —           PASS on 5c28e45  PASS
+ *   FRAMES short-blurred calibration          —           —                PASS (063747b9's frame)
+ *   FRAMES short-blurred delivery             —           —                FAIL on 063747b9 (759 red
+ *     (WSF_W7_BLUR_FRAME_SHA)                                                   ring px); PASS on 0bf8f427
  *
- * SEAM-1c and SEAM-3n: the BEFORE column is the preview below (W4's 5c28e45
- * route); the candidate column is 9f27c6ea (QA report, Check 16). On
- * 9f27c6ea the whole file passes, with SEAM-1's risky position reached 4×
- * at 390x844 and 430x932 and 0× at 390x640 (now asserted).
+ * SEAM-3n: the BEFORE column is the preview below (W4's 5c28e45 route); the
+ * candidate column is 9f27c6ea (QA report, Check 16). SEAM-1c was re-pointed
+ * to the Director's neutral-blur ruling (#365 `5802873607`) after Check 16;
+ * its earlier form asserted W4's superseded red-on-blur design and passed on
+ * 9f27c6ea. On the neutral-blur successor 0bf8f427 (9f27c6ea ⊕ W4 e653330;
+ * QA report, Check 17) SEAM-1 is 12/12 with its risky position reached 4× at
+ * 390x844 and 430x932 and 0× at 390x640, SEAM-1b 4/4, SEAM-1c 1/1, the
+ * controls 8/8 and FRAMES 4/4.
  *
  * PREVIEW (local, never pushed): f2f901a ⊕ W9 a87cd3b ⊕ W8 eff65b0 ⊕ 5c28e45
  * (6c98f485, tree 77129e6a). SEAM-2, 2b and 2c PASS there with W9's fix;
@@ -1096,26 +1104,32 @@ test.describe('FRAMES', () => {
     Director's neutral-blur ruling `5802873607`). Measured against the
     arrival frame at the same size and SHA: W4 states that every pixel that
     differs lies in the name field's box (x 20-369, y 376-425), so the box
-    below has a 2 px margin. The reader counts red-dominant pixels, and
-    compares the field's border ring (the box less a 5 px inset, where the
-    typed character cannot reach) and everything outside the box.
+    below has a 2 px margin. The reader counts red-dominant pixels in the
+    field's border ring (the box less a 5 px inset, where the typed character
+    cannot reach) and in the band under the field, and compares the ring and
+    everything outside the box with the arrival frame. The whole box is only
+    recorded: the typed "a" has three red-dominant colour fringes of its own
+    (x 36-40, y 398-403), the same in 063747b9's frame and in the successor's,
+    which a whole-box count mistook for paint (W7's instrument error, found on
+    0bf8f427 and corrected before the verdict).
   */
   test('FRAMES short-blurred calibration: the reader sees 063747b9\'s red border, and the too-long sentence under the field', () => {
     const blurred = decodePng(gitBlob('063747b9', `${FRAME_DIR}/${SHORT_BLURRED}`));
     const arrival = decodePng(gitBlob('063747b9', `${FRAME_DIR}/AFTER-start-arrival-390x844.png`));
     const tooLong = decodePng(gitBlob('063747b9', `${FRAME_DIR}/AFTER-start-name-too-long-390x844.png`));
     const m = {
+      blurredRingRed: ringRed(blurred),
+      arrivalRingRed: ringRed(arrival),
       blurredBoxRed: redCount(blurred, FIELD_BOX),
-      arrivalBoxRed: redCount(arrival, FIELD_BOX),
       blurredBandRed: redCount(blurred, SENTENCE_BAND),
       tooLongBandRed: redCount(tooLong, SENTENCE_BAND),
       ringDiff: ringDiff(blurred, arrival),
       outsideDiff: outsideDiff(blurred, arrival),
     };
     test.info().annotations.push({ type: 'calibration', description: JSON.stringify(m) });
-    expect(m.blurredBoxRed, 'the reader cannot see the red border').toBeGreaterThan(500);
+    expect(m.blurredRingRed, 'the reader cannot see the red border').toBeGreaterThan(500);
     expect(m.ringDiff, 'the ring comparison cannot see the red border').toBeGreaterThan(500);
-    expect(m.arrivalBoxRed).toBe(0);
+    expect(m.arrivalRingRed).toBe(0);
     expect(m.tooLongBandRed, 'the reader cannot see a sentence under the field').toBeGreaterThan(300);
     expect(m.blurredBandRed).toBe(0);
     expect(m.outsideDiff).toBe(0);
@@ -1130,9 +1144,9 @@ test.describe('FRAMES', () => {
     expect([img.w, img.h]).toEqual([390, 844]);
     const before = execFileSync('git', ['rev-parse', `063747b9:${FRAME_DIR}/${SHORT_BLURRED}`], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
     const now = execFileSync('git', ['rev-parse', `${BLUR_FRAME}:${FRAME_DIR}/${SHORT_BLURRED}`], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
-    const m = { boxRed: redCount(img, FIELD_BOX), bandRed: redCount(img, SENTENCE_BAND), ringDiff: ringDiff(img, arrival), outsideDiff: outsideDiff(img, arrival), blob: now };
+    const m = { ringRed: ringRed(img), boxRed: redCount(img, FIELD_BOX), bandRed: redCount(img, SENTENCE_BAND), ringDiff: ringDiff(img, arrival), outsideDiff: outsideDiff(img, arrival), blob: now };
     test.info().annotations.push({ type: 'the recaptured frame', description: JSON.stringify(m) });
-    expect(m.boxRed, 'the name field is still painted red').toBe(0);
+    expect(m.ringRed, 'the name field\'s border is still painted red').toBe(0);
     expect(m.ringDiff, 'the field border differs from the arrival frame\'s').toBe(0);
     expect(m.bandRed, 'red under the field (a sentence)').toBe(0);
     expect(m.outsideDiff, 'something outside the field differs from the arrival frame (a sentence, or a shift)').toBe(0);
@@ -1151,6 +1165,17 @@ function redCount(img: Img, box: Box): number {
   let n = 0;
   for (let y = box.y0; y <= box.y1; y += 1)
     for (let x = box.x0; x <= box.x1; x += 1) {
+      const i = (y * img.w + x) * img.ch;
+      const [r, g, b] = [img.px[i], img.px[i + 1], img.px[i + 2]];
+      if (r > 120 && r - g > 60 && r - b > 50) n += 1;
+    }
+  return n;
+}
+function ringRed(img: Img, box: Box = FIELD_BOX, inset = 5): number {
+  let n = 0;
+  for (let y = box.y0; y <= box.y1; y += 1)
+    for (let x = box.x0; x <= box.x1; x += 1) {
+      if (x >= box.x0 + inset && x <= box.x1 - inset && y >= box.y0 + inset && y <= box.y1 - inset) continue;
       const i = (y * img.w + x) * img.ch;
       const [r, g, b] = [img.px[i], img.px[i + 1], img.px[i + 2]];
       if (r > 120 && r - g > 60 && r - b > 50) n += 1;

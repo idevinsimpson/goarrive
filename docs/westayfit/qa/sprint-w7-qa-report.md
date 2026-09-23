@@ -1852,3 +1852,89 @@ Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 
 Everything here is **tested** on the candidate. Nothing is accepted, integrated
 or staged by W7.
+
+---
+
+# Check 17 — the neutral-blur successor `0bf8f427`: delta-only, **PASS on every delta item**
+
+Routed by L0 in #434 `5803510971` (Director `5802873607`; delta shape
+`5802882084`, `5803227673`). ACK `5803518058`. The successor is
+`0bf8f42741449f2f840c197281f215349f778595` on
+`claude/wsf-release-candidate-round-2`: `9f27c6e` ⊕ W4 `e653330`, one merge
+commit. Everything else in Check 16 and W5's kiosk gate carries unchanged, and
+nothing outside the delta was rerun.
+
+## 17.1 · What was tested, exactly
+
+- **Source.** `git diff 9f27c6ea 0bf8f427` is exactly W4's five files:
+  - the route;
+  - W4's outcomes spec (+1 test);
+  - W4's unit file;
+  - the capture case;
+  - one frame.
+
+  Each is **byte-identical to `e6533303`**: route `eae25212`, outcomes spec `bbcbb5a9`, capture spec `b4a78462`, unit file `d15234fd`, frame `f0ed081e`. No protected path is touched.
+- **The route change.** `nameLooksWrong` is now `nameMessage !== null`: the field is red exactly while a validation sentence is on screen. The blur handler (`setNameBlurred`) is gone.
+- **Build.** `0bf8f427` itself, built in its own worktree (exit 0, stamp `0bf8f427`) and served from the emulator.
+
+## 17.2 · Per item
+
+| # | delta item | result | measured on `0bf8f427` |
+|---|---|---|---|
+| 1 | **SEAM-1**: first invalid press, three classes, mouse 5 / 120 ms, touch 80 / 150 ms | **PASS 12/12** | The field-on-screen press position was reached 4× per run at 390×844 and 430×932, and 0× at 390×640 (the guard) |
+| 2 | **SEAM-1b**: leaving the field by keyboard moves nothing | **PASS 4/4** | 2 blur cases plus the 2 valid-name controls |
+| 3 | **SEAM-1c**, re-pointed to the ruling | **PASS 1/1** | The blurred short name keeps the resting border `rgb(230, 226, 218)`, shows no sentence, and is not focused. **One** Create press then gives "Give your community a name.", `rgb(180, 35, 44)` and focus, with 0 creates. A corrected name returns to resting; a too-long name is red with its sentence while typing. Focus alone does not paint red |
+| 4 | **W4's new e2e** (`sprint-w4-start-community-outcomes.spec.ts:332`) | **PASS** | W4's whole outcomes spec 28/28, from the successor's own tree |
+| 5 | **the recaptured frame** (`AFTER-start-name-too-short-blurred-390x844.png`, `f0ed081e`) | **PASS** (measured, not a visual verdict) | 0 red pixels in the border ring, where 063747b9's frame had 759. The ring and everything outside the field are identical to the same SHA's arrival frame (0 and 0 differing pixels). Nothing red under the field. The 24 frames: FRAMES delivery PASS |
+| 6 | **directly affected controls** | **PASS** | SEAM-1 controls 8/8; W4's unit file 37/37; check 9's "a too-short and a too-long name are refused without a request" 1/1; FRAMES calibrations 2/2 |
+| — | Safari / WebKit | **CANNOT-MEASURE** | Chromium only |
+
+**Fail-first on `9f27c6ea` (pre-staged, same file).** SEAM-1c fails there at
+the blur: a red border with no sentence, the ruled defect. The frame delivery
+check fails on `063747b9`'s frame with 759 red ring pixels.
+
+## 17.3 · My instrument error in this check
+
+The frame delivery check **first failed on `0bf8f427`**: 3 red-dominant pixels
+in the field box. I located them before judging. They are colour fringes of
+the typed "a" (x 36–40, y 398–403, e.g. `[163, 101, 70]`). They are identical
+in `063747b9`'s frame and absent from the arrival frame, which has no text.
+The count covered the whole box, glyph included.
+
+It now counts the **border ring** only (the box less a 5 px inset, where the
+glyph cannot reach). The calibration was re-run: 759 on `063747b9`'s frame, 0 on
+the arrival frame. After the change it fails on `063747b9` and passes on
+`0bf8f427`. The whole-box count is kept as a recorded number.
+
+## 17.4 · Pre-staged for the R1 successor (not yet routed; tested on `9f27c6ea`)
+
+`sprint-w7-candidate-risks.spec.ts`, run serially:
+
+- **R1, the Director's proof contract (`5803218763`).** It asserts:
+  - no yank: no history write into a community after the release, and the member stays on `/`;
+  - before a blank form can submit, the confirmed community's **name** is on screen, hit-tested on top at its own centre, on Home or on Start's re-entry;
+  - R1b's "couldn't open it" copy is not reused;
+  - one create request and one community until a deliberate second;
+  - a deliberate second still creates one.
+
+  **On `9f27c6ea` it fails at the acknowledgment**: Home still offers "Start a community", Start opens a blank form, and nothing names the community. The member is on `/`, with 1 create.
+- **R1m, the journey over time.** Home stays stale at:
+  - +4 s and +30 s: "Start a community" offered, the community not named, no re-read;
+  - after a Progress → Home round trip: the same.
+
+  **Only a reload** shows it (Home opens the community). 1 create and 1 community throughout.
+- **R1acct, the account-bound control.** The same journey, then an in-app sign-out and sign-in as another member, with no page load.
+  - **PASS on `9f27c6ea`:** nothing of the first account is shown on Home, on Start, or at either Back step.
+  - **Recorded, not asserted:** the first account's name stays in one **unrendered** `wsf-start-summary` node.
+- **Harness.** Under three workers, R1 once saw Home redirect into the new community. A slowed `wsfMyCommunities` read had landed after the commit: a race with Home's ordinary resolution, not the late success, and never seen serially. The harness now waits for Home's read to answer before the create starts.
+
+## 17.5 · Bound and hygiene
+
+Chromium only; Safari is CANNOT-MEASURE. Emulators only.
+
+- **Verification builds:** local and never pushed (`0bf8f427` built exactly).
+- **Edits:** no product edit; no other worker's spec edited. W4's spec and unit file were run from the successor's own tree.
+- **After every run:** artifacts and `test-results` cleaned.
+- **Checks:** `ts:check` 0; guard 9 / 20.
+
+**Status:** tested on `0bf8f427`; not accepted, integrated or staged by W7.
