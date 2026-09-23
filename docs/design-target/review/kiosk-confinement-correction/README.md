@@ -52,6 +52,22 @@ between a `before/` frame and its `after/` twin is the patch.
 | `kiosk-signout-failed-tablet-800x1280.png` | `efdc17aa0b240be4` | `ed6629eb6ed84909` | the bar goes; the warning and both instruction lines become readable |
 | `ordinary-contribution-keeps-its-tabs-tablet-800x1280.png` | `eb010b345f646278` | `d367506ab4ef251b` | **nothing that matters** — the same route without `?kiosk=1` keeps all four tabs and MOVE |
 
+### `ordinary-contribution-keeps-its-tabs-*` is history, not current truth
+
+That pair — one `before/` frame and its `after/` twin — has **no producer any
+more**. It was shot to show that the correction changed nothing on an ordinary
+contribution: the same route without `?kiosk=1` still kept all four tabs and
+MOVE. The member shell migration changed the claim underneath it. Contributing
+now lives outside the tab tree, so an ordinary contribution does not keep its
+tabs at all; what it keeps is its way back to the tab it came from. The block
+that shot this frame asserts that instead, and writes it under the name
+`ordinary-contribution-returns-to-its-tab-tablet-800x1280.png`.
+
+So these two files stay as the record of what was reviewed at the time, the way
+the Join package's `AFTER-failed-*` frames do. Nothing regenerates them, and a
+re-run of the suite will not touch them: reading either as a statement about the
+current build would be reading a photograph of a shell that no longer exists.
+
 **Three of the baseline frames are byte-identical to frames already delivered on
 Board 11** — `kiosk-receipt-tablet` to that package's `kiosk-receipt-stay`,
 `kiosk-unresolved-tablet` to its `kiosk-unresolved`, and

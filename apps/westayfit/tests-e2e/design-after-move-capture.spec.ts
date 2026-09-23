@@ -155,9 +155,24 @@ async function shot(page: Page, name: string, topTestId: string, primaryTestId: 
  * true if the shell's own metrics change.
  */
 async function assertNothingUnderTheBar(page: Page, name: string, primaryTestId: string) {
-  const bar = await page.getByTestId('wsf-member-tabs').boundingBox();
-  if (!bar) return; // surfaces without the shell have nothing to collide with
-  const move = await page.getByTestId('wsf-member-tab-move').boundingBox();
+  /*
+    "NO BAR HERE" IS ASKED WITH `isVisible`, NOT WITH `boundingBox`.
+
+    `boundingBox()` waits for its element to be visible and, with no action
+    timeout configured, waits until the whole test times out. The
+    "surfaces without the shell" branch below therefore never ran: it was only
+    ever reached on surfaces that HAD the bar. That cost nothing while every
+    route wore the shell. It costs three test timeouts now that MOVE opens
+    OVER the member shell (the bar is mounted but hidden beneath the sheet)
+    and contributing lives outside the tab tree entirely. `isVisible()`
+    answers immediately for both, so the branch does what it says.
+  */
+  const barLocator = page.getByTestId('wsf-member-tabs');
+  if (!(await barLocator.isVisible())) return; // nothing on show to collide with
+  const bar = await barLocator.boundingBox();
+  if (!bar) return;
+  const moveLocator = page.getByTestId('wsf-member-tab-move');
+  const move = (await moveLocator.isVisible()) ? await moveLocator.boundingBox() : null;
   const ceiling = Math.min(bar.y, move ? move.y : bar.y);
 
   /*

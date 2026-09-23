@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * E3.5 supplementary — pins surfaces `mu2-flow.spec.ts` does not touch:
@@ -50,10 +51,7 @@ const PROJECT_ID = 'demo-wsf-local';
  * rows are unchanged.
  */
 async function openChampionDetails(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();

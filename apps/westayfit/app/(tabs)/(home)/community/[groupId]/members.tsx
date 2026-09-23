@@ -3,11 +3,11 @@ import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { useWsfAuth } from '../../../src/auth';
-import { describeCallableError } from '../../../src/callableErrors';
-import { getFirebaseFunctions } from '../../../src/firebase';
-import { memberCountLabel } from '../../../src/labels';
-import { InitialsAvatar, isChampionRole } from '../../../src/ui/CommunityPresence';
+import { useWsfAuth } from '../../../../../src/auth';
+import { describeCallableError } from '../../../../../src/callableErrors';
+import { getFirebaseFunctions } from '../../../../../src/firebase';
+import { memberCountLabel } from '../../../../../src/labels';
+import { InitialsAvatar, isChampionRole } from '../../../../../src/ui/CommunityPresence';
 import {
   CARD_BORDER,
   CREAM,
@@ -20,8 +20,8 @@ import {
   PROGRESS_GREEN,
   SURFACE,
   TEXT_MUTED,
-} from '../../../src/ui/kit';
-import { MEMBER_TAB_BAR_BODY } from '../../../src/ui/MemberTabBar';
+} from '../../../../../src/ui/kit';
+import { MEMBER_TAB_BAR_BODY } from '../../../../../src/ui/MemberTabBar';
 
 /**
  * MEMBERS — the people in one community.
