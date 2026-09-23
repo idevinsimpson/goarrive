@@ -568,11 +568,22 @@ payload, default, read-time rule, index or test contract was touched.**
 | First momentum row **visible** at 390×844 | recovered through spacing and hero composition |
 | 390×640: presence + moved-today above the fold, feed next in scroll order | both hold |
 | `Anonymous member` for name-private/activity-visible | shipped, replacing `A member` |
+| A proven zero rendered, `null` silent | ruled by the Director after this lane suppressed the zero; both directions pinned |
 
-**Zero is not rendered.** `null` means the server could not prove the count;
-`0` means it proved nobody has moved yet in this goal's own day. That is true
-and also the single most discouraging sentence the screen could open with, and
-the quiet feed below already says it. The line starts at one.
+**A proven zero IS rendered; only `null` is silence.** This lane first
+suppressed the zero, arguing that a green `0 people moved today` is a
+discouraging thing to open a screen with. The Director overruled it and was
+right: hiding a known zero **collapses "known zero" into "unknown"**, which is
+exactly the distinction the rest of this feature exists to keep. `null` — no
+goal named, an unresolvable zone, a goal in another community, or a scan that
+did not provably reach the window start — still renders nothing at all.
+
+Both directions are pinned on the same screen with the same fixture shape, and
+the pair was mutation-tested rather than trusted: restoring the `> 0` condition
+kills the zero assertion and leaves the null assertion green, so neither is
+vacuous. The zero case is a live goal on a day nobody has moved yet, with real
+movement seeded *outside* the goal's local day so the feed still renders and
+the count line is the only thing under test.
 
 ## Members
 

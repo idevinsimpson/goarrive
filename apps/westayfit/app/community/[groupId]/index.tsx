@@ -3354,16 +3354,22 @@ export default function CommunityPage() {
             ) : null}
           </View>
           {/*
-            ZERO IS NOT A THING TO SAY OUT LOUD. `null` means the server could
-            not prove the count and renders nothing, which is the Director's
-            rule; `0` means it proved that nobody has moved yet in this goal's
-            own day, which is true and also the single most discouraging
-            sentence this screen could open with. The quiet feed below already
-            says it without a green headline, so the line starts at one.
+            A PROVEN ZERO IS DATA; ONLY `null` IS SILENCE.
+
+            `null` means the server could not establish the count — no goal
+            named, an unresolvable zone, a goal in another community, or a
+            bounded scan that did not reach past the window start — and it
+            renders nothing at all.
+
+            `0` means the server DID establish it and nobody has moved yet in
+            this goal's own day. An earlier revision suppressed that, on the
+            argument that a green zero is a discouraging thing to open with.
+            The Director overruled it and was right: hiding a known zero
+            collapses "known zero" into "unknown", which is precisely the
+            distinction the rest of this feature exists to keep. The screen
+            says what is true and lets the member decide how to feel about it.
           */}
-          {momentum !== null &&
-          momentum.contributorsToday !== null &&
-          momentum.contributorsToday > 0 ? (
+          {momentum !== null && momentum.contributorsToday !== null ? (
             <Text style={styles.movedToday} testID="wsf-community-contributors-today">
               {momentum.contributorsToday === 1
                 ? '1 person moved today'

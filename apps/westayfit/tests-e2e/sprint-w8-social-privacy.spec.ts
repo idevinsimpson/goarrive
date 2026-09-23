@@ -10,8 +10,11 @@ import {
   stampId,
 } from './helpers/mobile';
 import {
+  GOAL_TZ,
   seedContribution,
+  seedContributionAt,
   seedMembershipWithVisibility,
+  zonedDayStartMs,
 } from './sprint-w8-social-fixture';
 
 /**
@@ -334,6 +337,124 @@ test('the members directory refuses a non-member and leaks nothing to them', asy
     for (const name of ['Openly Named', 'Secret Identity', 'Quiet Contributor']) {
       expect(blob, `${name} reached a non-member`).not.toContain(name);
     }
+  } finally {
+    await ctx.close();
+  }
+});
+
+/**
+ * THE ZERO / NULL SEPARATION, PINNED IN BOTH DIRECTIONS.
+ *
+ * A PROVEN ZERO IS DATA AND A NULL IS SILENCE, and the whole point is that the
+ * interface distinguishes them. A one-sided test would pass against a build
+ * that rendered the line always, or one that rendered it never — so both cases
+ * are asserted, on the same screen, with the same fixture shape.
+ *
+ * Neither case is contrived: zero is a live goal on a day nobody has moved yet,
+ * and null is a goal whose stored zone cannot be resolved, which is one of the
+ * four conditions the server refuses to guess from.
+ */
+async function buildDayFixture(opts: { timezone?: string }): Promise<Fixture> {
+  const stamp = stampId();
+  const groupId = `w8z-${stamp}`;
+  const goalId = `w8zg-${stamp}`;
+  const email = `w8z-${stamp}@example.com`;
+  const password = 'Str0ng-Passw0rd!';
+  const meUid = await seedVerifiedUser(email, password);
+  await seedProfile(meUid, 'Day Window Member');
+  const mover = `w8z-mover-${stamp}`;
+
+  await seedCommunity({
+    groupId,
+    displayName: 'Day Window Community',
+    joinPolicy: 'private',
+    members: [{ uid: meUid, role: 'member' }],
+  });
+  await seedMembership(groupId, mover, 'member');
+  await seedProfile(mover, 'Yesterday Mover');
+
+  await seedActiveGoal({
+    goalId,
+    groupId,
+    ownerUid: meUid,
+    title: 'Day Window Goal',
+    target: 5000,
+    unit: 'squats',
+    total: 1200,
+    timezone: opts.timezone,
+  });
+
+  /*
+    REAL MOVEMENT, DELIBERATELY OUTSIDE THE GOAL'S CURRENT LOCAL DAY — two hours
+    before it began. The feed still has rows to show, so the momentum card
+    renders either way and the ONLY thing under test is the count line. Seeded
+    through the unclamped writer precisely because the clamped one exists to
+    stop this happening by accident.
+  */
+  const dayStart = zonedDayStartMs(GOAL_TZ);
+  await seedContributionAt(groupId, goalId, mover, 30, dayStart - 2 * 60 * 60_000);
+
+  return {
+    groupId,
+    goalId,
+    email,
+    password,
+    meUid,
+    named: mover,
+    namePrivate: mover,
+    activityPrivate: mover,
+  };
+}
+
+test('a PROVEN zero renders the line: "0 people moved today"', async ({
+  browser,
+}: {
+  browser: Browser;
+}) => {
+  test.setTimeout(120_000);
+  const fx = await buildDayFixture({});
+  const { ctx, page } = await phone(browser, fx);
+  try {
+    await page.goto(`/community/${fx.groupId}`);
+    await expect(page.getByTestId('wsf-community-momentum-card')).toBeVisible({
+      timeout: 40_000,
+    });
+    // The feed proves the read succeeded and simply found nothing inside today.
+    await expect(page.getByTestId('wsf-momentum-row').first()).toBeVisible({
+      timeout: 40_000,
+    });
+    const line = page.getByTestId('wsf-community-contributors-today');
+    await expect(line).toBeVisible({ timeout: 20_000 });
+    await expect(line).toHaveText('0 people moved today');
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an UNESTABLISHED count renders nothing at all', async ({
+  browser,
+}: {
+  browser: Browser;
+}) => {
+  test.setTimeout(120_000);
+  // A goal whose stored zone cannot be resolved: the server refuses to guess a
+  // day from it, so the count is null rather than zero.
+  const fx = await buildDayFixture({ timezone: 'Not/AZone' });
+  const { ctx, page } = await phone(browser, fx);
+  try {
+    await page.goto(`/community/${fx.groupId}`);
+    await expect(page.getByTestId('wsf-community-momentum-card')).toBeVisible({
+      timeout: 40_000,
+    });
+    await expect(page.getByTestId('wsf-momentum-row').first()).toBeVisible({
+      timeout: 40_000,
+    });
+    /*
+      The same screen, the same feed, and NO line. Asserted after the feed has
+      arrived, so this cannot pass merely because the page had not finished
+      loading — which is the way a negative assertion usually lies.
+    */
+    await expect(page.getByTestId('wsf-community-contributors-today')).toHaveCount(0);
   } finally {
     await ctx.close();
   }

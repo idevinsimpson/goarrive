@@ -87,9 +87,32 @@ export async function seedContribution(
   count: number,
   minutesAgo: number,
 ): Promise<void> {
-  const attemptId = stampId();
   const dayStart = zonedDayStartMs(GOAL_TZ);
-  const at = new Date(Math.max(Date.now() - minutesAgo * 60_000, dayStart + 60_000));
+  await seedContributionAt(
+    groupId,
+    goalId,
+    uid,
+    count,
+    Math.max(Date.now() - minutesAgo * 60_000, dayStart + 60_000),
+  );
+}
+
+/**
+ * The same write at an EXACT instant, with no clamping.
+ *
+ * Needed by the zero-state test, which has to place real movement OUTSIDE the
+ * goal's current local day: that is the only way to produce a count the server
+ * can PROVE is zero, as distinct from one it cannot establish at all.
+ */
+export async function seedContributionAt(
+  groupId: string,
+  goalId: string,
+  uid: string,
+  count: number,
+  atMs: number,
+): Promise<void> {
+  const attemptId = stampId();
+  const at = new Date(atMs);
   await firestoreWrite(`wsfContributions/${goalId}_${uid}_${attemptId}`, {
     goalId: { stringValue: goalId },
     attemptId: { stringValue: attemptId },
