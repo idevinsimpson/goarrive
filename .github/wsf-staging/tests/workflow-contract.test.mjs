@@ -795,4 +795,109 @@ test('the preflight never reads a secret payload or prints a token', () => {
   assert.match(src, /process\.exit\(0\)/, 'the preflight can exit nonzero');
 });
 
+
+// ── the staging hosting config's rewrites ─────────────────────────────────
+//
+// WHY THESE LIVE HERE rather than in a suite of their own: run-all.mjs carries
+// a hardcoded list of suites, and a new file that is not added to it is a test
+// that never runs. That file is not reserved to this packet, so the cases go
+// where they are already executed.
+//
+// WHAT THEY PIN. `firebase.westayfit.staging.json` is an OPERATIONAL file: the
+// workflow copies it into the candidate checkout (`cp ../ops/… .`) and both the
+// hosting and functions deploys use it. The app's `firebase.westayfit.json` is
+// the production site's config and the staging deploy never reads it — so a
+// rewrite added there does nothing for staging, and the two files' own comment
+// ("Keep the two in sync") is enforced by nothing but a person. These cases are
+// that enforcement for the community routes.
+
+const STAGING_HOSTING = JSON.parse(
+  fs.readFileSync('firebase.westayfit.staging.json', 'utf8')
+);
+const stagingRewrites = STAGING_HOSTING.hosting.rewrites;
+
+/**
+ * Firebase Hosting glob matching, enough of it to decide these cases:
+ * `*` matches within ONE path segment, `**` matches across segments, and the
+ * FIRST matching rewrite wins. Written out rather than imported so the rule the
+ * assertions rely on is visible at the point of use.
+ */
+function firstMatch(rewrites, urlPath) {
+  for (const r of rewrites) {
+    const rx = new RegExp(
+      '^' +
+        r.source
+          .split(/(\*\*|\*)/)
+          .map((part) =>
+            part === '**' ? '.*' : part === '*' ? '[^/]*' : part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          )
+          .join('') +
+        '$'
+    );
+    if (rx.test(urlPath)) return r;
+  }
+  return null;
+}
+
+await test('the members route has its own rewrite, and it wins over the catch-all', () => {
+  const hit = firstMatch(stagingRewrites, '/community/abc123/members');
+  assert.ok(hit, '/community/{id}/members matches no rewrite at all');
+  assert.equal(hit.source, '/community/*/members');
+  assert.equal(hit.destination, '/community/__dynamic/members.html');
+  // Order, stated as order and not merely as presence: a members rule placed
+  // after the catch-all would never be reached.
+  const members = stagingRewrites.findIndex((r) => r.source === '/community/*/members');
+  const catchAll = stagingRewrites.findIndex((r) => r.source === '/community/**');
+  assert.ok(members >= 0 && catchAll >= 0);
+  assert.ok(members < catchAll, 'the members rule must precede /community/**');
+});
+
+await test('THE DEFECT: without that rule the same URL resolves to the community home', () => {
+  // The rewrite list exactly as it stood on main 340e141, so the case proves
+  // what was wrong rather than only what is now right. A members request did
+  // NOT 404 — it silently served the community home document.
+  const before = stagingRewrites.filter((r) => r.source !== '/community/*/members');
+  const hit = firstMatch(before, '/community/abc123/members');
+  assert.equal(hit.source, '/community/**');
+  assert.equal(hit.destination, '/community/__dynamic.html');
+});
+
+await test('the challenge rule is unchanged and still precedes the catch-all', () => {
+  const hit = firstMatch(stagingRewrites, '/community/abc123/challenge');
+  assert.equal(hit.source, '/community/*/challenge');
+  assert.equal(hit.destination, '/community/__dynamic/challenge.html');
+  const challenge = stagingRewrites.findIndex((r) => r.source === '/community/*/challenge');
+  const catchAll = stagingRewrites.findIndex((r) => r.source === '/community/**');
+  assert.ok(challenge < catchAll, 'the challenge rule must precede /community/**');
+});
+
+await test('the community home itself still resolves to the catch-all', () => {
+  // The members rule must not capture the community page: `*` is one segment.
+  const hit = firstMatch(stagingRewrites, '/community/abc123');
+  assert.equal(hit.source, '/community/**');
+  assert.equal(hit.destination, '/community/__dynamic.html');
+});
+
+await test('no rewrite was removed and the site and codebase are untouched', () => {
+  for (const source of ['/community/*/challenge', '/community/**', '/join/**', '/contribute/**',
+    '/display/**', '/kiosk/**', '/station/**', '/event/**', '/queue/**', '/combined/**']) {
+    assert.ok(stagingRewrites.some((r) => r.source === source), `${source} was removed`);
+  }
+  assert.equal(STAGING_HOSTING.hosting.site, 'westayfit-staging');
+  assert.equal(STAGING_HOSTING.functions.length, 1);
+  assert.equal(STAGING_HOSTING.functions[0].codebase, 'westayfit');
+});
+
+await test('/move/{goalId} still has NO rewrite here — reported, not fixed in this packet', () => {
+  // A finding, pinned so it cannot be lost: apps/westayfit/app/move/[goalId].tsx
+  // exists and exports /move/__dynamic.html, the app's own config carries
+  // `/move/**`, and this operational file does not. A direct load or refresh of
+  // /move/{goalId} on staging therefore 404s today. The packet reserving this
+  // file said "nothing else in that file", so it is NOT added here; this case
+  // asserts the gap so that closing it is a deliberate act and re-opening it
+  // fails a test.
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal'), null,
+    'if this now matches, the /move gap was closed — update this case deliberately');
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);
