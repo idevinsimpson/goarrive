@@ -1,7 +1,8 @@
 # WSF — visual-review export for PR #426's /start-community checkpoints: the
 # ten actual BEFORE frames, the fifteen PROPOSED / NOT ACCEPTED target drawings
-# and their contact sheet, and — from PR #447 at 0901765 — the eighteen AFTER
-# captures of the implemented route (390x844, 390x640, 430x932) under
+# and their contact sheet, and — from PR #447 at d467754 — the twenty-four AFTER
+# captures of the implemented route incl. its signed-out / unverified gates
+# (390x844, 390x640, 430x932) under
 # docs/design-target/review/start-community-next/, exported at their source
 # commit as a workflow artifact with a manifest that pins each file to that
 # commit — the reviewer's proven native-file path (owner direction PR #365
@@ -59,7 +60,7 @@ jobs:
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
           SC = 'docs/design-target/review/start-community-next'
-          # THE EXACT ALLOWLIST: the 44 PNGs PRs #426 and #447 add under start-community-next/ —
+          # THE EXACT ALLOWLIST: the 50 PNGs PRs #426 and #447 add under start-community-next/ —
           # W4's ten actual BEFORE frames, fifteen PROPOSED / NOT ACCEPTED drawings (each
           # carrying its own amber strip inside the image) and their contact sheet, at the PR
           # head this job checks out, original committed bytes only.
@@ -90,24 +91,30 @@ jobs:
               (f'{SC}/target/PROPOSED-start-next-unconfirmed-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-start-next-unconfirmed-390x640.png'),
               (f'{SC}/target/PROPOSED-start-next-unconfirmed-390x844-end.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-start-next-unconfirmed-390x844-end.png'),
               (f'{SC}/target/PROPOSED-start-next-unconfirmed-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-start-next-unconfirmed-390x844.png'),
-              (f'{SC}/after/AFTER-start-arrival-390x640.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-arrival-390x640.png'),
-              (f'{SC}/after/AFTER-start-arrival-390x844.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-arrival-390x844.png'),
-              (f'{SC}/after/AFTER-start-arrival-430x932.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-arrival-430x932.png'),
-              (f'{SC}/after/AFTER-start-name-too-long-390x640.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-name-too-long-390x640.png'),
-              (f'{SC}/after/AFTER-start-name-too-long-390x844.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-name-too-long-390x844.png'),
-              (f'{SC}/after/AFTER-start-name-too-long-430x932.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-name-too-long-430x932.png'),
-              (f'{SC}/after/AFTER-start-refused-profile-390x640-end.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-refused-profile-390x640-end.png'),
-              (f'{SC}/after/AFTER-start-refused-profile-390x640.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-refused-profile-390x640.png'),
-              (f'{SC}/after/AFTER-start-refused-profile-390x844-end.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-refused-profile-390x844-end.png'),
-              (f'{SC}/after/AFTER-start-refused-profile-390x844.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-refused-profile-390x844.png'),
-              (f'{SC}/after/AFTER-start-refused-profile-430x932-end.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-refused-profile-430x932-end.png'),
-              (f'{SC}/after/AFTER-start-refused-profile-430x932.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-refused-profile-430x932.png'),
-              (f'{SC}/after/AFTER-start-unconfirmed-390x640-end.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-unconfirmed-390x640-end.png'),
-              (f'{SC}/after/AFTER-start-unconfirmed-390x640.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-unconfirmed-390x640.png'),
-              (f'{SC}/after/AFTER-start-unconfirmed-390x844-end.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-unconfirmed-390x844-end.png'),
-              (f'{SC}/after/AFTER-start-unconfirmed-390x844.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-unconfirmed-390x844.png'),
-              (f'{SC}/after/AFTER-start-unconfirmed-430x932-end.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-unconfirmed-430x932-end.png'),
-              (f'{SC}/after/AFTER-start-unconfirmed-430x932.png', 'AFTER · actual implemented /start-community at 0901765 (#447) · AFTER-start-unconfirmed-430x932.png'),
+              (f'{SC}/after/AFTER-start-arrival-390x640.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-arrival-390x640.png'),
+              (f'{SC}/after/AFTER-start-arrival-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-arrival-390x844.png'),
+              (f'{SC}/after/AFTER-start-arrival-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-arrival-430x932.png'),
+              (f'{SC}/after/AFTER-start-name-too-long-390x640.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-name-too-long-390x640.png'),
+              (f'{SC}/after/AFTER-start-name-too-long-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-name-too-long-390x844.png'),
+              (f'{SC}/after/AFTER-start-name-too-long-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-name-too-long-430x932.png'),
+              (f'{SC}/after/AFTER-start-refused-profile-390x640-end.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-refused-profile-390x640-end.png'),
+              (f'{SC}/after/AFTER-start-refused-profile-390x640.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-refused-profile-390x640.png'),
+              (f'{SC}/after/AFTER-start-refused-profile-390x844-end.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-refused-profile-390x844-end.png'),
+              (f'{SC}/after/AFTER-start-refused-profile-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-refused-profile-390x844.png'),
+              (f'{SC}/after/AFTER-start-refused-profile-430x932-end.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-refused-profile-430x932-end.png'),
+              (f'{SC}/after/AFTER-start-refused-profile-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-refused-profile-430x932.png'),
+              (f'{SC}/after/AFTER-start-unconfirmed-390x640-end.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-unconfirmed-390x640-end.png'),
+              (f'{SC}/after/AFTER-start-unconfirmed-390x640.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-unconfirmed-390x640.png'),
+              (f'{SC}/after/AFTER-start-unconfirmed-390x844-end.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-unconfirmed-390x844-end.png'),
+              (f'{SC}/after/AFTER-start-unconfirmed-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-unconfirmed-390x844.png'),
+              (f'{SC}/after/AFTER-start-unconfirmed-430x932-end.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-unconfirmed-430x932-end.png'),
+              (f'{SC}/after/AFTER-start-unconfirmed-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · AFTER-start-unconfirmed-430x932.png'),
+              (f'{SC}/after/AFTER-start-gate-signed-out-390x640.png', 'AFTER · actual implemented /start-community at d467754 (#447) · signed-out gate, reached as a member reaches it · AFTER-start-gate-signed-out-390x640.png'),
+              (f'{SC}/after/AFTER-start-gate-signed-out-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · signed-out gate, reached as a member reaches it · AFTER-start-gate-signed-out-390x844.png'),
+              (f'{SC}/after/AFTER-start-gate-signed-out-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · signed-out gate, reached as a member reaches it · AFTER-start-gate-signed-out-430x932.png'),
+              (f'{SC}/after/AFTER-start-gate-unverified-390x640.png', 'AFTER · actual implemented /start-community at d467754 (#447) · unverified gate, reached from an emulator sign-up with the verify step omitted · AFTER-start-gate-unverified-390x640.png'),
+              (f'{SC}/after/AFTER-start-gate-unverified-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · unverified gate, reached from an emulator sign-up with the verify step omitted · AFTER-start-gate-unverified-390x844.png'),
+              (f'{SC}/after/AFTER-start-gate-unverified-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · unverified gate, reached from an emulator sign-up with the verify step omitted · AFTER-start-gate-unverified-430x932.png'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
