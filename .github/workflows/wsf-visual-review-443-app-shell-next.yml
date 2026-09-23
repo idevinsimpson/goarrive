@@ -1,9 +1,11 @@
 # WSF — visual-review export for PR #443's app-shell / navigation checkpoint 1:
-# the 23 PNGs W9 adds under docs/design-target/review/app-shell-next/ (ten
+# the 36 PNGs W9 adds under docs/design-target/review/app-shell-next/ (ten
 # CURRENT-BUILD BEFORE captures of the real member routes at start SHA c8f38e3,
-# twelve PROPOSED / NOT ACCEPTED captures of the gated shell prototype —
-# Home, Community, Progress, You, MOVE open, MOVE closed at 390x844 and
-# 390x640 — and one contact sheet), exported at their source commit as a
+# twelve PROPOSED / NOT ACCEPTED captures of the gated shell prototype plus
+# their contact sheet, and — at the ordered revision 7466158 — twelve
+# MIGRATED BUILD / NOT ACCEPTED captures of the migrated shell on the real
+# routes: Home, Community, Progress, You, MOVE open and contributing at
+# 390x844 and 390x640, plus their contact sheet), exported at their source commit as a
 # workflow artifact with a manifest that pins each file to that commit — the
 # reviewer's proven native-file path (owner direction PR #365 comment
 # 5784428860 §3; the owner's shell decision 5788168334). Same exporter as
@@ -12,7 +14,7 @@
 # stdlib packaging, nothing from the tree executed, nothing rendered or
 # resized. This branch carries only this file on top of W9's head and is
 # never merged; it exists to run the job.
-name: 'WSF visual-review export — #443 app shell prototype checkpoint'
+name: 'WSF visual-review export — #443 app shell migration checkpoint'
 
 on:
   pull_request:
@@ -59,9 +61,10 @@ jobs:
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
           SN = 'docs/design-target/review/app-shell-next'
-          # THE EXACT ALLOWLIST: the 23 PNGs PR #443 adds under app-shell-next/ — W9's CURRENT-BUILD
-          # BEFOREs (real routes at c8f38e3) and PROPOSED / NOT ACCEPTED prototype captures, none an
-          # AFTER — at the PR head this job checks out, original committed bytes only.
+          # THE EXACT ALLOWLIST: the 36 PNGs PR #443 adds under app-shell-next/ — W9's CURRENT-BUILD
+          # BEFOREs (real routes at c8f38e3), PROPOSED / NOT ACCEPTED prototype captures, and the
+          # MIGRATED BUILD / NOT ACCEPTED successor captures at 7466158 — none an AFTER — at the PR
+          # head this job checks out, original committed bytes only.
           allow = [
               (f'{SN}/before/CURRENT-BUILD-activity-390x640.png', 'BEFORE · actual current build, captured from the real member routes at start SHA c8f38e3 · CURRENT-BUILD-activity-390x640.png'),
               (f'{SN}/before/CURRENT-BUILD-activity-390x844.png', 'BEFORE · actual current build, captured from the real member routes at start SHA c8f38e3 · CURRENT-BUILD-activity-390x844.png'),
@@ -86,6 +89,19 @@ jobs:
               (f'{SN}/target/PROPOSED-e-move-open-390x844.png', 'PROPOSED · NOT ACCEPTED · gated shell prototype capture (persistent top bar, real tabs, MOVE as a focus flow) · PROPOSED-e-move-open-390x844.png'),
               (f'{SN}/target/PROPOSED-f-move-closed-390x640.png', 'PROPOSED · NOT ACCEPTED · gated shell prototype capture (persistent top bar, real tabs, MOVE as a focus flow) · PROPOSED-f-move-closed-390x640.png'),
               (f'{SN}/target/PROPOSED-f-move-closed-390x844.png', 'PROPOSED · NOT ACCEPTED · gated shell prototype capture (persistent top bar, real tabs, MOVE as a focus flow) · PROPOSED-f-move-closed-390x844.png'),
+              (f'{SN}/successor/MIGRATED-a-home-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-a-home-390x640.png'),
+              (f'{SN}/successor/MIGRATED-a-home-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-a-home-390x844.png'),
+              (f'{SN}/successor/MIGRATED-b-community-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-b-community-390x640.png'),
+              (f'{SN}/successor/MIGRATED-b-community-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-b-community-390x844.png'),
+              (f'{SN}/successor/MIGRATED-c-progress-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-c-progress-390x640.png'),
+              (f'{SN}/successor/MIGRATED-c-progress-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-c-progress-390x844.png'),
+              (f'{SN}/successor/MIGRATED-d-you-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-d-you-390x640.png'),
+              (f'{SN}/successor/MIGRATED-d-you-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-d-you-390x844.png'),
+              (f'{SN}/successor/MIGRATED-e-move-open-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-e-move-open-390x640.png'),
+              (f'{SN}/successor/MIGRATED-e-move-open-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-e-move-open-390x844.png'),
+              (f'{SN}/successor/MIGRATED-f-contribute-390x640.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-f-contribute-390x640.png'),
+              (f'{SN}/successor/MIGRATED-f-contribute-390x844.png', 'MIGRATED BUILD · NOT ACCEPTED · capture of the migrated shell on the real member routes at 7466158 (not an AFTER) · MIGRATED-f-contribute-390x844.png'),
+              (f'{SN}/successor/MIGRATED-contact-sheet.png', 'CONTACT SHEET · MIGRATED BUILD / NOT ACCEPTED successor captures side by side · MIGRATED-contact-sheet.png'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
@@ -129,7 +145,7 @@ jobs:
                       'files': rows}
           json.dump(manifest, open(os.path.join(out, 'MANIFEST.json'), 'w'), indent=2)
           with open(os.path.join(out, 'MANIFEST.md'), 'w') as f:
-              f.write(f'# PR #443 app shell prototype checkpoint — visual review package\n\nRepository `{repo}` · source commit `{head}` · {len(rows)} files, {total} bytes · original bytes, re-hashed against git.\n\n')
+              f.write(f'# PR #443 app shell migration checkpoint — visual review package\n\nRepository `{repo}` · source commit `{head}` · {len(rows)} files, {total} bytes · original bytes, re-hashed against git.\n\n')
               f.write('| path | label | git blob | bytes | sha256 | w×h |\n| --- | --- | --- | ---: | --- | --- |\n')
               for r in rows:
                   f.write(f"| `{r['path']}` | {r['label']} | `{r['git_blob_sha1']}` | {r['bytes']} | `{r['sha256']}` | {r['width']}×{r['height']} |\n")
