@@ -868,13 +868,98 @@ hit-testable where a thumb lands on the screen the session rests on, and after p
 device is at its start screen **and** the account is gone — asserted as a coupling, with no
 `wsf-kiosk-finish-error` on screen. A patch that hides the shell but loses Finish fails this.
 
-**What K7 cannot establish, said rather than implied.** `runKioskFinish` reports a FAILED
-sign-out and keeps the visitor on the receipt with "We couldn't sign you out" instead of a start
-screen that lies. Firebase's web `signOut` clears local persistence and does not depend on a
-reachable server, so this harness cannot make it fail without editing product code, which this
-branch does not do. The failure branch's own coverage is `tests/kiosk-session.test.ts`; claiming
-browser coverage of it would be claiming a test I do not have.
+**~~What K7 cannot establish~~ — RETRACTED, see W5-K8 below.** I wrote here that a FAILED
+sign-out could not be reached from a browser harness without editing product code, because
+Firebase's web `signOut` does not depend on a reachable server. **That was wrong.** The fault
+does not have to be a network fault: sign-out removes the persisted record from IndexedDB, so
+failing only the *readwrite* transaction on `firebaseLocalStorage` makes it reject while leaving
+reads alone. W5-K8 does exactly that and the case is now covered. The original sentence is left
+struck through rather than deleted, because a report that silently repairs its own claims is not
+a record.
 
-Result at `d0477cc`: `expected 7, unexpected 0` — W5-K1 and W5-K4 are the two self-retiring
-tripwires; K2, K3, K5, K6, K7 pass. The historical failing baseline stays as K1, untouched, so
-the record of what was wrong survives the fix.
+Cases at `d0477cc`: **five passing safety cases** (K2, K3, K5, K6, K7) and **two intentionally
+failing tripwires** (K1, K4). Not "seven passes" — a tripwire that fails on purpose is not
+evidence of safety, and counting it as one would be the same error as counting a spinner as
+proof that nobody is named. The historical failing baseline stays as K1, untouched, so the
+record of what was wrong survives the fix.
+
+
+### The failure-injection correction, and three more bounded states
+
+The Director corrected two things in my last report at once (#395 comment 5786636183), and both
+corrections were right.
+
+**1. My "seven expected" phrasing.** Two of those seven fail on purpose. Reporting the run as a
+count of "expected" outcomes invites reading it as seven safety passes, which it is not. The
+count is now always given split: passing safety cases, and intentionally failing tripwires.
+
+**2. The sign-out failure IS reachable.** My claim that it was not, without editing product
+code, was wrong. Sign-out removes Firebase's persisted record from IndexedDB, so failing only
+the **readwrite** transaction on `firebaseLocalStorage` makes it reject while every readonly
+inspection keeps working. W1B had already done this at `be3ff1b4daabbdd4ede9f116ec8e1cecb0d92233`
+(`sprint-w1b-kiosk-capture.spec.ts`). The recipe is theirs; the run below is mine.
+
+#### W5-K8 — the failed sign-out: PASSES
+
+After a real confirmed contribution, with the fault injected, pressing Finish:
+
+- shows `wsf-kiosk-finish-error` with the product's exact words — "We couldn't sign you out.
+  Don't leave this device signed in — try Finish again.";
+- does **not** reveal the resting screen (`wsf-kiosk-screen` hidden, URL still
+  `/contribute/…?kiosk=1`, receipt still on screen);
+- leaves Finish offered and enabled rather than spinning;
+- and the account is still attached — observed through a **successful readonly probe**, not
+  inferred.
+
+Then the fault is removed **in place** (not by reloading, which would drop the page state and
+prove less) and Finish is pressed again: the device reaches its start screen, auth polls to
+zero, the kiosk key is gone, no pending record is left, and the next visitor meets the gate.
+That positive control is the half W1B's capture did not need and mine does — a device that
+refuses while it cannot sign out must still finish once it can, or the refusal is its own defect.
+
+**This case is why my auth probe had to be fixed first.** `readAuthRecords` used to resolve `[]`
+on every error path. Under an injected IndexedDB fault that would have reported "nobody is
+signed in" — turning the exact failure under test into a pass. It now returns a discriminated
+result and `authKeys` throws on an unreadable store, so an inspection failure can never be
+mistaken for an empty one. Same class of mistake as reading a spinner and reporting "does not
+name the visitor": both are an instrument answering a question it was not asked.
+
+#### W5-K9 — the bounded states: the exits W1B found, corroborated independently
+
+The contract enumeration, run across three more states. Measured:
+
+    receipt      = [the five member-tab controls]
+    missingGoal  = [wsf-contribute-home->/, the five member-tab controls]
+    loadError    = [wsf-contribute-home->/, the five member-tab controls]
+
+The source says the same thing plainly: `wsf-contribute-load-error` and
+`wsf-contribute-not-found` each render a `wsf-contribute-home` link to `/` with **no `kiosk`
+condition**, while the refused and pending states *do* gate their Back on the flag
+(`{kiosk ? renderKioskFinish(...) : <ButtonLink … />}`). So a kiosk session that fails to load,
+or is pointed at a goal this account cannot see, offers a door out that the same session does
+not offer when everything works. A patch verified on the entry screen alone would miss it.
+
+#### W5-K10 — the chrome Finish is not legible on the dark receipt
+
+Measured contrast of `wsf-kiosk-finish-chrome` on the confirmed receipt:
+
+    ratio=1  fg=11,31,58  bg=11,31,58
+
+Navy on navy. The source agrees: `renderChrome`'s non-kiosk Back applies `chromeLinkTextDark`
+(cream) when the tone is dark, and the kiosk branch beside it applies `chromeLinkText` (navy)
+with no dark variant. `toBeVisible()` passes for this, which is why the assertion measures
+contrast instead — against WCAG AA for **large** text (3:1), deliberately the lenient threshold,
+so the result cannot be waved off as a strict-standard quibble. 1.00 is not near it.
+
+This is a legibility defect, not a privacy one, and it is W1B's finding (5786572133) reproduced
+here rather than a new one of mine.
+
+#### Where the suite stands at `d0477cc`
+
+    six passing safety cases          K2 K3 K5 K6 K7 K8
+    four intentionally failing        K1 K4 K9 K10   (self-retiring tripwires)
+
+K1 remains untouched as the immutable historical baseline. K4, K9 and K10 each fail on a
+statement of intent rather than on a locator, so each becomes ordinary passing coverage on the
+day the patch makes its statement true — and none of them can be satisfied by renaming or
+hiding a testID.

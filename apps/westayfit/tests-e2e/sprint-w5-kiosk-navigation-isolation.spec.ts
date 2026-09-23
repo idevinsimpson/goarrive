@@ -204,39 +204,75 @@ async function seedBase(tag: string): Promise<Fx> {
  * The accounts Firebase Auth has persisted for this origin. The web SDK's
  * default persistence is IndexedDB, so this — not the screen, and not
  * localStorage — is what the next visitor would walk up to.
+ *
+ * IT REPORTS A FAILED INSPECTION AS A FAILED INSPECTION.
+ *
+ * The first version of this helper resolved `[]` on every error path, which is
+ * the single worst thing a probe of this kind can do: a store that could not be
+ * opened would have read as "nobody is signed in", and the sign-out-failure
+ * case below deliberately breaks IndexedDB. An empty store and an unreadable
+ * store are different facts and are kept different here; `authKeys` throws
+ * rather than let the second pass for the first.
  */
-async function readAuthRecords(page: Page): Promise<string[]> {
+type AuthProbe = { ok: true; keys: string[] } | { ok: false; error: string };
+
+async function readAuthRecords(page: Page): Promise<AuthProbe> {
   return page.evaluate(
     () =>
-      new Promise<string[]>((resolve) => {
-        const req = indexedDB.open('firebaseLocalStorageDb');
-        req.onerror = () => resolve([]);
+      new Promise<AuthProbe>((resolve) => {
+        let req: IDBOpenDBRequest;
+        try {
+          req = indexedDB.open('firebaseLocalStorageDb');
+        } catch (e) {
+          resolve({ ok: false, error: `open threw: ${String(e)}` });
+          return;
+        }
+        req.onerror = () => resolve({ ok: false, error: 'open failed' });
         req.onsuccess = () => {
           const db = req.result;
           if (!db.objectStoreNames.contains('firebaseLocalStorage')) {
             db.close();
-            resolve([]);
+            // A store that was never created is a genuinely empty device.
+            resolve({ ok: true, keys: [] });
             return;
           }
-          const all = db
-            .transaction('firebaseLocalStorage', 'readonly')
-            .objectStore('firebaseLocalStorage')
-            .getAllKeys();
+          let all: IDBRequest<IDBValidKey[]>;
+          try {
+            all = db
+              .transaction('firebaseLocalStorage', 'readonly')
+              .objectStore('firebaseLocalStorage')
+              .getAllKeys();
+          } catch (e) {
+            db.close();
+            resolve({ ok: false, error: `readonly transaction threw: ${String(e)}` });
+            return;
+          }
           all.onsuccess = () => {
             db.close();
-            resolve((all.result as unknown[]).map(String));
+            resolve({ ok: true, keys: (all.result as unknown[]).map(String) });
           };
           all.onerror = () => {
             db.close();
-            resolve([]);
+            resolve({ ok: false, error: 'getAllKeys failed' });
           };
         };
       })
   );
 }
 
+/** The persisted accounts, or a thrown error. Never a silent empty list. */
+async function authKeys(page: Page): Promise<string[]> {
+  const probe = await readAuthRecords(page);
+  if (!probe.ok) {
+    throw new Error(
+      `auth store could not be inspected (${probe.error}) — this is NOT evidence of a signed-out device`
+    );
+  }
+  return probe.keys;
+}
+
 async function signedInAccounts(page: Page): Promise<string[]> {
-  return (await readAuthRecords(page)).filter((k) => k.startsWith('firebase:authUser:'));
+  return (await authKeys(page)).filter((k) => k.startsWith('firebase:authUser:'));
 }
 
 async function readStorage(page: Page): Promise<{ local: string[]; session: string[] }> {
@@ -244,6 +280,59 @@ async function readStorage(page: Page): Promise<{ local: string[]; session: stri
     local: Object.keys(window.localStorage),
     session: Object.keys(window.sessionStorage),
   }));
+}
+
+/**
+ * EVERY WAY OUT OF THE KIOSK SESSION THAT A THUMB CAN REACH.
+ *
+ * The contract, expressed once and reused on every kiosk screen. It enumerates
+ * the page's interactive elements, keeps only the ones whose centre actually
+ * resolves to themselves under `elementFromPoint`, and reports two kinds of
+ * offender:
+ *
+ *   @outside-screen  chrome that is not part of the screen or the kiosk's own
+ *                    controls — a tab bar, a drawer, anything persistent.
+ *   ->/href          a link that leaves the kiosk's own routes, wherever it
+ *                    sits. "Back to home" inside the card is an exit even
+ *                    though it is inside the card.
+ *
+ * Asserting on this rather than on a testID is the whole point: a renamed bar,
+ * a restyled bar, or a bar moved into a drawer all fail it, and none of them
+ * fail a check that `wsf-member-tabs` is gone.
+ */
+async function escapeControls(page: Page, roots: string[]): Promise<string[]> {
+  return page.evaluate((rootSels) => {
+    const allowed = [
+      ...rootSels,
+      '[data-testid="wsf-kiosk-finish-chrome"]',
+      '[data-testid="wsf-kiosk-finish-bar"]',
+    ];
+    const out: string[] = [];
+    const els = Array.from(
+      document.querySelectorAll(
+        'a[href], button, input, select, textarea, [role="link"], [role="button"], [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) continue;
+      const hit = document.elementFromPoint(cx, cy);
+      if (!hit || !(el === hit || el.contains(hit))) continue;
+      const id = el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.tagName;
+      if (!allowed.some((sel) => el.closest(sel))) {
+        out.push(`${id}@outside-screen`);
+        continue;
+      }
+      const href = el.getAttribute('href');
+      if (href != null && !/^\/contribute\//.test(href) && !/^\/kiosk\//.test(href)) {
+        out.push(`${id}->${href}`);
+      }
+    }
+    return out;
+  }, roots);
 }
 
 /** The walk-up, up to the point a visitor is signed in and looking at the
@@ -531,40 +620,10 @@ test('nothing hit-testable on the kiosk contribution screen leads out of the kio
   const fx = await seedBase('contract');
   await walkUpAndSignIn(page, fx);
 
-  const offenders = await page.evaluate(() => {
-    const within = (el: Element, sel: string) => Boolean(el.closest(sel));
-    // The screen's own content, and the two controls the kiosk owns. The
-    // wordmark is allowed because it is a static mark on this route — if it
-    // ever becomes a link, it is an escape and this list must not excuse it,
-    // so it is matched on its own testID rather than by tag.
-    const allowed = [
-      '[data-testid="wsf-contribute-entry-screen"]',
-      '[data-testid="wsf-contribute-context"]',
-      '[data-testid="wsf-kiosk-finish-chrome"]',
-      '[data-testid="wsf-kiosk-finish-bar"]',
-    ];
-    const interactive = Array.from(
-      document.querySelectorAll(
-        'a[href], button, input, select, textarea, [role="link"], [role="button"], [tabindex]:not([tabindex="-1"])'
-      )
-    );
-    const out: string[] = [];
-    for (const el of interactive) {
-      if (allowed.some((sel) => within(el, sel))) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue;
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) continue;
-      // Reachable by a thumb, not merely present: the point a press would
-      // land on has to resolve to this control.
-      const hit = document.elementFromPoint(cx, cy);
-      if (!hit || !(el === hit || el.contains(hit))) continue;
-      const id = el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.tagName;
-      out.push(`${id}@${Math.round(cx)},${Math.round(cy)}`);
-    }
-    return out;
-  });
+  const offenders = await escapeControls(page, [
+    '[data-testid="wsf-contribute-entry-screen"]',
+    '[data-testid="wsf-contribute-context"]',
+  ]);
 
   test.info().annotations.push({
     type: 'kiosk-escape-controls',
@@ -726,4 +785,260 @@ test('Finish is reachable on a kiosk screen, and the start screen is only reache
   expect(atRest.session).not.toContain('wsf.kioskReturnGoalId');
   // Nothing was submitted this session, so there is no attempt to preserve.
   expect(atRest.local.some((k) => k.startsWith('wsf.pendingContribution.'))).toBe(false);
+});
+
+// ---- CASE 8 ---------------------------------------------------------------
+/*
+  THE SIGN-OUT THAT FAILS.
+
+  I reported this as unreachable from a browser harness without editing product
+  code. THAT WAS WRONG, and the correction is W1B's: Firebase Auth signs out by
+  REMOVING its persisted record from IndexedDB, so failing only the readwrite
+  transaction on `firebaseLocalStorage` makes sign-out reject while leaving
+  every readonly inspection — including this test's own — working. No network
+  fault, no product edit. The recipe is theirs
+  (sprint-w1b-kiosk-capture.spec.ts at be3ff1b); this is my own independent run
+  of it, with the positive control their capture did not need.
+
+  WHY THE READONLY HALF MATTERS SO MUCH HERE. If the injection broke reads too,
+  `authKeys` would report an unreadable store — and the first version of that
+  helper would have resolved `[]` and called it "signed out", turning the exact
+  failure under test into a pass. It now throws instead. This test is the
+  reason that was fixed.
+*/
+test('a failed sign-out keeps the device attached and says so, and Finish still works once it can', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('signoutfail');
+  await walkUpAndSignIn(page, fx);
+
+  // A REAL, CONFIRMED contribution first: the failure under test is the
+  // sign-out, not the write.
+  await page.getByTestId('wsf-contribute-entry').fill('9');
+  await page.getByTestId('wsf-contribute-review').click();
+  await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 40_000 });
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+
+  // ── THE INJECTION ─────────────────────────────────────────────────────────
+  // Only the removal is made to fail. Readonly access is deliberately left
+  // alone, because the observation below has to keep working.
+  await page.evaluate(() => {
+    const proto = IDBDatabase.prototype as IDBDatabase & {
+      __wsfOriginalTransaction?: IDBDatabase['transaction'];
+    };
+    proto.__wsfOriginalTransaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function patched(
+      this: IDBDatabase,
+      names: string | string[] | DOMStringList,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions
+    ): IDBTransaction {
+      const list = typeof names === 'string' ? [names] : Array.from(names as string[]);
+      if (mode === 'readwrite' && list.includes('firebaseLocalStorage')) {
+        throw new DOMException('injected storage fault', 'InvalidStateError');
+      }
+      return proto.__wsfOriginalTransaction!.call(this, names as string[], mode, options);
+    } as typeof IDBDatabase.prototype.transaction;
+  });
+
+  await page.getByTestId('wsf-kiosk-finish').click();
+
+  // 1. AN ACTUAL ERROR, in the product's own words.
+  await expect(page.getByTestId('wsf-kiosk-finish-error')).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('wsf-kiosk-finish-error')).toHaveText(
+    'We couldn’t sign you out. Don’t leave this device signed in — try Finish again.'
+  );
+  // 2. NO FALSE REST. The start screen stays mounted underneath the pushed
+  //    contribution route; what must not happen is the visitor being shown it.
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeHidden();
+  expect(page.url()).toContain('/contribute/');
+  expect(page.url()).toContain('kiosk=1');
+  await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible();
+  // 3. FINISH IS OFFERED AGAIN rather than left spinning.
+  await expect(page.getByTestId('wsf-kiosk-finish')).toHaveText('Finish');
+  await expect(page.getByTestId('wsf-kiosk-finish')).toBeEnabled();
+  // 4. A SUCCESSFUL READONLY OBSERVATION of the still-attached account. The
+  //    probe has to come back OK for this to mean anything — an unreadable
+  //    store would throw, and would not be allowed to read as "signed out".
+  const duringFault = await readAuthRecords(page);
+  expect(duringFault.ok, 'readonly inspection must survive the injected fault').toBe(true);
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+
+  // ── THE POSITIVE CONTROL ──────────────────────────────────────────────────
+  // Remove the fault in place — not by reloading, which would also drop the
+  // page state and prove less — and press Finish again. A device that refuses
+  // while it cannot sign out must still finish once it can; a permanently
+  // stuck kiosk would be its own defect.
+  await page.evaluate(() => {
+    const proto = IDBDatabase.prototype as IDBDatabase & {
+      __wsfOriginalTransaction?: IDBDatabase['transaction'];
+    };
+    if (proto.__wsfOriginalTransaction) {
+      IDBDatabase.prototype.transaction = proto.__wsfOriginalTransaction;
+      delete proto.__wsfOriginalTransaction;
+    }
+  });
+  await page.getByTestId('wsf-kiosk-finish').click();
+  await page.waitForURL(new RegExp(`/kiosk/${fx.goalId}$`), { timeout: 25_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 25_000 });
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 20_000, intervals: [200] })
+    .toBe(0);
+  expect((await readStorage(page)).session).not.toContain('wsf.kioskReturnGoalId');
+  // A confirmed contribution leaves no unresolved record for anyone.
+  expect((await readStorage(page)).local.some((k) => k.startsWith('wsf.pendingContribution.'))).toBe(
+    false
+  );
+  // And the next visitor meets the gate, not the previous account.
+  await page.getByTestId('wsf-kiosk-start').click();
+  await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 25_000 });
+});
+
+// ---- CASE 9 ---------------------------------------------------------------
+/*
+  THE BOUNDED STATES, not just the entry screen.
+
+  W1B found in-app exits on the error and missing-goal states. The source says
+  the same thing plainly: `wsf-contribute-load-error` and
+  `wsf-contribute-not-found` each render a `wsf-contribute-home` link to `/`
+  with no `kiosk` condition on it, while the refused and pending states DO gate
+  their Back on the flag. So a kiosk session that fails to load, or is pointed
+  at a goal this account cannot see, offers a door out that the same session
+  does not offer when everything works.
+
+  This runs the same contract across those states and the confirmed receipt, so
+  a patch cannot be verified on the happy path alone.
+*/
+test('no kiosk state offers a way out: missing goal, load error and the confirmed receipt', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  // W5-K9. Expected to fail while the seam is open.
+  test.fail();
+  const fx = await seedBase('states');
+  await walkUpAndSignIn(page, fx);
+
+  const found: Record<string, string[]> = {};
+
+  // -- the confirmed receipt (the dark screen) -------------------------------
+  await page.getByTestId('wsf-contribute-entry').fill('4');
+  await page.getByTestId('wsf-contribute-review').click();
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 40_000 });
+  found.receipt = await escapeControls(page, ['[data-testid="wsf-contribute-receipt"]']);
+
+  // -- a goal this account cannot see ---------------------------------------
+  await page.goto(`/contribute/w5kn-no-such-goal-${fx.stamp}?kiosk=1`);
+  await expect
+    .poll(
+      async () =>
+        (await page.getByTestId('wsf-contribute-not-found').count()) +
+        (await page.getByTestId('wsf-contribute-load-error').count()),
+      { timeout: 30_000, intervals: [200] }
+    )
+    .toBeGreaterThan(0);
+  found.missingGoal = await escapeControls(page, [
+    '[data-testid="wsf-contribute-not-found"]',
+    '[data-testid="wsf-contribute-load-error"]',
+  ]);
+
+  // -- the goal cannot be loaded at all --------------------------------------
+  await page.route(/wsfGoalPulse/, (route) => route.abort('connectionfailed'));
+  await page.goto(`/contribute/${fx.goalId}?kiosk=1`);
+  await expect
+    .poll(
+      async () =>
+        (await page.getByTestId('wsf-contribute-load-error').count()) +
+        (await page.getByTestId('wsf-contribute-not-found').count()),
+      { timeout: 30_000, intervals: [200] }
+    )
+    .toBeGreaterThan(0);
+  found.loadError = await escapeControls(page, [
+    '[data-testid="wsf-contribute-load-error"]',
+    '[data-testid="wsf-contribute-not-found"]',
+  ]);
+  await page.unroute(/wsfGoalPulse/);
+
+  test.info().annotations.push({
+    type: 'kiosk-escape-controls-by-state',
+    description: Object.entries(found)
+      .map(([k, v]) => `${k}=[${v.join(', ') || 'none'}]`)
+      .join(' | '),
+  });
+  expect(found, 'no kiosk state may offer a control that leaves the session').toEqual({
+    receipt: [],
+    missingGoal: [],
+    loadError: [],
+  });
+});
+
+// ---- CASE 10 --------------------------------------------------------------
+/*
+  FINISH HAS TO BE LEGIBLE, not merely rendered.
+
+  W1B reported the chrome Finish invisible on dark receipts. The source agrees:
+  `renderChrome`'s non-kiosk Back applies `chromeLinkTextDark` (cream) when the
+  tone is dark, and the kiosk branch beside it applies `chromeLinkText` (navy)
+  with no dark variant — so on a receipt whose tone is 'dark' the kiosk's own
+  way out is navy on navy.
+
+  `toBeVisible()` passes for that, which is exactly why this measures contrast
+  instead. The threshold is WCAG AA for large text (3:1) — deliberately the
+  lenient one, so this cannot be dismissed as a strict-standard quibble; the
+  measured value today is far below even that.
+*/
+test('the kiosk Finish in the chrome is legible on the dark receipt', async ({ page }) => {
+  test.setTimeout(300_000);
+  // W5-K10. Expected to fail until the dark tone reaches the kiosk branch.
+  test.fail();
+  const fx = await seedBase('legible');
+  await walkUpAndSignIn(page, fx);
+  await page.getByTestId('wsf-contribute-entry').fill('6');
+  await page.getByTestId('wsf-contribute-review').click();
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toBeVisible();
+
+  const contrast = await page.evaluate(() => {
+    const parse = (c: string): [number, number, number] => {
+      const m = c.match(/-?[\d.]+/g);
+      if (!m) return [0, 0, 0];
+      return [Number(m[0]), Number(m[1]), Number(m[2])];
+    };
+    const lum = ([r, g, b]: [number, number, number]) => {
+      const f = (v: number) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const el = document.querySelector('[data-testid="wsf-kiosk-finish-chrome"]')!;
+    // The label carries the colour; the pressable itself is transparent.
+    const label = el.querySelector('*') ?? el;
+    const fg = parse(getComputedStyle(label).color);
+    // Walk up for the first ancestor that actually paints a background.
+    let node: Element | null = el;
+    let bg: [number, number, number] = [255, 255, 255];
+    while (node) {
+      const c = getComputedStyle(node).backgroundColor;
+      if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) {
+        bg = parse(c);
+        break;
+      }
+      node = node.parentElement;
+    }
+    const a = lum(fg);
+    const b = lum(bg);
+    const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    return { ratio: Math.round(ratio * 100) / 100, fg, bg };
+  });
+
+  test.info().annotations.push({
+    type: 'kiosk-finish-chrome-contrast',
+    description: `ratio=${contrast.ratio} fg=${contrast.fg.join(',')} bg=${contrast.bg.join(',')}`,
+  });
+  expect(contrast.ratio, 'the kiosk chrome Finish must be readable on the receipt it sits on').toBeGreaterThanOrEqual(3);
 });
