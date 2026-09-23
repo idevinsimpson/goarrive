@@ -406,6 +406,79 @@ That is why check 5 recorded the parity gap as **latent rather than a live defec
 
 ---
 
-# Check 7 — further checkpoints
+# Check 7 — the focused DOM delta on W8's final successor **`bfc422a`**: **PASS**
 
-Awaiting L0's routing, including the focused DOM delta on W8's held Community + Members pages when their successor lands. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).
+Routed by L0 at `5789806629` (Director §D `5789105772`, §1 `5789388729`). Acknowledged at `5789851037` before execution. Spec: `apps/westayfit/tests-e2e/sprint-w7-social-delta-verify.spec.ts` — **9 passed / 0 failed**, plus a mutation run.
+
+## Identity and scope — every claim in the packet re-derived, not taken on report
+
+| | |
+|---|---|
+| `claude/wsf-social-community` head | **`bfc422a02c4ae520542dfed7dfb06488ce530e0b`** — the pinned SHA, unchanged throughout |
+| Base | app-shell **`d86620c`**, unmoved since check 5 |
+| How | `bfc422a` merged `--no-commit` onto the W7 branch, **never pushed, aborted afterwards**; the five product blobs re-verified in the worktree first |
+| The four rendering blobs | `community/[groupId]/index.tsx` **`b090c30d`**, `members.tsx` **`829795d0`**, `settings/privacy.tsx` **`5284e86e`**, `CommunityPresence.tsx` **`8f168db0`** — matching the packet |
+| **Backend delta, checked my own way** | `git diff 60604ca bfc422a -- functions-westayfit/` is one file, **+21 / −6**, and filtering out comments and blanks leaves **nothing**. The F2 comment alone; no executable line moved |
+| The no-diff list | `firestore.rules`, both firebase configs, `firestore.indexes.json` and W9's four shell files — **all eight unchanged** since `60604ca` |
+
+The privacy contract is **not** reopened: the 14/14 at `60604ca` stands as the Director's functional acceptance.
+
+## 1 · Zero separated from null — proven positively, in three states
+
+| Fixture | Rendered |
+|---|---|
+| Live goal, resolvable zone, window covering now, **no contributions** | **`0 people moved today`** |
+| Goal whose **stored zone cannot be resolved** | **no line at all** |
+| One mover | `1 person moved today` |
+| Two movers | `2 people moved today` |
+
+## 2 · The mutation, run rather than trusted
+
+The packet asked me to try the mutation myself instead of accepting that it had been tried. I did, on the merged worktree:
+
+```
+{momentum !== null && momentum.contributorsToday !== null ? (
+→ {momentum !== null && momentum.contributorsToday !== null && momentum.contributorsToday > 0 ? (
+```
+
+Rebuilt, then re-ran the four count cases:
+
+```
+✘ a proven zero renders "0 people moved today"
+    Error: a proven zero was suppressed — "known zero" collapsed into "unknown"
+    Expected: "0 people moved today" … element(s) not found
+✓ an unresolvable zone renders no moved-today line at all
+✓ one mover renders in the singular
+✓ two movers render in the plural
+1 failed, 3 passed
+```
+
+**Exactly the specified signature: the mutant kills the zero case and leaves the null case green.** So the two states are genuinely distinguished by the assertion, not merely co-passing. The source was then restored and the blob re-verified — `b090c30d…` before the mutation and `b090c30d…` after, identical to `bfc422a`'s — and the full file re-run **9/9** on the restored build.
+
+## 3 · Community — the corrections, measured the way the failure demands
+
+W8's own report says its fold guard reported safety three times when there was none: it measured against 844 rather than the floating tab bar, it ran in a bare browser context while the evidence was shot on an emulated phone, and its fixture was the easy case. So this file runs as an **emulated iPhone** (390×844, iPhone UA, `isMobile`, touch, DPR 3), seeds the **hard** fixture — six members, presence, a moved-today line and a real feed — and measures the first row against **the tab bar's own box**.
+
+- `6 members` on the primary surface, and **no privacy clause anywhere in the page text**.
+- Both counts **above the goal hero**, and **not merged**: member count above, moved-today below it, hero below both.
+- **The first momentum row's bottom is at or above the tab bar's top**, and the row is independently hit-tested so "above the bar" cannot pass for something covered.
+- `Start moving` is full width (>80% of 390) and hit-testable.
+- `Anonymous member` for name-private-with-activity-visible; **no row at all** for activity-private; the visible mover still named; the old `A member` copy gone.
+
+## 4 · Members, and Settings / Privacy
+
+- Heading **`Members`**; `6 members`; **no** privacy clause; **no** `Your visibility here · Settings` row; rows present and the quiet empty state **absent** while anyone is listed.
+- With **every** member private: the one quiet explanation appears, no rows — and the count still reads `6 members`, because everyone is hidden and nobody is gone.
+- Settings → `/settings` → `/settings/privacy` all reachable and hit-tested; the community's block renders with both switches; the note reads *"Your activity appears as “Anonymous member.”"*
+
+One correction owned: my first cut expected that note unconditionally and failed. It is **conditional by design** — it renders only for name-private **with** activity-visible, the one state that actually produces an anonymous row — so the fixture was wrong, not the product. Two other failures in my run were also mine: a second `signInVia` in one test that never reaches `/signin` while already signed in, and a read taken before the privacy screen had loaded — the same class of race W8 found in its own guard.
+
+## Bound
+
+The four changed rendering files at `bfc422a` merged onto `d86620c`, on an emulated iPhone against the emulators. **No pixel verdict** — the Director's, from #442, including W8's own open question about the Living WE at 152. No product edit is carried: the mutation was a local, never-committed experiment whose restoration is proven by blob hash. **Not in this packet:** the cold direct Members load, which waits on L0's mirrored `/community/*/members` line landing on the integration candidate. Findings route through L0 to W8.
+
+---
+
+# Check 8 — further checkpoints
+
+Awaiting L0's routing, including the cold direct Members load against the integration candidate once the mirrored rewrite lands. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).
