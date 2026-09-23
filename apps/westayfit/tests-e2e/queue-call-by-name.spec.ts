@@ -34,6 +34,7 @@ import { clearVerifyGate } from './helpers/mobile';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import * as nodePath from 'node:path';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * THE STATES A ROOM ACTUALLY SEES — the screen in the hall and the phone in a
@@ -245,7 +246,7 @@ test('a member chooses initials, the screen calls them by those initials and a c
   const { goalId } = await championWithGoal(page);
 
   // ---- the Champion authorizes the display and enrols a screen ------------
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`).click();
   await expect(page.getByTestId(`wsf-goal-display-auth-state-${goalId}`)).toContainText(
@@ -520,7 +521,7 @@ test('a person can take their own name off the screen, immediately and without a
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const { goalId } = await championWithGoal(page);
 
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`).click();
   await expect(page.getByTestId(`wsf-goal-display-auth-state-${goalId}`)).toContainText(
@@ -599,7 +600,7 @@ test('a person waiting can switch to their own phone, which frees the place and 
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const { goalId } = await championWithGoal(page);
 
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId(`wsf-goal-display-auth-toggle-${goalId}`).click();
   await expect(page.getByTestId(`wsf-goal-display-auth-state-${goalId}`)).toContainText(

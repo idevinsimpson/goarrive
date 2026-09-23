@@ -530,7 +530,34 @@ export async function tapInView(
   spec: ElementSpec,
   name: string
 ): Promise<ElementState> {
-  const st = await elementState(run.page, spec);
+  /*
+    TAP WHERE THE CONTROL IS, NOT WHERE IT WAS.
+
+    A tap is coordinates, and these pages move under one: Community Home
+    re-renders when its presence and activity reads return, and a wheel scroll
+    can still be settling when the box is read. Either shifts the control
+    between the measurement and the tap, and the tap then lands on whatever
+    took its place — which is how `reachAndTap` could report a reachable
+    control and leave the page exactly where it was. Measured at 360x800: two
+    failures in six solo runs, always the same silent no-op.
+
+    So the box is read until it stops moving. Nothing is relaxed by this: it is
+    the same control, and the in-view and uncovered checks below are unchanged
+    and are made against the settled box.
+  */
+  let st = await elementState(run.page, spec);
+  for (let i = 0; i < 20; i += 1) {
+    await sleep(50);
+    const next = await elementState(run.page, spec);
+    const settled =
+      st.found &&
+      next.found &&
+      Math.round(st.box.x) === Math.round(next.box.x) &&
+      Math.round(st.box.y) === Math.round(next.box.y) &&
+      Math.round(st.box.h) === Math.round(next.box.h);
+    st = next;
+    if (settled) break;
+  }
   if (!st.found) throw new Error(`${name}: not found`);
   if (!st.inView) {
     throw new Error(

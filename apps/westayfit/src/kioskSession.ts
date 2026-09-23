@@ -74,8 +74,26 @@ export function kioskContributeRoute(goalId: string): string {
   return `/contribute/${encodeURIComponent(goalId)}?kiosk=1`;
 }
 
-/** Whether a route parameter puts the contribution screen in kiosk mode. */
+/**
+ * Whether a route parameter puts a journey in kiosk mode.
+ *
+ * ONE ANSWER, FOR EVERY READER. The shell decides whether to draw member
+ * navigation and the contribution screen decides whether to offer Finish, and
+ * they have to reach the same verdict from the same URL. When the array case
+ * was normalised in the shell alone, `?kiosk=1&kiosk=x` produced the worst of
+ * both: no tab bar, because the shell called it a kiosk, AND no Finish, because
+ * the screen called it ordinary -- leaving a shared device with the screen's own
+ * member exits and nothing to end the session with. The normalisation belongs
+ * here, where both of them already look.
+ *
+ * FAIL CLOSED ON A REPEATED PARAMETER. A URL can carry the same key twice, and
+ * the router hands that over as an array. Reading it as "not the flag" would
+ * hand a shared device its ordinary navigation back for the price of one
+ * duplicated query parameter, so ANY element saying kiosk makes it a kiosk.
+ * Scalar behaviour is unchanged: '1' and 'true', nothing else.
+ */
 export function isKioskFlag(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((entry) => isKioskFlag(entry));
   return value === '1' || value === 'true';
 }
 
@@ -172,6 +190,51 @@ export function kioskCountdownLabel(seconds: number): string {
  */
 export type KioskOutcome = 'confirmed' | 'refused' | 'unresolved' | 'none';
 
+/**
+ * WHETHER A KIOSK SESSION MAY END BY ITSELF FROM THE SCREEN IT IS ON.
+ *
+ * A session ends unattended only from a screen it has come to REST on. Entry,
+ * review and the movement screen have somebody standing at them mid-thought, so
+ * a deadline there would finish a session out from under a person who is still
+ * using it. A receipt, a refusal and an unresolved attempt do not.
+ *
+ * NEITHER DOES A SETTLED LOAD, WHICH IS WHY THIS FUNCTION EXISTS. A goal that
+ * closed, one that cannot be found, and a load that failed are all screens
+ * where nothing further will happen without somebody acting -- and until now
+ * they carried a manual Finish and no deadline at all, so a shared device left
+ * on one of them stayed as the last visitor left it. They are rest states too.
+ *
+ * IN FLIGHT IS NEVER REST. Signing out from under a request that has not
+ * answered is precisely how an outcome becomes unknowable, so an attempt still
+ * out -- a submission, or a stored row still in `sending` -- refuses the
+ * deadline whatever else is true. This is the fail-closed direction: the worst
+ * case of getting it wrong here is a device that waits for a person instead of
+ * a person who loses their contribution.
+ *
+ * Pure, and kept beside the rest of the kiosk's rules so it can be read and
+ * tested without mounting a screen.
+ */
+export type KioskRestInput = {
+  /** What this session's attempt has settled as, if it made one. */
+  outcome: KioskOutcome;
+  /** A contribution or replay is still out and has not answered. */
+  attemptInFlight: boolean;
+  /** The goal itself is settled: closed, missing, or it failed to load. */
+  loadSettled: boolean;
+};
+
+export function kioskMayFinishUnattended(input: KioskRestInput): boolean {
+  if (input.attemptInFlight) return false;
+  switch (input.outcome) {
+    case 'confirmed':
+    case 'refused':
+    case 'unresolved':
+      return true;
+    case 'none':
+      return input.loadSettled;
+  }
+}
+
 export type KioskFinishPlan = {
   /** Whether Finish may remove this account's stored attempt record. */
   clearPendingDraft: boolean;
@@ -186,14 +249,45 @@ export type KioskFinishPlan = {
 };
 
 /**
- * The one sentence an unresolved attempt gets.
+ * What an unresolved attempt is told, and why this sentence and not the last one.
  *
- * It states two true things and no more: the attempt is attached to their
- * account, and the place to resolve it is a device that is theirs. It does
- * not say it was recorded — that is exactly the fact nobody has.
+ * IT USED TO PROMISE PORTABILITY IT CANNOT KEEP. The old wording — "Your
+ * attempt is saved to your account; check it from your own device." — reads as
+ * though the attempt travels with the account. It does not. The record that
+ * makes the SAME attempt replayable lives in `localStorage` on the browser that
+ * made it (src/pendingContribution.ts), keyed to that uid; a different device
+ * signing into the same account finds no such record. W3's storage-level probe
+ * confirmed it. A member's own credit total is durable and readable elsewhere,
+ * but a total is not this attempt's outcome: somebody who does not already know
+ * what it was before cannot infer whether this one landed.
+ *
+ * So the sentence now points at the only place the recovery actually exists —
+ * this screen, before Finish — and names the real cost of the alternative. It
+ * still does not say the attempt was recorded, because that is exactly the fact
+ * nobody has, and it does not force a retry: `Confirm this contribution` stays
+ * offered, Finish stays available, and the stored record is still kept rather
+ * than cleared on the way out.
  */
 export const KIOSK_UNRESOLVED_NOTICE =
-  'Your attempt is saved to your account; check it from your own device.';
+  'You can try to confirm this contribution here before you finish. Entering it again elsewhere could count it twice.';
+
+/**
+ * The same situation on a screen that CANNOT offer the retry.
+ *
+ * The accepted notice points at `Confirm this contribution`, which is the right
+ * thing to say wherever that control is on screen. It is not on every screen an
+ * unresolved attempt can be shown from: the contribution route returns its
+ * load-error branch BEFORE the pending one, so a goal that stops loading while
+ * an attempt is unresolved renders an error screen with no reconcile control at
+ * all. Telling somebody they can confirm it here, on a screen with nothing to
+ * confirm it with, is a promise the screen cannot keep.
+ *
+ * This variant says why the retry is not available and keeps the part that
+ * protects the member's effort. It still claims nothing about whether the
+ * attempt was recorded, and the reminder is still kept.
+ */
+export const KIOSK_UNRESOLVED_NOTICE_NO_RETRY =
+  'We couldn’t load this goal to confirm your contribution. Entering it again elsewhere could count it twice.';
 
 /**
  * WHAT FINISH IS ALLOWED TO ERASE.

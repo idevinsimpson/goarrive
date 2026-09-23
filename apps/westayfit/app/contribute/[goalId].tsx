@@ -41,8 +41,10 @@ import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions, wsfUsingEm
 import {
   KIOSK_TICK_MS,
   KIOSK_UNRESOLVED_NOTICE,
+  KIOSK_UNRESOLVED_NOTICE_NO_RETRY,
   clearKioskReturnGoal,
   isKioskFlag,
+  kioskMayFinishUnattended,
   kioskCountdownExpired,
   kioskCountdownLabel,
   kioskRemainingMs,
@@ -235,7 +237,11 @@ export default function ContributeToGoal() {
     nothing to clear.
   */
   const pathname = usePathname() || '/';
-  const shellBarShown = Boolean(user) && shellAppliesTo(pathname);
+  // The kiosk flag is part of the answer: the shell does not render over a
+  // kiosk session (src/ui/MemberTabBar.tsx), so there is no raised action to
+  // clear and reserving space for one would leave a band of nothing at the
+  // bottom of a screen that has no bar.
+  const shellBarShown = Boolean(user) && shellAppliesTo(pathname, { kiosk: params.kiosk });
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
@@ -888,13 +894,32 @@ export default function ContributeToGoal() {
       : pending
         ? 'unresolved'
         : 'none';
-  // A session ends by itself only from a screen it has come to REST on. The
-  // entry, review and movement screens have somebody standing at them
-  // mid-thought; a receipt, a refusal and an unresolved attempt do not.
-  // An attempt still in flight is NOT a rest state: signing out from under a
-  // request that has not answered is how an outcome becomes unknowable.
+  /*
+    WHICH SCREENS A SESSION MAY END ITSELF FROM. The rule is in
+    src/kioskSession.ts, where it can be read and tested without mounting this
+    screen; these are the three facts it decides from.
+
+    `loadSettled` is the part this screen used to be missing. A goal that
+    closed, one that cannot be found and a load that failed are screens where
+    nothing further happens without somebody acting -- and they carried a
+    manual Finish with no deadline, so a shared device left on one of them
+    stayed exactly as the last visitor left it.
+
+    `attemptInFlight` is stricter than the condition it replaces: a submission
+    in progress now refuses the deadline as well as a stored row still in
+    `sending`, so the timer can never fire out from under a request that has
+    not answered.
+  */
+  const kioskAttemptInFlight = submitting || (pending != null && pending.state === 'sending');
+  const kioskLoadSettled =
+    state.kind === 'closed' || state.kind === 'notFound' || state.kind === 'error';
   const kioskTerminal =
-    kiosk && (lastResult != null || refusal != null || (pending != null && pending.state === 'unknown'));
+    kiosk &&
+    kioskMayFinishUnattended({
+      outcome: kioskOutcome,
+      attemptInFlight: kioskAttemptInFlight,
+      loadSettled: kioskLoadSettled,
+    });
   const [kioskFinishing, setKioskFinishing] = useState(false);
   const [kioskError, setKioskError] = useState<string | null>(null);
   // Bumped by "Stay". Restarting the countdown is a new deadline, not a
@@ -1047,16 +1072,63 @@ export default function ContributeToGoal() {
           style={styles.chromeLink}
           testID="wsf-kiosk-finish-chrome"
         >
-          <Text style={styles.chromeLinkText}>{kioskFinishing ? 'Finishing…' : 'Finish'}</Text>
+          {/* NAVY ON NAVY WAS INVISIBLE. The ordinary Back link below already
+              switches to the dark colourway; the kiosk's Finish did not, so on
+              the navy receipt the one control in the chrome rendered at the
+              background's exact colour. Measured on the delivered frame: the
+              whole right half of the chrome band was rgb(11,31,58). */}
+          <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
+            {kioskFinishing ? 'Finishing…' : 'Finish'}
+          </Text>
         </Pressable>
       ) : showBack ? (
-        <ButtonLink
-          href={backHref}
+        /*
+          BACK POPS THE FOCUSED FLOW; IT DOES NOT NAVIGATE TO A COPY OF WHERE
+          YOU CAME FROM.
+
+          This was a `ButtonLink` to `/community/<groupId>`. Under the member
+          shell the contribution screen is a focused route presented OVER the
+          tab navigator, so following that href pushed a SECOND community
+          screen and left the original mounted but hidden behind it — measured:
+          two instances in the document, the visible one without the marker the
+          test had planted on the tab the member actually came from. The member
+          did not come back to their community; they arrived at another copy of
+          it, with its scroll and its loaded state reset.
+
+          So when there is a focused route to pop, this pops it and reveals the
+          exact instance underneath. `router.canGoBack()` is the question that
+          distinguishes the two journeys, and it is asked at press time rather
+          than at render, because whether there is something to go back to is a
+          property of the moment the member presses.
+
+          THE COLD / DEEP-LINK JOURNEY KEEPS ITS EXPLICIT DESTINATION. Somebody
+          who opened this URL directly has nothing beneath it, so `canGoBack()`
+          is false and the fallback navigates to the canonical destination —
+          `replace`, not `push`, because a contribution screen arrived at cold
+          is not somewhere a member should have to press back through.
+
+          NOTHING ABOUT KIOSK CHANGES. A kiosk session renders `Finish` instead
+          of this control (`showBack` is false there), so neither branch is
+          reachable in kiosk mode and the confinement, deadline and
+          unresolved-attempt behaviour are untouched.
+        */
+        <Pressable
           style={styles.chromeLink}
-          textStyle={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}
           testID="wsf-contribute-back"
-          label={backLabel}
-        />
+          accessibilityRole="link"
+          accessibilityLabel={backLabel}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+              return;
+            }
+            router.replace(backHref as never);
+          }}
+        >
+          <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
+            {backLabel}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -1065,12 +1137,23 @@ export default function ContributeToGoal() {
   // session can come to rest on. It carries the countdown that performs the
   // same Finish when nobody is standing there, and — when the outcome is
   // UNKNOWN — the one sentence the visitor needs before they walk away.
-  const renderKioskFinish = (outcome: KioskOutcome) =>
+  /**
+   * `canRetryHere` is not a style choice. The accepted unresolved notice points
+   * at "Confirm this contribution", and a screen has to be able to keep that
+   * promise: the load-error branch returns BEFORE the pending one, so it can
+   * show an unresolved session with no reconcile control on it at all. Screens
+   * that offer the retry say so; the one that cannot says why instead.
+   */
+  const renderKioskFinish = (
+    outcome: KioskOutcome,
+    tone: 'light' | 'dark' = 'light',
+    canRetryHere = true
+  ) =>
     kiosk ? (
       <View style={styles.kioskBar} testID="wsf-kiosk-finish-bar">
         {outcome === 'unresolved' ? (
           <Text style={styles.kioskNotice} testID="wsf-kiosk-unresolved-note">
-            {KIOSK_UNRESOLVED_NOTICE}
+            {canRetryHere ? KIOSK_UNRESOLVED_NOTICE : KIOSK_UNRESOLVED_NOTICE_NO_RETRY}
           </Text>
         ) : null}
         <Pressable
@@ -1084,13 +1167,24 @@ export default function ContributeToGoal() {
             {kioskFinishing ? 'Finishing…' : 'Finish'}
           </Text>
         </Pressable>
-        <Text style={styles.caption} testID="wsf-kiosk-finish-explainer">
+        {/* These two lines are the instructions: what Finish does to the
+            visitor's account, and how long they have. On a shared device that
+            is not decoration, so on the navy screen they take the same muted
+            colourway the kiosk's own display uses rather than the light one. */}
+        <Text
+          style={[styles.caption, tone === 'dark' ? styles.captionOnDark : null]}
+          testID="wsf-kiosk-finish-explainer"
+        >
           Finish signs you out and returns this device to its start screen.
         </Text>
         <View style={styles.kioskCountdownRow}>
           {/* D-2. The countdown changes without anybody acting, so it
               announces itself politely rather than interrupting. */}
-          <Text style={styles.caption} testID="wsf-kiosk-countdown" aria-live="polite">
+          <Text
+            style={[styles.caption, tone === 'dark' ? styles.captionOnDark : null]}
+            testID="wsf-kiosk-countdown"
+            aria-live="polite"
+          >
             {kioskCountdownLabel(kioskRemainingSeconds(kioskRemaining))}
           </Text>
           <Pressable
@@ -1099,11 +1193,23 @@ export default function ContributeToGoal() {
             style={styles.tertiaryButton}
             testID="wsf-kiosk-stay"
           >
-            <Text style={styles.tertiaryButtonText}>Stay</Text>
+            {/* On the navy receipt this was navy on navy: present, focusable
+                and operable, and invisible. Measured at a contrast ratio of
+                1:1 on the delivered Board 11 frames. */}
+            <Text style={[styles.tertiaryButtonText, tone === 'dark' ? styles.tertiaryButtonTextDark : null]}>
+              Stay
+            </Text>
           </Pressable>
         </View>
+        {/* The one string on a shared device that has to be read: the device
+            did not sign the last visitor out. At #8A1C1C on navy it measured
+            1.47:1 -- present, and barely readable. */}
         {kioskError ? (
-          <Text style={styles.kioskError} testID="wsf-kiosk-finish-error" aria-live="polite">
+          <Text
+            style={[styles.kioskError, tone === 'dark' ? styles.kioskErrorDark : null]}
+            testID="wsf-kiosk-finish-error"
+            aria-live="polite"
+          >
             {kioskError}
           </Text>
         ) : null}
@@ -1194,13 +1300,27 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-load-error">
           <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
-          <ButtonLink
-            href="/"
-            style={styles.secondaryButton}
-            textStyle={styles.secondaryButtonText}
-            testID="wsf-contribute-home"
-            label="Back to home"
-          />
+          {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
+              account signed in right now, so on a kiosk it is a door out of the
+              session and into somebody's account for whoever walks up next.
+              What the kiosk gets instead is the same end-of-session treatment
+              every other settled screen has: Finish, its sentence, and the
+              90-second deadline that performs it when nobody is standing here.
+              The outcome passed is the LIVE one, not a hardcoded `none`: this
+              branch returns before the pending ones, so a load failure can
+              coincide with an unresolved attempt, and finishing as `none`
+              would erase the reminder that attempt exists. */}
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome, 'light', false)
+          ) : (
+            <ButtonLink
+              href="/"
+              style={styles.secondaryButton}
+              textStyle={styles.secondaryButtonText}
+              testID="wsf-contribute-home"
+              label="Back to home"
+            />
+          )}
         </View>
       </>
     );
@@ -1430,7 +1550,7 @@ export default function ContributeToGoal() {
         {/* The receipt carries its own numbers; the anchor would repeat them. */}
         <View style={styles.actions}>
           {kiosk ? (
-            renderKioskFinish('confirmed')
+            renderKioskFinish('confirmed', 'dark')
           ) : (
             <>
             {/*
@@ -1615,13 +1735,27 @@ export default function ContributeToGoal() {
           <Text style={styles.body}>
             This goal doesn’t exist or isn’t available to this account.
           </Text>
-          <ButtonLink
-            href="/"
-            style={styles.secondaryButton}
-            textStyle={styles.secondaryButtonText}
-            testID="wsf-contribute-home"
-            label="Back to home"
-          />
+          {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
+              account signed in right now, so on a kiosk it is a door out of the
+              session and into somebody's account for whoever walks up next.
+              What the kiosk gets instead is the same end-of-session treatment
+              every other settled screen has: Finish, its sentence, and the
+              90-second deadline that performs it when nobody is standing here.
+              The outcome passed is the LIVE one, not a hardcoded `none`: this
+              branch returns before the pending ones, so a load failure can
+              coincide with an unresolved attempt, and finishing as `none`
+              would erase the reminder that attempt exists. */}
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome)
+          ) : (
+            <ButtonLink
+              href="/"
+              style={styles.secondaryButton}
+              textStyle={styles.secondaryButtonText}
+              testID="wsf-contribute-home"
+              label="Back to home"
+            />
+          )}
         </View>
       </>
     );
@@ -1734,13 +1868,21 @@ export default function ContributeToGoal() {
         {ownCreditLine(ownCredit, unit)}
         <Text style={styles.body}>It is no longer taking contributions.</Text>
         <View style={styles.actions}>
-          <ButtonLink
-            href={backHref}
-            style={styles.primaryButton}
-            textStyle={styles.primaryButtonText}
-            testID="wsf-contribute-back"
-            label={backLabel}
-          />
+          {/* Same door, same reason -- a goal can close while somebody is
+              standing at the kiosk, and this link goes to the community of the
+              account that is signed in. And the same replacement: a closed goal
+              is a settled screen, so it gets the deadline too. */}
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome)
+          ) : (
+            <ButtonLink
+              href={backHref}
+              style={styles.primaryButton}
+              textStyle={styles.primaryButtonText}
+              testID="wsf-contribute-back"
+              label={backLabel}
+            />
+          )}
         </View>
         {renderTestNote()}
       </>,
@@ -2323,6 +2465,14 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   chromeLinkTextDark: { color: CREAM },
+  /* The dark colourways for the kiosk's end-of-session controls. The light
+     ones are unchanged: the unresolved and refusal screens are cream, and
+     what reads there must keep reading there. */
+  tertiaryButtonTextDark: { color: CREAM },
+  /* The muted-on-navy the kiosk's own resting screen already uses. Measured
+     composited over the navy it sits on, not as an unblended colour. */
+  captionOnDark: { color: HERO_MUTED },
+  kioskErrorDark: { color: '#FFB4AE' },
 
   /* ---- the confirmed receipt: the whole page is the moment --------------- */
   receipt: { alignItems: 'center', gap: 6, paddingTop: 6 },
