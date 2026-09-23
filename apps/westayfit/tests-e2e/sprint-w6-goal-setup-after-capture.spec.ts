@@ -436,6 +436,61 @@ for (const [cls, viewport] of [
   });
 }
 
+/**
+ * THE ARRIVAL GUARD, AND THE ONE FRAME IT NEEDED.
+ *
+ * `/goals/new` opened without a community — a typed URL or a stale bookmark.
+ * There is nothing to type here, so the page names the way in, and `Go to
+ * your communities` is plainly its primary action.
+ *
+ * It was left on the progress green while the F6 ruling named only the three
+ * captured CTAs and the release said no other visual change; the Director
+ * closed that gap on the pixel pass. One frame, at one height, because that
+ * is what was asked and because this state does not change with viewport
+ * height: there is no scroll to lose and nothing below a fold.
+ */
+test.describe('390x844 · the arrival guard', () => {
+  test.use({
+    viewport: MAIN,
+    userAgent: IPHONE_UA,
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2,
+  });
+
+  test('opened with no community, the one way on wears the action green', async ({ page }) => {
+    test.setTimeout(120_000);
+    const stamp = stampId();
+    const email = `gsa.guard.${stamp}@example.invalid`;
+    const password = 'goal-setup-after-passw0rd';
+    const uid = await seedVerifiedUser(email, password);
+    await seedProfile(uid, `Champion ${stamp}`);
+    await signInVia(page, email, password);
+
+    await page.goto('/goals/new');
+    await expect(page.getByTestId('wsf-new-goal-no-community')).toBeVisible({ timeout: 25_000 });
+    // The state's own claim, unchanged: nothing to type, no id, no submit.
+    await expect(page.getByTestId('wsf-new-goal-no-community')).toContainText(
+      'Choose a community before starting a goal.',
+    );
+    expect(
+      await page.getByTestId('wsf-new-goal-form').locator('input').count(),
+      'the arrival guard asks for something',
+    ).toBe(0);
+    expect(
+      await page.getByTestId('wsf-new-goal-submit').count(),
+      'the arrival guard offers a submit',
+    ).toBe(0);
+
+    const home = page.getByTestId('wsf-new-goal-home');
+    await expect(home).toHaveText('Go to your communities');
+    await expect(home).toHaveAttribute('href', '/');
+    await expectActionGreen(page, 'wsf-new-goal-home', '390x844');
+    await assertNoLivingWe(page);
+    await shoot(page, 'AFTER-no-community-390x844');
+  });
+});
+
 test.afterAll(() => {
   if (!CAPTURE_FRAMES) {
     // eslint-disable-next-line no-console

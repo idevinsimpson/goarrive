@@ -17,7 +17,7 @@ window, *Coordinated Universal Time*.
 | Producer | `apps/westayfit/tests-e2e/sprint-w6-goal-setup-after-capture.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1` (`helpers/capture`) |
 | Ordinary run | 8 passed, **0 images written** |
-| Gated run | 8 passed, **14 frames** |
+| Gated run | 9 passed, **15 frames** |
 | TARGET it answers | `../target/` — unchanged, byte for byte |
 
 ## Why this is a second producer
@@ -56,6 +56,7 @@ a transaction that committed and lost its response, which is what W7 measured (#
 | `AFTER-refused-390x844.png` · `-390x640.png` | the real `permission-denied`; the refused action gone, the way out inside the panel |
 | `AFTER-unconfirmed-INJECTED-NETWORK-390x844.png` · `-390x640.png` | the unknown result and the action that resolves it |
 | `AFTER-unconfirmed-retry-INJECTED-NETWORK-390x844.png` · `-390x640.png` | the foot of that same state: the deliberate retry with its duplicate consequence |
+| `AFTER-no-community-390x844.png` | the arrival guard, and its one way on in the action green |
 
 **The unknown state needs two frames and the target needed one.** The drawing composed the
 banner, the resolving action, the review and the demoted retry into one screen; the shipped
@@ -80,6 +81,19 @@ surface, and one screen's ruling is not licence to restyle every button in the p
 is now **asserted** by the producer (`rgb(34, 197, 94)`, and explicitly not the progress green),
 so a later edit that reaches for `kit.primaryButton` here fails before a frame is written.
 
+### The follow-up: the fourth primary
+
+The first pass changed the three CTAs the ruling enumerated and deliberately left
+`wsf-new-goal-home` — *Go to your communities* — on the progress green, because the release said
+"no other visual change" and that state had no TARGET and no AFTER frame. The Director closed
+that on the pixel pass (`5789408712`): it is plainly the primary action of its state and takes
+ACTION_GREEN too. One line on the route, one real 390×844 capture of the state, and the same
+rendered-colour assertion the other three carry.
+
+**One height only, and not for want of effort:** this state has no scroll and nothing below a
+fold, so a second height would photograph the same composition against more cream. The frame is
+of the real route, not a drawing.
+
 ### Which frames moved, and which could not have
 
 Eight frames carry a primary call to action and changed; six do not and were left at their
@@ -99,6 +113,7 @@ timestamp is not evidence of a token change.
 | `AFTER-form-top-390x844.png` · `-390x640.png` | — | **unchanged** |
 | `AFTER-custom-window-390x844.png` · `-390x640.png` | — | **unchanged** |
 | `AFTER-refused-390x844.png` · `-390x640.png` | — | **unchanged** |
+| `AFTER-no-community-390x844.png` (added in the follow-up) | — | `aae48625a6277fb2` |
 
 The six unchanged frames carry no primary call to action — the refusal's only control is the
 cream-outlined **Back to community** on navy — so the token cannot have touched them. Three of
