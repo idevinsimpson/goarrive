@@ -13,6 +13,9 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 
 import {
@@ -187,6 +190,58 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+/**
+ * BACK RETURNS TO WHERE THE MEMBER CAME FROM; IT DOES NOT BUILD A COPY OF IT.
+ *
+ * The contribution screen is a focused route presented over the tab
+ * navigator. Following a plain link to `/community/<groupId>` from here
+ * pushes a SECOND community screen and leaves the one the member came from
+ * mounted but hidden behind it, with its scroll and loaded state lost —
+ * measured on the receipt at `f2f901a`: two instances, the visible one not
+ * the one the member left. The chrome control stopped doing that when the
+ * shell migrated; this is the same rule for every other "Back to community"
+ * exit on the screen, so one screen does not have two meanings of Back.
+ *
+ * `canGoBack()` is asked at press time. A cold or deep-linked arrival has
+ * nothing beneath it and gets its canonical destination by `replace`, so a
+ * contribution screen reached directly is not left in the history. Kiosk
+ * sessions never reach this: every kiosk rest state renders Finish instead.
+ */
+function returnToMemberContext(href: string): void {
+  if (router.canGoBack()) {
+    router.back();
+    return;
+  }
+  router.replace(href as never);
+}
+
+/** Looks like `ButtonLink`, behaves like the chrome Back. */
+function ReturnButton({
+  href,
+  style,
+  textStyle,
+  testID,
+  label,
+}: {
+  href: string;
+  style: StyleProp<ViewStyle>;
+  textStyle: StyleProp<TextStyle>;
+  testID: string;
+  label: string;
+}) {
+  return (
+    <Pressable
+      style={StyleSheet.flatten(style)}
+      testID={testID}
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      onPress={() => returnToMemberContext(href)}
+    >
+      <Text style={textStyle}>{label}</Text>
+    </Pressable>
+  );
 }
 
 export default function ContributeToGoal() {
@@ -1117,13 +1172,7 @@ export default function ContributeToGoal() {
           testID="wsf-contribute-back"
           accessibilityRole="link"
           accessibilityLabel={backLabel}
-          onPress={() => {
-            if (router.canGoBack()) {
-              router.back();
-              return;
-            }
-            router.replace(backHref as never);
-          }}
+          onPress={() => returnToMemberContext(backHref)}
         >
           <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
             {backLabel}
@@ -1578,15 +1627,27 @@ export default function ContributeToGoal() {
                 </Text>
               </Pressable>
             ) : null}
-            <ButtonLink
-              href={hasShared ? backHref : '/'}
-              style={canAddMore(repeatPolicy, r) ? styles.ghostDark : styles.primaryButton}
-              textStyle={
-                canAddMore(repeatPolicy, r) ? styles.ghostDarkText : styles.primaryButtonText
-              }
-              testID="wsf-contribute-back"
-              label={hasShared ? backLabel : 'Back to home'}
-            />
+            {hasShared ? (
+              <ReturnButton
+                href={backHref}
+                style={canAddMore(repeatPolicy, r) ? styles.ghostDark : styles.primaryButton}
+                textStyle={
+                  canAddMore(repeatPolicy, r) ? styles.ghostDarkText : styles.primaryButtonText
+                }
+                testID="wsf-contribute-back"
+                label={backLabel}
+              />
+            ) : (
+              <ButtonLink
+                href="/"
+                style={canAddMore(repeatPolicy, r) ? styles.ghostDark : styles.primaryButton}
+                textStyle={
+                  canAddMore(repeatPolicy, r) ? styles.ghostDarkText : styles.primaryButtonText
+                }
+                testID="wsf-contribute-back"
+                label="Back to home"
+              />
+            )}
             </>
           )}
         </View>
@@ -1631,13 +1692,23 @@ export default function ContributeToGoal() {
             {kiosk ? (
               renderKioskFinish('refused')
             ) : (
-              <ButtonLink
-                href={refusal.reason === 'signedOut' ? '/signin' : backHref}
-                style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
-                textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
-                testID="wsf-contribute-back"
-                label={refusal.reason === 'signedOut' ? 'Sign in' : backLabel}
-              />
+              refusal.reason === 'signedOut' ? (
+                <ButtonLink
+                  href="/signin"
+                  style={styles.primaryButton}
+                  textStyle={styles.primaryButtonText}
+                  testID="wsf-contribute-back"
+                  label="Sign in"
+                />
+              ) : (
+                <ReturnButton
+                  href={backHref}
+                  style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
+                  textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
+                  testID="wsf-contribute-back"
+                  label={backLabel}
+                />
+              )
             )}
           </View>
         </View>
@@ -1711,7 +1782,7 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish('unresolved')
           ) : (
-            <ButtonLink
+            <ReturnButton
               href={backHref}
               style={styles.tertiaryButton}
               textStyle={styles.tertiaryButtonText}
@@ -1875,7 +1946,7 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish(kioskOutcome)
           ) : (
-            <ButtonLink
+            <ReturnButton
               href={backHref}
               style={styles.primaryButton}
               textStyle={styles.primaryButtonText}
