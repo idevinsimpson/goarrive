@@ -1,4 +1,4 @@
-import { Link, router, useLocalSearchParams } from 'expo-router';
+import { Link, router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -413,6 +413,19 @@ function SignedInHome({
   useEffect(() => {
     if (openable) router.replace(`/community/${openable}`);
   }, [openable]);
+  // THE REQUEST HAS TO SURVIVE IN THE ADDRESS, because a reload re-derives
+  // this screen from the address alone. Arriving here from a focused flow
+  // (the unconfirmed-create screen's "Check your communities") pushes a new
+  // tab navigator whose target exists only as a navigate payload, and Expo
+  // Router writes the address from that payload with the query dropped: the
+  // member sees the list at `/`, and a reload opens the remembered community
+  // instead. Setting the param on this route commits the navigators' state,
+  // so the address is recomputed from the screen actually shown. The value is
+  // the one already asked for; nothing is added and nothing is remembered.
+  const navigation = useNavigation();
+  useEffect(() => {
+    if (listRequested) navigation.setParams({ view: VIEW_COMMUNITIES } as never);
+  }, [listRequested, navigation]);
   if (openable) {
     return (
       <View
