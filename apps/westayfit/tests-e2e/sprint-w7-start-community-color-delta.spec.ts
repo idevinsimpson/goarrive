@@ -388,11 +388,16 @@ test.describe('W7 NEW — the four route controls render action green at d467754
     ).toEqual([]);
     // Inside the route, the action green appears exactly where it was routed.
     expect(sweep.route.map((g) => g.testId).sort()).toEqual(['wsf-start-check-communities']);
-    // And the sweep demonstrably finds green when green is there: the shell's
-    // own raised MOVE action is a primary, and is correctly action green.
+    // And the DOCUMENT-WIDE sweep demonstrably finds green when green is
+    // there, so its empty progress-green result above is not a blind sweep.
+    // Calibrated on the route's own recovery primary, which is action green.
+    // (Until the barless composition this anchor was the shell's raised MOVE
+    // action; W9's shell presents /start-community without the member tab
+    // bar, so that anchor no longer exists on this route — measured on the
+    // combined candidate 9f27c6ea, QA report Check 16.)
     expect(
-      sweep.document.find((g) => g.testId === 'wsf-member-tab-move')?.background,
-      'the sweep did not find the shell action it is calibrated against',
+      sweep.document.find((g) => g.testId === 'wsf-start-check-communities')?.background,
+      'the document-wide sweep did not find the green it is calibrated against',
     ).toBe(ACTION_GREEN_RGB);
   });
 
