@@ -1291,8 +1291,42 @@ Product tree verified **identical to `fca3326`** after every run. Verification
 only: **no product edit retained, no edit to any W9 test, no capture written, no
 frame rebaselined.** Complete result logs retained, unfiltered.
 
+## 13.8 · After acceptance: the integrated head is the tree W7 tested
+
+Check 13 was accepted as the functional gate (L0 `5799845823`) and W9's
+`fca3326` was integrated into `claude/wsf-app-shell` as **`dd86721`**. Its two
+parents are `37367fd` and `fca3326` — the same two parents as W7's local
+verification merge (`2d85d265`, never pushed). So the question worth asking is
+whether the integration resolved anything differently from the tree that was
+actually tested. It did not:
+
+| | root tree |
+|---|---|
+| `dd86721` (integrated) | `645c71e4326e` |
+| `2d85d265` (W7's verification merge) | `645c71e4326e` |
+
+**Identical root trees**, so every file and every path on the integrated base
+is exactly what the check-13 runs exercised; `git diff --stat` between them is
+empty. There is no gap between "verified" and "integrated".
+
+## 13.9 · A correction to check 12, owned
+
+Check 12 reported that `MIGRATED-g-champion-menu-open-390x640.png` was **"never
+added in any branch"**, on the strength of `git log --all --diff-filter=A`. L0
+corrected this (`5798577554`): the frame was added in `a52e9fd1` on
+`claude/wsf-app-shell-nav`. The timestamps agree with L0 — `a52e9fd1` is dated
+15:13Z, while W7's fetch at about 15:24Z still showed that branch at
+`41f80f3`, so the commit reached the remote after W7's fetch. `--all` searches
+only the refs a clone has fetched. The accurate claim was **"absent at
+`41f80f3` and from every ref fetched as of ~15:24Z"**; stating it as a universal
+without re-fetching first was my error. It did not change the check-12 verdict,
+which was on `41f80f3` where the frame genuinely was absent, but the wording
+overclaimed.
+
 ---
 
 # Check 14 — further checkpoints
 
-Awaiting L0's routing. The W4-on-accepted-shell seam check follows W9's PASS.
+**Queued, not yet SENT:** W4's barless recomposition of `/start-community` on
+exact `dd86721` (L0 `5799845823`). As of 17:55Z W4's branch is still at
+`d467754`, so nothing is owed until that delivery exists.
