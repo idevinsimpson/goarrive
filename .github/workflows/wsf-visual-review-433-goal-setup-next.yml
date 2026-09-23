@@ -1,0 +1,156 @@
+# WSF — visual-review export for PR #433's /goals/new TARGET checkpoint: the 13
+# PNGs W6 adds under docs/design-target/review/goal-setup-next/target/ (twelve
+# PROPOSED / NOT ACCEPTED drawings at 390x844 and 390x640 plus one contact
+# sheet) together with the 16 frozen BEFORE frames of the real route under
+# docs/design-target/review/goal-setup-current/ that the checkpoint reuses
+# unchanged (before/README.md proves the reuse on the e5be66f route blob),
+# exported at their source commit as a workflow artifact with a manifest that
+# pins each file to that commit — the reviewer's proven native-file path
+# (owner direction PR #365 comment 5784428860 §3; Director 5787689862 §1).
+# Same exporter as #403, #406, #407, #410, #414, #418, #419, #424, #425, #428,
+# #430 and #431, same posture: ordinary pull_request job into this one branch,
+# contents:read, pinned actions, persist-credentials false, inline stdlib
+# packaging, nothing from the tree executed, nothing rendered or resized. This
+# branch carries only this file on top of W6's head and is never merged; it
+# exists to run the job.
+name: 'WSF visual-review export — #433 goal-setup TARGET'
+
+on:
+  pull_request:
+    branches:
+      - claude/wsf-sprint-w6-goal-setup-next
+    paths:
+      - '.github/workflows/wsf-visual-review-433-goal-setup-next.yml'
+      - 'docs/design-target/review/goal-setup-next/**'
+      - 'docs/design-target/review/goal-setup-current/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsf-visual-review-433-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Export the pinned canonical images with a manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the PR head commit exactly (not the merge ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Package original bytes + manifest (inline, stdlib only; nothing from the tree is executed)
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, shutil, struct, subprocess, sys
+          repo = os.environ['REPO']
+          want = os.environ['SOURCE_SHA']
+          def git(*a):
+              return subprocess.check_output(['git', *a], text=True).strip()
+          head = git('rev-parse', 'HEAD')
+          if head != want:
+              sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
+          GS = 'docs/design-target/review'
+          # THE EXACT ALLOWLIST: the 13 TARGET PNGs PR #433 adds under goal-setup-next/target/ —
+          # W6's drawings, every one carrying a PROPOSED / NOT ACCEPTED strip inside the image, none an
+          # AFTER — and the 16 frozen BEFORE frames under goal-setup-current/ they are drawn against,
+          # at the PR head this job checks out, original committed bytes only.
+          allow = [
+              (f'{GS}/goal-setup-next/target/CONTACT-SHEET-goal-setup-next.png', 'CONTACT SHEET · PROPOSED / NOT ACCEPTED drawings side by side · CONTACT-SHEET-goal-setup-next.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-form-top-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-form-top-390x844.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-form-top-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-form-top-390x640.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-custom-window-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-custom-window-390x844.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-custom-window-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-custom-window-390x640.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-summary-commit-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-summary-commit-390x844.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-summary-commit-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-summary-commit-390x640.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-refused-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-refused-390x844.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-refused-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-refused-390x640.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-unconfirmed-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-unconfirmed-390x844.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-unconfirmed-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-unconfirmed-390x640.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-created-390x844.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-created-390x844.png'),
+              (f'{GS}/goal-setup-next/target/PROPOSED-created-390x640.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · PROPOSED-created-390x640.png'),
+              (f'{GS}/goal-setup-current/form-populated-top-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-form-top-390x844.png · form-populated-top-390x844.png'),
+              (f'{GS}/goal-setup-current/form-populated-top-390x640.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-form-top-390x640.png · form-populated-top-390x640.png'),
+              (f'{GS}/goal-setup-current/form-duration-options-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-form-top-390x844.png · form-duration-options-390x844.png'),
+              (f'{GS}/goal-setup-current/form-duration-derived-window-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-form-top-390x844.png · form-duration-derived-window-390x844.png'),
+              (f'{GS}/goal-setup-current/form-custom-window-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-custom-window-390x844.png · form-custom-window-390x844.png'),
+              (f'{GS}/goal-setup-current/form-repeat-once-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-summary-commit-390x844.png · form-repeat-once-390x844.png'),
+              (f'{GS}/goal-setup-current/form-repeat-multiple-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-summary-commit-390x844.png · form-repeat-multiple-390x844.png'),
+              (f'{GS}/goal-setup-current/form-summary-check-it-over-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-summary-commit-390x844.png · form-summary-check-it-over-390x844.png'),
+              (f'{GS}/goal-setup-current/form-summary-check-it-over-390x640.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-summary-commit-390x640.png · form-summary-check-it-over-390x640.png'),
+              (f'{GS}/goal-setup-current/form-server-refusal-INJECTED-NETWORK-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-refused-* and PROPOSED-unconfirmed-* (the build draws one state where the route has two) · form-server-refusal-INJECTED-NETWORK-390x844.png'),
+              (f'{GS}/goal-setup-current/created-receipt-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-created-390x844.png · created-receipt-390x844.png'),
+              (f'{GS}/goal-setup-current/created-actions-390x640.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · answered by PROPOSED-created-390x640.png · created-actions-390x640.png'),
+              (f'{GS}/goal-setup-current/form-validation-first-refused-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · form-validation-first-refused-390x844.png'),
+              (f'{GS}/goal-setup-current/form-submitting-INJECTED-DELAY-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · form-submitting-INJECTED-DELAY-390x844.png'),
+              (f'{GS}/goal-setup-current/no-community-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · no-community-390x844.png'),
+              (f'{GS}/goal-setup-current/signed-out-390x844.png', 'BEFORE · frozen current-build /goals/new (goal-setup-current, reused unchanged) · no TARGET opposite in this checkpoint, deliberately (before/README) · signed-out-390x844.png'),
+          ]
+          PER_FILE_MAX = 8 * 1024 * 1024
+          TOTAL_MAX = 24 * 1024 * 1024
+          out = 'wsf-visual-review-433-goal-setup-next'
+          rows, total = [], 0
+          for rel, label in allow:
+              # Tracked as an ordinary regular file at this commit: mode 100644,
+              # never a symlink (120000), submodule (160000) or executable.
+              stage = git('ls-files', '--stage', '--', rel)
+              if not stage:
+                  sys.exit(f'not tracked at HEAD: {rel}')
+              mode, blob = stage.split()[0], stage.split()[1]
+              if mode != '100644':
+                  sys.exit(f'refusing {rel}: tracked mode {mode}, not a regular file')
+              if os.path.islink(rel) or not os.path.isfile(rel):
+                  sys.exit(f'refusing {rel}: not a regular file in the checkout')
+              if blob != git('rev-parse', f'HEAD:{rel}'):
+                  sys.exit(f'index/HEAD disagree on {rel}')
+              data = open(rel, 'rb').read()
+              if len(data) > PER_FILE_MAX:
+                  sys.exit(f'refusing {rel}: {len(data)} bytes exceeds the per-file bound')
+              total += len(data)
+              if total > TOTAL_MAX:
+                  sys.exit(f'refusing: total exceeds the {TOTAL_MAX}-byte bound at {rel}')
+              if data[:8] != b'\x89PNG\r\n\x1a\n' or data[12:16] != b'IHDR':
+                  sys.exit(f'not a PNG: {rel}')
+              w, h = struct.unpack('>II', data[16:24])
+              dest = os.path.join(out, rel)
+              os.makedirs(os.path.dirname(dest), exist_ok=True)
+              shutil.copyfile(rel, dest)
+              # The exported bytes must BE the committed blob: rehash the copy
+              # with git's own object hashing and compare, not merely record it.
+              copied = open(dest, 'rb').read()
+              rehashed = git('hash-object', '--', dest)
+              if rehashed != blob or hashlib.sha256(copied).digest() != hashlib.sha256(data).digest():
+                  sys.exit(f'exported bytes for {rel} do not match the committed blob ({rehashed} vs {blob})')
+              rows.append({'path': rel, 'label': label, 'git_blob_sha1': blob, 'bytes': len(data),
+                           'sha256': hashlib.sha256(data).hexdigest(), 'width': w, 'height': h})
+          manifest = {'repo': repo, 'source_sha': head, 'files_total_bytes': total,
+                      'note': 'original bytes copied from this commit and re-hashed against the git blob; nothing rendered, resized or repaired',
+                      'files': rows}
+          json.dump(manifest, open(os.path.join(out, 'MANIFEST.json'), 'w'), indent=2)
+          with open(os.path.join(out, 'MANIFEST.md'), 'w') as f:
+              f.write(f'# PR #433 goal-setup TARGET — visual review package\n\nRepository `{repo}` · source commit `{head}` · {len(rows)} files, {total} bytes · original bytes, re-hashed against git.\n\n')
+              f.write('| path | label | git blob | bytes | sha256 | w×h |\n| --- | --- | --- | ---: | --- | --- |\n')
+              for r in rows:
+                  f.write(f"| `{r['path']}` | {r['label']} | `{r['git_blob_sha1']}` | {r['bytes']} | `{r['sha256']}` | {r['width']}×{r['height']} |\n")
+          print(open(os.path.join(out, 'MANIFEST.md')).read())
+          PY
+
+      - name: Upload as a workflow artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: wsf-visual-review-433-goal-setup-next-${{ github.event.pull_request.head.sha }}
+          path: wsf-visual-review-433-goal-setup-next
+          if-no-files-found: error
+          retention-days: 7
+          # The PNG is already compressed; keep its bytes verbatim inside the zip.
+          compression-level: 0
