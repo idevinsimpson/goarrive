@@ -4,12 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useWsfAuth } from '../../src/auth';
-import { mapWithLimit } from '../../src/concurrency';
-import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../src/currentCommunity';
-import { getFirebaseFunctions } from '../../src/firebase';
-import { memberCountLabel, roleCardLabel } from '../../src/labels';
-import { formatSinceShort } from '../../src/ui/dates';
+import { useWsfAuth } from '../../../src/auth';
+import { mapWithLimit } from '../../../src/concurrency';
+import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { getFirebaseFunctions } from '../../../src/firebase';
+import { memberCountLabel, roleCardLabel } from '../../../src/labels';
+import { formatSinceShort } from '../../../src/ui/dates';
 import {
   ACTION_GREEN,
   CREAM,
@@ -25,11 +25,11 @@ import {
   TEXT_MUTED,
   display,
   elevation,
-} from '../../src/ui/kit';
-import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../src/ui/MemberTabBar';
-import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../src/ui/progressFormat';
-import { WsfWordmark } from '../../src/ui/WsfWordmark';
+} from '../../../src/ui/kit';
+import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
+import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
+import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../../src/ui/progressFormat';
+import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.

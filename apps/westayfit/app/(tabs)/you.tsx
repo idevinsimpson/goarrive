@@ -5,13 +5,13 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { useWsfAuth } from '../src/auth';
-import { mapWithLimit } from '../src/concurrency';
-import { resolveCurrentCommunity } from '../src/currentCommunity';
-import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions } from '../src/firebase';
-import { memberCountLabel, roleCardLabel } from '../src/labels';
-import { LivingWeProgress } from '../src/ui/LivingWeProgress';
-import { WsfWordmark } from '../src/ui/WsfWordmark';
+import { useWsfAuth } from '../../src/auth';
+import { mapWithLimit } from '../../src/concurrency';
+import { resolveCurrentCommunity } from '../../src/currentCommunity';
+import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions } from '../../src/firebase';
+import { memberCountLabel, roleCardLabel } from '../../src/labels';
+import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
+import { WsfWordmark } from '../../src/ui/WsfWordmark';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -27,8 +27,8 @@ import {
   SURFACE,
   display,
   elevation,
-} from '../src/ui/kit';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../src/ui/MemberTabBar';
+} from '../../src/ui/kit';
+import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../src/ui/MemberTabBar';
 
 /**
  * PAGE 5 — YOU. Implemented against the accepted target in

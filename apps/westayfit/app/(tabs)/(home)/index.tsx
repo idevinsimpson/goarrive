@@ -4,22 +4,22 @@ import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { useWsfAuth } from '../src/auth';
-import { describeCallableError } from '../src/callableErrors';
-import { resolveCurrentCommunity } from '../src/currentCommunity';
-import { wsfAuthEnabled } from '../src/featureFlags';
-import { getFirebaseAuth, getFirebaseFunctions } from '../src/firebase';
+import { useWsfAuth } from '../../../src/auth';
+import { describeCallableError } from '../../../src/callableErrors';
+import { resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { wsfAuthEnabled } from '../../../src/featureFlags';
+import { getFirebaseAuth, getFirebaseFunctions } from '../../../src/firebase';
 import {
   challengeParticipationLabel,
   groupTypeCardLabel,
   memberCountLabel,
   roleCardLabel,
-} from '../src/labels';
-import { wsfTheme } from '../src/theme';
-import { ButtonLink } from '../src/ui/ButtonLink';
-import { CARD_BORDER, NAVY, kit } from '../src/ui/kit';
-import { formatCount, totalOfTargetLabel } from '../src/ui/progressFormat';
-import { WsfWordmark } from '../src/ui/WsfWordmark';
+} from '../../../src/labels';
+import { wsfTheme } from '../../../src/theme';
+import { ButtonLink } from '../../../src/ui/ButtonLink';
+import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
+import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
+import { WsfWordmark } from '../../../src/ui/WsfWordmark';
 
 type MyCommunityItem = {
   groupId: string;

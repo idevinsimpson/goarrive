@@ -15,15 +15,15 @@ declare module 'react-native' {
   }
 }
 
-import { useWsfAuth } from '../../../src/auth';
-import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
-import { describeCallableError } from '../../../src/callableErrors';
-import { FormShell, SecondaryLink, TextField } from '../../../src/AuthFormPrimitives';
-import { wsfAuthEnabled } from '../../../src/featureFlags';
-import { getFirebaseFunctions } from '../../../src/firebase';
-import { CARD_BORDER, CREAM, SURFACE, TEXT_MUTED, kit } from '../../../src/ui/kit';
-import { ButtonLink } from '../../../src/ui/ButtonLink';
-import { WsfWordmark } from '../../../src/ui/WsfWordmark';
+import { useWsfAuth } from '../../../../../src/auth';
+import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../../../../src/callableErrors';
+import { FormShell, SecondaryLink, TextField } from '../../../../../src/AuthFormPrimitives';
+import { wsfAuthEnabled } from '../../../../../src/featureFlags';
+import { getFirebaseFunctions } from '../../../../../src/firebase';
+import { CARD_BORDER, CREAM, SURFACE, TEXT_MUTED, kit } from '../../../../../src/ui/kit';
+import { ButtonLink } from '../../../../../src/ui/ButtonLink';
+import { WsfWordmark } from '../../../../../src/ui/WsfWordmark';
 
 // Response shapes mirror wsfListChallenge / wsfCheckIn in functions-westayfit.
 // Kept narrow on purpose: the whitelist here is what a member is allowed to

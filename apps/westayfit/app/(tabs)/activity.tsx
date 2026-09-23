@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useWsfAuth } from '../src/auth';
-import { mapWithLimit } from '../src/concurrency';
-import { getFirebaseFunctions } from '../src/firebase';
+import { useWsfAuth } from '../../src/auth';
+import { mapWithLimit } from '../../src/concurrency';
+import { getFirebaseFunctions } from '../../src/firebase';
 import {
   ACTION_GREEN,
   CREAM,
@@ -21,18 +21,18 @@ import {
   TEXT_MUTED,
   display,
   elevation,
-} from '../src/ui/kit';
-import { LivingWeProgress } from '../src/ui/LivingWeProgress';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../src/ui/MemberTabBar';
+} from '../../src/ui/kit';
+import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
+import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../src/ui/MemberTabBar';
 import {
   fillRatio,
   formatCount,
   isReached,
   percentLabel,
   totalOfTargetLabel,
-} from '../src/ui/progressFormat';
-import { WsfWordmark } from '../src/ui/WsfWordmark';
-import { formatEndedOn } from '../src/ui/dates';
+} from '../../src/ui/progressFormat';
+import { WsfWordmark } from '../../src/ui/WsfWordmark';
+import { formatEndedOn } from '../../src/ui/dates';
 
 /**
  * PROGRESS — the member's OWN recorded movement, and nobody else's.

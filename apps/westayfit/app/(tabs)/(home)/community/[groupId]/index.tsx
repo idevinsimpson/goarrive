@@ -13,14 +13,14 @@ import {
   View,
 } from 'react-native';
 
-import { useWsfAuth } from '../../../src/auth';
-import { rememberCurrentCommunity } from '../../../src/currentCommunity';
-import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
-import { describeCallableError } from '../../../src/callableErrors';
-import { FormShell } from '../../../src/AuthFormPrimitives';
-import { resolveRepeatPolicy, type RepeatPolicy } from '../../../src/contributionFlow';
-import { wsfAuthEnabled } from '../../../src/featureFlags';
-import { getFirebaseFirestore, getFirebaseFunctions } from '../../../src/firebase';
+import { useWsfAuth } from '../../../../../src/auth';
+import { rememberCurrentCommunity } from '../../../../../src/currentCommunity';
+import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../../../../src/callableErrors';
+import { FormShell } from '../../../../../src/AuthFormPrimitives';
+import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
+import { wsfAuthEnabled } from '../../../../../src/featureFlags';
+import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
 import {
   beginContext,
   confirmedButAbsent,
@@ -34,7 +34,7 @@ import {
   unsettledFor,
   type DisplayAuthState,
   type OperationScope,
-} from '../../../src/displayAuthControl';
+} from '../../../../../src/displayAuthControl';
 import {
   challengeParticipationLabel,
   groupTypeLabel,
@@ -42,8 +42,8 @@ import {
   memberCountLabel,
   roleLabel,
   statusLabel,
-} from '../../../src/labels';
-import { communityMomentumLine } from '../../../src/communityMomentum';
+} from '../../../../../src/labels';
+import { communityMomentumLine } from '../../../../../src/communityMomentum';
 import {
   canShareGoalDisplay,
   displayShareUrl,
@@ -51,15 +51,15 @@ import {
   shareRoute,
   SHARE_DISCLOSURE,
   type ShareStatus,
-} from '../../../src/shareGoalDisplay';
-import { wsfTheme } from '../../../src/theme';
-import { PROGRESS_GREEN } from '../../../src/ui/brandAssets';
-import { ButtonLink } from '../../../src/ui/ButtonLink';
-import { JoinQrCode } from '../../../src/ui/JoinQrCode';
-import { buildJoinUrl, isLinkJoinable } from '../../../src/ui/joinLink';
-import { buildKioskUrl, currentOrigin } from '../../../src/ui/kioskLink';
-import { buildStationUrl } from '../../../src/ui/eventLinks';
-import { buildCombinedUrl } from '../../../src/ui/combinedLink';
+} from '../../../../../src/shareGoalDisplay';
+import { wsfTheme } from '../../../../../src/theme';
+import { PROGRESS_GREEN } from '../../../../../src/ui/brandAssets';
+import { ButtonLink } from '../../../../../src/ui/ButtonLink';
+import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
+import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
+import { buildKioskUrl, currentOrigin } from '../../../../../src/ui/kioskLink';
+import { buildStationUrl } from '../../../../../src/ui/eventLinks';
+import { buildCombinedUrl } from '../../../../../src/ui/combinedLink';
 import {
   childSelectionMessage,
   deviceTimeZone,
@@ -70,23 +70,23 @@ import {
   parseTargetInput,
   validateChildSelection,
   zoneInWords,
-} from '../../../src/combinedSetup';
-import { DateTimeField } from '../../../src/ui/DateTimeField';
-import { OptionGroup, OptionRow } from '../../../src/ui/OptionRow';
+} from '../../../../../src/combinedSetup';
+import { DateTimeField } from '../../../../../src/ui/DateTimeField';
+import { OptionGroup, OptionRow } from '../../../../../src/ui/OptionRow';
 import {
   normalizePairingCode,
   pairingCodeInputValue,
   STATION_PAIRING_CODE_LENGTH,
   STATION_SLOTS,
   type StationSlot,
-} from '../../../src/stationSession';
+} from '../../../../../src/stationSession';
 import {
   formatActiveWindowLabel,
   formatClock,
   formatMonthYear,
   formatPeriod,
   formatReachedOn,
-} from '../../../src/ui/dates';
+} from '../../../../../src/ui/dates';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -99,14 +99,14 @@ import {
   display,
   elevation,
   kit,
-} from '../../../src/ui/kit';
-import { LIVING_WE_ASPECT } from '../../../src/ui/livingWeCalibration';
+} from '../../../../../src/ui/kit';
+import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
 import {
   MomentumRow,
   PresenceRow,
   type ActivityRow,
-} from '../../../src/ui/CommunityPresence';
-import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
+} from '../../../../../src/ui/CommunityPresence';
+import { LivingWeProgress } from '../../../../../src/ui/LivingWeProgress';
 import {
   formatCount,
   isReached,
@@ -116,8 +116,8 @@ import {
   statusLine,
   totalOfTargetLabel,
   totalOfTargetParts,
-} from '../../../src/ui/progressFormat';
-import { WsfWordmark } from '../../../src/ui/WsfWordmark';
+} from '../../../../../src/ui/progressFormat';
+import { WsfWordmark } from '../../../../../src/ui/WsfWordmark';
 
 type GroupDoc = {
   displayName: string;
