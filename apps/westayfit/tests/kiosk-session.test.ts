@@ -159,12 +159,21 @@ describe('what Finish is allowed to erase', () => {
     }
   });
 
-  it('KEEPS an unresolved attempt, and says where it is', () => {
+  it('KEEPS an unresolved attempt, and points at the recovery that actually exists', () => {
     const plan = kioskFinishPlan(GOAL, 'unresolved');
     expect(plan.clearPendingDraft).toBe(false);
-    expect(plan.notice).toBe('Your attempt is saved to your account; check it from your own device.');
+    expect(plan.notice).toBe(
+      'You can try to confirm this contribution here before you finish. Entering it again elsewhere could count it twice.'
+    );
     expect(plan.notice).toBe(KIOSK_UNRESOLVED_NOTICE);
     expect(plan.signOut).toBe(true);
+  });
+
+  it('promises no portability the stored record cannot keep', () => {
+    // The pending record lives in this browser's localStorage, keyed to the
+    // uid that made it; another device signing into the same account does not
+    // find it. The notice must not read as though the attempt travels.
+    expect(KIOSK_UNRESOLVED_NOTICE).not.toMatch(/your own device|another device|anywhere|saved to your account/i);
   });
 
   it('never claims the unresolved attempt was recorded', () => {

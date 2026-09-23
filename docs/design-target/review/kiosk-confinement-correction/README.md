@@ -16,9 +16,10 @@ The correction is this packet, assigned on
 | Baseline | `d0477cc047f4e71133fed0741935ebb99d46024d` (`claude/wsf-app-shell` head) |
 | Producer | `apps/westayfit/tests-e2e/sprint-w1b-kiosk-confinement.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1`, through `helpers/capture` |
-| Baseline run | **1 passed, 8 failed** — every confinement test fails, and the one that passes is *ordinary personal contribution keeps its tabs* |
-| Corrected run | **9 passed** |
-| Revision | `b24da91` → `HEAD` after the Director's source review [`5786956143`](https://github.com/idevinsimpson/goarrive/pull/427#issuecomment-5786956143): one shared kiosk predicate, and the two instruction lines raised to the control floor |
+| Baseline run | **1 passed, 9 failed** — every confinement test fails, and the one that passes is *ordinary personal contribution keeps its tabs* |
+| Corrected run | **10 passed** |
+| Revision | `b24da91` → `50806fa` after the source review [`5786956143`](https://github.com/idevinsimpson/goarrive/pull/427#issuecomment-5786956143): one shared kiosk predicate, and the two instruction lines raised to the control floor |
+| Revision | `50806fa` → `HEAD` after [`5787211535`](https://github.com/idevinsimpson/goarrive/pull/427#issuecomment-5787211535): the unresolved notice stops promising portability it cannot keep |
 | Classes | 800×1280 (the class a venue screen is drawn at) and 390×640 (the repository's short phone) |
 | Fixtures | `helpers/mobile`, isolated `demo-wsf-local` over loopback |
 
@@ -42,13 +43,14 @@ between a `before/` frame and its `after/` twin is the patch.
 
 | Frame | `before/` | `after/` | What changes |
 |---|---|---|---|
-| `kiosk-entry-tablet-800x1280.png` | `54aa63fe33030280` | `73f7d3111ca7fcfd` | Home · Community · MOVE · Progress · You along the bottom → gone |
+| `kiosk-entry-tablet-800x1280.png` | `54aa63fe33030280` | `8b628a1290c7b5e7` | Home · Community · MOVE · Progress · You along the bottom → gone |
 | `kiosk-entry-short-phone-390x640.png` | `f8ecc246b637fda7` | `bf2bfc15798197df` | the clearest pair: the bar and the raised MOVE circle cut off *How we count squats*; without them the screen simply ends |
 | `kiosk-receipt-tablet-800x1280.png` | `e53c7191e43e2164` | `a1a61673890c5caa` | the bar goes; the chrome `Finish`, `Stay` and both instruction lines become legible |
 | `kiosk-receipt-short-phone-390x640.png` | `8d9aebb914a333dd` | `1bfbab29a5adc543` | the same, at the short class |
-| `kiosk-unresolved-tablet-800x1280.png` | `2aa9ad903d76af19` | `2943449d8b5c6e0d` | the bar goes; every word of the unknown-outcome screen is unchanged |
+| `kiosk-unresolved-tablet-800x1280.png` | `2aa9ad903d76af19` | `3b47983a0089acf6` | the bar goes; the notice is rewritten (below) and the rest of the screen is unchanged |
+| `kiosk-unresolved-short-phone-390x640.png` | *(no baseline — added with the rewritten notice)* | `72f70c888a017a8c` | the longest string on any kiosk screen, at the class where wrapping fails first |
 | `kiosk-signout-failed-tablet-800x1280.png` | `efdc17aa0b240be4` | `ed6629eb6ed84909` | the bar goes; the warning and both instruction lines become readable |
-| `ordinary-contribution-keeps-its-tabs-tablet-800x1280.png` | `eb010b345f646278` | `9fedcdcb32cce6b3` | **nothing that matters** — the same route without `?kiosk=1` keeps all four tabs and MOVE |
+| `ordinary-contribution-keeps-its-tabs-tablet-800x1280.png` | `eb010b345f646278` | `d367506ab4ef251b` | **nothing that matters** — the same route without `?kiosk=1` keeps all four tabs and MOVE |
 
 **Three of the baseline frames are byte-identical to frames already delivered on
 Board 11** — `kiosk-receipt-tablet` to that package's `kiosk-receipt-stay`,
@@ -148,6 +150,41 @@ working `Finish` — then drives `?kiosk=0&kiosk=no` and asserts that an
 unrecognised duplicate is an ordinary contribution that keeps its tabs. Failing
 closed must not mean treating every duplicate as a kiosk.
 
+## The unresolved notice stops promising portability
+
+The notice used to read *"Your attempt is saved to your account; check it from
+your own device."* It reads as though the attempt travels with the account. It
+does not: the record that makes the SAME attempt replayable is in
+`localStorage` on the browser that made it (`src/pendingContribution.ts`), keyed
+to that uid, and another device signing into the same account finds no such
+record — W3's storage-level probe (`5787080285`) confirmed it. A member's own
+credit total is durable and readable elsewhere, but a total is not this
+attempt's outcome: somebody who does not already know what it was before cannot
+infer whether this one landed.
+
+It now reads:
+
+> You can try to confirm this contribution here before you finish. Entering it
+> again elsewhere could count it twice.
+
+It points at the only place the recovery actually exists — this screen, before
+Finish — and names the real cost of the alternative. **Copy only.** No forced
+retry, no extra send, no portability promise, and no backend, storage, auth or
+retention change: `Confirm this contribution` is still offered, `Finish` is
+still available, and the account-scoped pending record is still kept rather
+than cleared on the way out. The unit test that asserts the record survives is
+untouched; what changed is the literal expectation and one test description,
+plus a new assertion that the notice names no other device.
+
+**Wrapping, measured at the class where it fails first.** The sentence is the
+longest string on any kiosk screen, so it is captured at 390×640 as well: it
+takes three whole lines inside the screen's width, there is no sideways scroll,
+and `Finish` sits directly under it, visible and enabled.
+
+**One reference deliberately left alone.** `src/ui/designTarget/RoomScreenTargets.tsx`
+draws the old sentence into the batch-e *target* artwork. That is a frozen
+design reference, not the product, and this packet does not repaint targets.
+
 ## Reported, not fixed
 
 - **The countdown does not cover the closed-goal, not-found or load-error
@@ -169,18 +206,25 @@ still reachable that way. What the correction removes is every route the product
 offers out of a kiosk session; typing an address is not one of them, and no
 web page can make it one.
 
-## What the revision re-captured
+## What each revision re-captured
 
-Five `after/` frames were re-taken; the `before/` set is byte-identical to its
-first capture, checked before and after every run.
+The `before/` set is byte-identical to its first capture, checked before and
+after every run.
 
-- the three **navy** frames (`kiosk-receipt` ×2, `kiosk-signout-failed`) changed
-  because the two instruction lines changed colour — that is the correction;
-- the two **light** frames (`kiosk-entry-tablet`,
-  `ordinary-contribution-keeps-its-tabs`) changed by **16 rows** each, at
-  y 338–353, which is the anchor's `Confirmed HH:MM` line. Those screens carry a
-  clock, so their bytes differ run to run; nothing else in them moved. Measured
-  row by row rather than asserted.
+**`b24da91` → `50806fa`** — five `after/` frames: the three **navy** ones
+(`kiosk-receipt` ×2, `kiosk-signout-failed`) because the two instruction lines
+changed colour, which is the correction; and two **light** ones
+(`kiosk-entry-tablet`, `ordinary-contribution-keeps-its-tabs`) by **16 rows**
+each at y 338–353, which is the anchor's `Confirmed HH:MM` line.
+
+**`50806fa` → `HEAD`** — the unresolved frame, because its notice is rewritten;
+one new frame, the same state at the short class; and the same two light frames,
+again by **17 rows** each at y 338–354 and y 418–434, the same clock line. The
+navy receipt and sign-out frames came back **byte-identical** this time, which
+is what confirms the earlier three changed for the colour and nothing else.
+
+Those screens carry a clock, so their bytes differ run to run and nothing else
+in them moved. Measured row by row rather than asserted.
 
 ## Reproducing
 
@@ -204,9 +248,10 @@ assertions then fail, by design, and that failure is the defect.
 ## Regression run alongside this change
 
 `ui-app-shell` 3 · `ui-kiosk` 3 · `ui-contribute-short-phone` 7 — **13 passed**,
-all unmodified. Unit suite: 46 files, **797 tests**, passed — the two added are
-the focused kiosk-flag cases in `tests/kiosk-session.test.ts`, the only existing
-test file this packet touches and the one the Director's review named.
+all unmodified. Unit suite: 46 files, **798 tests**, passed — the three added are the focused
+kiosk-flag cases and the notice's no-portability assertion in
+`tests/kiosk-session.test.ts`, the only existing test file this packet touches
+and the one the reviews named.
 `ts:check` passes.
 
 ## Scope

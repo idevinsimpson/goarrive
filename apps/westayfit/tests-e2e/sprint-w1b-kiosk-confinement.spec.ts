@@ -347,6 +347,48 @@ for (const klass of [
   });
 }
 
+/**
+ * The unresolved notice is the longest string on any kiosk screen, and the
+ * short phone is the class where wrapping fails first. Captured there for that
+ * reason and no other -- the state itself is asserted in full at the tablet.
+ */
+test.describe('kiosk confinement · the unresolved notice at the short class', () => {
+  test.use({ viewport: SHORT_PHONE, deviceScaleFactor: 2 });
+
+  test('the notice wraps readably and Finish is still reachable under it', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seedKiosk('g');
+    await walkUpToEntry(page, fx);
+    await page.getByTestId('wsf-contribute-entry').fill(String(ADDED));
+    await page.getByTestId('wsf-contribute-review').click();
+    await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible();
+    await page.route('**/wsfContribute', (route: Route) => route.abort('failed'));
+    await page.getByTestId('wsf-contribute-submit').click();
+    await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+
+    await page.getByTestId('wsf-kiosk-finish').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(600);
+    await saveFrame(page, frame('kiosk-unresolved-short-phone-390x640.png'));
+
+    // Readable rather than clipped: the notice takes whole lines inside the
+    // screen's own width, and nothing overflows it sideways.
+    const box = await page.getByTestId('wsf-kiosk-unresolved-note').boundingBox();
+    expect(box, 'the notice has a box').not.toBeNull();
+    expect(box!.width).toBeLessThanOrEqual(SHORT_PHONE.width);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1
+    );
+    expect(overflow, 'no sideways scroll at the short class').toBe(false);
+
+    // And the way out is still under it.
+    await expect(page.getByTestId('wsf-kiosk-finish')).toBeVisible();
+    await expect(page.getByTestId('wsf-kiosk-finish')).toBeEnabled();
+    await expectNoMemberNavigation(page);
+    await expectFinishUsable(page);
+    await page.unroute('**/wsfContribute');
+  });
+});
+
 test.describe('kiosk confinement · the states a correction could quietly break', () => {
   test.use({ viewport: TABLET, deviceScaleFactor: 2 });
 
@@ -368,7 +410,7 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     await saveFrame(page, frame('kiosk-unresolved-tablet-800x1280.png'));
     // The state is unchanged by the correction.
     await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
-      'Your attempt is saved to your account; check it from your own device.'
+      'You can try to confirm this contribution here before you finish. Entering it again elsewhere could count it twice.'
     );
     await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveText(
       'Confirm this contribution'
