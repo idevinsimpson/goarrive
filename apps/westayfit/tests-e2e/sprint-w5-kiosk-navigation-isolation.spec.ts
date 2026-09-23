@@ -1557,8 +1557,16 @@ test('a load failure over an unresolved attempt says what it can do, and Finish 
   await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
     'We couldn’t load this goal to confirm your contribution. Entering it again elsewhere could count it twice.'
   );
-  // 2. AND THE PROMISE IT DOES NOT MAKE.
-  const errorText = await page.getByTestId('wsf-contribute-screen').innerText();
+  /*
+    2. AND THE PROMISE IT DOES NOT MAKE.
+
+    Read from the document body, not from `wsf-contribute-screen`: the screen
+    wrapper takes its testID as an optional argument and the load-error branch
+    passes none, so the first version of this line waited out the whole test
+    timeout on an element that does not exist on this screen. My gap, found by
+    running it.
+  */
+  const errorText = await page.locator('body').innerText();
   expect(errorText).not.toContain('You can try to confirm this contribution here before you finish.');
   await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveCount(0);
   // 3. The session is still endable from here, and unattended.
@@ -1619,14 +1627,23 @@ test('the deadline does not exist on the initial load, entry, review, or with a 
   });
   await page.route(CONTRIBUTE_CALLABLE, async (route) => {
     await held;
-    await route.abort('connectionfailed');
+    // The route can be torn down around this handler; aborting a route that is
+    // already handled is a harness race, not a finding, so it is swallowed
+    // here rather than failing a case about countdowns.
+    await route.abort('connectionfailed').catch(() => {});
   });
   await page.getByTestId('wsf-contribute-submit').click();
   await expect(page.getByTestId('wsf-contribute-recording')).toBeVisible({ timeout: 25_000 });
   seen.inFlight = await countdownSeconds(page);
+  /*
+    Release the held request and let the screen settle BEFORE unrouting.
+    Unrouting first handled the route out from under the pending handler, and
+    its `route.abort` then threw "Route is already handled!" — my sequencing,
+    not the product's behaviour.
+  */
   release();
-  await page.unroute(CONTRIBUTE_CALLABLE);
   await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+  await page.unroute(CONTRIBUTE_CALLABLE);
 
   // initial load: a fresh kiosk contribution whose pulse has not answered yet.
   const fx2 = await seedBase('ineligible-load');
@@ -1794,15 +1811,26 @@ test('the deadline detaches the account by itself, and a failed sign-out on a se
     }
   });
 
-  // --- and now the deadline, waited out for real ----------------------------
-  await page.goto(`/contribute/w5kn-absent-${fx.stamp}?kiosk=1`);
-  await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 40_000 });
+  /*
+    --- and now the deadline, waited out for real ---------------------------
+
+    On a CLOSED goal rather than the missing one used above. `/kiosk/<goalId>`
+    for a goal that does not exist correctly renders the display's generic
+    refusal, not the hero — so asserting the hero after the deadline was
+    asserting the wrong screen for the fixture I had chosen. The deadline
+    itself fired either way; this picks a fixture whose resting screen is the
+    one the assertion is about.
+  */
+  const closedGoalId = `w5kn-deadline-closed-${fx.stamp}`;
+  await seedGoal(fx.groupId, fx.championUid, closedGoalId, 500, 'closed');
+  await page.goto(`/contribute/${closedGoalId}?kiosk=1`);
+  await expect(page.getByTestId('wsf-contribute-closed')).toBeVisible({ timeout: 40_000 });
   const opened = await countdownSeconds(page);
   expect(opened, 'the deadline is running on this screen').not.toBeNull();
   expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
 
   // Nobody touches it. KIOSK_IDLE_MS is 90s; the wait is that plus slack.
-  await page.waitForURL(new RegExp(`/kiosk/w5kn-absent-${fx.stamp}$`), { timeout: 150_000 });
+  await page.waitForURL(new RegExp(`/kiosk/${closedGoalId}$`), { timeout: 150_000 });
   await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 30_000 });
   await expect
     .poll(async () => (await signedInAccounts(page)).length, { timeout: 30_000, intervals: [250] })
