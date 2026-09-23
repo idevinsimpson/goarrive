@@ -17,9 +17,10 @@ assigned as its own packet:
 | Rule | `kioskMayFinishUnattended` in `src/kioskSession.ts` |
 | Producers | `tests/kiosk-idle-finish.test.ts` · `tests-e2e/sprint-w1b-kiosk-idle-finish.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1`, through `helpers/capture` |
-| Browser suite | **8 passed** |
-| Unit | 47 files, **805 tests** passed |
+| Browser suite | **9 passed** |
+| Unit | 47 files, **808 tests** passed |
 | Classes | 800×1280 and 390×640 |
+| Revision | `e4243f1` → `HEAD` after the source review [`5787727916`](https://github.com/idevinsimpson/goarrive/pull/436#issuecomment-5787727916): a fail-closed auth probe, and copy that does not promise a control this screen lacks |
 
 ## What is reused, not invented
 
@@ -68,7 +69,8 @@ an assertion for precisely this case.
 | `kiosk-not-found-short-phone-390x640.png` | `be7e532b9897ac5b` | the same at the short class |
 | `kiosk-load-error-tablet-800x1280.png` | `94e8460ab05f20db` | `Something went wrong` with the deadline under it |
 | `kiosk-load-error-short-phone-390x640.png` | `d58b77cd33f12b3a` | the same at the short class |
-| `kiosk-load-error-with-unresolved-tablet-800x1280.png` | `79e45c67ab13fad3` | the ordering case: a failed load **while an unresolved attempt is stored**, carrying that attempt's own notice |
+| `kiosk-load-error-with-unresolved-tablet-800x1280.png` | `6fd872a32033ac35` | the ordering case: a failed load **while an unresolved attempt is stored**, now carrying the no-retry variant |
+| `kiosk-load-error-with-unresolved-short-phone-390x640.png` | `153f5d46cef8fffc` | the same state at the short class, for the longer sentence's wrapping and `Finish`'s reachability under it |
 | `kiosk-not-found-signout-failed-tablet-800x1280.png` | `02e597e93619ea9e` | the deadline fired and the sign-out was refused: the device stays put and says so |
 
 ## Deterministic time, unmodified duration
@@ -95,7 +97,8 @@ is asserted **not** to render as a contribution refusal.
 Then the behaviour:
 
 - **the deadline performs the same safe Finish** — sign-out completes *before*
-  the return to rest, asserted by reading the auth store after the URL changes;
+  the return to rest, asserted by *observing* the auth store empty rather than
+  merely failing to read it;
 - **`Stay` renews it** — and renews a *whole* deadline, not the remainder of the
   old one;
 - **a failed sign-out at the deadline stays protected** — the device does not
@@ -119,10 +122,66 @@ hide the outcome, the visitor still signed in at that moment, and the reminder
 stored. That is the real edge between "in flight" and "nobody knows", and it is
 in the suite rather than in a sentence.
 
+## Two corrections on review
+
+### The test evidence failed open
+
+`authRecords()` turned a refused `indexedDB.open`, a read error or a blocked
+upgrade into `[]` — **exactly** the value the tests then assert as "signed out".
+An unreadable store is UNKNOWN, not empty, so every sign-out assertion in this
+file could have passed on a browser whose IndexedDB was simply broken. The same
+class of error as a contrast probe that ignores alpha: a tool certifying the
+property rather than measuring it.
+
+It is replaced by `inspectAuthStore`, which returns `{ok: true, keys}` or
+`{ok: false, reason}` and never conflates them — `onerror`, `onblocked`, a
+throwing transaction and a read failure are each reported as failures, and the
+read is **bounded** so an inspection that never answers is reported rather than
+waited on. Opening a database that does not exist still counts as a genuine
+observation of absence, because it is one. `expectSignedOut` and
+`expectStillAttached` replace every bare comparison, and the account is now
+observed **before** each expiry so the empty store afterwards is a transition
+the run watched happen.
+
+**A discriminating regression proves it.** One test breaks the readonly
+inspection, asserts the probe reports it as unreadable, and asserts that
+`expectSignedOut` then *fails* — a failed inspection cannot satisfy a signed-out
+assertion. The probe stays readonly precisely so it keeps working under the
+sign-out-failure injection, which breaks readwrite only; that test still asserts
+the account is attached through it.
+
+### The notice promised a control this screen does not have
+
+The accepted unresolved notice points at `Confirm this contribution`. The
+load-error branch returns **before** the pending one, so it can show an
+unresolved session with **no reconcile control on it at all** — and it was
+saying "you can try to confirm this contribution here" on a screen with nothing
+to confirm it with.
+
+Where the retry exists the accepted copy is unchanged. Where it does not, a
+contextual variant says why instead:
+
+> We couldn't load this goal to confirm your contribution. Entering it again
+> elsewhere could count it twice.
+
+The unknown status, the reminder, the manual `Finish` and the deadline are all
+preserved, and no flow was expanded to justify a sentence. `canRetryHere` is an
+explicit argument rather than something inferred, so a future screen has to
+state which kind it is. Tested both ways: the no-retry state names no available
+action anywhere on the page, and the ordinary unresolved screen still has both
+the accepted copy **and** a real reconciliation control.
+
 ## Reported, not changed
 
 The `/kiosk/<goalId>` start screen itself has no deadline, because it is already
 the rest state a session returns *to*. Nothing here changes it.
+
+## Scope, this revision
+
+Only the affected evidence moved: the load-error-with-unresolved frame was
+re-captured for the new copy, and its short-class twin was added for
+reachability. **The other six frames are byte-unchanged**, and #427's merged
+evidence and Board 11's record were not touched.
 
 ## Scope
 

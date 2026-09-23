@@ -41,6 +41,7 @@ import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions, wsfUsingEm
 import {
   KIOSK_TICK_MS,
   KIOSK_UNRESOLVED_NOTICE,
+  KIOSK_UNRESOLVED_NOTICE_NO_RETRY,
   clearKioskReturnGoal,
   isKioskFlag,
   kioskMayFinishUnattended,
@@ -1096,12 +1097,23 @@ export default function ContributeToGoal() {
   // session can come to rest on. It carries the countdown that performs the
   // same Finish when nobody is standing there, and — when the outcome is
   // UNKNOWN — the one sentence the visitor needs before they walk away.
-  const renderKioskFinish = (outcome: KioskOutcome, tone: 'light' | 'dark' = 'light') =>
+  /**
+   * `canRetryHere` is not a style choice. The accepted unresolved notice points
+   * at "Confirm this contribution", and a screen has to be able to keep that
+   * promise: the load-error branch returns BEFORE the pending one, so it can
+   * show an unresolved session with no reconcile control on it at all. Screens
+   * that offer the retry say so; the one that cannot says why instead.
+   */
+  const renderKioskFinish = (
+    outcome: KioskOutcome,
+    tone: 'light' | 'dark' = 'light',
+    canRetryHere = true
+  ) =>
     kiosk ? (
       <View style={styles.kioskBar} testID="wsf-kiosk-finish-bar">
         {outcome === 'unresolved' ? (
           <Text style={styles.kioskNotice} testID="wsf-kiosk-unresolved-note">
-            {KIOSK_UNRESOLVED_NOTICE}
+            {canRetryHere ? KIOSK_UNRESOLVED_NOTICE : KIOSK_UNRESOLVED_NOTICE_NO_RETRY}
           </Text>
         ) : null}
         <Pressable
@@ -1259,7 +1271,7 @@ export default function ContributeToGoal() {
               coincide with an unresolved attempt, and finishing as `none`
               would erase the reminder that attempt exists. */}
           {kiosk ? (
-            renderKioskFinish(kioskOutcome)
+            renderKioskFinish(kioskOutcome, 'light', false)
           ) : (
             <ButtonLink
               href="/"

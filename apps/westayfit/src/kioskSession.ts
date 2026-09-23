@@ -272,6 +272,24 @@ export const KIOSK_UNRESOLVED_NOTICE =
   'You can try to confirm this contribution here before you finish. Entering it again elsewhere could count it twice.';
 
 /**
+ * The same situation on a screen that CANNOT offer the retry.
+ *
+ * The accepted notice points at `Confirm this contribution`, which is the right
+ * thing to say wherever that control is on screen. It is not on every screen an
+ * unresolved attempt can be shown from: the contribution route returns its
+ * load-error branch BEFORE the pending one, so a goal that stops loading while
+ * an attempt is unresolved renders an error screen with no reconcile control at
+ * all. Telling somebody they can confirm it here, on a screen with nothing to
+ * confirm it with, is a promise the screen cannot keep.
+ *
+ * This variant says why the retry is not available and keeps the part that
+ * protects the member's effort. It still claims nothing about whether the
+ * attempt was recorded, and the reminder is still kept.
+ */
+export const KIOSK_UNRESOLVED_NOTICE_NO_RETRY =
+  'We couldn’t load this goal to confirm your contribution. Entering it again elsewhere could count it twice.';
+
+/**
  * WHAT FINISH IS ALLOWED TO ERASE.
  *
  * A confirmed or definitively refused attempt has already been settled by

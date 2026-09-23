@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   KIOSK_IDLE_MS,
+  KIOSK_UNRESOLVED_NOTICE,
+  KIOSK_UNRESOLVED_NOTICE_NO_RETRY,
   kioskMayFinishUnattended,
   kioskRemainingMs,
   type KioskOutcome,
@@ -89,5 +91,32 @@ describe('the deadline itself is unchanged by this', () => {
     const started = 1_000_000;
     expect(kioskRemainingMs(started, started + 30_000)).toBe(60_000);
     expect(kioskRemainingMs(started, started + KIOSK_IDLE_MS + 5 * 60_000)).toBe(0);
+  });
+});
+
+describe('what an unresolved session is told depends on what the screen can offer', () => {
+  it('the accepted notice points at the retry, because that screen has one', () => {
+    expect(KIOSK_UNRESOLVED_NOTICE).toContain('confirm this contribution here');
+  });
+
+  it('the no-retry variant promises no action the screen cannot perform', () => {
+    // The load-error branch returns before the pending one, so an unresolved
+    // session can render on a screen with no reconcile control at all. Saying
+    // "you can confirm it here" there is a promise that screen cannot keep.
+    // Not a naive substring: "elsewhere" contains "here", and the first
+    // version of this assertion failed on that rather than on the copy.
+    expect(KIOSK_UNRESOLVED_NOTICE_NO_RETRY).not.toContain('confirm this contribution here');
+    expect(KIOSK_UNRESOLVED_NOTICE_NO_RETRY).not.toMatch(/you can|try to confirm/i);
+    // It says why the retry is missing rather than offering one.
+    expect(KIOSK_UNRESOLVED_NOTICE_NO_RETRY).toMatch(/couldn’t load this goal/i);
+  });
+
+  it('both keep the duplicate-entry warning, and neither claims the attempt landed', () => {
+    for (const notice of [KIOSK_UNRESOLVED_NOTICE, KIOSK_UNRESOLVED_NOTICE_NO_RETRY]) {
+      expect(notice).toContain('could count it twice');
+      expect(notice).not.toMatch(/recorded|counted|confirmed|verified/i);
+      // and neither promises the attempt travels to another device
+      expect(notice).not.toMatch(/your own device|another device|saved to your account/i);
+    }
   });
 });
