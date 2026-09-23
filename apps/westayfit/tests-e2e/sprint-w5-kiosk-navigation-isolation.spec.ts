@@ -1656,7 +1656,11 @@ test('the deadline does not exist on the initial load, entry, review, or with a 
     await route.continue();
   });
   await page.goto(`/contribute/${fx2.goalId}?kiosk=1`);
-  await expect(page.getByTestId('wsf-contribute-loading')).toBeVisible({ timeout: 25_000 });
+  // The loading branch carries no testID — it is identified by the only thing
+  // on it. `wsf-contribute-loading` was my invention, and asserting on an
+  // invented testID is how a test claims to have checked a screen it never
+  // reached.
+  await expect(page.getByText('Loading goal…')).toBeVisible({ timeout: 25_000 });
   seen.initialLoad = await countdownSeconds(page);
   releaseLoad();
   await page.unroute(/wsfGoalPulse/);
