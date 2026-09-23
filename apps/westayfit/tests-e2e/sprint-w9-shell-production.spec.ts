@@ -71,6 +71,33 @@ async function scrollOf(page: Page, testId: string): Promise<number | null> {
   }, testId);
 }
 
+/**
+ * Set a scroll offset and read back what it SETTLED at.
+ *
+ * Community Home enriches itself after it paints — the presence line and the
+ * momentum rows arrive from their own reads — and Chrome's scroll anchoring
+ * then adjusts `scrollTop` to keep what the member is looking at in place. So
+ * a value planted before that lands is not the value the page is holding a
+ * moment later: measured under parallel load, a planted 180 read back as 238,
+ * exactly the height of the late content above it. Comparing the restored
+ * offset against the planted one would then be measuring the enrichment
+ * rather than the shell, and it failed that way twice in one suite run.
+ *
+ * This reads until two consecutive reads agree, and returns that. Nothing is
+ * relaxed: the restored offset still has to equal it exactly.
+ */
+async function settleScroll(page: Page, testId: string, top: number): Promise<number | null> {
+  await setScroll(page, testId, top);
+  let last = await scrollOf(page, testId);
+  for (let i = 0; i < 20; i += 1) {
+    await page.waitForTimeout(100);
+    const next = await scrollOf(page, testId);
+    if (next === last) return next;
+    last = next;
+  }
+  return last;
+}
+
 async function setScroll(page: Page, testId: string, top: number): Promise<number | null> {
   return page.evaluate(
     ({ id, value }) => {
@@ -153,7 +180,10 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
       entry, no reload, no remount, and the scroll left where it was.
     */
     expect(await markNode(page, 'wsf-community'), 'the Home screen was marked').toBe(true);
-    const planted = await setScroll(page, 'wsf-community', 160);
+    // The page's own late reads land first, so the offset is planted into a
+    // page that has stopped growing underneath it.
+    await expect(page.getByTestId('wsf-community-hero-presence')).toBeVisible({ timeout: 30_000 });
+    const planted = await settleScroll(page, 'wsf-community', 160);
     expect(planted, 'Home has somewhere to scroll to').not.toBeNull();
     const historyBefore = await page.evaluate(() => window.history.length);
 
@@ -412,7 +442,8 @@ test('MOVE opens as a sheet over the tab the member was on, and Close returns to
       non-vacuous scroll, and Close brings back that exact screen.
     */
     expect(await markNode(page, 'wsf-community'), 'Home was marked').toBe(true);
-    const homeScroll = await setScroll(page, 'wsf-community', 180);
+    await expect(page.getByTestId('wsf-community-hero-presence')).toBeVisible({ timeout: 30_000 });
+    const homeScroll = await settleScroll(page, 'wsf-community', 180);
     expect(homeScroll, 'Home has somewhere to scroll to').not.toBeNull();
     expect(homeScroll!, 'the planted Home scroll is not vacuous').toBeGreaterThan(40);
 
