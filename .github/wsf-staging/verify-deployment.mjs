@@ -39,7 +39,7 @@ for (const [k, v] of Object.entries({ WSF_GOOGLE_ACCESS_TOKEN: TOKEN, WSF_APPROV
 process.umask(0o077);
 fs.mkdirSync(RESULT_DIR, { recursive: true, mode: 0o700 });
 
-const EXPECTED = [
+const BASE_EXPECTED = [
   'wsfadjustgoal', 'wsfchallengepulse', 'wsfcheckin', 'wsfcontribute',
   'wsfcreatecommunity', 'wsfcreategoal', 'wsfdesignatechampion', 'wsfgoalpulse',
   'wsfgoalrecentadditions',
@@ -65,7 +65,93 @@ const EXPECTED = [
   'wsfcancelturn', 'wsfleaveturnline', 'wsfcallnext',
   'wsfcreatecombinedgoal', 'wsfclosecombinedgoal', 'wsfrepaircombinedgoal',
   'wsfcombinedgoalpulse',
-].sort();
+];
+
+/**
+ * THE CALLABLES A REVIEWED APPROVAL ADDS, and why they are read rather than
+ * written here.
+ *
+ * The inventory above is the set this verifier will accept. Anything outside
+ * it is `present but not expected` and fails — which is the check working, and
+ * it is also why a reviewed rollout that legitimately ADDS callables could not
+ * pass: the verifier would report the approved additions as a surprise. That
+ * is drift in the check, not a finding about the deploy, and it has happened
+ * once before (the fifteen turn/combined services, corrected above).
+ *
+ * So the additions come from the APPROVAL, not from an edit to this file:
+ * `approved-candidate.json` may carry an optional `candidateAddedFunctions`
+ * array naming exactly the services a reviewed change is allowed to create.
+ *
+ * WHERE IT IS READ FROM, and why that is the whole security of it. The file
+ * is resolved BESIDE THIS SCRIPT (`import.meta.url`), which is the operational
+ * checkout — the commit the workflow itself ran from. There is no environment
+ * override and no path input, deliberately: a path this process could be told
+ * would be a path the candidate checkout could supply, and a candidate that
+ * can name its own additions approves itself. The same rule the approval file
+ * already states about `approvedAppSha` applies to this key.
+ *
+ * WHAT IT CANNOT DO. It cannot widen anything by accident: the key is optional
+ * and its absence means the empty list, which is byte-for-byte the behaviour
+ * this verifier had before it existed. It cannot accept an arbitrary extra
+ * function — only the exact names a reviewed file lists. It cannot hide a lost
+ * service, a missing required service, a transport drift or a wrong SHA; every
+ * one of those checks runs unchanged. And a listed name that is NOT deployed
+ * is a failure, so naming a function here is a commitment, not a permission
+ * slip.
+ *
+ * A MALFORMED OR UNREADABLE APPROVAL IS AN ERROR, never an empty list. That is
+ * the same rule the before-inventory is held to a few lines down: "I could not
+ * read it" must not become "there is nothing to add".
+ */
+function readApprovedAdditions() {
+  const file = new URL('./approved-candidate.json', import.meta.url);
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    console.error('::error::the approval file beside this script is missing or unreadable; the expected inventory cannot be established');
+    console.error('VERIFY=error (no valid approval file)');
+    process.exit(1);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    console.error('::error::the approval file is not a JSON object');
+    console.error('VERIFY=error (malformed approval file)');
+    process.exit(1);
+  }
+  const raw = parsed.candidateAddedFunctions;
+  // Absent is the ordinary case and means exactly what it did before this key
+  // existed: this deploy creates nothing new.
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    console.error('::error::candidateAddedFunctions is present but is not an array');
+    console.error('VERIFY=error (malformed approval file)');
+    process.exit(1);
+  }
+  const names = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || !/^wsf[a-z0-9]+$/.test(entry)) {
+      console.error(`::error::candidateAddedFunctions contains an entry that is not a lower-case wsf service name: ${JSON.stringify(entry)}`);
+      console.error('VERIFY=error (malformed approval file)');
+      process.exit(1);
+    }
+    if (BASE_EXPECTED.includes(entry)) {
+      // A name already in the inventory would silently do nothing, so the
+      // approval would read as authorizing something it does not.
+      console.error(`::error::candidateAddedFunctions names ${entry}, which is already part of the expected inventory`);
+      console.error('VERIFY=error (malformed approval file)');
+      process.exit(1);
+    }
+    if (names.includes(entry)) {
+      console.error(`::error::candidateAddedFunctions names ${entry} twice`);
+      console.error('VERIFY=error (malformed approval file)');
+      process.exit(1);
+    }
+    names.push(entry);
+  }
+  return names;
+}
+const APPROVED_ADDITIONS = readApprovedAdditions();
+const EXPECTED = [...BASE_EXPECTED, ...APPROVED_ADDITIONS].sort();
 const CREATED_BY_PACKAGE_E = 'wsfsetgoaldisplayauthorization';
 /**
  * The callables THIS candidate adds. New to staging with this deploy, so each
@@ -130,7 +216,7 @@ const RECENTLY_CREATED = [
   'wsfliststations',
   'wsfrevokestation',
 ];
-const NEW_SERVICES = [CREATED_BY_PACKAGE_E, ...RECENTLY_CREATED, ...CREATED_BY_CANDIDATE];
+const NEW_SERVICES = [CREATED_BY_PACKAGE_E, ...RECENTLY_CREATED, ...CREATED_BY_CANDIDATE, ...APPROVED_ADDITIONS];
 const PRE_EXISTING = EXPECTED.filter((n) => !NEW_SERVICES.includes(n));
 
 const failures = [];
@@ -191,6 +277,14 @@ for (const name of CREATED_BY_CANDIDATE) {
     failures.push(`${name} absent — the candidate's new callable did not deploy`);
   }
 }
+// A name the approval authorizes is a name the deploy must actually produce.
+// Authorizing an addition and then not deploying it is a failed rollout, not a
+// quiet pass.
+for (const name of APPROVED_ADDITIONS) {
+  if (!after.includes(name)) {
+    failures.push(`${name} absent — the approval authorizes this addition and the deploy did not produce it`);
+  }
+}
 
 // ---- region and project are part of the claim ---------------------------
 const wrongLocation = (functionsBody.functions || [])
@@ -223,7 +317,7 @@ function transportOf(serviceName) {
 }
 const newServiceTransport = transportOf(CREATED_BY_PACKAGE_E);
 const candidateServiceTransports = Object.fromEntries(
-  [...CREATED_BY_CANDIDATE, ...RECENTLY_CREATED].map((n) => [n, transportOf(n)])
+  [...CREATED_BY_CANDIDATE, ...RECENTLY_CREATED, ...APPROVED_ADDITIONS].map((n) => [n, transportOf(n)])
 );
 const candidateTransportNeedingApproval = Object.entries(candidateServiceTransports)
   .filter(([, t]) => t !== 'invoker_iam_check_disabled')
@@ -309,6 +403,10 @@ const receipt = {
     createdThisDeploy: after.filter((n) => !before.includes(n)),
     lostThisDeploy: lost,
   },
+  approvedAdditions: APPROVED_ADDITIONS,
+  approvedAdditionsPresent: Object.fromEntries(
+    APPROVED_ADDITIONS.map((n) => [n, after.includes(n)])
+  ),
   createdCallablePresent: after.includes(CREATED_BY_PACKAGE_E),
   candidateCallablePresent: CREATED_BY_CANDIDATE.every((n) => after.includes(n)),
   candidateCallablesPresent: Object.fromEntries(
@@ -351,6 +449,8 @@ console.log(`INVENTORY_BEFORE=${before.length}`);
 console.log(`INVENTORY_AFTER=${after.length}`);
 console.log(`CREATED_THIS_DEPLOY=${receipt.inventory.createdThisDeploy.join(',') || 'none'}`);
 console.log(`NEW_CALLABLE_PRESENT=${receipt.createdCallablePresent}`);
+console.log(`APPROVED_ADDITIONS=${APPROVED_ADDITIONS.join(',') || 'none'}`);
+console.log(`EXPECTED_INVENTORY=${EXPECTED.length}`);
 console.log(`PREEXISTING_TRANSPORT_VERIFIED=${receipt.preExistingTransportVerified}/${PRE_EXISTING.length}`);
 console.log(`NEW_SERVICE_TRANSPORT=${newServiceTransport}`);
 console.log(
