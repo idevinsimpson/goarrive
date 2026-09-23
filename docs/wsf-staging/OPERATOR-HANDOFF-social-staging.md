@@ -21,7 +21,7 @@ perform either operation. Never invent access; never retry a denied identity.
 | region | `us-central1` |
 | single index | `wsfContributions`, query scope **COLLECTION**, fields `communityGroupId ASC`, `createdAt DESC` — the candidate's `firestore.indexes.json` entry at `37367fd` |
 | three services | `wsfsetcommunityvisibility`, `wsfcommunitymembers`, `wsfcommunityactivity` (Cloud Run service names of the callables `wsfSetCommunityVisibility`, `wsfCommunityMembers`, `wsfCommunityActivity`) |
-| **operator** | **UNASSIGNED** until an actual identity with the permissions below accepts on #365. The candidate identities are the owner's console identity or a person the owner designates. The deploy SA is not widened. |
+| **operator** | **UNASSIGNED** until an actual identity accepts on #365 **and its own preflight succeeds** (a read of the project's index list and the three services' metadata with that identity, recorded). Status as of 2026-09-23 16:57Z (#365 `5799068153`): the Director holds no Google Cloud operator identity; Maia's last completed access check reported her available identities could not read the `westayfit-staging` project / IAM state, with no newer successful-access receipt; Manus previously completed staging-project operations but is currently unavailable (credits exhausted) — prior capability is not a current operator; whether the owner's own Google identity already holds the permissions named here is **UNKNOWN**, and the owner is not described as the operator merely by being the owner. The deploy SA is not widened. |
 
 ## Authorized sequence
 
