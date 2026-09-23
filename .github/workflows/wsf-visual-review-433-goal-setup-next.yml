@@ -112,6 +112,7 @@ jobs:
               (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-INJECTED-NETWORK-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-INJECTED-NETWORK-390x844.png'),
               (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-retry-INJECTED-NETWORK-390x640.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-retry-INJECTED-NETWORK-390x640.png'),
               (f'{GS}/goal-setup-next/after/AFTER-unconfirmed-retry-INJECTED-NETWORK-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-unconfirmed-retry-INJECTED-NETWORK-390x844.png'),
+              (f'{GS}/goal-setup-next/after/AFTER-no-community-390x844.png', 'AFTER · actual /goals/new built to the accepted TARGET (implementation, not accepted; W7 verification pending) · AFTER-no-community-390x844.png'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
