@@ -357,13 +357,21 @@ export default function CommunityPage() {
     THE SECOND LOOK, once the pulse cache has certainly expired.
 
     `wsfGoalPulse` serves a shared total from a 2 s server cache
-    (PULSE_CACHE_TTL_MS). The contribution screen reads the pulse while the
-    member is there, so a return straight from the receipt can re-read inside
-    that window and be handed the total from BEFORE the contribution: "You've
-    added 20" beside an unchanged shared total, and nothing ever corrects it.
-    So a return also schedules one quiet re-read just past the window. It
-    only replaces figures that were already on screen, never shows loading,
-    and a failure leaves what is there.
+    (PULSE_CACHE_TTL_MS). The server drops the entry when a contribution
+    commits, but a read that BEGAN before the commit can finish after that
+    drop and pin the pre-contribution total for the next 2 s — and the
+    contribution screen reads the pulse while the member is there. So a
+    screen that reads once inside that window is handed "You've added 20"
+    beside an unchanged shared total, and nothing ever corrects it.
+
+    EVERY FOCUS, THE FIRST INCLUDED, therefore schedules one quiet re-read
+    just past the window. A return straight from the receipt is one way into
+    the window (W1B measured it on #453). A FRESH mount is the other: a
+    "Back to home" that builds a new Community after a contribution reads
+    the stale total on arrival and, with no return to trigger a second look,
+    keeps it (W7 measured 0 against 20 at 15 s, #434 5803764263). The
+    re-read only replaces figures that were already on screen, never shows
+    loading, and a failure leaves what is there.
   */
   const [settleToken, setSettleToken] = useState(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1198,15 +1206,18 @@ export default function CommunityPage() {
     useCallback(() => {
       // A return re-reads the goal list first; progress follows from it
       // (or directly, if that read fails), so progress is read once, not twice.
-      if (focusedBefore.current) {
-        setReturnToken((n) => n + 1);
-        if (settleTimer.current) clearTimeout(settleTimer.current);
-        settleTimer.current = setTimeout(() => {
-          settleTimer.current = null;
-          setSettleToken((n) => n + 1);
-        }, PULSE_SETTLE_MS);
-      }
+      // The first focus is the mount, which the ordinary reads already cover.
+      if (focusedBefore.current) setReturnToken((n) => n + 1);
       focusedBefore.current = true;
+      // The settle read is scheduled on EVERY focus, the mount included: a
+      // fresh mount can land inside the pulse cache window just as a return
+      // can (see `settleToken`). One timer at a time; the cleanup below clears
+      // it when the screen loses focus, so a blur before 2.6 s reads nothing.
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => {
+        settleTimer.current = null;
+        setSettleToken((n) => n + 1);
+      }, PULSE_SETTLE_MS);
       // Leaving the screen closes the Champion tools sheet. The sheet is a
       // portal over the whole window, and the stack keeps this screen
       // mounted underneath the next one, so an open sheet would otherwise

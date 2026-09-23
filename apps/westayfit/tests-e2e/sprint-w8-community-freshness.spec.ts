@@ -6,6 +6,7 @@ import {
   seedActiveGoal,
   seedCommunity,
   seedProfile,
+  seedShards,
   seedVerifiedUser,
   signInVia,
   stampId,
@@ -281,6 +282,71 @@ test.describe('Community data is current on a genuine return', () => {
     }
   });
 
+  /**
+   * A FRESH MOUNT INSIDE THE CACHE WINDOW.
+   *
+   * The return cases above land on an instance that was already mounted. A
+   * Community can also be mounted NEW right after a contribution — W7's X5 /
+   * X5s journey (#434 5803764263): warm Goal Setup → contribution → "Back to
+   * home" builds a fresh Community, whose first pulse read lands inside
+   * `wsfGoalPulse`'s 2 s cache and shows the pre-contribution total; with no
+   * return to trigger a second look, it stays wrong (0 against 20 at 15 s).
+   *
+   * The journey depends on other lanes' exits, so this case reproduces the
+   * MECHANISM directly and deterministically: the fresh mount's own first
+   * pulse request is held while the cache is warmed at the old total and the
+   * confirmed total moves on the server; then the request goes through and is
+   * served from the cache. The stale 0 is asserted FIRST, so a slow load that
+   * missed the window fails here rather than passing vacuously.
+   */
+  test('a fresh mount inside the pulse cache window settles on the confirmed total', async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await champion('fresh', true);
+    const { context, page } = await phone(browser);
+    try {
+      await arrive(page, fx.email, fx.password, fx.groupId);
+      const total = () =>
+        visibleCommunity(page).getByTestId(`wsf-community-goal-total-${fx.goalId}`).first();
+      await expect(total()).toHaveText(/^0\s+of 5,000 squats$/, { timeout: 40_000 });
+
+      // The fresh mount's first pulse request: warm the server cache with the
+      // old total (the read the contribution screen would have made), move
+      // the confirmed total to 20, and only then let the request through.
+      // Every later pulse request (the settle) passes untouched.
+      let held = false;
+      await page.route('**/wsfGoalPulse', async (route: Route) => {
+        if (held) return route.fallback();
+        held = true;
+        const req = route.request();
+        const warm = await fetch(req.url(), {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: req.headers()['authorization'] ?? '',
+          },
+          body: req.postData() ?? '',
+        });
+        expect(warm.status, 'warming the pulse cache with the old total').toBe(200);
+        await seedShards(fx.goalId, 20);
+        await route.continue();
+      });
+
+      // A full navigation is a NEW mount: nothing of the previous instance
+      // survives, and there is no "return" for the return path to notice.
+      await page.goto(`/community/${fx.groupId}`);
+      await expect(visibleCommunity(page)).toHaveCount(1, { timeout: 40_000 });
+      // The window was hit: the fresh mount shows the cached, pre-move total.
+      await expect(total()).toHaveText(/^0\s+of 5,000 squats$/, { timeout: 40_000 });
+      expect(held, 'the fresh mount issued its first pulse read').toBe(true);
+      // And is corrected by the first-focus settle, just past the cache window.
+      await expect(total()).toHaveText(/^20\s+of 5,000 squats$/, { timeout: 10_000 });
+    } finally {
+      await context.close();
+    }
+  });
+
   test('the return keeps the scroll; reselecting the active tab reads nothing', async ({
     browser,
   }) => {
@@ -292,12 +358,17 @@ test.describe('Community data is current on a genuine return', () => {
       await expect(page.getByTestId('wsf-community-momentum-card')).toBeVisible({
         timeout: 40_000,
       });
-      await page.waitForTimeout(1500);
+      // Past the first-focus settle (2.6 s after the mount) before listening,
+      // so what is recorded below can only come from the reselect itself.
+      await page.waitForTimeout(3500);
       await mark(page);
 
       const calls: string[] = [];
       page.on('request', (r) => {
-        const m = /\/(wsfListGoals|wsfCommunityActivity|wsfCommunityMembers)\b/.exec(r.url());
+        const m =
+          /\/(wsfListGoals|wsfCommunityActivity|wsfCommunityMembers|wsfGoalPulse|wsfMyContribution)\b/.exec(
+            r.url(),
+          );
         if (m) calls.push(m[1]!);
       });
 
