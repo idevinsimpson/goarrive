@@ -1208,4 +1208,32 @@ await test('the helper itself makes no network or cloud call', () => {
   }
 });
 
+await test('the hosting check step is LIVE: nothing gates, skips or swallows it', () => {
+  // Pinning WHERE the step sits proves nothing if it can be disarmed in
+  // place. Each of these leaves the order case green while the check does
+  // nothing: the step commented out, `if: ${{ false }}`, `continue-on-error:
+  // true`, `|| true` appended, or the command turned into an `echo`. So the
+  // step is read as YAML lines and must be exactly a name and one command.
+  const lines = text.split('\n');
+  const deployStart = lines.findIndex((l) => /^  deploy:\s*$/.test(l));
+  const deployEnd = lines.findIndex((l, i) => i > deployStart && /^  [A-Za-z0-9_-]+:\s*$/.test(l));
+  assert.ok(deployStart >= 0 && deployEnd > deployStart, 'the deploy job could not be isolated');
+  const job = lines.slice(deployStart, deployEnd);
+
+  // The job itself must not tolerate a failed step either.
+  const stepsAt = job.findIndex((l) => /^    steps:\s*$/.test(l));
+  assert.ok(stepsAt > 0, 'the deploy job has no steps block');
+  assert.equal(job.slice(0, stepsAt).some((l) => /^    continue-on-error:/.test(l)), false,
+    'the deploy job is continue-on-error, so a failed hosting check would not stop it');
+
+  const nameAt = job.findIndex((l) => /^      - name: Check the operational hosting config routes this candidate\s*$/.test(l));
+  assert.ok(nameAt > stepsAt, 'the hosting check step is missing or commented out');
+  const nextStep = job.findIndex((l, i) => i > nameAt && /^      - /.test(l));
+  const body = job.slice(nameAt + 1, nextStep < 0 ? job.length : nextStep)
+    .filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+
+  assert.deepEqual(body, ['        run: node ops/.github/wsf-staging/check-hosting-routes.mjs app ops'],
+    'the hosting check step carries more than its one command (an if:, continue-on-error, shell, env or a changed run line)');
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);
