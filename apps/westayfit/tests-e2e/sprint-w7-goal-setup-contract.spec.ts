@@ -53,11 +53,21 @@ const CREATE_GOAL = '**/wsfCreateGoal';
 /**
  * The sentence the form shows when the outcome is lost. It is a CONSTANT here,
  * and asserted by equality in both the abort-before-send and the
- * commit-with-lost-response case, because the finding is precisely that the
- * two produce the SAME sentence while leaving DIFFERENT server state. Allowing
- * a set of acceptable messages would have hidden that.
+ * commit-with-lost-response case, because the two still produce the SAME
+ * sentence while leaving DIFFERENT server state. Allowing a set of acceptable
+ * messages would hide that.
+ *
+ * UPDATED FOR #433, WHICH IS NOW IN THE BASE. The sentence used to be
+ * "Something went wrong. Please try again." — an instruction whose plain
+ * reading is that nothing was created, which is the defect this file found
+ * (`5787648446`). W6 replaced it with a classifier, and the lost outcome now
+ * claims nothing in either direction and warns about duplication instead.
+ * What has NOT changed is the shape of the finding: the client still cannot
+ * tell the two cases apart, and this file still proves that by asserting the
+ * identical sentence against different server state.
  */
-const LOST_MESSAGE = 'Something went wrong. Please try again.';
+const LOST_MESSAGE =
+  'It may have been created anyway. Starting another one could create a duplicate.';
 
 type Champion = { email: string; password: string; uid: string };
 
@@ -223,13 +233,22 @@ test.describe('W7 — /goals/new creation-result and recovery contract', () => {
     await fillGoal(page, 'W7 refused goal');
     await page.getByTestId('wsf-new-goal-submit').click();
 
+    // #433 appends what the server's answer entitles the screen to say: this
+    // code is raised before the write, so "no goal was created" is a claim the
+    // page may make — and the server read below is what proves it true.
     await expect(page.getByTestId('wsf-new-goal-error')).toHaveText(
-      'Only a Champion of this community can start a goal here.',
+      'Only a Champion of this community can start a goal here. ' +
+        'The server refused this request, so no goal was created.',
       { timeout: 25_000 },
     );
-    // The refusal is a refusal: no confirmation, and the control comes back.
+    // The refusal is a refusal: no confirmation. And since #433 this refusal is
+    // TERMINAL — repeating it could never succeed from this page — so the
+    // control is taken away rather than left to buy a second copy of the same
+    // sentence. That is a behaviour change, not a copy change, and it is
+    // asserted as such.
     await expect(page.getByTestId('wsf-new-goal-created')).toHaveCount(0);
-    await expect(page.getByTestId('wsf-new-goal-submit')).toBeEnabled();
+    await expect(page.getByTestId('wsf-new-goal-submit')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-new-goal-refused-back')).toBeVisible();
 
     expect(await goalsFor(groupId), 'a refused submit created a goal').toHaveLength(0);
     expect(counters).toEqual({ attempted: 1, delivered: 1 });

@@ -479,6 +479,65 @@ The four changed rendering files at `bfc422a` merged onto `d86620c`, on an emula
 
 ---
 
-# Check 8 — further checkpoints
+# Check 8 — the cold direct Members load on integration candidate **`9a65324`**: **PASS**
 
-Awaiting L0's routing, including the cold direct Members load against the integration candidate once the mirrored rewrite lands. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).
+Routed by L0 at `5790010909` (the Director's named proof, `5789966395` §W8). Acknowledged at `5790314486`. Spec: `apps/westayfit/tests-e2e/sprint-w7-members-route-parity.spec.ts` — **4 passed / 0 failed**.
+
+## The candidate, re-derived
+
+`claude/wsf-app-shell` **`d86620c` → `9a65324c3a2e0c1ce0acecb831a55ce49f8d5ea0`**, and the four commits are what the packet says: `2fffcf3` = #433 (W6 `e0546b3`), `3e6a86b` = #441 (W8 `bfc422a`), **`1041a1f` = the one-line mirror**, `9a65324` = the bottom-tabs dependency. Both revisions I verified independently are now in the base. The mirror's diff places `/community/*/members` **between `*/challenge` and the `/community/**` catch-all** — read from the diff, which is the ordering the fix requires.
+
+## The two hosting configs are now identical
+
+Compared as parsed JSON rather than by eye: **12 rewrites each, lists equal**.
+
+## The bytes — measured on the same scale as the original finding
+
+| Cold request | Served | Expected |
+|---|---|---|
+| `/community/<id>/members` | `cabeeb0e…` | **= `members.html`** (`cabeeb0e…`), **≠ fallback** (`3db13b84…`) |
+| `/community/<id>/challenge` | `7a4e71e9…` | = `challenge.html` — unshadowed by the new line |
+| `/community/<id>` | `3db13b84…` | = the catch-all, as before |
+
+The build emits `apps/westayfit/dist/community/__dynamic/members.html`.
+
+**One correction to my own ACK:** I said I would expect the literal `e8a0c8c4…` from check 5. That was wrong to promise — the bundle was rebuilt at a new head, so the file's hash legitimately differs. What carries across is the **identity relation**, not the literal digest: the served bytes now equal `members.html` and differ from the fallback, which is exactly the comparison that exposed the gap.
+
+## The browser half — including the part bytes cannot see
+
+A rewrite is a routing change, not an authorization change, so "the route resolves" must not become "the route resolves for anybody":
+
+- **member, cold direct load** → `wsf-members-screen` renders at the right path, the panel loads, `3 members`, all three names present;
+- **non-member, same cold URL** → refused (`wsf-members-failed`), **no panel, no rows, and none of the three names or the community name anywhere in the page**;
+- **signed out, same cold URL** → no panel, no rows, no names;
+- **the community page itself still loads cold**, unshadowed by the new rewrite.
+
+## What this does and does not establish
+
+It establishes that the harness now exercises the rewrite that actually ships. It does **not** retroactively make the earlier gap user-visible — check 5 found hydration masked it, and that finding stands as recorded.
+
+---
+
+# Check 9 — the check-2 spec updated for #433, now in the base: **7 passed / 0 failed**
+
+Routed at `5790010909`. `apps/westayfit/tests-e2e/sprint-w7-goal-setup-contract.spec.ts` asserted pre-#433 copy in the three places named at `5788654782`. Against `9a65324` it gave **4 passed / 3 failed**, each failure exactly one of those three. Updated, it is **7/7**.
+
+**What changed, and nothing else:**
+
+1. `LOST_MESSAGE` — `"Something went wrong. Please try again."` → `"It may have been created anyway. Starting another one could create a duplicate."`
+2. the refusal copy — now including `"The server refused this request, so no goal was created."`
+3. **one behaviour assertion, named separately because it is not copy:** the terminal refusal now **removes** the submit control instead of re-enabling it, so `toBeEnabled()` became `toHaveCount(0)` plus a check that the `Back to community` link is there. This is the fourth place, beyond the three I had named — reported rather than folded in silently, because it is a behaviour change I verified as correct and deliberate in check 4, not a copy edit.
+
+**What deliberately did not change:** every request count, every `runQuery` server read and every server-state assertion. The diff touches exactly one assertion line. The four cases that already passed are the server-side contract — normal success, the retry producing a second goal, duplicate-submit protection, confirmed-then-lost — and the point of this file is that it proves the contract rather than agreeing with the screen. Relaxing those to make the copy fit would have destroyed the only thing it is for.
+
+The header now records the history rather than erasing it: the old sentence, why it was the defect, and the fact that the *shape* of the finding is unchanged — the client still cannot distinguish the two lost cases, and the file still proves it by asserting the identical sentence against different server state.
+
+## The whole W7 suite on the integrated base
+
+`sprint-w7-*` — **61 passed / 0 failed** on `9a65324`: every check delivered in this sprint still holds on the integrated tree.
+
+---
+
+# Check 10 — further checkpoints
+
+Awaiting L0's routing. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).
