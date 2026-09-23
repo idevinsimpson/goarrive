@@ -1,4 +1,4 @@
-import { Link, router } from 'expo-router';
+import { Link, router, useLocalSearchParams } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -344,6 +344,34 @@ function SignedOutHome({
 }
 
 /**
+ * ONE NAVIGATION ASKS HOME NOT TO OPEN A COMMUNITY.
+ *
+ * Home opening the member's community is right almost always, and stays the
+ * default. It is wrong in one place: after a create whose result never came
+ * back. `wsfCreateCommunity` has no attempt key, so a member who already has a
+ * community and then loses the response is sent to the REMEMBERED one and
+ * cannot tell whether the new one exists — the two outcomes render the same
+ * screen. `/?view=communities` is how that one navigation asks for the list it
+ * needs instead.
+ *
+ * WHAT THIS DELIBERATELY IS NOT. It is not a preference: nothing is written,
+ * nothing is remembered, and bare `/` behaves exactly as it did. It is not a
+ * new surface either — the list it reveals is the one `SignedInHome` already
+ * renders, from the same authenticated read. And it never selects a community
+ * on the member's behalf: it removes a selection, it does not make one.
+ *
+ * Anything other than the exact value keeps today's behaviour, including an
+ * absent param, an unrecognised one, and the array expo-router hands back for
+ * a repeated `?view=`. An opt-in that could be triggered by accident would be
+ * a change to the default wearing a query string.
+ */
+const VIEW_COMMUNITIES = 'communities';
+
+function wantsCommunityList(view: string | string[] | undefined): boolean {
+  return view === VIEW_COMMUNITIES;
+}
+
+/**
  * Signed in, the page is the member's communities and nothing above them.
  * With at least one community the card is the primary action and the two
  * ways to add another sit below it as secondaries; with none, starting one
@@ -365,14 +393,22 @@ function SignedInHome({
   onJoinCodeSubmit: () => void;
 }) {
   const { user } = useWsfAuth();
+  const { view } = useLocalSearchParams<{ view?: string }>();
+  const listRequested = wantsCommunityList(view);
   const noCommunityYet = state.kind === 'ready' && state.items.length === 0;
   // HOME OPENS THE COMMUNITY. Replace rather than push: Home is not a place
   // the member should have to press back through to leave the community they
   // are in. The redirect waits for the real list, so it can never act on a
   // guess, and it runs in an effect rather than during render.
-  const openable = state.kind === 'ready'
+  //
+  // Unless this navigation asked for the list. `resolveCurrentCommunity` is
+  // still called and still reads what it reads — only the redirect is skipped,
+  // so nothing the member has opened before is forgotten by passing through
+  // here.
+  const resolved = state.kind === 'ready'
     ? resolveCurrentCommunity(user?.uid ?? null, state.items.map((item) => item.groupId))
     : null;
+  const openable = listRequested ? null : resolved;
   useEffect(() => {
     if (openable) router.replace(`/community/${openable}`);
   }, [openable]);
