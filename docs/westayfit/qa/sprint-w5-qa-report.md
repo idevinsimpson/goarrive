@@ -1157,3 +1157,71 @@ feature never claimed it.
 No product file was edited, nothing was deployed, and no approval or merge recommendation is
 given. Shared/unattended kiosk use remains HELD as far as this report is concerned — that
 disposition is not mine.
+
+
+## DELTA VERIFICATION — product `6690370`: PASS
+
+The copy-only successor to `50806fa`. Per the packet this is a **focused delta check, not another
+eleven-case matrix**.
+
+**Verification head** `3e713dcff7ef6b76ef653eb2ebff0e1174ec8b95` — a local merge of my tests at
+`fa2244e3` with product `66903704e15a51a115499c3458e91930ea01bacb`; built and driven, not pushed.
+Base merged first: `claude/wsf-app-shell` at `a193b430` (#420's Join TARGET rebaseline), whose
+only product source is `src/ui/designTarget/JoinSetupTargets.tsx` — a design-target reference
+component the kiosk journey never renders.
+
+**Why a targeted run is sufficient, established rather than asserted.** The whole-tree delta
+`50806fa..6690370` is eight files, and the only **product source** among them is
+`src/kioskSession.ts`, +18/−5, which is the `KIOSK_UNRESOLVED_NOTICE` string and its docstring.
+The rest is W1B's own spec, a unit test, the evidence README and four PNGs. So the eight cases
+that do not touch the unresolved screen run against byte-identical product code to the
+`50806fa` run already reported, and **I did not re-run them** — repeating an unchanged suite
+would be theatre, not evidence.
+
+### The delta, measured
+
+`K12` (new), plus the two existing cases that touch the unresolved state, `K3` and `K10`:
+
+    3 cases, 3 ordinary passes, 0 unexpected
+
+- **The sentence, exactly:** "You can try to confirm this contribution here before you finish.
+  Entering it again elsewhere could count it twice."
+- **No portability claim anywhere on the screen** — not merely in that one element, because a
+  promise moved into a neighbouring caption is still a promise. `/your own device/`,
+  `/check it from/`, `/saved to your account/`, `/another device/`, `/any device/`: none present.
+- **The uncertainty is still stated:** "NOT CONFIRMED YET" and "We don't know whether this effort
+  was recorded."
+- **The recovery the new sentence points at is actually offered:** `wsf-contribute-reconcile`
+  visible, labelled `Confirm this contribution`.
+- **Finish survives the longer sentence at both sizes.** At 800×1280 and 390×640: a real touch
+  target (≥44px), wholly on screen (top ≥ 0, bottom ≤ viewport height — the specific thing a
+  longer notice would break), resolving to itself under a thumb, and legible —
+  `wsf-kiosk-finish=7.15/4.5`, `wsf-kiosk-unresolved-note=15.16/4.5` at both viewports.
+- **The record survives Finish** (`K3`'s rule, asserted on the screen the new sentence is printed
+  on): `wsf.pendingContribution.<goalId>.<uid>` present before Finish and still present after,
+  while auth goes to zero and the kiosk key is removed. The copy now points at a recovery, so the
+  artefact that recovery depends on had to survive the way out — it does.
+- **K10 unchanged** at this head: every kiosk control on both tones still above its own floor,
+  same numbers as `50806fa`, thinnest margin still 4.97/4.5 on the light terminal state.
+
+### A third instrument error of mine, recorded
+
+My first K12 asserted the screen must not match `/confirmed\b/i`. It failed — **on the honest
+copy**. The screen's correct wording is built out of that very word: "NOT CONFIRMED YET", "We
+couldn't confirm your contribution yet." A ban on the vocabulary fails the truthful sentence and
+would have passed one that said "recorded!" instead. **Banning a word is not the same as banning
+a claim.** The uncertainty is now asserted positively, which is the property that actually
+matters. The portability checks were unaffected and passed as written.
+
+That is the third time in this packet's life that my instrument, not the product, was the thing
+at fault — the spinner read, the `[]`-on-error auth probe, and now this. Each is in this report
+rather than quietly repaired, because a QA record that only shows the product's mistakes is not
+an honest one.
+
+### Limits
+
+Verification head local and unpushed, named by its parents. Emulator fixtures, one browser, the
+two viewports named above. Contrast computed from the DOM — the matched-pixel read of the
+`6690370` frames is the Director's, through #430, and these numbers do not stand in for it. No
+product edit, no staging action, no approval or merge recommendation. The shared/unattended-use
+hold is not mine to lift.
