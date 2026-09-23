@@ -1283,3 +1283,114 @@ fresh proof is the original run, and it is still pinned to its own head.
 
 No product edit, no staging action, no pin edit, no approval or merge recommendation. Nothing
 here lifts the shared/unattended kiosk hold.
+
+
+## PACKET 2 — the idle-Finish contract at product `84acea5`: PASS
+
+**Product SHA** `84acea5378e915f611858b80eb86fc7fec86e657` (#436, W1B's corrected successor — **not**
+the held `e4243f1`).
+**Verification head** `8a50406168daea49830e019e2aadac956d37abc4` — my tests merged locally with
+the candidate `c8f38e3` and then with `84acea5`; built and driven, not pushed, named by its
+parents.
+
+Blobs confirmed by hash before building: `src/kioskSession.ts` `6f69d0ae…` and
+`app/contribute/[goalId].tsx` `ae490a4f…` equal to `84acea5`; `app/index.tsx` `c7f2c629…` and
+`src/ui/MemberTabBar.tsx` `0b14df95…` equal to the candidate, since `84acea5` sits on `6690370`
+and does not itself carry #432 or #420.
+
+### Result
+
+    17 cases, 17 passed, 0 unexpected
+    (K1 remains the uncounted historical baseline -> 16 substantive)
+
+Five cases are new and added to the suite rather than replacing any of it.
+
+#### (a) The ordering that loses a reminder — W5-K13
+
+The contribution route returns its load-error branch **before** its pending one, so a goal that
+stops loading while an attempt is unresolved renders an error screen with no reconcile control.
+Two things have to hold together, and either alone is worthless:
+
+- the **copy** does not point at a retry the screen cannot offer — the notice is
+  *"We couldn't load this goal to confirm your contribution. Entering it again elsewhere could
+  count it twice."*, the accepted "confirm here" sentence is absent, and
+  `wsf-contribute-reconcile` is not on the screen;
+- the **outcome** passed to Finish is the live one. `wsf.pendingContribution.<goalId>.<uid>` is
+  present before Finish and **still present after**, while auth polls to zero and the kiosk key
+  goes. Finishing as `none` would have cleared it.
+
+A screen that says the right thing while erasing the record would pass a copy check and still
+lose somebody's effort, which is why both are in one case.
+
+#### (b) Where the deadline must not be — W5-K14
+
+    entry=no-countdown  review=no-countdown  inFlight=no-countdown  initialLoad=no-countdown
+
+Asserted by the countdown's absence on screen, not by reading the predicate: `kioskMayFinishUnattended`
+is W1B's to unit-test, and what this suite owes is the behaviour. The in-flight case holds the
+contribution request open so the screen genuinely sits in its sending state.
+
+#### (c) The deadline and `Stay` on the three settled screens — W5-K15
+
+    closed:    opened=90  fell=88  renewed=90
+    notFound:  opened=90  fell=88  renewed=90
+    loadError: opened=90  fell=88  renewed=90
+
+The deadline is read from what the product's own countdown **says**, so a changed
+`KIOSK_IDLE_MS` would surface as a different number instead of passing silently. `Stay` is only
+pressed after the countdown has visibly fallen, so a `Stay` that merely paused the timer could
+not pass as one that renews a whole deadline.
+
+#### (d) The deadline fires, and a failed sign-out still refuses to lie — W5-K16
+
+The deadline is **waited out for real** — the product reads `Date.now()`, and a faked clock would
+be testing the fake. Once, on one screen (a closed goal). At the deadline the device returns to
+its start screen by itself, auth polls to **zero**, the kiosk key is gone, the start screen names
+nobody, and the next visitor meets the gate.
+
+The failed sign-out is exercised on a settled screen (a missing goal) by pressing Finish with the
+readwrite storage fault injected — the same `runKioskFinish` path, without buying a second
+90-second wait. The error appears, the resting screen stays hidden, and the account is observed
+still attached **through a probe that returns `ok` first**. That last point is not decoration:
+the successor's own fix is fail-closed auth inspection, and a fail-open read here would have
+turned the failure under test into a pass. W1B's helper was not reused.
+
+#### The control — W5-K17
+
+    closed:    shell=true wayOn=1 countdown=none attached=1
+    notFound:  shell=true wayOn=1 countdown=none attached=1
+    loadError: shell=true wayOn=1 countdown=none attached=1
+
+An ordinary member meeting the same three screens on their own device keeps the shell and a way
+on, is never put on a deadline, and is not signed out. This is the likeliest collateral of the
+change and it is clean.
+
+### Four more instrument errors of mine, all found by running
+
+Every one of these failed on the first pass and **none was a product finding**:
+
+1. K13 read the load-error screen through `wsf-contribute-screen`. The screen wrapper takes its
+   testID as an optional argument and that branch passes none, so the line waited out the whole
+   300-second test timeout on an element that does not exist there. It reads the document body
+   now. The assertion that mattered — the contextual notice — had already passed before it.
+2. K14 unrouted the contribution callable while its held handler was still in flight, so
+   Playwright handled the route first and the handler's `abort` threw *Route is already handled!*.
+3. K14 also waited for `wsf-contribute-loading`, **a testID I invented**. The loading branch
+   renders a spinner and the words "Loading goal…" and carries no testID at all. Asserting on an
+   invented testID is how a test claims to have checked a screen it never reached.
+4. K16 waited out the deadline on a **missing** goal and then asserted the kiosk hero.
+   `/kiosk/<absent>` correctly renders the display's generic refusal instead, so the assertion was
+   about the wrong screen for the fixture I picked. The deadline had fired either way — the URL
+   change arrived — so the wait moved to a closed goal, whose resting screen is the one the
+   assertion is about.
+
+That makes seven instrument errors of mine recorded across this packet's life. They are all here
+because a QA record that shows only the product's mistakes is not a record, it is an argument.
+
+### Limits
+
+Verification head local and unpushed, named by its parents. Emulator fixtures, one browser.
+`kioskMayFinishUnattended` is exercised only through the screen; its unit-level behaviour is
+W1B's. The Director's AFTER review of the two changed frames (via #440) is separate and these
+results do not stand in for it. No product edit, no staging action, no pin edit, no approval or
+merge recommendation.
