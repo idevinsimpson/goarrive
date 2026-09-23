@@ -83,7 +83,7 @@ groups. Nothing here was made to pass by relaxing an assertion.
 | Assertions on a page's own wordmark | 3 | Release 2 removed the per-page wordmarks the Director released; two live checks and this packet's own route-by-route measurement still named them | **Repointed** at `wsf-member-topbar-wordmark`, and the measurement now states the AFTER it measures |
 | A redundant `?groupId=` on `/community/<id>` | 3 | An expo-router serialisation artifact of entering a tab-nested route from outside its tab — see below | **Reported, not patched** |
 | A 43 px control on Community Home | 2 | `wsf-community-members-link` is 43 px tall, one short of the 44 px rule — **fails on the base build too**, measured — see below | **Reported, not patched** |
-| The Champion's goal hero, 42 px past its budget | 1 | The shell's 52 px bar is pure addition above a Champion's own Manage row — see below | **Reported, not patched** |
+| The Champion's goal hero, out of budget | 1 | The shell's 52 px bar is pure addition above a Champion's own Manage row, and the 220 px budget now has no slack — measured 226 to 262, passing in some runs — see below | **Reported, not patched** |
 
 The first four groups are 14 of the 22, and all 14 pass at this head. Two more
 surfaced only after those were fixed, and are in the table above: W1B's
@@ -166,7 +166,14 @@ surface, and W9 has not applied it.
 
 `ui-mobile-acceptance`'s Eastern-time journey ends by returning from a created
 goal to Community Home and asking that the goal hero starts within 220 px of
-the product area. It **passes on the base** and fails here at **262**.
+the product area. It **passes on the base** — measured at 210, with 10 px of
+slack — and here it has no slack left at all: the same test measured **262** in
+two full-suite runs, **226** in two consecutive solo runs, and passed in two
+others. The budget is exhausted for the Champion view, and which side of the
+line a run lands on is decided by whether the identity band's presence line has
+rendered when the measurement is taken. A verdict that depends on a render race
+is not a verdict, which is why this is reported rather than papered over with a
+second screen-specific budget.
 
 The 52 px are the bar's, and the measurement says so exactly. On the base, the
 page's own chrome row carried the wordmark AND the Champion's Manage control
@@ -186,7 +193,8 @@ Two ways out, and both are somebody's call rather than mine:
 
 1. **Manage joins the shell.** The top bar already carries a menu on the
    right; Champion tools belong there far more than in a row of their own, and
-   the page row disappears entirely (hero at 204, 16 px inside the budget).
+   the page row disappears entirely: an ordinary member, who has no such row,
+   measures 204 — 16 px inside the budget, with the presence line rendered.
    It is member chrome, so it is W9 work, but it changes a Champion's surface
    and the Manage sheet's state lives in the page, so it needs plumbing and a
    release rather than a quiet patch.
@@ -208,12 +216,26 @@ they are flagged here rather than rewritten.
 
 ## Results at the head of this branch
 
-- `sprint-w9-*` e2e — **15 passed / 0 failed**.
-- `sprint-w9-shell-geometry` vitest — **11 passed / 0 failed**.
-- Regression baseline `ui-app-shell`, `ui-kiosk`, `ui-matrix` — **8 passed / 0 failed**.
-- `ts:check` clean; `check-evidence-intact.mjs` frozen 9 / accepted 20 intact.
-- An ordinary run without `WSF_CAPTURE_FRAMES` writes **zero bytes**: 24 files
-  in this package, sha256 identical before and after.
+Every number below is the count the suite's own run printed, not a tally by eye.
+
+| Run | Result |
+|---|---|
+| **Whole e2e suite** (392 tests) | **343 passed / 9 failed / 41 skipped**, 19.5 min |
+| — of those 9, standing failures | **6**: three `?groupId=`, two base-build 44 px, one Champion hero |
+| — of those 9, parallel-load flakes | **3**: `event-return`, `ui-contribute:465`, `ui-mobile-acceptance:387` — each re-run serially and **passing** |
+| `sprint-w9-*` e2e (six files) | **16 passed / 0 failed** |
+| `sprint-w9-shell-geometry` vitest | **11 passed / 0 failed** |
+| Whole vitest suite | **821 passed / 0 failed**, 48 files |
+| `sprint-w1b-kiosk-confinement` | **10 passed / 0 failed** |
+| `sprint-w1b-kiosk-idle-finish` | **9 passed / 0 failed** |
+| `ui-app-shell` + `ui-kiosk` + `ui-matrix` + `ui-contribute-short-phone` | **15 passed / 0 failed** |
+| `ui-mobile-acceptance` (whole file) | **8 passed / 0 failed** |
+| Ordinary `npm run build:web` | **exit 0**, no ERROR line, 9 route-group duplicates skipped, 12 dynamic routes aliased |
+| `ts:check` | clean |
+| `check-evidence-intact.mjs` | frozen **9** / accepted **20** intact |
+
+An ordinary run without `WSF_CAPTURE_FRAMES` still writes zero bytes of this
+package's evidence; the guard above is what proves it after every pass.
 
 ## The BEFORE producer is non-deterministic in its pixels
 
