@@ -76,6 +76,20 @@ import {
  * R1 is introduced by the candidate's M5 fix (a trade: no yank, but no
  * sign of the new community either); R1b's copy and R2's second Community
  * are pre-existing, and R2 is narrower on the candidate (one tab bar).
+ *
+ * ON THE R1 SUCCESSOR 7ee70e4f (0bf8f427 ⊕ W4 7a4b2710; QA report, Check 18):
+ *   R1      PASS ×2. Home unchanged ("/", Start offered, 1 create); Start
+ *           shows the acknowledgment instead of a form: the name as heading,
+ *           "It was created after you left this page.", "Open <name>", no
+ *           Create; "Start another community" then makes the deliberate
+ *           second (2 communities)
+ *   R1m     the same timeline as before: Home is not changed by the fix
+ *   R1acct, R1acct-late  PASS; the same one held node
+ *   R1b     PASS: "Your community is ready. It was created after you left
+ *           this page."
+ * R1's first run there hung on my optional read of a name field that the
+ * acknowledgment replaces (no timeout on the read); the optional reads now
+ * time out at 2 s. Instrument, not product.
  */
 
 test.use({ viewport: { width: 390, height: 844 } });
@@ -266,7 +280,7 @@ async function backSteps(page: Page, text: string): Promise<Array<Record<string,
 async function startDeliberateSecond(page: Page): Promise<{ reached: boolean; via: string }> {
   const blank = async () =>
     (await visibleCount(page, 'wsf-start-name')) > 0 &&
-    (await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue()) === '';
+    (await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue({ timeout: 2_000 })) === '';
   if (await blank()) return { reached: true, via: 'the form on screen' };
   let via = 'the route';
   if ((await visibleCount(page, 'wsf-start-another')) > 0) {
@@ -321,10 +335,10 @@ test.describe('Candidate risks, measured', () => {
         pressed: true,
         named,
         blankFormVisible: await visibleCount(page, 'wsf-start-name'),
-        nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue().catch(() => null),
+        nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue({ timeout: 2_000 }).catch(() => null),
         createdCardVisible: await visibleCount(page, 'wsf-start-created'),
         createVisible: await visibleCount(page, 'wsf-start-submit'),
-        openText: (await page.locator('[data-testid="wsf-start-open"]:visible').first().innerText().catch(() => '')).trim(),
+        openText: (await page.locator('[data-testid="wsf-start-open"]:visible').first().innerText({ timeout: 2_000 }).catch(() => '')).trim(),
       };
     }
     test.info().annotations.push({ type: 'acknowledgment', description: JSON.stringify({ ack, onStart }) });
@@ -400,7 +414,7 @@ test.describe('Candidate risks, measured', () => {
       shown: await shownByName(page, NAME),
       held: await heldCopies(page, NAME),
       createdCard: await visibleCount(page, 'wsf-start-created'),
-      nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue(),
+      nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue({ timeout: 5_000 }),
     };
     // What browser Back shows the next account, step by step.
     const backs: Array<Record<string, unknown>> = [];
@@ -467,7 +481,7 @@ test.describe('Candidate risks, measured', () => {
     const onStart = {
       shown: await shownByName(page, NAME),
       createdCard: await visibleCount(page, 'wsf-start-created'),
-      nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue(),
+      nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue({ timeout: 5_000 }),
     };
     const backs = await backSteps(page, NAME);
     test.info().annotations.push({ type: 'the next account, after the old create landed', description: JSON.stringify({ opsSinceRelease, onHome, onStart, backs }) });
@@ -489,7 +503,7 @@ test.describe('Candidate risks, measured', () => {
     const seen = {
       path: new URL(page.url()).pathname,
       createdVisible: await visibleCount(page, 'wsf-start-created'),
-      body: (await page.locator('[data-testid="wsf-start-created"]:visible').innerText().catch(() => '')).replace(/\s+/g, ' ').trim(),
+      body: (await page.locator('[data-testid="wsf-start-created"]:visible').innerText({ timeout: 2_000 }).catch(() => '')).replace(/\s+/g, ' ').trim(),
     };
     test.info().annotations.push({ type: 'after Back', description: JSON.stringify(seen) });
     // Recorded, then the one assertion this step supports: nothing on screen

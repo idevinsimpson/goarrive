@@ -1982,3 +1982,63 @@ Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 - **Checks:** `ts:check` 0; guard 9 / 20.
 
 **Status:** tested on `0bf8f427`; not accepted, integrated or staged by W7.
+
+---
+
+# Check 18 — the R1 successor `7ee70e4f`: delta-only, **PASS on every routed item**
+
+Routed by L0 in #434 `5803830996` (Director `5803218763`, `5803485378`,
+`5803634916`). ACK `5803834489`. The successor is
+`7ee70e4f4db73c9d3fd475ef4729d3eb51064619` on
+`claude/wsf-release-candidate-round-2`: `0bf8f427` ⊕ W4 `7a4b2710`, one merge
+commit. Checks 16 and 17 and W5's gate carry; nothing outside the delta was
+rerun.
+
+## 18.1 · What was tested, exactly
+
+- **Source.** `git diff 0bf8f427 7ee70e4f` is W4's six files: the route (`41e2bc60`), the route's outcome helper `src/startCommunityOutcome.ts` (`88e97368`), W4's outcomes spec, capture spec and unit file, and one new frame `AFTER-start-created-after-leaving-390x844.png` (`4281e110`). Each is byte-identical to `7a4b2710`. **No Home file and no protected path.**
+- **The fix, from the diff.** A create that confirms while its form is not the screen in front is remembered in module memory as `{uid, groupId, displayName}`, only if the same account is still signed in when it lands; it is dropped on any sign-out or account change, read only for its own uid, and cleared by Open, by "Start another community", or by being shown. `/start-community` for that account then shows the community by name instead of a blank form.
+- **Tree identity.** `7ee70e4f`'s root tree `18c20c79` equals the local composition I had built from W4's pushed commit before L0 composed (never pushed).
+- **Build.** `7ee70e4f` itself, built in its own worktree (exit 0, stamp `7ee70e4f`), served from the emulator. Everything ran serially.
+
+## 18.2 · Per item
+
+| # | routed item | result | measured on `7ee70e4f` |
+|---|---|---|---|
+| 1 | **R1**, the Director's proof contract on my exact journey | **PASS ×2** | After the release: still `/`, no history write into a community, Start offered, **1 create**. Pressing Start shows the acknowledgment **instead of a form**: heading "W7 Risk First", body "Your community is ready. It was created after you left this page.", primary **"Open W7 Risk First"**, **no Create** (0 visible), no blank field. Server: 1 community. Then **"Start another community"** opens a blank form, and its submit makes the second: **2 communities**. On `0bf8f427` the same test fails at the acknowledgment; on `6c98f485` at no-yank |
+| 2 | **R1m**, the journey over time | measured | Unchanged from `0bf8f427`: Home stays as read at +4 s and +30 s and after a tab round trip; a reload opens the community. By design the fix reconciles on Start's re-entry, not on Home. 1 create, 1 community throughout |
+| 3 | **R1acct** | **PASS** | An in-app account change after the commit: nothing shown to the next account on Home, on Start or at either Back step; the same one unrendered `wsf-start-summary` node is held |
+| 4 | **R1acct-late** (the old request lands after the account change) | **PASS** | The first account's create commits after the switch; the next account gets no history write, stays on `/`, sees a blank Start, nothing at either Back step |
+| 5 | **R1b**, the leave path's copy | **PASS** | Browser Back after "Back to home" shows the created card reading "Your community is ready. It was created after you left this page." — not "couldn't open it automatically" |
+| 6 | **SEAM-4 + CONTROL** (no yank) | **PASS 2/2** | `/`, one request, one community, no created card on the page the member is on |
+| 7 | **check 9's outcome tests** | **PASS 15/15** | seven transport codes read as unconfirmed with no developer text; each named refusal renders its own copy; a lost response leaves one community and a screen that claims nothing; the demoted retry creates a genuine second; failed-precondition blocks and points at the profile; too-short / too-long refused without a request; two taps in one frame create one; an unusable id reads as unconfirmed; leaving mid-flight paints no outcome on the next page |
+| 8 | **W4's outcomes spec** (from the successor's tree) | **PASS 29/29** | including the new test "after leaving mid-create, Start shows the confirmed community by name before any blank form; a second is only deliberate" |
+| 9 | **W4's unit file** | **PASS 54/54** | |
+| — | Safari / WebKit | **CANNOT-MEASURE** | Chromium only |
+
+## 18.3 · My instrument error in this check
+
+R1's first run on the successor **timed out** after "Home after the commit".
+The acknowledgment replaces the form, so `wsf-start-name` never appears, and my
+optional read of its value (`inputValue().catch(...)`) had no timeout: the
+catch handles a rejection, but the wait was the test's whole timeout. The
+optional reads now time out at 2 s. R1 then passed twice in a row. Nothing
+else changed in the assertion.
+
+## 18.4 · Recorded, not measured (outside the routed list)
+
+- Leaving mid-create by **browser Back** rather than "Back to home": W4 states the note covers it; I did not drive it.
+- The new frame `AFTER-start-created-after-leaving-390x844.png` goes to the Director through #428; I did not measure it.
+- The hidden `wsf-start-summary` node holding the first account's name (R1acct) is unchanged by this fix and stays recorded.
+
+## 18.5 · Bound and hygiene
+
+Chromium only; Safari is CANNOT-MEASURE. Emulators only.
+
+- **Verification builds:** local and never pushed (`7ee70e4f` built exactly; the earlier local composition `a04c20cc` was tree-identical and is not the reported build).
+- **Edits:** no product edit; no other worker's spec edited. W4's spec and unit file ran from the successor's own tree.
+- **After every run:** artifacts and `test-results` cleaned.
+- **Checks:** `ts:check` 0; guard 9 / 20.
+- **Session model:** the owner switched this session with `/model` at ~22:20Z; `session_context.model` now reads `claude-fable-5-1`. Checks 14–17 and the runs above before that switch were on `claude-opus-5-5`; the R1 ×2 rerun and this report are after it.
+
+**Status:** tested on `7ee70e4f`; not accepted, integrated or staged by W7.
