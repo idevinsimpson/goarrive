@@ -60,7 +60,7 @@ jobs:
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
           SC = 'docs/design-target/review/start-community-next'
-          # THE EXACT ALLOWLIST: the 51 PNGs PRs #426 and #447 add under start-community-next/ —
+          # THE EXACT ALLOWLIST: the 52 PNGs PRs #426 and #447 add under start-community-next/ —
           # W4's ten actual BEFORE frames, fifteen PROPOSED / NOT ACCEPTED drawings (each
           # carrying its own amber strip inside the image) and their contact sheet, at the PR
           # head this job checks out, original committed bytes only.
@@ -116,6 +116,7 @@ jobs:
               (f'{SC}/after/AFTER-start-gate-unverified-390x844.png', 'AFTER · actual implemented /start-community at d467754 (#447) · unverified gate, reached from an emulator sign-up with the verify step omitted · AFTER-start-gate-unverified-390x844.png'),
               (f'{SC}/after/AFTER-start-gate-unverified-430x932.png', 'AFTER · actual implemented /start-community at d467754 (#447) · unverified gate, reached from an emulator sign-up with the verify step omitted · AFTER-start-gate-unverified-430x932.png'),
               (f'{SC}/after/AFTER-start-name-too-short-blurred-390x844.png', 'AFTER · evidence only · the short-name-after-blur state at 390x844: the corrected NEUTRAL pre-submit capture (ordinary resting border, no sentence; the sentence and invalid styling arrive on the first Create press) · W4 e653330, Director pixel PASS 5803545938 on candidate 0bf8f42 · not one of the 24 accepted frames'),
+              (f'{SC}/after/AFTER-start-created-after-leaving-390x844.png', 'AFTER · evidence only · R1: the community created after the member left, shown by name before any blank form can make a second, at 390x844 · W4 7a4b271 · not one of the 24 accepted frames'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 24 * 1024 * 1024
