@@ -146,9 +146,22 @@ test('the shell carries four destinations and the MOVE action, and Home is the c
       if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, `${key}-${w.key}.png`) });
     }
 
-    // THE WORDMARK GOES HOME, from a destination that is not Home.
-    await page.getByTestId('wsf-you-wordmark-home').click();
-    await expect(page.getByTestId(`wsf-community-goal-title-${fx.goalId}`)).toBeVisible({ timeout: 40_000 });
+    /*
+      THE WORDMARK GOES HOME, from a destination that is not Home — and it is
+      the SHELL's wordmark now, not the page's.
+
+      This clicked `wsf-you-wordmark-home`, the You page's own copy. Every
+      member page used to draw its own wordmark; with the persistent top bar
+      they drew a second one beneath the shell's, and each carried its own Home
+      gesture that navigated INTO the tab tree from inside it — which pushed a
+      new community screen rather than returning to the mounted one, leaving
+      two in the document. The page copies are gone; the bar's is the one
+      gesture, and it is asserted here.
+    */
+    await page.getByTestId('wsf-member-topbar-wordmark-home').click();
+    await expect(
+      page.locator(`[data-testid="wsf-community-goal-title-${fx.goalId}"]:visible`).first(),
+    ).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('wsf-member-tab-home')).toHaveAttribute('data-current', 'true');
 
     /*

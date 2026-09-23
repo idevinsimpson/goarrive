@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
+import { manageOffered, openMemberManage } from './helpers/memberShell';
 
 /**
  * COMMUNITY HOME — phone-first visual checkpoint.
@@ -331,7 +332,10 @@ test('Community Home at phone size — member view, Champion view, full page', a
   // ---- member ---------------------------------------------------------------
   await signInVia(page, memberEmail, password);
   await page.goto(`/community/${groupId}`);
-  await expect(page.getByTestId('wsf-community-wordmark')).toBeVisible({ timeout: 20_000 });
+  // THE WORDMARK IS THE SHELL'S NOW. Community Home drew its own until the
+  // member shell landed; the persistent top bar carries the one wordmark for
+  // every tab, so this asks the same question of the control that answers it.
+  await expect(page.getByTestId('wsf-member-topbar-wordmark')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-community-name')).toHaveText('Maple Street Movers');
   await waitForProgress(page, featured);
 
@@ -410,7 +414,10 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId('wsf-community-invite')).toHaveCount(0);
   // No Champion tools for a member: no Manage, no link rotation, and none of
   // the administrative rows — a member's page carries no role label.
-  await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(page),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
   await expect(page.getByTestId('wsf-community-reset')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
@@ -456,8 +463,9 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await signInVia(page, championEmail, password);
   await page.goto(`/community/${groupId}`);
   await waitForProgress(page, featured);
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible();
+  // THE CHAMPION'S ONE EXTRA CONTROL IS IN THE SHELL'S MENU NOW, not in a
+  // chrome row of the page's own. Offered, and the sheet not yet open.
+  expect(await manageOffered(page), 'a Champion is offered Champion tools').toBe(true);
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
   // The Champion's own view of the community is the member view plus one control.
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
@@ -469,8 +477,7 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await scrollTo(page, 0);
   await snapViewport(page, 'champion-01-top-manage-closed');
   const heroBoxBefore = await page.getByTestId('wsf-community-goal-hero').boundingBox();
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+  await openMemberManage(page);
   await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${featured}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${closed}`)).toBeVisible();
   // Management is a surface over the page: the hero has not moved.
@@ -496,8 +503,7 @@ test('Community Home at phone size — member view, Champion view, full page', a
 
   // "Start another goal" from inside the sheet leaves for the new-goal
   // screen and takes the sheet with it: nothing stays overlaid on the form.
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+  await openMemberManage(page);
   await page.getByTestId('wsf-community-start-goal').click();
   await expect(page.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);

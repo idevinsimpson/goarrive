@@ -13,14 +13,14 @@ import {
   View,
 } from 'react-native';
 
-import { useWsfAuth } from '../../../src/auth';
-import { rememberCurrentCommunity } from '../../../src/currentCommunity';
-import { AuthFlagOffPanel } from '../../../src/AuthFlagOffPanel';
-import { describeCallableError } from '../../../src/callableErrors';
-import { FormShell } from '../../../src/AuthFormPrimitives';
-import { resolveRepeatPolicy, type RepeatPolicy } from '../../../src/contributionFlow';
-import { wsfAuthEnabled } from '../../../src/featureFlags';
-import { getFirebaseFirestore, getFirebaseFunctions } from '../../../src/firebase';
+import { useWsfAuth } from '../../../../../src/auth';
+import { rememberCurrentCommunity } from '../../../../../src/currentCommunity';
+import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
+import { describeCallableError } from '../../../../../src/callableErrors';
+import { FormShell } from '../../../../../src/AuthFormPrimitives';
+import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
+import { wsfAuthEnabled } from '../../../../../src/featureFlags';
+import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
 import {
   beginContext,
   confirmedButAbsent,
@@ -34,7 +34,7 @@ import {
   unsettledFor,
   type DisplayAuthState,
   type OperationScope,
-} from '../../../src/displayAuthControl';
+} from '../../../../../src/displayAuthControl';
 import {
   challengeParticipationLabel,
   groupTypeLabel,
@@ -42,8 +42,8 @@ import {
   memberCountLabel,
   roleLabel,
   statusLabel,
-} from '../../../src/labels';
-import { communityMomentumLine } from '../../../src/communityMomentum';
+} from '../../../../../src/labels';
+import { communityMomentumLine } from '../../../../../src/communityMomentum';
 import {
   canShareGoalDisplay,
   displayShareUrl,
@@ -51,15 +51,16 @@ import {
   shareRoute,
   SHARE_DISCLOSURE,
   type ShareStatus,
-} from '../../../src/shareGoalDisplay';
-import { wsfTheme } from '../../../src/theme';
-import { PROGRESS_GREEN } from '../../../src/ui/brandAssets';
-import { ButtonLink } from '../../../src/ui/ButtonLink';
-import { JoinQrCode } from '../../../src/ui/JoinQrCode';
-import { buildJoinUrl, isLinkJoinable } from '../../../src/ui/joinLink';
-import { buildKioskUrl, currentOrigin } from '../../../src/ui/kioskLink';
-import { buildStationUrl } from '../../../src/ui/eventLinks';
-import { buildCombinedUrl } from '../../../src/ui/combinedLink';
+} from '../../../../../src/shareGoalDisplay';
+import { wsfTheme } from '../../../../../src/theme';
+import { PROGRESS_GREEN } from '../../../../../src/ui/brandAssets';
+import { useMemberShellAction } from '../../../../../src/ui/memberShellActions';
+import { ButtonLink } from '../../../../../src/ui/ButtonLink';
+import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
+import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
+import { buildKioskUrl, currentOrigin } from '../../../../../src/ui/kioskLink';
+import { buildStationUrl } from '../../../../../src/ui/eventLinks';
+import { buildCombinedUrl } from '../../../../../src/ui/combinedLink';
 import {
   childSelectionMessage,
   deviceTimeZone,
@@ -70,23 +71,23 @@ import {
   parseTargetInput,
   validateChildSelection,
   zoneInWords,
-} from '../../../src/combinedSetup';
-import { DateTimeField } from '../../../src/ui/DateTimeField';
-import { OptionGroup, OptionRow } from '../../../src/ui/OptionRow';
+} from '../../../../../src/combinedSetup';
+import { DateTimeField } from '../../../../../src/ui/DateTimeField';
+import { OptionGroup, OptionRow } from '../../../../../src/ui/OptionRow';
 import {
   normalizePairingCode,
   pairingCodeInputValue,
   STATION_PAIRING_CODE_LENGTH,
   STATION_SLOTS,
   type StationSlot,
-} from '../../../src/stationSession';
+} from '../../../../../src/stationSession';
 import {
   formatActiveWindowLabel,
   formatClock,
   formatMonthYear,
   formatPeriod,
   formatReachedOn,
-} from '../../../src/ui/dates';
+} from '../../../../../src/ui/dates';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -96,17 +97,18 @@ import {
   ON_NAVY_MUTED,
   ON_NAVY_RULE,
   SURFACE,
+  TEXT_MUTED,
   display,
   elevation,
   kit,
-} from '../../../src/ui/kit';
-import { LIVING_WE_ASPECT } from '../../../src/ui/livingWeCalibration';
+} from '../../../../../src/ui/kit';
+import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
 import {
   MomentumRow,
   PresenceRow,
   type ActivityRow,
-} from '../../../src/ui/CommunityPresence';
-import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
+} from '../../../../../src/ui/CommunityPresence';
+import { LivingWeProgress } from '../../../../../src/ui/LivingWeProgress';
 import {
   formatCount,
   isReached,
@@ -116,8 +118,7 @@ import {
   statusLine,
   totalOfTargetLabel,
   totalOfTargetParts,
-} from '../../../src/ui/progressFormat';
-import { WsfWordmark } from '../../../src/ui/WsfWordmark';
+} from '../../../../../src/ui/progressFormat';
 
 type GroupDoc = {
   displayName: string;
@@ -1026,6 +1027,34 @@ export default function CommunityPage() {
   // Coming back to this screen (from a contribution, say) re-reads progress.
   // The first focus is the mount, which the effect above already covers.
   const focusedBefore = useRef(false);
+  /*
+    MANAGE, OFFERED BY THE SHELL, FOR A CHAMPION LOOKING AT THIS COMMUNITY.
+
+    Registered here rather than drawn below: the row it used to live in is
+    gone. Three conditions, all read from what this screen already knows —
+    the page is loaded, the role on it is foundingChampion, and there is an
+    account. Anything else offers nothing, which is how an ordinary member
+    never sees it.
+
+    `onPress` opens the SAME sheet the row used to open, by flipping the same
+    state. The scope is the account and the community, so changing either
+    unregisters before it registers, and the whole thing is torn down when the
+    screen loses focus — a tab switch included, since this screen stays mounted
+    underneath the tab a member moves to.
+  */
+  const championHere =
+    state.kind === 'ready' && state.role === 'foundingChampion' && Boolean(user?.uid);
+  useMemberShellAction(
+    championHere
+      ? {
+          key: 'manage-community',
+          label: 'Manage community',
+          onPress: () => setManageOpen(true),
+        }
+      : null,
+    `${user?.uid ?? 'none'}:${groupId}`,
+  );
+
   useFocusEffect(
     useCallback(() => {
       if (focusedBefore.current) setProgressReloadToken((n) => n + 1);
@@ -3227,33 +3256,22 @@ export default function CommunityPage() {
       {...({ 'data-state': 'ready' } as Record<string, unknown>)}
     >
       <View style={styles.inner}>
-        {/* Product chrome: the full wordmark, compact; Champion tools behind one quiet control. */}
-        <View style={styles.productHeader}>
-          {/* SHELL. The wordmark is the way Home on every member surface. */}
-          <Pressable
-            onPress={() => router.replace('/')}
-            accessibilityRole="link"
-            accessibilityLabel="We Stay Fit, go Home"
-            testID="wsf-community-wordmark-home"
-            // The mark is 22px tall; a 22px tap target is not a tap target.
-            // The padding makes the touchable 44 without moving the mark.
-            style={styles.wordmarkTouch}
-          >
-            <WsfWordmark variant="navy" height={17} testID="wsf-community-wordmark" />
-          </Pressable>
-          {isChampion ? (
-            <Pressable
-              onPress={() => setManageOpen(true)}
-              accessibilityRole="button"
-              aria-expanded={manageOpen}
-              accessibilityLabel="Manage: Champion tools"
-              style={styles.manageButton}
-              testID="wsf-community-manage"
-            >
-              <Text style={styles.manageButtonText}>Manage</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        {/* NO PAGE CHROME ROW AT ALL — THE SHELL CARRIES BOTH OF ITS CONTROLS.
+
+            The wordmark went first: the persistent member top bar carries it,
+            and its tap is the one gesture that goes Home. A copy here stacked a
+            second wordmark under the bar, and its own Home gesture navigated
+            INTO the tab tree from inside it, which pushed a new screen instead
+            of revealing the mounted one.
+
+            Manage followed it, on the Director's ruling. Under a persistent
+            bar this row was a second masthead: an ordinary member paid 34px
+            plus the column's 14px gap for an empty row, and a Champion paid 44
+            plus 14 for a single control — which put the goal hero outside the
+            220px product-area budget on the Champion's own view. The trigger
+            is now registered into the bar's menu while this screen is focused
+            (see `useMemberShellAction` above); the sheet, its state and its
+            behaviour are untouched and still live here. */}
         {renderManageSheet()}
 
         {/*
@@ -4073,30 +4091,6 @@ const styles = StyleSheet.create({
   // 18 -> 14. The command-centre rhythm the target sets is denser than the
   // page had; four sections at 18 spent most of what the shorter hero freed.
   inner: { maxWidth: 640, width: '100%', gap: 14 },
-  productHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    // The row still offers a 44px target — the wordmark's own Pressable does
-    // that — but the row no longer reserves 44px of the first viewport for a
-    // mark that is not what the member came for.
-    minHeight: 34,
-    // SLICE 2. The wordmark became a tappable way Home, and a Pressable does
-    // not shrink the way a bare mark did: at 200% text zoom the Manage
-    // control was pushed past the right edge. The row wraps and both children
-    // may shrink, so the pair stays on the screen at any width.
-    flexWrap: 'wrap',
-    columnGap: 8,
-    rowGap: 4,
-  },
-  manageButton: {
-    backgroundColor: '#ECE8E0',
-    borderRadius: wsfTheme.radius.pill,
-    paddingHorizontal: 16,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  manageButtonText: { color: NAVY, fontWeight: '700', fontSize: 14 },
   identity: { gap: 2 },
   identityEyebrow: {
     color: ACTION_GREEN_DEEP,
@@ -4107,7 +4101,19 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   presenceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 1 },
-  presenceText: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, fontWeight: '500' },
+  /*
+    INK_QUIET -> TEXT_MUTED, FOR CONTRAST RATHER THAN FOR TASTE.
+
+    `INK_QUIET` (#6B7C93) on cream is **3.9:1** — axe measures it, and WCAG AA
+    wants 4.5:1 for text this size. It was failing before this branch and axe
+    could not say so: the line used to sit at y=209, overlapping the navy hero
+    that starts at 210, and an overlap makes the check INCOMPLETE rather than a
+    violation. Deleting the page's chrome row lifted the line onto plain cream,
+    where the check can finish, and it fails. `TEXT_MUTED` (#5A6B85) is the
+    design system's own muted token and measures **5.0:1** on the same cream,
+    so this is a swap to an existing token, not a new colour.
+  */
+  presenceText: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17, fontWeight: '500' },
   switchChip: {
     minHeight: 32,
     justifyContent: 'center',
@@ -4179,6 +4185,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 10,
+    /*
+      44, MEASURED RATHER THAN ASSUMED. 10 + 10 of padding around a chevron
+      line box of about 23 came to 43 — one pixel under the touch-target floor,
+      and `ui-a11y` R3 and `ui-a11y-fixes` (d) both reported it, on the base
+      build as well as here. The Director released the correction into this
+      branch (`5795101998`) because the file is reserved to W9 during the
+      migration. It is a minimum, not a height: the row still sizes to its own
+      content wherever that is taller, and nothing about the copy, the
+      hierarchy, the data or the destination changes.
+    */
+    minHeight: 44,
   },
   peopleLinkText: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   peopleLinkChevron: { color: INK_QUIET, fontSize: 20, fontWeight: '700' },
@@ -4340,7 +4357,6 @@ const styles = StyleSheet.create({
     borderLeftColor: PROGRESS_GREEN,
     ...elevation.card,
   },
-  wordmarkTouch: { minHeight: 44, justifyContent: 'center', flexShrink: 1, marginVertical: -5 },
   // SLICE 2. The identity band: the community's name, then the one presence
   // fact, separated from the goal below by a hairline rather than a gap, so
   // the hero reads as one object and not two stacked cards.
