@@ -100,7 +100,7 @@ export const html = page({
   </style>
   ${header('INDEX', 'The canonical package')}
   <div class="copy">
-    <div class="lead">Eighteen boards. Ten exist. None is a placeholder presented as final.</div>
+    <div class="lead">Eighteen boards. Eleven exist. None is a placeholder presented as final.</div>
     <div class="gov">NAVIGATION ONLY — OPEN THE FULL BOARD BEFORE EDITING PRODUCT UI.</div>
   </div>
   <p class="intro">Each thumbnail is the board's own rendered PNG, read from <b style="color:${NAVY}">docs/design-target/north-star-final/</b> at render time. A slot is a real board or the word PENDING — nothing in between. Boards 00–11 are locked in review; 12–17 are not started.</p>

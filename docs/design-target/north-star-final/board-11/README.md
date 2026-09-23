@@ -196,3 +196,45 @@ That file belongs to the lead; adding these paths is their call.
 Every claim on the board is a quotation from the lock, a property visible in the
 frame it captions, a value from the evidence set's `fixture.json`, or a fact read
 from a named file in this repository.
+
+## Independent board review — ACCEPTED as a dated PRE-FIX current-build record, 2026-09-23
+
+Creative Director verdicts `5786608901` and `5786639647` on PR #423, a pixel
+review of the exported original at `be3ff1b` (PR #424, run `35799963839`,
+artifact `10725905242`, archive sha256 `b3f3c67c…`; PNG git blob `124d3b1`,
+sha256 `37a40e00…`, 2,572,407 bytes, 2560×6392) — *accepted as a faithful,
+dated record of the CURRENT BUILD, not its safety and not the final kiosk
+design.* Status 3 in the manifest is now REVIEWED with that qualifier.
+Status-only: the PNG bytes and the fifteen `review/kiosk-current/` captures
+are exactly the reviewed bytes; nothing was repainted and the footer's
+submission label was deliberately not re-rendered.
+
+**What the verdict does not accept.** The visible member tab bar on the
+kiosk contribution screen and the illegible `Stay` / chrome `Finish` labels
+(`#0B1F3A` on `#0B1F3A`) that this board photographs are **product holds,
+not accepted behaviour**. They must not become the accepted kiosk.
+
+**SHARED / UNATTENDED KIOSK USE IS HELD** (Director `5786524650`). After this
+board was captured, W5's independent navigation probe proved that an ordinary
+member-tab tap from the kiosk contribution screen leaves the previous
+visitor's own identity and member pages on the shared device, without kiosk
+Finish or timeout (`5786450648`; probe
+`tests-e2e/sprint-w5-kiosk-navigation-isolation.spec.ts`). Returning to the
+kiosk rest screen does clear the account and preserves the account-scoped
+unknown attempt — that defence passes. This later finding supersedes the
+board's own "presence only / nothing more claimed" limit on the tab-bar seam.
+The correction is W1B's separate product patch on `claude/wsf-kiosk-confinement`
+(from `d0477cc`, into `claude/wsf-app-shell`); W5 verifies it independently.
+This board and its captures are preserved as the **historical BEFORE**; a
+matched AFTER attaches separately once the fix passes its own gates.
+
+**Scope of the evidence, as the verdict states it.** The unknown-outcome
+capture uses a request aborted before it reached the server: it proves the
+rendered uncertainty path and the locally retained attempt, not cross-device
+recovery or a server-committed lost response. The successful-Finish and
+failed-sign-out observations have their stated browser scope, not a blanket
+"no data remains" guarantee.
+
+The verdict accepts the reference artifact only: no kiosk release, no app
+release, no staging promotion, no product acceptance, no privacy or security
+clearance, and no Board 12–17 release follows from it.

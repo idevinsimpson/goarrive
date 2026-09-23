@@ -49,8 +49,8 @@ board gets treated as accepted when only its source screens were:
    checked it line by line against the lock verdict (recorded in the board's
    README).
 3. **Independent board review** — the Program Director has visually reviewed
-   the rendered board itself. **Boards 00–09 + INDEX have it as of
-   2026-09-22** — Boards 00–05 + INDEX by Program Director verdict
+   the rendered board itself. **Boards 00–09 and 11 + INDEX have it as of
+   2026-09-23** — Boards 00–05 + INDEX by Program Director verdict
    `5783373780`, a pixel review of the commit-pinned 1× review copies at
    `a912773` (*PASS as the canonical reconstructed 00–05 package*); Board 06
    by Creative Director verdict `5784845039` on PR #404, a pixel review of the
@@ -59,7 +59,11 @@ board gets treated as accepted when only its source screens were:
    `fe82c1e` (artifact `10723837867`, blob `df1a587`); Boards 08 and 09 by
    Creative Director verdicts `5786034310` (PR #409, exported original at
    `5674a86`, artifact `10724116667`, blob `bb72dacc`) and `5786014162`
-   (PR #412, `8aae42d`, artifact `10724485128`, blob `f34cfaf3`). It clears this status for these
+   (PR #412, `8aae42d`, artifact `10724485128`, blob `f34cfaf3`); Board 11 by
+   Creative Director verdicts `5786608901` / `5786639647` on PR #423, a pixel
+   review of the exported original at `be3ff1b` (artifact `10725905242`, blob
+   `124d3b1`), accepted **as a dated PRE-FIX current-build record only** — its
+   row and README carry the kiosk use HOLD. It clears this status for these
    reconstructed artifacts only; it does not newly accept or stage the
    underlying app pages, and it authorises no deployment.
 
@@ -108,7 +112,7 @@ unaffected.
 | 08 | Goal setup | **REVIEWED** · independent board review passed 2026-09-22 (`5786034310`) | `5771436211` | staging-only current-build truth — the two arrival frames frozen at `02e24df`; a CURRENT BUILD strip from W4's real goal-setup captures (#415, source `0757379`); the target drawings kept non-authoritative where they conflict with the lock | [`board-08/…BOARD_08_GOAL_SETUP_FINAL.png`](board-08/WE_STAY_FIT_NORTH_STAR_BOARD_08_GOAL_SETUP_FINAL.png) | `5674a86` | W1B (PR #409); composition PASS `5784966469`, the coverage hold closed by the bounded revision `56fb683`, two captions corrected at `5674a86`; reviewed from the exported original (artifact `10724116667`, blob `bb72dacc`); the PNG's own footer still reads its submission label. Not page acceptance: the route stays available in staging and local emulators, production UI gated. |
 | 09 | Lifecycle / history | **REVIEWED** · independent board review passed 2026-09-22 (`5786014162`) | `5771469193` | lifecycle truth — eleven accepted-build captures read in place, plus the corrected-below-target specimen photographed from a real reach and a real group-level correction (`review/lifecycle-corrected-current/`, W1B's gated producer) | [`board-09/…BOARD_09_LIFECYCLE_HISTORY_FINAL.png`](board-09/WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png) | `8aae42d` | W1B (PR #412); layout PASS `5785588557`, the completeness hold closed by the supplement; reviewed from the exported original (artifact `10724485128`, blob `f34cfaf3`); the PNG's own footer still reads its submission label. No new History route, no dated personal history, no streak. |
 | 10 | Public display family | PENDING | `5771496484` | target | — | — | Device classes are design targets, not installed hardware. |
-| 11 | Single-goal kiosk | PENDING | `5771528649` | target | — | — | Device classes are design targets, not installed hardware. |
+| 11 | Single-goal kiosk | **REVIEWED** · independent board review passed 2026-09-23 (`5786639647`, `5786608901`) — **as a dated PRE-FIX current-build record only** | `5771528649` | current-build truth of `/kiosk/[goalId]` — fifteen real kiosk frames at 800×1280 (+ one 1024×1366) from W1B's gated producer (`review/kiosk-current/`), including the injected unknown-outcome and sign-out-failure states; no target drawing | [`board-11/…BOARD_11_SINGLE_GOAL_KIOSK_FINAL.png`](board-11/WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL.png) | `be3ff1b` | W1B (PR #423); reviewed from the exported original (artifact `10725905242`, blob `124d3b1`); the PNG's own footer still reads its submission label. **The member tab bar on the kiosk contribution screen and the illegible `Stay` / chrome `Finish` labels it photographs are product holds, not accepted behaviour.** **SHARED / UNATTENDED KIOSK USE IS HELD** (`5786524650`): after this board was captured, W5 proved the bar leaves the previous visitor's own identity on the device without Finish/timeout (`5786450648`); correction by W1B on `claude/wsf-kiosk-confinement` (from `d0477cc`), independent verification by W5. This board and its captures are the historical BEFORE; a matched AFTER attaches separately once the fix passes. Device classes are design targets, not installed hardware. |
 | 12 | — | PENDING | — | — | — | — | Not started. Paused until 00–11 clears. |
 | 13 | — | PENDING | — | — | — | — | Not started. |
 | 14 | — | PENDING | — | — | — | — | Not started. |
