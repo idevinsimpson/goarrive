@@ -40,16 +40,61 @@ process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 process.env.FIRESTORE_EMULATOR_HOST =
   process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { Timestamp, getFirestore } from 'firebase-admin/firestore';
 import {
+  wsfCallNext,
+  wsfCancelTurn,
   wsfChallengePulse,
   wsfCombinedGoalPulse,
+  wsfCommunityActivity,
+  wsfCommunityMembers,
+  wsfCompleteTurn,
   wsfContribute,
   wsfGoalPulse,
   wsfGoalRecentAdditions,
   wsfPreviewCommunity,
+  wsfSendPasswordResetEmail,
+  wsfStartTurn,
+  wsfStationClaimPairing,
+  wsfStationPairingStatus,
+  wsfStationRequestPairing,
   wsfStationState,
+  wsfTurnState,
 } from '../../src/index';
+
+/**
+ * EVERY `invoker: 'public'` CALLABLE, READ FROM THE SOURCE RATHER THAN LISTED.
+ *
+ * This function is a correction. The first version of this probe walked a
+ * HARDCODED list of six surfaces, and the report it fed said it covered "every
+ * `invoker: 'public'` surface". That was not true: the head it ran against
+ * already had seventeen, so eleven public callables were never driven at all.
+ *
+ * It is also exactly the defect I raised against somebody else's work in #393
+ * (F1: a reach matrix walking a hardcoded array of job names rather than one
+ * derived from the parsed workflow, so an added job is invisible to it). A
+ * list that has to be kept in step by hand falls out of step, and the thing it
+ * stops covering is precisely the thing that was just added.
+ *
+ * So the set is derived from `src/index.ts` and the coverage test below fails
+ * when a public callable is not driven here. A new public surface now breaks
+ * this probe until somebody points it at the surface.
+ */
+function declaredPublicCallables(): string[] {
+  const src = readFileSync(path.resolve(__dirname, '../../src/index.ts'), 'utf8');
+  const found: string[] = [];
+  const parts = src.split(/\nexport const ([A-Za-z0-9_]+)\s*=\s*/);
+  for (let i = 1; i < parts.length; i += 2) {
+    const name = parts[i];
+    // The options object precedes the handler; a generous window covers it
+    // without reaching into the next export.
+    if (/invoker:\s*['"]public['"]/.test(parts[i + 1].slice(0, 1500))) found.push(name);
+  }
+  return found.sort();
+}
 
 function uniq(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -236,6 +281,67 @@ describe('W5 probe — public/kiosk/display payloads carry no member identity', 
       name: 'wsfStationState',
       call: () => wsfStationState.run(anonRequest({ stationId: groupId, secret: 'w5-probe-secret' })),
     },
+    /*
+      THE SOCIAL SURFACES. These are the two the community-presence work added,
+      and they are the reason the hardcoded list had to go: they resolve member
+      display names by design, for authenticated members of that community, and
+      they carry `invoker: 'public'` — which governs who may reach the Cloud Run
+      service, not who the function will answer. A real `groupId` is passed so
+      the call does the work rather than bouncing on a missing argument.
+    */
+    {
+      name: 'wsfCommunityMembers',
+      call: () => wsfCommunityMembers.run(anonRequest({ groupId })),
+    },
+    {
+      name: 'wsfCommunityActivity',
+      call: () => wsfCommunityActivity.run(anonRequest({ groupId, goalId })),
+    },
+    /*
+      THE REST OF THE DECLARED PUBLIC SET, never driven by the first version of
+      this probe. Several need pairing or turn state this file does not build,
+      so they will refuse — and a refusal is scanned exactly like a payload,
+      which is the point: an error that names the member it refused on behalf of
+      leaks as much as a list would.
+    */
+    { name: 'wsfTurnState', call: () => wsfTurnState.run(anonRequest({ stationId: groupId })) },
+    {
+      name: 'wsfStartTurn',
+      call: () => wsfStartTurn.run(anonRequest({ stationId: groupId, secret: 'w5-probe-secret' })),
+    },
+    {
+      name: 'wsfCallNext',
+      call: () => wsfCallNext.run(anonRequest({ stationId: groupId, secret: 'w5-probe-secret' })),
+    },
+    {
+      name: 'wsfCompleteTurn',
+      call: () => wsfCompleteTurn.run(anonRequest({ stationId: groupId, secret: 'w5-probe-secret' })),
+    },
+    {
+      name: 'wsfCancelTurn',
+      call: () => wsfCancelTurn.run(anonRequest({ stationId: groupId, secret: 'w5-probe-secret' })),
+    },
+    {
+      name: 'wsfStationRequestPairing',
+      call: () => wsfStationRequestPairing.run(anonRequest({ goalId })),
+    },
+    {
+      name: 'wsfStationPairingStatus',
+      call: () => wsfStationPairingStatus.run(anonRequest({ pairingId: uniq('w5pair') })),
+    },
+    {
+      name: 'wsfStationClaimPairing',
+      call: () => wsfStationClaimPairing.run(anonRequest({ pairingId: uniq('w5pair') })),
+    },
+    /*
+      Driven with a member's REAL address. A password-reset surface that echoes
+      whether an address is known is an account-existence oracle, and the only
+      way to see that is to ask it about somebody who exists.
+    */
+    {
+      name: 'wsfSendPasswordResetEmail',
+      call: () => wsfSendPasswordResetEmail.run(anonRequest({ email: MEMBER_A.email })),
+    },
   ];
 
   for (const { name } of surfaces()) {
@@ -257,6 +363,17 @@ describe('W5 probe — public/kiosk/display payloads carry no member identity', 
    * — so it is tested against a payload that genuinely carries each identifier,
    * in a value, in a key, and nested inside an array.
    */
+  /*
+    THE COVERAGE GUARD. Without this the file is a list that drifts, and the
+    drift is silent: the surfaces it stops covering are the newly added ones.
+  */
+  test('every declared public callable is actually driven by this probe', () => {
+    const declared = declaredPublicCallables();
+    const driven = surfaces().map((s) => s.name).sort();
+    expect(declared.length).toBeGreaterThan(0);
+    expect(declared.filter((n) => !driven.includes(n))).toEqual([]);
+  });
+
   test('the identity detector actually detects — keys, values and nesting', () => {
     expect(identityIn({ members: [{ displayName: MEMBER_A.displayName }] })).toEqual([
       MEMBER_A.displayName,

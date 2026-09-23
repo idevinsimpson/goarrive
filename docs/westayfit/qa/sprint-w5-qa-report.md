@@ -1468,3 +1468,68 @@ the seam closed, K13, K15 and K16 when the idle-Finish contract landed. None was
 and none was softened to make a run go green. The discipline that made that work is one line:
 **a tripwire must fail by assertion, never by hanging** — the correction K16 forced, and the
 eighth of the instrument errors recorded in this report.
+
+
+## Base advance to `9a65324c` — the first advance that changes the BACKEND, and a correction to my own coverage claim
+
+`claude/wsf-app-shell` moved `d86620cc` → **`9a65324c`**, carrying #441 (W8 social community) and
+#433 (W6 goal setup). Unlike every earlier advance this one changes
+**`functions-westayfit/src/index.ts` (+734)** and **`app/you.tsx`**, which the kiosk suite drives.
+
+That retires a caveat I have repeated since packet 1: my identity suites were "a non-regression
+read **because the candidate carries no backend change**". At this base that sentence is false, so
+they were re-run here as a real check of the privacy line.
+
+### The correction: my probe covered six of seventeen public callables
+
+`sprint-w5-public-surface-identity` walked a **hardcoded list of six** surfaces. My report and my
+PR body described it as covering "**every** `invoker: 'public'` surface called unauthenticated".
+**That was not true.** Parsing `src/index.ts` at this head gives **seventeen** public callables:
+
+    wsfCallNext  wsfCancelTurn  wsfChallengePulse  wsfCombinedGoalPulse
+    wsfCommunityActivity  wsfCommunityMembers  wsfCompleteTurn  wsfGoalPulse
+    wsfGoalRecentAdditions  wsfPreviewCommunity  wsfSendPasswordResetEmail
+    wsfStartTurn  wsfStationClaimPairing  wsfStationPairingStatus
+    wsfStationRequestPairing  wsfStationState  wsfTurnState
+
+Eleven were never driven, and the omission predates this base — the six named in the report were
+always accurate, the word "every" never was.
+
+**It is also precisely the defect I raised against somebody else's work.** #393's F1 was a reach
+matrix walking a hardcoded array of job names instead of one derived from the parsed workflow, so
+an added job is invisible to it. My own probe had the same shape, and the surfaces it stopped
+covering were exactly the ones just added.
+
+**Fixed at the root, not by lengthening the list.** The probe now derives the public set from
+`src/index.ts` and a coverage test fails when a declared public callable is not driven. A new
+public surface breaks this probe until somebody points it at that surface.
+
+### Result at `9a65324c`
+
+    public-surface-identity   19 passed  (17 surfaces + coverage guard + detector self-test)
+    pending-reconcile-identity 6 passed
+    kiosk suite K1-K17        17 passed, 0 unexpected
+
+**The social surfaces are clean to an unauthenticated caller.** `wsfCommunityMembers` and
+`wsfCommunityActivity` resolve member display names by design, for authenticated members of that
+community, and they carry `invoker: 'public'` — which governs who may reach the Cloud Run service,
+not who the function will answer. Driven anonymously against a real seeded community with two
+members whose names, uids and addresses are unmistakable, neither returns any of them, in a
+payload or in a refusal.
+
+`wsfSendPasswordResetEmail` is driven with a **real** member address, because a reset surface that
+echoes whether an address is known is an account-existence oracle and the only way to see that is
+to ask it about somebody who exists. It names nobody.
+
+### What this result is and is not
+
+It is an independent check of the **declared public set** at this head. It is **not** a review of
+W8's social visibility model, and it does not duplicate W8's own
+`sprint-w8-social-visibility.test.ts` or their invoker test — those are theirs, I did not run them
+as mine, and their assertions are not mine to claim. The member-visible-by-default behaviour for
+**authenticated** members is a different question from the one this probe asks, and I have not
+tested it.
+
+That is nine instrument corrections recorded in this report. This one is the most consequential:
+the others would have misreported a single case, and this one overstated the reach of the probe
+the sprint has been reading as the privacy line.
