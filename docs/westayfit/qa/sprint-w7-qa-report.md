@@ -656,6 +656,203 @@ The eleven items at `0901765` merged onto `37367fd`, in Chromium on the emulator
 
 ---
 
-# Check 11 — further checkpoints
+# Check 11 — the bounded colour delta on `/start-community` at `d467754`
 
-Awaiting L0's routing. Packet 10 (W9's shell) remains held pending its corrected successor SHA; W7 verifies that successor, never `7466158`.
+**Packet 12** — L0 `5796309092`, relayed `5796353584`, on the Director's `5796296396`.
+ACK `5796687337`. Discrimination head `0901765` (the accepted functional gate,
+`5796186487`). **PASS**, with one item recorded as MEASURED rather than passed,
+because it falls outside what the packet routed.
+
+New spec: `apps/westayfit/tests-e2e/sprint-w7-start-community-color-delta.spec.ts`.
+
+## 11.1 · The SHA, and L0's claims re-derived
+
+`d467754` was the **live head** of `claude/wsf-sprint-w4-start-community-impl`
+at ACK time, not a stale reference — `git fetch` moved `0901765..d467754`.
+Checked out detached; product blob verified both ways:
+
+| | |
+|---|---|
+| `git rev-parse d467754:apps/westayfit/app/start-community.tsx` | `08745e67…` |
+| `git hash-object apps/westayfit/app/start-community.tsx` | `08745e67…` |
+
+One commit, 20 files. Every claim in the routing re-derived with git rather
+than taken on report:
+
+| Claim | Evidence | Result |
+|---|---|---|
+| shared kit untouched | `src/ui/kit.ts` absent from `--name-status` | holds; `kit.primaryButton` still `backgroundColor: PROGRESS_GREEN` |
+| `SubmitButton` unchanged | `src/AuthFormPrimitives.tsx` absent | holds |
+| callables untouched | no `functions-westayfit/` path | holds |
+| BEFORE / TARGET untouched | no `BEFORE-*` or `TARGET-*` path at all | holds |
+| four route controls | `style`/`textStyle` changed on exactly four `ButtonLink`s | four |
+| six gate frames | six **added** `AFTER-start-gate-*` PNGs | six |
+| retry tertiary | `variant={… 'tertiary' : 'primary'}`, **unchanged** from `0901765` | a carry-forward invariant, gated as one |
+
+Eleven previously-committed `AFTER-start-*` frames are **modified**. They live
+under `docs/design-target/review/start-community-next/after/`, which is in
+**neither** list in `check-evidence-intact.mjs` — W4 re-shooting its own
+in-flight evidence, not a rewrite of accepted evidence. Worth stating plainly:
+that guard diffs the working tree against `HEAD`, so it gates **runs**, never a
+deliberate committed re-baseline. Guard at every checkpoint of this check: **9
+frozen / 20 accepted, no byte changed.**
+
+## 11.2 · Why this is a render test
+
+The diff says the four links take a local `action.primary` carrying
+`ACTION_GREEN`. That is a statement about source, not about pixels. On web,
+`Link asChild` merges the child's style by **object spread**, so an array style
+silently becomes `{0: …, 1: …}` and paints nothing — `ButtonLink`'s own comment
+records that exact failure. So every assertion reads `getComputedStyle` off the
+element a member would press, plus `opacity`, because `#22C55E` at 0.6 reports
+`rgb(34, 197, 94)` while painting something else.
+
+And the wrong green is **named**, not merely excluded. The defect was never "no
+green"; it was the **progress** green (`#91CB7D`, for a reported number) on an
+**action**. A test that accepted "some green" would have passed on the broken
+head.
+
+## 11.3 · Result, and the discrimination that makes it mean something
+
+| Group | `d467754` | `0901765` |
+|---|---|---|
+| **NEW** — 6 tests | **6/6 pass** | **6/6 fail** |
+| **PRESERVED** — 3 tests | **3/3 pass** | **3/3 pass** |
+| | **9 passed** | **6 failed, 3 passed** |
+
+Every NEW failure on the base head is the defect itself, not a timeout or a
+missing element:
+
+```
+Error: wsf-start-signed-out-signin is not action green
+  Expected: "rgb(34, 197, 94)"
+  Received: "rgb(145, 203, 125)"
+```
+
+— identically for `wsf-start-unverified-verify`, `wsf-start-profile` and
+`wsf-start-check-communities`. No NEW assertion can pass vacuously.
+
+**The four controls, each in the state that renders it:**
+
+| control | state reached | fill | ink | href |
+|---|---|---|---|---|
+| `wsf-start-signed-out-signin` | signed out | `rgb(34, 197, 94)` | `rgb(4, 38, 15)` | `/signin` |
+| `wsf-start-unverified-verify` | a real **unverified** account | `rgb(34, 197, 94)` | `rgb(4, 38, 15)` | `/verify-email` |
+| `wsf-start-profile` | `failed-precondition` refusal | `rgb(34, 197, 94)` | `rgb(4, 38, 15)` | `/profile-setup` |
+| `wsf-start-check-communities` | `internal` → unconfirmed | `rgb(34, 197, 94)` | `rgb(4, 38, 15)` | `/?view=communities` |
+
+Each at full opacity, each ≥52 px tall, each still a **link** with its real
+destination — a repainted control that had lost its href would pass a colour
+test and strand a member.
+
+**The census.** The screen is swept rather than sampled: nothing anywhere on
+the page — app shell included — still **fills** with the progress green, and
+inside `wsf-start` the action green appears on exactly one control and no
+other. The first version of this test swept the whole document and **failed**,
+reporting a second action-green fill on `wsf-member-tab-move`. That was my
+assertion's error, not W4's: the shell's raised MOVE action is a primary and is
+correctly action green. It is now the sweep's **calibration** — a census that
+found nothing would otherwise be indistinguishable from a census that did not
+work.
+
+**PRESERVED, true on both heads and therefore proving nothing on its own:**
+`wsf-start-submit` is the same action green it already was; the retry in the
+unconfirmed state is still the **tertiary** control (no fill, navy ink, 44 px
+not 52) reading *Start another community* — a route that has just learned to
+paint primaries green is exactly where a risky retry could acquire a fill by
+accident; and one press still leaves **exactly one** community on the server,
+read back by `runQuery`, with one delivered create and the navigation that
+follows.
+
+## 11.4 · The six gate frames, verified in their own pixels
+
+Not "six files with the right names". Each PNG was decoded and its exact-RGB
+regions located:
+
+| frame | dimensions | action-green regions found |
+|---|---|---|
+| `AFTER-start-gate-signed-out-390x640` | 390×640 | 350×52 at (20,144) |
+| `AFTER-start-gate-signed-out-390x844` | 390×844 | 350×52 at (20,341) |
+| `AFTER-start-gate-signed-out-430x932` | 430×932 | 390×52 at (20,374) |
+| `AFTER-start-gate-unverified-390x640` | 390×640 | 350×52 at (20,144) **+ 50×51 at (170,553)** |
+| `AFTER-start-gate-unverified-390x844` | 390×844 | 350×52 at (20,312) **+ 50×51 at (170,757)** |
+| `AFTER-start-gate-unverified-430x932` | 430×932 | 390×52 at (20,345) **+ 50×51 at (190,845)** |
+
+**Progress-green pixel count in all six: zero.**
+
+Three things fall out of that table that a filename check cannot give:
+
+- Each frame's pixel dimensions match the viewport in its own name.
+- The button widens by exactly 40 px between the 390 and 430 classes — the
+  viewport difference, so the frames really are the classes they claim.
+- The **unverified** frames carry a second green region the signed-out frames
+  do not: a 50×51 disc, horizontally centred (170+25 = 195 = 390/2;
+  190+25 = 215 = 430/2), low on the screen. That is the member shell's MOVE
+  action, which a signed-in-but-unverified member has and a signed-out visitor
+  does not. The two states are distinguishable **in the pixels**, so the
+  signed-out/unverified labelling is confirmed rather than assumed.
+
+## 11.5 · MEASURED, not a verdict: the delta is not colour only
+
+Decoding the eleven re-shot frames on **both** heads puts a number on what
+changed. The control keeps its width and its exact (x, y) — so nothing moved —
+and is **two pixels shorter**:
+
+| frame | `0901765` progress-green region | `d467754` action-green region |
+|---|---|---|
+| `AFTER-start-refused-profile-390x640` | 350 × **54** at (20,247) | 350 × **52** at (20,247) |
+| `AFTER-start-refused-profile-390x844` | 350 × **54** at (20,418) | 350 × **52** at (20,418) |
+| `AFTER-start-refused-profile-430x932` | 390 × **54** at (20,431) | 390 × **52** at (20,431) |
+| `AFTER-start-unconfirmed-390x640` | 350 × **54** at (20,264) | 350 × **52** at (20,264) |
+| `AFTER-start-unconfirmed-390x844` | 350 × **54** at (20,435) | 350 × **52** at (20,435) |
+| `AFTER-start-unconfirmed-430x932` | 390 × **54** at (20,468) | 390 × **52** at (20,468) |
+
+Across all eleven: **progress-green pixels 17 222 / 17 068 / 19 382 / 19 228 …
+→ 0**, and the same block is action green instead. The four `-end` frames are
+scrolled past the control, so they change little; `refused-profile-430x932-end`
+catches it clipped at the viewport top, 390×42 on both heads.
+
+Source agrees with the pixels. `kit.primaryButton` is `borderRadius: 14,
+minHeight: 54` with **no** shadow; the new local `action.primary` is
+`borderRadius: 16, minHeight: 52` **plus `elevation.action`** — a green drop
+shadow the shared token has none of.
+
+**This is coherent, not careless.** Those are `SubmitButton`'s own primary
+values, so the four links did not acquire a second invented treatment; they
+acquired the treatment *Create community* already had. A test now pins that
+down: each of the four must match `wsf-start-submit` on fill, ink, height,
+radius **and** box-shadow, read from the reference control at runtime rather
+than from a constant.
+
+But a 2 px height change, a 2 px radius change and a new shadow are **not
+colour**, and the packet routed a colour delta. W7 measures it and says so;
+whether it belongs inside this delta is the Director's call, not mine.
+
+## 11.6 · Bound and hygiene
+
+Nine tests, run on the emulators in Chromium at **both** heads, each head built
+from its own source (`rm -rf dist` then a full `build:web`; both builds exit 0).
+`ts:check` exit 0. `check-evidence-intact` exit 0 at every checkpoint — 9
+frozen, 20 accepted, no byte changed. Artifacts and `test-results` cleaned after
+each run; nothing from them committed. Verification only: **no product edit, no
+edit to any W4 test, no capture written, no frame rebaselined.**
+
+**Complete result logs retained** (L0 `5796198857`), not filtered tails:
+`FINAL-d467754.log` (9 passed) and `FINAL-0901765.log` (6 failed, 3 passed)
+with every failure's full error text. **No non-reproducing failure occurred in
+this check.** The one failure that did occur — the unscoped census, §11.3 —
+reproduced exactly, was mine, and was fixed rather than re-run.
+
+**One thing noticed and deliberately not acted on.** The detached checkout at
+`d467754` does **not** carry L0's `1041a1f` members-rewrite mirror in
+`firebase.westayfit.emulators.json`; W4's branch predates it. It is irrelevant
+to this check (no members route is involved, and the running emulator had
+already read its config at start), but it is worth L0 knowing before that
+branch is taken as a base.
+
+---
+
+# Check 12 — further checkpoints
+
+Awaiting L0's routing. Packet 10 (W9's shell) remains held pending its corrected
+successor SHA; W7 verifies that successor, never `7466158` and never `494af36`.
