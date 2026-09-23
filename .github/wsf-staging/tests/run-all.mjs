@@ -14,6 +14,7 @@ const suites = [
   'write-sdk-config.test.mjs',
   'functions-env.test.mjs',
   'verify-deployment.test.mjs',
+  'check-hosting-routes.test.mjs',
   'mail-preflight-domain.test.mjs',
 ];
 let failed = 0;
