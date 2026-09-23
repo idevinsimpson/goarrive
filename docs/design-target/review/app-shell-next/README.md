@@ -319,6 +319,53 @@ is 44×44 and returns to that exact screen with its non-vacuous planted scroll;
 and a cold `/move` closes to the canonical member destination. The twelve
 successor frames are re-shot on it.
 
+## How the suite's own arithmetic reconciles
+
+L0 asked (`5796367768` §1) which figure the runner printed, and where the
+one-test difference in my earlier receipts came from. Every run's arithmetic
+balances exactly; **the mismatch was in my heading, not in the run**. I had
+quoted a `playwright test --list` total taken at a different moment — after a
+spec file was added — instead of the total the run itself printed.
+
+| Retained log | Runner printed | passed + failed + skipped |
+|---|---|---|
+| `e2e-full3.log` | **393** | 330 + 22 + 41 = 393 |
+| `e2e-final.log` | **393** | 343 + 9 + 41 = 393 |
+| `e2e-gate.log` | **396** | 348 + 7 + 41 = 396 |
+| `e2e-gate2.log` | **396** | 350 + 5 + 41 = 396 |
+| `e2e-gate3.log` | **399** | 355 + 3 + 41 = 399 |
+
+No skipped-versus-counted discrepancy and no duplicate id: the totals are the
+totals. The headings that said 392 and 397 were wrong by one and by one.
+
+### Every failure in the successor run, named
+
+`e2e-gate3.log`, sorted into the three bins L0 asked for:
+
+| Bin | Count | Which |
+|---|---|---|
+| The accepted `?groupId=` seam | **0** | it has a narrow regression now (`expectCommunityUrl`), so it fails nothing |
+| Real defects | **0** | — |
+| Non-reproducing | **3** | `event-return:230`, `ui-a11y` R1 maxima, `ui-contribute-guide:356` — all three re-run serially in one command and **all three passed** |
+
+### What the tested build carried
+
+`EXPO_PUBLIC_WSF_AUTH_ENABLED=1` and `EXPO_PUBLIC_WSF_USE_EMULATORS=1`, plus
+`build:web`'s own `EXPO_PUBLIC_BUILD_COMMIT` and `EXPO_PUBLIC_WSF_BUILT_AT`.
+The **ordinary** `npm run build:web` — no flags — was also run at this head and
+exited 0 with no ERROR line and no tree deletion; the flagged build is what the
+emulator then serves, because the flagless one puts the whole app in its
+accounts-closed state.
+
+The functions emulator carries **49** loaded functions, which is what the
+merged base `740a763` defines. An earlier run of mine was made against a stale
+emulator carrying 46, which produced CORS failures on `wsfCommunityMembers` and
+`wsfCommunityActivity`; those results were discarded, not reported.
+
+Every run's complete log is retained in this session's scratchpad
+(`e2e-full3`, `e2e-final`, `e2e-gate`, `e2e-gate2`, `e2e-gate3`, `e2e-gate4`,
+plus each build log), and every count in this file cites the run it came from.
+
 ## Three per-page AFTER capture specs still name wordmarks that no longer exist
 
 `design-community-after-capture`, `design-progress-after-capture` and
@@ -362,7 +409,7 @@ suite now has **no standing failure at all**.
 | 4 | MOVE over the mounted prior tab, bar unreachable, Close returns to it | `sprint-w9-shell-production` — both tests, opened from Home AND from You, with the sheet bounded, the scrim translucent, neither bar reachable at nine points across its width, Close 44×44, and a cold `/move` fallback |
 | 5 | ordinary contribution Back/Close, six-point proof at a non-vacuous 390×640 scroll fixture | `sprint-w1b-kiosk-confinement` |
 | 6 | Champion hamburger Manage opens the existing sheet and disappears on route/role change | `sprint-w9-shell-manage-action` |
-| 7 | 12 successor frames, MIGRATED BUILD / NOT ACCEPTED, one masthead, no duplicate page chrome, explicit Close on MOVE, no obsolete bottom-bar spacing | `successor/`, re-shot on this head |
+| 7 | successor frames, MIGRATED BUILD / NOT ACCEPTED, one masthead, no duplicate page chrome, explicit Close on MOVE, no obsolete bottom-bar spacing | `successor/`, re-shot on this head — **13 frames**: the twelve plus `MIGRATED-g-champion-menu-open-390x640.png` |
 | + | the members link is a 44 px touch target | `sprint-w9-members-link-target`, plus the two sweeps that first reported it |
 
 An ordinary run without `WSF_CAPTURE_FRAMES` still writes zero bytes of this

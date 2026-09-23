@@ -144,6 +144,35 @@ test('the migrated shell captures on the real routes, and the top of the app agr
     timezone: 'America/New_York',
   });
 
+  /*
+    A SECOND ACCOUNT, FOR THE ONE FRAME THAT NEEDS A CHAMPION. The twelve
+    frames above are a member's, deliberately: that is what most people see.
+    The thirteenth is the relocated Manage entry, which only exists for a
+    Champion, so it needs somebody who is one — of their own community, so the
+    member's frames keep their single-community composition.
+  */
+  const champEmail = `wsf-w9-successor-champ-${stamp}@example.com`;
+  const champUid = await seedVerifiedUser(champEmail, password);
+  await seedProfile(champUid, 'Dana Brooks');
+  const champGroupId = `w9afterchamp-${stamp}`;
+  await seedCommunity({
+    groupId: champGroupId,
+    displayName: 'Westside Walkers',
+    joinPolicy: 'inviteOnly',
+    groupType: 'custom',
+    members: [{ uid: champUid, role: 'foundingChampion' }],
+  });
+  await seedActiveGoal({
+    goalId: `w9afterchampgoal-${stamp}`,
+    groupId: champGroupId,
+    ownerUid: champUid,
+    title: 'Lunchtime Laps',
+    target: 800,
+    unit: 'laps',
+    total: 617,
+    timezone: 'America/New_York',
+  });
+
   await page.setViewportSize({ width: 480, height: 940 });
   await signInVia(page, email, password);
   /*
@@ -316,6 +345,53 @@ test('the migrated shell captures on the real routes, and the top of the app agr
   }
 
   /*
+    g — THE RELOCATED MANAGE ENTRY, WITH THE MENU OPEN.
+
+    The Director's evidence gap (`5796980838`): none of the twelve frames shows
+    where Champion tools went when the page's chrome row was deleted. This is
+    that frame — a Champion, at the short phone class, with the shell's menu
+    open, showing the contextual "Manage community" above the utilities it now
+    sits with. The sheet itself is not redesigned and is not photographed here;
+    what is being shown is the way in.
+  */
+  await page.setViewportSize({ width: 480, height: 940 });
+  await page.goto('/');
+  await page.getByTestId('wsf-member-topbar-menu-button').last().click();
+  await page.getByTestId('wsf-member-topbar-menu-signout').click();
+  await expect(page.getByTestId('wsf-member-topbar')).toHaveCount(0, { timeout: 40_000 });
+  await signInVia(page, champEmail, password);
+  await page.goto('/');
+  await page.getByTestId('wsf-community-name').waitFor({ state: 'visible', timeout: 60_000 });
+
+  {
+    const device = { key: '390x640', width: 390, height: 640 } as const;
+    await page.setViewportSize({ width: device.width + 60, height: device.height + BANNER + 60 });
+    const stage = await easel(page, device.width, device.height, '/');
+    const frameEl = page.getByTestId('wsf-w9s-frame');
+    await stage.getByTestId('wsf-community-name').waitFor({ state: 'visible', timeout: 60_000 });
+
+    await stage.getByTestId('wsf-member-topbar-menu-button').click();
+    await stage.getByTestId('wsf-member-topbar-menu').waitFor({ state: 'visible', timeout: 30_000 });
+
+    // The frame has to show the thing it is evidence for, so both rows are
+    // asserted before the shutter rather than hoped for after it.
+    await expect(
+      stage.getByTestId('wsf-member-topbar-menu-manage-community'),
+      'the Champion menu frame does not show the relocated Manage entry',
+    ).toBeVisible();
+    await expect(
+      stage.getByTestId('wsf-member-topbar-menu-settings'),
+      'the Champion menu frame does not show Settings beside it',
+    ).toBeVisible();
+
+    if (CAPTURE_FRAMES) {
+      await frameEl.screenshot({
+        path: path.join(OUT, `MIGRATED-g-champion-menu-open-${device.key}.png`),
+      });
+    }
+  }
+
+  /*
     THE CONTACT SHEET: both phones, one image, for the review that needs the
     frames beside each other. The PNGs are INLINED as data URIs read back off
     disk rather than referenced by URL — the easel is served by the hosting
@@ -333,13 +409,25 @@ test('the migrated shell captures on the real routes, and the top of the app agr
       { id: 'e-move-open', label: 'MOVE open' },
       { id: 'f-contribute', label: 'Contributing' },
     ] as const;
-    const tiles = DEVICES.map((d) => ({
+    type Tile = { device: string; frames: { label: string; data: string }[] };
+    const tiles: Tile[] = DEVICES.map((d) => ({
       device: d.key,
       frames: STEPS.map((s) => {
         const file = path.join(OUT, `MIGRATED-${s.id}-${d.key}.png`);
         return { label: s.label, data: `data:image/png;base64,${fs.readFileSync(file).toString('base64')}` };
       }),
     }));
+    tiles.push({
+      device: '390x640',
+      frames: [
+        {
+          label: 'Champion menu open',
+          data: `data:image/png;base64,${fs
+            .readFileSync(path.join(OUT, 'MIGRATED-g-champion-menu-open-390x640.png'))
+            .toString('base64')}`,
+        },
+      ],
+    });
 
     await page.setViewportSize({ width: 1340, height: 1180 });
     await page.goto('/health');

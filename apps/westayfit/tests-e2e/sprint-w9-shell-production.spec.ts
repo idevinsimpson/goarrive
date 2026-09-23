@@ -71,6 +71,33 @@ async function scrollOf(page: Page, testId: string): Promise<number | null> {
   }, testId);
 }
 
+/**
+ * Set a scroll offset and read back what it SETTLED at.
+ *
+ * Community Home enriches itself after it paints — the presence line and the
+ * momentum rows arrive from their own reads — and Chrome's scroll anchoring
+ * then adjusts `scrollTop` to keep what the member is looking at in place. So
+ * a value planted before that lands is not the value the page is holding a
+ * moment later: measured under parallel load, a planted 180 read back as 238,
+ * exactly the height of the late content above it. Comparing the restored
+ * offset against the planted one would then be measuring the enrichment
+ * rather than the shell, and it failed that way twice in one suite run.
+ *
+ * This reads until two consecutive reads agree, and returns that. Nothing is
+ * relaxed: the restored offset still has to equal it exactly.
+ */
+async function settleScroll(page: Page, testId: string, top: number): Promise<number | null> {
+  await setScroll(page, testId, top);
+  let last = await scrollOf(page, testId);
+  for (let i = 0; i < 20; i += 1) {
+    await page.waitForTimeout(100);
+    const next = await scrollOf(page, testId);
+    if (next === last) return next;
+    last = next;
+  }
+  return last;
+}
+
 async function setScroll(page: Page, testId: string, top: number): Promise<number | null> {
   return page.evaluate(
     ({ id, value }) => {
@@ -153,7 +180,10 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
       entry, no reload, no remount, and the scroll left where it was.
     */
     expect(await markNode(page, 'wsf-community'), 'the Home screen was marked').toBe(true);
-    const planted = await setScroll(page, 'wsf-community', 160);
+    // The page's own late reads land first, so the offset is planted into a
+    // page that has stopped growing underneath it.
+    await expect(page.getByTestId('wsf-community-hero-presence')).toBeVisible({ timeout: 30_000 });
+    const planted = await settleScroll(page, 'wsf-community', 160);
     expect(planted, 'Home has somewhere to scroll to').not.toBeNull();
     const historyBefore = await page.evaluate(() => window.history.length);
 
@@ -248,7 +278,15 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
       'the member tab bar is reachable under the MOVE sheet — MOVE is offering to take a member where they already are',
     ).toBe(false);
 
-    await page.goBack();
+    /*
+      CLOSED BY ITS OWN CONTROL, NOT BY THE BROWSER. An earlier revision of
+      this leg pressed Back, which proves the router's history and says
+      nothing about the sheet: a sheet with no way out of its own would have
+      passed it. The Director asked for the named control (`5796776652`), so
+      that is what is pressed here and in every other proof in this file.
+    */
+    await expect(page.getByTestId('wsf-move-close')).toBeVisible();
+    await page.getByTestId('wsf-move-close').click();
     await expect(page.getByTestId('wsf-you-name')).toBeVisible({ timeout: 30_000 });
     expect(
       await markSurvives(page, 'wsf-you-name'),
@@ -404,7 +442,8 @@ test('MOVE opens as a sheet over the tab the member was on, and Close returns to
       non-vacuous scroll, and Close brings back that exact screen.
     */
     expect(await markNode(page, 'wsf-community'), 'Home was marked').toBe(true);
-    const homeScroll = await setScroll(page, 'wsf-community', 180);
+    await expect(page.getByTestId('wsf-community-hero-presence')).toBeVisible({ timeout: 30_000 });
+    const homeScroll = await settleScroll(page, 'wsf-community', 180);
     expect(homeScroll, 'Home has somewhere to scroll to').not.toBeNull();
     expect(homeScroll!, 'the planted Home scroll is not vacuous').toBeGreaterThan(40);
 
@@ -464,6 +503,91 @@ test('MOVE opens as a sheet over the tab the member was on, and Close returns to
       new URL(page.url()).pathname,
       'a cold MOVE closed to something other than the canonical member destination',
     ).toMatch(/^\/(community\/[^/]+)?$/);
+  } finally {
+    await context.close();
+  }
+});
+
+/**
+ * THE OTHER STATES THIS ROUTE STAYS OPEN IN.
+ *
+ * MOVE resolves itself and leaves when there is exactly one open goal, so the
+ * sheet is only ever ON SCREEN in three states: the chooser, "nothing is
+ * running", and the error. The chooser is covered above. The Director asked
+ * for the rest where the route remains open (`5796776652`), because a sheet
+ * that is a sheet in one state and a page in another is not a sheet — the
+ * scrim, the bounded panel and the one Close have to be the same in each.
+ *
+ * The working state is deliberately not asserted as a still: it exists only
+ * between the two reads that resolve it, and a test that waited for it would
+ * be timing a callable rather than photographing a screen.
+ */
+test('MOVE with nothing running is the same sheet, with the same way out', async ({ browser }) => {
+  test.setTimeout(240_000);
+
+  const stamp = stampId();
+  const email = `wsf-w9-nogoal-${stamp}@example.com`;
+  const password = 'Sup3rSecret!23';
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Alex Rivera');
+  const groupId = `w9nogoal-${stamp}`;
+  // A community with no goal at all: the state a member lands in between
+  // challenges, and the one the route stays open in.
+  await seedCommunity({
+    groupId,
+    displayName: 'Alpharetta Morning Movers',
+    joinPolicy: 'private',
+    members: [{ uid, role: 'member' }],
+  });
+
+  const context = await browser.newContext({
+    viewport: PHONE,
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  try {
+    await signInVia(page, email, password);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 40_000 });
+    expect(await markNode(page, 'wsf-community'), 'Home was marked').toBe(true);
+
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await expect(page.getByTestId('wsf-move-no-goal')).toBeVisible({ timeout: 40_000 });
+
+    // The same three things that make the chooser a sheet.
+    await expect(page.getByTestId('wsf-move-sheet')).toBeVisible();
+    const sheetBox = (await page.getByTestId('wsf-move-sheet').boundingBox())!;
+    expect(
+      Math.round(sheetBox.y),
+      'the no-goal sheet starts at the top of the viewport, so nothing is behind it',
+    ).toBeGreaterThan(0);
+    await expect(page.getByTestId('wsf-move-scrim')).toBeVisible();
+
+    const closeBox = (await page.getByTestId('wsf-move-close').boundingBox())!;
+    expect(Math.round(closeBox.width), 'no-goal: Close is under 44px wide').toBeGreaterThanOrEqual(
+      44,
+    );
+    expect(Math.round(closeBox.height), 'no-goal: Close is under 44px tall').toBeGreaterThanOrEqual(
+      44,
+    );
+
+    // The words this state exists to say are still its own.
+    await expect(page.getByTestId('wsf-move-no-goal')).toContainText('Nothing is running right now');
+    await expect(page.getByTestId('wsf-move-no-goal-community')).toBeVisible();
+
+    expect(
+      await markSurvives(page, 'wsf-community'),
+      'no-goal: MOVE replaced the tab underneath instead of opening over it',
+    ).toBe(true);
+
+    await page.getByTestId('wsf-move-close').click();
+    await expect(page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 30_000 });
+    expect(
+      await markSurvives(page, 'wsf-community'),
+      'no-goal: Close came back to a rebuilt screen',
+    ).toBe(true);
   } finally {
     await context.close();
   }
