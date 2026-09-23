@@ -324,6 +324,7 @@ test.describe('Candidate risks, measured', () => {
         nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue().catch(() => null),
         createdCardVisible: await visibleCount(page, 'wsf-start-created'),
         createVisible: await visibleCount(page, 'wsf-start-submit'),
+        openText: (await page.locator('[data-testid="wsf-start-open"]:visible').first().innerText().catch(() => '')).trim(),
       };
     }
     test.info().annotations.push({ type: 'acknowledgment', description: JSON.stringify({ ack, onStart }) });
@@ -332,6 +333,11 @@ test.describe('Candidate risks, measured', () => {
     // the community that exists is on screen, on top at its own centre.
     expect(ack, `nothing on screen names "${NAME}" before a blank form is offered: ${JSON.stringify({ home, onStart })}`).not.toBeNull();
     expect(ack!.body, 'the acknowledgment reuses the "couldn\'t open it" sentence (R1b) on a path that did not try to open it').not.toMatch(/couldn.t open it automatically/i);
+    if (ack!.where === 'start') {
+      // On Start the acknowledgment stands INSTEAD of a blank form (L0 5803830996).
+      expect(onStart.createVisible, 'a Create stands beside the acknowledgment, so a blank form can still submit').toBe(0);
+      expect(onStart.openText, 'the acknowledgment does not offer to open the community by name').toBe(`Open ${NAME}`);
+    }
     expect(await communitiesOf(me.uid), 'a second community exists before any deliberate second').toHaveLength(1);
     expect(creates.count(), 'a second create was sent before any deliberate second').toBe(1);
 
