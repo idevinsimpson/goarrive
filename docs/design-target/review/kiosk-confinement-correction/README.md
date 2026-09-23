@@ -16,8 +16,9 @@ The correction is this packet, assigned on
 | Baseline | `d0477cc047f4e71133fed0741935ebb99d46024d` (`claude/wsf-app-shell` head) |
 | Producer | `apps/westayfit/tests-e2e/sprint-w1b-kiosk-confinement.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1`, through `helpers/capture` |
-| Baseline run | **1 passed, 7 failed** — every confinement test fails, and the one that passes is *ordinary personal contribution keeps its tabs* |
-| Corrected run | **8 passed** |
+| Baseline run | **1 passed, 8 failed** — every confinement test fails, and the one that passes is *ordinary personal contribution keeps its tabs* |
+| Corrected run | **9 passed** |
+| Revision | `b24da91` → `HEAD` after the Director's source review [`5786956143`](https://github.com/idevinsimpson/goarrive/pull/427#issuecomment-5786956143): one shared kiosk predicate, and the two instruction lines raised to the control floor |
 | Classes | 800×1280 (the class a venue screen is drawn at) and 390×640 (the repository's short phone) |
 | Fixtures | `helpers/mobile`, isolated `demo-wsf-local` over loopback |
 
@@ -41,13 +42,13 @@ between a `before/` frame and its `after/` twin is the patch.
 
 | Frame | `before/` | `after/` | What changes |
 |---|---|---|---|
-| `kiosk-entry-tablet-800x1280.png` | `54aa63fe33030280` | `15c7f0589e804ea0` | Home · Community · MOVE · Progress · You along the bottom → gone |
+| `kiosk-entry-tablet-800x1280.png` | `54aa63fe33030280` | `73f7d3111ca7fcfd` | Home · Community · MOVE · Progress · You along the bottom → gone |
 | `kiosk-entry-short-phone-390x640.png` | `f8ecc246b637fda7` | `bf2bfc15798197df` | the clearest pair: the bar and the raised MOVE circle cut off *How we count squats*; without them the screen simply ends |
-| `kiosk-receipt-tablet-800x1280.png` | `e53c7191e43e2164` | `3c9b5897b8b2dfdb` | the bar goes; the chrome `Finish` and `Stay` become visible |
-| `kiosk-receipt-short-phone-390x640.png` | `8d9aebb914a333dd` | `46acca1888d0a082` | the same, at the short class |
+| `kiosk-receipt-tablet-800x1280.png` | `e53c7191e43e2164` | `a1a61673890c5caa` | the bar goes; the chrome `Finish`, `Stay` and both instruction lines become legible |
+| `kiosk-receipt-short-phone-390x640.png` | `8d9aebb914a333dd` | `1bfbab29a5adc543` | the same, at the short class |
 | `kiosk-unresolved-tablet-800x1280.png` | `2aa9ad903d76af19` | `2943449d8b5c6e0d` | the bar goes; every word of the unknown-outcome screen is unchanged |
-| `kiosk-signout-failed-tablet-800x1280.png` | `efdc17aa0b240be4` | `7b9dc8a89b788903` | the bar goes; the warning becomes readable |
-| `ordinary-contribution-keeps-its-tabs-tablet-800x1280.png` | `eb010b345f646278` | `93c3bed95cfdd3ff` | **nothing that matters** — the same route without `?kiosk=1` keeps all four tabs and MOVE |
+| `kiosk-signout-failed-tablet-800x1280.png` | `efdc17aa0b240be4` | `ed6629eb6ed84909` | the bar goes; the warning and both instruction lines become readable |
+| `ordinary-contribution-keeps-its-tabs-tablet-800x1280.png` | `eb010b345f646278` | `9fedcdcb32cce6b3` | **nothing that matters** — the same route without `?kiosk=1` keeps all four tabs and MOVE |
 
 **Three of the baseline frames are byte-identical to frames already delivered on
 Board 11** — `kiosk-receipt-tablet` to that package's `kiosk-receipt-stay`,
@@ -88,23 +89,64 @@ unknown outcome and the failed sign-out**:
 
 The producer reads each control's own computed colour and the colour actually
 painted behind it, and computes the WCAG contrast ratio. Controls a visitor has
-to act on are held at **4.5:1**; the two captions at **3:1**, the floor they
-already meet.
+to act on, and the instructions telling a visitor how their account is cleared,
+are all held at **4.5:1**.
 
 | Control | Before | After |
 |---|---|---|
 | `wsf-kiosk-finish-chrome` on the navy receipt | `#0B1F3A` on `#0B1F3A` — **1.0:1** | cream on navy |
 | `wsf-kiosk-stay` on the navy receipt | `#0B1F3A` on `#0B1F3A` — **1.0:1** | cream on navy |
 | `wsf-kiosk-finish-error` on the navy receipt | `#8A1C1C` on `#0B1F3A` — **1.47:1** | `#FFB4AE` on navy |
+| `wsf-kiosk-finish-explainer` — *what Finish does to your account* | `#5A6B85` on `#0B1F3A` — **3.05:1** | the kiosk display's own `rgba(247,245,240,0.78)` |
+| `wsf-kiosk-countdown` — *how long you have* | `#5A6B85` on `#0B1F3A` — **3.05:1** | the same |
 
-The light screens are unchanged and are asserted to stay legible there.
+The last two were first reported as a shortfall left in place. On the
+Director's review they are corrected instead: these are the instructions that
+tell a visitor at a shared device when and how their account is cleared, so
+they are held at the same **4.5:1** floor as the controls, not a lower one.
+They take the muted-on-navy the kiosk's own resting screen already uses rather
+than a new colour. The light screens are unchanged and are asserted to stay
+legible there.
 
-**One instrument correction, recorded rather than quietly fixed.** The first
+**Two instrument corrections, recorded rather than quietly fixed.** The first
 version of the colour probe read the computed colour of a layout wrapper rather
 than the node carrying the label, and reported `rgb(0,0,0)` — it called a
-*corrected* control broken. Had it erred the other way it would have called a
-broken control fixed, which is the version of this mistake that matters. It now
-walks to the leaf node that holds the text.
+*corrected* control broken. It now walks to the leaf node that holds the text.
+
+The second matters more, because it errs the dangerous way. The muted-on-navy
+the instruction lines now use is `rgba(247,245,240,0.78)` — **translucent**. A
+probe that reads three channels and drops the alpha scores it as near-white on
+navy, about 15:1, when what a visitor sees is about **9.6:1**. That is a tool
+certifying text as legible without having measured it. The foreground is now
+composited over the background it actually sits on before anything is computed,
+so every ratio in the table above is the ratio that lands on the glass.
+
+## One kiosk interpretation, not two
+
+The first revision normalised the repeated-parameter case in the shell alone.
+`shellAppliesTo` read `?kiosk=1&kiosk=x` as a kiosk and hid the bar; the
+contribution screen still called `isKioskFlag` directly, which accepted only a
+scalar, and so rendered the **ordinary** screen — no `Finish`, and its own
+member exits back on offer. Hiding the bar and withholding the way out is worse
+than either consistent answer. Read in source by the Director
+([`5786956143`](https://github.com/idevinsimpson/goarrive/pull/427#issuecomment-5786956143)),
+who was explicit that they had not reproduced it in a browser.
+
+**It reproduces.** Driven through this harness against `b24da91` at
+`/contribute/<goalId>?kiosk=1&kiosk=x`: the tab bar is gone and
+`wsf-contribute-back` is present, count 1 — a member exit on a shared device
+with nothing to end the session. That is now a measured finding, not only a
+source reading.
+
+The normalisation moved into `isKioskFlag` in `src/kioskSession.ts`, the one
+predicate both the shell and the screen already read, and the shell's private
+copy of the rule is gone. Scalar behaviour is unchanged. The unit tests cover
+missing, null, empty, `'0'`, `'1'`, `'true'`, a number, and the array shapes,
+and state the accepting set exactly; the e2e drives a **real repeated-query
+navigation** and asserts both halves agree — no member navigation *and* a
+working `Finish` — then drives `?kiosk=0&kiosk=no` and asserts that an
+unrecognised duplicate is an ordinary contribution that keeps its tabs. Failing
+closed must not mean treating every duplicate as a kiosk.
 
 ## Reported, not fixed
 
@@ -114,11 +156,9 @@ walks to the leaf node that holds the text.
   links are removed and `Finish` stays in the chrome, but extending the
   90-second rule to new screens is a behaviour change beyond this correction and
   is not made here.
-- **`Finish signs you out…` and `Finishing in N seconds` measure 3.05:1** on the
-  navy receipt (`#5A6B85` on `#0B1F3A`). Legible, and below AA for body text.
-  Not changed: they are readable in the frames, and re-toning approved
-  typography is not this packet's scope. The 3:1 floor is asserted so the number
-  cannot quietly get worse.
+- ~~The two instruction lines at 3.05:1.~~ **Corrected** on review — see the
+  legibility table above. The 3:1 floor they were held at is gone; they are
+  asserted at 4.5:1 with every other control on the surface.
 
 ## The boundary, stated rather than oversold
 
@@ -128,6 +168,19 @@ away: it drives the browser straight to `/you` by URL and asserts the account is
 still reachable that way. What the correction removes is every route the product
 offers out of a kiosk session; typing an address is not one of them, and no
 web page can make it one.
+
+## What the revision re-captured
+
+Five `after/` frames were re-taken; the `before/` set is byte-identical to its
+first capture, checked before and after every run.
+
+- the three **navy** frames (`kiosk-receipt` ×2, `kiosk-signout-failed`) changed
+  because the two instruction lines changed colour — that is the correction;
+- the two **light** frames (`kiosk-entry-tablet`,
+  `ordinary-contribution-keeps-its-tabs`) changed by **16 rows** each, at
+  y 338–353, which is the anchor's `Confirmed HH:MM` line. Those screens carry a
+  clock, so their bytes differ run to run; nothing else in them moved. Measured
+  row by row rather than asserted.
 
 ## Reproducing
 
@@ -150,14 +203,20 @@ assertions then fail, by design, and that failure is the defect.
 
 ## Regression run alongside this change
 
-`ui-app-shell` 3 · `ui-kiosk` 3 · `ui-contribute-short-phone` 7 — all passed,
-unmodified. Unit suite: 46 files, 795 tests, passed. `ts:check` passes.
+`ui-app-shell` 3 · `ui-kiosk` 3 · `ui-contribute-short-phone` 7 — **13 passed**,
+all unmodified. Unit suite: 46 files, **797 tests**, passed — the two added are
+the focused kiosk-flag cases in `tests/kiosk-session.test.ts`, the only existing
+test file this packet touches and the one the Director's review named.
+`ts:check` passes.
 
 ## Scope
 
 Loopback and `demo-wsf-local` throughout. Product changes are confined to
-`src/ui/MemberTabBar.tsx` and `app/contribute/[goalId].tsx`; `app/_layout.tsx`
-and `src/kioskSession.ts` were **not edited**. No dependency, backend, rules,
+`src/ui/MemberTabBar.tsx`, `app/contribute/[goalId].tsx` and — on the
+Director's explicit authorisation in `5786956143`, announced before the edit —
+the `isKioskFlag` predicate in `src/kioskSession.ts` with its focused tests.
+`app/_layout.tsx` was **not edited**. No session, storage or auth model
+changed. No dependency, backend, rules,
 index, IAM, auth-model, storage-schema or policy change; no existing test
 touched; no accepted or frozen image written. Every account, community, goal and
 number is synthetic and local to the emulator.

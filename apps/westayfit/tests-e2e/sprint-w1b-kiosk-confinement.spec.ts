@@ -145,19 +145,50 @@ async function seedKiosk(tag: string): Promise<Fixture> {
 
 // ---- legibility, measured rather than eyeballed ----------------------------
 
-/** WCAG relative luminance of an `rgb(r, g, b)` string. */
-function luminance(css: string): number {
-  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(css);
+type Rgba = { r: number; g: number; b: number; a: number };
+
+function parseColour(css: string): Rgba {
+  const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,/\s]+([\d.]+))?/.exec(css);
   if (!m) throw new Error(`not an rgb colour: ${css}`);
+  return {
+    r: Number(m[1]),
+    g: Number(m[2]),
+    b: Number(m[3]),
+    a: m[4] === undefined ? 1 : Number(m[4]),
+  };
+}
+
+/**
+ * TRANSLUCENT TEXT IS MEASURED AS IT LANDS, NOT AS IT IS DECLARED.
+ *
+ * The product's muted-on-navy is `rgba(247,245,240,0.78)`. Reading those three
+ * channels and dropping the alpha would score it as near-white on navy -- about
+ * 15:1, when what a visitor actually sees is roughly 9.6:1. The error is in the
+ * direction that matters: it would let this file certify text as legible that
+ * had never been measured. So the foreground is composited over the background
+ * it sits on before anything is computed.
+ */
+function composite(fg: Rgba, bg: Rgba): Rgba {
+  return {
+    r: fg.a * fg.r + (1 - fg.a) * bg.r,
+    g: fg.a * fg.g + (1 - fg.a) * bg.g,
+    b: fg.a * fg.b + (1 - fg.a) * bg.b,
+    a: 1,
+  };
+}
+
+/** WCAG relative luminance of an opaque colour. */
+function luminance({ r, g, b }: Rgba): number {
   const channel = (v: number) => {
     const c = v / 255;
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
-  const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])].map(channel);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
-function contrast(fg: string, bg: string): number {
+function contrast(fgCss: string, bgCss: string): number {
+  const bg = parseColour(bgCss);
+  const fg = composite(parseColour(fgCss), bg);
   const a = luminance(fg);
   const b = luminance(bg);
   const [hi, lo] = a > b ? [a, b] : [b, a];
@@ -298,8 +329,10 @@ for (const klass of [
       // and the chrome `Finish` were both drawn in the background's own colour.
       await expectLegible(page, 'wsf-kiosk-stay');
       await expectLegible(page, 'wsf-kiosk-finish');
-      await expectLegible(page, 'wsf-kiosk-finish-explainer', 3);
-      await expectLegible(page, 'wsf-kiosk-countdown', 3);
+      // The instructions -- what Finish does to the visitor's account, and how
+      // long they have -- are held at the control floor, not a lower one.
+      await expectLegible(page, 'wsf-kiosk-finish-explainer');
+      await expectLegible(page, 'wsf-kiosk-countdown');
 
       // Confinement that cost the visitor their way out would be worse than
       // the defect.
@@ -431,6 +464,30 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     expect(hit, 'an ordinary member can still reach their own tabs').toBe(true);
     await page.waitForTimeout(500);
     await saveFrame(page, frame('ordinary-contribution-keeps-its-tabs-tablet-800x1280.png'));
+  });
+
+  test('a repeated ?kiosk parameter is one verdict, not two', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seedKiosk('f');
+    // A URL can carry the same key twice. The router hands that over as an
+    // array, and while only the shell normalised it the two halves of one
+    // journey disagreed: the shell called it a kiosk and hid the bar, the
+    // screen called it ordinary and withheld Finish, leaving a shared device
+    // with the screen's own member exits and nothing to end the session with.
+    // Driven as a real navigation, not asserted on the predicate alone.
+    await signInVia(page, fx.email, fx.password);
+    await page.goto(`/contribute/${fx.goalId}?kiosk=1&kiosk=x`);
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+
+    await expectNoMemberNavigation(page);
+    await expectFinishUsable(page);
+
+    // And the same URL with no recognised value is an ORDINARY contribution:
+    // failing closed must not mean treating every duplicate as a kiosk.
+    await page.goto(`/contribute/${fx.goalId}?kiosk=0&kiosk=no`);
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+    await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toHaveCount(0);
   });
 
   test('the boundary: this is in-app confinement, not a device lockdown', async ({ page }) => {

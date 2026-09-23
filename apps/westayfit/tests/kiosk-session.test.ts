@@ -73,6 +73,30 @@ describe('the handoff across sign-in', () => {
     expect(isKioskFlag('0')).toBe(false);
     expect(isKioskFlag(undefined)).toBe(false);
     expect(isKioskFlag(1)).toBe(false);
+    expect(isKioskFlag(null)).toBe(false);
+    expect(isKioskFlag('')).toBe(false);
+  });
+
+  it('fails CLOSED on a repeated query parameter, which arrives as an array', () => {
+    // A URL can carry ?kiosk twice and the router hands that over as an array.
+    // Reading it as "not the flag" would hand a shared device its ordinary
+    // member navigation back for the price of one duplicated parameter.
+    expect(isKioskFlag(['1'])).toBe(true);
+    expect(isKioskFlag(['1', 'x'])).toBe(true);
+    expect(isKioskFlag(['x', 'true'])).toBe(true);
+    expect(isKioskFlag(['0', 'no'])).toBe(false);
+    expect(isKioskFlag([])).toBe(false);
+  });
+
+  it('is the ONE answer the shell and the screen both read', () => {
+    // The app shell (shellAppliesTo) and the contribution screen both ask this
+    // function about the same URL. While the array case was normalised in the
+    // shell alone they could disagree inside one journey -- no tab bar because
+    // the shell said kiosk, no Finish because the screen said ordinary, and the
+    // screen's own member exits still on offer. Nothing here may fork again:
+    // every shape has exactly one verdict.
+    const shapes: unknown[] = [undefined, null, '', '0', '1', 'true', ['1'], ['1', 'x'], ['0'], []];
+    expect(shapes.filter((v) => isKioskFlag(v))).toEqual(['1', 'true', ['1'], ['1', 'x']]);
   });
 });
 

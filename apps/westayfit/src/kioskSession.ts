@@ -74,8 +74,26 @@ export function kioskContributeRoute(goalId: string): string {
   return `/contribute/${encodeURIComponent(goalId)}?kiosk=1`;
 }
 
-/** Whether a route parameter puts the contribution screen in kiosk mode. */
+/**
+ * Whether a route parameter puts a journey in kiosk mode.
+ *
+ * ONE ANSWER, FOR EVERY READER. The shell decides whether to draw member
+ * navigation and the contribution screen decides whether to offer Finish, and
+ * they have to reach the same verdict from the same URL. When the array case
+ * was normalised in the shell alone, `?kiosk=1&kiosk=x` produced the worst of
+ * both: no tab bar, because the shell called it a kiosk, AND no Finish, because
+ * the screen called it ordinary -- leaving a shared device with the screen's own
+ * member exits and nothing to end the session with. The normalisation belongs
+ * here, where both of them already look.
+ *
+ * FAIL CLOSED ON A REPEATED PARAMETER. A URL can carry the same key twice, and
+ * the router hands that over as an array. Reading it as "not the flag" would
+ * hand a shared device its ordinary navigation back for the price of one
+ * duplicated query parameter, so ANY element saying kiosk makes it a kiosk.
+ * Scalar behaviour is unchanged: '1' and 'true', nothing else.
+ */
 export function isKioskFlag(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((entry) => isKioskFlag(entry));
   return value === '1' || value === 'true';
 }
 

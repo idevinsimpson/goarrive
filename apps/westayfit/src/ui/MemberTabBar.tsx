@@ -85,21 +85,17 @@ const SHELL_EXACT = ['/move'];
  * So the route's parameters are an input now. A caller that has none passes
  * none and gets the old behaviour exactly.
  *
- * FAIL CLOSED ON A REPEATED PARAMETER. `?kiosk=1&kiosk=x` arrives as an array.
- * Treating an array as "not the flag" would hand a shared device its bar back
- * for the price of one duplicated query parameter, so ANY element saying kiosk
- * makes it a kiosk.
+ * THE RULE IS NOT COPIED HERE. `isKioskFlag` in src/kioskSession.ts is the one
+ * answer, and the contribution screen asks it the same question about the same
+ * URL. An earlier revision of this fix normalised the repeated-parameter case
+ * in this file alone, which let the shell and the screen disagree within one
+ * journey -- no bar because the shell said kiosk, no Finish because the screen
+ * said ordinary.
  */
-function isKioskRoute(params?: ShellRouteParams): boolean {
-  const value = params?.kiosk;
-  if (Array.isArray(value)) return value.some((entry) => isKioskFlag(entry));
-  return isKioskFlag(value);
-}
-
 export type ShellRouteParams = { kiosk?: unknown };
 
 export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boolean {
-  if (isKioskRoute(params)) return false;
+  if (isKioskFlag(params?.kiosk)) return false;
   if (pathname === '/') return true;
   if (SHELL_EXACT.includes(pathname)) return true;
   return SHELL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

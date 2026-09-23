@@ -1095,13 +1095,24 @@ export default function ContributeToGoal() {
             {kioskFinishing ? 'Finishing…' : 'Finish'}
           </Text>
         </Pressable>
-        <Text style={styles.caption} testID="wsf-kiosk-finish-explainer">
+        {/* These two lines are the instructions: what Finish does to the
+            visitor's account, and how long they have. On a shared device that
+            is not decoration, so on the navy screen they take the same muted
+            colourway the kiosk's own display uses rather than the light one. */}
+        <Text
+          style={[styles.caption, tone === 'dark' ? styles.captionOnDark : null]}
+          testID="wsf-kiosk-finish-explainer"
+        >
           Finish signs you out and returns this device to its start screen.
         </Text>
         <View style={styles.kioskCountdownRow}>
           {/* D-2. The countdown changes without anybody acting, so it
               announces itself politely rather than interrupting. */}
-          <Text style={styles.caption} testID="wsf-kiosk-countdown" aria-live="polite">
+          <Text
+            style={[styles.caption, tone === 'dark' ? styles.captionOnDark : null]}
+            testID="wsf-kiosk-countdown"
+            aria-live="polite"
+          >
             {kioskCountdownLabel(kioskRemainingSeconds(kioskRemaining))}
           </Text>
           <Pressable
@@ -2367,6 +2378,9 @@ const styles = StyleSheet.create({
      ones are unchanged: the unresolved and refusal screens are cream, and
      what reads there must keep reading there. */
   tertiaryButtonTextDark: { color: CREAM },
+  /* The muted-on-navy the kiosk's own resting screen already uses. Measured
+     composited over the navy it sits on, not as an unblended colour. */
+  captionOnDark: { color: HERO_MUTED },
   kioskErrorDark: { color: '#FFB4AE' },
 
   /* ---- the confirmed receipt: the whole page is the moment --------------- */
