@@ -7,6 +7,10 @@ import { useWsfAuth } from '../../src/auth';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { MemberTabBar } from '../../src/ui/MemberTabBar';
+import {
+  MemberShellActionsProvider,
+  useMemberShellActions,
+} from '../../src/ui/memberShellActions';
 import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 
 /**
@@ -39,6 +43,24 @@ import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
  * add two entries where they added one — was measured, reported and accepted.
  */
 export default function MemberTabsLayout() {
+  /*
+    THE SHELL'S ACTION REGISTRY WRAPS THE SHELL, NOT THE OTHER WAY AROUND.
+
+    The bar reads what the focused screen has registered, so the provider has
+    to sit ABOVE the component that renders the bar — a component cannot
+    consume a context it provides. `ownerUid` empties the registry when the
+    account changes, so one person's Champion action can never be offered to
+    the next person to sign in on the same device.
+  */
+  const { user } = useWsfAuth();
+  return (
+    <MemberShellActionsProvider ownerUid={user?.uid ?? null}>
+      <MemberShell />
+    </MemberShellActionsProvider>
+  );
+}
+
+function MemberShell() {
   const router = useRouter();
   /**
    * NO ACCOUNT, NO CHROME.
@@ -53,6 +75,14 @@ export default function MemberTabsLayout() {
   const { user } = useWsfAuth();
   const signedIn = Boolean(user);
   const [menuOpen, setMenuOpen] = useState(false);
+  /*
+    WHAT THE SCREEN THE MEMBER IS ON HAS ASKED FOR. Today that is exactly one
+    thing — a Champion's Manage community, relocated out of Community Home's
+    own chrome row — and it is offered ABOVE the utilities, because it belongs
+    to the page in front of them while Settings, Build details and Sign out
+    belong to the app.
+  */
+  const routeActions = useMemberShellActions();
   const [signingOut, setSigningOut] = useState(false);
 
   /**
@@ -69,6 +99,14 @@ export default function MemberTabsLayout() {
    * row promising one would be an invention.
    */
   const menu: MemberMenuItem[] = [
+    ...routeActions.map(
+      (action): MemberMenuItem => ({
+        kind: 'action',
+        key: action.key,
+        label: action.label,
+        onPress: action.onPress,
+      }),
+    ),
     {
       kind: 'link',
       key: 'settings',
