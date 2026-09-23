@@ -1,7 +1,7 @@
-import { Link, router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { Link, router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../../../src/auth';
@@ -108,12 +108,78 @@ export default function BrandShell() {
     };
   }, [ready, user]);
 
+  /*
+    A GENUINE RETURN TO THIS SCREEN RE-READS WHAT IT SHOWS, QUIETLY.
+
+    Home stays mounted under whatever the member opens from it, and a labelled
+    "Back to home" returns to it as it stands (contribute/[goalId].tsx). So a
+    member who asked for their list, moved, and came back is looking at the
+    SAME list — which read once, on mount, and would otherwise still show the
+    figures from before they moved (measured: a card at 1,847 against a
+    committed 1,867, #458).
+
+    Bumped on every focus except the first: the mount read covers that one,
+    and reselecting the tab already in view is not a focus change, so it stays
+    a no-op. Each return is one wsfMyCommunities read and one wsfListGoals
+    read per community — the same reads the mount makes — and nothing polls.
+  */
+  const [returnToken, setReturnToken] = useState(0);
+  const focusedBefore = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedBefore.current) setReturnToken((n) => n + 1);
+      focusedBefore.current = true;
+    }, [])
+  );
+  /*
+    Deliberately NOT the mount effect above: that one sets `loading` so a
+    different account can never see the previous one's list, and on a return
+    that would blank a screen the member is already looking at. Here nothing
+    is cleared. A successful read replaces the list (and, through the effect
+    below, re-reads every card's figures); a failed one leaves what is on
+    screen standing and re-reads the figures alone. A read still in flight is
+    left to finish. The cleanup runs when the account changes, so a result
+    read for one account is never applied to another.
+  */
+  const [figuresRefreshToken, setFiguresRefreshToken] = useState(0);
+  const handledReturn = useRef(0);
+  useEffect(() => {
+    if (!wsfAuthEnabled || !ready || !user) return;
+    if (returnToken === 0 || returnToken === handledReturn.current) return;
+    handledReturn.current = returnToken;
+    if (myCommunities.kind === 'idle' || myCommunities.kind === 'loading') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const fn = httpsCallable<Record<string, never>, { items: MyCommunityItem[] }>(
+          getFirebaseFunctions(),
+          'wsfMyCommunities'
+        );
+        const result = await fn({});
+        if (cancelled) return;
+        setMyCommunities({ kind: 'ready', items: result.data.items });
+      } catch (e) {
+        if (cancelled) return;
+        console.warn('[wsf] home list refresh failed', e);
+        setFiguresRefreshToken((n) => n + 1);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, returnToken, myCommunities.kind]);
+
   // The open goal of each community, so a card can say what is happening and
   // what the next action is. One wsfListGoals read per community (the same
   // member-authorized read Community Home makes, with history so the row
   // carries its confirmed total), in parallel; each card settles on its own
   // so one slow or failed read never blanks the others. A failed read falls
   // back to the challenge line the list already carries.
+  //
+  // A card that already has a figure keeps it until its new read returns: a
+  // re-read on a return replaces numbers, it never shows loading over them.
+  // The mount effect passes through `loading` first, which clears every card,
+  // so a figure never carries over from a different account.
   useEffect(() => {
     if (myCommunities.kind !== 'ready') {
       setGoalsByGroup({});
@@ -121,7 +187,9 @@ export default function BrandShell() {
     }
     let cancelled = false;
     const ids = myCommunities.items.map((item) => item.groupId);
-    setGoalsByGroup(Object.fromEntries(ids.map((id) => [id, { kind: 'loading' } as CardGoalState])));
+    setGoalsByGroup((prev) =>
+      Object.fromEntries(ids.map((id) => [id, prev[id] ?? ({ kind: 'loading' } as CardGoalState)]))
+    );
     for (const groupId of ids) {
       (async () => {
         let next: CardGoalState;
@@ -143,7 +211,7 @@ export default function BrandShell() {
     return () => {
       cancelled = true;
     };
-  }, [myCommunities]);
+  }, [myCommunities, figuresRefreshToken]);
 
   const onJoinCodeSubmit = useCallback(() => {
     const trimmed = joinCodeInput.trim();
@@ -406,9 +474,22 @@ function SignedInHome({
   // still called and still reads what it reads — only the redirect is skipped,
   // so nothing the member has opened before is forgotten by passing through
   // here.
-  const resolved = state.kind === 'ready'
-    ? resolveCurrentCommunity(user?.uid ?? null, state.items.map((item) => item.groupId))
-    : null;
+  //
+  // DECIDED ONCE, ON WHAT IS FIRST READ FOR THIS ACCOUNT. A later re-read (a
+  // genuine return to this screen, above) replaces figures on the screen the
+  // member is looking at; it never moves them. A member who left a create
+  // mid-flight and came Home stays on Home when it lands (M5), and a member
+  // who pressed Back from a community to see the list gets the list, not the
+  // community again. A different account decides afresh.
+  const uid = user?.uid ?? null;
+  const decided = useRef<{ uid: string | null; openable: string | null } | null>(null);
+  if (state.kind === 'ready' && (decided.current === null || decided.current.uid !== uid)) {
+    decided.current = {
+      uid,
+      openable: resolveCurrentCommunity(uid, state.items.map((item) => item.groupId)),
+    };
+  }
+  const resolved = decided.current?.uid === uid ? decided.current.openable : null;
   const openable = listRequested ? null : resolved;
   useEffect(() => {
     if (openable) router.replace(`/community/${openable}`);
