@@ -1,9 +1,16 @@
 # `/goals/new` — findings
 
 Read off the source at `a193b43` (route blob `e5be66f`) and off the current-build captures in
-`../goal-setup-current/`. **Every one of these is REPORTED. Nothing here is patched:**
-`apps/westayfit/app/goals/new.tsx` is unchanged on this branch and stays unchanged until the
-Director rules on the target. Where a finding shaped a drawing, the drawing is named.
+`../goal-setup-current/`. They were all **reported and not patched** while the target was under
+review. The target has since passed (`5788308449`) and the route is implemented, so each finding
+below now also says what actually happened to it.
+
+| | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 |
+|---|---|---|---|---|---|---|---|---|
+| | fixed | fixed | fixed | fixed | fixed | **held — awaiting the F6 ruling** | still reported | still reported |
+
+F6 is deliberately not fixed: the release said to keep the route's current fill until the
+Director rules on it. F7 and F8 are outside what this packet was released to change.
 
 ## F1 — a lost response makes a second goal, and nothing on the client can tell
 
@@ -46,6 +53,31 @@ Director's contract point for point:
 
 **No idempotency is claimed and no backend field is asked for** — the honest frontend answer to
 a backend gap is to stop asserting what it cannot observe, not to design around it.
+
+### Two things the drawings did not settle, decided in the implementation
+
+A target can draw one refusal. The route has to classify every one of them, so these rules are
+in the code with their reasons, and they are recorded here because a reviewer cannot read them
+off a frame.
+
+**Which failures count as a refusal rather than an unknown result.** Only codes the server can
+*only* have produced **before** it wrote: `unauthenticated`, `failed-precondition`,
+`permission-denied`, `invalid-argument`, `not-found`, `resource-exhausted`. Everything else —
+`unavailable`, `deadline-exceeded`, `internal`, `aborted`, `cancelled`, an unrecognised code,
+and anything that is not a `FirebaseError` — is **unknown**, because a transaction that throws
+after committing is indistinguishable from one that never ran. Ambiguity resolves toward "we do
+not know" and never toward a claim.
+
+**Which refusals take the submit control away.** The target drew `permission-denied`, where
+redrawing the control would buy the Champion a second copy of the same sentence. Generalising
+that to every refusal would be wrong: `invalid-argument` and `resource-exhausted` are refusals a
+Champion *can* clear from this page. So the control is removed only for a refusal that cannot be
+cleared here — `unauthenticated`, `failed-precondition`, `permission-denied`, `not-found` — and
+kept otherwise.
+
+**One sentence is scoped by a third rule.** *"The server refused this request, so no goal was
+created."* is appended only when a server actually answered. The one refusal that comes from a
+client guard (arriving with no community) does not borrow it.
 
 **For the implementation's independent review, not this checkpoint:** W7's existing-community
 recovery assertion finds an *attached link* to the stored goal, which is narrower than proving

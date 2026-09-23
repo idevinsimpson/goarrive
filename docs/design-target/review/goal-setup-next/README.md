@@ -1,13 +1,18 @@
-# `/goals/new` — goal setup TARGET checkpoint (W6)
+# `/goals/new` — goal setup TARGET and AFTER (W6)
 
-**NOTHING IN THIS PACKAGE IS ACCEPTED AND NOTHING IN IT IS IMPLEMENTED.** The thirteen images
-under `target/` are DRAWINGS awaiting the Director's verdict. Every one of them carries a
-`PROPOSED / NOT ACCEPTED` strip inside the image, and the producer asserts the strip is there
-before it writes the frame. **None of them is an AFTER.**
+**The target PASSED** (`5788308449`, Director `5788288648` §3, reviewed at `f880732`) and is now
+implemented on the real route. This package holds both halves:
 
-The product route `apps/westayfit/app/goals/new.tsx` is **unchanged** on this branch — blob
-`e5be66f0e9afb03ae92c1ba3573fc641bd749ef3`, the same blob the Director had read — and stays
-unchanged until the target has a verdict.
+- `target/` — the thirteen **accepted** drawings. Every one carries a `PROPOSED / NOT ACCEPTED`
+  strip inside the image, and they keep it: the strip records what they were when they were
+  ruled on. **None of them is an AFTER**, and they have not changed a byte since the verdict.
+- `after/` — the **matched AFTERs**: the shipped route, photographed. See
+  [`after/README.md`](after/README.md), including the three places the AFTER deliberately
+  differs from the drawing.
+- `before/` — the reuse proof for the frozen BEFOREs in `../goal-setup-current/`.
+
+Everything below describes the target as it was submitted, and is kept as the record of what
+was argued for.
 
 | | |
 |---|---|
@@ -122,6 +127,15 @@ frame is drawn at the scroll position where a Champion actually meets the commit
 cannot hold the repeat decision **and** the whole panel, and drawing them together would either
 clip the button — the exact defect the frame is about — or invent a composition no phone
 renders.
+
+## What shipped
+
+`apps/westayfit/app/goals/new.tsx` now carries the spine, the payoff at the display tier, the
+duration pills, the review-and-commit as one navy object, and the three truthful outcomes — plus
+a foot reserve so nothing on this route ends under the floating member tab bar. Two things the
+drawings did not settle were decided in code and are written up in `findings.md` F1: which
+failure codes count as a refusal rather than an unknown result, and which refusals take the
+submit control away. The route keeps its current `PROGRESS_GREEN` primary until F6 is ruled on.
 
 ## The producer writes nothing unless asked
 
