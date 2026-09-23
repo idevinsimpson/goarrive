@@ -807,13 +807,39 @@ test('the shell is unchanged for an ordinary member: /contribute without the kio
 
   // The member's own chrome: the shell, and the Back the kiosk deliberately
   // replaces. Neither is a kiosk control.
-  await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+  // THE SHELL MIGRATION MOVED THIS CONTROL; IT DID NOT REMOVE IT.
+  //
+  // This case used to assert `wsf-member-tabs` on screen here. Under the
+  // accepted shell (`dd867211`, product `41f80f3`) `/contribute` is a focused,
+  // barless flow by ruling — it sits outside `(tabs)`, so the tab bar is gone
+  // from this route deliberately and `MemberTabBar` is no longer mounted over
+  // it. Measured at that base: shell=false, wayOn=1, countdown=none,
+  // attached=1 on every settled screen.
+  //
+  // What this case is FOR is unchanged, and is the half that must not move: a
+  // fix that closed the kiosk seam by stranding the ordinary member too would
+  // still have to fail here. So the assertion is re-pointed from the bar to
+  // the property the bar used to carry — the member keeps a way out of the
+  // contribution screen and is given no kiosk semantics. That is weaker about
+  // the MECHANISM and exactly as strong about the MEMBER.
   await expect(page.getByTestId('wsf-contribute-back')).toBeVisible();
   await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toHaveCount(0);
   await expect(page.getByTestId('wsf-kiosk-finish')).toHaveCount(0);
 
-  // And the four destinations still work as destinations for the member whose
-  // screen this is.
+  // AND THE MEMBER CAN STILL GET BACK TO THEIR OWN PRODUCT.
+  //
+  // This used to press the tab bar here, because the bar was on this screen.
+  // Under the accepted shell the member leaves a focused flow by its own Back
+  // control and lands in the mounted tab context, which is where the tabs
+  // live. The destination is what matters and it is unchanged: the member
+  // reaches their own surfaces, with the bar, from the contribution screen.
+  await page.getByTestId('wsf-contribute-back').click();
+  await expect(page.getByTestId('wsf-member-tabs')).toBeVisible({ timeout: 25_000 });
+  expect(page.url(), 'Back from an ordinary contribution leaves /contribute').not.toContain(
+    '/contribute/'
+  );
+
+  // The tabs reached that way are real destinations, not decoration.
   await page.getByTestId('wsf-member-tab-you').click();
   await page.waitForURL(/\/you\b/, { timeout: 25_000 });
   await expect
@@ -1292,7 +1318,7 @@ test('the shell and the screen agree on kiosk mode for every shape of the flag',
   await walkUpAndSignIn(page, fx);
 
   const observed: Record<string, string> = {};
-  const disagreements: string[] = [];
+  const shellOverContribute: string[] = [];
   const stranded: string[] = [];
   const kioskWithEscapes: string[] = [];
   const lostKioskMode: string[] = [];
@@ -1315,8 +1341,21 @@ test('the shell and the screen agree on kiosk mode for every shape of the flag',
     observed[shape.name] =
       `screenKiosk=${screenKiosk} shell=${shell} back=${memberBack} escapes=${escapes.length}`;
 
-    // 1. The two readers agree about what this route is.
-    if (screenKiosk === shell) disagreements.push(`${shape.name}(${observed[shape.name]})`);
+    // 1. THE SHELL NEVER RENDERS OVER THIS ROUTE — for ANY shape of the flag.
+    //
+    //    This clause used to compare two readers, `shellAppliesTo` and the
+    //    screen's own `isKioskFlag`, because both rendered here and could
+    //    disagree. Under the accepted shell `/contribute` sits outside
+    //    `(tabs)` entirely, so there is no second reader left to disagree
+    //    with and the old comparison flagged every non-kiosk shape on a
+    //    correct product.
+    //
+    //    What replaces it is not weaker: the defect this case was born for was
+    //    a member bar sitting over a kiosk contribution screen, and a bar
+    //    returning over ANY shape of this route — kiosk or not — is now the
+    //    thing reported. Clause 4 still carries the repeated-parameter defect
+    //    on its own.
+    if (shell) shellOverContribute.push(`${shape.name}(${observed[shape.name]})`);
     // 2. A kiosk surface has no way out of the session.
     if (screenKiosk && escapes.length > 0) {
       kioskWithEscapes.push(`${shape.name}=[${escapes.join(', ')}]`);
@@ -1324,7 +1363,12 @@ test('the shell and the screen agree on kiosk mode for every shape of the flag',
     // 3. A member surface is a WHOLE member surface. Neither-nor is the
     //    failure this case exists for: no Finish and no member chrome leaves a
     //    visitor on a shared device with nothing that ends or leaves anything.
-    if (!screenKiosk && !(shell && memberBack)) {
+    // `shell &&` was dropped here for the reason CASE 5 records: under the
+    // accepted shell an ordinary `/contribute` is barless by ruling, so
+    // requiring the bar would fail every non-kiosk shape on a product that is
+    // behaving correctly. The strand test itself is untouched — a non-kiosk
+    // surface with no way out is still reported.
+    if (!screenKiosk && !memberBack) {
       stranded.push(`${shape.name}(${observed[shape.name]})`);
     }
     // 4. A URL THAT SAYS KIOSK IS A KIOSK. The clauses above compare the two
@@ -1353,13 +1397,13 @@ test('the shell and the screen agree on kiosk mode for every shape of the flag',
     run, which is how a reviewer ends up chasing one defect at a time. The
     whole verdict lands at once instead:
 
-      disagreements    the two readers disagree about the same URL
+      shellOverContribute  the member bar rendered over this route at all
       kioskWithEscapes a kiosk surface offers a way out of the session
       stranded         a non-kiosk surface is not a whole member surface
       lostKioskMode    a URL carrying the flag did not reach kiosk mode
   */
-  expect({ disagreements, kioskWithEscapes, stranded, lostKioskMode }).toEqual({
-    disagreements: [],
+  expect({ shellOverContribute, kioskWithEscapes, stranded, lostKioskMode }).toEqual({
+    shellOverContribute: [],
     kioskWithEscapes: [],
     stranded: [],
     lostKioskMode: [],
@@ -1949,7 +1993,10 @@ test('an ordinary member on a closed, missing or unloadable goal keeps navigatio
     const attached = (await signedInAccounts(page)).length;
     observed[screen] = `shell=${shell} wayOn=${wayOn} countdown=${countdown ?? 'none'} attached=${attached}`;
 
-    expect(shell, `${screen}: the member keeps the shell`).toBe(true);
+    // The bar is gone from this route by ruling (see CASE 5); `shell` is still
+    // measured and reported in the annotation, but what must hold for the
+    // member is that they are not stranded and are never given kiosk
+    // semantics. Those are the next three assertions, unchanged.
     expect(wayOn, `${screen}: the member keeps a way on from this screen`).toBeGreaterThan(0);
     expect(countdown, `${screen}: an ordinary member is never on a deadline`).toBeNull();
     expect(attached, `${screen}: the member is not signed out`).toBeGreaterThan(0);

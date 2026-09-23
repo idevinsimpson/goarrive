@@ -1977,3 +1977,88 @@ post-deploy transport correction) remain open and are not mine to close.
 
 Both match the packet. No live call, secret, deploy, dispatch or IAM; W3's and L0's files
 read, never edited.
+
+---
+
+## SHELL INTEGRATION — K1–K18 at base `dd867211`, and three controls re-expressed
+
+The accepted shell integrated into `claude/wsf-app-shell` as
+**`dd8672115aea326a4e0e1153a2f73a6f7780f695`** (W9's migration at review head
+`fca3326`, product `41f80f3`). Merged into this branch by merge commit; the
+web bundle was rebuilt at the merged head before anything was measured.
+
+**Carry fact 1 re-verified against the real integrated base, not assumed:**
+`git diff --stat 37367fd2 dd867211 -- functions-westayfit/src` is **empty**, so
+the identity suites (25) did not gate this and were not re-run.
+`apps/westayfit/app` (+1450 / −330) and `apps/westayfit/src` (+1201 / −42) did
+move, so the kiosk suite did. All four kiosk roots are still present and
+`src/kioskSession.ts` — `isKioskFlag`, the single predicate — is untouched.
+
+### The first run: 15 passed, 3 failed — and the failures were the right ones
+
+K5, K11 and K17 failed. Every one of them failed on the same thing: they
+asserted `wsf-member-tabs` on `/contribute`, and under the accepted shell that
+route sits **outside `(tabs)`** and is a focused, barless flow by the
+Director's ruling; `MemberTabBar` is no longer mounted over it at all. **The
+kiosk half passed untouched** — K4's escape contract, K9's bounded states,
+K13–K16's deadline work and K18's destination control all green.
+
+This is exactly the case K5's own comment was written for: *"a patch that
+closed the kiosk seam by dropping `/contribute` from the shell's prefixes
+would turn CASE 4 green and take this with it."* The control did its job. The
+difference is that this was not a patch dodging the test — it was an accepted
+design ruling, so what needed re-expressing was my **expression** of the
+property, never the property.
+
+### Measured before deciding anything
+
+A scratch copy of the spec (never committed) reported, on every settled screen
+for an ordinary member at `dd867211`:
+
+```
+closed:    shell=false  wayOn=1  countdown=none  attached=1
+notFound:  shell=false  wayOn=1  countdown=none  attached=1
+loadError: shell=false  wayOn=1  countdown=none  attached=1
+```
+
+So the member is **not stranded**, is **never on a deadline**, and is **not
+signed out**. The safety property is intact; only its mechanism changed, from
+a tab bar to a Back control that pops to the mounted tab context.
+
+### What changed, stated exactly
+
+| Case | Was | Is | Weaker about | Exactly as strong about |
+| --- | --- | --- | --- | --- |
+| K5 | the bar is on screen, then press a tab | the member keeps a way out and no kiosk semantics, then leave by Back and reach the tabs from their own context | the mechanism | the member not being stranded |
+| K11 clause 1 | the two readers agree | **the bar never renders over this route, for any shape** | nothing — there is no second reader left to compare | the defect it was born for |
+| K11 clause 3 | `!(shell && memberBack)` | `!memberBack` | the bar | a non-kiosk surface with no way out |
+| K17 | the member keeps the shell | (dropped; `shell` still measured and reported) | the bar | `wayOn > 0`, no deadline, still attached |
+
+K11's clause 1 deserves its own note: the old comparison had two readers,
+`shellAppliesTo` and the screen's `isKioskFlag`, and they could disagree. With
+the shell no longer covering this route there is only one reader, so the old
+formula flagged every non-kiosk shape on a correct product. It is replaced by
+a property that still exists and still guards the original defect — a member
+bar appearing over this route at all — and clause 4 (`lostKioskMode`) carries
+the repeated-parameter defect on its own, unchanged.
+
+### Mutation-proved, because a re-expressed control that cannot fail is worse than the red it replaced
+
+Simulated at the DOM level in a scratch copy, so no product source was edited:
+
+| Mutant | Caught by |
+| --- | --- |
+| the ordinary member's way out removed (stranded) | **K5** |
+| the member bar returns over `/contribute` | **K11 `shellOverContribute`** |
+
+### Result at `dd867211`
+
+```
+sprint-w5-kiosk-navigation-isolation.spec.ts   18 passed, 0 unexpected
+check:evidence                                 intact — 9 frozen / 20 accepted
+tsc --noEmit (app + tests-e2e)                 0 errors
+identity suites                                NOT re-run — functions-westayfit/src unchanged
+```
+
+No `test.fail()` anywhere in the file (the single grep hit is prose in a
+comment). No artifacts or test-results committed.
