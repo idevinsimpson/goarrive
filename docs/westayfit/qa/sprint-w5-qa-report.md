@@ -1225,3 +1225,61 @@ two viewports named above. Contrast computed from the DOM — the matched-pixel 
 `6690370` frames is the Director's, through #430, and these numbers do not stand in for it. No
 product edit, no staging action, no approval or merge recommendation. The shared/unattended-use
 hold is not mine to lift.
+
+
+## PACKET 1 — focused candidate check at `c8f38e3`: PASS
+
+The combined app candidate, **without #436** as instructed.
+
+**Product SHA** `c8f38e37b6286297d1f401834cd9500a675a2923` (`claude/wsf-app-shell` head).
+**Verification head** `ba347d4987e1ff0e9205d932065f940d7fafe4c7` — a local merge of my branch at
+`b602c25e` with the candidate; built and driven, not pushed, named by its parents.
+
+**Blob equality confirmed before building**, not inferred from a clean merge:
+
+    src/kioskSession.ts          bee956ca9bb66a581cf092b30a9267dd1bf1c3bb   = 6690370
+    src/ui/MemberTabBar.tsx      0b14df9519e4a60fb10d17f808413f2f474ae120   = 6690370
+    app/contribute/[goalId].tsx  d2ccd90e872643aba6227527dc7d383555d9c3d2   = 6690370
+    app/index.tsx                c7f2c629cf0f1e233836f68cade676d96b48e3af   = de8f567
+
+Product delta `6690370..c8f38e3` is two files: `app/index.tsx` (+40, #432) and
+`src/ui/designTarget/JoinSetupTargets.tsx` (#420's design-target reference component).
+Functions compiled and the bundle rebuilt from this head; emulators confirmed up before the run
+and still up after it, so no result here rests on a collapsed fixture.
+
+### Counts, split by suite
+
+    my kiosk suite      K1-K12                                12 expected, 0 unexpected
+                        (K1 is the historical baseline and is NOT counted:
+                         11 substantive passes)
+    candidate's own     ui-app-shell                           3
+    specs, run          ui-kiosk                               3
+    unmodified          ui-contribute-short-phone              7
+                        sprint-w1b-kiosk-confinement          10
+                        sprint-w4-home-view-communities        5
+                                                        total 28 expected, 0 unexpected
+    callable identity   sprint-w5-pending-reconcile-identity   } 2 suites,
+                        sprint-w5-public-surface-identity      } 13 tests, 0 failures
+
+**Not run, deliberately:** W7's `sprint-w7-home-view-communities` is W7's and was not
+duplicated. **Not edited:** none of the candidate's five specs was touched — they were run as
+they stand, which is the only way their passing means anything.
+
+### What the identity suites are and are not evidence of
+
+They pass, and they are reported as a **non-regression read**, exactly as assigned. The candidate
+carries no backend change — `functions-westayfit/` is identical to the served `d0477cc` — so
+this is confirmation that the privacy line did not move, not a fresh proof that it holds. The
+fresh proof is the original run, and it is still pinned to its own head.
+
+### Limitations
+
+- The verification head is **local and unpushed**, named by its parents; my branch carries tests
+  and this report only.
+- Emulator fixtures, one browser, the viewport classes each spec chooses for itself.
+- DOM-computed contrast where contrast is measured; no pixel review is claimed.
+- A pass of somebody else's spec is a pass of **their** assertions. I did not audit what the
+  candidate's five specs choose to assert; I established that they pass unmodified at this head.
+
+No product edit, no staging action, no pin edit, no approval or merge recommendation. Nothing
+here lifts the shared/unattended kiosk hold.
