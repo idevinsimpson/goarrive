@@ -1091,7 +1091,9 @@ function StartFieldNext({
 }
 
 /** The B2 form again, frozen at arm's length from the accepted one. `submit`
- * is the whole reason it exists: the unconfirmed frame has to demote it. */
+ * is the whole reason it exists, and it is REQUIRED rather than defaulted:
+ * one frame demotes the create action, one removes it, and a default would
+ * have quietly put it back. */
 function StartFormNext({
   variant,
   nameValue,
@@ -1103,7 +1105,7 @@ function StartFormNext({
   nameValue?: string;
   nameError?: string;
   nameInvalid?: boolean;
-  submit?: React.ReactNode;
+  submit: React.ReactNode;
 }) {
   const family = variant === 'familyFriends';
   return (
@@ -1151,7 +1153,7 @@ function StartFormNext({
             (family ? 'Private' : 'Anyone with the link')}
         </Text>
       </View>
-      {submit ?? <Primary label="Create community" />}
+      {submit}
     </>
   );
 }
@@ -1173,6 +1175,7 @@ export function StartNextNameTooLongTarget() {
               variant="familyFriends"
               nameValue="The Henderson Family Reunion Walking and Stretching Group of Greater Portland, Maine"
               nameError="Use 80 characters or fewer. This name is 84."
+              submit={<Primary label="Create community" />}
             />
             <Foot>
               <Secondary label="Back to home" quiet />
@@ -1204,7 +1207,27 @@ export function StartNextRefusedTarget() {
               title="We couldn’t create your community."
               body="Complete your profile before creating a community."
             />
-            <StartFormNext variant="familyFriends" nameValue="The Henderson Family" />
+            <Primary label="Complete your profile" />
+            {/*
+              NO CREATE ACTION ON THIS FRAME. The server has already refused
+              this exact request and will refuse it again until the profile
+              exists, so repeating the button would only buy the member a
+              second copy of the same sentence. The one way forward is the
+              profile step, and it is the only thing drawn as an action.
+
+              IT PROMISES NO RETURN AND NO SAVED DRAFT, because neither exists:
+              `profile-setup.tsx:157` finishes with
+              `router.replace(nextRouteAfterAuth('/'))`, and that resolver
+              (`pendingJoinCode.ts:96`) knows a pending join code, an event
+              return and a kiosk return goal — there is no slot for coming back
+              to creation, and adding one would be the new storage this packet
+              rules out. Reported as a finding instead.
+            */}
+            <StartFormNext
+              variant="familyFriends"
+              nameValue="The Henderson Family"
+              submit={null}
+            />
             <Foot>
               <Secondary label="Back to home" quiet />
             </Foot>
@@ -1239,7 +1262,15 @@ export function StartNextUnconfirmedTarget() {
             <StartFormNext
               variant="familyFriends"
               nameValue="The Henderson Family"
-              submit={<Secondary label="Create it again" />}
+              submit={
+                <>
+                  <Secondary label="Start another community" />
+                  <Text style={s.actionNote}>
+                    This starts a new, separate community. If the first one was created, you will
+                    have two.
+                  </Text>
+                </>
+              }
             />
             <Foot>
               <Secondary label="Back to home" quiet />
@@ -2270,6 +2301,9 @@ const s = StyleSheet.create({
   bannerTitle: { color: NAVY, fontSize: 14, lineHeight: 19, fontWeight: '900' },
   bannerTitleError: { color: ERROR_RED },
   bannerBody: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17 },
+  /** A caution that belongs to the control under it, so it survives the scroll
+   * that leaves the banner at the top of the sheet off a short phone. */
+  actionNote: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, marginTop: 10 },
 
   /* choices */
   option: {

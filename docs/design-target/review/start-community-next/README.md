@@ -44,8 +44,8 @@ network layer. Nothing about the server was changed to take that frame.
 
 | frame | the claim |
 |---|---|
-| `PROPOSED-start-next-refused-*` | the server **answered**; nothing was created and the screen may say so |
-| `PROPOSED-start-next-unconfirmed-*` | the transport failed; the screen says it **does not know**, promotes "Check your communities", demotes the retry |
+| `PROPOSED-start-next-refused-*` | the server **answered**; nothing was created and the screen may say so. Its one action is the profile step — **not** the create button the server just refused |
+| `PROPOSED-start-next-unconfirmed-*` | the transport failed; the screen says it **does not know**, promotes "Check your communities", and demotes the retry to **"Start another community"** with the duplicate risk stated next to it |
 | `PROPOSED-start-next-created-*` | a confirmed `groupId` whose navigation failed is a **success** with one thing left to do |
 | `PROPOSED-start-next-name-too-long-*` | the 80-character ceiling stated where it is enforced |
 
@@ -70,6 +70,14 @@ Detail, with line numbers and reproductions, in
    because `router.replace()` sits inside the same `try` as the awaited call.
 4. **The form accepts a name the server refuses**, and the refusal never names
    the length.
+
+Two more were found while applying the Director's interaction corrections at
+`5787041281`, and both bound what these frames may promise: there is **no
+navigation support for returning to creation** after the profile step (F5), and
+**no destination that reliably shows the member's community list** (F6) —
+`/` opens a remembered community instead. `findings.md` carries the case
+analysis and the smallest fix for each. It also carries the deliberate
+code-by-code mapping of which results are refusals and which are not.
 
 `wsfCreateCommunity` carries **no attempt key**. This proposal asks for none
 and claims no idempotency — it is a frontend recovery proposal only. No new
@@ -97,7 +105,7 @@ second create, and no promise that retrying is free.
 | `before/start-name-over-80-accepted-390x844.png` | 390×844 | `12f52d3a20d8dccd` |
 | `before/start-name-too-short-390x640.png` | 390×640 | `5c39f0c8ac3576bb` |
 | `before/start-name-too-short-390x844.png` | 390×844 | `7a61715f4125c1f7` |
-| `target/CONTACT-SHEET-start-community-next.png` | 3520×1968 | `139166e3175b8747` |
+| `target/CONTACT-SHEET-start-community-next.png` | 3520×1968 | `cbdd9a332f8799b1` |
 | `target/PROPOSED-start-next-created-390x640-end.png` | 780×1316 | `af52b1b1b4b1bf15` |
 | `target/PROPOSED-start-next-created-390x640.png` | 780×1316 | `91f7b30327aee522` |
 | `target/PROPOSED-start-next-created-390x844.png` | 780×1724 | `7c0d6e5907879c5e` |
@@ -105,11 +113,11 @@ second create, and no promise that retrying is free.
 | `target/PROPOSED-start-next-name-too-long-390x640.png` | 780×1316 | `19ff363b76a5a7d7` |
 | `target/PROPOSED-start-next-name-too-long-390x844-end.png` | 780×1724 | `9b69ca58c3472e77` |
 | `target/PROPOSED-start-next-name-too-long-390x844.png` | 780×1724 | `d6f19db7170ce260` |
-| `target/PROPOSED-start-next-refused-390x640-end.png` | 780×1316 | `5d54f1420e19798a` |
-| `target/PROPOSED-start-next-refused-390x640.png` | 780×1316 | `b4896bd6a328f000` |
-| `target/PROPOSED-start-next-refused-390x844-end.png` | 780×1724 | `95371a7789b960db` |
-| `target/PROPOSED-start-next-refused-390x844.png` | 780×1724 | `9383cb96b0a22ffa` |
-| `target/PROPOSED-start-next-unconfirmed-390x640-end.png` | 780×1316 | `84f41c5cb3ed0f02` |
+| `target/PROPOSED-start-next-refused-390x640-end.png` | 780×1316 | `0edc17f72f2339ef` |
+| `target/PROPOSED-start-next-refused-390x640.png` | 780×1316 | `c08b728e4eefbaa8` |
+| `target/PROPOSED-start-next-refused-390x844-end.png` | 780×1724 | `238f3dba4c9422dc` |
+| `target/PROPOSED-start-next-refused-390x844.png` | 780×1724 | `6a0eb52c0c1f1e17` |
+| `target/PROPOSED-start-next-unconfirmed-390x640-end.png` | 780×1316 | `d15fff408668d79a` |
 | `target/PROPOSED-start-next-unconfirmed-390x640.png` | 780×1316 | `1458dc3fa43888d3` |
-| `target/PROPOSED-start-next-unconfirmed-390x844-end.png` | 780×1724 | `fbb1698b3d8f9aa8` |
+| `target/PROPOSED-start-next-unconfirmed-390x844-end.png` | 780×1724 | `53753c023e5a9a72` |
 | `target/PROPOSED-start-next-unconfirmed-390x844.png` | 780×1724 | `338bda1325964ac9` |
