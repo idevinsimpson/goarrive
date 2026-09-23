@@ -196,19 +196,23 @@ const KIT_PAGE_FOOT_PX = 48;
 /**
  * THE ROUTE IS BARLESS, AND ITS FOOT IS ITS OWN.
  *
- * Presence proves nothing here: the `(tabs)` navigator stays mounted under
- * this Stack route, so `wsf-member-tabs` is IN the DOM, hidden. Three checks,
- * each able to fail on its own:
+ * Presence proves nothing here. Pushed from a tab — the way a Champion
+ * arrives — this Stack route sits over the mounted `(tabs)` screen, so
+ * `wsf-member-tabs` is IN the DOM, hidden; opened cold (the refusal and the
+ * arrival guard below) it is absent. Three checks, each able to fail on its
+ * own, and each true either way:
  *
- *   - the named bar is not visible;
- *   - whatever is painted at the foot of the viewport belongs to this route's
- *     own scroller — which a bar under any name, or any overlay, would not;
+ *   - no copy of the named bar is visible;
+ *   - a press 8 px above the bottom edge, at the left, the centre and the
+ *     right, lands inside this route's own scroller — which a bar or overlay
+ *     under any name would take instead. (A layer with `pointer-events: none`
+ *     takes no press, and is not seen by this check.)
  *   - the scroller's foot is no deeper than `kit.page`'s. The 140 px reserve
  *     for the floating bar was dead space once the bar left (measured
  *     `5800472286`), and this is what keeps it from coming back.
  */
 async function assertBarlessFoot(page: Page, containerTestId: string, at: string): Promise<void> {
-  // Counted, not `toBeHidden()`: the hidden copy is always there, so a second,
+  // Counted, not `toBeHidden()`: a hidden copy may be there, so a second,
   // visible one would make a strict locator throw rather than state the defect.
   await expect(
     page.getByTestId('wsf-member-tabs').filter({ visible: true }),
@@ -220,18 +224,24 @@ async function assertBarlessFoot(page: Page, containerTestId: string, at: string
       scroller = scroller.parentElement;
     }
     if (!scroller || !scroller.firstElementChild) return null;
-    const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 8);
+    const route = scroller;
+    const y = window.innerHeight - 8;
+    const strangers = [8, window.innerWidth / 2, window.innerWidth - 8].flatMap((x) => {
+      const hit = document.elementFromPoint(x, y);
+      if (hit && route.contains(hit)) return [];
+      const name = hit ? (hit.closest('[data-testid]')?.getAttribute('data-testid') ?? hit.tagName) : 'nothing';
+      return [`x=${Math.round(x)}: ${name}`];
+    });
     return {
       paddingBottom: parseFloat(getComputedStyle(scroller.firstElementChild).paddingBottom),
-      footIsThisRoute: Boolean(hit && scroller.contains(hit)),
-      footHit: hit ? (hit.closest('[data-testid]')?.getAttribute('data-testid') ?? hit.tagName) : null,
+      strangers,
     };
   });
   expect(foot, `${at}: the route's own scroller was not found`).not.toBeNull();
   expect(
-    foot!.footIsThisRoute,
-    `${at}: something other than this route is painted at its foot (${foot!.footHit})`,
-  ).toBe(true);
+    foot!.strangers,
+    `${at}: something other than this route takes a press at its foot`,
+  ).toEqual([]);
   expect(
     foot!.paddingBottom,
     `${at}: the foot is deeper than kit.page's — a reserve for a bar that is not here`,
@@ -240,8 +250,11 @@ async function assertBarlessFoot(page: Page, containerTestId: string, at: string
 
 /**
  * Reachable means WHOLE and PRESSABLE, not merely touching the viewport:
- * brought into view the way a thumb would, entirely inside it, and the
- * element a press at its centre actually lands on.
+ * scrolled into view programmatically (`scrollIntoViewIfNeeded`, not a finger
+ * drag), then entirely inside it, and the element a press at its centre
+ * actually lands on. Where a control must ALREADY be on screen — where a
+ * press left the Champion — the caller asserts that first, before this
+ * scrolls anything.
  */
 async function expectReachable(page: Page, testId: string, at: string): Promise<void> {
   const target = page.getByTestId(testId);
@@ -367,8 +380,10 @@ for (const [cls, viewport] of [
       await expect(submit).toHaveText('Start this goal');
       await expectActionGreen(page, 'wsf-new-goal-submit', cls);
       // Whole, not clipped: the control that agrees to the review is on
-      // screen with it, which is the defect the target exists to fix. At the
-      // short class this is the primary action reachable at rest.
+      // screen with it, which is the defect the target exists to fix —
+      // asserted as framed, before anything else scrolls. At the short class
+      // this is also the primary action reachable at rest.
+      await expect(submit, `${cls}: the commit is not on screen with the review`).toBeInViewport();
       await expectReachable(page, 'wsf-new-goal-submit', `${cls} at rest`);
       await shoot(page, `AFTER-summary-commit-${cls}`);
     });
@@ -457,6 +472,12 @@ for (const [cls, viewport] of [
       const check = page.getByTestId('wsf-new-goal-check-goals');
       await expect(check).toHaveText('Check community goals');
       await expect(check).toHaveAttribute('href', `/community/${fx.groupId}`);
+      // On screen where the press left the Champion — nothing has scrolled
+      // since — and only then whole and pressable.
+      await expect(
+        check,
+        `${cls} unknown: the resolving action is not on screen after the press`,
+      ).toBeInViewport();
       await expectReachable(page, 'wsf-new-goal-check-goals', `${cls} unknown`);
       await expectActionGreen(page, 'wsf-new-goal-check-goals', cls);
       // And the demoted retry is still NOT an action: promoting it with the
@@ -533,8 +554,8 @@ for (const [cls, viewport] of [
       `ui-mobile-acceptance` models it — the last text field keeps focus and
       the on-screen keyboard takes the bottom 344 px — but from the short
       class, so 640 becomes 296: the least room this route is asked to work
-      in. From there the commit must still be reachable by thumb, whole and
-      pressable, and by keys alone; and a press on it must actually create.
+      in. From there the commit must still be reachable by keys alone, then
+      whole on screen and pressable; and a press on it must actually create.
     */
     if (cls === '390x640') {
       test('with the keyboard up, the primary action is still reachable', async ({ page }) => {
@@ -561,7 +582,7 @@ for (const [cls, viewport] of [
         }
         expect(reachedByTab, '390x296 keyboard: Tab never reaches Start this goal').toBe(true);
 
-        // By thumb: whole, pressable, and the press creates.
+        // Whole and pressable at 390x296, and a tap on it creates.
         await expectReachable(page, 'wsf-new-goal-submit', '390x296 keyboard');
         await expectActionGreen(page, 'wsf-new-goal-submit', '390x296 keyboard');
         await shoot(page, 'AFTER-keyboard-submit-390x296');

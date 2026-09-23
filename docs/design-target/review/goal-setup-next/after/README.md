@@ -5,8 +5,9 @@
 > shell migration (integrated at `dd86721`) `/goals/new` is a focused flow outside `(tabs)`: no
 > bar renders over it, and the 140 px foot reserve these frames were built around was removed
 > (Director `5800455297` §2). The current route is photographed in
-> [`../after-barless/`](../after-barless/README.md), awaiting review. Where this README describes
-> the bar or the reserve as present, below, it is describing these frames.
+> [`../after-barless/`](../after-barless/README.md), awaiting review. Where this README, below,
+> describes the bar, the reserve, the route "as it now ships" or what the producer writes, it is
+> describing how these frames were made; the producer now writes `../after-barless/`.
 
 The accepted target, implemented on the real route and photographed the way the BEFOREs were.
 
