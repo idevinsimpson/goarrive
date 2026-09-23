@@ -2282,3 +2282,49 @@ line of the cherry-pick is identical to the original.
 
 **Verdict: PASS** on the bounded delta. It is not CI-gated, and not accepted, integrated or staged.
 L0 carries it with `-x` under the standing ruling.
+
+## PACKET — FINAL #452 pin delta at `2f286e94` (L0 `5803970970`; Director final acceptance `5803984351`)
+
+**Reviewed:** pin head `2f286e945cb1ab65dcadb426d15db81da1945db2` (`claude/wsf-staging-pin-f2f901a`), confirmed by
+`ls-remote` at 22:26Z.
+- History: `ed8649ec` → `c9ea9104`, L0's merge of `main` `18dd21eb` → `2f286e94`, the approval edit.
+- Candidate: `7ee70e4f4db73c9d3fd475ef4729d3eb51064619`, accepted by the Director as final.
+
+**Instrument:** `docs/westayfit/qa/sprint-w5-pin-452-final-delta-verify.mjs`. It was pushed at `86b4d519` before
+the pin moved. Its self-test on a local, never-pushed simulated pin gave 11/11 control rows and caught 8/8 mutants.
+
+**Result on the real pin: 11/11 OK, exit 0.**
+
+| row | result |
+| --- | --- |
+| E0 | `ed8649ec` is an ancestor; no history rewrite |
+| E1 | the pin tree is `ed8649ec` ⊕ `main` plus **only** `approved-candidate.json` |
+| E2 | changed fields are `approvedAppSha`, `packageLabel` and `_fullCandidateNote`. `expectedPriorFunctions` stays 46, and the three additions are unchanged and in the same order. No key was added or removed. |
+| E3 | `approvedAppSha` = `7ee70e4f…`, a real commit descending from `f2f901a` and `c8f38e3` |
+| E4 | protected paths: 9 files from `c8f38e3`, 0 from `f2f901a` |
+| E5 | candidate source exports go 46 → 49; the added three equal `candidateAddedFunctions` |
+| E6 | no "#450 under review"; the candidate is cited in full; the note is re-based off `f2f901a` |
+| E7 | `resolve-candidate` resolves `7ee70e4` and refuses `f2f901a`, `c8f38e3`, `9f27c6e`, `0bf8f42` and `dd86721` |
+| E8 | the pre-review harness on pin ⊕ `main` scores 22/22 |
+| E9 | `run-all`: `main` exits 0 with 14 suites, 258 + 66 = 324; pin ⊕ `main` exits 0 with 14 suites, 260 + 66 = **326** |
+| E10 | the hosting check (`main`'s helper, F1/F2 included) passes the candidate's config: `ROUTES=pass`. The dist is **modelled** from the declared destinations. The candidate's `firebase.westayfit.json` blob `b22d77ac` is identical to `f2f901a`'s, which passed against a real export in the #450 review. |
+
+**Checked by hand against git:**
+- The prose claims hold: `c8f38e3..7ee70e4` is 257 files, +22,642 / −882, over 15 first-parent commits.
+- The five composition merges have exactly the named second parents (`7f37e2a`, `eff65b0`, `cd02949`, `e653330`, `7a4b271`).
+- There is no protected change since `f2f901a`.
+- The DRAFT / HELD paragraph claims no final acceptance, as L0's scope required.
+
+**Verdict: PASS.**
+
+**Observations, low and non-blocking:**
+1. **An inherited sentence is now stale.** `_fullCandidateNote`'s "Independent verification of this exact SHA" sentence was carried over from the `f2f901a` version. It still cites checks at `fca3326` and `dd86721` only. It omits W7 Checks 16–18 and W5's K-run on `9f27c6e`, which was carried to `7ee70e4`. The note calls itself a boundary record, so this is prose only.
+2. **The DRAFT / HELD wording is now historical.** The Director's `5803984351` says so and asks for no re-review.
+3. **The candidate is reachable from one branch only.** At 22:27Z, `7ee70e4` was reachable only from `claude/wsf-release-candidate-round-2`, and the deploy checks it out by SHA. That branch, or `claude/wsf-app-shell` once the candidate is integrated, must keep it reachable. The Director has already told L0 to preserve the frozen candidate.
+
+**Status:** reviewed. The pin is not merged, nothing is dispatched, and staging still serves `c8f38e3`. This is not an approval.
+
+**Limits:**
+- Dispatch still needs the operator preflight and the index READY receipt.
+- The hosting check used a modelled dist, not a real build of `7ee70e4`.
+- No Actions runner was used.
