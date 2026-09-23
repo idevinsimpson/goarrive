@@ -41,8 +41,10 @@ import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions, wsfUsingEm
 import {
   KIOSK_TICK_MS,
   KIOSK_UNRESOLVED_NOTICE,
+  KIOSK_UNRESOLVED_NOTICE_NO_RETRY,
   clearKioskReturnGoal,
   isKioskFlag,
+  kioskMayFinishUnattended,
   kioskCountdownExpired,
   kioskCountdownLabel,
   kioskRemainingMs,
@@ -892,13 +894,32 @@ export default function ContributeToGoal() {
       : pending
         ? 'unresolved'
         : 'none';
-  // A session ends by itself only from a screen it has come to REST on. The
-  // entry, review and movement screens have somebody standing at them
-  // mid-thought; a receipt, a refusal and an unresolved attempt do not.
-  // An attempt still in flight is NOT a rest state: signing out from under a
-  // request that has not answered is how an outcome becomes unknowable.
+  /*
+    WHICH SCREENS A SESSION MAY END ITSELF FROM. The rule is in
+    src/kioskSession.ts, where it can be read and tested without mounting this
+    screen; these are the three facts it decides from.
+
+    `loadSettled` is the part this screen used to be missing. A goal that
+    closed, one that cannot be found and a load that failed are screens where
+    nothing further happens without somebody acting -- and they carried a
+    manual Finish with no deadline, so a shared device left on one of them
+    stayed exactly as the last visitor left it.
+
+    `attemptInFlight` is stricter than the condition it replaces: a submission
+    in progress now refuses the deadline as well as a stored row still in
+    `sending`, so the timer can never fire out from under a request that has
+    not answered.
+  */
+  const kioskAttemptInFlight = submitting || (pending != null && pending.state === 'sending');
+  const kioskLoadSettled =
+    state.kind === 'closed' || state.kind === 'notFound' || state.kind === 'error';
   const kioskTerminal =
-    kiosk && (lastResult != null || refusal != null || (pending != null && pending.state === 'unknown'));
+    kiosk &&
+    kioskMayFinishUnattended({
+      outcome: kioskOutcome,
+      attemptInFlight: kioskAttemptInFlight,
+      loadSettled: kioskLoadSettled,
+    });
   const [kioskFinishing, setKioskFinishing] = useState(false);
   const [kioskError, setKioskError] = useState<string | null>(null);
   // Bumped by "Stay". Restarting the countdown is a new deadline, not a
@@ -1061,13 +1082,53 @@ export default function ContributeToGoal() {
           </Text>
         </Pressable>
       ) : showBack ? (
-        <ButtonLink
-          href={backHref}
+        /*
+          BACK POPS THE FOCUSED FLOW; IT DOES NOT NAVIGATE TO A COPY OF WHERE
+          YOU CAME FROM.
+
+          This was a `ButtonLink` to `/community/<groupId>`. Under the member
+          shell the contribution screen is a focused route presented OVER the
+          tab navigator, so following that href pushed a SECOND community
+          screen and left the original mounted but hidden behind it — measured:
+          two instances in the document, the visible one without the marker the
+          test had planted on the tab the member actually came from. The member
+          did not come back to their community; they arrived at another copy of
+          it, with its scroll and its loaded state reset.
+
+          So when there is a focused route to pop, this pops it and reveals the
+          exact instance underneath. `router.canGoBack()` is the question that
+          distinguishes the two journeys, and it is asked at press time rather
+          than at render, because whether there is something to go back to is a
+          property of the moment the member presses.
+
+          THE COLD / DEEP-LINK JOURNEY KEEPS ITS EXPLICIT DESTINATION. Somebody
+          who opened this URL directly has nothing beneath it, so `canGoBack()`
+          is false and the fallback navigates to the canonical destination —
+          `replace`, not `push`, because a contribution screen arrived at cold
+          is not somewhere a member should have to press back through.
+
+          NOTHING ABOUT KIOSK CHANGES. A kiosk session renders `Finish` instead
+          of this control (`showBack` is false there), so neither branch is
+          reachable in kiosk mode and the confinement, deadline and
+          unresolved-attempt behaviour are untouched.
+        */
+        <Pressable
           style={styles.chromeLink}
-          textStyle={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}
           testID="wsf-contribute-back"
-          label={backLabel}
-        />
+          accessibilityRole="link"
+          accessibilityLabel={backLabel}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+              return;
+            }
+            router.replace(backHref as never);
+          }}
+        >
+          <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
+            {backLabel}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -1076,12 +1137,23 @@ export default function ContributeToGoal() {
   // session can come to rest on. It carries the countdown that performs the
   // same Finish when nobody is standing there, and — when the outcome is
   // UNKNOWN — the one sentence the visitor needs before they walk away.
-  const renderKioskFinish = (outcome: KioskOutcome, tone: 'light' | 'dark' = 'light') =>
+  /**
+   * `canRetryHere` is not a style choice. The accepted unresolved notice points
+   * at "Confirm this contribution", and a screen has to be able to keep that
+   * promise: the load-error branch returns BEFORE the pending one, so it can
+   * show an unresolved session with no reconcile control on it at all. Screens
+   * that offer the retry say so; the one that cannot says why instead.
+   */
+  const renderKioskFinish = (
+    outcome: KioskOutcome,
+    tone: 'light' | 'dark' = 'light',
+    canRetryHere = true
+  ) =>
     kiosk ? (
       <View style={styles.kioskBar} testID="wsf-kiosk-finish-bar">
         {outcome === 'unresolved' ? (
           <Text style={styles.kioskNotice} testID="wsf-kiosk-unresolved-note">
-            {KIOSK_UNRESOLVED_NOTICE}
+            {canRetryHere ? KIOSK_UNRESOLVED_NOTICE : KIOSK_UNRESOLVED_NOTICE_NO_RETRY}
           </Text>
         ) : null}
         <Pressable
@@ -1230,9 +1302,17 @@ export default function ContributeToGoal() {
           <Text style={styles.body}>{state.message}</Text>
           {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
               account signed in right now, so on a kiosk it is a door out of the
-              session and into somebody's account for whoever walks up next. The
-              kiosk's one way out is Finish, in the chrome above. */}
-          {kiosk ? null : (
+              session and into somebody's account for whoever walks up next.
+              What the kiosk gets instead is the same end-of-session treatment
+              every other settled screen has: Finish, its sentence, and the
+              90-second deadline that performs it when nobody is standing here.
+              The outcome passed is the LIVE one, not a hardcoded `none`: this
+              branch returns before the pending ones, so a load failure can
+              coincide with an unresolved attempt, and finishing as `none`
+              would erase the reminder that attempt exists. */}
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome, 'light', false)
+          ) : (
             <ButtonLink
               href="/"
               style={styles.secondaryButton}
@@ -1657,9 +1737,17 @@ export default function ContributeToGoal() {
           </Text>
           {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
               account signed in right now, so on a kiosk it is a door out of the
-              session and into somebody's account for whoever walks up next. The
-              kiosk's one way out is Finish, in the chrome above. */}
-          {kiosk ? null : (
+              session and into somebody's account for whoever walks up next.
+              What the kiosk gets instead is the same end-of-session treatment
+              every other settled screen has: Finish, its sentence, and the
+              90-second deadline that performs it when nobody is standing here.
+              The outcome passed is the LIVE one, not a hardcoded `none`: this
+              branch returns before the pending ones, so a load failure can
+              coincide with an unresolved attempt, and finishing as `none`
+              would erase the reminder that attempt exists. */}
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome)
+          ) : (
             <ButtonLink
               href="/"
               style={styles.secondaryButton}
@@ -1780,10 +1868,13 @@ export default function ContributeToGoal() {
         {ownCreditLine(ownCredit, unit)}
         <Text style={styles.body}>It is no longer taking contributions.</Text>
         <View style={styles.actions}>
-          {/* Same door, same reason. A goal can close while somebody is
+          {/* Same door, same reason -- a goal can close while somebody is
               standing at the kiosk, and this link goes to the community of the
-              account that is signed in. Finish stays in the chrome. */}
-          {kiosk ? null : (
+              account that is signed in. And the same replacement: a closed goal
+              is a settled screen, so it gets the deadline too. */}
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome)
+          ) : (
             <ButtonLink
               href={backHref}
               style={styles.primaryButton}

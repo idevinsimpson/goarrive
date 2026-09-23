@@ -287,7 +287,9 @@ test('a long community name does not push the primary action off a short phone',
         markBottom: m ? Math.round(m.bottom) : null,
       };
     },
-    { id: `wsf-community-goal-link-${goalId}`, markId: 'wsf-community-wordmark' }
+    // The wordmark the capture must begin at is the member shell's: Community
+    // Home stopped drawing one of its own when the persistent top bar landed.
+    { id: `wsf-community-goal-link-${goalId}`, markId: 'wsf-member-topbar-wordmark' }
   );
   expect(measured, 'the primary action was not found').not.toBeNull();
   expect(

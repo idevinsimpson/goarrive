@@ -1,4 +1,4 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useGlobalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
 
@@ -40,8 +40,34 @@ const P = '/design-target/shell-next';
  * Progress carry a navy 22px wordmark, You carries a white 17px one inside a
  * full-bleed navy card, and MOVE carries none.
  */
+/**
+ * THE TAB ROUTER'S BACK MODEL, SELECTABLE FOR THE SPIKE. PROTOTYPE ONLY.
+ *
+ * `backBehavior` is a documented option on the underlying bottom-tab
+ * navigator, not a manual history mutation. It decides what the navigator's
+ * back action means, and — this is the part that had to be measured rather
+ * than assumed — it also decides whether a tab change becomes a real entry in
+ * the BROWSER's history on web.
+ *
+ * It is driven by a query parameter here so one build can be measured in every
+ * mode. A member never sees this: production would hard-code the chosen mode,
+ * and with no parameter the prototype uses it too.
+ */
+const BACK_BEHAVIOURS = ['history', 'fullHistory', 'order', 'initialRoute', 'firstRoute', 'none'] as const;
+type BackBehaviour = (typeof BACK_BEHAVIOURS)[number];
+const DEFAULT_BACK_BEHAVIOUR: BackBehaviour = 'history';
+
+function chosenBackBehaviour(raw: string | string[] | undefined): BackBehaviour {
+  // A repeated parameter hands back an array; anything unrecognised keeps the
+  // default rather than silently disabling the fix.
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return (BACK_BEHAVIOURS as readonly string[]).includes(v ?? '') ? (v as BackBehaviour) : DEFAULT_BACK_BEHAVIOUR;
+}
+
 export default function ShellNextTabsLayout() {
   const router = useRouter();
+  const { backBehavior: backBehaviorParam } = useGlobalSearchParams<{ backBehavior?: string }>();
+  const backBehavior = chosenBackBehaviour(backBehaviorParam);
   const [menuOpen, setMenuOpen] = useState(false);
 
   /**
@@ -105,6 +131,7 @@ export default function ShellNextTabsLayout() {
       />
       <View style={{ flex: 1 }}>
         <Tabs
+          backBehavior={backBehavior}
           screenOptions={{
             headerShown: false,
             // The navigator's own bar is replaced wholesale; `tabBar` below is

@@ -30,10 +30,24 @@ import {
  * from a description of a video nobody else can open.
  *
  * IT ASSERTS, so it runs in the ordinary suite and writes no bytes unless
- * WSF_CAPTURE_FRAMES is set. The assertion is deliberately the owner's claim:
- * that the top of the app is NOT the same from route to route. If a later
- * change ever makes these agree, this test fails and says so — which is the
- * right way round for a BEFORE.
+ * WSF_CAPTURE_FRAMES is set.
+ *
+ * THIS FILE NOW HAS TWO JOBS, AND ONLY ONE OF THEM IS "BEFORE".
+ *
+ *   1. It is still the PRODUCER of the frozen `before/` frames and of
+ *      `before/chrome-geometry.json`. Those bytes are the record of the build
+ *      that had the defect; they are guarded and are not re-shot by a routine
+ *      run.
+ *   2. Its live assertions used to be the owner's complaint, stated as an
+ *      inequality: the top of the app is NOT the same from route to route.
+ *      The member shell has since landed and made that false, so keeping the
+ *      inequality would mean demanding the defect back. The assertions are now
+ *      the AFTER of the same measurements — one wordmark, one top-bar box on
+ *      all four destinations, and MOVE no longer wearing the bar — and they
+ *      fail if any of that regresses.
+ *
+ * The measurements themselves are unchanged, so the numbers in the frozen JSON
+ * and the numbers this run prints are directly comparable.
  */
 
 const OUT = path.resolve(__dirname, '../../../docs/design-target/review/app-shell-next/before');
@@ -58,6 +72,11 @@ type Measurement = {
   bar: boolean;
   /** Whether the raised MOVE control is present on this route. */
   move: boolean;
+  /** The member shell's own top bar, once there is one: its box on this route. */
+  shellBarY: number | null;
+  shellBarHeight: number | null;
+  /** Whether the bar can be reached where it sits, or is covered by this route. */
+  barReachable: boolean;
 };
 
 /** Each route, and the wordmark testID it happens to use. There is no shared
@@ -81,6 +100,9 @@ async function measure(page: Page, spec: (typeof ROUTES)[number]): Promise<Measu
     firstContentY: null,
     bar: false,
     move: false,
+    shellBarY: null,
+    shellBarHeight: null,
+    barReachable: false,
   };
 
   if (spec.wordmark) {
@@ -115,10 +137,38 @@ async function measure(page: Page, spec: (typeof ROUTES)[number]): Promise<Measu
 
   m.bar = (await page.getByTestId('wsf-member-tabs').count()) > 0;
   m.move = (await page.getByTestId('wsf-member-tab-move').count()) > 0;
+
+  const shellBar = page.getByTestId('wsf-member-topbar');
+  if (await shellBar.count()) {
+    const box = await shellBar.boundingBox();
+    if (box) {
+      m.shellBarY = Math.round(box.y);
+      m.shellBarHeight = Math.round(box.height);
+    }
+  }
+
+  /*
+    REACHABLE, NOT MERELY PRESENT. MOVE opens OVER the member shell, so the tab
+    bar stays mounted underneath it and a presence check would report it as
+    still on show. The question the owner asked — "MOVE is in the bottom bar
+    while I am already on MOVE" — is about what a thumb can hit, so it is asked
+    of the pixels: whatever is at the bar's own centre must be part of the bar.
+  */
+  m.barReachable = await page.evaluate(() => {
+    const bar = document.querySelector('[data-testid="wsf-member-tabs"]');
+    if (!(bar instanceof HTMLElement)) return false;
+    const r = bar.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    const top = document.elementFromPoint(
+      Math.round(r.x + r.width / 2),
+      Math.round(r.y + r.height / 2),
+    );
+    return top instanceof Node && bar.contains(top);
+  });
   return m;
 }
 
-test('the current build is measured route by route, and does not agree with itself', async ({ browser }) => {
+test('the shell is measured route by route, and the top of the app agrees with itself', async ({ browser }) => {
   test.setTimeout(300_000);
   if (CAPTURE_FRAMES) fs.mkdirSync(OUT, { recursive: true });
 
@@ -172,39 +222,73 @@ test('the current build is measured route by route, and does not agree with itse
       all[device.key] = measured;
 
       /*
-        THE FINDING, AS A CHECK.
+        THE FINDING, AS A CHECK — NOW FROM THE OTHER SIDE.
 
-        Four member destinations, and the top of the app is not the same thing
-        on any two of them. Asserted as an inequality on purpose: this is a
-        BEFORE, and a BEFORE that silently starts agreeing with itself is a
-        BEFORE that has stopped describing the build.
+        This file was written against the shipping build at the branch's start
+        SHA, and it asserted the owner's complaint: four member destinations,
+        and the top of the app was not the same thing on any two of them. The
+        member shell has since landed, so that inequality is no longer true of
+        this build, and a test that still demanded it would be demanding the
+        defect back.
+
+        The frozen `before/` frames and `before/chrome-geometry.json` remain
+        exactly what they were — the record of the build that HAD the defect,
+        byte-identical and guarded. What changes here is the claim the live
+        assertions make, which is now the AFTER of that record: one wordmark,
+        carried once by the shell; one top-bar box on all four destinations;
+        and MOVE no longer offering to take a member where they already are.
+        Same machinery, same routes, same numbers — opposite verdict, because
+        the build is the opposite of what it was.
       */
       const tabs = measured.filter((m) => ['/', '/community', '/activity', '/you'].includes(m.route));
 
-      // The wordmark does not sit at one height across the four.
-      const heights = new Set(tabs.map((m) => m.wordmarkHeight));
+      // NOT ONE PAGE DRAWS ITS OWN. The four wordmark testIDs this file was
+      // written around exist in no member surface any more.
+      for (const m of tabs) {
+        expect(
+          m.wordmarkVariant,
+          `${device.key}: ${m.route} is drawing a wordmark of its own again (${m.wordmarkTestId})`,
+        ).toBe('none');
+        expect(
+          m.wordmarkHeight,
+          `${device.key}: ${m.route} has its own wordmark box again`,
+        ).toBeNull();
+      }
+
+      // THE SHELL CARRIES ONE, AND IT IS THE SAME OBJECT EVERYWHERE. One box,
+      // at one height, on all four — which is the claim the recording made
+      // false and this migration makes true.
+      const barBoxes = tabs.map((m) => `${m.shellBarY}x${m.shellBarHeight}`);
+      for (const m of tabs) {
+        expect(
+          m.shellBarY,
+          `${device.key}: ${m.route} has no member top bar`,
+        ).not.toBeNull();
+      }
       expect(
-        heights.size,
-        `${device.key}: the current build already uses one wordmark height: ${JSON.stringify(tabs)}`,
-      ).toBeGreaterThan(1);
+        new Set(barBoxes).size,
+        `${device.key}: the member top bar is not one box across the four destinations: ${JSON.stringify(
+          tabs.map((m) => ({ route: m.route, y: m.shellBarY, h: m.shellBarHeight })),
+        )}`,
+      ).toBe(1);
 
-      // Nor in one colourway.
-      const variants = new Set(tabs.map((m) => m.wordmarkVariant));
-      expect(
-        variants.size,
-        `${device.key}: the current build already uses one wordmark colourway`,
-      ).toBeGreaterThan(1);
+      // And the bar is reachable where a member expects it, on all four.
+      for (const m of tabs) {
+        expect(
+          m.barReachable,
+          `${device.key}: ${m.route} covers its own tab bar`,
+        ).toBe(true);
+      }
 
-      // /you is the outlier the owner described: a different artwork, smaller,
-      // higher up the screen than the cream routes' chrome row.
-      const you = tabs.find((m) => m.route === '/you')!;
-      expect(you.wordmarkVariant, '/you no longer uses the white wordmark').toBe('white');
-
-      // And /move wears the shell today, raised MOVE control and all — the
-      // control offering to take a member where they already are.
+      // AND /move NO LONGER WEARS THE SHELL. The bar is still mounted beneath
+      // the sheet — that is what keeps the tab underneath alive — but nothing
+      // of it can be reached, so the control that offered to take a member
+      // where they already are is gone from the screen.
       const move = measured.find((m) => m.route === '/move')!;
-      expect(move.bar, '/move no longer renders the member tab bar').toBe(true);
-      expect(move.move, '/move no longer renders the raised MOVE control beneath the MOVE page').toBe(true);
+      expect(
+        move.barReachable,
+        '/move is showing the member tab bar again, raised MOVE control and all',
+      ).toBe(false);
     } finally {
       await ctx.close();
     }

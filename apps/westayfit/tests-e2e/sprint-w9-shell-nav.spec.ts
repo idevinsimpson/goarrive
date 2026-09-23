@@ -134,21 +134,22 @@ test.describe('W9 shell prototype', () => {
     }
 
     /*
-      OPENING A COMMUNITY FROM THE LIST MOVES TO THE HOME TAB — AND COSTS A
-      BROWSER BACK ENTRY THAT TODAY'S SHELL PROVIDES. This is the one place
-      where the proposal is measurably WORSE than the build it replaces, so it
-      is asserted rather than described, and ARCHITECTURE.md puts it to the
-      Director as the open risk rather than burying it in a passing suite.
+      OPENING A COMMUNITY FROM THE LIST MOVES TO THE HOME TAB, AND NOW LEAVES A
+      REAL BACK DESTINATION BEHIND IT.
 
-      What happens: the link crosses from the Community tab to the Home tab,
-      react-navigation performs a tab jump, and on web a tab jump REPLACES the
-      history entry instead of pushing one. `history.length` does not move. The
-      URL and the lit tab both change correctly and both tabs stay mounted, but
-      a browser Back from the detail leaves the app entirely, because there is
-      no entry behind it to return to.
+      THIS IS THE SAME ASSERTION CHECKPOINT 1 SHIPPED, TURNED AROUND. It read
+      `expect(historyOnDetail).toBe(historyOnList)` and documented the defect:
+      the link crosses from the Community tab to the Home tab, react-navigation
+      performs a tab jump, and on web a tab jump REPLACED the history entry
+      instead of pushing one, so a browser Back from the detail left the app.
+      The Director refused to ship that and refused the "accept it" option.
 
-      Measured: history 2 -> 2 across the jump, and `page.goBack()` lands on
-      about:blank.
+      It is not deleted to make the suite green. It is inverted, so the same
+      line now pins the fix and fails again the moment the entry stops being
+      created. The fix is `backBehavior="history"` on the tab navigator — the
+      router's own documented back model, not a hand-rolled history mutation;
+      `sprint-w9-back-path-spike.spec.ts` measures all five navigation methods
+      and `sprint-w9-back-behaviour-matrix.spec.ts` measures all six modes.
     */
     await open(page, `${BASE}/community`);
     await expect(page.getByTestId('wsf-shell-next-tab-community')).toHaveAttribute('data-current', 'true');
@@ -157,37 +158,25 @@ test.describe('W9 shell prototype', () => {
     await page.getByTestId('wsf-shell-next-community-to-group').click();
     await page.getByTestId('wsf-shell-next-page-community-detail').waitFor({ state: 'visible' });
 
-    // The URL and the lit tab are both right.
     expect(new URL(page.url()).pathname).toBe(`${BASE}/community/detail`);
     await expect(page.getByTestId('wsf-shell-next-tab-home')).toHaveAttribute('data-current', 'true');
     await expect(page.getByTestId('wsf-shell-next-tabs')).toBeVisible();
 
-    // Both tabs are still mounted, so nothing was thrown away by the jump.
     await expect(page.getByTestId('wsf-shell-next-page-community')).toBeAttached();
     await expect(page.getByTestId('wsf-shell-next-page-community-detail')).toBeAttached();
 
-    /*
-      THE COST, PINNED DOWN. If a future change makes a cross-tab jump push
-      properly, this assertion fails and somebody reads the note above and
-      deletes it deliberately. That is the right way for a known defect to be
-      recorded: as a failing-when-fixed check, not as a silent absence.
-    */
     const historyOnDetail = await page.evaluate(() => history.length);
     // eslint-disable-next-line no-console
     console.log(`[W9] cross-tab link history: ${historyOnList} -> ${historyOnDetail}`);
     expect(
       historyOnDetail,
-      'a cross-tab jump now pushes a history entry — the known back-button gap may be fixed',
-    ).toBe(historyOnList);
+      'the cross-tab navigation stopped creating a back destination — the checkpoint-1 defect is back',
+    ).toBeGreaterThan(historyOnList);
 
-    /*
-      THE IN-APP WAY BACK DOES WORK, and it is the one a member on a phone
-      actually uses: the Community tab still holds the list, mounted, and
-      tapping it returns there.
-    */
-    await page.getByTestId('wsf-shell-next-tab-community').click();
-    await page.getByTestId('wsf-shell-next-page-community').waitFor({ state: 'visible' });
-    expect(new URL(page.url()).pathname).toBe(`${BASE}/community`);
+    /* And Back actually uses it. */
+    await page.goBack();
+    await page.getByTestId('wsf-shell-next-page-community').waitFor({ state: 'visible', timeout: 15_000 });
+    expect(new URL(page.url()).pathname, 'Back did not return to the Community list').toBe(`${BASE}/community`);
     await expect(page.getByTestId('wsf-shell-next-tab-community')).toHaveAttribute('data-current', 'true');
   });
 
@@ -356,17 +345,30 @@ test.describe('W9 shell prototype', () => {
     expect(scroll, 'Home lost its scroll position across a tab switch').toBeGreaterThan(150);
 
     /*
-      THE HISTORY COST, MEASURED RATHER THAN ASSERTED AWAY.
-      Three tab switches must not leave three entries to walk back through.
-      The assertion is deliberately the product rule — "a tab switch is not a
-      place you go back to" — and the exact number is printed either way so the
-      architecture note quotes a measurement, not an expectation.
+      THE HISTORY COST OF THE BACK-PATH FIX, MEASURED RATHER THAN HIDDEN.
+
+      This number MOVED, and it moved because of the fix. Before
+      `backBehavior="history"` three tab switches added ONE entry; they now add
+      TWO, because the mechanism that gives the community detail a real back
+      destination is precisely "a tab change is an entry in browser history".
+      The two cannot be separated: `sprint-w9-back-behaviour-matrix.spec.ts`
+      drives all six modes and every mode that returns Back to the list also
+      makes tab switches cost entries, while every mode that keeps tab switches
+      cheap leaves Back exiting the app.
+
+      That is a genuine tension between the owner's brief ("switching primary
+      tabs stacks no history trail") and the Director's property 3/4 (a
+      community detail must have a real back destination). The Director's
+      requirement is explicit and "accept it" was refused, so the fix is in and
+      the cost is reported rather than smoothed over. The bound is 2 — three
+      switches, deduplicated back to two because returning to Home collapses
+      onto its earlier entry — and a third would mean something else changed.
     */
     const historyAfter = await page.evaluate(() => history.length);
     const added = historyAfter - historyAtStart;
     // eslint-disable-next-line no-console
     console.log(`[W9] history entries added by 3 tab switches: ${added}`);
-    expect(added, `three tab switches added ${added} history entries`).toBeLessThanOrEqual(1);
+    expect(added, `three tab switches added ${added} history entries`).toBeLessThanOrEqual(2);
   });
 
   test('MOVE opens over the member context and closes back onto it', async ({ page }) => {

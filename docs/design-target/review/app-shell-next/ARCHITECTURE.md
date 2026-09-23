@@ -131,10 +131,29 @@ undisturbed.
 
 ## 3. What it costs — the honest column
 
-### 3.1 The one measured regression: back across a tab boundary
+### 3.1 The one measured regression: back across a tab boundary — **RESOLVED in packet 2**
 
-**This is the only place the proposal is worse than the build it replaces, and
-it is the thing to weigh.**
+> **UPDATE (packet 2, `BACK-PATH-SPIKE.md`).** The Director adopted true Tabs
+> and refused this regression and option 1 outright. It is **fixed**:
+> `backBehavior="history"` on the tab navigator — the router's own documented
+> back model, not a hand-rolled history mutation — makes the cross-tab
+> navigation create a real entry (+1), and Back returns to the still-mounted
+> Community list with its state and scroll intact. All five of the Director's
+> properties now hold together, and checkpoint 1's failing-when-fixed assertion
+> was kept and inverted rather than deleted.
+>
+> **It costs one thing, measured:** three tab switches now add **two** history
+> entries where they added one, because the mechanism that gives the detail a
+> back destination *is* "a tab change is an entry in browser history". All six
+> `backBehavior` modes were driven and none delivers both, so the trail is a
+> real trade-off against the owner's "no history trail" line and the choice is
+> the Director's. See `BACK-PATH-SPIKE.md`.
+>
+> The section below is kept as the record of what was measured at checkpoint 1
+> and why the arrangement is what it is. Its *status* is superseded; its
+> reasoning about why the detail must live in the Home tab still holds.
+
+**This was the only place the proposal was worse than the build it replaces.**
 
 In the shipping build, opening a community from `/community` pushes, and the
 browser Back button returns to the list. Under a tab navigator the community
@@ -161,6 +180,12 @@ which I have authority to choose:
    is a product change to what Home is.
 3. **Ship the minimum-change shell instead** (§4), which keeps today's history
    behaviour exactly and gives up mounted-tab state.
+
+**What was actually done:** none of these three. The spike found a fourth
+answer the checkpoint-1 options list had missed — the tab router's own
+`backBehavior`, which fixes it in configuration rather than by trading one
+property for another. Listing three options and measuring none of the router's
+own settings was the gap in that analysis, and it is worth recording as such.
 
 ### 3.2 A product decision hidden in a file path
 
@@ -244,15 +269,13 @@ outright).
 
 **Recommendation stands on that one line.** If preserving mounted tab state and
 presenting MOVE over the member's real context are part of the target, true
-Tabs is the only one of the two that can deliver them, and the back-button cost
-in §3.1 is the price. If they are not, the minimum-change shell is the better
-trade this sprint and should be taken instead — it is genuinely most of the
-visible win for a fraction of the risk.
+Tabs is the only one of the two that can deliver them.
 
-A reasonable middle path, if the Director wants the visible fix now and the
-structural one later: **ship the minimum-change shell first**, then migrate to
-tabs once §3.1 has a decision. The two are not mutually exclusive and the top
-bar built for one is the top bar for the other.
+> **DECIDED (Director `5788831679` §1).** True Expo Router Tabs is the product
+> decision; the minimum-change shell is **not to ship, even as an interim**.
+> The back-button cost that made this a real choice is resolved in packet 2, so
+> the paragraphs above are the record of the comparison rather than an open
+> question. The "ship the minimum-change shell first" middle path is withdrawn.
 
 ---
 
