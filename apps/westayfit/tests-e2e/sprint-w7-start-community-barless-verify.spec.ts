@@ -53,6 +53,8 @@ import {
  *                                                                               opens the older group)
  *   SEAM-3  unverified gate way out           PASS        FAIL             PASS  (M4 — ruling pending)
  *   SEAM-4  leaving mid-create                FAIL        FAIL             PASS  (M5 — ruling pending)
+ *   SEAM-1b blur by keyboard moves nothing     not run     FAIL ×2 (+52 px) PASS  (W4's stated design;
+ *     (its valid-name CONTROL: PASS ×2)                                           see note below)
  *   SEAM-1 CONTROL ×8 (reader can see a pass)  —           PASS ×8          PASS
  *   SEAM-4 CONTROL (assertions satisfiable)    —           PASS             PASS
  *   BARLESS ×4 states                         FAIL        PASS             PASS
@@ -65,6 +67,10 @@ import {
  * (6c98f485, tree 77129e6a). SEAM-2, 2b and 2c PASS there with W9's fix;
  * SEAM-1 at 390x844 / 430x932, SEAM-3 and SEAM-4 still FAIL, as W4's
  * successor has not landed. W9's and W8's own specs pass on it.
+ *
+ * SEAM-1b was measured on the preview below, whose /start-community route
+ * and shell are byte-for-byte 5c28e45's (W9's and W8's commits touch neither);
+ * not run on the old shell, whose route blob is the same.
  *
  * SEAM-1 at 390x640 cannot fail first: at every scroll position where the
  * whole Create button is on screen, the name field's bottom is at y ≤ −84, so
@@ -353,6 +359,62 @@ for (const vp of [
       });
     });
   }
+}
+
+/**
+ * SEAM-1b — LEAVING THE NAME FIELD SHORT MOVES NOTHING. The direct test of the
+ * mechanism, with no press at all: the field is left by the keyboard (Tab), so
+ * no pointer is involved. The Create button's position IN THE CONTENT (its box
+ * top plus the scroller's scrollTop) and the content height must not change.
+ * On BEFORE the blur inserts the name error above the button (+52 px).
+ *
+ * This measures W4's own stated design for Q3 (#394 `5801525555`: "on blur, a
+ * short name marks the field invalid with a route-local border-colour change
+ * only — same width, zero layout change"). A fix that reserves the error's
+ * space passes it too; one that only suppresses the reveal when focus moves to
+ * Create would not, and the report would say so rather than call it wrong.
+ */
+for (const vp of [
+  { width: 390, height: 844 },
+  { width: 430, height: 932 },
+]) {
+  test.describe(`SEAM-1b @${vp.width}x${vp.height}`, () => {
+    test.use({ viewport: vp });
+    for (const [label, name] of [['short', 'a'], ['CONTROL valid', 'W7 Valid Name']] as const) {
+    test(`leaving the name field ${label} by keyboard moves nothing @${vp.width}x${vp.height}`, async ({ page }) => {
+      // The CONTROL uses a valid name, so nothing is revealed: it proves the
+      // Tab and the focus change themselves move nothing, i.e. the check can pass.
+      test.setTimeout(240_000);
+      const me = await person(`s1b${vp.height}${label[0]}`);
+      await signInVia(page, me.email, me.password);
+      await openForm(page);
+      await page.getByTestId('wsf-start-name').fill(name);
+      const p = await placeAt(page, await maxScroll(page));
+      await page.waitForTimeout(150);
+      const geo = () =>
+        page.evaluate(() => {
+          const btn = document.querySelector('[data-testid="wsf-start-submit"]') as HTMLElement;
+          let sc: HTMLElement | null = btn;
+          while (sc && !(sc.scrollHeight > sc.clientHeight + 1)) sc = sc.parentElement;
+          return {
+            btnInContent: Math.round(btn.getBoundingClientRect().top + (sc ? sc.scrollTop : 0)),
+            contentHeight: sc ? sc.scrollHeight : -1,
+            active: (document.activeElement as HTMLElement | null)?.dataset?.testid ?? '-',
+          };
+        });
+      const before = await geo();
+      expect(before.active, 'the field did not have focus before the blur').toBe('wsf-start-name');
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(400);
+      const after = await geo();
+      const row = `field[${p.inputTop}..${p.inputBottom}] before=${JSON.stringify(before)} after=${JSON.stringify(after)}`;
+      test.info().annotations.push({ type: 'geometry', description: row });
+      expect(after.active, 'Tab did not move focus off the field').not.toBe('wsf-start-name');
+      expect(Math.abs(after.btnInContent - before.btnInContent), `the blur moved Create: ${row}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(after.contentHeight - before.contentHeight), `the blur changed the content height: ${row}`).toBeLessThanOrEqual(1);
+    });
+    }
+  });
 }
 
 /**

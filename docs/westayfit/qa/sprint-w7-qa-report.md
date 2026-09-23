@@ -1646,5 +1646,27 @@ Progress's read as Community's, so F2's re-read check and F4's fault counter
 were contaminated. Every counter and fault now starts at the moment of the
 return, after Progress has finished its reads.
 
+## 14.13 · SEAM-1b: the Q3 mechanism, measured without a press
+
+W4's stated design for Q3 (#394 `5801525555`) is: on blur, a short name gets a
+route-local border-colour change only, with zero layout change, and the
+sentence appears on the press. SEAM-1b tests that claim directly.
+
+**How it measures.** The field is left by keyboard (Tab), so no pointer is
+involved. The test compares two numbers before and after the blur: Create's
+position in the content (box top + `scrollTop`) and the content height.
+
+On the preview, whose route and shell are `5c28e45`'s:
+
+| | 390×844 | 430×932 |
+|---|---|---|
+| name `a`, left by Tab | **FAIL**: Create 1099 → 1151, content 1231 → 1283 | **FAIL**: Create 1112 → 1164, content 1244 → 1296 |
+| CONTROL, a valid name, left by Tab | PASS | PASS |
+
+The control shows that the Tab and the focus change themselves move nothing, so
+the check can pass. A fix that reserves the error's space also passes it. A fix
+that only suppresses the reveal when focus goes to Create would not; that is the
+alternative W4 rejected.
+
 **Next:** L0's combined candidate (W4's successor ⊕ W9's `a87cd3b` ⊕ W8's
 `eff65b0` on `f2f901a`), checked as one tree (`5800787974` §2, `5801193038`).
