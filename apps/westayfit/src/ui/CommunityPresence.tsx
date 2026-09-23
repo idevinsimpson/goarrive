@@ -152,7 +152,10 @@ export function relativeWhen(at: string, nowMs: number = Date.now()): string {
 export function MomentumRow({ row, first }: { row: ActivityRow; first: boolean }) {
   const named = row.displayName !== null && row.displayName.trim() !== '';
   return (
-    <View style={[styles.momentumRow, first ? null : styles.momentumRule]}>
+    <View
+      style={[styles.momentumRow, first ? null : styles.momentumRule]}
+      testID="wsf-momentum-row"
+    >
       {named ? (
         <InitialsAvatar displayName={row.displayName!} size={28} />
       ) : (
@@ -162,7 +165,7 @@ export function MomentumRow({ row, first }: { row: ActivityRow; first: boolean }
       )}
       <View style={styles.momentumText}>
         <Text style={styles.momentumWho} numberOfLines={1}>
-          {named ? row.displayName : 'A member'}
+          {named ? row.displayName : 'Anonymous member'}
         </Text>
         <Text style={styles.momentumWhat}>
           added {row.amount.toLocaleString()}
@@ -204,7 +207,7 @@ const styles = StyleSheet.create({
   },
   anonDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#B3AEA2' },
 
-  momentumRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  momentumRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
   momentumRule: { borderTopWidth: 1, borderTopColor: HAIRLINE },
   momentumText: { flex: 1, gap: 1 },
   momentumWho: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },

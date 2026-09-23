@@ -1653,7 +1653,7 @@ export default function CommunityPage() {
   */
   const heroWeWidth = Math.max(
     96,
-    Math.min(shortViewport ? 136 : windowWidth >= 420 ? 232 : 198, heroContentWidth),
+    Math.min(shortViewport ? 120 : windowWidth >= 420 ? 206 : 152, heroContentWidth),
   );
   /*
     THE BLOOM NEVER EXCEEDS THE CARD IT SITS IN.
@@ -3311,21 +3311,26 @@ export default function CommunityPage() {
             ) : null}
           </View>
           {/*
-            PRESENCE — PEOPLE FIRST, THEN THE NUMBER.
+            PRESENCE — PEOPLE FIRST, THEN THE PROOF THAT THEY MOVED.
 
             The initials row is drawn from `wsfCommunityMembers`, which returns
             only members who are visible in THIS community and returns no uid
             beside any name. It renders nothing at all when nobody is visible:
-            a row of empty discs would be a drawing of absence, and the line
-            below already carries the truth.
+            a row of empty discs would be a drawing of absence.
 
-            THE COUNT IS STILL A COUNT OF MEMBERS, NEVER OF PEOPLE WHO MOVED.
-            That distinction survives the social lane unchanged — what moved is
-            that a proven count of contributors now exists, separately, in the
-            momentum section below, and only where the server can prove it.
+            THE FIRST SENTENCE THE COMMUNITY SAYS ABOUT ITSELF IS ITS SIZE, AND
+            NOTHING ABOUT PRIVACY. An earlier revision appended `· some choose
+            not to be listed` here; the Director's AFTER review removed it,
+            because privacy belongs in Settings rather than in the line a member
+            reads before anything else. The residual is still derivable and
+            still not computed for the reader — what changed is that the page
+            stopped narrating it.
 
-            The second clause states THAT somebody is unlisted and never HOW
-            MANY, and only when the whole visible set is in hand.
+            THE MEMBER COUNT AND THE MOVED-TODAY COUNT ARE DIFFERENT FACTS and
+            are never merged into one line. One counts membership; the other
+            counts distinct people who contributed inside the featured goal's
+            OWN day, and it renders only when the server could prove it — a
+            null renders nothing at all, never a substitute.
           */}
           {presence !== null && presence.people.length > 0 ? (
             <PresenceRow people={presence.people} />
@@ -3334,11 +3339,6 @@ export default function CommunityPage() {
             {memberCount != null ? (
               <Text style={styles.presenceText} testID="wsf-community-hero-presence">
                 {memberCountLabel(memberCount)}
-                {presence !== null &&
-                presence.complete &&
-                presence.people.length < memberCount
-                  ? ' · some choose not to be listed'
-                  : ' · moving together this week'}
               </Text>
             ) : null}
             {otherCommunityCount > 0 ? (
@@ -3353,6 +3353,29 @@ export default function CommunityPage() {
               </Pressable>
             ) : null}
           </View>
+          {/*
+            A PROVEN ZERO IS DATA; ONLY `null` IS SILENCE.
+
+            `null` means the server could not establish the count — no goal
+            named, an unresolvable zone, a goal in another community, or a
+            bounded scan that did not reach past the window start — and it
+            renders nothing at all.
+
+            `0` means the server DID establish it and nobody has moved yet in
+            this goal's own day. An earlier revision suppressed that, on the
+            argument that a green zero is a discouraging thing to open with.
+            The Director overruled it and was right: hiding a known zero
+            collapses "known zero" into "unknown", which is precisely the
+            distinction the rest of this feature exists to keep. The screen
+            says what is true and lets the member decide how to feel about it.
+          */}
+          {momentum !== null && momentum.contributorsToday !== null ? (
+            <Text style={styles.movedToday} testID="wsf-community-contributors-today">
+              {momentum.contributorsToday === 1
+                ? '1 person moved today'
+                : `${momentum.contributorsToday} people moved today`}
+            </Text>
+          ) : null}
           {humanLine ? (
             <Text style={styles.humanLine} testID="wsf-community-human-line">
               {humanLine}
@@ -3649,7 +3672,7 @@ export default function CommunityPage() {
             RECENT MOMENTUM — the evidence that other real people are moving.
 
             Every row is a real `wsfContributions` record. A member showing
-            activity but not their name appears as "A member" WITH their amount
+            activity but not their name appears as "Anonymous member" WITH their amount
             and time: dropping the row would quietly under-report what the
             community did in order to make the feed tidier. A member who turned
             activity off has no row at all, and their effort still moved the
@@ -3663,16 +3686,6 @@ export default function CommunityPage() {
           (momentum.entries.length > 0 || momentum.contributorsToday !== null) ? (
             <View style={styles.momentumCard} testID="wsf-community-momentum-card">
               <Text style={styles.sectionEyebrow}>Recent momentum</Text>
-              {momentum.contributorsToday !== null ? (
-                <Text
-                  style={styles.momentumHeadline}
-                  testID="wsf-community-contributors-today"
-                >
-                  {momentum.contributorsToday === 1
-                    ? '1 person moved today'
-                    : `${momentum.contributorsToday} people moved today`}
-                </Text>
-              ) : null}
               {momentum.entries.slice(0, 3).map((row, i) => (
                 <MomentumRow key={i} row={row} first={i === 0} />
               ))}
@@ -4053,7 +4066,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 48,
     backgroundColor: wsfTheme.colors.background,
   },
@@ -4151,14 +4164,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_BORDER,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 4,
+    paddingVertical: 6,
+    gap: 2,
   },
-  momentumHeadline: {
-    color: wsfTheme.colors.text,
-    fontSize: 16,
-    lineHeight: 21,
+  movedToday: {
+    color: ACTION_GREEN_DEEP,
+    fontSize: 14,
+    lineHeight: 19,
     fontWeight: '800',
+    marginTop: 1,
   },
   peopleLink: {
     flexDirection: 'row',
@@ -4168,7 +4182,7 @@ const styles = StyleSheet.create({
   },
   peopleLinkText: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   peopleLinkChevron: { color: INK_QUIET, fontSize: 20, fontWeight: '700' },
-  section: { gap: 12 },
+  section: { gap: 8 },
   sectionEyebrow: {
     color: ACTION_GREEN_DEEP,
     fontSize: 12,
@@ -4182,9 +4196,15 @@ const styles = StyleSheet.create({
     backgroundColor: NAVY,
     borderRadius: 24,
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 14,
-    gap: 6,
+    // TIGHTENED FOR THE SOCIAL FOLD. The Director's AFTER review required the
+    // first momentum row to be VISIBLE above the tab bar at 390x844, and said
+    // to recover the height from spacing and hero composition rather than by
+    // shrinking the Living WE into a minor icon or hiding an action. This is
+    // that recovery: the hero's own frame gives up a few points, the mark keeps
+    // its dominance.
+    paddingTop: 10,
+    paddingBottom: 10,
+    gap: 4,
     // overflow clips the light and the bloom to the card's own corners.
     overflow: 'hidden',
     ...elevation.hero,
@@ -4249,7 +4269,7 @@ const styles = StyleSheet.create({
   // Reserved room for the mark and the facts; the loading line sits centred
   // in it rather than at the top of a hole.
   progressArea: { justifyContent: 'center', gap: 2 },
-  weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 8, paddingBottom: 4 },
+  weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingBottom: 2 },
   // The numbers sit in their own recessed panel, so the progress area reads as
   // an instrument rather than as text floating on the card.
   factsLarge: {
@@ -4258,9 +4278,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.20)',
     borderRadius: 14,
     paddingHorizontal: 13,
-    paddingTop: 10,
-    paddingBottom: 11,
-    marginTop: 4,
+    paddingTop: 8,
+    paddingBottom: 9,
+    marginTop: 2,
   },
   track: {
     height: 8,
@@ -4302,7 +4322,7 @@ const styles = StyleSheet.create({
   // breathing room with it and the button sat too close to "to go". 20 read
   // better still, but it cost the worst-case long name its clearance on a
   // 390x640 phone (15px left); 14 keeps the air and returns the margin.
-  actions: { gap: 10, marginTop: 2 },
+  actions: { gap: 8, marginTop: 2 },
   // A short phone's fold lands just under the secondary control. Without this
   // the pair sat flush against the fixed navigation, which reads as the screen
   // running out rather than as a composition ending.
