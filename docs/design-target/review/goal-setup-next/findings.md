@@ -150,11 +150,14 @@ so a verdict could accept the layout and refuse this, or the reverse.
 community goals**, **Open the contribute page** — on a route-local style, not an edit to
 `kit.primaryButton`. The fill is asserted by the producer, so it cannot regress silently.
 
-**One primary was deliberately left alone:** `wsf-new-goal-home` (*Go to your communities*), the
-arrival guard shown when the route is opened with no community. The ruling enumerated three
-CTAs, the release said "no other visual change", and that state has no TARGET or AFTER frame —
-so changing it would move a surface nobody reviewed. It is the one control on this route still
-wearing the progress green, and it is a one-line change whenever that is wanted.
+**The fourth primary, held and then closed.** `wsf-new-goal-home` (*Go to your communities*),
+the arrival guard shown when the route is opened with no community, was left on the progress
+green in the first pass: the ruling enumerated three CTAs, the release said "no other visual
+change", and that state had no TARGET or AFTER frame, so changing it would have moved a surface
+nobody had reviewed. It was recorded here rather than changed quietly — and the Director closed
+it on the pixel pass (`5789408712`): it is plainly the primary action of its state. It now takes
+ACTION_GREEN with the same rendered-colour assertion as the other three, and the state has a
+real 390×844 AFTER of its own. **No control on this route still wears the progress green.**
 
 ## F7 — the signed-out state carries no `testID`
 

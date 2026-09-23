@@ -819,10 +819,16 @@ export default function NewGoalPage() {
             Open the community the goal is for, then tap Start a goal there.
           </Text>
         </View>
+        {/*
+          The primary action of this state, so it wears the action green like
+          the route's other three. It was left on the progress green while the
+          F6 ruling named only the three captured CTAs; the Director closed
+          that gap on the pixel pass — this is plainly the primary action here.
+        */}
         <ButtonLink
           href="/"
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
+          style={styles.primaryAction}
+          textStyle={styles.primaryActionText}
           testID="wsf-new-goal-home"
           label="Go to your communities"
         />
