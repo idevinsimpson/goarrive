@@ -922,25 +922,43 @@ await test('bare /move is not what this rule is for, and static content decides 
   assert.equal(firstMatch(stagingRewrites, '/move/some-goal/deeper').destination, '/move/__dynamic.html');
 });
 
-await test('the app config on THIS branch cannot be used to cross-check, and that is the finding', () => {
-  // The obvious test — assert the staging list matches the app's
-  // firebase.westayfit.json — cannot be written where this suite runs.
+await test('the two-tree hosting check runs, and runs BEFORE any credential exists', () => {
+  // This REPLACES a case that pinned the asymmetry — that the app config
+  // carries no rewrites on this branch, so no test here could cross-check the
+  // two hosting configs. That was a description of the gap, not a fix. The fix
+  // is check-hosting-routes.mjs, which runs in the one job where both
+  // checkouts and the built artifact exist together.
   //
-  // MEASURED: that file carries 0 rewrites on main and 0 on this branch, and
-  // 12 only on the app-shell lineage (37367fd). The rules live on the
-  // CANDIDATE, the operational copy lives on main, and no single checkout holds
-  // both. That is precisely why the two files' own "Keep the two in sync"
-  // comment is enforced by nothing, and why two rules went missing here while
-  // being present there.
-  //
-  // So this case pins the asymmetry rather than pretending to close it: if the
-  // app config on this branch ever gains rewrites, a real cross-check becomes
-  // possible and this case should be replaced by one.
-  const app = JSON.parse(fs.readFileSync('firebase.westayfit.json', 'utf8'));
-  assert.deepEqual(app.hosting.rewrites ?? [], [],
-    'the app config now carries rewrites on this branch — replace this case with a real cross-check');
-  assert.equal(STAGING_HOSTING.hosting.site, 'westayfit-staging');
-  assert.notEqual(app.hosting.site, STAGING_HOSTING.hosting.site);
+  // WHERE it runs is the load-bearing part. The step must sit after the
+  // artifact is confirmed (so dist/ exists) and before the auth step (so the
+  // check cannot be reached by anything holding a credential). A check that
+  // drifted below authentication would still pass its own tests while
+  // silently becoming privileged.
+  assert.ok(fs.existsSync('.github/wsf-staging/check-hosting-routes.mjs'),
+    'the helper the workflow invokes does not exist');
+
+  const deployJob = text.slice(text.indexOf('\n  deploy:'), text.indexOf('\n  hosted-verify:'));
+  assert.ok(deployJob.length > 0, 'the deploy job could not be isolated');
+
+  const confirm = deployJob.indexOf('Confirm the artifact belongs to the approved commit');
+  const check = deployJob.indexOf('check-hosting-routes.mjs');
+  const auth = deployJob.indexOf('Authenticate to Google Cloud');
+  assert.ok(confirm >= 0 && check >= 0 && auth >= 0, 'a required deploy step is missing');
+  assert.ok(confirm < check, 'the hosting check runs before the artifact is confirmed');
+  assert.ok(check < auth, 'the hosting check runs after a credential is obtained');
+
+  // It reads two checkouts and nothing else: no token, no project, no network.
+  const step = deployJob.slice(deployJob.lastIndexOf('- name:', check), auth);
+  assert.match(step, /node ops\/\.github\/wsf-staging\/check-hosting-routes\.mjs app ops/);
+  assert.equal(/WSF_GOOGLE_ACCESS_TOKEN|google-github-actions\/auth|gcloud |firebase /.test(step), false,
+    'the hosting check step reaches for a credential or a cloud CLI');
+});
+
+await test('the helper itself makes no network or cloud call', () => {
+  const helper = fs.readFileSync('.github/wsf-staging/check-hosting-routes.mjs', 'utf8');
+  for (const forbidden of ['fetch(', 'https://', 'child_process', 'gcloud', 'firebase-tools']) {
+    assert.equal(helper.includes(forbidden), false, `the helper references ${forbidden}`);
+  }
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);

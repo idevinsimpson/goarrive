@@ -353,6 +353,23 @@ jobs:
           rm -f app/apps/westayfit/dist/wsf-build-sha.txt app/functions-westayfit/lib/wsf-build-sha.txt
           echo "artifact belongs to $APPROVED"
 
+      # THE ONE PLACE BOTH HOSTING CONFIGS EXIST TOGETHER.
+      #
+      # The rewrites that let a dynamic route survive a direct load or a refresh
+      # are split across two files that no single checkout holds: the
+      # candidate's firebase.westayfit.json, reviewed with the app, and the
+      # operational firebase.westayfit.staging.json, reviewed on main and
+      # copied in at deploy time. inject_meta.py already fails a build whose
+      # dynamic route has no rewrite, but it reads the CANDIDATE's file, so an
+      # omission in the operational one is invisible to it — which is how
+      # /community/<id>/members came to be served the community home document
+      # and /move/<goalId> came to 404.
+      #
+      # Here, ops/ and app/ and the built artifact are all present and no
+      # credential is, so the check runs before authentication and reads only.
+      - name: Check the operational hosting config routes this candidate
+        run: node ops/.github/wsf-staging/check-hosting-routes.mjs app ops
+
       # --ignore-scripts: this job holds id-token, so no package lifecycle code
       # runs here. The staging config declares no predeploy hook, so nothing is
       # rebuilt — lib/ comes from the unprivileged build job.
