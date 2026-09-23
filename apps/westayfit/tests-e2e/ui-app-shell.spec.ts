@@ -227,7 +227,14 @@ test('Activity shows what this member actually recorded, and says it is private'
   // The number is the member's own, not the goal's shared total: 1,847 is
   // seeded on the goal and must never appear on this private screen.
   await expect(page.getByTestId('wsf-activity')).not.toContainText('1,847');
-  await expect(page.getByTestId('wsf-activity-privacy')).toContainText('Only you can see this');
+  // The one clarification says both halves: this summary is the member's own,
+  // and their contributions reach community activity per their settings. The
+  // old blanket "nobody else can see it" was wrong about the second half.
+  await expect(page.getByTestId('wsf-activity-subtitle')).toHaveText('Your recorded contributions, by goal.');
+  await expect(page.getByTestId('wsf-activity-privacy')).toHaveText(
+    'This personal summary is only for you. Community activity follows your visibility settings.',
+  );
+  await expect(page.getByTestId('wsf-activity')).not.toContainText('nobody else can see');
   if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, 'activity-recorded-390.png') });
   await context.close();
 });

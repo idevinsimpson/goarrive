@@ -262,10 +262,10 @@ export default function ActivityScreen() {
         <Text style={[display.md, styles.pageTitle]} testID="wsf-activity-title">
           Your progress
         </Text>
-        {/* Said once, plainly, at the top: this is private. */}
-        <Text style={styles.privacy} testID="wsf-activity-privacy">
-          Only you can see this. It is what you have recorded, not a score, and it is never
-          compared with anyone else.
+        {/* What the page is, contribution first. Who can see what is said once,
+            quietly, at the foot of the summary -- not promised up here. */}
+        <Text style={styles.privacy} testID="wsf-activity-subtitle">
+          Your recorded contributions, by goal.
         </Text>
 
         {!ready || !user ? (
@@ -325,8 +325,7 @@ function FailureBody({ onRetry }: { onRetry: () => void }) {
         <View style={styles.failPanel}>
           <Text style={styles.failTitle}>Your progress could not be loaded just now.</Text>
           <Text style={styles.failBody}>
-            Nothing has changed — this is the reading, not the record. What you recorded is still
-            recorded.
+            What you recorded is still recorded. This screen could not read it just now.
           </Text>
           <Pressable
             onPress={onRetry}
@@ -347,13 +346,6 @@ function FailureBody({ onRetry }: { onRetry: () => void }) {
           />
         </View>
       </View>
-      <View style={styles.fact}>
-        <Text style={styles.factTitle}>Nothing was lost</Text>
-        <Text style={styles.factBody}>
-          Every amount you recorded is stored against its goal. This screen could not read it just
-          now; it is still there.
-        </Text>
-      </View>
     </View>
   );
 }
@@ -365,9 +357,11 @@ function EmptyBody({ partial }: { partial: boolean }) {
     <View style={[styles.stateWrap, styles.spread]} testID="wsf-activity-empty">
       <View style={styles.group}>
         <View style={styles.emptyPanel}>
-          <Text style={[display.lg, styles.emptyTitle]}>Nothing recorded yet</Text>
+          <Text style={[display.lg, styles.emptyTitle]}>
+            Your first contribution will appear here
+          </Text>
           <Text style={styles.emptyBody}>
-            When you add what you did to a goal, it lands here — your part, kept to yourself.
+            Add what you did to a goal, and it is recorded here under that goal.
           </Text>
           <Pressable
             onPress={() => router.replace('/move')}
@@ -383,17 +377,12 @@ function EmptyBody({ partial }: { partial: boolean }) {
       </View>
       <View style={styles.group}>
         <View style={styles.fact}>
-          <Text style={styles.factTitle}>This page is only ever yours</Text>
-          <Text style={styles.factBody}>
-            It shows what you recorded. It is not a ranking, and nobody else can see it.
-          </Text>
-        </View>
-        <View style={styles.fact}>
           <Text style={styles.factTitle}>Finished goals stay here</Text>
           <Text style={styles.factBody}>
             When a goal you added to ends, your part in it does not disappear.
           </Text>
         </View>
+        <PersonalNote />
       </View>
     </View>
   );
@@ -410,6 +399,21 @@ function PartialNote() {
         Some of your goals could not be read just now, so this may not be everything.
       </Text>
     </View>
+  );
+}
+
+/**
+ * THE ONE CLARIFICATION, said once per screen and no louder than a footnote.
+ *
+ * The earlier copy promised "nobody else can see it" several times over. That
+ * was true of this summary and wrong about the member's contributions, which
+ * appear in community activity by default. This says both halves precisely.
+ */
+function PersonalNote() {
+  return (
+    <Text style={styles.personalNote} testID="wsf-activity-privacy">
+      This personal summary is only for you. Community activity follows your visibility settings.
+    </Text>
   );
 }
 
@@ -518,12 +522,7 @@ function ReadyBody({ state }: { state: Ready }) {
         )}
       </View>
 
-      <View style={styles.fact}>
-        <Text style={styles.factTitle}>This page is only ever yours</Text>
-        <Text style={styles.factBody}>
-          It shows what you recorded. It is not a ranking, and nobody else can see it.
-        </Text>
-      </View>
+      <PersonalNote />
     </View>
   );
 }
@@ -681,6 +680,7 @@ const styles = StyleSheet.create({
   },
   factTitle: { color: NAVY, fontSize: 14, lineHeight: 19, fontWeight: '800' },
   factBody: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17 },
+  personalNote: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17, paddingHorizontal: 2 },
 
   skeletonPanel: {
     backgroundColor: SURFACE,
