@@ -1,8 +1,9 @@
-import { usePathname, useRouter } from 'expo-router';
+import { usePathname, useGlobalSearchParams, useRouter } from 'expo-router';
 import { Fragment } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isKioskFlag } from '../kioskSession';
 import { ACTION_GREEN, CARD_BORDER, CREAM, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
 import { TabGlyph } from './TabGlyph';
 
@@ -66,7 +67,35 @@ const SHELL_PREFIXES = ['/community', '/contribute', '/goals', '/activity', '/yo
  * is an exact match instead.
  */
 const SHELL_EXACT = ['/move'];
-export function shellAppliesTo(pathname: string): boolean {
+
+/**
+ * A KIOSK SESSION IS NOT A MEMBER SURFACE, WHATEVER ITS PATH.
+ *
+ * The comment at the top of this file already says a station or kiosk screen
+ * must not wear the shell, because there it "would offer a room's worth of
+ * strangers a way into somebody's account". The rule did not hold, because it
+ * was written against the PATH alone: the kiosk deliberately rides the
+ * ordinary contribution route (`/contribute/<goalId>?kiosk=1`) rather than
+ * minting a second bracketed one, so what makes it a kiosk is a query
+ * parameter this function never saw. `/contribute` is a member prefix, so the
+ * bar rendered — and one tap of You or Progress carried the visitor out of the
+ * kiosk session to a member page, still signed in, with no Finish and no idle
+ * countdown to end the session. Measured on this exact shell.
+ *
+ * So the route's parameters are an input now. A caller that has none passes
+ * none and gets the old behaviour exactly.
+ *
+ * THE RULE IS NOT COPIED HERE. `isKioskFlag` in src/kioskSession.ts is the one
+ * answer, and the contribution screen asks it the same question about the same
+ * URL. An earlier revision of this fix normalised the repeated-parameter case
+ * in this file alone, which let the shell and the screen disagree within one
+ * journey -- no bar because the shell said kiosk, no Finish because the screen
+ * said ordinary.
+ */
+export type ShellRouteParams = { kiosk?: unknown };
+
+export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boolean {
+  if (isKioskFlag(params?.kiosk)) return false;
   if (pathname === '/') return true;
   if (SHELL_EXACT.includes(pathname)) return true;
   return SHELL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -74,6 +103,10 @@ export function shellAppliesTo(pathname: string): boolean {
 
 export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
   const pathname = usePathname() || '/';
+  // The bar lives in the root layout, above every screen, so the route's OWN
+  // parameters are not in scope here -- `useGlobalSearchParams` is the hook
+  // that reports the focused route's parameters to chrome rendered outside it.
+  const params = useGlobalSearchParams();
   const router = useRouter();
   const { width } = useWindowDimensions();
   // SAFE AREA, FROM THE PLATFORM RATHER THAN A GUESS. The previous version
@@ -92,7 +125,7 @@ export function MemberTabBar({ signedIn }: { signedIn: boolean }) {
    * runs off the screen.
    */
   const narrow = width < 260;
-  if (!signedIn || !shellAppliesTo(pathname)) return null;
+  if (!signedIn || !shellAppliesTo(pathname, params)) return null;
   return (
     <View
       style={[styles.bar, { paddingBottom: 10 + insets.bottom }, narrow ? styles.barWrapped : null]}
