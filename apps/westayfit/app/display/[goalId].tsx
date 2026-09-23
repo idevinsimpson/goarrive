@@ -372,7 +372,7 @@ export default function DisplayGoal() {
             <WsfWordmark variant="navy" height={22} testID="wsf-display-wordmark" />
           </View>
           <View style={styles.phoneHero} testID="wsf-display-phone-hero">
-            <View style={styles.genericBlock}>
+            <View style={[styles.genericBlock, big ? { maxWidth: Math.round(720 * tf) } : null]}>
               <Text
                 style={styles.genericHeadline}
                 accessibilityRole="header"
