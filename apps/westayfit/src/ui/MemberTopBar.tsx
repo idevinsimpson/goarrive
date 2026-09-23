@@ -154,8 +154,22 @@ const styles = StyleSheet.create({
   },
   // 44 is the minimum target; the bar is 52, so both controls are centred in
   // it with 4 to spare and the bar's height does not depend on either.
-  wordmarkTap: { minHeight: 44, justifyContent: 'center', paddingRight: 8 },
-  menuTap: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
+  //
+  // THE WORDMARK IS THE SIDE THAT GIVES. At 200% text zoom the usable width
+  // halves to ~195 px, and the artwork's natural width at height 22 does not
+  // fit beside a 44 px control. `WsfWordmark` already carries `maxWidth: 100%`,
+  // but that resolves against THIS box, so without a shrink here the row kept
+  // its natural width and pushed the menu button off the right edge — the
+  // whole page then scrolled sideways, which is the R1 rule. The menu button
+  // is pinned instead: a touch target may not be traded for a logo.
+  wordmarkTap: { minHeight: 44, justifyContent: 'center', paddingRight: 8, flexShrink: 1, minWidth: 0 },
+  menuTap: {
+    minHeight: 44,
+    minWidth: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   burger: { width: 20, gap: 4 },
   burgerRule: { height: 2, borderRadius: 1, backgroundColor: NAVY },
   sheet: {
