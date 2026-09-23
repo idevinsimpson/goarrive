@@ -183,8 +183,17 @@ async function seedAdditions(goalId: string): Promise<void> {
 /** Nothing the display renders may escape the canvas it cannot scroll. */
 async function nodesOutsideCanvas(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const root = document.querySelector('[data-testid="wsf-display-screen"]') as HTMLElement | null;
-    if (!root) return ['wsf-display-screen: not rendered'];
+    /*
+      EVERY STATE HAS A ROOT, AND THEY ARE NOT ALL CALLED THE SAME THING. The
+      ready screen is `wsf-display-screen`; loading, unreachable and the one
+      generic refusal each carry their own testID. Looking only for the ready
+      one reported "not rendered" on exactly the states this check most needs
+      to cover.
+    */
+    const root = (['wsf-display-screen', 'wsf-display-loading', 'wsf-display-unreachable', 'wsf-display-not-available']
+      .map((id) => document.querySelector(`[data-testid="${id}"]`))
+      .find(Boolean) ?? null) as HTMLElement | null;
+    if (!root) return ['no display root rendered'];
     const cs = getComputedStyle(root);
     const rr = root.getBoundingClientRect();
     const box = {

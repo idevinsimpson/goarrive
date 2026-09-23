@@ -78,9 +78,17 @@ export function isWideTier(tier: DisplayTier): boolean {
 export function displayWeWidth(tier: DisplayTier, width: number): number {
   switch (tier) {
     case 'collective':
-      // 0.42 of the glass, as the booth already gets, instead of a cap that
-      // binds the moment the room grows.
-      return Math.min(820, Math.round(width * 0.42));
+      /*
+        LARGER THAN THE BOOTH'S CAP, AND STILL INSIDE THE CANVAS.
+
+        The first cut of this took 0.42 of the glass, as the booth does — 806px
+        on a 1920. Together with the room's type that made the right column
+        taller than 1080, and the display cannot scroll, so the recent list was
+        clipped off the bottom. The instrument still grows with the room (760
+        against the 640 the booth is capped at, 40% of the width against 33%),
+        but not at the cost of losing a line of confirmed evidence.
+      */
+      return Math.min(760, Math.round(width * 0.4));
     case 'booth':
       // Untouched: the shipped expression, so 1280×800 and 1440×900 are
       // pixel-identical to what they render today.
@@ -113,7 +121,10 @@ export function displayWeWidth(tier: DisplayTier, width: number): number {
 export function displayTypeFactor(tier: DisplayTier): number {
   switch (tier) {
     case 'collective':
-      return 1.45;
+      // 1.3 rather than 1.45: the taller scale pushed the recent list off a
+      // 1080 canvas that has no scroll. Measured by the containment assertion
+      // in the responsive spec, not by eye.
+      return 1.3;
     case 'portrait':
       return 0.8;
     case 'booth':
