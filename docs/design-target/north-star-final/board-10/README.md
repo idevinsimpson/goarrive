@@ -130,3 +130,36 @@ and no injected failure is presented as an organic one.
 Every claim on the board is either a quotation from the lock, a property
 visible in the frame it captions, or a line read out of the repository at a
 named SHA. Where the lock did not settle something, it is not asserted.
+
+## Independent board review — PASSED 2026-09-23
+
+Creative Director verdict `5786952407` on PR #422, a pixel review of the
+exported original at `aac62c0` (PR #425, run `35801222465`, artifact
+`10725827245`, archive sha256 `7c2516c9…`; PNG git blob `6b863a55`,
+3,245,603 bytes, 2560×9260) — *PASS as a reconstructed, dated CURRENT BUILD
++ explicitly labelled TARGET reference.* Status 3 in the manifest is now
+REVIEWED. Status-only: the PNG bytes and the twenty-one
+`review/sprint-w2-board10/` captures are exactly the reviewed bytes; the
+footer's submission label was deliberately not re-rendered.
+
+**What the verdict accepts.** The phone's one calibrated Living WE and no
+member chrome, the lifecycle distinctions and the overshoot, the narrow
+portrait build against the intended portrait composition, the wide variants,
+retained stale truth, initial failure with no invented total, the generic
+refusal and the list-only failure are visibly represented. The fixture
+difference (Maple Street captures, Riverside drawings) is disclosed, so the
+two are not presented as one implemented before/after. QR is NOT WIRED and
+absent from every current-capture claim.
+
+**What it does not accept.** The current public-display page as its finished
+premium design, installed hardware, a QR implementation, a privacy or
+production release, or any deploy. The product gaps stay explicit: the
+800 px portrait still takes the narrow (phone) layout, room-scale text and
+status are too small, and the wide failure placement needs recomposition.
+They feed W2's separate public-display responsive TARGET checkpoint
+(`docs/design-target/review/public-display-next/`), not a repaint of this
+board.
+
+This completes independent review of the initial Boards 00–11 package:
+twelve reference boards, not twelve implemented pages. Board 11's PRE-FIX
+qualifier and the shared/unattended kiosk use HOLD remain in force.
