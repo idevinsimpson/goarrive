@@ -14,7 +14,7 @@ after the responsive direction passed.
 | | |
 |---|---|
 | Original | **`a193b43`** — `claude/wsf-app-shell`, verified as its head when this branch was cut |
-| New | **`f22bded`** — `claude/wsf-display-responsive` |
+| New | **`1fd669f`** — `claude/wsf-display-responsive` |
 | Product delta | `app/display/[goalId].tsx` (+196 / −38) · `src/ui/displayLayout.ts` (new, +160) |
 | Test delta | `tests-e2e/sprint-w2-display-responsive-capture.spec.ts` (new) |
 
@@ -66,9 +66,10 @@ checkable.
    length-tiering in `displayTypeScale` keeps working. The freshness line,
    which had **no wide variant at all**, is now 26px at collective and 22px at
    portrait; booth keeps 13px deliberately.
-3. **The wide generic states are centred.** `canvasWide` is `space-between`,
-   and the refusal renders two children, so it was pinned to the top edge with
-   two thirds of the glass empty beneath it.
+3. **The collective generic states are centred.** `canvasWide` is
+   `space-between`, and the refusal renders two children, so at 1920 it was
+   pinned to the top edge with two thirds of the glass empty beneath it. The
+   centred canvas is the collective tier's alone — see the correction below.
 
 ## What did not change, deliberately
 
@@ -77,11 +78,25 @@ checkable.
   target package on #429; the space it held is closed up, not left as a hole.
 - **The phone composition is untouched**, to the pixel, and is not in this
   checkpoint.
-- **The total stays one line.** The accepted target splits the number from its
-  denominator; the route composes `241 of 500 squats` as a single string that
-  the suite asserts, so splitting it is a content change rather than the
-  responsive one this packet authorises. Named here rather than done quietly.
-- **The booth is untouched**: type factor exactly 1, mark expression verbatim.
+- **The total stays one line — as a choice for this packet, not a rule.** The
+  accepted target splits the number from its denominator. I left the route's
+  single `241 of 500 squats` string alone because re-authoring the total is
+  more than the responsive change this packet carries, and I would rather
+  surface it than smuggle it. My earlier wording overstated the reason: an
+  existing assertion on that exact text does **not** make the composition
+  immutable. Typography and layout may change while the accessible
+  numerator, denominator and unit stay exactly what they are, so this is a
+  matched-AFTER decision, not a constraint the suite imposes.
+- **The booth keeps its shipped composition** — type factor exactly 1, mark
+  expression verbatim, generic canvas unchanged. **This was not true when this
+  record first said it.** The first cut selected the new centred generic canvas
+  on `wide`, which is both wide tiers, so 1280x800 and 1440x900 silently moved
+  while this file claimed they had not. Corrected in `1fd669f`: the centred
+  generic canvas is now keyed on `tier === 'collective'`, and a regression
+  measures the generic block's distance from the top against its distance from
+  the bottom at 1280x800 and 1440x900 (deliberately unbalanced) versus
+  collective, portrait and phone (balanced). The existing mark-width test could
+  not have caught this: the generic states render no mark.
 
 ## Verification
 
@@ -92,28 +107,46 @@ checkable.
 after the scale correction below. Includes the long-name containment checks and
 the authorization-race cases.
 
-**This packet's own spec: 11 passed.** Tier boundaries; the shipped mark widths
+**After the booth correction, the specs that photograph a booth: 19 passed** —
+all of `e5-display-authorization`, `ui-a11y-fixes`, `ui-display` and
+`ui-matrix`, which between them carry `wide 1440x900 distant display states
+need no scroll`, `wide 1440x900 the distant display carries the same four
+states, full page`, `(f) wide display holds a long name, title and unit on
+screen`, and the generic unknown/unauthorized/revoked path. No redesign and no
+full-suite repetition: the affected states and `ts:check`.
+
+**This packet's own spec: 12 passed.** Tier boundaries; the shipped mark widths
 to the pixel; every phase at both new classes with its exact values, overshoot
 and capped percent; stale retaining its confirmed number and mark; an
 unreachable first load inventing no zero and no mark; a refusal clearing
 context and staying terminal until an explicit `Check again`; a recent-list
-failure touching only that list; long strings contained; QR absent.
+failure touching only that list; long strings contained; QR absent; and the
+booth-generic regression described above.
 
-## Four defects found while building this, and how each surfaced
+## Five defects in this work, and how each surfaced
 
-Three of the four were invisible to a passing test run. On this surface,
-**assertions prove behaviour and only measurement or pixels prove appearance.**
+Four of the five were invisible to a passing test run, and the fifth was
+invisible to me entirely — the Director read the diff and found it. On this
+surface, **assertions prove behaviour and only measurement, pixels or a second
+reader prove appearance.**
 
 | Defect | Kind | Found by |
 |---|---|---|
 | A Firestore `PATCH` without `updateMask` replaced each seeded goal, wiping title, target and unit — the product looked like it refused to recover from a revocation | my test | reading the failure against the existing spec's helper |
 | The containment check looked only for `wsf-display-screen`, the **ready** root, so it reported "not rendered" on exactly the failure states it exists to cover | my test | the failure message naming the sentinel |
 | **The recent list was clipped off a 1080 canvas.** 0.42 of the glass plus a 1.45 type factor made the column taller than a screen that cannot scroll — confirmed evidence silently lost to a style change | **product, mine** | the containment assertion written for it |
+| **The booth's generic canvas moved while this file said it had not** — the centred canvas was keyed on `wide`, which is the booth as well as the collective | **product, mine** | the Director reading the diff against this record's own claim ([`5787628430`](https://github.com/idevinsimpson/goarrive/pull/435#issuecomment-5787628430)) |
 | **The room-scaled `maxWidth` was applied to the wrong element** — `styles.genericBlock` occurs twice and the edit hit the phone loading card, where `big` is always false, so it was a silent no-op and the refusal kept wrapping to two lines | **product, mine** | measuring the live DOM: `maxWidth` read back 720px, not 936px |
 
 ## Frames
 
 Eight, all from one run against one seeded fixture at `f22bded`:
+
+The `1fd669f` correction touches only the generic loading/unavailable/
+unreachable canvas at the booth tier, which no frame here photographs. I
+recorded the eight hashes, rebuilt and re-ran the producer at `1fd669f`, and
+all eight came back **byte-identical** — so these are the frames of the
+current head, not stale ones.
 
 ```
 AFTER-progress-800x1280.png              AFTER-progress-1920x1080.png
