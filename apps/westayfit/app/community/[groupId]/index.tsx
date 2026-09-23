@@ -95,11 +95,17 @@ import {
   ON_ACTION,
   ON_NAVY_MUTED,
   ON_NAVY_RULE,
+  SURFACE,
   display,
   elevation,
   kit,
 } from '../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../src/ui/livingWeCalibration';
+import {
+  MomentumRow,
+  PresenceRow,
+  type ActivityRow,
+} from '../../../src/ui/CommunityPresence';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -305,8 +311,106 @@ export default function CommunityPage() {
   // a different link to a different audience from the invite link, and a copy
   // of one must never light up the other's confirmation.
   const [shareStatus, setShareStatus] = useState<ShareStatus>('idle');
+  /*
+    THE SOCIAL LAYER. Both reads are ENRICHMENT: the page is about the
+    community and its goal, and it rendered for months without either. So a
+    failure in either one is swallowed and simply renders nothing, never an
+    error state and never a blocked page. A member must not lose their goal
+    because the directory was slow.
+  */
+  const [presence, setPresence] = useState<{
+    people: { displayName: string; role: string }[];
+    /**
+     * Whether this is the WHOLE visible set. Only then can the page say that
+     * somebody is unlisted: with a page still outstanding, fewer rows than
+     * members proves nothing except that there is another page.
+     */
+    complete: boolean;
+  } | null>(null);
+  const [momentum, setMomentum] = useState<{
+    entries: ActivityRow[];
+    contributorsToday: number | null;
+  } | null>(null);
   const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
+
+  /*
+    WHO IS HERE, AND WHAT HAS JUST HAPPENED.
+
+    Two member-only callables, both gated on active membership server-side, and
+    both fired only once this page has resolved to `ready` — which is already
+    past the membership check, so a non-member never issues either call.
+
+    `contributorsToday` is asked for against the FEATURED GOAL and no other,
+    because "today" is the goal's own stored timezone and active window. Asking
+    without a goal returns null rather than a count computed on some other
+    clock: never Cloud Functions host time, never accidental UTC, never the
+    caller device's local day.
+
+    THIS HOOK LIVES ABOVE EVERY EARLY RETURN, and that placement is the whole
+    correctness story rather than a style preference. It first sat beside the
+    `featured` goal further down — which is AFTER this component returns early
+    for loading, signed-out, non-member and error. React counts hooks per
+    render, so the page rendered one fewer hook while loading than it did once
+    ready, and the render after the data arrived threw rather than painting.
+    The symptom was not an error on screen: it was four authenticated specs
+    timing out on a page that never appeared, while the signed-out probe passed
+    because it returns early on every render and never changes the count.
+
+    The featured goal is therefore derived here from `goalsState` rather than
+    read from `featured` below. The two agree: both take the first active goal
+    in the order wsfListGoals returned.
+  */
+  const socialFeaturedGoalId =
+    goalsState.kind === 'loaded'
+      ? (goalsState.goals.find((g) => g.status === 'active')?.goalId ?? null)
+      : null;
+  const readyForSocial = state.kind === 'ready';
+  useEffect(() => {
+    if (!readyForSocial || !groupId) return;
+    let cancelled = false;
+    const functions = getFirebaseFunctions();
+    void (async () => {
+      try {
+        const fn = httpsCallable<
+          { groupId: string },
+          { members: { displayName: string; role: string }[]; nextCursor: string | null }
+        >(functions, 'wsfCommunityMembers');
+        const r = await fn({ groupId });
+        if (!cancelled) {
+          setPresence({
+            people: r.data.members ?? [],
+            complete: (r.data.nextCursor ?? null) === null,
+          });
+        }
+      } catch {
+        // Enrichment. Its absence is not an error state.
+      }
+    })();
+    void (async () => {
+      try {
+        const fn = httpsCallable<
+          { groupId: string; goalId?: string },
+          { entries: ActivityRow[]; contributorsToday: number | null; nextCursor: string | null }
+        >(functions, 'wsfCommunityActivity');
+        const r = await fn(
+          socialFeaturedGoalId ? { groupId, goalId: socialFeaturedGoalId } : { groupId }
+        );
+        if (!cancelled) {
+          setMomentum({
+            entries: r.data.entries ?? [],
+            contributorsToday: r.data.contributorsToday ?? null,
+          });
+        }
+      } catch {
+        // Enrichment. Its absence is not an error state.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [readyForSocial, groupId, socialFeaturedGoalId]);
+
   const [progress, setProgress] = useState<Record<string, GoalProgress>>({});
   const [progressReloadToken, setProgressReloadToken] = useState(0);
   const [manageOpen, setManageOpen] = useState(false);
@@ -1502,6 +1606,7 @@ export default function CommunityPage() {
     .slice()
     .sort((a, b) => (a.endsAt === b.endsAt ? a.goalId.localeCompare(b.goalId) : b.endsAt.localeCompare(a.endsAt)));
   const featured = activeGoals[0] ?? null;
+
   const otherActive = activeGoals.slice(1);
   // D-7. Which goals actually get a permission card this pass — ONE source,
   // consulted by the card renderer and by the orphan block in the Manage
@@ -3206,14 +3311,34 @@ export default function CommunityPage() {
             ) : null}
           </View>
           {/*
-            PRESENCE, AND ONLY WHAT THIS PRODUCT MAY SAY. A member count is a
-            fact the member is already authorized to read. It is NOT a count
-            of people who moved, and this line must never become one.
+            PRESENCE — PEOPLE FIRST, THEN THE NUMBER.
+
+            The initials row is drawn from `wsfCommunityMembers`, which returns
+            only members who are visible in THIS community and returns no uid
+            beside any name. It renders nothing at all when nobody is visible:
+            a row of empty discs would be a drawing of absence, and the line
+            below already carries the truth.
+
+            THE COUNT IS STILL A COUNT OF MEMBERS, NEVER OF PEOPLE WHO MOVED.
+            That distinction survives the social lane unchanged — what moved is
+            that a proven count of contributors now exists, separately, in the
+            momentum section below, and only where the server can prove it.
+
+            The second clause states THAT somebody is unlisted and never HOW
+            MANY, and only when the whole visible set is in hand.
           */}
+          {presence !== null && presence.people.length > 0 ? (
+            <PresenceRow people={presence.people} />
+          ) : null}
           <View style={styles.presenceRow}>
             {memberCount != null ? (
               <Text style={styles.presenceText} testID="wsf-community-hero-presence">
-                {memberCountLabel(memberCount)} · moving together this week
+                {memberCountLabel(memberCount)}
+                {presence !== null &&
+                presence.complete &&
+                presence.people.length < memberCount
+                  ? ' · some choose not to be listed'
+                  : ' · moving together this week'}
               </Text>
             ) : null}
             {otherCommunityCount > 0 ? (
@@ -3503,16 +3628,69 @@ export default function CommunityPage() {
 
           {/*
             W7. Community momentum: one line across the open goals, and only
-            when every one of them has answered. It counts GOALS, never people
-            — no server surface here counts contributors, and none is invented.
+            when every one of them has answered. It counts GOALS, never people.
             Members only, which this whole screen already is: a non-member is
             refused at `state.kind === 'notMember'` above and never reaches it.
+
+            The clause that once stood here — "no server surface counts
+            contributors, and none is invented" — was true until the social
+            lane. `wsfCommunityActivity` now counts them, under the owner's
+            decision, and the guard moved rather than disappeared: see the
+            section below, where the count renders only when the server could
+            PROVE it over the goal's own day.
           */}
           {momentumLine ? (
             <Text style={styles.momentumLine} testID="wsf-community-momentum">
               {momentumLine}
             </Text>
           ) : null}
+
+          {/*
+            RECENT MOMENTUM — the evidence that other real people are moving.
+
+            Every row is a real `wsfContributions` record. A member showing
+            activity but not their name appears as "A member" WITH their amount
+            and time: dropping the row would quietly under-report what the
+            community did in order to make the feed tidier. A member who turned
+            activity off has no row at all, and their effort still moved the
+            shared total.
+
+            `contributorsToday` is rendered ONLY when the server returned a
+            number. Null renders nothing — never "at least N", never an
+            estimate, and never the row count standing in for a person count.
+          */}
+          {momentum !== null &&
+          (momentum.entries.length > 0 || momentum.contributorsToday !== null) ? (
+            <View style={styles.momentumCard} testID="wsf-community-momentum-card">
+              <Text style={styles.sectionEyebrow}>Recent momentum</Text>
+              {momentum.contributorsToday !== null ? (
+                <Text
+                  style={styles.momentumHeadline}
+                  testID="wsf-community-contributors-today"
+                >
+                  {momentum.contributorsToday === 1
+                    ? '1 person moved today'
+                    : `${momentum.contributorsToday} people moved today`}
+                </Text>
+              ) : null}
+              {momentum.entries.slice(0, 3).map((row, i) => (
+                <MomentumRow key={i} row={row} first={i === 0} />
+              ))}
+            </View>
+          ) : null}
+
+          {/* The way to the people. A quiet row, never a card competing with
+              the goal for weight. */}
+          <Pressable
+            onPress={() => router.push(`/community/${groupId}/members`)}
+            style={styles.peopleLink}
+            testID="wsf-community-members-link"
+            accessibilityRole="link"
+            accessibilityLabel="See everyone in this community"
+          >
+            <Text style={styles.peopleLinkText}>See everyone in this community</Text>
+            <Text style={styles.peopleLinkChevron}>›</Text>
+          </Pressable>
 
           {/* Your part: exact own credit, no ranking, no comparison. */}
           {featured
@@ -3967,6 +4145,29 @@ const styles = StyleSheet.create({
   // W7. One quiet line between the hero and "Your part": a fact about the
   // community's goals, not a leaderboard and not a nudge.
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  momentumCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  momentumHeadline: {
+    color: wsfTheme.colors.text,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '800',
+  },
+  peopleLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  peopleLinkText: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
+  peopleLinkChevron: { color: INK_QUIET, fontSize: 20, fontWeight: '700' },
   section: { gap: 12 },
   sectionEyebrow: {
     color: ACTION_GREEN_DEEP,

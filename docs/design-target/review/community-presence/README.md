@@ -1,16 +1,24 @@
-# Community presence — W8 checkpoint 1
+# Community presence — W8
 
-**Status: PROPOSED — NOT ACCEPTED. Nothing here is implemented, nothing is deployed.**
+**Status: target + architecture PASSED at `862b2f5` (Director verdict
+`5788288648`); implementation released with two corrections and delivered.
+NOTHING IS DEPLOYED — the composite index declaration in particular is declared
+and not rolled out.**
+
+Sections 1–7 are checkpoint 1, kept as written so the proposal can be read
+against what shipped. **Section 8 records the implementation and the matched
+AFTERs.**
 
 Target + truth inventory + architecture contract for the social/community lane,
 on the owner's decision of 2026-09-22 ~22:23 ET relayed in #365 comment
 [`5787909127`](https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5787909127).
 
-Every frame in this folder is a **drawing**, carries a `PROPOSED — NOT ACCEPTED`
-strip inside the image, and is named `PROPOSED-*`. None is an AFTER. The strip
-is amber rather than the accepted producers' green, because those mark frames
-drawn against a target the Director has already accepted and this package has
-not been reviewed at all.
+**Two kinds of image live here and they must never be confused.**
+`PROPOSED-*.png` at the top level are **drawings**; each carries a
+`PROPOSED — NOT ACCEPTED` strip inside the image, in amber rather than the
+accepted producers' green. `after/AFTER-*.png` are **real screenshots of the
+running product** — nothing drawn, no banner, every value on them produced by
+the real callables against the emulator.
 
 ## Start record
 
@@ -447,3 +455,93 @@ without its label, and still be published.
 An ordinary run writes **zero bytes**: measured by hashing this folder before
 and after a run without `WSF_CAPTURE_FRAMES`, not asserted. Both hashes were
 `b29c3ce473c0ccef7c050e273c106211c69fb537613bcf7f5de78afc4ed4f1d7`.
+
+---
+
+# 8 · Implementation — matched AFTERs
+
+**Released by the Director's verdict `5788288648` (target + architecture PASS at
+`862b2f5`), with both required corrections applied.**
+
+`after/AFTER-*.png` are **real screenshots of the running product**. Nothing in
+that folder is drawn and no frame carries a banner. Every name, count and
+amount on them came out of the emulator through the real callables.
+
+## The two corrections
+
+1. **No gear or header treatment on You.** W9 owns the persistent header and
+   hamburger, so a second utility affordance in that corner would either fight
+   W9's or become dead. Settings is an ordinary working row inside You content,
+   leading to real `/settings` and `/settings/privacy` routes — real on
+   arrival, with nothing left to wire up when W9 exposes them.
+2. **`contributorsToday` runs on the goal's own stored timezone and active
+   window.** Never Cloud Functions host time, never accidental UTC, never the
+   caller device's local day. The zone offset is measured twice, because a
+   zone's offset at midnight can differ from its offset now — that is what a DST
+   transition is, and getting it wrong moves the boundary by an hour on exactly
+   the two days a year nobody would notice. It renders nothing where the zone
+   cannot be resolved, where no goal is named, where the goal belongs to another
+   community, or where the bounded scan did not provably reach past the window
+   start.
+
+## What the AFTERs prove, in one fixture
+
+The capture seeds six members: three with **no visibility field at all** — the
+real state of every membership in the product today — one Champion, one who
+chose `name: 'private'`, and one who chose `activity: 'private'`. Four of them
+contributed today.
+
+- `AFTER-community-390x844` — the presence row names five and omits Priya, who
+  chose name privacy. The line reads `6 members · some choose not to be listed`:
+  the count is everyone, the clause says **that** somebody is unlisted and never
+  **how many**.
+- **`4 people moved today`** counts Tom, whose *activity* is private and who
+  therefore has no row in the feed. That is the aggregate rule working: private
+  members stay counted, with their identity hidden.
+- `AFTER-members-390x844` — five named people, the Champion pill on the one
+  Champion, `Your visibility here · Settings` as one unweighted row.
+- `AFTER-settings-privacy-390x844` — the same member visible in one community
+  and private in another, with the consequence stated in the feed's own words.
+- `AFTER-you-390x844` — the Settings row, no gear.
+
+## Honest limits of the implementation
+
+- **At 390×844 the momentum card sits at the fold and is read by scrolling a
+  little.** The presence row, the truthful member line, the hero and both
+  actions are above it, and the card's eyebrow and contributor line peek above
+  the tab bar. The proposal frames did not show this because they omitted page
+  furniture the shipped screen has — the `Already moved?` action, the
+  `Confirmed … Refresh` line and the tab bar. The order was left alone
+  deliberately: moving momentum above the actions would push `Start moving`
+  down, and the product loop outranks the feed.
+- The `A member` wording from the proposal is what shipped. If the literal
+  `Anonymous member` is wanted it is still a one-line change.
+- `430×932` is not captured, as at checkpoint 1.
+
+## Evidence on the implementation head
+
+| Suite | Result |
+| --- | --- |
+| Callable (`test:callable`) | **453 / 453** — including 21 new W8 privacy assertions |
+| Rules | **28 / 28** |
+| Deploy-config | **17 / 17** — including the source-read invoker pin |
+| e2e regression (`community-list`, `ui-app-shell`, `e35-home`, `batch-a-identity`) | **38 / 38** |
+| e2e privacy (`sprint-w8-social-privacy`) | **4 / 4**, in the ordinary suite |
+| `ts:check` | clean |
+| `check-evidence-intact` | frozen 9 / accepted 20, no byte changed |
+
+Two tests were **extended rather than weakened**, and both were the guard doing
+its job: `wsf-my-communities` pins the item's exact key set and now names the
+caller's own two preferences, safe there because that query is `userId ==
+caller`; and the invoker pin had to be rewritten to read source, because
+`__endpoint.callableTrigger` is `{}` even for the deliberately public
+`wsfGoalRecentAdditions` — its positive control is what caught the first
+version reporting every callable as private.
+
+One real bug the instruments caught: the social effect first sat beside the
+featured goal, which is **after four early returns**, so React saw one fewer
+hook while loading than once ready and the page threw instead of painting. Four
+authenticated specs timed out while a signed-out probe passed, because that
+path returns early on every render and never changes the count. The hook now
+sits above every early return, and the fix took the regression suite from
+2.0 minutes with four timeouts to 48 seconds green.

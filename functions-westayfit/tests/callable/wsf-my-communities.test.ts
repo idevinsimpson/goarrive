@@ -190,15 +190,24 @@ describe('wsfMyCommunities', () => {
     // Whitelist the item shape — a future field that leaked another member's
     // uid or displayName would fail this check even if it slipped past a
     // targeted assertion.
+    //
+    // `nameVisibility` / `activityVisibility` were added deliberately by the
+    // social lane and are the CALLER'S OWN settings, which is the reason they
+    // are safe here and nowhere else: this query is `userId == caller`, so
+    // every row it touches is the caller's. They carry no other member's
+    // identity, and the guard above is doing its job by making their arrival a
+    // decision somebody had to write down rather than a silent widening.
     for (const item of result.items) {
       expect(Object.keys(item).sort()).toEqual([
         'activeChallenge',
+        'activityVisibility',
         'displayName',
         'groupId',
         'groupType',
         'isSample',
         'joinPolicy',
         'memberCount',
+        'nameVisibility',
         'role',
       ]);
       if (item.activeChallenge) {
