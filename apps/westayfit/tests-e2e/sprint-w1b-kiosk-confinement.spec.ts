@@ -560,28 +560,6 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     await expect(goalLink).toBeVisible({ timeout: 40_000 });
 
     expect(await markMountedContext(page, CONTEXT), 'the mount marker was planted').toBe(true);
-    /*
-      SET THE OFFSET BEFORE LEAVING, AND COMPARE THE CLAMPED VALUE.
-
-      W1B's residual (#436 `5792137856`), accepted: an earlier revision of mine
-      read `contextScroll` on ARRIVAL, before anything had scrolled, so the
-      recorded pair was 0/0 and proved nothing in either direction — harmless
-      while it was only logged, and exactly wrong now that step 4 asserts it.
-      The browser clamps to the content's own maximum, so the clamped value is
-      read back and that is what the comparison uses.
-    */
-    const scrolled = await page.evaluate((id) => {
-      let el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
-      while (el) {
-        if (el.scrollHeight > el.clientHeight + 1) {
-          el.scrollTop = 240;
-          return el.scrollTop;
-        }
-        el = el.parentElement;
-      }
-      return null;
-    }, CONTEXT);
-
     await goalLink.click();
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
 
@@ -650,10 +628,72 @@ test.describe('kiosk confinement · the states a correction could quietly break'
       await visibleMarkSurvives(page, CONTEXT),
       'the community screen on show is not the one the member came from',
     ).toBe(true);
+    /*
+      5 · AND ITS SCROLL COMES BACK WITH IT — ASKED WHERE THERE IS A SCROLL TO
+      ASK ABOUT.
+
+      At 800x1280 this community page does not scroll at all — it fits, with
+      nothing to restore — and it had about thirty pixels of travel before the
+      empty chrome row came out of it. Thirty pixels is inside what a single
+      re-flow can clamp away on the way back: measured, the page came back at 0
+      from a 30, and comes back at 294 from a 294 when there is real travel. An
+      equality asserted at the tablet class would therefore be reporting the
+      re-flow, or nothing at all, and an inequality would be the weaker claim
+      W1B has already caught me making quietly.
+
+      W1B's residual (#436 `5792137856`), accepted, is inside this: an earlier
+      revision of mine read the offset on ARRIVAL, before anything had
+      scrolled, so the recorded pair was 0/0 and proved nothing in either
+      direction. The offset is planted, and the browser's own clamp of it read
+      back, before the member leaves.
+
+      So the journey is made again at a phone height, on the SAME mounted
+      screen — the viewport is resized rather than re-entered, so nothing is
+      remounted and the marker planted at the top of this test still applies —
+      and the claim is exact there: 430px of travel, the offset planted, the
+      clamped value read back, and the value after Back equal to it.
+    */
+    await page.setViewportSize({ width: 390, height: 640 });
+    await page.waitForTimeout(500);
+    const phoneScrolled = await page.evaluate((id) => {
+      let el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+      while (el) {
+        if (el.scrollHeight > el.clientHeight + 1) {
+          el.scrollTop = 240;
+          return el.scrollTop;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    }, CONTEXT);
+    expect(
+      phoneScrolled,
+      'the community page has real travel at a phone height, so the scroll claim can fail',
+    ).toBeGreaterThanOrEqual(100);
+
+    await page.getByTestId(CONTEXT).first().click();
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-contribute-back').click();
+    await expect(
+      page.locator(`[data-testid="${CONTEXT}"]:visible`).first(),
+      'phone height: Back returns the member to their community',
+    ).toBeVisible({ timeout: 40_000 });
+    expect(
+      await page.getByTestId(CONTEXT).count(),
+      'phone height: Back pushed a copy rather than popping',
+    ).toBe(1);
+    expect(
+      await visibleMarkSurvives(page, CONTEXT),
+      'phone height: the community screen on show is not the one the member came from',
+    ).toBe(true);
     expect(
       await contextScroll(page, CONTEXT),
       'its scroll did not come back with it',
-    ).toBe(scrolled);
+    ).toBe(phoneScrolled);
+
+    // And back to the class this test's frame is taken at.
+    await page.setViewportSize({ width: 800, height: 1280 });
+    await page.waitForTimeout(400);
 
     await page.waitForTimeout(500);
     await saveFrame(page, frame('ordinary-contribution-returns-to-its-tab-tablet-800x1280.png'));
