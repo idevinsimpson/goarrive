@@ -3,7 +3,15 @@ import { FirebaseError } from 'firebase/app';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { createRef, useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
@@ -19,7 +27,23 @@ import { type RepeatPolicy } from '../../src/contributionFlow';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { isValidTimeZone } from '../../src/ui/dates';
 import { DateTimeField, type DateTimeFieldHandle } from '../../src/ui/DateTimeField';
-import { kit, NAVY } from '../../src/ui/kit';
+import {
+  ACTION_GREEN,
+  CREAM,
+  display,
+  elevation,
+  ERROR_RED,
+  HAIRLINE,
+  HERO_MUTED,
+  kit,
+  NAVY,
+  ON_ACTION,
+  ON_NAVY_RULE,
+  OPTION_SELECTED_TINT,
+  PROGRESS_GREEN,
+  SURFACE,
+  TEXT_MUTED,
+} from '../../src/ui/kit';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
@@ -262,32 +286,87 @@ function repeatLabel(policy: RepeatPolicy): string {
 }
 
 /**
- * A plain sentence for whatever the callable refused with. The known codes
- * wsfCreateGoal raises are named; nothing here ever shows a raw code.
+ * WHAT THE CLIENT ACTUALLY KNOWS AFTER A FAILED CREATE.
+ *
+ * This used to be one sentence for every failure, and the two sentences it
+ * chose between both ended in "try again". W7 photographed what that costs
+ * (#434, evidence `e6a208a`): a request aborted before it was sent and a
+ * request whose transaction COMMITTED before the response was lost render
+ * the identical words, while the server holds zero goals in the first case
+ * and one in the second. A Champion who obeys "try again" after the second
+ * one ends up with two goals, two ids, one title.
+ *
+ * So the failure is classified instead, and the rule is the only one the
+ * client can honestly apply: a code the server can ONLY have produced BEFORE
+ * it wrote is a refusal, and everything else is unknown.
+ *
+ *   REFUSED — the server answered, and answered before the write. Every code
+ *   below is raised by wsfCreateGoal ahead of, or inside but before, the
+ *   `tx.set` in its transaction (functions-westayfit/src/index.ts). The
+ *   screen may say plainly that no goal was created.
+ *
+ *   UNKNOWN — `unavailable`, `deadline-exceeded`, `internal`, `aborted`,
+ *   `cancelled`, an unrecognised code, and anything that is not a
+ *   FirebaseError at all. A transaction that throws after committing is
+ *   indistinguishable here from one that never ran, so the screen says only
+ *   that it could not confirm. It claims nothing in EITHER direction.
+ *
+ * Ambiguity resolves toward "we do not know" and never toward a claim. No
+ * idempotency is invented to paper over it: `wsfCreateGoal` takes no attempt
+ * key, and asking it for one is not this route's call to make.
  */
-function describeServerError(e: unknown): string {
-  if (e instanceof FirebaseError) {
-    switch (e.code) {
-      case 'functions/unauthenticated':
-        return 'Please sign in again, then start the goal.';
-      case 'functions/failed-precondition':
-        return 'Verify your email address before starting a goal.';
-      case 'functions/permission-denied':
-        return 'Only a Champion of this community can start a goal here.';
-      case 'functions/invalid-argument':
-        return "Something about this goal didn't look right. Check the details and try again.";
-      case 'functions/not-found':
-        return "We couldn't find that community.";
-      case 'functions/resource-exhausted':
-        return 'Too many goals were started in a short time. Wait a moment and try again.';
-      case 'functions/unavailable':
-      case 'functions/deadline-exceeded':
-        return "We couldn't reach the server. Check your connection and try again.";
-      default:
-        return 'Something went wrong. Please try again.';
+type Outcome =
+  | {
+      kind: 'refused';
+      message: string;
+      /**
+       * Whether a SERVER produced this. The one refusal that does not come
+       * from one is the guard for arriving with no community, and it may not
+       * borrow the sentence about what the server did.
+       */
+      fromServer: boolean;
+      /**
+       * Whether repeating this exact request could ever succeed from this
+       * page. A refusal the Champion CAN clear here — a value the form sent,
+       * or a rate limit that lapses — keeps the submit control. One they
+       * cannot (not signed in, unverified, not a Champion, no such community)
+       * takes it away: leaving it would buy them a second copy of the same
+       * sentence.
+       */
+      terminal: boolean;
     }
+  | { kind: 'unknown' };
+
+const REFUSAL_COPY: Readonly<Record<string, { message: string; terminal: boolean }>> = {
+  'functions/unauthenticated': {
+    message: 'Please sign in again, then start the goal.',
+    terminal: true,
+  },
+  'functions/failed-precondition': {
+    message: 'Verify your email address before starting a goal.',
+    terminal: true,
+  },
+  'functions/permission-denied': {
+    message: 'Only a Champion of this community can start a goal here.',
+    terminal: true,
+  },
+  'functions/not-found': { message: "We couldn't find that community.", terminal: true },
+  'functions/invalid-argument': {
+    message: "Something about this goal didn't look right. Check the details and try again.",
+    terminal: false,
+  },
+  'functions/resource-exhausted': {
+    message: 'Too many goals were started in a short time. Wait a moment and try again.',
+    terminal: false,
+  },
+};
+
+function classifyFailure(e: unknown): Outcome {
+  if (e instanceof FirebaseError) {
+    const known = REFUSAL_COPY[e.code];
+    if (known) return { kind: 'refused', fromServer: true, ...known };
   }
-  return 'Something went wrong. Please try again.';
+  return { kind: 'unknown' };
 }
 
 // The fields a submit can refuse, in the order they sit on the page: the
@@ -298,6 +377,12 @@ type FieldErrors = Partial<Record<FieldKey, string>>;
 
 export default function NewGoalPage() {
   const { ready, user } = useWsfAuth();
+  // The short phone is the one this form is worst on, because it is the
+  // longest form in the product. The only thing it changes is type size: the
+  // heading drops a tier so the definition line clears the fold. Nothing is
+  // hidden, moved or removed at any width.
+  const { height: viewportHeight } = useWindowDimensions();
+  const shortPhone = viewportHeight > 0 && viewportHeight < 700;
   // The real path: a champion arrives from their community page, which passes
   // the group it already knows. Package C's job was to make that path work;
   // seeding a synthetic community from inside the product screen was a test
@@ -334,7 +419,7 @@ export default function NewGoalPage() {
   const [communityName, setCommunityName] = useState<string | null>(null);
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [error, setError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedGoal | null>(null);
 
@@ -449,14 +534,21 @@ export default function NewGoalPage() {
 
   const onSubmit = useCallback(async () => {
     if (submitting) return;
-    setError(null);
+    // A new attempt clears the previous answer. Nothing here retries on the
+    // Champion's behalf: every create on this page is a press they made.
+    setOutcome(null);
 
     const errors: FieldErrors = {};
 
     // The form only renders with a community; this is a guard, not a state.
     const trimmedGroupId = groupIdParam;
     if (!trimmedGroupId) {
-      setError('Open this page from your community to start a goal.');
+      setOutcome({
+        kind: 'refused',
+        fromServer: false,
+        message: 'Open this page from your community to start a goal.',
+        terminal: true,
+      });
       return;
     }
 
@@ -546,7 +638,7 @@ export default function NewGoalPage() {
         repeatPolicy,
       });
     } catch (e) {
-      setError(describeServerError(e));
+      setOutcome(classifyFailure(e));
     } finally {
       setSubmitting(false);
     }
@@ -621,6 +713,12 @@ export default function NewGoalPage() {
   if (created) {
     // String hrefs, as Community Home builds them: the anchor resolves to the
     // same `/contribute/<goalId>` the object form produced.
+    //
+    // THE ID HERE IS THE SERVER'S, and only the server's. It came back in the
+    // callable's response and is held for as long as this receipt is in
+    // memory. Nothing infers it from the title and nothing looks for a goal
+    // whose name happens to match — a reload loses the receipt, and the way
+    // back after that is the community, not a guess.
     const contributeHref = `/contribute/${created.goalId}`;
     const displayHref = `/display/${created.goalId}`;
     const communityHref = `/community/${created.communityGroupId}`;
@@ -639,54 +737,66 @@ export default function NewGoalPage() {
       >
         <View>
           <Text style={kit.eyebrow}>{communityLabel}</Text>
-          <Text style={[kit.heading, styles.headingAfterEyebrow]}>Your goal is live</Text>
+          <Text
+            style={[shortPhone ? kit.headingCompact : kit.heading, styles.headingAfterEyebrow]}
+          >
+            Your goal is live
+          </Text>
           <Text style={[kit.intro, styles.intro]}>
             Send it to your members and put it on a screen.
           </Text>
         </View>
-        <View style={kit.card}>
-          <Text style={kit.cardTitle}>{created.title}</Text>
-          <Text style={styles.definition}>{definitionPhrase(created.target, created.unit)}</Text>
-          <Text style={kit.cardMeta}>
+        {/*
+          The goal that now exists, as one object: what it is, when it runs,
+          and the one next useful action inside it. The phrase is the TARGET,
+          not a total — it is drawn large because it is the thing the
+          community agreed to, and there is no ratio, bar or count anywhere on
+          this screen. Nobody has contributed yet, so a Living WE here would
+          be a picture of a number that does not exist.
+        */}
+        <View style={styles.livePanel}>
+          <Text style={styles.liveEyebrow}>NOW OPEN</Text>
+          <Text style={styles.liveTitle}>{created.title}</Text>
+          <Text style={[shortPhone ? display.md : display.lg, styles.livePhrase]}>
+            {definitionPhrase(created.target, created.unit)}
+          </Text>
+          <View style={styles.liveRule} />
+          <Text style={styles.liveMeta}>
             Starts {describeMoment(created.startsAt, now)} · Ends {describeMoment(created.endsAt, now)}
           </Text>
-          <Text style={kit.cardMeta}>
+          <Text style={styles.liveMeta}>
             {zoneInWords(created.timezone)} · {repeatLabel(created.repeatPolicy)}
+          </Text>
+          {/*
+            The one next useful action, and the only control on this screen
+            that opens the contribute page. It is a ButtonLink, so the primary
+            itself carries the href.
+          */}
+          <ButtonLink
+            href={contributeHref}
+            style={styles.primaryAction}
+            textStyle={styles.primaryActionText}
+            testID="wsf-new-goal-goto-contribute"
+            label="Open the contribute page"
+          />
+          <Text style={styles.liveCaption}>
+            Where members record what they did and watch the shared total grow.
           </Text>
         </View>
         {/*
-          The one next useful action, and the only control on this screen that
-          opens the contribute page. It used to be a button that navigated
-          there in code, with a second, differently-labelled secondary
-          ("Contribute on a phone") pointing at the same route — two controls,
-          one job, and no way for a Champion to tell them apart. It is a
-          ButtonLink now, so the primary itself carries the href.
+          The two remaining ways on, as a plain pair. The card that used to
+          wrap one of them was a surface for a single link.
         */}
         <ButtonLink
-          href={contributeHref}
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
-          testID="wsf-new-goal-goto-contribute"
-          label="Open the contribute page"
+          href={displayHref}
+          style={kit.secondaryButton}
+          textStyle={kit.secondaryButtonText}
+          testID="wsf-new-goal-display-link"
+          label="Show on a big screen"
         />
         <Text style={kit.caption}>
-          Where members record what they did and watch the shared total grow.
+          A live view of the total for a TV or projector where everyone can see it.
         </Text>
-        <View style={kit.card}>
-          <Text style={kit.cardTitle}>Put it to work</Text>
-          <View style={styles.action}>
-            <ButtonLink
-              href={displayHref}
-              style={kit.secondaryButton}
-              textStyle={kit.secondaryButtonText}
-              testID="wsf-new-goal-display-link"
-              label="Show on a big screen"
-            />
-            <Text style={kit.cardMeta}>
-              A live view of the total for a TV or projector where everyone can see it.
-            </Text>
-          </View>
-        </View>
         <ButtonLink
           href={communityHref}
           style={kit.secondaryButton}
@@ -709,16 +819,29 @@ export default function NewGoalPage() {
             Open the community the goal is for, then tap Start a goal there.
           </Text>
         </View>
+        {/*
+          The primary action of this state, so it wears the action green like
+          the route's other three. It was left on the progress green while the
+          F6 ruling named only the three captured CTAs; the Director closed
+          that gap on the pixel pass — this is plainly the primary action here.
+        */}
         <ButtonLink
           href="/"
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
+          style={styles.primaryAction}
+          textStyle={styles.primaryActionText}
           testID="wsf-new-goal-home"
           label="Go to your communities"
         />
       </Page>
     );
   }
+
+  const durationNote = DURATIONS.find((d) => d.key === duration)?.description ?? '';
+  const unresolved = outcome?.kind === 'unknown';
+  // A refusal the Champion cannot clear from this page takes the control away
+  // with it: the server would answer the identical request the same way.
+  const canSubmit = !(outcome?.kind === 'refused' && outcome.terminal);
+  const communityHref = `/community/${groupIdParam}`;
 
   return (
     <Page
@@ -733,20 +856,25 @@ export default function NewGoalPage() {
         <Text style={kit.eyebrow} testID="wsf-new-goal-community">
           {communityLabel}
         </Text>
-        <Text style={[kit.heading, styles.headingAfterEyebrow]}>Start a goal</Text>
-        <Text style={[kit.intro, styles.intro]}>
+        <Text style={[shortPhone ? kit.headingCompact : kit.heading, styles.headingAfterEyebrow]}>
+          Start a goal
+        </Text>
+        <Text style={[shortPhone ? kit.body : kit.intro, styles.intro]}>
           Set what your community will do together. Every contribution adds to one shared total.
         </Text>
       </View>
 
-      <View style={kit.card}>
-        <Text style={kit.cardTitle}>The goal</Text>
-        <Text style={kit.cardMeta}>
-          Name it, set the total, and say what you're counting — together they read like
-          "5,000 squats" or "300 miles".
-        </Text>
+      {/*
+        THE SPINE. The same three decisions and the same review that were
+        here before, in the same order and the same words — joined by a
+        numbered rule instead of stacked as four identically-weighted cards.
+        It is still ONE page and one scroll: nothing collapses, nothing
+        paginates, and no step hides another. What it buys is that a Champion
+        can see how many decisions there are and which one they are in.
+      */}
+      <Step n="1" title="The goal" meta={`Name it, set the total, and say what you're counting — together they read like "5,000 squats" or "300 miles".`}>
         <View ref={anchorRefs.title}>
-          <Text style={[kit.fieldLabel, styles.label]}>Goal name</Text>
+          <Text style={kit.fieldLabel}>Goal name</Text>
           <TextField
             ref={titleRef}
             value={title}
@@ -760,65 +888,89 @@ export default function NewGoalPage() {
           />
           <FieldError message={fieldErrors.title} testID="wsf-new-goal-title-error" />
         </View>
-        <View ref={anchorRefs.target}>
-          <Text style={[kit.fieldLabel, styles.label]}>Target</Text>
-          <TextField
-            ref={targetRef}
-            value={target}
-            onChangeText={(v) => {
-              setTarget(v);
-              clearFieldError('target');
-            }}
-            placeholder="e.g. 5000"
-            keyboardType="number-pad"
-            inputMode="numeric"
-            editable={!submitting}
-            testID="wsf-new-goal-target"
-          />
-          <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
+        {/*
+          The number and the unit read as one sentence, so they sit on one
+          line where the words allow it and stack when they do not.
+        */}
+        <View style={styles.pair}>
+          <View style={styles.pairTarget} ref={anchorRefs.target}>
+            <Text style={kit.fieldLabel}>Target</Text>
+            <TextField
+              ref={targetRef}
+              value={target}
+              onChangeText={(v) => {
+                setTarget(v);
+                clearFieldError('target');
+              }}
+              placeholder="e.g. 5000"
+              keyboardType="number-pad"
+              inputMode="numeric"
+              editable={!submitting}
+              testID="wsf-new-goal-target"
+            />
+            <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
+          </View>
+          <View style={styles.pairUnit} ref={anchorRefs.unit}>
+            <Text style={kit.fieldLabel}>What you&apos;re counting</Text>
+            <TextField
+              ref={unitRef}
+              value={unit}
+              onChangeText={(v) => {
+                setUnit(v);
+                clearFieldError('unit');
+              }}
+              placeholder="e.g. squats"
+              editable={!submitting}
+              testID="wsf-new-goal-unit"
+            />
+            <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
+          </View>
         </View>
-        <View ref={anchorRefs.unit}>
-          <Text style={[kit.fieldLabel, styles.label]}>What you're counting</Text>
-          <TextField
-            ref={unitRef}
-            value={unit}
-            onChangeText={(v) => {
-              setUnit(v);
-              clearFieldError('unit');
-            }}
-            placeholder="e.g. squats"
-            editable={!submitting}
-            testID="wsf-new-goal-unit"
-          />
-          <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
-        </View>
+        {/*
+          THE SENTENCE THE TWO FIELDS EXIST TO MAKE, at the kit's display tier
+          rather than at field-label weight. It is the thing being made, and
+          it is the only thing on this screen at this size.
+        */}
         {definition ? (
-          <Text style={[styles.definition, styles.label]} testID="wsf-new-goal-definition">
-            {definition}
-          </Text>
+          <View style={styles.payoff}>
+            <Text style={[display.md, styles.payoffText]} testID="wsf-new-goal-definition">
+              {definition}
+            </Text>
+          </View>
         ) : null}
-      </View>
+      </Step>
 
-      <View style={kit.card}>
-        <Text style={kit.cardTitle}>When</Text>
-        <Text style={[kit.fieldLabel, styles.label]}>How long</Text>
-        <OptionGroup accessibilityLabel="How long" testID="wsf-new-goal-duration">
+      <Step n="2" title="When">
+        <Text style={kit.fieldLabel}>How long</Text>
+        {/*
+          FOUR PILLS, NOT FOUR ROWS. The same four choices with the same
+          labels and the same 44 px of hit target, in the height four option
+          rows spent on describing three options nobody picked. The chosen
+          one's description is kept, once, underneath. Selection is stated as
+          aria-checked on a radio, never by colour alone.
+        */}
+        <View
+          style={styles.pills}
+          accessibilityRole="radiogroup"
+          accessibilityLabel="How long"
+          testID="wsf-new-goal-duration"
+        >
           {DURATIONS.map((d) => (
-            <OptionRow
+            <DurationPill
               key={d.key}
               label={d.label}
-              description={d.description}
               selected={duration === d.key}
-              onPress={() => chooseDuration(d.key)}
               disabled={submitting}
+              onPress={() => chooseDuration(d.key)}
               testID={`wsf-new-goal-duration-${d.key}`}
             />
           ))}
-        </OptionGroup>
+        </View>
+        {durationNote ? <Text style={kit.caption}>{durationNote}</Text> : null}
         {duration === 'custom' ? (
           <>
             <View ref={anchorRefs.starts}>
-              <Text style={[kit.fieldLabel, styles.label]}>Starts</Text>
+              <Text style={kit.fieldLabel}>Starts</Text>
               <DateTimeField
                 ref={startsRef}
                 value={startsAt}
@@ -834,7 +986,7 @@ export default function NewGoalPage() {
               <FieldError message={fieldErrors.starts} testID="wsf-new-goal-starts-error" />
             </View>
             <View ref={anchorRefs.ends}>
-              <Text style={[kit.fieldLabel, styles.label]}>Ends</Text>
+              <Text style={kit.fieldLabel}>Ends</Text>
               <DateTimeField
                 ref={endsRef}
                 value={endsAt}
@@ -850,6 +1002,11 @@ export default function NewGoalPage() {
           </>
         ) : null}
         <View style={styles.window}>
+          {/*
+            Under Custom the control above states the start, so the derived
+            line is not drawn as well: they are alternatives, not companions.
+            The ends line is rendered in both modes.
+          */}
           {duration !== 'custom' && startsDate ? (
             <Text style={kit.body} testID="wsf-new-goal-starts-line">
               Starts {describeMoment(startsDate, now)}
@@ -868,12 +1025,20 @@ export default function NewGoalPage() {
           </Text>
           <FieldError message={fieldErrors.timezone} testID="wsf-new-goal-timezone-error" />
         </View>
-      </View>
+      </Step>
 
-      <View style={kit.card}>
-        <Text style={kit.cardTitle}>How members take part</Text>
-        <Text style={[kit.fieldLabel, styles.label]}>How often can one member contribute?</Text>
-        <OptionGroup accessibilityLabel="How often can one member contribute?" testID="wsf-new-goal-repeat">
+      {/*
+        The repeat choice keeps the full option row in both states. It is the
+        one decision on this page with a consequence for every member, so it
+        keeps its description whether or not it is the chosen one — and there
+        are still exactly two.
+      */}
+      <Step n="3" title="How members take part" last>
+        <Text style={kit.fieldLabel}>How often can one member contribute?</Text>
+        <OptionGroup
+          accessibilityLabel="How often can one member contribute?"
+          testID="wsf-new-goal-repeat"
+        >
           {REPEAT_OPTIONS.map((o) => (
             <OptionRow
               key={o.key}
@@ -886,57 +1051,215 @@ export default function NewGoalPage() {
             />
           ))}
         </OptionGroup>
-      </View>
+      </Step>
 
-      <View style={kit.cardQuiet} testID="wsf-new-goal-summary">
-        <Text style={kit.cardTitle}>Check it over</Text>
-        <Text style={kit.cardMeta}>This is what your community will see.</Text>
-        <SummaryRow label="Community" value={communityLabel} />
-        <SummaryRow label="Goal" value={title.trim() || 'Not named yet'} />
-        <SummaryRow label="Target" value={definition ?? 'Not set yet'} />
-        <SummaryRow
-          label="Starts"
-          value={startsDate ? describeMoment(startsDate, now) : 'Choose a start'}
-        />
-        {/*
-          An end at or before the start is the one configuration the form
-          refuses that still produces a readable date. Saying it back under
-          "This is what your community will see" would confirm a goal that
-          cannot be created, so the row states the problem instead. It stays
-          in the row's own voice, not red: the red message belongs under the
-          field, after a submit attempt.
-        */}
-        <SummaryRow
-          label="Ends"
-          value={
-            endsDate
-              ? windowInvalid
-                ? `${describeMoment(endsDate, now)} — must be after the start`
-                : describeMoment(endsDate, now)
-              : 'Choose an end'
-          }
-        />
-        <SummaryRow label="Time zone" value={zoneInWords(timezone)} />
-        <SummaryRow label="Members" value={repeatLabel(repeatPolicy)} />
-      </View>
+      {outcome ? <OutcomeBanner outcome={outcome} communityHref={communityHref} /> : null}
 
-      {error ? (
-        <Text style={kit.errorText} testID="wsf-new-goal-error">
-          {error}
-        </Text>
-      ) : null}
-      <Pressable
-        style={[kit.primaryButton, submitting && kit.primaryButtonDisabled]}
-        onPress={onSubmit}
-        disabled={submitting}
-        accessibilityRole="button"
-        testID="wsf-new-goal-submit"
-      >
-        <Text style={kit.primaryButtonText}>
-          {submitting ? 'Starting…' : 'Start this goal'}
-        </Text>
-      </Pressable>
+      {/*
+        THE CHECK AND THE COMMIT, AS ONE OBJECT. The same seven rows and the
+        same words as before, on the one navy surface on the page, with the
+        control that starts the goal inside it. A Champion cannot scroll the
+        thing they are confirming away from the thing that confirms it, and
+        the last row is no longer underneath the raised MOVE circle.
+      */}
+      <View style={styles.commit} testID="wsf-new-goal-summary">
+        <Text style={styles.commitTitle}>Check it over</Text>
+        <Text style={styles.commitMeta}>This is what your community will see.</Text>
+        <View style={styles.commitRows}>
+          <SummaryRow label="Community" value={communityLabel} />
+          <SummaryRow label="Goal" value={title.trim() || 'Not named yet'} />
+          <SummaryRow label="Target" value={definition ?? 'Not set yet'} />
+          <SummaryRow
+            label="Starts"
+            value={startsDate ? describeMoment(startsDate, now) : 'Choose a start'}
+          />
+          {/*
+            An end at or before the start is the one configuration the form
+            refuses that still produces a readable date. Saying it back under
+            "This is what your community will see" would confirm a goal that
+            cannot be created, so the row states the problem instead. It stays
+            in the row's own voice, not red: the red message belongs under the
+            field, after a submit attempt.
+          */}
+          <SummaryRow
+            label="Ends"
+            value={
+              endsDate
+                ? windowInvalid
+                  ? `${describeMoment(endsDate, now)} — must be after the start`
+                  : describeMoment(endsDate, now)
+                : 'Choose an end'
+            }
+          />
+          <SummaryRow label="Time zone" value={zoneInWords(timezone)} />
+          <SummaryRow label="Members" value={repeatLabel(repeatPolicy)} />
+        </View>
+        {canSubmit ? (
+          <>
+            {/*
+              After an unknown result this is NOT the same button. It says
+              what it would start, it is drawn as a secondary rather than the
+              one green action on the screen, and the consequence sits
+              directly under it. Nothing retries on the Champion's behalf.
+            */}
+            <Pressable
+              style={[
+                unresolved ? styles.commitSecondary : styles.primaryAction,
+                submitting && kit.primaryButtonDisabled,
+              ]}
+              onPress={onSubmit}
+              disabled={submitting}
+              accessibilityRole="button"
+              testID="wsf-new-goal-submit"
+            >
+              <Text style={unresolved ? styles.commitSecondaryText : styles.primaryActionText}>
+                {submitting ? 'Starting…' : unresolved ? 'Start another goal' : 'Start this goal'}
+              </Text>
+            </Pressable>
+            {unresolved ? (
+              <Text style={styles.commitNote}>
+                This starts a new, separate goal. If the first one was created, your community
+                will have two.
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <ButtonLink
+            href={communityHref}
+            style={styles.commitSecondary}
+            textStyle={styles.commitSecondaryText}
+            testID="wsf-new-goal-refused-back"
+            label="Back to community"
+          />
+        )}
+      </View>
     </Page>
+  );
+}
+
+/**
+ * One section of the form on the spine: a numbered marker, a rule down to the
+ * next one, and the section's own surface. The number and the rule are the
+ * whole of the navigation — nothing here collapses or hides.
+ */
+function Step({
+  n,
+  title,
+  meta,
+  children,
+  last,
+}: {
+  n: string;
+  title: string;
+  meta?: string;
+  children: ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <View style={styles.step}>
+      <View style={styles.spine}>
+        <View style={styles.spineDot}>
+          <Text style={styles.spineDotText}>{n}</Text>
+        </View>
+        {last ? null : <View style={styles.spineRule} />}
+      </View>
+      <View style={styles.stepBody}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        {meta ? <Text style={styles.stepMeta}>{meta}</Text> : null}
+        <View style={styles.stepCard}>{children}</View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * One duration choice. A pill rather than a row, but the same control
+ * underneath: `role="radio"` with `aria-checked`, so the selected state is
+ * stated to a screen reader and to anyone who cannot rely on colour, exactly
+ * as OptionRow states it. The raw attribute is there because browsers read
+ * the DOM rather than accessibilityState.
+ */
+function DurationPill({
+  label,
+  selected,
+  disabled,
+  onPress,
+  testID,
+}: {
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={[kit.pill, selected ? kit.pillSelected : null, disabled ? styles.pillDisabled : null]}
+      testID={testID}
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected, disabled }}
+      accessibilityLabel={label}
+      {...({ 'aria-checked': selected } as Record<string, unknown>)}
+    >
+      <Text style={[kit.pillText, selected ? kit.pillTextSelected : null]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * What the page says when a create did not produce a goal — and the whole
+ * point of it is that those are TWO different things.
+ *
+ * A REFUSAL may speak about the server's state, because the server answered
+ * and answered before it wrote. An UNKNOWN result may not, in either
+ * direction: it does not say nothing was created, it does not say anything
+ * was, and it does not promise that trying again is free. It offers the one
+ * action that can actually resolve it — the community's own page, which
+ * lists the goal if there is one — and leaves the second create to a
+ * deliberate press further down.
+ */
+function OutcomeBanner({ outcome, communityHref }: { outcome: Outcome; communityHref: string }) {
+  if (outcome.kind === 'refused') {
+    return (
+      <View style={[styles.banner, styles.bannerRefused]}>
+        <Text style={styles.bannerTitleRefused}>We couldn&rsquo;t start your goal.</Text>
+        <Text style={styles.bannerBody} testID="wsf-new-goal-error">
+          {outcome.fromServer
+            ? `${outcome.message} The server refused this request, so no goal was created.`
+            : outcome.message}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <>
+      <View style={[styles.banner, styles.bannerUnknown]}>
+        {/*
+          Amber, not red. An unknown outcome is not a failure, and colouring
+          it as one is its own false claim.
+        */}
+        <Text style={styles.bannerTitleUnknown}>
+          We couldn&rsquo;t confirm your goal was created.
+        </Text>
+        <Text style={styles.bannerBody} testID="wsf-new-goal-error">
+          It may have been created anyway. Starting another one could create a duplicate.
+        </Text>
+      </View>
+      {/*
+        Community-level on purpose. No goal id is guessed from the title and
+        no goal whose name happens to match is opened: the community page
+        lists what actually exists, and the Champion reads it.
+      */}
+      <ButtonLink
+        href={communityHref}
+        style={styles.primaryAction}
+        textStyle={styles.primaryActionText}
+        testID="wsf-new-goal-check-goals"
+        label="Check community goals"
+      />
+    </>
   );
 }
 
@@ -950,12 +1273,16 @@ function FieldError({ message, testID }: { message?: string; testID: string }) {
   );
 }
 
-/** One label/value line of the summary; the value wraps under the label when narrow. */
+/**
+ * One label/value line of the review; the value wraps under the label when
+ * narrow. Cream on navy now, because the review is the one navy surface on
+ * the page — same rows, same words, read against a different ground.
+ */
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <View style={kit.row}>
-      <Text style={kit.rowLabel}>{label}</Text>
-      <Text style={kit.rowValue}>{value}</Text>
+    <View style={styles.sumRow}>
+      <Text style={styles.sumLabel}>{label}</Text>
+      <Text style={styles.sumValue}>{value}</Text>
     </View>
   );
 }
@@ -986,7 +1313,14 @@ function Page({
     <ScrollView
       ref={scrollRef}
       style={kit.scroll}
-      contentContainerStyle={kit.page}
+      // THE FOOT OF THE PAGE CLEARS THE MEMBER TAB BAR. The bar floats over
+      // this route, and `kit.page` ends 48 px from the bottom — which is why
+      // the current build's summary card has its last row under the raised
+      // MOVE circle (goal-setup-current, observation 4). The extra room is
+      // added HERE, on this route's own scroll container, rather than in the
+      // shared page style: the bar and the shell belong to another surface
+      // and nothing about them is changed to fix this.
+      contentContainerStyle={[kit.page, styles.pageFoot]}
       keyboardShouldPersistTaps="handled"
     >
       <View
@@ -1018,19 +1352,158 @@ function Page({
 const chromeBackStyle = StyleSheet.flatten([kit.chromeLink, { flexShrink: 1, minWidth: 0 }]);
 
 const styles = StyleSheet.create({
+  // Room at the foot for the floating member tab bar, so no content of this
+  // route ends underneath it. 48 px of `kit.page` plus the bar's own height.
+  pageFoot: { paddingBottom: 140 },
+
+  /*
+    THE ACTION GREEN, on this route's primary calls to action.
+
+    `kit.primaryButton` fills with PROGRESS_GREEN (#91CB7D), which Board 00
+    reserves for CONFIRMED PROGRESS — the colour the Living WE speaks in. The
+    kit says as much where it introduces the two tokens: the action green is
+    "deliberately a SEPARATE token" because "a button must never be able to
+    restate what the Living WE is saying about the shared total". A Champion's
+    eye is trained on this screen, and a button wearing the progress colour
+    trains it wrong even on a page that has no ratio to draw.
+
+    So the three primaries here — Start this goal, Check community goals,
+    Open the contribute page — are ACTION_GREEN on ON_ACTION ink, which is
+    what the accepted target drew. Everything else about them is unchanged:
+    same words, same behaviour, same hit target, same disabled treatment.
+    `Start another goal` stays a secondary, because demoting it is the point.
+
+    This is a route-local style rather than an edit to `kit.primaryButton`:
+    the kit belongs to another surface, and one screen's ruling is not
+    licence to restyle every button in the product.
+  */
+  primaryAction: {
+    backgroundColor: ACTION_GREEN,
+    borderRadius: 14,
+    minHeight: 54,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryActionText: { color: ON_ACTION, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+
   // Eyebrow, heading and intro sit close together as one block.
   headingAfterEyebrow: { marginTop: 6 },
   intro: { marginTop: 8 },
-  // Fields are grouped label-over-input; the label's top margin opens the
-  // gap between one group and the next inside the card.
-  label: { marginTop: 6 },
-  // The goal as one phrase: "5,000 squats".
-  definition: { color: NAVY, fontSize: 20, fontWeight: '800', lineHeight: 26 },
+
+  // ---- the spine: a numbered marker and a rule down to the next section ----
+  step: { flexDirection: 'row', gap: 12 },
+  spine: { width: 26, alignItems: 'center' },
+  spineDot: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: NAVY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spineDotText: { color: CREAM, fontSize: 13, fontWeight: '900' },
+  spineRule: { flex: 1, width: 2, backgroundColor: HAIRLINE, marginTop: 6 },
+  stepBody: { flex: 1, gap: 6, minWidth: 0 },
+  stepTitle: { color: NAVY, fontSize: 18, fontWeight: '800', lineHeight: 26 },
+  stepMeta: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
+  // The section's own surface. Depth instead of a border: kit.elevation
+  // exists for exactly this, and four bordered rectangles down one page is
+  // what made the form read as a wall.
+  stepCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    padding: 13,
+    gap: 9,
+    marginTop: 2,
+    ...elevation.card,
+  },
+
+  // The target and the unit read as one sentence, so they share a line where
+  // the words allow it and stack when they do not.
+  pair: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  pairTarget: { flexGrow: 1, flexBasis: 120, minWidth: 110, gap: 2 },
+  pairUnit: { flexGrow: 2, flexBasis: 150, minWidth: 140, gap: 2 },
+
+  // The goal as one phrase — the payoff of the first section, not a caption.
+  payoff: {
+    backgroundColor: OPTION_SELECTED_TINT,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  payoffText: { color: NAVY },
+
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, width: '100%' },
+  pillDisabled: { opacity: 0.6 },
+
   // The start and end in words, one under the other.
   window: { gap: 4, marginTop: 4 },
-  // The quiet time-zone line with its "Change" control beside it; the line
-  // wraps under the control when the column is narrow.
+  // The quiet time-zone line; it wraps when the column is narrow.
   zoneText: { flexShrink: 1, minWidth: 0 },
-  // A secondary action with its one-line purpose under it.
-  action: { gap: 6, marginTop: 4 },
+
+  // ---- the review and the commit, as one object ----
+  commit: {
+    backgroundColor: NAVY,
+    borderRadius: 20,
+    padding: 16,
+    gap: 5,
+    ...elevation.hero,
+  },
+  commitTitle: { color: CREAM, fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  commitMeta: { color: HERO_MUTED, fontSize: 14, lineHeight: 19 },
+  commitRows: { marginTop: 4, marginBottom: 9 },
+  commitNote: { color: HERO_MUTED, fontSize: 12.5, lineHeight: 17, marginTop: 8 },
+  commitSecondary: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(247,245,240,0.45)',
+    borderRadius: 14,
+    minHeight: 48,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commitSecondaryText: { color: CREAM, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  sumRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: ON_NAVY_RULE,
+  },
+  sumLabel: { color: HERO_MUTED, fontSize: 14, flexShrink: 1, minWidth: 0 },
+  sumValue: {
+    color: CREAM,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
+    flexShrink: 1,
+    minWidth: 0,
+    marginLeft: 'auto',
+  },
+
+  // ---- what happened, when it was not a goal ----
+  banner: { borderRadius: 16, padding: 14, gap: 4, borderLeftWidth: 5 },
+  bannerRefused: { backgroundColor: '#FBECEC', borderLeftColor: ERROR_RED },
+  bannerUnknown: { backgroundColor: '#FDF3E2', borderLeftColor: '#B8761B' },
+  bannerTitleRefused: { color: ERROR_RED, fontSize: 17, fontWeight: '800', lineHeight: 23 },
+  bannerTitleUnknown: { color: '#8A5610', fontSize: 17, fontWeight: '800', lineHeight: 23 },
+  bannerBody: { color: NAVY, fontSize: 14, lineHeight: 20 },
+
+  // ---- the goal, once it exists ----
+  livePanel: {
+    backgroundColor: NAVY,
+    borderRadius: 20,
+    padding: 18,
+    gap: 8,
+    ...elevation.hero,
+  },
+  liveEyebrow: { color: PROGRESS_GREEN, fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
+  liveTitle: { color: CREAM, fontSize: 20, fontWeight: '700', lineHeight: 26 },
+  livePhrase: { color: CREAM },
+  liveRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 2 },
+  liveMeta: { color: HERO_MUTED, fontSize: 13.5, lineHeight: 19 },
+  liveCaption: { color: HERO_MUTED, fontSize: 12.5, lineHeight: 17 },
 });
