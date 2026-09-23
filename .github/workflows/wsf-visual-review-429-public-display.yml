@@ -1,0 +1,137 @@
+# WSF — visual-review export for PR #429's public-display responsive TARGET
+# checkpoint: the 14 PNGs W2 adds under docs/design-target/review/public-display-next/
+# (actual BEFORE frames of the real /display/[goalId], PROPOSED / NOT ACCEPTED
+# target frames from the gated preview, and one comparison sheet per class),
+# exported at their source commit as a workflow artifact with a manifest that
+# pins each file to that commit — the reviewer's proven native-file path
+# (owner direction PR #365 comment 5784428860 §3: ChatGPT reviews the actual
+# PNGs before integration). Same exporter as #403, #406, #407, #410, #414,
+# #418, #419, #424, #425 and #428, same posture: ordinary pull_request job into
+# this one branch, contents:read, pinned actions, persist-credentials false,
+# inline stdlib packaging, nothing from the tree executed, nothing rendered or
+# resized. This branch carries only this file on top of W2's head and is never
+# merged; it exists to run the job.
+name: WSF visual-review export — #429 public display target
+
+on:
+  pull_request:
+    branches:
+      - claude/wsf-public-display-next
+    paths:
+      - '.github/workflows/wsf-visual-review-429-public-display.yml'
+      - 'docs/design-target/review/public-display-next/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsf-visual-review-429-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Export the pinned canonical images with a manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the PR head commit exactly (not the merge ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Package original bytes + manifest (inline, stdlib only; nothing from the tree is executed)
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, shutil, struct, subprocess, sys
+          repo = os.environ['REPO']
+          want = os.environ['SOURCE_SHA']
+          def git(*a):
+              return subprocess.check_output(['git', *a], text=True).strip()
+          head = git('rev-parse', 'HEAD')
+          if head != want:
+              sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
+          PD = 'docs/design-target/review/public-display-next'
+          # THE EXACT ALLOWLIST: the 14 PNGs PR #429 adds under public-display-next/ — W2's
+          # actual BEFORE frames, PROPOSED / NOT ACCEPTED target frames and comparison sheets,
+          # at the PR head this job checks out, original committed bytes only.
+          allow = [
+              (f'{PD}/COMPARISON-collective-1920x1080.png', 'COMPARISON SHEET · BEFORE beside PROPOSED · COMPARISON-collective-1920x1080.png'),
+              (f'{PD}/COMPARISON-portrait-800x1280.png', 'COMPARISON SHEET · BEFORE beside PROPOSED · COMPARISON-portrait-800x1280.png'),
+              (f'{PD}/before/BEFORE-progress-1920x1080.png', 'BEFORE · actual current /display/[goalId] · BEFORE-progress-1920x1080.png'),
+              (f'{PD}/before/BEFORE-progress-800x1280.png', 'BEFORE · actual current /display/[goalId] · BEFORE-progress-800x1280.png'),
+              (f'{PD}/before/BEFORE-refused-1920x1080.png', 'BEFORE · actual current /display/[goalId] · BEFORE-refused-1920x1080.png'),
+              (f'{PD}/before/BEFORE-refused-800x1280.png', 'BEFORE · actual current /display/[goalId] · BEFORE-refused-800x1280.png'),
+              (f'{PD}/before/BEFORE-stale-INJECTED-NETWORK-1920x1080.png', 'BEFORE · actual current /display/[goalId] · BEFORE-stale-INJECTED-NETWORK-1920x1080.png'),
+              (f'{PD}/before/BEFORE-stale-INJECTED-NETWORK-800x1280.png', 'BEFORE · actual current /display/[goalId] · BEFORE-stale-INJECTED-NETWORK-800x1280.png'),
+              (f'{PD}/target/TARGET-progress-1920x1080.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · TARGET-progress-1920x1080.png'),
+              (f'{PD}/target/TARGET-progress-800x1280.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · TARGET-progress-800x1280.png'),
+              (f'{PD}/target/TARGET-refused-1920x1080.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · TARGET-refused-1920x1080.png'),
+              (f'{PD}/target/TARGET-refused-800x1280.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · TARGET-refused-800x1280.png'),
+              (f'{PD}/target/TARGET-stale-1920x1080.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · TARGET-stale-1920x1080.png'),
+              (f'{PD}/target/TARGET-stale-800x1280.png', 'PROPOSED TARGET · NOT ACCEPTED · drawing · TARGET-stale-800x1280.png'),
+          ]
+          PER_FILE_MAX = 8 * 1024 * 1024
+          TOTAL_MAX = 24 * 1024 * 1024
+          out = 'wsf-visual-review-429-public-display'
+          rows, total = [], 0
+          for rel, label in allow:
+              # Tracked as an ordinary regular file at this commit: mode 100644,
+              # never a symlink (120000), submodule (160000) or executable.
+              stage = git('ls-files', '--stage', '--', rel)
+              if not stage:
+                  sys.exit(f'not tracked at HEAD: {rel}')
+              mode, blob = stage.split()[0], stage.split()[1]
+              if mode != '100644':
+                  sys.exit(f'refusing {rel}: tracked mode {mode}, not a regular file')
+              if os.path.islink(rel) or not os.path.isfile(rel):
+                  sys.exit(f'refusing {rel}: not a regular file in the checkout')
+              if blob != git('rev-parse', f'HEAD:{rel}'):
+                  sys.exit(f'index/HEAD disagree on {rel}')
+              data = open(rel, 'rb').read()
+              if len(data) > PER_FILE_MAX:
+                  sys.exit(f'refusing {rel}: {len(data)} bytes exceeds the per-file bound')
+              total += len(data)
+              if total > TOTAL_MAX:
+                  sys.exit(f'refusing: total exceeds the {TOTAL_MAX}-byte bound at {rel}')
+              if data[:8] != b'\x89PNG\r\n\x1a\n' or data[12:16] != b'IHDR':
+                  sys.exit(f'not a PNG: {rel}')
+              w, h = struct.unpack('>II', data[16:24])
+              dest = os.path.join(out, rel)
+              os.makedirs(os.path.dirname(dest), exist_ok=True)
+              shutil.copyfile(rel, dest)
+              # The exported bytes must BE the committed blob: rehash the copy
+              # with git's own object hashing and compare, not merely record it.
+              copied = open(dest, 'rb').read()
+              rehashed = git('hash-object', '--', dest)
+              if rehashed != blob or hashlib.sha256(copied).digest() != hashlib.sha256(data).digest():
+                  sys.exit(f'exported bytes for {rel} do not match the committed blob ({rehashed} vs {blob})')
+              rows.append({'path': rel, 'label': label, 'git_blob_sha1': blob, 'bytes': len(data),
+                           'sha256': hashlib.sha256(data).hexdigest(), 'width': w, 'height': h})
+          manifest = {'repo': repo, 'source_sha': head, 'files_total_bytes': total,
+                      'note': 'original bytes copied from this commit and re-hashed against the git blob; nothing rendered, resized or repaired',
+                      'files': rows}
+          json.dump(manifest, open(os.path.join(out, 'MANIFEST.json'), 'w'), indent=2)
+          with open(os.path.join(out, 'MANIFEST.md'), 'w') as f:
+              f.write(f'# PR #429 public display target — visual review package\n\nRepository `{repo}` · source commit `{head}` · {len(rows)} files, {total} bytes · original bytes, re-hashed against git.\n\n')
+              f.write('| path | label | git blob | bytes | sha256 | w×h |\n| --- | --- | --- | ---: | --- | --- |\n')
+              for r in rows:
+                  f.write(f"| `{r['path']}` | {r['label']} | `{r['git_blob_sha1']}` | {r['bytes']} | `{r['sha256']}` | {r['width']}×{r['height']} |\n")
+          print(open(os.path.join(out, 'MANIFEST.md')).read())
+          PY
+
+      - name: Upload as a workflow artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: wsf-visual-review-429-public-display-${{ github.event.pull_request.head.sha }}
+          path: wsf-visual-review-429-public-display
+          if-no-files-found: error
+          retention-days: 7
+          # The PNG is already compressed; keep its bytes verbatim inside the zip.
+          compression-level: 0
