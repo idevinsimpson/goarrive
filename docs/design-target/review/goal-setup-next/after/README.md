@@ -12,7 +12,7 @@ window, *Coordinated Universal Time*.
 |---|---|
 | Verdict released by | `5788308449` (Director `5788288648` §3) — TARGET PASS at `f880732` |
 | AFTER verdict | `5788849410` (Director `5788831679` §2) — **functional PASS**, visual HOLD for the F6 brand-token correction, applied below |
-| Route blob | `e5be66f0e9afb03ae92c1ba3573fc641bd749ef3` (before, through `f880732`) → `cbda3fdea53a40aa1a404da45938cb4766b26718` (at `8067364`) → `e33b0614695143622685e25a8f09336e1b06d6d5` (at `df78521`, carrying the F6 ruling). Each verified with `git rev-parse <sha>:apps/westayfit/app/goals/new.tsx`. |
+| Route blob | `e5be66f0e9afb03ae92c1ba3573fc641bd749ef3` (before, through `f880732`) → `cbda3fdea53a40aa1a404da45938cb4766b26718` (at `8067364`) → `e33b0614695143622685e25a8f09336e1b06d6d5` (at `df78521`, the F6 ruling) → `95fc01b23886fdcf1bd3828d111c98a20d5bf796` (at `b81b617`, the arrival guard's primary). Each verified with `git rev-parse <sha>:apps/westayfit/app/goals/new.tsx`, and cross-checked before the commit with `git hash-object` on the working file — the route blob does not depend on this README, so it can be read before it is written down. |
 | Behaviour verified by | W7, seven cases at `8067364` — PASS on all four conditions (`5788653228`) |
 | Producer | `apps/westayfit/tests-e2e/sprint-w6-goal-setup-after-capture.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1` (`helpers/capture`) |
