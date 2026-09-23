@@ -1313,14 +1313,13 @@ function Page({
     <ScrollView
       ref={scrollRef}
       style={kit.scroll}
-      // THE FOOT OF THE PAGE CLEARS THE MEMBER TAB BAR. The bar floats over
-      // this route, and `kit.page` ends 48 px from the bottom — which is why
-      // the current build's summary card has its last row under the raised
-      // MOVE circle (goal-setup-current, observation 4). The extra room is
-      // added HERE, on this route's own scroll container, rather than in the
-      // shared page style: the bar and the shell belong to another surface
-      // and nothing about them is changed to fix this.
-      contentContainerStyle={[kit.page, styles.pageFoot]}
+      // THE FOOT IS `kit.page`'s OWN 48 px. This route is a focused flow
+      // outside `(tabs)`, so no member tab bar renders over it. It used to
+      // carry a 140 px reserve for the floating bar (goal-setup-current,
+      // observation 4); with the bar gone that reserve was dead space, and on
+      // a 390 × 844 phone it alone made the created receipt scroll
+      // (measured `5800472286`; removed per Director `5800455297` §2).
+      contentContainerStyle={kit.page}
       keyboardShouldPersistTaps="handled"
     >
       <View
@@ -1352,10 +1351,6 @@ function Page({
 const chromeBackStyle = StyleSheet.flatten([kit.chromeLink, { flexShrink: 1, minWidth: 0 }]);
 
 const styles = StyleSheet.create({
-  // Room at the foot for the floating member tab bar, so no content of this
-  // route ends underneath it. 48 px of `kit.page` plus the bar's own height.
-  pageFoot: { paddingBottom: 140 },
-
   /*
     THE ACTION GREEN, on this route's primary calls to action.
 

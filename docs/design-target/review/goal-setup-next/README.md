@@ -8,7 +8,10 @@ implemented on the real route. This package holds both halves:
   ruled on. **None of them is an AFTER**, and they have not changed a byte since the verdict.
 - `after/` — the **matched AFTERs**: the shipped route, photographed. See
   [`after/README.md`](after/README.md), including the three places the AFTER deliberately
-  differs from the drawing.
+  differs from the drawing. **Historical** since the shell migration: accepted under the floating
+  tab bar, byte-identical, not regenerated.
+- `after-barless/` — the same route **as it now builds**, barless and without the tab-bar foot
+  reserve, awaiting pixel review. See [`after-barless/README.md`](after-barless/README.md).
 - `before/` — the reuse proof for the frozen BEFOREs in `../goal-setup-current/`.
 
 Everything below describes the target as it was submitted, and is kept as the record of what
