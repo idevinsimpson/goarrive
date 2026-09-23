@@ -13,6 +13,9 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 
 import {
@@ -187,6 +190,86 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+/**
+ * BACK RETURNS TO WHERE THE MEMBER CAME FROM; IT DOES NOT BUILD A COPY OF IT.
+ *
+ * The contribution screen is a focused route presented over the tab
+ * navigator. Following a plain link to `/community/<groupId>` from here
+ * pushes a SECOND community screen and leaves the one the member came from
+ * mounted but hidden behind it, with its scroll and loaded state lost —
+ * measured on the receipt at `f2f901a`: two instances, the visible one not
+ * the one the member left. The chrome control stopped doing that when the
+ * shell migrated, and this is its rule: the arrow is "the step before this".
+ * The labelled exits below go where their label says (`leaveFor`).
+ *
+ * `canGoBack()` is asked at press time. A cold or deep-linked arrival has
+ * nothing beneath it and gets its canonical destination by `replace`, so a
+ * contribution screen reached directly is not left in the history. Kiosk
+ * sessions never reach this: every kiosk rest state renders Finish instead.
+ */
+function returnToMemberContext(href: string): void {
+  if (router.canGoBack()) {
+    router.back();
+    return;
+  }
+  router.replace(href as never);
+}
+
+/**
+ * A LABELLED EXIT GOES WHERE ITS LABEL SAYS, AND LANDS ON THE MEMBER'S
+ * MOUNTED TABS RATHER THAN BUILDING A SECOND SET.
+ *
+ * `back()` is right for the chrome arrow, which means "the step before this".
+ * It is not right for a button that says where it goes: this screen is also
+ * reached from the MOVE sheet (which replaces itself with it, so the tab
+ * beneath can be You or Progress), from the MOVE chooser, from Goal Setup's
+ * receipt and from an event screen. From any of those, `back()` lands
+ * somewhere other than the community the button promised.
+ *
+ * `dismissTo` pops every focused route above the member's mounted tabs and
+ * opens the destination there. For "Back to community", when that community
+ * is already the screen on top of the Home tab (the ordinary journey), the
+ * router keeps its key: the same mounted screen, its scroll and its loaded
+ * state, and no second instance. For "Back to home" (the own-only receipt,
+ * a goal that could not be read, a context not yet verified), Home opens and
+ * resolves the member's communities afresh, which is the point of those
+ * paths. With no tabs beneath (a cold or deep-linked arrival) either one
+ * replaces this screen, so a dead-end contribution screen is not left in the
+ * history.
+ *
+ * Sign in is not one of these: it is its own destination and stays a link.
+ */
+function leaveFor(href: string): void {
+  router.dismissTo(href as never);
+}
+
+/** Looks like `ButtonLink`; lands on the member's mounted tabs. */
+function ReturnButton({
+  href,
+  style,
+  textStyle,
+  testID,
+  label,
+}: {
+  href: string;
+  style: StyleProp<ViewStyle>;
+  textStyle: StyleProp<TextStyle>;
+  testID: string;
+  label: string;
+}) {
+  return (
+    <Pressable
+      style={StyleSheet.flatten(style)}
+      testID={testID}
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      onPress={() => leaveFor(href)}
+    >
+      <Text style={textStyle}>{label}</Text>
+    </Pressable>
+  );
 }
 
 export default function ContributeToGoal() {
@@ -1117,13 +1200,7 @@ export default function ContributeToGoal() {
           testID="wsf-contribute-back"
           accessibilityRole="link"
           accessibilityLabel={backLabel}
-          onPress={() => {
-            if (router.canGoBack()) {
-              router.back();
-              return;
-            }
-            router.replace(backHref as never);
-          }}
+          onPress={() => returnToMemberContext(backHref)}
         >
           <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
             {backLabel}
@@ -1313,7 +1390,7 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish(kioskOutcome, 'light', false)
           ) : (
-            <ButtonLink
+            <ReturnButton
               href="/"
               style={styles.secondaryButton}
               textStyle={styles.secondaryButtonText}
@@ -1578,7 +1655,7 @@ export default function ContributeToGoal() {
                 </Text>
               </Pressable>
             ) : null}
-            <ButtonLink
+            <ReturnButton
               href={hasShared ? backHref : '/'}
               style={canAddMore(repeatPolicy, r) ? styles.ghostDark : styles.primaryButton}
               textStyle={
@@ -1631,13 +1708,23 @@ export default function ContributeToGoal() {
             {kiosk ? (
               renderKioskFinish('refused')
             ) : (
-              <ButtonLink
-                href={refusal.reason === 'signedOut' ? '/signin' : backHref}
-                style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
-                textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
-                testID="wsf-contribute-back"
-                label={refusal.reason === 'signedOut' ? 'Sign in' : backLabel}
-              />
+              refusal.reason === 'signedOut' ? (
+                <ButtonLink
+                  href="/signin"
+                  style={styles.primaryButton}
+                  textStyle={styles.primaryButtonText}
+                  testID="wsf-contribute-back"
+                  label="Sign in"
+                />
+              ) : (
+                <ReturnButton
+                  href={backHref}
+                  style={refusal.reason === 'invalid' ? styles.secondaryButton : styles.primaryButton}
+                  textStyle={refusal.reason === 'invalid' ? styles.secondaryButtonText : styles.primaryButtonText}
+                  testID="wsf-contribute-back"
+                  label={backLabel}
+                />
+              )
             )}
           </View>
         </View>
@@ -1711,7 +1798,7 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish('unresolved')
           ) : (
-            <ButtonLink
+            <ReturnButton
               href={backHref}
               style={styles.tertiaryButton}
               textStyle={styles.tertiaryButtonText}
@@ -1748,7 +1835,7 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish(kioskOutcome)
           ) : (
-            <ButtonLink
+            <ReturnButton
               href="/"
               style={styles.secondaryButton}
               textStyle={styles.secondaryButtonText}
@@ -1875,7 +1962,7 @@ export default function ContributeToGoal() {
           {kiosk ? (
             renderKioskFinish(kioskOutcome)
           ) : (
-            <ButtonLink
+            <ReturnButton
               href={backHref}
               style={styles.primaryButton}
               textStyle={styles.primaryButtonText}
