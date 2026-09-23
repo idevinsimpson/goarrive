@@ -59,9 +59,19 @@ function startMock({ functions = ALL, services = null, health = SHA.slice(0, 7),
   });
   return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, base: `http://127.0.0.1:${server.address().port}` })));
 }
+/**
+ * THE BASE CONTRACT, PINNED. These legacy cases model the 46-name inventory
+ * with no approved additions. Until the f2f901a pin they ran the script beside
+ * the LIVE approval, which carried no additions, so the two were the same
+ * thing. The live approval now names three additions, so the legacy cases run
+ * against an explicit no-additions approval written next to a copy of the
+ * script (the same resolution rule the script uses in the real checkout), and
+ * the LIVE approval has its own cases below: a 49-function project passes and
+ * reports exactly the three; a 46-function project fails, naming them.
+ */
 function run(base, beforeFile, dir) {
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [VERIFY], { env: { ...process.env,
+    const c = spawn(process.execPath, [opsCheckout(dir, NO_ADDITIONS)], { env: { ...process.env,
       WSF_GOOGLE_ACCESS_TOKEN: 't', WSF_APPROVED_SHA: SHA, WSF_STAGING_URL: `${base}`,
       WSF_INVENTORY_BEFORE: beforeFile, WSF_RESULT_DIR: dir, WSF_API_BASE: base } });
     let out = '', err = '';
@@ -505,12 +515,40 @@ await test("an approved addition that is SHUT is reported, never failed as pre-e
   );
 });
 
-await test('the live approval file carries no additions, so the c8f38e3 / 46 contract is untouched', async () => {
-  // Read from the repository, not a fixture: this is the check that the change
-  // cannot have altered what today's pin verifies.
+await test('the LIVE approval against a 49-function project passes and reports exactly the three social services as created', async () => {
+  // The real script beside the real approval — the resolution the deploy job
+  // uses — against a project that deployed this pin completely.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
+  const all49 = [...ALL, ...SOCIAL];
+  const { server, base } = await startMock({ functions: all49, services: all49.map((n) => svc(n)) });
+  const r = await runFrom(VERIFY, base, beforeFile(d, ALL), d);
+  server.close();
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /VERIFY=pass/);
+  assert.match(r.out, /EXPECTED_INVENTORY=49/);
+  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [...SOCIAL].sort());
+});
+
+await test('the LIVE approval against a 46-function project FAILS, naming the three it authorizes and did not get', async () => {
+  // The pin demands its additions: a deploy that produced none of them is a
+  // failed deploy of THIS pin, not a clean deploy of the previous one.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
+  const { server, base } = await startMock();
+  const r = await runFrom(VERIFY, base, beforeFile(d, ALL), d);
+  server.close();
+  assert.equal(r.code, 1);
+  for (const n of SOCIAL) assert.match(r.err, new RegExp(`${n} absent — the approval authorizes this addition and the deploy did not produce it`));
+});
+
+await test('the live approval file names exactly the three reviewed social additions over the measured 46', async () => {
+  // Read from the repository, not a fixture. Until the f2f901a pin this case
+  // asserted that the live approval carried NO additions; the pin flips it
+  // deliberately, so the tripwire now holds the pin to its reviewed inventory:
+  // exactly these three, in this form, and nothing else.
   const live = JSON.parse(fs.readFileSync(path.resolve('.github/wsf-staging/approved-candidate.json'), 'utf8'));
-  assert.equal(live.candidateAddedFunctions, undefined, 'the live approval must not carry additions yet');
+  assert.deepEqual(live.candidateAddedFunctions, SOCIAL, 'the live approval must name exactly the three reviewed additions');
   assert.equal(live.expectedPriorFunctions, 46);
+  assert.match(live.approvedAppSha, /^[0-9a-f]{40}$/);
 });
 
 console.log(`\nverify-deployment: ${passed} passed`);
