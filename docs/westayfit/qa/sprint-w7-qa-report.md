@@ -1619,5 +1619,32 @@ On the preview the click writes `pushState /?view=communities`, then
 `replaceState /?view=communities`, and `history.length` goes up by exactly 1.
 That is W9's `setParams` committing the address without adding an entry.
 
+## 14.12 · W8's freshness delta, pre-staged with independent instruments
+
+`sprint-w7-community-freshness-verify.spec.ts` measures W8's promises
+(`eff65b0`, #455) where W8's own spec cannot see:
+
+| | what it adds to W8's spec | `f2f901a` (no W8) | preview (with W8) |
+|---|---|---|---|
+| F1 | reselect counts **every** `wsf*` callable, for 4 s (W8 counts three, for 1.5 s) | PASS: preserved guard | PASS ×2 |
+| F2 | a `MutationObserver` catches **any transient** loading testID during the return (W8 checks once, afterwards); the return must re-read the list | **FAIL**: no list re-read; per-goal progress skeletons flashed | PASS ×2 |
+| F3 | the member's **in-app** exit after a lost goal create ("Check community goals"), not history Back; the server holds exactly one goal | PASS: preserved (see below) | PASS ×2 |
+| F4 | W8's untested promise: a failed return read leaves the page standing (`wsfListGoals` faulted for the return only) | **FAIL** at non-vacuity (no re-read to fault) | PASS ×2 |
+
+With W8, one return makes these calls: `wsfCommunityMembers`,
+`wsfCommunityActivity`, `wsfListGoals`, `wsfGoalPulse`, `wsfMyContribution`. The
+settle read follows as a second `wsfGoalPulse` and `wsfMyContribution`.
+
+**F3, recorded, not asserted.** "Check community goals" pushes a **second**
+Community instance: two roots, one visible, the kept one unmarked. The URL
+carries W9's documented `?groupId=`. So the member's own path reads fresh with
+or without W8, and the DOM holds two `(tabs)` stacks, as M5 showed.
+
+**My instrument error, caught on `f2f901a` and fixed.** Progress calls
+`wsfListGoals` with Community's own arguments. The first revision counted
+Progress's read as Community's, so F2's re-read check and F4's fault counter
+were contaminated. Every counter and fault now starts at the moment of the
+return, after Progress has finished its reads.
+
 **Next:** L0's combined candidate (W4's successor ⊕ W9's `a87cd3b` ⊕ W8's
 `eff65b0` on `f2f901a`), checked as one tree (`5800787974` §2, `5801193038`).
