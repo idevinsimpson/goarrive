@@ -384,14 +384,18 @@ test.describe('phone preview 390×844', () => {
 test.describe('portrait picture frame 800×1280', () => {
   test.use({ viewport: FRAME, deviceScaleFactor: 1, isMobile: false, hasTouch: false });
 
-  test('below 900px the current build takes the PHONE layout', async ({ page }) => {
+  test('at 800x1280 the build takes the PORTRAIT tier (the pre-fix PHONE layout is the board\'s dated record)', async ({ page }) => {
     test.setTimeout(120_000);
     const fx = await seedCommunity('frame');
     const goalId = await seedGoal(fx, SEEDS.building!);
     await page.goto(`/display/${goalId}`);
     await expectReady(page, 'building', fx);
-    // This is the assertion the board's TARGET label rests on.
-    await expect(page.getByTestId('wsf-display-screen')).toHaveAttribute('data-layout', 'phone');
+    // Board 10 recorded the pre-fix build taking the PHONE layout here; the accepted
+    // #429 target and the #435 implementation (integrated at app-shell ba774ef) give the
+    // 800x1280 frame its own PORTRAIT tier. The board's frames stay the dated record;
+    // this assertion follows the build so the producer keeps running against it.
+    await expect(page.getByTestId('wsf-display-screen')).toHaveAttribute('data-layout', 'portrait');
+    await expect(page.getByTestId('wsf-display-screen')).toHaveAttribute('data-tier', 'portrait');
     await page.waitForTimeout(250);
     await shoot(page, 'display-building-800x1280');
   });
