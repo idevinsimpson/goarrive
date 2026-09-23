@@ -58,6 +58,20 @@ import {
  * settle is in both), X4 FAIL (pushState '/'). X3/X3b/X3c guard the
  * arrow's unchanged back() semantics; X3b records that the arrow reads
  * "Back to community" while returning to You.
+ *
+ * X5 / X5s, THE STALE-TOTAL CONSEQUENCE of the known warm "Back to home"
+ * duplicate (W9 #458 `5802502922`; deferred, Director `5802767529` §3),
+ * measured on 9f27c6ea:
+ *   X5  FAIL, with no stub. The fresh Community's first pulse left 374 ms
+ *       after the review screen's last pre-write poll (inside the 2 s cache),
+ *       showed 0 against the server's 20, and nothing re-read it in 10 s.
+ *       Timing: Submit straight after a poll, "Back to home" at once.
+ *   X5s FAIL. The stale sentinel showed at +257 ms and was still on screen
+ *       at 15 s, with no pulse after landing. A tab round trip (Progress →
+ *       Home) corrected it 329 ms after the return.
+ *   Both: 2 Community roots, 1 tab bar (W9's duplicate).
+ * So on this path the stale total is not a bounded cache interval: it lasts
+ * until the member leaves and returns, or reloads.
  */
 
 test.use({ viewport: { width: 390, height: 844 } });
@@ -210,6 +224,72 @@ async function contributeFromCommunity(page: Page, fx: Fx): Promise<void> {
   await page.getByTestId('wsf-contribute-done').last().click();
   await recordTwenty(page);
 }
+
+/** A Champion with a community and no goal yet: the first goal's journey. */
+async function seedChampion(tag: string): Promise<Omit<Fx, 'goalId'>> {
+  const id = stampId();
+  const email = `w7ex-${tag}-${id}@example.com`;
+  const password = `Aa1!${randomBytes(6).toString('hex')}`;
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Robin Vale');
+  const groupId = `w7ex-${tag}-${id}`;
+  await seedCommunity({ groupId, displayName: 'W7 Exit Movers', joinPolicy: 'private', members: [{ uid, role: 'foundingChampion' }] });
+  return { email, password, uid, groupId };
+}
+
+/**
+ * "/" → the community → Goal Setup → the receipt's "Open the contribute page"
+ * (a link that names no community, so the contribution's exits read "Back to
+ * home") → the entry screen. Returns the goal the server made.
+ */
+async function firstGoalToContribute(page: Page, fx: Omit<Fx, 'goalId'>): Promise<string> {
+  await signInVia(page, fx.email, fx.password);
+  await page.goto('/');
+  await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe(`/community/${fx.groupId}`);
+  const start = page.getByTestId('wsf-community-start-goal').last();
+  await expect(start).toBeVisible({ timeout: 40_000 });
+  await markVisibleCommunity(page);
+  await start.click();
+  await expect(page.getByTestId('wsf-new-goal-form').last()).toBeVisible({ timeout: 40_000 });
+  await page.getByTestId('wsf-new-goal-title').last().fill('W7 Stale Squats');
+  await page.getByTestId('wsf-new-goal-target').last().fill('500');
+  await page.getByTestId('wsf-new-goal-unit').last().fill('squats');
+  await page.getByTestId('wsf-new-goal-submit').last().click();
+  const created = page.getByTestId('wsf-new-goal-created').last();
+  await expect(created).toBeVisible({ timeout: 40_000 });
+  const goalId = (await created.getAttribute('data-goal-id')) ?? '';
+  expect(goalId, 'the receipt names the goal the server made').not.toBe('');
+  await page.getByTestId('wsf-new-goal-goto-contribute').last().click();
+  await expect(page.getByTestId('wsf-contribute-entry-screen').last()).toBeVisible({ timeout: 40_000 });
+  return goalId;
+}
+
+/** The first integer in the goal's total, read inside the one Community screen on show. */
+async function shownTotal(page: Page, goalId: string): Promise<number | null> {
+  return page.evaluate((id) => {
+    const shown = Array.from(document.querySelectorAll('[data-testid="wsf-community"]')).filter(
+      (el) => (el as HTMLElement).offsetParent !== null,
+    );
+    if (shown.length !== 1) return null;
+    const t = shown[0]!.querySelector(`[data-testid="wsf-community-goal-total-${id}"]`) as HTMLElement | null;
+    const m = t ? /\d[\d,]*/.exec(t.innerText) : null;
+    return m ? Number(m[0].replace(/,/g, '')) : null;
+  }, goalId);
+}
+
+/** Sample the shown total every 250 ms until `until`; returns [ms since `from`, value] pairs. */
+async function sampleTotal(page: Page, goalId: string, from: number, until: number): Promise<Array<[number, number | null]>> {
+  const out: Array<[number, number | null]> = [];
+  while (Date.now() < until) {
+    out.push([Date.now() - from, await shownTotal(page, goalId)]);
+    await page.waitForTimeout(250);
+  }
+  return out;
+}
+
+/** Compress a timeline to its changes. */
+const changes = (tl: Array<[number, number | null]>) =>
+  tl.filter(([, v], i) => i === 0 || v !== tl[i - 1]![1]).map(([t, v]) => `${t}ms:${v}`);
 
 test.describe('W9 contribution exits, independent instruments', () => {
   test('X1 the ordinary arrival: the receipt returns to the same Community at the same place, with the server total; Forward re-opens only a fresh start', async ({ page }) => {
@@ -449,5 +529,138 @@ test.describe('W9 contribution exits, independent instruments', () => {
     test.info().annotations.push({ type: 'after Back', description: after });
     expect(after, 'Back returned to the dead-end contribution screen').not.toMatch(/^\/contribute\//);
     expect(await visibleCount(page, 'wsf-contribute-not-found'), 'the dead-end screen is on show again').toBe(0);
+  });
+
+  /*
+    X5 / X5s — THE STALE-TOTAL CONSEQUENCE OF THE KNOWN WARM DUPLICATE (L0
+    #434 `5803105016` bound 3; the duplicate itself is W9's measurement,
+    #458 `5802502922`, recorded and deferred by the Director, `5802767529`
+    §3). A Champion's first contribution from Goal Setup's receipt exits by
+    "Back to home"; on a warm arrival that builds a SECOND, freshly mounted
+    Community. W8's settle re-read runs on a RETURN, not on a mount, and
+    `wsfGoalPulse` answers from a 2 s server cache that a contribution does
+    not invalidate. So a first read inside that window shows the total from
+    before the contribution. The question is whether that is a bounded cache
+    interval or stays stale after a success receipt.
+
+    X5  natural timing, no stub: Submit is pressed straight after one of the
+        review screen's own 2 s pulse polls, and "Back to home" as soon as the
+        receipt shows. Records whether the fresh screen's first read landed
+        inside the cache window, and what it showed.
+    X5s the consequence, made certain: every pulse issued from the press to
+        1.5 s after landing is answered with a sentinel total (7, never a real
+        value here), which is what the cache serves in that window. Then:
+        corrected within W8's settle bound (4.5 s), or still stale at 15 s?
+        What corrects it afterwards (a tab round trip)?
+    Each asserts what the member should get: the server's total within the
+    settle bound, holding.
+  */
+  test('X5 natural timing: after a first contribution from Goal Setup, "Back to home" shows the committed total', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seedChampion('x5');
+    const goalId = await firstGoalToContribute(page, fx);
+    const pulses: Array<{ at: number; kind: 'req' | 'res' }> = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && /\/us-central1\/wsfGoalPulse/.test(r.url())) pulses.push({ at: Date.now(), kind: 'req' });
+    });
+    page.on('response', (r) => {
+      if (r.request().method() === 'POST' && /\/us-central1\/wsfGoalPulse/.test(r.url())) pulses.push({ at: Date.now(), kind: 'res' });
+    });
+    await page.getByTestId('wsf-contribute-entry').last().fill('20');
+    await page.getByTestId('wsf-contribute-review').last().click();
+    // Straight after one of the screen's own polls: the cache now holds 0.
+    await page.waitForResponse((r) => /\/us-central1\/wsfGoalPulse/.test(r.url()), { timeout: 10_000 });
+    const submittedAt = Date.now();
+    await page.getByTestId('wsf-contribute-submit').last().click();
+    await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
+    const receiptAt = Date.now();
+    const lastPrewrite = Math.max(...pulses.filter((p) => p.kind === 'req' && p.at <= submittedAt).map((p) => p.at));
+    const pressedAt = Date.now();
+    await pressLabelledExit(page, 'Back to home');
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe(`/community/${fx.groupId}`);
+    const landedAt = Date.now();
+    const timeline = await sampleTotal(page, goalId, landedAt, landedAt + 10_000);
+    const server = await serverTotal(goalId);
+    const firstFresh = pulses.find((p) => p.kind === 'req' && p.at >= pressedAt)?.at ?? NaN;
+    const r = await reading(page);
+    const m = {
+      server,
+      submitToReceiptMs: receiptAt - submittedAt,
+      receiptToPressMs: pressedAt - receiptAt,
+      lastPrewritePollToFirstFreshReadMs: firstFresh - lastPrewrite,
+      insideCacheWindow: firstFresh - lastPrewrite < 2_000,
+      pulsesAfterLandingMs: pulses.filter((p) => p.kind === 'req' && p.at >= landedAt).map((p) => p.at - landedAt),
+      timeline: changes(timeline),
+      roots: r.roots,
+      tabBars: r.tabBars,
+    };
+    test.info().annotations.push({ type: 'X5 measured', description: JSON.stringify(m) });
+    expect(server, 'the server did not commit the 20').toBe(20);
+    const at = (ms: number) => timeline.filter(([t]) => t >= ms).map(([, v]) => v)[0];
+    expect(at(4_500), 'the total shown 4.5 s after landing is not the committed one').toBe(20);
+    expect(timeline[timeline.length - 1]![1], 'the committed total did not hold').toBe(20);
+  });
+
+  test('X5s a stale first read on the fresh Community after "Back to home" is corrected within the settle bound', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seedChampion('x5s');
+    const goalId = await firstGoalToContribute(page, fx);
+    await recordTwenty(page);
+    expect(await serverTotal(goalId), 'the server did not commit the 20').toBe(20);
+
+    const STALE = 7;
+    let pressedAt = Number.POSITIVE_INFINITY;
+    let staleUntil = Number.POSITIVE_INFINITY;
+    const served: Array<{ at: number; stale: boolean }> = [];
+    await page.route('**/us-central1/wsfGoalPulse', async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const now = Date.now();
+      if (now < pressedAt) return route.continue();
+      if (now >= staleUntil) {
+        served.push({ at: now, stale: false });
+        return route.continue();
+      }
+      const res = await route.fetch();
+      const body = (await res.json()) as { result?: { sharedTotal?: number } };
+      if (!body.result || typeof body.result.sharedTotal !== 'number') throw new Error('unexpected pulse shape');
+      body.result.sharedTotal = STALE;
+      served.push({ at: now, stale: true });
+      await route.fulfill({ response: res, json: body });
+    });
+
+    pressedAt = Date.now();
+    await pressLabelledExit(page, 'Back to home');
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe(`/community/${fx.groupId}`);
+    const landedAt = Date.now();
+    staleUntil = landedAt + 1_500;
+    const timeline = await sampleTotal(page, goalId, landedAt, landedAt + 15_000);
+    const r = await reading(page);
+
+    // What corrects it: a tab round trip (Progress, then Home).
+    await page.getByTestId('wsf-member-tab-activity').last().click();
+    await page.waitForURL((u) => u.pathname.startsWith('/activity'), { timeout: 20_000 });
+    await page.waitForTimeout(1_000);
+    const backAt = Date.now();
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    const afterRoundTrip = await sampleTotal(page, goalId, backAt, backAt + 6_000);
+
+    const sawStale = timeline.some(([, v]) => v === STALE);
+    const firstStale = timeline.find(([, v]) => v === STALE)?.[0] ?? null;
+    const correctedAt = firstStale === null ? null : (timeline.find(([t, v]) => t > firstStale && v === 20)?.[0] ?? null);
+    const m = {
+      servedMsAfterLanding: served.map((x) => `${x.at - landedAt}${x.stale ? ' stale' : ''}`),
+      timeline: changes(timeline),
+      correctedAtMs: correctedAt,
+      at15s: timeline[timeline.length - 1]![1],
+      afterRoundTrip: changes(afterRoundTrip),
+      roots: r.roots,
+      tabBars: r.tabBars,
+    };
+    test.info().annotations.push({ type: 'X5s measured', description: JSON.stringify(m) });
+    // The stub must reach the screen, or the rest proves nothing.
+    expect(sawStale, 'the stale first read never reached the screen on show').toBe(true);
+    expect(correctedAt, `the stale total was not corrected within the settle bound: ${JSON.stringify(m)}`).not.toBeNull();
+    expect(correctedAt! - firstStale!, 'corrected, but later than the settle bound').toBeLessThanOrEqual(4_500);
+    expect(m.at15s, 'the corrected total did not hold').toBe(20);
   });
 });

@@ -23,25 +23,49 @@ import {
  *
  *   R1  M5'S NEGATIVE PATH. A first-community member presses Create, then
  *       "Back to home" while the create is in flight; the create commits.
- *       M5 correctly does not navigate them. Does anything tell them the
- *       community exists — or does Home, read before the commit, still offer
- *       "Start a community", opening a blank form and a silent second
- *       community? R1b records what browser Back shows instead.
+ *       Ruled a release BLOCKER (Director #365 `5803218763`), routed to W4.
+ *       The test is the Director's proof contract: no yank (no history write
+ *       into a community after the release, still on "/"); before a blank
+ *       form can submit, the confirmed community is NAMED on screen (on
+ *       top at its own centre: not "Start vanished", not "the path changed"),
+ *       on Home or on Start's re-entry; one create request and one community
+ *       until a deliberate second; R1b's "couldn't open it" copy not reused;
+ *       and a deliberate second still creates one.
+ *   R1m THE SAME JOURNEY OVER TIME (L0 #434 `5803105016` bound 4): Home at
+ *       +4 s and +30 s, after a tab round trip, after a reload; requests.
+ *       Preconditions only; the timeline is the measurement.
+ *   R1acct THE ACCOUNT BOUND, a control for the R1 correction: after the same
+ *       journey, sign out and in as another member INSIDE the app (no page
+ *       load, so nothing held in memory is lost); nothing of the first
+ *       account's community is SHOWN on Home, on Start or at any Back step.
+ *       A hidden DOM copy is recorded, not asserted.
+ *   R1b browser Back after the same journey: the card's copy.
  *   R2  A WARM "BACK TO HOME". From the member's mounted Community, a goal
  *       whose screen fails to load offers "Back to home". Does the member come
  *       back to the Community they left, or to a second, freshly mounted one
  *       with the first kept hidden beneath it?
  *
- * MEASURED (QA report, Check 16):
+ * The harness settles Home's own read of the member's communities BEFORE the
+ * create starts. Under three workers a slowed read once landed after the
+ * commit and Home redirected into the new community by itself: a race with
+ * Home's ordinary resolution, never seen serially. Run this file serially.
  *
- *   test   9f27c6ea (candidate)                     6c98f485 (W4 5c28e45 route, old exits)
- *   R1     FAIL: Home offers "Start a community";   pass: the late success moved the
- *          the blank form made a SECOND community   member into the new community
- *   R1b    FAIL: "We couldn't open it               FAIL: the same card sentence
- *          automatically." (pre-existing copy)
- *   R2     FAIL: 2 Community roots, 1 tab bar       FAIL: 2 Community roots, 2 tab bars
+ * MEASURED:
  *
- * So R1 is introduced by the candidate's M5 fix (a trade: no yank, but no
+ *   test    9f27c6ea (candidate)                     6c98f485 (W4 5c28e45 route, old exits)
+ *   R1      FAIL: nothing names the community on      FAIL at no-yank (Check 16: the
+ *           Home (still "Start a community") or on    late success moved the member
+ *           Start's blank form; "/", 1 create         into the new community)
+ *   R1m     +4 s and +30 s: "/", Start offered, not named, no Home re-read;
+ *           after Progress → Home: the same; after a reload: Home opens the
+ *           community and names it. 1 create, 1 community throughout
+ *   R1acct  PASS: shown nowhere, Back ×2 stays on "/"; HELD in one unrendered
+ *           wsf-start-summary node
+ *   R1b     FAIL: "We couldn't open it automatically." (pre-existing copy,
+ *           both builds)
+ *   R2      FAIL: 2 Community roots, 1 tab bar      FAIL: 2 Community roots, 2 tab bars
+ *
+ * R1 is introduced by the candidate's M5 fix (a trade: no yank, but no
  * sign of the new community either); R1b's copy and R2's second Community
  * are pre-existing, and R2 is narrower on the candidate (one tab bar).
  */
@@ -95,8 +119,20 @@ async function holdCreates(page: Page): Promise<{ count: () => number; release: 
 async function leaveMidCreate(page: Page, name: string) {
   const me = await member('r1');
   await signInVia(page, me.email, me.password);
+  // Home's read of the member's communities must have ANSWERED before the
+  // create starts: that is the journey (Home read the list before the
+  // commit). Otherwise a read slowed by load can land after the commit, and
+  // Home resolves into the new community by its ordinary redirect, which is
+  // not the late success acting. Seen once under three workers, never
+  // serially.
+  const homeRead = page.waitForResponse((r) => /\/us-central1\/wsfMyCommunities/.test(r.url()) && r.request().method() === 'POST', { timeout: 30_000 });
   await page.goto('/');
+  await homeRead;
   await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+  const homeReads: number[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && /\/us-central1\/wsfMyCommunities/.test(r.url())) homeReads.push(Date.now());
+  });
   await page.getByTestId('wsf-home-start').last().click();
   await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
   const creates = await holdCreates(page);
@@ -106,54 +142,243 @@ async function leaveMidCreate(page: Page, name: string) {
   await page.getByTestId('wsf-start-back').click();
   await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
   await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 20_000 });
+  const releasedAt = Date.now();
   creates.release();
   await page.waitForTimeout(4_000);
-  return { me, creates };
+  return { me, creates, releasedAt, homeReadsSince: (t: number) => homeReads.filter((x) => x >= t).length };
+}
+
+/** Every pushState / replaceState, with its path and wall-clock time. */
+async function traceHistory(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __w7h: Array<{ op: string; path: string; at: number }> };
+    w.__w7h = [];
+    for (const m of ['pushState', 'replaceState'] as const) {
+      const orig = History.prototype[m];
+      History.prototype[m] = function (this: History, ...a: [unknown, string, (string | URL | null)?]) {
+        w.__w7h.push({ op: m, path: new URL(String(a[2] ?? ''), location.href).pathname, at: Date.now() });
+        return orig.apply(this, a as never);
+      };
+    }
+  });
+}
+async function historyOps(page: Page): Promise<Array<{ op: string; path: string; at: number }>> {
+  return page.evaluate(() => (window as unknown as { __w7h?: Array<{ op: string; path: string; at: number }> }).__w7h?.slice() ?? []);
+}
+
+type Named = { shown: boolean; testId: string; body: string };
+/**
+ * Is `text` SHOWN to the member: the deepest element whose text contains it,
+ * rendered, scrolled into view, and on top at its own centre. A screen kept
+ * mounted but covered (the stack keeps them) does not count, and neither does
+ * a DOM node the member cannot see. `body` is the text of the nearest
+ * testID'd container, for the copy check.
+ */
+async function shownByName(page: Page, text: string): Promise<Named> {
+  return page.evaluate((needle) => {
+    const hits = Array.from(document.querySelectorAll('body *')).filter((el) => {
+      if (!(el.textContent ?? '').includes(needle)) return false;
+      return !Array.from(el.children).some((c) => (c.textContent ?? '').includes(needle));
+    }) as HTMLElement[];
+    for (const el of hits) {
+      if (el.offsetParent === null || el.getClientRects().length === 0) continue;
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!top || !(el === top || el.contains(top) || top.contains(el))) continue;
+      let box: HTMLElement | null = el;
+      while (box && !box.dataset?.testid) box = box.parentElement;
+      return { shown: true, testId: box?.dataset.testid ?? '-', body: (box?.innerText ?? el.innerText).replace(/\s+/g, ' ').trim() };
+    }
+    return { shown: false, testId: '-', body: '' };
+  }, text);
+}
+
+/** Every DOM copy of `text` (shown or not), by the nearest testID and whether it is rendered. */
+async function heldCopies(page: Page, text: string): Promise<Array<{ testId: string; screen: string; rendered: boolean }>> {
+  return page.evaluate((needle) => {
+    const deepest = Array.from(document.querySelectorAll('body *')).filter(
+      (el) => (el.textContent ?? '').includes(needle) && !Array.from(el.children).some((c) => (c.textContent ?? '').includes(needle)),
+    ) as HTMLElement[];
+    return deepest.map((el) => {
+      let box: HTMLElement | null = el;
+      while (box && !box.dataset?.testid) box = box.parentElement;
+      let screen: HTMLElement | null = el;
+      while (screen && !(screen.dataset?.testid ?? '').match(/^wsf-(start|home|community)$|^wsf-start-/)) screen = screen.parentElement;
+      return { testId: box?.dataset.testid ?? '-', screen: screen?.dataset.testid ?? '-', rendered: el.offsetParent !== null };
+    });
+  }, text);
+}
+
+/**
+ * The deliberate second, by the ordinary routes a member has: a blank form
+ * already on screen, else Home's "Start a community", else the route itself.
+ * Returns whether an EMPTY name field was reached.
+ */
+async function startDeliberateSecond(page: Page): Promise<{ reached: boolean; via: string }> {
+  const blank = async () =>
+    (await visibleCount(page, 'wsf-start-name')) > 0 &&
+    (await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue()) === '';
+  if (await blank()) return { reached: true, via: 'the form on screen' };
+  let via = 'the route';
+  if (new URL(page.url()).pathname === '/' && (await visibleCount(page, 'wsf-home-start')) > 0) {
+    await page.getByTestId('wsf-home-start').last().click();
+    via = "Home's Start a community";
+  } else {
+    await page.goto('/start-community');
+  }
+  await page.locator('[data-testid="wsf-start-name"]:visible').first().waitFor({ timeout: 25_000 }).catch(() => undefined);
+  return { reached: await blank(), via };
 }
 
 test.describe('Candidate risks, measured', () => {
-  test('R1 after leaving mid-create, the member is told the community exists before a blank form can make a second', async ({ page }) => {
+  test('R1 after leaving mid-create, the confirmed community is named on screen before a blank form can make a second; no yank; a deliberate second still works', async ({ page }) => {
     test.setTimeout(300_000);
-    const { me, creates } = await leaveMidCreate(page, 'W7 Risk First');
+    await traceHistory(page);
+    const NAME = 'W7 Risk First';
+    const { me, creates, releasedAt } = await leaveMidCreate(page, NAME);
     const committed = await communitiesOf(me.uid);
+    const opsSinceRelease = (await historyOps(page)).filter((o) => o.at >= releasedAt);
     const home = {
+      elapsedMs: Date.now() - releasedAt,
       path: new URL(page.url()).pathname,
       startOffered: await visibleCount(page, 'wsf-home-start'),
-      listShowsIt: await page.locator('[data-testid="wsf-home-my-list"]:visible').filter({ hasText: 'W7 Risk First' }).count(),
+      named: await shownByName(page, NAME),
     };
-    test.info().annotations.push({ type: 'Home after the commit', description: JSON.stringify({ ...home, committed, creates: creates.count() }) });
-    expect(committed, 'precondition: the create committed once').toEqual(['W7 Risk First']);
+    test.info().annotations.push({ type: 'Home after the commit', description: JSON.stringify({ ...home, committed, creates: creates.count(), opsSinceRelease }) });
+    expect(committed, 'precondition: the create committed once').toEqual([NAME]);
+    expect(creates.count(), 'precondition: one create request').toBe(1);
 
-    // What a member does next on this Home: press its primary.
-    let afterStart: Record<string, unknown> = { pressed: false };
-    if (home.startOffered > 0) {
+    // M5 kept: the commit moved nobody. No history write to a community after
+    // the release, and the member is still where they chose to go.
+    expect(home.path, 'the late success moved the member off Home (the M5 yank)').toBe('/');
+    expect(opsSinceRelease.filter((o) => o.path.startsWith('/community/')), 'the late success navigated into the community').toEqual([]);
+
+    // Where the member is shown the community: on Home, or on Start's re-entry
+    // before its blank form can submit. Pressing Start is what a member on
+    // this Home does next if Home says nothing.
+    let ack: (Named & { where: string }) | null = home.named.shown ? { ...home.named, where: 'home' } : null;
+    let onStart: Record<string, unknown> = { pressed: false };
+    if (!ack && home.startOffered > 0) {
       await page.getByTestId('wsf-home-start').last().click();
-      await expect(page.locator('[data-testid="wsf-start-name"]:visible')).toBeVisible({ timeout: 25_000 });
-      afterStart = {
+      await page.waitForURL((u) => u.pathname === '/start-community', { timeout: 25_000 });
+      await page.waitForTimeout(2_500);
+      const named = await shownByName(page, NAME);
+      if (named.shown) ack = { ...named, where: 'start' };
+      onStart = {
         pressed: true,
-        nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').inputValue(),
+        named,
+        blankFormVisible: await visibleCount(page, 'wsf-start-name'),
+        nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue().catch(() => null),
         createdCardVisible: await visibleCount(page, 'wsf-start-created'),
-        retryNoteVisible: await visibleCount(page, 'wsf-start-retry-note'),
-        submitText: (await page.locator('[data-testid="wsf-start-submit"]:visible').innerText()).trim(),
       };
     }
-    test.info().annotations.push({ type: 'after pressing Start a community', description: JSON.stringify(afterStart) });
+    test.info().annotations.push({ type: 'acknowledgment', description: JSON.stringify({ ack, onStart }) });
 
-    // THE PROPERTY: before a blank form can make a second community, the member
-    // has been shown the first — on Home, or as a created card on the form.
-    const told = home.listShowsIt > 0 || home.startOffered === 0 || (afterStart.createdCardVisible as number) > 0;
-    expect.soft(told, `the member was not told their community exists; Home offers a blank "Start a community": ${JSON.stringify({ home, afterStart })}`).toBe(true);
+    // THE PROPERTY. Not "Start vanished", not "the path changed": the name of
+    // the community that exists is on screen, on top at its own centre.
+    expect(ack, `nothing on screen names "${NAME}" before a blank form is offered: ${JSON.stringify({ home, onStart })}`).not.toBeNull();
+    expect(ack!.body, 'the acknowledgment reuses the "couldn\'t open it" sentence (R1b) on a path that did not try to open it').not.toMatch(/couldn.t open it automatically/i);
+    expect(await communitiesOf(me.uid), 'a second community exists before any deliberate second').toHaveLength(1);
+    expect(creates.count(), 'a second create was sent before any deliberate second').toBe(1);
 
-    // And the consequence, carried through: the blank form makes a second one.
-    if (afterStart.pressed && !told) {
-      await page.unroute(CREATE);
-      await page.locator('[data-testid="wsf-start-name"]:visible').fill('W7 Risk Second');
-      await page.locator('[data-testid="wsf-start-submit"]:visible').click();
-      await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toMatch(/^\/community\//);
-      const after = await communitiesOf(me.uid);
-      test.info().annotations.push({ type: 'communities after the blank form', description: JSON.stringify(after) });
-      expect.soft(after, 'a second community was created without the member being told the first exists').toHaveLength(1);
+    // A DELIBERATE second stays possible (Director 5803218763): later
+    // communities are not all duplicates.
+    await page.unroute(CREATE);
+    const second = await startDeliberateSecond(page);
+    test.info().annotations.push({ type: 'deliberate second', description: JSON.stringify(second) });
+    expect(second.reached, `no way to start a second community after the acknowledgment: ${JSON.stringify(second)}`).toBe(true);
+    await page.locator('[data-testid="wsf-start-name"]:visible').first().fill('W7 Risk Second');
+    await page.locator('[data-testid="wsf-start-submit"]:visible').first().click();
+    await expect.poll(() => communitiesOf(me.uid), { timeout: 30_000 }).toHaveLength(2);
+  });
+
+  test('R1m the journey measured over time: Home at +4 s and +30 s, after a tab round trip, after a reload; requests', async ({ page }) => {
+    test.setTimeout(300_000);
+    const NAME = 'W7 Risk Timed';
+    const { me, creates, releasedAt, homeReadsSince } = await leaveMidCreate(page, NAME);
+    const homeNow = async () => ({
+      elapsedMs: Date.now() - releasedAt,
+      path: new URL(page.url()).pathname,
+      startOffered: await visibleCount(page, 'wsf-home-start'),
+      named: (await shownByName(page, NAME)).shown,
+      myCommunitiesReadsSinceRelease: homeReadsSince(releasedAt),
+    });
+    const at4 = await homeNow();
+    await page.waitForTimeout(Math.max(0, releasedAt + 30_000 - Date.now()));
+    const at30 = await homeNow();
+    await page.getByTestId('wsf-member-tab-activity').last().click();
+    await page.waitForURL((u) => u.pathname.startsWith('/activity'), { timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(3_000);
+    const afterRoundTrip = await homeNow();
+    await page.reload();
+    await page.waitForTimeout(6_000);
+    const afterReload = { elapsedMs: Date.now() - releasedAt, path: new URL(page.url()).pathname, named: (await shownByName(page, NAME)).shown };
+    const committed = await communitiesOf(me.uid);
+    test.info().annotations.push({ type: 'Home over time', description: JSON.stringify({ at4, at30, afterRoundTrip, afterReload, creates: creates.count(), committed }) });
+    // Preconditions only: the timeline is the measurement.
+    expect(committed, 'the create committed once').toEqual([NAME]);
+    expect(creates.count(), 'nothing but the one create was sent').toBe(1);
+  });
+
+  test('R1acct the result of one account is not shown to the next on the same device (no reload between them)', async ({ page }) => {
+    test.setTimeout(300_000);
+    const NAME = 'W7 Risk Acct';
+    const { me } = await leaveMidCreate(page, NAME);
+    expect(await communitiesOf(me.uid), 'precondition: the create committed').toEqual([NAME]);
+    const next = await member('r1n');
+    // Sign out and in again inside the app, so nothing held in memory is lost
+    // to a page load.
+    await page.getByTestId('wsf-home-signout').last().click();
+    await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-home-signin').last().click();
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-signin-email').fill(next.email);
+    await page.getByTestId('wsf-signin-password').fill(next.password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(2_000);
+    const onHome = { shown: await shownByName(page, NAME), held: await heldCopies(page, NAME) };
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.locator('[data-testid="wsf-start-name"]:visible').first()).toBeVisible({ timeout: 25_000 });
+    await page.waitForTimeout(2_000);
+    const onStart = {
+      shown: await shownByName(page, NAME),
+      held: await heldCopies(page, NAME),
+      createdCard: await visibleCount(page, 'wsf-start-created'),
+      nameValue: await page.locator('[data-testid="wsf-start-name"]:visible').first().inputValue(),
+    };
+    // What browser Back shows the next account, step by step.
+    const backs: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < 4; i += 1) {
+      const before = page.url();
+      await page.goBack().catch(() => undefined);
+      await page.waitForTimeout(1_500);
+      if (!page.url().startsWith('http://127.0.0.1')) {
+        backs.push({ step: i + 1, left: page.url() });
+        break;
+      }
+      backs.push({
+        step: i + 1,
+        path: new URL(page.url()).pathname,
+        shown: await shownByName(page, NAME),
+        createdCard: await visibleCount(page, 'wsf-start-created'),
+      });
+      if (page.url() === before) break;
     }
+    test.info().annotations.push({ type: 'the next account', description: JSON.stringify({ onHome, onStart, backs }) });
+    expect(onHome.shown.shown, "the previous account's community is SHOWN on the next account's Home").toBe(false);
+    expect(onStart.shown.shown, "the previous account's community is SHOWN on the next account's Start").toBe(false);
+    expect(onStart.createdCard).toBe(0);
+    expect(onStart.nameValue).toBe('');
+    for (const b of backs) expect((b.shown as Named | undefined)?.shown ?? false, `browser Back showed the previous account's community: ${JSON.stringify(b)}`).toBe(false);
+    expect(await communitiesOf(next.uid)).toEqual([]);
+    // HELD, NOT SHOWN, is recorded above and not asserted: on 9f27c6ea the
+    // previous account's name stays in one unrendered wsf-start-summary node
+    // (a Start screen kept mounted), which no screen and no Back step shows.
   });
 
   test('R1b the same journey, then browser Back: what the member sees', async ({ page }) => {

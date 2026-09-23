@@ -429,33 +429,66 @@ for (const vp of [
 }
 
 /**
- * SEAM-1c — THE SIGNAL THE Q3 FIX GIVES INSTEAD OF MOVING THINGS. W4's design
- * (#394 `5801525555`): leaving the field short turns its border red and shows
- * no sentence; a corrected name returns it to normal; a too-long name keeps
- * showing its sentence while typing, as before. No delivered frame shows the
- * blurred-short state, so it is measured here. The normal colour is read from
- * a validly named field, not assumed.
+ * SEAM-1c — THE NEUTRAL BLUR, THEN THE FIRST PRESS. The Director ruled W4's
+ * red-border-only blur state a NARROW FAIL (#365 `5802873607`; L0
+ * `5802882084`, `5803227673`). Leaving the field with a too-short name must
+ * stay visually NEUTRAL while no sentence is shown: the same border as a
+ * validly named, unfocused field. The FIRST invalid Create activation then
+ * gives, in that one activation, the sentence, focus in the field and the
+ * invalid border, and sends nothing. A corrected name returns to normal; a
+ * too-long name keeps saying so while typing.
+ *
+ * Colours are read, not assumed: `normal` from a validly named, unfocused
+ * field and `focusedValid` from the same field focused, so focus styling
+ * cannot pass for invalid styling. The invalid colour is W4's ERROR_RED,
+ * rgb(180, 35, 44), the one the delivered Q3 behaviour paints.
+ *
+ * Every state is read before any assertion, so a build that fails early
+ * still records the press state.
+ *
+ * MEASURED on 9f27c6ea: FAILS at the blur (a red border with no sentence,
+ * the ruled defect). The recorded press state there already has the
+ * sentence, focus and red. The earlier SEAM-1c asserted W4's superseded
+ * red-on-blur design and passed there.
  */
+const ERROR_RED = 'rgb(180, 35, 44)';
 test.describe('SEAM-1c', () => {
   test.use({ viewport: { width: 390, height: 844 } });
-  test('leaving the field short marks it red without a sentence; correcting it clears the red', async ({ page }) => {
+  test('a short name left by blur stays neutral with no sentence; the first Create press gives the sentence, focus and the invalid border at once', async ({ page }) => {
     test.setTimeout(240_000);
     const me = await person('s1c');
     await signInVia(page, me.email, me.password);
     await openForm(page);
+    let creates = 0;
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && /\/wsfCreateCommunity/.test(r.url())) creates += 1;
+    });
     const field = page.getByTestId('wsf-start-name');
     const border = () => field.evaluate((el) => getComputedStyle(el).borderTopColor);
     const sentence = () => visibleCount(page, 'wsf-start-name-error');
+    const sentenceText = async () => (await page.locator('[data-testid="wsf-start-name-error"]:visible').first().innerText().catch(() => '')).trim();
+    const focused = () => field.evaluate((el) => document.activeElement === el);
+
     await field.fill('W7 Valid Name');
+    await page.waitForTimeout(200);
+    const focusedValid = await border();
     await page.keyboard.press('Tab');
     await page.waitForTimeout(300);
     const normal = await border();
+
     await field.click();
     await field.fill('a');
     await page.keyboard.press('Tab');
     await page.waitForTimeout(300);
-    const shortBlurred = { border: await border(), sentence: await sentence() };
-    await field.click();
+    const shortBlurred = { border: await border(), sentence: await sentence(), focused: await focused() };
+
+    // The first invalid activation: one press on Create.
+    const submit = page.locator('[data-testid="wsf-start-submit"]:visible').first();
+    await submit.scrollIntoViewIfNeeded();
+    await submit.click();
+    await page.waitForTimeout(400);
+    const firstPress = { border: await border(), sentence: await sentence(), text: await sentenceText(), focused: await focused(), creates };
+
     await field.fill('Ab');
     await page.keyboard.press('Tab');
     await page.waitForTimeout(300);
@@ -463,16 +496,23 @@ test.describe('SEAM-1c', () => {
     await field.click();
     await field.fill('x'.repeat(81));
     await page.waitForTimeout(300);
-    const tooLongTyping = {
-      border: await border(),
-      sentence: (await page.locator('[data-testid="wsf-start-name-error"]:visible').innerText().catch(() => '')).trim(),
-    };
-    test.info().annotations.push({ type: 'border states', description: JSON.stringify({ normal, shortBlurred, corrected, tooLongTyping }) });
-    expect(normal, 'a valid name shows the error red').not.toBe('rgb(180, 35, 44)');
-    expect(shortBlurred.border, 'leaving the field short did not mark it').toBe('rgb(180, 35, 44)');
+    const tooLongTyping = { border: await border(), sentence: await sentenceText() };
+    test.info().annotations.push({
+      type: 'field states',
+      description: JSON.stringify({ normal, focusedValid, shortBlurred, firstPress, corrected, tooLongTyping }),
+    });
+
+    expect(normal, 'a valid name shows the error red').not.toBe(ERROR_RED);
+    expect(focusedValid, 'focus alone paints the error red, so invalid cannot be told from focused').not.toBe(ERROR_RED);
     expect(shortBlurred.sentence, 'leaving the field short inserted a sentence (the Q3 mechanism)').toBe(0);
-    expect(corrected.border, 'a corrected name stayed red').toBe(normal);
-    expect(corrected.sentence).toBe(0);
+    expect(shortBlurred.border, 'leaving the field short changed the border with no sentence (ruled a NARROW FAIL)').toBe(normal);
+    expect(firstPress.creates, 'the invalid press sent a create').toBe(0);
+    expect(firstPress.sentence, 'the first invalid press showed no sentence').toBeGreaterThan(0);
+    expect(firstPress.text, 'the sentence does not say why').not.toBe('');
+    expect(firstPress.focused, 'the first invalid press did not put focus in the field').toBe(true);
+    expect(firstPress.border, 'the first invalid press did not apply the invalid border').toBe(ERROR_RED);
+    expect(corrected.border, 'a corrected name stayed marked').toBe(normal);
+    expect(corrected.sentence, 'a corrected name kept its sentence').toBe(0);
     expect(tooLongTyping.sentence, 'a too-long name no longer says so while typing').toMatch(/80 characters or fewer/);
   });
 });
@@ -1033,7 +1073,9 @@ test.describe('FRAMES', () => {
   const DELIVERY = process.env.WSF_W7_DELIVERY_SHA;
   test('FRAMES delivery: 24 frames, right sizes, none showing the old bar, the 21 re-shot', () => {
     test.skip(!DELIVERY, 'set WSF_W7_DELIVERY_SHA to W4\'s delivery — the verification run must report 0 skipped');
-    const names = gitNames(DELIVERY!).sort();
+    // 063747b9 added one frame of the short-and-blurred state; it is checked
+    // on its own below and is not one of the 24.
+    const names = gitNames(DELIVERY!).filter((n) => n !== SHORT_BLURRED).sort();
     expect(names).toEqual(EXPECTED_FRAMES);
     for (const n of names) {
       const img = decodePng(gitBlob(DELIVERY!, `${FRAME_DIR}/${n}`));
@@ -1048,4 +1090,88 @@ test.describe('FRAMES', () => {
       expect(b, `${n} was carried, not re-shot`).not.toBe(a);
     }
   });
+
+  /*
+    THE SHORT-AND-BLURRED FRAME (W4 `063747b9`, recaptured under the
+    Director's neutral-blur ruling `5802873607`). Measured against the
+    arrival frame at the same size and SHA: W4 states that every pixel that
+    differs lies in the name field's box (x 20-369, y 376-425), so the box
+    below has a 2 px margin. The reader counts red-dominant pixels, and
+    compares the field's border ring (the box less a 5 px inset, where the
+    typed character cannot reach) and everything outside the box.
+  */
+  test('FRAMES short-blurred calibration: the reader sees 063747b9\'s red border, and the too-long sentence under the field', () => {
+    const blurred = decodePng(gitBlob('063747b9', `${FRAME_DIR}/${SHORT_BLURRED}`));
+    const arrival = decodePng(gitBlob('063747b9', `${FRAME_DIR}/AFTER-start-arrival-390x844.png`));
+    const tooLong = decodePng(gitBlob('063747b9', `${FRAME_DIR}/AFTER-start-name-too-long-390x844.png`));
+    const m = {
+      blurredBoxRed: redCount(blurred, FIELD_BOX),
+      arrivalBoxRed: redCount(arrival, FIELD_BOX),
+      blurredBandRed: redCount(blurred, SENTENCE_BAND),
+      tooLongBandRed: redCount(tooLong, SENTENCE_BAND),
+      ringDiff: ringDiff(blurred, arrival),
+      outsideDiff: outsideDiff(blurred, arrival),
+    };
+    test.info().annotations.push({ type: 'calibration', description: JSON.stringify(m) });
+    expect(m.blurredBoxRed, 'the reader cannot see the red border').toBeGreaterThan(500);
+    expect(m.ringDiff, 'the ring comparison cannot see the red border').toBeGreaterThan(500);
+    expect(m.arrivalBoxRed).toBe(0);
+    expect(m.tooLongBandRed, 'the reader cannot see a sentence under the field').toBeGreaterThan(300);
+    expect(m.blurredBandRed).toBe(0);
+    expect(m.outsideDiff).toBe(0);
+  });
+
+  const BLUR_FRAME = process.env.WSF_W7_BLUR_FRAME_SHA;
+  test('FRAMES short-blurred delivery: the recaptured frame shows the field as on arrival, with no sentence', () => {
+    test.skip(!BLUR_FRAME, 'set WSF_W7_BLUR_FRAME_SHA to the neutral-blur successor — the verification run must report 0 skipped');
+    expect(gitNames(BLUR_FRAME!)).toContain(SHORT_BLURRED);
+    const img = decodePng(gitBlob(BLUR_FRAME!, `${FRAME_DIR}/${SHORT_BLURRED}`));
+    const arrival = decodePng(gitBlob(BLUR_FRAME!, `${FRAME_DIR}/AFTER-start-arrival-390x844.png`));
+    expect([img.w, img.h]).toEqual([390, 844]);
+    const before = execFileSync('git', ['rev-parse', `063747b9:${FRAME_DIR}/${SHORT_BLURRED}`], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+    const now = execFileSync('git', ['rev-parse', `${BLUR_FRAME}:${FRAME_DIR}/${SHORT_BLURRED}`], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+    const m = { boxRed: redCount(img, FIELD_BOX), bandRed: redCount(img, SENTENCE_BAND), ringDiff: ringDiff(img, arrival), outsideDiff: outsideDiff(img, arrival), blob: now };
+    test.info().annotations.push({ type: 'the recaptured frame', description: JSON.stringify(m) });
+    expect(m.boxRed, 'the name field is still painted red').toBe(0);
+    expect(m.ringDiff, 'the field border differs from the arrival frame\'s').toBe(0);
+    expect(m.bandRed, 'red under the field (a sentence)').toBe(0);
+    expect(m.outsideDiff, 'something outside the field differs from the arrival frame (a sentence, or a shift)').toBe(0);
+    expect(now, 'the frame was carried from 063747b9, not recaptured').not.toBe(before);
+  });
 });
+
+const SHORT_BLURRED = 'AFTER-start-name-too-short-blurred-390x844.png';
+type Box = { x0: number; y0: number; x1: number; y1: number };
+const FIELD_BOX: Box = { x0: 18, y0: 374, x1: 371, y1: 427 };
+const SENTENCE_BAND: Box = { x0: 0, y0: 428, x1: 389, y1: 470 };
+const TOL = 16;
+const differs = (a: Img, b: Img, i: number) =>
+  Math.abs(a.px[i] - b.px[i]) > TOL || Math.abs(a.px[i + 1] - b.px[i + 1]) > TOL || Math.abs(a.px[i + 2] - b.px[i + 2]) > TOL;
+function redCount(img: Img, box: Box): number {
+  let n = 0;
+  for (let y = box.y0; y <= box.y1; y += 1)
+    for (let x = box.x0; x <= box.x1; x += 1) {
+      const i = (y * img.w + x) * img.ch;
+      const [r, g, b] = [img.px[i], img.px[i + 1], img.px[i + 2]];
+      if (r > 120 && r - g > 60 && r - b > 50) n += 1;
+    }
+  return n;
+}
+function ringDiff(a: Img, b: Img, box: Box = FIELD_BOX, inset = 5): number {
+  let n = 0;
+  for (let y = box.y0; y <= box.y1; y += 1)
+    for (let x = box.x0; x <= box.x1; x += 1) {
+      if (x >= box.x0 + inset && x <= box.x1 - inset && y >= box.y0 + inset && y <= box.y1 - inset) continue;
+      if (differs(a, b, (y * a.w + x) * a.ch)) n += 1;
+    }
+  return n;
+}
+function outsideDiff(a: Img, b: Img, box: Box = FIELD_BOX): number {
+  let n = 0;
+  for (let y = 0; y < a.h; y += 1)
+    for (let x = 0; x < a.w; x += 1) {
+      if (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1) continue;
+      if (differs(a, b, (y * a.w + x) * a.ch)) n += 1;
+    }
+  return n;
+}
