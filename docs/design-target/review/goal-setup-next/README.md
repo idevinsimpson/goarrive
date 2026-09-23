@@ -53,7 +53,10 @@ The proposal answers those and nothing else:
   seven rows, same words. The check and the control that acts on it cannot be scrolled apart,
   and the last row is no longer under the raised MOVE circle.
 - **A reserved strip for the member tab bar**, so nothing sits under it.
-- **Three truthful outcomes** where the build renders one string: refused, unconfirmed, live.
+- **Three truthful outcomes** where the build renders one string: refused, unconfirmed, live —
+  to the Director's recovery contract (`5787676653`), answering a defect W7 measured in a
+  browser rather than one inferred from the source. See `findings.md` F1 for the clause-by-clause
+  table.
 
 ## Kept exactly
 
@@ -85,8 +88,8 @@ Walkers*, goal *Autumn squat challenge*, *30,000 squats*, the 1-week derived win
 | `PROPOSED-form-top-390x844.png` · `-390x640.png` | the spine, and the payoff above the fold at **both** classes |
 | `PROPOSED-custom-window-390x844.png` · `-390x640.png` | Custom open; the explicit start control **replaces** the derived line |
 | `PROPOSED-summary-commit-390x844.png` · `-390x640.png` | the check and the commit arrive **whole**, as one object |
-| `PROPOSED-refused-390x844.png` · `-390x640.png` | the server answered; the refused action is gone |
-| `PROPOSED-unconfirmed-390x844.png` · `-390x640.png` | the client does not know, and does not pretend to |
+| `PROPOSED-refused-390x844.png` · `-390x640.png` | the server answered; the claim is tied to the refusal that makes it true, and the refused action is gone |
+| `PROPOSED-unconfirmed-390x844.png` · `-390x640.png` | the client does not know and does not pretend to; **Check community goals** resolves it, **Start another goal** is subordinate and deliberate |
 | `PROPOSED-created-390x844.png` · `-390x640.png` | the goal exists; the target is not a total |
 
 ## Measured, not eyeballed

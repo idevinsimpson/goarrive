@@ -7,6 +7,16 @@ Director rules on the target. Where a finding shaped a drawing, the drawing is n
 
 ## F1 — a lost response makes a second goal, and nothing on the client can tell
 
+> **CONFIRMED INDEPENDENTLY, AND RULED ON.** W7 measured this in a browser at `a193b43`
+> (evidence `e6a208a`, checkpoint `5787648446`): abort-before-send and
+> commit-with-lost-response render the **identical sentence, word for word**, while the server
+> holds 0 goals in one case and 1 in the other — so obeying *"Please try again."* after a
+> committed-but-unconfirmed submit produces two goals, two ids, one title. W7 also found the way
+> back: `/community/<groupId>` **already links to the goal that was created**. The Director
+> accepted the finding at that level and specified the recovery this target now draws
+> (`5787676653`). Seven passing investigation cases are not seven safety guarantees; the frames
+> below are a proposal, not a shipped fix.
+
 `wsfCreateGoal` takes no attempt key and writes to a fresh auto-id on every call
 (`functions-westayfit/src/index.ts`: `const goalRef = db.collection('wsfGoals').doc()` inside
 the transaction), and neither the callable nor the route enforces a one-open-goal-per-community
@@ -19,12 +29,29 @@ The route renders both cases as one string. `describeServerError` maps `unavaila
 and the default case to *"Something went wrong. Please try again."* Both invite the retry, and
 neither says the first attempt may have succeeded.
 
-**Drawn as:** two separate states, `PROPOSED-refused-*` and `PROPOSED-unconfirmed-*`. The
-refusal may say *"Nothing was started"* because the server answered; the unconfirmed state says
-only that it could not confirm, promotes the action that **resolves** the uncertainty (check the
-community's goals) and demotes the retry to a secondary with the consequence written beside it.
+**Drawn as:** two separate states, `PROPOSED-refused-*` and `PROPOSED-unconfirmed-*`, to the
+Director's contract point for point:
+
+| The contract (`5787676653`) | Where it is in the frames |
+|---|---|
+| the unknown sentence | *"We couldn't confirm your goal was created."* |
+| brief duplicate warning | *"It may have been created anyway. Starting another one could create a duplicate."* |
+| primary resolves, community-level | **Check community goals** → `/community/<groupId>`, the route's own already-validated param |
+| fresh create is explicit, subordinate, deliberate | **Start another goal**, a secondary inside the panel, with *"…your community will have two."* beside it |
+| never an automatic retry | no `Try again`, no retry sent on the Champion's behalf — asserted by the producer |
+| refusals stay separate and actionable | the refused frame keeps its own banner and a **Back to community** action, and does not redraw the control the server just refused |
+| no blanket claim | *"The server refused this request, so no goal was created."* is on the **refused** frame only, tied to the refusal that makes it true; the producer asserts the unconfirmed frame contains none of `Nothing was created` / `Nothing was started` / `no goal was created` / `no goal was started` |
+| goalId is the server's | the created frame's action resolves `/contribute/<goalId>` from the callable's response; **no id inferred from the title, no matching-name goal selected** |
+| reload promises nothing | nothing in any frame says a draft or receipt is saved; the producer asserts the word `saved` does not appear |
+
 **No idempotency is claimed and no backend field is asked for** — the honest frontend answer to
 a backend gap is to stop asserting what it cannot observe, not to design around it.
+
+**For the implementation's independent review, not this checkpoint:** W7's existing-community
+recovery assertion finds an *attached link* to the stored goal, which is narrower than proving
+the proposed action is visible, tappable and arrives there. When this is implemented, that
+review must exercise the real **Check community goals** action and verify it creates no second
+goal.
 
 *This is the same refusal-vs-unconfirmed class W4 recorded on `/start-community`. Two routes,
 one shape; a fix that only lands on one of them leaves the product inconsistent.*
