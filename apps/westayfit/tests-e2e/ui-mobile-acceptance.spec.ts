@@ -652,9 +652,23 @@ for (const def of PHONE_CONTEXTS) {
           cta: 'wsf-community-start-goal',
           ctaText: 'Start a goal',
         });
-        // Manage is where the administration lives, one tap away.
-        const manage = await reachAndTap(run, { testId: 'wsf-community-manage' }, 'Community Home: Manage');
-        expect(manage.reason, 'Community Home: Manage is reachable').toBeNull();
+        // Manage is where the administration lives. The trigger moved into the
+        // shell's menu when the page's own chrome row was deleted, so the thumb
+        // path is two taps — the bar's button, then the row this community
+        // registers while a Champion is looking at it — and both are tapped by
+        // coordinates, like everything else in this file.
+        const shellMenu = await reachAndTap(
+          run,
+          { testId: 'wsf-member-topbar-menu-button' },
+          'Community Home: the shell menu'
+        );
+        expect(shellMenu.reason, 'Community Home: the shell menu is reachable').toBeNull();
+        const manage = await reachAndTap(
+          run,
+          { testId: 'wsf-member-topbar-menu-manage-community' },
+          'Community Home: Manage community'
+        );
+        expect(manage.reason, 'Community Home: Manage community is reachable').toBeNull();
         await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
         expect(
           await visibleCount(page, 'wsf-community-leave'),

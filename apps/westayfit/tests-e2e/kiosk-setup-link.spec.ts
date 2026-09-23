@@ -13,6 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
@@ -78,7 +79,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
 }
 
 async function openManage(page: Page): Promise<void> {
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
 }
 
