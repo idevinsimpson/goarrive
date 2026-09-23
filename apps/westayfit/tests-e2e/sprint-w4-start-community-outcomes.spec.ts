@@ -60,22 +60,51 @@ function countCreates(page: Page): () => number {
   return () => n;
 }
 
-/** The member's communities, straight from Firestore — not from the screen. */
+/**
+ * The member's communities, straight from Firestore — not from the screen.
+ *
+ * A SERVER-SIDE QUERY, NOT A PAGE OF THE COLLECTION. This used to list
+ * `wsfCommunityGroups?pageSize=300` and filter by creator in the browser, which
+ * silently depends on collection size: a long-lived emulator holding 878
+ * groups returned only the first 300, so a community that really had been
+ * created was reported missing and three tests failed intermittently for a
+ * reason that had nothing to do with the route. Filtering on
+ * `createdByUserId` in the query makes the answer the same at 8 groups or
+ * 8,000 — the same `documents:runQuery` form the other emulator specs use.
+ *
+ * `Bearer owner` reads past the rules; without it the query is refused, and
+ * an empty result would make every assertion below pass for the wrong reason.
+ * So a refusal throws rather than returning [].
+ */
 async function communityNames(uid: string): Promise<string[]> {
-  // `Bearer owner` is how the emulator helpers read past the rules; without it
-  // the listing is refused and every assertion below silently reads an empty
-  // array, which would make this file pass for the wrong reason.
   const res = await fetch(
-    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/wsfCommunityGroups?pageSize=300`,
-    { headers: { authorization: 'Bearer owner' } },
+    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`,
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'wsfCommunityGroups' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'createdByUserId' },
+              op: 'EQUAL',
+              value: { stringValue: uid },
+            },
+          },
+        },
+      }),
+    },
   );
-  if (!res.ok) throw new Error(`community listing failed: ${res.status}`);
-  const body = (await res.json()) as {
-    documents?: Array<{ fields?: Record<string, { stringValue?: string }> }>;
-  };
-  return (body.documents ?? [])
-    .filter((d) => d.fields?.createdByUserId?.stringValue === uid)
-    .map((d) => d.fields?.displayName?.stringValue ?? '');
+  if (!res.ok) throw new Error(`community query failed: ${res.status} ${await res.text()}`);
+  // An empty result is one row carrying only `readTime`, so rows without a
+  // document are dropped rather than read as a nameless community.
+  const rows = (await res.json()) as {
+    document?: { fields?: Record<string, { stringValue?: string }> };
+  }[];
+  return rows
+    .filter((row) => row.document)
+    .map((row) => row.document!.fields?.displayName?.stringValue ?? '');
 }
 
 /**
@@ -409,7 +438,22 @@ test.describe('start-community outcomes', () => {
 test.describe('start-community stays a usable form', () => {
   test.use({ viewport: { width: 390, height: 640 } });
 
-  test('the member tabs remain, and the submit is hit-testable on a short phone', async ({
+  /**
+   * BARLESS ON THE INTEGRATED SHELL.
+   *
+   * This used to assert the member tabs were present, because the shell drew
+   * them over every page. W9's shell makes `/start-community` a focused flow
+   * presented ABOVE the tab navigator (`app/_layout.tsx`), so it is barless by
+   * where it sits in the tree — and the Director ruled that is the final
+   * composition. The assertion is inverted rather than deleted: a bar
+   * reappearing here would be a regression.
+   *
+   * The rest of what this test proves matters more now, not less. The bar used
+   * to TAKE 62 px as a flex sibling; with it gone the composition moves, so
+   * reachability is re-measured rather than assumed, and the space the bar
+   * held must not survive as a blank reservation.
+   */
+  test('no member tabs on this focused route, and the submit is reachable at rest and by keyboard', async ({
     page,
   }) => {
     test.setTimeout(150_000);
@@ -417,10 +461,39 @@ test.describe('start-community stays a usable form', () => {
     await signInVia(page, me.email, me.password);
     await openStart(page);
 
-    // The prototype drew no tab bar. That was a drawing, not permission to
-    // remove the shell.
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+    // No bar on a flow a member is inside.
+    await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
 
+    // One masthead. The shell's stack runs with `headerShown: false`, so the
+    // route's own navy header is the only one — two would mean the shell had
+    // started drawing a header over a page that already has one.
+    //
+    // Counted across the WHOLE page, by the wordmark's testID. Scoping this to
+    // `wsf-start` could never catch a masthead the shell draws, which is the
+    // case that matters; and counting `img` as well double-counts, because the
+    // wordmark's testID sits on a wrapper around its own image.
+    expect(
+      await page.locator('[data-testid*="wordmark"]').count(),
+      'the page does not carry exactly one masthead',
+    ).toBe(1);
+
+    // No reservation: the scrolling surface runs to the bottom of the
+    // viewport. A leftover 62 px strip would end it short.
+    const gap = await page.evaluate(() => {
+      const scrollers = Array.from(document.querySelectorAll('*')).filter((el) => {
+        const cs = getComputedStyle(el);
+        return (cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 1;
+      });
+      scrollers.sort((a, b) => b.scrollHeight - a.scrollHeight);
+      const main = scrollers[0];
+      return main ? Math.round(window.innerHeight - main.getBoundingClientRect().bottom) : null;
+    });
+    expect(gap, 'no scrolling surface found').not.toBeNull();
+    expect(gap!, 'a blank strip is still reserved below the page').toBeLessThanOrEqual(2);
+
+    // At rest: wheel-scrolled the way a member scrolls, then measured without
+    // touching the page again. Playwright auto-scrolls before it taps, so a
+    // passing `.click()` proves nothing about this.
     await fillValid(page, 'Short Phone');
     await wheelUntilInView(page, 'wsf-start-submit');
     const submit = await elementState(page, { testId: 'wsf-start-submit' });
@@ -429,13 +502,25 @@ test.describe('start-community stays a usable form', () => {
     expect(submit.covered, 'something covers the submit at rest').toBe(false);
     expect(submit.box.h, 'the submit is under the 44px touch minimum').toBeGreaterThanOrEqual(44);
 
-    // The field a member types into is reachable with the keyboard open: the
-    // viewport shrinks, so re-measure after focusing rather than assuming.
+    // By keyboard: from the name field, Tab reaches the submit, and it is in
+    // view when it does. Nothing is pressed — this is reachability, not a
+    // create.
     await wheelUntilInView(page, 'wsf-start-name');
     await page.getByTestId('wsf-start-name').focus();
     const field = await elementState(page, { testId: 'wsf-start-name' });
     expect(field.covered, 'the name field is covered while focused').toBe(false);
     expect(field.box.h).toBeGreaterThanOrEqual(44);
+    let reached = false;
+    for (let i = 0; i < 20 && !reached; i += 1) {
+      await page.keyboard.press('Tab');
+      reached = await page.evaluate(
+        () => document.activeElement?.getAttribute('data-testid') === 'wsf-start-submit',
+      );
+    }
+    expect(reached, 'Tab never reaches the submit').toBe(true);
+    await page.getByTestId('wsf-start-submit').scrollIntoViewIfNeeded();
+    const focusedSubmit = await elementState(page, { testId: 'wsf-start-submit' });
+    expect(focusedSubmit.covered, 'the focused submit is covered').toBe(false);
   });
 });
 

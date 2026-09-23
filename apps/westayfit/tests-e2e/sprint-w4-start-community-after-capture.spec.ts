@@ -106,9 +106,10 @@ for (const { w, h } of CLASSES) {
       await openStart(page);
       await expect(page.getByTestId('wsf-start-groupType')).toBeVisible();
       await expect(page.getByTestId('wsf-start-joinPolicy')).toBeVisible();
-      // The shared navigation is still here. The target drew no tab bar; that
-      // was a drawing, not permission to remove the shell.
-      await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+      // Barless: on W9's integrated shell this is a focused flow presented
+      // above the tab navigator, so no member bar renders here. Asserted, so a
+      // bar reappearing would fail the capture rather than be photographed.
+      await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
       await saveFrame(page, path.join(OUT, `AFTER-start-arrival-${c}.png`));
 
       // ---- the ceiling, stated locally -----------------------------------
