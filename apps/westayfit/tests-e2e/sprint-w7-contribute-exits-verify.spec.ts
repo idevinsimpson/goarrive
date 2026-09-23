@@ -667,4 +667,250 @@ test.describe('W9 contribution exits, independent instruments', () => {
     expect(correctedAt! - firstStale!, 'corrected, but later than the settle bound').toBeLessThanOrEqual(4_500);
     expect(m.at15s, 'the corrected total did not hold').toBe(20);
   });
+
+  /*
+    X6 — THE EXPLICIT LIST, THEN A CONTRIBUTION, THEN "BACK TO HOME" (the
+    second of the two journeys the Director named for W9's option 1, #365
+    `5803510323`; W9's comparison #458 `5803479617`). The member asked for the
+    list (`/?view=communities`) and saw the card "… 1,847 of 5,000 squats";
+    MOVE's one-goal handoff, +20 committed, an own-only receipt (the server's
+    shared fields withheld in the response, W9's labelled injection; the
+    write commits) so the exit reads "Back to home"; then the press.
+
+    What the member should get, per the contract: the list they asked for
+    (address kept), the SAME list instance in the foreground, one tab
+    navigator, and the card refreshed to the server's total within a bounded
+    time. On 7ee70e4f (cd02949's exits) the list request is dropped and Home
+    opens the community; on 37082fd ⊕ eff65b0 the list is kept but stays at
+    1,847 (W9's measurement). Both are failures of this one test.
+  */
+  test('X6 the explicit list survives a contribution\'s "Back to home": same list, in front, refreshed to the server\'s total', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x6');
+    await traceHistory(page);
+    await signInVia(page, fx.email, fx.password);
+    await page.goto('/?view=communities');
+    const card = page.locator(`[data-testid="wsf-home-community-${fx.groupId}"]:visible`).first();
+    await expect(card).toContainText(SEEDED.toLocaleString('en-US'), { timeout: 40_000 });
+    await page.evaluate(() => {
+      const list = Array.from(document.querySelectorAll('[data-testid="wsf-home-my-list"]')).find((el) => (el as HTMLElement).offsetParent !== null);
+      if (!list) throw new Error('no visible list to mark');
+      list.setAttribute('data-w7-list', 'kept');
+    });
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await expect(page.getByTestId('wsf-contribute-move-screen').last()).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-contribute-done').last().click();
+    // Own-only receipt: the shared fields are withheld from the response; the write commits.
+    await page.route('**/us-central1/wsfContribute', async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const res = await route.fetch();
+      const body = (await res.json()) as { result?: Record<string, unknown> };
+      if (!body.result) return route.fulfill({ response: res });
+      for (const k of ['sharedTotal', 'target', 'unit', 'status']) delete body.result[k];
+      await route.fulfill({ response: res, json: body });
+    });
+    await recordTwenty(page);
+    expect(await serverTotal(fx.goalId), 'the server did not commit the 20').toBe(SEEDED + 20);
+    // Read just before the press: MOVE's own push is part of the journey, not of the exit.
+    const historyBefore = await page.evaluate(() => history.length);
+    await pressLabelledExit(page, 'Back to home');
+    const pressedAt = Date.now();
+
+    const sample = () =>
+      page.evaluate((groupId) => {
+        const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2) as HTMLElement | null;
+        const lists = Array.from(document.querySelectorAll('[data-testid="wsf-home-my-list"]')) as HTMLElement[];
+        const shownList = lists.find((el) => el.offsetParent !== null) ?? null;
+        const cardEl = shownList?.querySelector(`[data-testid="wsf-home-community-${groupId}"]`) as HTMLElement | null;
+        const m = cardEl ? /\d[\d,]*/.exec(cardEl.innerText) : null;
+        return {
+          path: location.pathname + location.search,
+          foreground: hit?.closest('[data-testid="wsf-home-my-list"]') ? 'list' : hit?.closest('[data-testid="wsf-community"]') ? 'community' : (hit?.closest('[data-testid]') as HTMLElement | null)?.dataset.testid ?? '-',
+          listMarked: shownList?.getAttribute('data-w7-list') === 'kept',
+          lists: lists.length,
+          cardTotal: m ? Number(m[0].replace(/,/g, '')) : null,
+          communityRoots: document.querySelectorAll('[data-testid="wsf-community"]').length,
+          tabBars: document.querySelectorAll('[data-testid="wsf-member-tabs"]').length,
+          historyLength: history.length,
+        };
+      }, fx.groupId);
+    const timeline: Array<{ t: number; s: Awaited<ReturnType<typeof sample>> }> = [];
+    while (Date.now() < pressedAt + 10_000) {
+      timeline.push({ t: Date.now() - pressedAt, s: await sample() });
+      await page.waitForTimeout(500);
+    }
+    const at = (ms: number) => timeline.find((x) => x.t >= ms)?.s ?? timeline[timeline.length - 1]!.s;
+    const last = timeline[timeline.length - 1]!.s;
+    const refreshedAt = timeline.find((x) => x.s.cardTotal === SEEDED + 20)?.t ?? null;
+    test.info().annotations.push({
+      type: 'X6 measured',
+      description: JSON.stringify({ historyBefore, at4s: at(4_000), last, refreshedAtMs: refreshedAt, ops: await historyOps(page) }),
+    });
+    expect(at(4_000).path, 'the list the member asked for was dropped').toBe('/?view=communities');
+    expect(at(4_000).foreground, 'the list is not what is in front').toBe('list');
+    expect(at(4_000).listMarked, 'the list in front is not the one the member was looking at').toBe(true);
+    expect(last.tabBars, 'one tab bar').toBe(1);
+    expect(last.historyLength, 'the exit added a history entry').toBe(historyBefore);
+    expect(refreshedAt, `the card still shows the pre-contribution total 10 s after the return: ${JSON.stringify(last)}`).not.toBeNull();
+    expect(last.cardTotal, 'the refreshed total did not hold').toBe(SEEDED + 20);
+    expect(last.listMarked, 'the refresh replaced the list instance').toBe(true);
+
+    // Control: a query reload of the same address resolves the list afresh with the server's total.
+    await page.reload();
+    const reloaded = page.locator(`[data-testid="wsf-home-community-${fx.groupId}"]:visible`).first();
+    await expect(reloaded, 'after a reload the list did not show the server total').toContainText((SEEDED + 20).toLocaleString('en-US'), { timeout: 40_000 });
+    expect(new URL(page.url()).search, 'the reload dropped the list request').toBe('?view=communities');
+  });
+
+  /*
+    X7 — W8'S FIRST-FOCUS SETTLE (`9d30c38b`, #462; Director #434
+    `5804104996`). A fresh mount can read the pulse inside the 2 s cache window
+    and be handed the pre-contribution total; the settle is now scheduled on
+    the first focus too. These are independent of any exit: a DIRECT entry
+    (`page.goto('/community/<id>')`, a full load, so a fresh mount whatever
+    W9's exits become), with the first pulse answered stale (sentinel 1,848).
+
+      X7   corrected by the first-focus settle within 4.5 s and holding;
+           the member's own part stays its own figure (20) while the shared
+           total corrects (1,867); then the active tab's reselect, after the
+           settle, issues no read at all.
+      X7b  a blur before 2.6 s (You tab) cancels the settle: no pulse follows.
+      X7c  an account change before 2.6 s (sign out) cancels it too.
+      X7d  THE DISCLOSED LIMIT: the initial pulse is still in flight when the
+           settle fires (held 4 s, then stale). The settle only replaces
+           figures already on screen, and the late initial read has no
+           sequence guard. What is on screen at 12 s?
+      X7e  the same race on the accepted RETURN path (eff65b0): after a
+           genuine return, the return's first pulse is held 4 s and answers
+           stale while the settle (2.6 s) answers fresh; which one is on
+           screen at 12 s?
+    Each asserts what the member should get: the server's total, holding.
+  */
+  const STALE = SEEDED + 1; // 1,848 never appears legitimately
+
+  /** Answer the first `n` pulse POSTs after `from()` with the sentinel, each after `holdMs`. */
+  async function staleFirstPulses(page: Page, n: number, holdMs = 0): Promise<{ arm: () => void; served: number[] }> {
+    let armedAt = Number.POSITIVE_INFINITY;
+    let count = 0;
+    const served: number[] = [];
+    await page.route('**/us-central1/wsfGoalPulse', async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const now = Date.now();
+      if (now < armedAt || count >= n) return route.continue();
+      count += 1;
+      if (holdMs > 0) await new Promise((r) => setTimeout(r, holdMs));
+      const res = await route.fetch();
+      const body = (await res.json()) as { result?: { sharedTotal?: number } };
+      if (!body.result || typeof body.result.sharedTotal !== 'number') throw new Error('unexpected pulse shape');
+      body.result.sharedTotal = STALE;
+      served.push(now - armedAt);
+      await route.fulfill({ response: res, json: body });
+    });
+    return { arm: () => { armedAt = Date.now(); }, served };
+  }
+
+  async function ownPart(page: Page, goalId: string): Promise<string> {
+    return (await page.locator(`[data-testid="wsf-community-your-part-${goalId}"]:visible`).first().innerText({ timeout: 2_000 }).catch(() => '')).replace(/\s+/g, ' ').trim();
+  }
+
+  test('X7 a direct entry with a stale first read settles on the server total; own part distinct; reselect after the settle reads nothing', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x7');
+    await arrive(page, fx);
+    await contributeFromCommunity(page, fx);
+    expect(await serverTotal(fx.goalId)).toBe(SEEDED + 20);
+    const stub = await staleFirstPulses(page, 1);
+    const pulses = watchCalls(page, ['wsfGoalPulse']);
+    stub.arm();
+    const enteredAt = Date.now();
+    await page.goto(`/community/${fx.groupId}`);
+    const timeline = await sampleTotal(page, fx.goalId, enteredAt, enteredAt + 12_000);
+    const firstStale = timeline.find(([, v]) => v === STALE)?.[0] ?? null;
+    const correctedAt = firstStale === null ? null : (timeline.find(([t, v]) => t > firstStale && v === SEEDED + 20)?.[0] ?? null);
+    const own = await ownPart(page, fx.goalId);
+    // Reselect, after the settle: nothing may be read.
+    const all = watchCalls(page, ['wsfGoalPulse', 'wsfMyContribution', 'wsfListGoals', 'wsfCommunityActivity', 'wsfCommunityMembers']);
+    const before = all.length;
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(4_000);
+    const m = { timeline: changes(timeline), pulsesMs: pulses.map((p) => p.at - enteredAt), staleServedMs: stub.served, correctedAtMs: correctedAt, at12s: timeline[timeline.length - 1]![1], own, readsOnReselect: all.length - before, roots: (await reading(page)).roots };
+    test.info().annotations.push({ type: 'X7 measured', description: JSON.stringify(m) });
+    expect(firstStale, 'the stale first read never reached the screen').not.toBeNull();
+    expect(correctedAt, `never corrected: ${JSON.stringify(m)}`).not.toBeNull();
+    expect(correctedAt! - firstStale!, 'corrected later than the settle bound').toBeLessThanOrEqual(4_500);
+    expect(m.at12s, 'the corrected total did not hold').toBe(SEEDED + 20);
+    expect(own, "the member's own part does not show their own 20").toMatch(/\b20\b/);
+    expect(own, "the member's own part shows the shared total").not.toMatch(/1,8\d\d/);
+    expect(m.readsOnReselect, 'reselecting the active tab after the settle issued a read').toBe(0);
+  });
+
+  for (const leg of ['a blur (You tab)', 'an account change (sign out)'] as const) {
+    test(`X7${leg.startsWith('a blur') ? 'b' : 'c'} ${leg} before 2.6 s cancels the first-focus settle`, async ({ page }) => {
+      test.setTimeout(300_000);
+      const fx = await seed(leg.startsWith('a blur') ? 'x7b' : 'x7c');
+      await signInVia(page, fx.email, fx.password);
+      const pulses = watchCalls(page, ['wsfGoalPulse']);
+      const enteredAt = Date.now();
+      await page.goto(`/community/${fx.groupId}`);
+      await expect(page.locator(`[data-testid="wsf-community-goal-total-${fx.goalId}"]:visible`).first()).toBeVisible({ timeout: 40_000 });
+      const leftAt = Date.now();
+      expect(leftAt - enteredAt, 'precondition: the leave must precede the 2.6 s settle').toBeLessThan(2_300);
+      await page.getByTestId('wsf-member-tab-you').last().click();
+      await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
+      if (!leg.startsWith('a blur')) {
+        await page.getByTestId('wsf-you-signout').last().click();
+        await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
+      }
+      await page.waitForTimeout(Math.max(0, leftAt + 6_000 - Date.now()));
+      const before = pulses.filter((p) => p.at < leftAt).length;
+      const after = pulses.filter((p) => p.at >= leftAt).map((p) => p.at - enteredAt);
+      test.info().annotations.push({ type: 'pulses', description: JSON.stringify({ beforeLeaving: before, afterLeavingMs: after }) });
+      expect(before, 'precondition: the mount read the pulse').toBeGreaterThan(0);
+      expect(after, 'a settle read followed after the screen was left').toEqual([]);
+    });
+  }
+
+  test('X7d the disclosed limit: an initial read still in flight when the settle fires — what stays on screen', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x7d');
+    await arrive(page, fx);
+    await contributeFromCommunity(page, fx);
+    expect(await serverTotal(fx.goalId)).toBe(SEEDED + 20);
+    const stub = await staleFirstPulses(page, 1, 4_000);
+    const pulses = watchCalls(page, ['wsfGoalPulse']);
+    stub.arm();
+    const enteredAt = Date.now();
+    await page.goto(`/community/${fx.groupId}`);
+    const timeline = await sampleTotal(page, fx.goalId, enteredAt, enteredAt + 12_000);
+    const m = { timeline: changes(timeline), pulsesMs: pulses.map((p) => p.at - enteredAt), staleServedMs: stub.served, at12s: timeline[timeline.length - 1]![1] };
+    test.info().annotations.push({ type: 'X7d measured', description: JSON.stringify(m) });
+    expect(m.timeline.some((c) => c.endsWith(`:${STALE}`)), 'the held stale read never reached the screen').toBe(true);
+    expect(m.at12s, `stale progress stays in view: ${JSON.stringify(m)}`).toBe(SEEDED + 20);
+  });
+
+  test('X7e the same race on a return: the return\'s first read held past the settle', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x7e');
+    await arrive(page, fx);
+    await markVisibleCommunity(page);
+    await contributeFromCommunity(page, fx);
+    await pressLabelledExit(page, 'Back to community');
+    const total = page.locator(`[data-testid="wsf-community-goal-total-${fx.goalId}"]:visible`).first();
+    await expect(total).toContainText((SEEDED + 20).toLocaleString('en-US'), { timeout: 15_000 });
+    await page.waitForTimeout(4_000); // past the return's own settle
+    const stub = await staleFirstPulses(page, 1, 4_000);
+    const pulses = watchCalls(page, ['wsfGoalPulse']);
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1_000);
+    stub.arm();
+    const returnedAt = Date.now();
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    const timeline = await sampleTotal(page, fx.goalId, returnedAt, returnedAt + 12_000);
+    const r = await reading(page);
+    const m = { timeline: changes(timeline), pulsesMs: pulses.map((p) => p.at - returnedAt), staleServedMs: stub.served, at12s: timeline[timeline.length - 1]![1], marked: r.marked, roots: r.roots };
+    test.info().annotations.push({ type: 'X7e measured', description: JSON.stringify(m) });
+    expect(r.marked, 'the return did not land on the same Community').toBe(true);
+    expect(m.at12s, `stale progress stays in view after a return: ${JSON.stringify(m)}`).toBe(SEEDED + 20);
+  });
 });
