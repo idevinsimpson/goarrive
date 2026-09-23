@@ -467,11 +467,12 @@ test('an ordinary tap from the kiosk contribution screen stays inside the kiosk 
   page,
 }) => {
   test.setTimeout(300_000);
-  // W5-K1. Expected to fail while the seam is open, and `fail` rather than
-  // `skip` so the body still runs: this retires itself the moment the shell
-  // stops rendering over the kiosk's contribution screen. A suite that went
-  // green by ignoring the case would tell a future reviewer nothing.
-  test.fail();
+  // W5-K1. RETIRED at product 50806fa: the shell no longer renders over the
+  // kiosk's contribution screen, so this case now takes its early return and
+  // passes because THERE IS NOTHING TO TAP. That is a weak pass by
+  // construction, and it is left exactly as it was written rather than
+  // rewritten into a stronger one -- it is the historical record of the
+  // defect, and W5-K4 is what actually holds the line now.
   const fx = await seedBase('taps');
   await walkUpAndSignIn(page, fx);
 
@@ -722,9 +723,7 @@ test('nothing hit-testable on the kiosk contribution screen leads out of the kio
   page,
 }) => {
   test.setTimeout(300_000);
-  // W5-K4. Expected to fail while the seam is open; `fail`, not `skip`, so the
-  // body runs and this becomes ordinary passing coverage the day a patch lands.
-  test.fail();
+  // W5-K4. RETIRED at product 50806fa: ordinary passing coverage now.
   const fx = await seedBase('contract');
   await walkUpAndSignIn(page, fx);
 
@@ -1024,8 +1023,7 @@ test('no kiosk state offers a way out: receipt, missing goal, closed goal and lo
   page,
 }) => {
   test.setTimeout(300_000);
-  // W5-K9. Expected to fail while the seam is open.
-  test.fail();
+  // W5-K9. RETIRED at product 50806fa: ordinary passing coverage now.
   const fx = await seedBase('states');
   await walkUpAndSignIn(page, fx);
 
@@ -1060,19 +1058,23 @@ test('no kiosk state offers a way out: receipt, missing goal, closed goal and lo
   await expect
     .poll(
       async () =>
+        // `wsf-contribute-closed` is the closed goal's own state. The first
+        // version of this poll listed the entry screen and the two failure
+        // cards and timed out on a state it had simply never named -- a gap in
+        // this test, not a finding about the product.
+        (await page.getByTestId('wsf-contribute-closed').count()) +
         (await page.getByTestId('wsf-contribute-entry-screen').count()) +
         (await page.getByTestId('wsf-contribute-not-found').count()) +
-        (await page.getByTestId('wsf-contribute-load-error').count()) +
-        (await page.getByTestId('wsf-contribute-refused').count()),
+        (await page.getByTestId('wsf-contribute-load-error').count()),
       { timeout: 30_000, intervals: [200] }
     )
     .toBeGreaterThan(0);
   found.closedGoal = await escapeControls(page, [
+    '[data-testid="wsf-contribute-closed"]',
     '[data-testid="wsf-contribute-entry-screen"]',
     '[data-testid="wsf-contribute-context"]',
     '[data-testid="wsf-contribute-not-found"]',
     '[data-testid="wsf-contribute-load-error"]',
-    '[data-testid="wsf-contribute-refused"]',
   ]);
 
   // -- the goal cannot be loaded at all --------------------------------------
@@ -1138,8 +1140,7 @@ test('every kiosk control is legible on the dark receipt and on the light termin
   page,
 }) => {
   test.setTimeout(300_000);
-  // W5-K10. Expected to fail until the dark tone reaches the kiosk controls.
-  test.fail();
+  // W5-K10. RETIRED at product 50806fa: ordinary passing coverage now.
   const fx = await seedBase('legible');
   await walkUpAndSignIn(page, fx);
 
@@ -1262,10 +1263,7 @@ test('the shell and the screen agree on kiosk mode for every shape of the flag',
   page,
 }) => {
   test.setTimeout(300_000);
-  // W5-K11. Expected to fail while the seam is open: at this head the shell
-  // does not read the flag at all, so it renders over `?kiosk=1` and the two
-  // readers disagree on the product's own URL.
-  test.fail();
+  // W5-K11. RETIRED at product 50806fa: ordinary passing coverage now.
   const fx = await seedBase('shapes');
   await walkUpAndSignIn(page, fx);
 
