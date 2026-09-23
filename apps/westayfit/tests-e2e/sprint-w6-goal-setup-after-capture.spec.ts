@@ -185,6 +185,20 @@ async function assertNoLivingWe(page: Page): Promise<void> {
  * that a later edit could quietly undo. Asserted on every class.
  */
 async function assertAcceptedShape(page: Page, at: string): Promise<void> {
+  /*
+    THE ROUTE'S OWN CHROME, WHICH NOTHING HERE USED TO PIN.
+    `/goals/new` is a focused flow: no shell bar renders over it, so the
+    wordmark it draws is its SOLE chrome rather than a second copy of one
+    (the Director's ruling, `5792030574`: "Focused routes such as /goals/new
+    retain their sole route-owned wordmark"). It is in all fifteen accepted
+    AFTER frames — and until this line, a chrome pass that removed it from
+    this route would have passed every check in this file, leaving a human
+    noticing the frames no longer matched as the only signal.
+  */
+  await expect(
+    page.getByTestId('wsf-new-goal-wordmark'),
+    `${at}: the route's own wordmark is gone`,
+  ).toBeVisible();
   // Four durations, still, with the route's own labels — and each one still
   // states its selected state without relying on colour.
   for (const key of ['1w', '2w', '1m', 'custom']) {
