@@ -377,6 +377,35 @@ The named properties and the two implementation conditions at `60604ca` merged o
 
 ---
 
-# Check 6 — further checkpoints
+# Check 6 — the W6 + W8 cross-lane proof, and two answers L0 asked for
 
-Awaiting L0's routing. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).
+L0's `5789119272` crossed with check 5. It made two points, both answered here on evidence rather than argument.
+
+## 1 · "Without #433 in the tree, that proof tells us nothing about W6 + W8 together" — correct, and now done properly
+
+Check 5 said plainly that #433 was not in the merge and that only the *dependency* had been checked, not the action. L0 is right that this is the weaker claim. So the real one was run: **W6's `f332559` and W8's `60604ca` merged together onto app-shell `d86620c`**, on a throwaway local branch that was never pushed and was deleted afterwards.
+
+| | |
+|---|---|
+| W6 revision | **`f332559d7febc8bef5ff3d75216588d251cff5b8`** — the colour successor of `8067364`, which is now #433's head |
+| W8 revision | **`60604ca54490cb39b21bd7a4fb9b3396153cc5b9`** |
+| Base | app-shell **`d86620c`** |
+| Blob proof on the combined tree | `app/goals/new.tsx` = `f332559`'s `e33b0614…`; `community/[groupId]/index.tsx`, `src/ui/CommunityPresence.tsx`, `functions-westayfit/src/index.ts` = `60604ca`'s — all four confirmed |
+
+**Result: 21 passed / 0 failed** — check 4's seven recovery cases and check 5's fourteen social cases, together on one tree.
+
+The case that matters is check 4's condition 4, which now runs end to end across both lanes: after a genuine commit-with-lost-response, **`Check community goals` is visible, hit-testable, clicked, and reaches the created goal on W8's *changed* community page, with the server still holding exactly one goal and no further create call.** W6's recovery path and W8's community rewrite work together.
+
+**And check 4 is re-pinned.** My PASS was reported on `8067364`; #433's head is now `f332559`. That diff is colour-only in substance — same testids, labels, behaviour and 54px hit target — but it swaps `kit.primaryButton` for a route-local `ACTION_GREEN` style on three primaries, **one of which is `Check community goals` itself**. A restyled control is exactly what can move a box or let something cover it, so the hit test was re-run rather than assumed to carry. It holds at `f332559`.
+
+## 2 · "Say how W8's members-page cases reached the route if the rewrite is missing"
+
+They reach it normally, and the missing rewrite does not stop them. `/community/__dynamic.html` and `/community/__dynamic/members.html` are **the same SPA bundle**; expo-router resolves the real path from `window.location` on hydration. So a cold load served by the emulator's `/community/**` catch-all still renders the members screen — which is what my own behaviour test asserts and what it found.
+
+That is why check 5 recorded the parity gap as **latent rather than a live defect**: the bytes differ (`f620fec7…` served, `e8a0c8c4…` expected), the rendered outcome does not. W8's 4/4 is therefore a real pass, not an artefact. What the gap costs is that the emulator never exercises the rewrite that ships, so the day the SPA fallback stops covering that path, the harness would not say so — which is the failure mode the config's own comment exists to prevent. Still W8's to fix if L0 routes it; W7 takes no fix ownership and changed nothing.
+
+---
+
+# Check 7 — further checkpoints
+
+Awaiting L0's routing, including the focused DOM delta on W8's held Community + Members pages when their successor lands. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).

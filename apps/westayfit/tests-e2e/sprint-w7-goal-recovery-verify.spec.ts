@@ -20,6 +20,15 @@ import {
  * assertion here was trusted and exercised through a local merge that is
  * never pushed.
  *
+ * RE-VERIFIED ON W6's COLOUR SUCCESSOR **`f332559`** (route blob
+ * `e33b0614695143622685e25a8f09336e1b06d6d5`), merged together with W8's
+ * `60604ca` onto app-shell `d86620c`. That re-run is not ceremonial: the
+ * successor swaps `kit.primaryButton` for a route-local ACTION_GREEN style on
+ * three primaries, and one of them is `Check community goals` — the exact
+ * control the hit test below targets. A restyled control is precisely the kind
+ * of change that can move a box or put something over it, so the hit test was
+ * re-run rather than assumed to carry.
+ *
  * This answers the four things the Director (`5788288648`) and L0
  * (`5788323817` §2) made conditions of acceptance:
  *
@@ -184,7 +193,7 @@ async function expectHittable(target: Locator, what: string): Promise<void> {
   expect(covered, `${what} cannot be pressed: ${covered}`).toBeNull();
 }
 
-test.describe('W7 — W6 goal-setup recovery behaviour at 8067364', () => {
+test.describe('W7 — W6 goal-setup recovery behaviour (8067364, re-verified at f332559)', () => {
   /**
    * CONDITION 1a — A REFUSAL IS NOW A REFUSAL, AND ITS CLAIM IS TRUE.
    *
