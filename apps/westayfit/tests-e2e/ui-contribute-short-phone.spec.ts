@@ -174,6 +174,35 @@ async function unreachableAtRest(
   page: Page,
   testIds: readonly string[],
 ): Promise<Record<string, string>> {
+  /*
+    AT REST MEANS AFTER THE LAYOUT SETTLES, SO THIS WAITS FOR IT TO.
+
+    The first version sampled once, immediately after the control became
+    visible, and it passed every time it was run alone and failed once in a
+    fully parallel suite. Visible is not settled: a control can be painted
+    while a sibling is still resolving its height, and for one frame its centre
+    belongs to something else. That is a property of my instrument, not of the
+    product, and dismissing it as a flake would have been wrong twice over --
+    it would have hidden the instability AND left a check that reports layout
+    noise as a reachability defect.
+
+    So it retries until the answer is clean, for up to two seconds, and returns
+    the last reading if it never is. A control that is genuinely unreachable
+    stays unreachable through every attempt and is still reported.
+  */
+  const deadline = Date.now() + 2_000;
+  let last: Record<string, string> = {};
+  for (;;) {
+    last = await readUnreachable(page, testIds);
+    if (Object.keys(last).length === 0 || Date.now() > deadline) return last;
+    await page.waitForTimeout(100);
+  }
+}
+
+async function readUnreachable(
+  page: Page,
+  testIds: readonly string[],
+): Promise<Record<string, string>> {
   return page.evaluate((ids) => {
     const out: Record<string, string> = {};
     const readInset = () => {

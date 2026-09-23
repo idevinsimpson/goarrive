@@ -79,7 +79,8 @@ describe('the proposed shell reuses the shipping bottom-bar footprint', () => {
 
 describe('the shipping shell, for the record this proposal is measured against', () => {
   const bar = SRC('src/ui/MemberTabBar.tsx');
-  const home = SRC('app/index.tsx');
+  // Home moved into its tab group in the migration; the file is the same one.
+  const home = SRC('app/(tabs)/(home)/index.tsx');
 
   it('has no MOVE destination, because MOVE is an action', () => {
     // Already true today. The proposal keeps it true STRUCTURALLY, by giving
@@ -90,25 +91,44 @@ describe('the shipping shell, for the record this proposal is measured against',
     expect(tabs).not.toContain('move');
   });
 
-  it('puts the shell on /move today, which is the finding', () => {
+  it('no longer puts the shell on /move — the finding, now fixed', () => {
     /*
-      THE OWNER'S REPORT, AS A CHECK ON THE SHIPPING CODE. `/move` wears the
-      member shell, so the raised MOVE control renders beneath the MOVE page —
-      a control offering to take a member where they already are.
+      KEPT AND INVERTED, NOT DELETED. This read
+      `toMatch(/const SHELL_EXACT = \['\/move'\]/)` and pinned the owner's
+      report: `/move` wore the member shell, so the raised MOVE control
+      rendered BENEATH the MOVE page — a control offering to take a member
+      where they already were. The migration makes MOVE a focused flow
+      presented above the tab navigator, so the list is empty and the same line
+      now fails if `/move` is ever put back into member chrome.
     */
-    expect(bar).toMatch(/const SHELL_EXACT = \['\/move'\]/);
+    expect(bar).toMatch(/const SHELL_EXACT: string\[\] = \[\]/);
+    expect(bar).not.toMatch(/SHELL_EXACT[^\n]*'\/move'/);
   });
 
-  it('replaces the active tab unconditionally, which is the reload on reselect', () => {
-    // The single line behind "tapping the already-selected bottom icon
-    // reloads that page": no guard on the pressed tab being the current one.
-    expect(bar).toMatch(/onPress=\{\(\) => router\.replace\(tab\.href\)\}/);
+  it('guards the active tab instead of replacing it unconditionally', () => {
+    /*
+      KEPT AND INVERTED. This pinned the single line behind "tapping the
+      already-selected bottom icon reloads that page":
+      `onPress={() => router.replace(tab.href)}`, with no guard on the pressed
+      tab being the current one. The bar is a tabBar now and returns before it
+      can reach the router when the tab is already focused.
+    */
+    /*
+      THE CALL SITE, NOT THE WORDS. A bare `router.replace(tab.href)` still
+      appears in this file -- QUOTED in the comment that explains the defect it
+      used to be. The first draft of this assertion matched that prose and
+      failed on a file that was already correct, which is the standing hazard
+      of asserting on source text: match the shape of the code, not a phrase
+      that can legitimately appear in a sentence about it.
+    */
+    expect(bar).not.toMatch(/onPress=\{\(\) => router\.replace\(tab\.href\)\}/);
+    expect(bar, 'the reselect guard is gone').toMatch(/if \(active\) return;/);
   });
 
   it('treats the community detail as Home, which decides where it lives under tabs', () => {
     /*
       THIS IS WHY THE PROTOTYPE PUTS `/community/<id>` IN THE HOME TAB.
-      `app/index.tsx` resolves the member's community and replaces `/` with
+      `app/(tabs)/(home)/index.tsx` resolves the member's community and replaces `/` with
       `/community/<id>`, so Home's own match has to cover the detail — and
       under a tab navigator the detail has to live in the Home tab, or Home's
       own redirect lands the member in a tab they did not press.
