@@ -331,7 +331,10 @@ test('Community Home at phone size — member view, Champion view, full page', a
   // ---- member ---------------------------------------------------------------
   await signInVia(page, memberEmail, password);
   await page.goto(`/community/${groupId}`);
-  await expect(page.getByTestId('wsf-community-wordmark')).toBeVisible({ timeout: 20_000 });
+  // THE WORDMARK IS THE SHELL'S NOW. Community Home drew its own until the
+  // member shell landed; the persistent top bar carries the one wordmark for
+  // every tab, so this asks the same question of the control that answers it.
+  await expect(page.getByTestId('wsf-member-topbar-wordmark')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-community-name')).toHaveText('Maple Street Movers');
   await waitForProgress(page, featured);
 
