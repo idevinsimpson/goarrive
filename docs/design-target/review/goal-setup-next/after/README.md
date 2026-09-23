@@ -11,6 +11,9 @@ window, *Coordinated Universal Time*.
 | | |
 |---|---|
 | Verdict released by | `5788308449` (Director `5788288648` §3) — TARGET PASS at `f880732` |
+| AFTER verdict | `5788849410` (Director `5788831679` §2) — **functional PASS**, visual HOLD for the F6 brand-token correction, applied below |
+| Route blob | `e5be66f0e9afb03ae92c1ba3573fc641bd749ef3` (before, through `f880732`) → `cbda3fdea53a40aa1a404da45938cb4766b26718` (at `8067364`) → `e33b0614695143622685e25a8f09336e1b06d6d5` (at `df78521`, carrying the F6 ruling). Each verified with `git rev-parse <sha>:apps/westayfit/app/goals/new.tsx`. |
+| Behaviour verified by | W7, seven cases at `8067364` — PASS on all four conditions (`5788653228`) |
 | Producer | `apps/westayfit/tests-e2e/sprint-w6-goal-setup-after-capture.spec.ts` |
 | Write gate | `WSF_CAPTURE_FRAMES=1` (`helpers/capture`) |
 | Ordinary run | 8 passed, **0 images written** |
@@ -61,20 +64,59 @@ its foot, but not both. Shooting only the top would have left the half of the co
 matters most — the retry saying what it starts, with the consequence beside it —
 unphotographed, and a reviewer would be taking my word for it.
 
-## Where the AFTER differs from the accepted TARGET, deliberately
+## The F6 correction
 
-1. **The primaries are the paler `PROGRESS_GREEN`, not the target's `ACTION_GREEN`.** F6 was
-   explicitly not ruled on (`5788308449`), and the instruction was to keep the route's current
-   fill until it is. This is the only colour difference between the target and the product, and
-   it is obedience rather than drift. A ruling either way is a one-token change.
-2. **The tab bar is the real one, not the target's reserved strip.** The drawing showed reserved
+The first AFTER set used `PROGRESS_GREEN` `#91CB7D` on the primary calls to action, because F6
+had not been ruled on and the release said to keep the route's current fill. **It has now been
+ruled on** (`5788849410`): Board 00 reserves that green for confirmed progress — the colour the
+Living WE speaks in — and primary actions take `ACTION_GREEN` `#22C55E`. All three primaries on
+this route now carry it on `ON_ACTION` ink, which is what the accepted target drew: **Start this
+goal**, **Check community goals**, **Open the contribute page**. Every word, behaviour, hit
+target and disabled treatment is unchanged, the navy selections are untouched, and **Start
+another goal** stays a secondary because demoting it is the point.
+
+It is a route-local style, not an edit to `kit.primaryButton`: the kit belongs to another
+surface, and one screen's ruling is not licence to restyle every button in the product. The fill
+is now **asserted** by the producer (`rgb(34, 197, 94)`, and explicitly not the progress green),
+so a later edit that reaches for `kit.primaryButton` here fails before a frame is written.
+
+### Which frames moved, and which could not have
+
+Eight frames carry a primary call to action and changed; six do not and were left at their
+`8067364` bytes rather than re-shot, because the container's clock moves between runs and a new
+timestamp is not evidence of a token change.
+
+| Frame | before | after |
+|---|---|---|
+| `AFTER-summary-commit-390x844.png` | `b356ffec7375afbf` | `941f8f6e84eca0d2` |
+| `AFTER-summary-commit-390x640.png` | `b85be2db1f46e655` | `e26910a93c8411f3` |
+| `AFTER-unconfirmed-INJECTED-NETWORK-390x844.png` | `5cb2432bcd09467c` | `0a9eba57c412ac59` |
+| `AFTER-unconfirmed-INJECTED-NETWORK-390x640.png` | `bab9e848b003a55e` | `a947ec2269f7d7c1` |
+| `AFTER-unconfirmed-retry-INJECTED-NETWORK-390x844.png` | `a3f5049f80bf37bb` | `910e3e1e17ecd77e` |
+| `AFTER-unconfirmed-retry-INJECTED-NETWORK-390x640.png` | `3cf7f349f6ed475b` | `dae8d89ecd115d15` |
+| `AFTER-created-390x844.png` | `ad03445b0ce18c97` | `440a3c9fd7f8e792` |
+| `AFTER-created-390x640.png` | `7737711b0723956f` | `0eb9847d20c335fa` |
+| `AFTER-form-top-390x844.png` · `-390x640.png` | — | **unchanged** |
+| `AFTER-custom-window-390x844.png` · `-390x640.png` | — | **unchanged** |
+| `AFTER-refused-390x844.png` · `-390x640.png` | — | **unchanged** |
+
+The six unchanged frames carry no primary call to action — the refusal's only control is the
+cream-outlined **Back to community** on navy — so the token cannot have touched them. Three of
+them came back byte-identical from a full re-capture anyway; the other three differed only in
+the clock, and were restored rather than committed, so the diff against `8067364` contains
+nothing but the ruling.
+
+## Where the AFTER still differs from the accepted TARGET, deliberately
+
+1. **The tab bar is the real one, not the target's reserved strip.** The drawing showed reserved
    space labelled as reserved, because `MemberTabBar.tsx` belongs to another surface and the
    drawing had not looked at it. The route now reserves that room for real, from its **own**
    scroll container — nothing in the shell was touched — and the created state's last control
    and the unknown state's consequence line both clear the bar, which
    `../../goal-setup-current/created-receipt-390x844.png` does not.
-3. **Times read `3:15 AM` where the target drew `10:15 PM`.** The capture container's clock
-   moved between the two runs. Same zone, same behaviour, different hour.
+2. **Times drift between runs.** The capture container's clock moves; the target drew
+   `10:15 PM`, the AFTERs read whatever the hour was. Same zone, same behaviour. The custom
+   window is fixed on purpose, which is why those two frames are reproducibly byte-identical.
 
 ## What did not move
 

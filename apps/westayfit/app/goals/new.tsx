@@ -28,6 +28,7 @@ import { ButtonLink } from '../../src/ui/ButtonLink';
 import { isValidTimeZone } from '../../src/ui/dates';
 import { DateTimeField, type DateTimeFieldHandle } from '../../src/ui/DateTimeField';
 import {
+  ACTION_GREEN,
   CREAM,
   display,
   elevation,
@@ -36,6 +37,7 @@ import {
   HERO_MUTED,
   kit,
   NAVY,
+  ON_ACTION,
   ON_NAVY_RULE,
   OPTION_SELECTED_TINT,
   PROGRESS_GREEN,
@@ -772,8 +774,8 @@ export default function NewGoalPage() {
           */}
           <ButtonLink
             href={contributeHref}
-            style={kit.primaryButton}
-            textStyle={kit.primaryButtonText}
+            style={styles.primaryAction}
+            textStyle={styles.primaryActionText}
             testID="wsf-new-goal-goto-contribute"
             label="Open the contribute page"
           />
@@ -1096,7 +1098,7 @@ export default function NewGoalPage() {
             */}
             <Pressable
               style={[
-                unresolved ? styles.commitSecondary : kit.primaryButton,
+                unresolved ? styles.commitSecondary : styles.primaryAction,
                 submitting && kit.primaryButtonDisabled,
               ]}
               onPress={onSubmit}
@@ -1104,7 +1106,7 @@ export default function NewGoalPage() {
               accessibilityRole="button"
               testID="wsf-new-goal-submit"
             >
-              <Text style={unresolved ? styles.commitSecondaryText : kit.primaryButtonText}>
+              <Text style={unresolved ? styles.commitSecondaryText : styles.primaryActionText}>
                 {submitting ? 'Starting…' : unresolved ? 'Start another goal' : 'Start this goal'}
               </Text>
             </Pressable>
@@ -1246,8 +1248,8 @@ function OutcomeBanner({ outcome, communityHref }: { outcome: Outcome; community
       */}
       <ButtonLink
         href={communityHref}
-        style={kit.primaryButton}
-        textStyle={kit.primaryButtonText}
+        style={styles.primaryAction}
+        textStyle={styles.primaryActionText}
         testID="wsf-new-goal-check-goals"
         label="Check community goals"
       />
@@ -1347,6 +1349,37 @@ const styles = StyleSheet.create({
   // Room at the foot for the floating member tab bar, so no content of this
   // route ends underneath it. 48 px of `kit.page` plus the bar's own height.
   pageFoot: { paddingBottom: 140 },
+
+  /*
+    THE ACTION GREEN, on this route's primary calls to action.
+
+    `kit.primaryButton` fills with PROGRESS_GREEN (#91CB7D), which Board 00
+    reserves for CONFIRMED PROGRESS — the colour the Living WE speaks in. The
+    kit says as much where it introduces the two tokens: the action green is
+    "deliberately a SEPARATE token" because "a button must never be able to
+    restate what the Living WE is saying about the shared total". A Champion's
+    eye is trained on this screen, and a button wearing the progress colour
+    trains it wrong even on a page that has no ratio to draw.
+
+    So the three primaries here — Start this goal, Check community goals,
+    Open the contribute page — are ACTION_GREEN on ON_ACTION ink, which is
+    what the accepted target drew. Everything else about them is unchanged:
+    same words, same behaviour, same hit target, same disabled treatment.
+    `Start another goal` stays a secondary, because demoting it is the point.
+
+    This is a route-local style rather than an edit to `kit.primaryButton`:
+    the kit belongs to another surface, and one screen's ruling is not
+    licence to restyle every button in the product.
+  */
+  primaryAction: {
+    backgroundColor: ACTION_GREEN,
+    borderRadius: 14,
+    minHeight: 54,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryActionText: { color: ON_ACTION, fontSize: 17, fontWeight: '800', textAlign: 'center' },
 
   // Eyebrow, heading and intro sit close together as one block.
   headingAfterEyebrow: { marginTop: 6 },
