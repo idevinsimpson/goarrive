@@ -1,4 +1,5 @@
 import { router, useNavigation } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, type TextInput } from 'react-native';
@@ -15,12 +16,17 @@ import {
   TextField,
 } from '../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../src/featureFlags';
-import { getFirebaseFunctions } from '../src/firebase';
+import { getFirebaseAuth, getFirebaseFunctions } from '../src/firebase';
 import {
   classifyCreateFailure,
+  dropUnacknowledgedCreateUnlessFor,
+  forgetUnacknowledgedCreate,
   nameLongMessage,
   nameProblem,
   NAME_SHORT_MESSAGE,
+  rememberUnacknowledgedCreate,
+  subscribeUnacknowledgedCreate,
+  unacknowledgedCreateFor,
   usableGroupId,
   type CreateOutcome,
   type GroupType,
@@ -85,11 +91,29 @@ const UNCONFIRMED_BODY =
   'It may have been created anyway. Check your communities before you start another one.';
 
 const CREATED_TITLE = 'Your community is ready.';
+/** Only where getting there really failed: the member stayed, and it did not open. */
 const CREATED_BODY = 'We couldn’t open it automatically.';
+/** R1: the member left first, so nothing tried to open it. */
+const CREATED_AFTER_LEAVING_BODY = 'It was created after you left this page.';
 
 const RETRY_LABEL = 'Start another community';
 const RETRY_NOTE =
   'This starts a new, separate community. If the first one was created, you will have two.';
+
+/*
+  R1 — THE NOTE LIVES ONLY WHILE ITS ACCOUNT IS SIGNED IN.
+
+  Registered once, the first time a note is remembered, and independent of any
+  mounted form: a form the member left by browser Back is gone, but a sign-out
+  or a different account signing in must still drop the note, so it can never
+  be shown to another account or resurface later for its own as if current.
+*/
+let watchingSignIn = false;
+function dropNoteWhenTheAccountChanges(): void {
+  if (watchingSignIn) return;
+  watchingSignIn = true;
+  onAuthStateChanged(getFirebaseAuth(), (u) => dropUnacknowledgedCreateUnlessFor(u?.uid ?? null));
+}
 
 /**
  * THE LIST, NOT HOME.
@@ -130,7 +154,12 @@ export default function StartCommunity() {
   const [groupType, setGroupType] = useState<GroupType>('familyFriends');
   const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>(defaultJoinPolicyFor('familyFriends'));
   const [submitting, setSubmitting] = useState(false);
-  const [outcome, setOutcome] = useState<CreateOutcome>({ kind: 'idle' });
+  // R1: a community this account created after leaving the form is shown
+  // before a blank form is — see `startCommunityOutcome`.
+  const [outcome, setOutcome] = useState<CreateOutcome>(() => {
+    const waiting = unacknowledgedCreateFor(user?.uid ?? null);
+    return waiting ? { kind: 'created', via: 'left', ...waiting } : { kind: 'idle' };
+  });
   const nameRef = useRef<TextInput>(null);
 
   /*
@@ -182,6 +211,37 @@ export default function StartCommunity() {
       setSubmitting(false);
     }
   }, [uid]);
+
+  /*
+    R1 — ACKNOWLEDGE BEFORE A BLANK FORM CAN SUBMIT.
+
+    A create this account confirmed after leaving its form is shown here, by
+    name, instead of a blank form: when this form opens, and also if the
+    confirmation lands while this form is already open, which is the member who
+    came back before the first create had finished. A form whose own create is
+    in flight is left alone; its own result speaks for it.
+  */
+  useEffect(() => {
+    const adopt = () => {
+      if (inFlight.current) return;
+      const waiting = unacknowledgedCreateFor(uid);
+      if (!waiting) return;
+      setOutcome((current) =>
+        current.kind === 'idle' ? { kind: 'created', via: 'left', ...waiting } : current,
+      );
+    };
+    adopt();
+    return subscribeUnacknowledgedCreate(adopt);
+  }, [uid]);
+
+  // Shown to the member, it is acknowledged: a form in front of them showing
+  // the card clears the note, so a later Start is an ordinary blank form and
+  // not the same card again. The hidden form they left does not count.
+  useEffect(() => {
+    if (outcome.kind === 'created' && outcome.via === 'left' && navigation.isFocused()) {
+      forgetUnacknowledgedCreate(outcome.groupId);
+    }
+  }, [outcome, navigation]);
 
   const selectGroupType = (next: GroupType) => {
     setGroupType(next);
@@ -284,6 +344,16 @@ export default function StartCommunity() {
     // synchronous. Nothing below it runs twice.
     if (inFlight.current) return;
 
+    // R1, SYNCHRONOUSLY. A confirmation can land between the render this press
+    // came from and the one that would show it; state is a tick late, so the
+    // press itself asks whether the community already exists, and shows it
+    // instead of sending anything.
+    const waiting = unacknowledgedCreateFor(activeUid.current);
+    if (waiting) {
+      setOutcome({ kind: 'created', via: 'left', ...waiting });
+      return;
+    }
+
     if (problem) {
       // The button stays tappable; an invalid name sends the member to the
       // field with the message under it, and nothing is sent to the server.
@@ -350,14 +420,38 @@ export default function StartCommunity() {
     }
 
     if (!created) return;
-    if (!alive.current || activeUid.current !== requestedBy) return;
 
     // The community exists from here on. Failing to reach it is a navigation
     // problem with a known destination, never a reason to create again.
     const reached = created;
-    const offerTheCommunity = () => {
+
+    /*
+      R1 — REMEMBERED WHEN NOBODY IS LOOKING.
+
+      If this form is no longer the screen in front of the member — they left
+      by "Back to home" (a push, so it is hidden) or by browser Back (so it is
+      gone) — the confirmed community is remembered for THIS account, so the
+      next /start-community shows it before a blank form. Remembering paints
+      nothing, so it sits before the guard below.
+    */
+    // Only for the account that asked, and only if it is STILL the one signed
+    // in: a confirmation that arrives after an account change is kept for
+    // nobody (Director `5803485378`).
+    const signedInNow = getFirebaseAuth().currentUser?.uid ?? null;
+    if (
+      requestedBy !== null &&
+      signedInNow === requestedBy &&
+      (!alive.current || !navigation.isFocused())
+    ) {
+      rememberUnacknowledgedCreate({ uid: requestedBy, ...reached });
+      dropNoteWhenTheAccountChanges();
+    }
+
+    if (!alive.current || activeUid.current !== requestedBy) return;
+
+    const offerTheCommunity = (via: 'unopened' | 'left') => {
       if (!alive.current || activeUid.current !== requestedBy) return;
-      setOutcome({ kind: 'created', ...reached });
+      setOutcome({ kind: 'created', via, ...reached });
     };
 
     /*
@@ -365,11 +459,14 @@ export default function StartCommunity() {
 
       If this form is no longer the focused screen, it does not navigate. The
       create has still happened, so the form becomes the created card where it
-      sits — hidden under wherever they are — and a member who comes back to
-      it finds Open rather than a fresh form that would make a second one.
+      sits — hidden under wherever they are — and browser Back finds it there,
+      saying truthfully that it was created after they left. A member who
+      instead opens /start-community again gets a NEW form, and that one shows
+      the community through the note remembered above (R1): a fresh form must
+      not be where a second community is made by accident.
     */
     if (!navigation.isFocused()) {
-      offerTheCommunity();
+      offerTheCommunity('left');
       return;
     }
 
@@ -377,7 +474,7 @@ export default function StartCommunity() {
       router.replace(`/community/${reached.groupId}`);
     } catch {
       // A platform that fails loudly and synchronously.
-      offerTheCommunity();
+      offerTheCommunity('unopened');
       return;
     }
     // …and the web, which does not. The replace above targets this screen,
@@ -385,23 +482,44 @@ export default function StartCommunity() {
     // removes it; still being mounted after the grace period means it did not
     // happen. The guards inside make this a no-op when it did.
     if (navTimer.current) clearTimeout(navTimer.current);
-    navTimer.current = setTimeout(offerTheCommunity, NAVIGATION_GRACE_MS);
+    navTimer.current = setTimeout(() => offerTheCommunity('unopened'), NAVIGATION_GRACE_MS);
   }
 
   function openCreated(groupId: string) {
     // Re-navigation only. This must never call the callable: the community is
     // already there, and a second create would be a second community.
+    forgetUnacknowledgedCreate(groupId);
     router.replace(`/community/${groupId}`);
   }
 
+  /*
+    R1 — A SECOND COMMUNITY, DELIBERATELY.
+
+    Only after the first has been shown by name. This clears the note and
+    gives back an empty form, and it releases the duplicate guard: the guard
+    is held after a confirmed create so that a stray second tap cannot make a
+    second community, and this press is the member choosing to make one.
+  */
+  function startAnother() {
+    forgetUnacknowledgedCreate();
+    inFlight.current = false;
+    setSubmitting(false);
+    setName('');
+    setTriedSubmit(false);
+    setOutcome({ kind: 'idle' });
+  }
+
   if (outcome.kind === 'created') {
+    const leftFirst = outcome.via === 'left';
     return (
       <FormShell heading={outcome.displayName} testID="wsf-start">
         <View style={card.note} testID="wsf-start-created">
           <Text style={card.noteTitle} testID="wsf-start-created-title">
             {CREATED_TITLE}
           </Text>
-          <Text style={card.body}>{CREATED_BODY}</Text>
+          <Text style={card.body} testID="wsf-start-created-body">
+            {leftFirst ? CREATED_AFTER_LEAVING_BODY : CREATED_BODY}
+          </Text>
         </View>
         <SubmitButton
           label={`Open ${outcome.displayName}`}
@@ -409,6 +527,15 @@ export default function StartCommunity() {
           submitting={false}
           testID="wsf-start-open"
         />
+        {leftFirst ? (
+          <SubmitButton
+            label={RETRY_LABEL}
+            onPress={startAnother}
+            submitting={false}
+            testID="wsf-start-another"
+            variant="tertiary"
+          />
+        ) : null}
         <SecondaryLink href="/" label="Back to home" testID="wsf-start-back" />
       </FormShell>
     );
