@@ -51,7 +51,7 @@ Summary of what the operator needs and what is recorded:
 
 | | |
 | --- | --- |
-| permission | `datastore.indexes.create` + `datastore.indexes.list` on `westayfit-staging` (`roles/datastore.indexAdmin`, or owner / editor) |
+| permission | `datastore.indexes.create` + `datastore.indexes.list` on `westayfit-staging` (carried by `roles/datastore.indexAdmin`); the operator's actual permissions are checked, not inferred from a broad role |
 | CLI spelling | `--query-scope=collection` (lower-case CLI choice per the `gcloud firestore indexes composite create` reference); the resulting API / receipt value is `queryScope=COLLECTION` |
 | never | `firebase deploy --only firestore:indexes` (shared 49 / 48-index catalog; a catalog deploy prunes), the default project, a delete |
 | READY read | the composite `list` for the project; `CREATING` is not READY |
