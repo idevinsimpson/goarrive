@@ -74,8 +74,26 @@ export function kioskContributeRoute(goalId: string): string {
   return `/contribute/${encodeURIComponent(goalId)}?kiosk=1`;
 }
 
-/** Whether a route parameter puts the contribution screen in kiosk mode. */
+/**
+ * Whether a route parameter puts a journey in kiosk mode.
+ *
+ * ONE ANSWER, FOR EVERY READER. The shell decides whether to draw member
+ * navigation and the contribution screen decides whether to offer Finish, and
+ * they have to reach the same verdict from the same URL. When the array case
+ * was normalised in the shell alone, `?kiosk=1&kiosk=x` produced the worst of
+ * both: no tab bar, because the shell called it a kiosk, AND no Finish, because
+ * the screen called it ordinary -- leaving a shared device with the screen's own
+ * member exits and nothing to end the session with. The normalisation belongs
+ * here, where both of them already look.
+ *
+ * FAIL CLOSED ON A REPEATED PARAMETER. A URL can carry the same key twice, and
+ * the router hands that over as an array. Reading it as "not the flag" would
+ * hand a shared device its ordinary navigation back for the price of one
+ * duplicated query parameter, so ANY element saying kiosk makes it a kiosk.
+ * Scalar behaviour is unchanged: '1' and 'true', nothing else.
+ */
 export function isKioskFlag(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((entry) => isKioskFlag(entry));
   return value === '1' || value === 'true';
 }
 
@@ -186,14 +204,27 @@ export type KioskFinishPlan = {
 };
 
 /**
- * The one sentence an unresolved attempt gets.
+ * What an unresolved attempt is told, and why this sentence and not the last one.
  *
- * It states two true things and no more: the attempt is attached to their
- * account, and the place to resolve it is a device that is theirs. It does
- * not say it was recorded — that is exactly the fact nobody has.
+ * IT USED TO PROMISE PORTABILITY IT CANNOT KEEP. The old wording — "Your
+ * attempt is saved to your account; check it from your own device." — reads as
+ * though the attempt travels with the account. It does not. The record that
+ * makes the SAME attempt replayable lives in `localStorage` on the browser that
+ * made it (src/pendingContribution.ts), keyed to that uid; a different device
+ * signing into the same account finds no such record. W3's storage-level probe
+ * confirmed it. A member's own credit total is durable and readable elsewhere,
+ * but a total is not this attempt's outcome: somebody who does not already know
+ * what it was before cannot infer whether this one landed.
+ *
+ * So the sentence now points at the only place the recovery actually exists —
+ * this screen, before Finish — and names the real cost of the alternative. It
+ * still does not say the attempt was recorded, because that is exactly the fact
+ * nobody has, and it does not force a retry: `Confirm this contribution` stays
+ * offered, Finish stays available, and the stored record is still kept rather
+ * than cleared on the way out.
  */
 export const KIOSK_UNRESOLVED_NOTICE =
-  'Your attempt is saved to your account; check it from your own device.';
+  'You can try to confirm this contribution here before you finish. Entering it again elsewhere could count it twice.';
 
 /**
  * WHAT FINISH IS ALLOWED TO ERASE.
