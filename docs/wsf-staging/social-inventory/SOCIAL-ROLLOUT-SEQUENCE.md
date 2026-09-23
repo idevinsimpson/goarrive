@@ -60,7 +60,8 @@ The packet's second point is right and is an argument *against* touching `read-i
 For the deploy that **creates** the three services, the BEFORE inventory is still **46** —
 they do not exist yet. `expectedPriorFunctions: 46` is correct for that run; writing 49
 early fails preflight, which is the check working. 49 becomes the correct baseline only for
-a **later** pin, after a run's own receipt establishes it. Sequence, not code.
+a **later** pin, after a run's own receipt establishes it. Sequence, not code — and never a
+number this document infers on a reader's behalf (see §6a).
 
 ## 4. Three things the actual dispatch cannot do
 
@@ -149,11 +150,46 @@ so no separate workflow can authenticate. Anything operational has to land on `m
    separate approval.
 7. **A narrow member / non-member / privacy smoke**, and only then any claim about the
    feature. Application-level authorization is not transport.
-8. **Cleanup** as the existing suite does it, and **rollback** is the ordinary one: re-pin
-   the previous `approvedAppSha` with `candidateAddedFunctions` removed. Note what rollback
-   does **not** do — it does not delete the three services, so the next deploy's BEFORE
-   inventory is 49 and `expectedPriorFunctions` must be 49 from then on.
-9. **A later pin moves `expectedPriorFunctions` to 49** once step 5's receipt establishes it.
+8. **Cleanup** as the existing suite does it. **Rollback — corrected, see below.** A
+   rollback re-pin that leaves the three services deployed must **retain the exact
+   `candidateAddedFunctions` list**, and `expectedPriorFunctions` must describe the
+   **measured** BEFORE inventory from a run's own receipt.
+9. **A later pin moves `expectedPriorFunctions` to 49** once a run's receipt establishes it —
+   never before, and never as an inference from this document.
+
+## 6a. The rollback correction — my error, confirmed by W5
+
+**An earlier version of step 8 said rollback is "re-pin the previous `approvedAppSha` with
+`candidateAddedFunctions` removed". That is wrong, and it would have failed the deploy it
+was meant to rescue.**
+
+Removing the key restores `EXPECTED` to the 46-name base while the project still holds
+**49** deployed services. `verify-deployment.mjs:182` then reports all three as
+`present but not expected` and the run fails — the verifier working exactly as designed,
+on a procedure that asked for the impossible. Setting `expectedPriorFunctions` to 49 does
+**not** rescue it either: that value is checked against the BEFORE inventory by
+`read-inventory.mjs` and has no effect on `EXPECTED`. The two are separate mechanisms and
+this document previously conflated them.
+
+**The valid rollback**, while the three services remain deployed:
+
+| | |
+| --- | --- |
+| `approvedAppSha` | the earlier app SHA being rolled back to |
+| `candidateAddedFunctions` | **retained, exactly as listed** — the services still exist |
+| `expectedPriorFunctions` | whatever a run's receipt **measured**, not a number chosen here |
+
+The key is removed only if the services themselves are removed, and **this workflow has no
+supported way to remove a function**: nothing in it deletes a service, the verifier treats a
+service present before and absent after as `lost` and fails, and `--only functions:westayfit`
+does not prune. Intentional removal would be a separately designed and verified operation,
+and nothing in this document should be read as saying the present pipeline supports it.
+
+Also carried from the review, and worth stating where a reader will meet it: **`VERIFY=pass`
+with the new callables' transport SHUT does not establish a working member feature.** A
+release request has to name any separately authorized transport step and a successful
+member / non-member / privacy smoke before any feature-ready claim. No IAM action is
+authorized by this document.
 
 ## 7. Verification of this change
 
