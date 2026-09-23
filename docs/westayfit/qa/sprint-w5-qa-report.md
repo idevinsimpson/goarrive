@@ -1878,3 +1878,102 @@ it.
 
 Both match the packet exactly. No live call, secret, deploy, dispatch or IAM; W3's files
 read, never edited.
+
+---
+
+## ADDITIONS PACKET — W3's packet 3 and L0's handoff (L0 `5799290753`)
+
+Heads by `rev-parse`: #449 **`47c32ba44264e905c7846495f054ac2ce3ff2cbb`** (one commit on
+`10019faa`), #448 **`30734f4ae28897f7f622e568a50debdd884ed43c`** (six commits on
+`5de3c716`). **All four items PASS. No findings.** Both D1 and D2 from the previous
+packet are closed, and my merge-order note was adopted — #449 was held until this landed.
+
+### Item 1 — `/move/**` on #449: PASS
+
+The rule is at index **10**, between `/queue/**` and `/combined/**`, and the staging list
+is now identical **in content and order** to the candidate's `firebase.westayfit.json` at
+`37367fd2` — twelve rules each, compared side by side rather than assumed.
+
+**The old gap assertion is gone, not inverted:** `grep -c "still has NO rewrite"` on
+`47c32ba4` returns **0**. That was the thing most likely to be "fixed" by flipping a sign
+while leaving a test that still encodes the defect, so it was checked first. Its
+replacement asserts the rule, the destination and a multi-segment path, and the new
+negative is explicitly source-derived (`null` against the `main` list, with "no request
+was made" stated in the case itself).
+
+**Bare `/move` is preserved**, structurally: `app/move/index.tsx` and
+`app/move/[goalId].tsx` both exist at the candidate, so bare `/move` exports a static
+`move/index.html`, and Hosting serves a matching static file before applying any rewrite.
+
+**W3's four mutations re-derived here** (baseline `workflow-contract: 64 passed`), each
+caught: `/move` rule removed · destination changed · `**` → `*` · members rule removed.
+
+**The pinned asymmetry case is sound and is NOT defect-preserving.** Its premise is true —
+`firebase.westayfit.json` carries **0** rewrites on `main` `340e1417` and on #449's branch,
+and **12** at the candidate `37367fd2` — so a cross-check inside this suite genuinely
+cannot see both trees, and pinning that is more honest than a comparison that would
+silently compare against an empty list. It differs from the `:891` case in the way that
+matters: its failure mode is loud and self-describing (*"replace this case with a real
+cross-check"*) rather than a quiet pass over a live defect. The one cost, noted rather
+than objected to: it couples an unrelated file's state to this suite, so an unrelated
+change to the app config on `main` would fail it.
+
+### Item 2 — W3's doc corrections on #448: PASS
+
+**D1 closed better than asked.** Rather than correcting the line number, §6a now cites the
+named `present but not expected` guard plus the **immutable blob**
+`b75ea3ff3692e77c37978d089bb6791fb0602a17`, with §1 pinned to `main`'s `5e40cf7d…`. A blob
+cannot drift the way a line number did.
+
+**D2 closed.** §6 step 5 now carries a four-row precondition table — index READY with its
+receipt; the operational side reviewed and pinned; the candidate reviewed and pinned; and
+**a named, legitimate, already-existing operator** with the applicable access and an agreed
+post-deploy handoff — citing the authority already granted (`5797657663` / `5797754279` /
+`5798443901`) rather than asking for scope again.
+
+The ordering is right and now states its own reason: the three services do not exist before
+dispatch, so no transport measurement of them is possible until step 6, which is the first
+moment the measurement exists. §9 adds a hosted direct-load **and refresh** of
+`/community/<id>/members` and `/move/<goalId>` judged on what rendered, not on HTTP 200.
+
+### Item 3 — L0's handoff document: PASS
+
+**The permission rows match what the operations actually require**, checked against the
+operations rather than against the document's own assertion — a handoff that names the
+wrong role sends a real person to a real console with the wrong grant:
+
+- transport: **`run.services.setIamPolicy`** with `run.services.get` / `update`, identified
+  as Cloud Run Admin (`roles/run.admin`);
+- index: `datastore.indexes.create` + `.list` (`roles/datastore.indexAdmin`).
+
+Both say the operator's **actual** permissions are checked rather than inferred from a
+broad role, and no role is granted or identity retried.
+
+The read-back is schema-matched and metadata-only, offering the verifier's Cloud Run **v2**
+`invokerIamDisabled`, the Knative **v1** export annotation, or the console — and it
+explicitly rules out `--format='value(invokerIamDisabled)'` as an invalid projection of the
+v1 export. **"Empty output proves neither OPEN nor SHUT"** is stated.
+
+The operator row is **UNASSIGNED**, with honest status for all three candidate identities,
+and says plainly that *the owner is not described as the operator merely by being the
+owner*. The reference edit (`30734f4a`) changes exactly **two lines in two files** — the
+superseded handoff SHA/blob swapped for `dfcce291…` / `7cae9186` — and nothing else.
+
+### Item 4 — merge readiness
+
+The intermediate the Director held #449 for is gone: no test on `47c32ba4` has a success
+condition that requires the `/move` gap. On the evidence of this review and the two before
+it, I record that **both heads are consistent with the reviewed operational merge** under
+`5797657663`. The decision is L0's and the Director's; **I neither approve nor recommend a
+merge**, and the two access dependencies (index READY by a named operator, and the
+post-deploy transport correction) remain open and are not mine to close.
+
+### Numbers, as the runs printed them
+
+| head | suites | self + node:test | exit |
+| --- | --- | --- | --- |
+| #448 `30734f4a` | 13 | 231 + 66 = **297** (unchanged; docs only) | 0 |
+| #449 `47c32ba4` | 13 | 228 + 66 = **294** (= 291 + W3's three) | 0 |
+
+Both match the packet. No live call, secret, deploy, dispatch or IAM; W3's and L0's files
+read, never edited.
