@@ -625,17 +625,31 @@ went 835 → 800 → 781 → 773 → clear of the tab bar at 768.
 | `AFTER-members-390x844` / `-390x640` | changed — the correction |
 | `AFTER-settings-390x844` | **byte-identical**, which also validates the comparison |
 | `AFTER-settings-privacy-390x844` / `-390x640` | changed, and the reason is a real shared dependency: the screen quotes the feed's own words, so `A member` → `Anonymous member` |
-| `AFTER-you-390x844` | changed **only** in the per-run fixture email (`mudkis5u…` → `mudmkc9i…`); the layout is identical and no You code changed in this pass |
+| `AFTER-you-390x844` | **restored byte-identical** to the `60604ca` capture. A recapture changed it, but only in the per-run fixture email — no You code changed in this pass, so the earlier capture is still a true AFTER of the current page and keeping it satisfies the byte-identical requirement instead of churning the evidence. |
 
-## The F2 carry
+## The F2 carry — HELD, not landed
 
-`functions-westayfit/src/index.ts`, the station-enrolment header comment. It
-claimed a station "cannot record a contribution" and that "nothing here writes
-wsfContributions, wsfGoalCounters or wsfGoalMemberTotals". Verified against the
-code rather than taken on report: `wsfCompleteTurn` is station-authorized and
+It was briefly landed and then **reverted before it could matter**, and the
+reason is worth recording rather than hiding.
+
+L0 released the correction with an explicit condition: *hold the F2 comment
+carry until W7's exact-`60604ca` result has landed, then land it as one
+standalone comment-only commit* — `functions-westayfit/**` untouched in this
+successor, because the Director's "backend frozen while W7 finishes" is read
+strictly. That instruction was posted **39 seconds after** the announcement it
+answered, and this lane pushed without re-reading the thread first. The
+backend file is now byte-identical to `60604ca` again, and the carry waits.
+
+The finding itself stands and was verified rather than taken on report: the
+station-enrolment header comment claimed a station "cannot record a
+contribution" and that "nothing here writes wsfContributions, wsfGoalCounters
+or wsfGoalMemberTotals", while `wsfCompleteTurn` is station-authorized and
 reaches `completeTurnEntry`, which calls `performContribution` — the same
-function `wsfContribute` uses. The comment now says so, and says what actually
-keeps it narrow: the station supplies no identity, the uid comes from the turn
-entry of the member who joined the line, and the station can only complete the
-attempt it is serving. **It credits a person it cannot name.** Comment only, no
-behaviour change.
+function `wsfContribute` uses. The correction to land later says so, and says
+what actually keeps it narrow: the station supplies no identity, the uid comes
+from the turn entry of the member who joined the line, and it can only complete
+the attempt it is serving. **It credits a person it cannot name.**
+
+The operating lesson, which cost nothing this time only because the change was
+a comment: an announcement is not a licence. Re-read the thread immediately
+before pushing, not only before starting.

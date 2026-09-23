@@ -5177,29 +5177,18 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
 // device in its own localStorage, presented on every call, compared in
 // constant time, and revocable by the Champion in one action.
 //
-// WHAT A STATION IS DELIBERATELY NOT ABLE TO DO. It cannot name a person, it
-// cannot list members, and it cannot read anything a public display could not.
-//
-// IT CAN, HOWEVER, CAUSE A CONTRIBUTION TO BE RECORDED — and an earlier version
-// of this comment said the opposite, which was the more dangerous of the two
-// errors a comment can make. `wsfCompleteTurn` and `wsfCancelTurn` are
-// station-authorized and reach `completeTurnEntry`, which calls
-// `performContribution` — the same function `wsfContribute` uses, writing
-// wsfContributions, the goal shard and wsfGoalMemberTotals. What keeps this
-// narrow is that the station supplies no identity: the uid comes from the turn
-// entry of the member who joined the line and started the turn, and the station
-// can only complete the attempt IT is serving. It credits a person it cannot
-// name. It calls
+// WHAT A STATION IS DELIBERATELY NOT ABLE TO DO. It cannot record a
+// contribution, it cannot name a person, it cannot list members, and it
+// cannot read anything a public display could not. It calls
 // `readGoalPulseTotals(goalId, null)` — the display route, the Champion's own
 // published-display permission — so a station standing on a goal that is not
 // display-authorized is refused exactly as the kiosk and the display are.
 //
 // WHAT IS DELIBERATELY NOT STORED about a station: no user agent, no IP
 // address, no device fingerprint, no geolocation, and no attendee identity of
-// any kind. A station cannot prove who is standing at it, so it records nothing
-// about them. The enrolment callables in THIS section write none of
-// wsfContributions, wsfGoalCounters or wsfGoalMemberTotals; the turn family
-// above does, through the member's own turn entry, as stated there.
+// any kind. A station cannot prove who is standing at it, so it records
+// nothing about them, and nothing here writes wsfContributions,
+// wsfGoalCounters or wsfGoalMemberTotals.
 //
 // RULES. Neither wsfKioskStations nor wsfKioskPairings appears in
 // firestore.rules, so both fall to the catch-all `match /{document=**} { allow
