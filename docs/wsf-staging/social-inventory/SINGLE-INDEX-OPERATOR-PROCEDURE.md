@@ -63,15 +63,19 @@ gcloud firestore indexes composite create \
   --project=westayfit-staging \
   --database='(default)' \
   --collection-group=wsfContributions \
-  --query-scope=COLLECTION \
+  --query-scope=collection \
   --field-config=field-path=communityGroupId,order=ascending \
   --field-config=field-path=createdAt,order=descending
 ```
 
 `--project` is passed explicitly rather than relying on the active configuration, because
 the default project is the one thing that turns a staging action into a production one.
-`--query-scope=COLLECTION` matches the declaration; `COLLECTION_GROUP` would be a different
-index and would not serve this query.
+
+**On the two spellings of the same thing:** the CLI flag is lower-case,
+`--query-scope=collection`, while the value that comes back in the API and belongs in the
+receipt is upper-case, `queryScope=COLLECTION` — the same scope, written the way each
+surface writes it. Either way it must be *collection* and not *collection-group*: a
+collection-group index is a different index and would not serve this query.
 
 **I could not execute or version-check this command** — no `gcloud` call is permitted to me
 and none was made. The operator should confirm the flag spelling against their own CLI
@@ -132,12 +136,26 @@ The ordering follows from §5 rather than from taste: the deploy is what makes
 window in which every activity call fails. Creating the index first costs nothing — an index
 on a collection no deployed callable queries yet is inert — and closes that window entirely.
 
-Against the rest of the rollout (full version in `SOCIAL-ROLLOUT-SEQUENCE.md` §6):
+Against the rest of the rollout (full version, with the dispatch preconditions, in
+`SOCIAL-ROLLOUT-SEQUENCE.md` §6):
 
 ```
-verifier change on main  →  members rewrite on the staging config  →
-**this index, to READY**  →  pin  →  dispatch deploy  →  transport read  →  smoke
+verifier change on main  →  the members and /move rewrites on the staging config  →
+**this index, to READY**  →  reviewed+pinned ops and candidate  →  a NAMED operator with
+the applicable access and an agreed handoff  →  dispatch deploy  →
+measure the three transports (first possible here — the services did not exist before)  →
+only if shut: the narrow per-service correction, then read-back  →
+authenticated member / non-member / privacy smokes  →  only then any feature-ready claim
 ```
+
+The named-operator row is a **precondition of dispatch**, not a request for scope: the
+narrow staging authority is already granted and recorded (#365 `5797657663` /
+`5797754279`, ordering `5798443901`). The handoff document for this release lane is
+`docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md` (#448,
+`ae44b0eef14150eb99528a7828915eb52638ed00`, blob `a2ebbb4c`); it defers the index command
+to **this** document and currently leaves the operator **unassigned**. Its other operations
+— including the transport correction's permission and its read-back — are **its** rows, and
+are deliberately not restated here so the two documents cannot drift apart.
 
 ## 7. Rollback: leave it
 
@@ -161,6 +179,29 @@ rollback and needs its own review.
 | **Cannot, from this pipeline** | create it as part of a dispatch — the workflow never deploys indexes at all, and the only `--only firestore` in it is a GoArrive **emulator** regression |
 | **Must not** | run `firebase deploy --only firestore:indexes` (§2), target the default project, or delete any index |
 | **Not established** | that the deploy service account holds the permission; nothing here grants it, and the answer to a refusal is to report it |
+
+## 9. What the hosted verification should add
+
+The authorized hosted verification described in `SOCIAL-ROLLOUT-SEQUENCE.md` — not the
+workflow's own 24-row suite — should additionally drive, against a real synthetic fixture:
+
+| Request | What must be true |
+| --- | --- |
+| direct load of `/community/<id>/members` | the **members** UI renders — not the community home, which is what the catch-all served before the rewrite |
+| refresh of that same URL | unchanged: a refresh is the case a missing rewrite breaks |
+| direct load of `/move/<goalId>` | the follow-along UI renders — this URL had **no** matching rewrite at all before |
+| refresh of that same URL | unchanged |
+
+**HTTP 200 is not the check.** Both failure modes here return a document: the members route
+was served the community home (200, wrong page), and a rewrite restored badly could serve
+any other document just as successfully. The assertion has to be on what rendered — a
+testid or a distinctive string from the right screen — or it proves nothing that a 404
+check would not have proved better.
+
+These are **source-derived expectations**. No request has been made to the staging site
+from here, so nothing in this document reports an observed response.
+
+## 10. Nobody here runs any of this
 
 **No Claude session performs any of this.** It is written to be reviewed and then performed
 by the operator who holds the permission, and the receipt in §4 is what comes back.
