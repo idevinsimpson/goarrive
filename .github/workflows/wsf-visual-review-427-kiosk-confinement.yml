@@ -57,9 +57,9 @@ jobs:
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
           KC = 'docs/design-target/review/kiosk-confinement-correction'
-          # THE EXACT ALLOWLIST: the 14 PNGs PR #427 adds under kiosk-confinement-correction/ —
+          # THE EXACT ALLOWLIST: the 15 PNGs PR #427 adds under kiosk-confinement-correction/ —
           # W1B's seven matched BEFORE frames captured on unpatched d0477cc and seven AFTER
-          # frames from the corrected head, at the PR head this job checks out, original
+          # frames from the corrected head (plus the successor's short-phone unresolved AFTER), at the PR head this job checks out, original
           # committed bytes only.
           allow = [
               (f'{KC}/after/kiosk-entry-short-phone-390x640.png', 'AFTER · corrected head, patch under review · kiosk-entry-short-phone-390x640.png'),
@@ -67,6 +67,7 @@ jobs:
               (f'{KC}/after/kiosk-receipt-short-phone-390x640.png', 'AFTER · corrected head, patch under review · kiosk-receipt-short-phone-390x640.png'),
               (f'{KC}/after/kiosk-receipt-tablet-800x1280.png', 'AFTER · corrected head, patch under review · kiosk-receipt-tablet-800x1280.png'),
               (f'{KC}/after/kiosk-signout-failed-tablet-800x1280.png', 'AFTER · corrected head, patch under review · kiosk-signout-failed-tablet-800x1280.png'),
+              (f'{KC}/after/kiosk-unresolved-short-phone-390x640.png', 'AFTER · copy-only successor, patch under review · kiosk-unresolved-short-phone-390x640.png'),
               (f'{KC}/after/kiosk-unresolved-tablet-800x1280.png', 'AFTER · corrected head, patch under review · kiosk-unresolved-tablet-800x1280.png'),
               (f'{KC}/after/ordinary-contribution-keeps-its-tabs-tablet-800x1280.png', 'AFTER · corrected head, patch under review · ordinary-contribution-keeps-its-tabs-tablet-800x1280.png'),
               (f'{KC}/before/kiosk-entry-short-phone-390x640.png', 'BEFORE · unpatched d0477cc · kiosk-entry-short-phone-390x640.png'),
