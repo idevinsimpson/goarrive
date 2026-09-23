@@ -19,12 +19,25 @@ named beside it; nothing is carried from another document's claim.
 The vitest and jest suites could not be executed here (no `node_modules` in this
 container), so a test is cited as *present and naming the case*, never as *passing today*.
 
+**Correction, 05:3xZ, after first delivery.** The first version of this map called `d0477cc`
+"the staging candidate" and "the served build" throughout. **That was wrong.** Staging was
+promoted to **`c8f38e3`** by run 46 (`35810257325`, dispatched 02:24:57Z from `main`
+`340e1417`, the #437 pin) — an hour before this map was written, and I had already seen
+that pin on `main`. I took the packet's 01:30Z context line on trust instead of checking.
+Every statement below now names the served `c8f38e3`, and the correction *strengthens* the
+central finding rather than weakening it: `functions-westayfit/src` is byte-identical at
+`d0477cc`, `c8f38e3` **and** the head, so the 46 callables are the same ones at whichever
+of the three you measure from. No other conclusion changes. (Run 46's hosted rows are
+`24 / 0` like run 45's, and `c8f38e3` is itself pre-responsive-display, so the one gap that
+turned on this — the responsive display having no hosted receipt — is unaffected.)
+
 ---
 
 ## The one-line answer
 
 Every one of the six requirements has routes **and** deployed callables at this head, and
-five of the six have end-to-end evidence against the **served** staging build from run 45.
+five of the six have end-to-end evidence against a **served** staging build — run 45 at
+`d0477cc`, re-run as run 46 at the now-served `c8f38e3`.
 The readiness gap is not missing capability — it is that **two of the three documents a
 reader would consult understate what exists**, and that the one thing genuinely unproven
 is a physical room, not a contract.
@@ -35,7 +48,8 @@ is a physical room, not a contract.
 
 Legend, kept from `PhysicalFlowBoard.tsx` rather than invented:
 **BUILT** a route or callable does this today · **HOSTED** additionally exercised
-end-to-end against the served staging build in run 45 · **PROOF NEEDED** contract holds,
+end-to-end against a served staging build (run 45 at `d0477cc`, run 46 at the served
+`c8f38e3`; the rows quoted here are run 45's, which I read verbatim) · **PROOF NEEDED** contract holds,
 never driven on real hardware with real people · **SEAM** named capability the product
 does not have.
 
@@ -46,7 +60,7 @@ does not have.
 | 3 | Phone or queue | `/event/[goalId]` · `/queue/[goalId]` | `wsfJoinTurnLine` `wsfMyTurn` `wsfTurnReady` `wsfCompleteMyTurn` `wsfLeaveTurnLine` | **BUILT · HOSTED** |
 | 4 | Movement choice | `/event/[goalId]` (the event's frozen list) · `/move` · `/move/[goalId]` | `wsfEventContext` `wsfListGoals` `wsfGoalPulse` | **BUILT · HOSTED** (the choice; the follow-along player itself is not in any hosted row) |
 | 5 | Multiple movements toward one shared goal | creation on `/community/[groupId]` · watch on `/combined/[setupId]` | `wsfCreateCombinedGoal` `wsfCombinedGoalPulse` `wsfCloseCombinedGoal` `wsfRepairCombinedGoal` `wsfAdjustGoal` | **BUILT · HOSTED** |
-| 6 | A separate collective display | `/display/[goalId]` (946 lines) | `wsfGoalPulse` `wsfGoalRecentAdditions` `wsfSetGoalDisplayAuthorization` | **BUILT · HOSTED** at the pinned build; the responsive tiers are newer than it · **SEAM**: no QR-to-join |
+| 6 | A separate collective display | `/display/[goalId]` (946 lines) | `wsfGoalPulse` `wsfGoalRecentAdditions` `wsfSetGoalDisplayAuthorization` | **BUILT · HOSTED** at the served build; the responsive tiers are newer than it · **SEAM**: no QR-to-join |
 
 ### 1 — Two equivalent stations
 
@@ -158,17 +172,24 @@ The route says so itself at `app/display/[goalId].tsx:735`. Batch F draws the se
 route does not have it.
 
 **The one place where staging and the tree differ meaningfully.** `functions-westayfit/src`
-is **byte-identical** between the staging candidate `d0477cc` and this head — so all 46
-callables behind every requirement above are the ones already deployed and exercised. The
-app differs by 11 source files / 1,853 insertions, and the largest single piece is this
-route: `app/display/[goalId].tsx` +210 and the new `src/ui/displayLayout.ts`. Run 45's
-display evidence (`15-phone-public-display.png`, `16-wide-authorized-display.png`) is of
-the **pre-responsive** build. Nothing has regressed — the responsive work simply has no
-hosted receipt yet.
+is **byte-identical** at `d0477cc`, at the served `c8f38e3` and at this head — so all 46
+callables behind every requirement above are the ones already deployed and exercised,
+measured from any of the three.
 
-**Smallest next approved slice:** a staging deploy at a pin naming the head that carries
-the responsive display, so the display rows re-run against it. That is the existing
-pin-and-deploy path (#437 pins `c8f38e37`, which predates it); no new mechanism.
+Against the **served** `c8f38e3` the app differs by exactly three source files / 879
+insertions, and all three are this route: `app/display/[goalId].tsx` +210, the new
+`src/ui/displayLayout.ts`, and its capture spec. (Against `d0477cc`, the run-45 baseline,
+it is 11 files / 1,853 — that figure describes the older comparison, not the current one.)
+
+Both run 45's display evidence (`15-phone-public-display.png`,
+`16-wide-authorized-display.png`) and run 46's are of a **pre-responsive** build: the
+responsive work integrated at `ba774eff`, after the `c8f38e3` that run 46 pinned and
+served. Nothing has regressed — the responsive display simply has no hosted receipt yet.
+
+**Smallest next approved slice:** a staging deploy at a pin naming a head that carries the
+responsive display, so the display rows re-run against it. That is the existing
+pin-and-deploy path — #437 pinned `c8f38e3` and run 46 served it, and `c8f38e3` predates
+the responsive work; no new mechanism, one more turn of the same crank.
 
 ---
 
@@ -252,8 +273,9 @@ can serve.
 Nothing in the six requirements is waiting on code that does not exist. Three things are
 genuinely open, and only the first is engineering:
 
-1. **The responsive display has no hosted receipt.** A deploy at a pin naming the head that
-   carries it re-runs the two display rows. Existing path.
+1. **The responsive display has no hosted receipt.** Runs 45 and 46 both captured the
+   pre-responsive build (`c8f38e3`, which run 46 served, predates it). A deploy at a pin
+   naming a head that carries it re-runs the two display rows. Existing path.
 2. **Two simultaneous callers, and a physical room.** Covered by a callable test, not by
    hardware. This is the on-site rehearsal, and it is an operator task.
 3. **Email.** Run 45's row is `PASS signup verification gate (D-1) — gate held 6s with no
