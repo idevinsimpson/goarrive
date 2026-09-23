@@ -538,6 +538,124 @@ The header now records the history rather than erasing it: the old sentence, why
 
 ---
 
-# Check 10 — further checkpoints
+# Check 10 — W4's `/start-community` implementation (PR #447) at **`0901765`**: **PASS**, no defect found
 
-Awaiting L0's routing. W7's standing lane is independent QA for W4 / W2 / W6 / W8 (Director `5787928919`).
+Routed by L0 at `5795497510`. Acknowledged at `5795864184`. Spec: `apps/westayfit/tests-e2e/sprint-w7-start-community-verify.spec.ts` — **15 passed / 0 failed**, plus W4's own suites re-run.
+
+## Identity, re-derived
+
+| | |
+|---|---|
+| #447 head | **`0901765af0f23f654a12baa8bc016ff3ee4be810`**, unchanged throughout |
+| Parent | `de8f567` (#432's head, already in app-shell) |
+| Diff | **23 files, +1,347 / −33**; the non-image set is exactly the five files the packet names — `git diff --name-only` shows **nothing outside it** |
+| Base | app-shell **`37367fd`**, merged locally and **never pushed** |
+| Blobs | `app/start-community.tsx` `b30b5d65`, `src/startCommunityOutcome.ts` `a6df3de7` — both identical to `0901765` in the worktree |
+
+## The eleven items
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Outcome classification | **PASS** |
+| 2 | Response lost | **PASS** |
+| 3 | Unconfirmed screen | **PASS** |
+| 4 | Named refusal (profile) | **PASS** |
+| 5 | Name window 2–80 | **PASS** |
+| 6 | Two taps in one frame | **PASS** |
+| 7 | Created ≠ navigated | **PASS in the reachable half**; W4's "cannot be staged in a browser" **CONFIRMED** |
+| 8 | Unmount mid-flight | **PASS**, with one precise correction to the premise |
+| 9 | Frames | **PASS**, byte-identity verified against #426 itself |
+| 10 | Counts | **PASS**, every number reconciled |
+| 11 | Shell seam | **MEASURED**, no verdict offered |
+
+### 1 · Classification
+
+**All seven transport codes** — `internal`, `unavailable`, `deadline-exceeded`, `unknown`, `cancelled`, `aborted`, `data-loss` — read as **unconfirmed**, each exercised separately rather than by a representative. **All four reachable named refusals** render their own copy. `callableErrors.ts` is **byte-identical** (`70b1908f` both sides).
+
+The developer-text rule is proven positively: every fixture answers with the marker `DEV-ONLY-LEAK-MARKER-9f3a` in the callable's `message`, and it appears nowhere on any screen. A route that echoed the server's text would fail every one of these eleven cases.
+
+### 2 · Response lost
+
+`route.fetch()` then `route.abort()`: the server replied **200**, the reply was discarded, and the community was **read back out of Firestore** — exactly one, with the reply naming that same `groupId`. Attempted 1 / delivered 1. The screen says it cannot confirm and claims nothing in either direction.
+
+### 3 · The unconfirmed screen
+
+`Check your communities` → **`/?view=communities`**, asserted as the exact href — the seam W7 verified for W4 in check 1, not bare `/`. The retry is demoted to `Start another community` with the duplicate risk **beside the control**. Pressing it makes a **genuine second community**: two distinct ids, one name, attempted 2 / delivered 2.
+
+### 4 · The profile refusal
+
+Nothing created; the create control is **gone, not disabled**; the action leads to `/profile-setup`; and the screen promises **no return trip and no saved draft** — asserted against `/come back|return here|saved|draft/i`, because promising a return that does not exist is the failure mode here.
+
+### 5 · The name window
+
+A one-character name and an 84-character name **never leave the browser** — attempted **0**, delivered **0**. Focus lands on the field both times, and the long message carries the count: *"Use 80 characters or fewer. This name is 84."*
+
+### 6 · Two taps in one frame
+
+Dispatched as **two clicks in a single JS task**, not two sequential Playwright clicks — the latter would be stopped by the disabled state and would prove nothing about the ref guard, which exists precisely because `submitting` lands a tick late. With the create held open 1.5 s: **one delivered request, one community**.
+
+### 7 · Created ≠ navigated
+
+The reachable half passes: a 200 carrying an id the route cannot navigate to (`not/usable`) reads as **unconfirmed, not refused** — the community very likely exists, so the honest next step is the list rather than a broken button.
+
+**W4's "cannot be staged in a browser" is CONFIRMED, from my own measurement rather than from the report.** Breaking the history write unmounts the screen anyway, so the created-but-not-opened state has no browser-reachable rendering. I record that as confirmed rather than merely repeated — it was a claim I was asked to confirm or refute, and refuting it was a live possibility.
+
+### 8 · Unmount mid-flight — and a correction to the premise
+
+The property holds: **nothing of the outcome is painted on the replacing page**, the body carries none of the outcome text, and the member ends on `/community/<id>`.
+
+But the premise in the item's name is not what happens, and it matters. **Expo Router RETAINS the previous screen rather than unmounting it.** Measured directly: after leaving, `wsf-start-created` is **present in the document (count 1) and not visible (`isVisible() === false`)**, and `wsf-start` is likewise retained. So the settled create *does* write its outcome — onto a screen that is no longer displayed.
+
+The consequence for the review: the property is satisfied **by non-visibility, not by the `alive` guard**, because on this navigation the screen was never unmounted for that guard to catch. The guard is still right to exist for real unmounts; it simply is not what is doing the work here. My first assertion demanded absence from the DOM and failed — **my error, not the product's** — and asserting absence would have failed on a route behaving correctly.
+
+### 9 · Frames
+
+**Byte-identity verified against #426 itself, not against the stated hashes.** `sprint-w4-start-community-next` was fetched read-only and the BEFORE arrival frames compared directly:
+
+| class | #426 BEFORE | candidate AFTER | |
+|---|---|---|---|
+| 390×640 | `7d216e4a37830fb4` | `7d216e4a37830fb4` | **identical** |
+| 390×844 | `a0f0f51eedbc1a4c` | `a0f0f51eedbc1a4c` | **identical** |
+
+The packet quoted those two digests; confirming a file matches a number someone supplied is weaker than confirming it matches the other file, so the other file was fetched.
+
+**The AFTER producer ungated writes zero bytes**: run without `WSF_CAPTURE_FRAMES`, 6 passed, and the sha256-of-sha256s over all 18 frames is **unchanged**. `check-evidence-intact` exit 0 — 9 frozen, 20 accepted, no byte changed. No `tests-e2e/artifacts` or `test-results` committed.
+
+### 10 · Counts — every number reconciled
+
+| Run | W4 | W7 |
+|---|---|---|
+| outcomes spec | 9/9 | **9/9** |
+| unit suite | 28 | **28/28** |
+| whole vitest | 823/823 | **838/838** |
+| seven-spec regression set | 31/31 | **31/31** |
+
+**The vitest difference is fully explained and is not a discrepancy in W4's claim** — the two numbers are measured on different trees, and the arithmetic closes exactly:
+
+- `kiosk-idle-finish.test.ts` is **absent at `de8f567`** and present on app-shell: **+10**
+- `exported-head.test.ts` grew **+2** between `de8f567` and `37367fd`
+- `kiosk-session.test.ts` grew **+3**
+
+**823 + 10 + 2 + 3 = 838.** W4's count is right for its tree; mine is right for the merged tree.
+
+**One honest note on the regression set.** Its **first** run gave **30 passed / 1 failed** (`expect(locator).toBeVisible()`); two further runs gave **31/31**, the second with exit 0. I did not capture which test failed, because that first command filtered the output — so it is reported as a **non-reproducing failure I could not attribute**, not smoothed into a clean pass. It did not recur.
+
+### 11 · The shell seam — measured exactly, no verdict
+
+W4 asserts the member tab bar on `/start-community`; under W9's migrated shell that route is a focused **barless** flow. Exactly what depends on the bar:
+
+- **One assertion in the behaviour suite** — `sprint-w4-start-community-outcomes.spec.ts:399`, inside the test *"the member tabs remain, and the submit is hit-testable on a short phone"* (line 389).
+- **One assertion in the capture producer** — `sprint-w4-start-community-after-capture.spec.ts:111`. It sits in the per-class body **before the first `saveFrame`**, so it gates **every frame of that class** — and therefore **all 18 AFTER frames**, not only the arrival ones.
+- **A consequence worth stating, because it is easy to miss:** the two arrival frames are W4's evidence that the header and hierarchy did not move, and that evidence rests on byte-identity with #426's BEFORE. A barless shell necessarily changes those bytes, so the sequencing decision also decides whether that particular proof survives in its current form.
+
+The sequencing is the Director's. W7 offers no opinion on it and changed neither lane.
+
+## Bound
+
+The eleven items at `0901765` merged onto `37367fd`, in Chromium on the emulators. Verification only: **no product edit, no edit to any W4 test, no capture written, no target called an AFTER.** Findings route through L0 to W4.
+
+---
+
+# Check 11 — further checkpoints
+
+Awaiting L0's routing. Packet 10 (W9's shell) remains held pending its corrected successor SHA; W7 verifies that successor, never `7466158`.
