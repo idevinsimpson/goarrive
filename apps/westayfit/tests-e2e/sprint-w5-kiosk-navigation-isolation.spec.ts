@@ -1481,3 +1481,408 @@ test('the unresolved notice makes no portability claim, and Finish survives it o
   expect(atRest.session).not.toContain('wsf.kioskReturnGoalId');
   expect(atRest.local, 'the unresolved record survives Finish').toContain(pendingKey);
 });
+
+// ---- PACKET 2: the idle-Finish contract (product 84acea5) ------------------
+/*
+  A kiosk session may now end itself from a SETTLED screen. The rule lives in
+  `kioskMayFinishUnattended` and the screen supplies three facts: what the
+  attempt settled as, whether one is still in flight, and whether the load
+  itself has settled (closed / not-found / error).
+
+  The cases below read the product's behaviour with this suite's own
+  instruments. In particular the auth store is read through `authKeys`, which
+  THROWS on an unreadable store rather than reporting an empty one — the fix
+  the successor makes in product code is the same mistake my probe once made,
+  and a detachment check that fails open would turn a failure to sign out into
+  a pass.
+*/
+
+/** The kiosk-owned deadline, as the product's own countdown reports it. */
+async function countdownSeconds(page: Page): Promise<number | null> {
+  if ((await page.getByTestId('wsf-kiosk-countdown').count()) === 0) return null;
+  const text = await page.getByTestId('wsf-kiosk-countdown').innerText();
+  const m = text.match(/(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+/** Signs in at the kiosk and leaves an UNRESOLVED attempt on the record. */
+async function leaveUnresolvedAttempt(page: Page, fx: Fx, count: string): Promise<void> {
+  await page.route(CONTRIBUTE_CALLABLE, async (route) => {
+    await route.fetch();
+    await route.abort('connectionfailed');
+  });
+  await page.getByTestId('wsf-contribute-entry').fill(count);
+  await page.getByTestId('wsf-contribute-review').click();
+  await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+  await page.unroute(CONTRIBUTE_CALLABLE);
+}
+
+// ---- CASE 13 --------------------------------------------------------------
+/*
+  THE ORDERING THAT LOSES A REMINDER IF IT IS GOT WRONG.
+
+  The contribution route returns its load-error branch BEFORE its pending one,
+  so a goal that stops loading while an attempt is unresolved renders an error
+  screen — one with no reconcile control on it at all. Two things follow, and
+  this case checks both because each is worthless without the other:
+
+    the COPY  must not point at a retry this screen cannot offer;
+    the OUTCOME passed to Finish must be the LIVE one. Finishing as `none`
+              would clear the stored reminder, destroying the only artefact
+              that lets the member replay the same attempt.
+
+  A screen that says the right thing while erasing the record would pass a
+  copy check and still lose somebody's effort.
+*/
+test('a load failure over an unresolved attempt says what it can do, and Finish keeps the record', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('loaderr-unresolved');
+  await walkUpAndSignIn(page, fx);
+  await leaveUnresolvedAttempt(page, fx, '17');
+
+  const pendingKey = `wsf.pendingContribution.${fx.goalId}.${fx.memberUid}`;
+  expect((await readStorage(page)).local).toContain(pendingKey);
+
+  // Now the goal stops loading, with that attempt still unresolved.
+  await page.route(/wsfGoalPulse/, (route) => route.abort('connectionfailed'));
+  await page.goto(`/contribute/${fx.goalId}?kiosk=1`);
+  await expect(page.getByTestId('wsf-contribute-load-error')).toBeVisible({ timeout: 40_000 });
+
+  // 1. THE CONTEXTUAL NOTICE — it says why the retry is unavailable rather
+  //    than pointing at a control that is not on this screen.
+  await expect(page.getByTestId('wsf-kiosk-unresolved-note')).toHaveText(
+    'We couldn’t load this goal to confirm your contribution. Entering it again elsewhere could count it twice.'
+  );
+  // 2. AND THE PROMISE IT DOES NOT MAKE.
+  const errorText = await page.getByTestId('wsf-contribute-screen').innerText();
+  expect(errorText).not.toContain('You can try to confirm this contribution here before you finish.');
+  await expect(page.getByTestId('wsf-contribute-reconcile')).toHaveCount(0);
+  // 3. The session is still endable from here, and unattended.
+  await expect(page.getByTestId('wsf-kiosk-finish')).toBeVisible();
+  expect(await countdownSeconds(page)).not.toBeNull();
+
+  // 4. THE LIVE OUTCOME. Finishing here must not erase the reminder.
+  await page.getByTestId('wsf-kiosk-finish').click();
+  await page.waitForURL(new RegExp(`/kiosk/${fx.goalId}$`), { timeout: 25_000 });
+  await page.unroute(/wsfGoalPulse/);
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 20_000, intervals: [200] })
+    .toBe(0);
+  const atRest = await readStorage(page);
+  expect(atRest.session).not.toContain('wsf.kioskReturnGoalId');
+  expect(atRest.local, 'the unresolved reminder survives a Finish taken from the error screen').toContain(
+    pendingKey
+  );
+
+  // 5. And the next visitor inherits nothing.
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-kiosk-start').click();
+  await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 25_000 });
+});
+
+// ---- CASE 14 --------------------------------------------------------------
+/*
+  WHERE THE DEADLINE MUST NOT EXIST.
+
+  A screen with somebody standing at it mid-thought is not a rest state, and a
+  request that has not answered is the one case where ending the session is how
+  an outcome becomes unknowable. Four screens, asserted by the absence of the
+  countdown itself rather than by reading the predicate — the predicate is
+  W1B's to unit-test; what this suite owes is the behaviour on screen.
+*/
+test('the deadline does not exist on the initial load, entry, review, or with a request in flight', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('ineligible');
+  await walkUpAndSignIn(page, fx);
+
+  const seen: Record<string, number | null> = {};
+
+  // entry
+  seen.entry = await countdownSeconds(page);
+  // review
+  await page.getByTestId('wsf-contribute-entry').fill('8');
+  await page.getByTestId('wsf-contribute-review').click();
+  await expect(page.getByTestId('wsf-contribute-review-screen')).toBeVisible({ timeout: 25_000 });
+  seen.review = await countdownSeconds(page);
+
+  // in flight: the request leaves and is HELD, so the screen sits in its
+  // sending state for as long as this test needs it to.
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  await page.route(CONTRIBUTE_CALLABLE, async (route) => {
+    await held;
+    await route.abort('connectionfailed');
+  });
+  await page.getByTestId('wsf-contribute-submit').click();
+  await expect(page.getByTestId('wsf-contribute-recording')).toBeVisible({ timeout: 25_000 });
+  seen.inFlight = await countdownSeconds(page);
+  release();
+  await page.unroute(CONTRIBUTE_CALLABLE);
+  await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+
+  // initial load: a fresh kiosk contribution whose pulse has not answered yet.
+  const fx2 = await seedBase('ineligible-load');
+  let releaseLoad: () => void = () => {};
+  const heldLoad = new Promise<void>((r) => {
+    releaseLoad = r;
+  });
+  await page.route(/wsfGoalPulse/, async (route) => {
+    await heldLoad;
+    await route.continue();
+  });
+  await page.goto(`/contribute/${fx2.goalId}?kiosk=1`);
+  await expect(page.getByTestId('wsf-contribute-loading')).toBeVisible({ timeout: 25_000 });
+  seen.initialLoad = await countdownSeconds(page);
+  releaseLoad();
+  await page.unroute(/wsfGoalPulse/);
+
+  test.info().annotations.push({
+    type: 'kiosk-deadline-ineligible',
+    description: Object.entries(seen)
+      .map(([k, v]) => `${k}=${v === null ? 'no-countdown' : v}`)
+      .join(' '),
+  });
+  expect(seen).toEqual({ entry: null, review: null, inFlight: null, initialLoad: null });
+});
+
+// ---- CASE 15 --------------------------------------------------------------
+/*
+  THE DEADLINE ON THE THREE SETTLED SCREENS, AND WHAT `Stay` RENEWS.
+
+  These three are the screens the successor adds the deadline to, and they are
+  exactly the ones a shared device gets abandoned on: a goal that closed, one
+  that cannot be found, one that would not load. The deadline is read from what
+  the product's own countdown SAYS, so an altered KIOSK_IDLE_MS would show up
+  here as a different number rather than passing silently.
+
+  `Stay` must renew a WHOLE deadline, not top up the remainder — the test waits
+  for the countdown to visibly fall first, so a `Stay` that merely paused it
+  could not pass.
+*/
+const SETTLED_SCREENS = ['closed', 'notFound', 'loadError'] as const;
+
+test('closed, missing and unloadable goals each carry the existing 90s deadline, and Stay renews it whole', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('settled');
+  await walkUpAndSignIn(page, fx);
+  const closedGoalId = `w5kn-settled-closed-${fx.stamp}`;
+  await seedGoal(fx.groupId, fx.championUid, closedGoalId, 500, 'closed');
+
+  const opened: Record<string, number | null> = {};
+  const renewed: Record<string, number | null> = {};
+  const fell: Record<string, number | null> = {};
+
+  for (const screen of SETTLED_SCREENS) {
+    if (screen === 'loadError') await page.route(/wsfGoalPulse/, (r) => r.abort('connectionfailed'));
+    const target =
+      screen === 'closed'
+        ? closedGoalId
+        : screen === 'notFound'
+          ? `w5kn-absent-${fx.stamp}`
+          : fx.goalId;
+    await page.goto(`/contribute/${target}?kiosk=1`);
+    await expect
+      .poll(
+        async () =>
+          (await page.getByTestId('wsf-contribute-closed').count()) +
+          (await page.getByTestId('wsf-contribute-not-found').count()) +
+          (await page.getByTestId('wsf-contribute-load-error').count()),
+        { timeout: 40_000, intervals: [200] }
+      )
+      .toBeGreaterThan(0);
+
+    opened[screen] = await countdownSeconds(page);
+    // Let it visibly fall, so "Stay renews" cannot pass on a paused timer.
+    await expect
+      .poll(async () => countdownSeconds(page), { timeout: 20_000, intervals: [500] })
+      .toBeLessThan(opened[screen]! - 1);
+    fell[screen] = await countdownSeconds(page);
+    await page.getByTestId('wsf-kiosk-stay').click();
+    await expect
+      .poll(async () => countdownSeconds(page), { timeout: 10_000, intervals: [200] })
+      .toBeGreaterThan(fell[screen]! + 1);
+    renewed[screen] = await countdownSeconds(page);
+    if (screen === 'loadError') await page.unroute(/wsfGoalPulse/);
+  }
+
+  test.info().annotations.push({
+    type: 'kiosk-deadline-settled',
+    description: SETTLED_SCREENS.map(
+      (s) => `${s}: opened=${opened[s]} fell=${fell[s]} renewed=${renewed[s]}`
+    ).join(' | '),
+  });
+
+  for (const screen of SETTLED_SCREENS) {
+    // The EXISTING deadline, unchanged: 90 seconds, allowing only for the
+    // second that can elapse between the screen settling and the read.
+    expect(opened[screen], `${screen}: the deadline opens at the existing 90s`).toBeGreaterThanOrEqual(88);
+    expect(opened[screen], `${screen}: the deadline is not longer than 90s`).toBeLessThanOrEqual(90);
+    // A WHOLE deadline, not a top-up of what was left.
+    expect(renewed[screen], `${screen}: Stay renews a whole deadline`).toBeGreaterThanOrEqual(88);
+  }
+});
+
+// ---- CASE 16 --------------------------------------------------------------
+/*
+  THE DEADLINE ACTUALLY FIRES, AND A FAILED SIGN-OUT STILL REFUSES TO LIE.
+
+  A countdown that reaches zero without detaching the account would be worse
+  than no countdown at all, because the device would LOOK finished. So this one
+  waits out a real deadline — the product reads `Date.now()`, and a faked clock
+  would be testing the fake. Once, on one screen, and slow by design.
+
+  The failed sign-out is exercised by pressing Finish with the storage fault
+  injected rather than by waiting out a second deadline: it is the same
+  `runKioskFinish` path, and a second 90-second wait would buy nothing.
+*/
+test('the deadline detaches the account by itself, and a failed sign-out on a settled screen says so', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('deadline');
+  await walkUpAndSignIn(page, fx);
+
+  // --- the failed sign-out, on a settled screen -----------------------------
+  await page.goto(`/contribute/w5kn-absent-${fx.stamp}?kiosk=1`);
+  await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 40_000 });
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const proto = IDBDatabase.prototype as IDBDatabase & {
+      __wsfOriginalTransaction?: IDBDatabase['transaction'];
+    };
+    proto.__wsfOriginalTransaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function patched(
+      this: IDBDatabase,
+      names: string | string[] | DOMStringList,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions
+    ): IDBTransaction {
+      const list = typeof names === 'string' ? [names] : Array.from(names as string[]);
+      if (mode === 'readwrite' && list.includes('firebaseLocalStorage')) {
+        throw new DOMException('injected storage fault', 'InvalidStateError');
+      }
+      return proto.__wsfOriginalTransaction!.call(this, names as string[], mode, options);
+    } as typeof IDBDatabase.prototype.transaction;
+  });
+  await page.getByTestId('wsf-kiosk-finish').click();
+  await expect(page.getByTestId('wsf-kiosk-finish-error')).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeHidden();
+  expect(page.url()).toContain('kiosk=1');
+  // Read with THIS suite's probe, which throws on an unreadable store rather
+  // than reporting an empty one. A fail-open read here would turn the failure
+  // under test into a pass.
+  const duringFault = await readAuthRecords(page);
+  expect(duringFault.ok, 'readonly inspection survives the injected fault').toBe(true);
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const proto = IDBDatabase.prototype as IDBDatabase & {
+      __wsfOriginalTransaction?: IDBDatabase['transaction'];
+    };
+    if (proto.__wsfOriginalTransaction) {
+      IDBDatabase.prototype.transaction = proto.__wsfOriginalTransaction;
+      delete proto.__wsfOriginalTransaction;
+    }
+  });
+
+  // --- and now the deadline, waited out for real ----------------------------
+  await page.goto(`/contribute/w5kn-absent-${fx.stamp}?kiosk=1`);
+  await expect(page.getByTestId('wsf-contribute-not-found')).toBeVisible({ timeout: 40_000 });
+  const opened = await countdownSeconds(page);
+  expect(opened, 'the deadline is running on this screen').not.toBeNull();
+  expect((await signedInAccounts(page)).length).toBeGreaterThan(0);
+
+  // Nobody touches it. KIOSK_IDLE_MS is 90s; the wait is that plus slack.
+  await page.waitForURL(new RegExp(`/kiosk/w5kn-absent-${fx.stamp}$`), { timeout: 150_000 });
+  await expect(page.getByTestId('wsf-kiosk-screen')).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 30_000, intervals: [250] })
+    .toBe(0);
+  const atRest = await readStorage(page);
+  expect(atRest.session).not.toContain('wsf.kioskReturnGoalId');
+  const startText = await page.getByTestId('wsf-kiosk-screen').innerText();
+  expect(startText).not.toContain(fx.memberName);
+  expect(startText).not.toContain(fx.memberEmail);
+  await page.getByTestId('wsf-kiosk-start').click();
+  await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 25_000 });
+});
+
+// ---- CASE 17 --------------------------------------------------------------
+/*
+  THE ORDINARY MEMBER IS NOT A KIOSK, ON THE SAME THREE SCREENS.
+
+  The control case for this packet, and the likeliest collateral: a member who
+  hits a closed goal, a missing one or a load failure on their OWN device must
+  keep their navigation and must never be signed out by a timer they did not
+  ask for.
+*/
+test('an ordinary member on a closed, missing or unloadable goal keeps navigation and is never timed out', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const fx = await seedBase('ordinary-settled');
+  const closedGoalId = `w5kn-ord-closed-${fx.stamp}`;
+  await seedGoal(fx.groupId, fx.championUid, closedGoalId, 500, 'closed');
+
+  // Sign in the ordinary way, then open each screen without the kiosk flag.
+  await page.goto(`/contribute/${fx.goalId}`);
+  await expect(page.getByTestId('wsf-contribute-signed-out')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-contribute-signin-link').click();
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 25_000 });
+  await page.getByTestId('wsf-signin-email').fill(fx.memberEmail);
+  await page.getByTestId('wsf-signin-password').fill(fx.password);
+  await page.getByTestId('wsf-signin-submit').click();
+  await page.waitForURL(/\/community\//, { timeout: 30_000 });
+  await expect
+    .poll(async () => (await signedInAccounts(page)).length, { timeout: 25_000, intervals: [200] })
+    .toBeGreaterThan(0);
+
+  const observed: Record<string, string> = {};
+  for (const screen of SETTLED_SCREENS) {
+    if (screen === 'loadError') await page.route(/wsfGoalPulse/, (r) => r.abort('connectionfailed'));
+    const target =
+      screen === 'closed'
+        ? closedGoalId
+        : screen === 'notFound'
+          ? `w5kn-ord-absent-${fx.stamp}`
+          : fx.goalId;
+    await page.goto(`/contribute/${target}`);
+    await expect
+      .poll(
+        async () =>
+          (await page.getByTestId('wsf-contribute-closed').count()) +
+          (await page.getByTestId('wsf-contribute-not-found').count()) +
+          (await page.getByTestId('wsf-contribute-load-error').count()),
+        { timeout: 40_000, intervals: [200] }
+      )
+      .toBeGreaterThan(0);
+
+    const shell = (await page.getByTestId('wsf-member-tabs').count()) > 0;
+    const wayOn =
+      (await page.getByTestId('wsf-contribute-home').count()) +
+      (await page.getByTestId('wsf-contribute-back').count());
+    const countdown = await countdownSeconds(page);
+    const attached = (await signedInAccounts(page)).length;
+    observed[screen] = `shell=${shell} wayOn=${wayOn} countdown=${countdown ?? 'none'} attached=${attached}`;
+
+    expect(shell, `${screen}: the member keeps the shell`).toBe(true);
+    expect(wayOn, `${screen}: the member keeps a way on from this screen`).toBeGreaterThan(0);
+    expect(countdown, `${screen}: an ordinary member is never on a deadline`).toBeNull();
+    expect(attached, `${screen}: the member is not signed out`).toBeGreaterThan(0);
+    if (screen === 'loadError') await page.unroute(/wsfGoalPulse/);
+  }
+
+  test.info().annotations.push({
+    type: 'ordinary-member-settled-screens',
+    description: SETTLED_SCREENS.map((s) => `${s}: ${observed[s]}`).join(' | '),
+  });
+});
