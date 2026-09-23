@@ -117,13 +117,21 @@ async function seed(label: string, goals: number): Promise<Fixture> {
   return { email, password, uid, groupId, goalIds };
 }
 
-type Geometry = { scrollBottom: number; barTop: number; moveTop: number; scrollRange: number };
+type Geometry = { scrollBottom: number; safeBottom: number; viewportBottom: number };
 
 /**
- * The screen's scroll view, the bar and the raised action, measured from the
- * live DOM. The scroll view is found as the scrollable ancestor of the
- * screen's wordmark rather than by a test id, so every state is measured the
- * same way whatever id its scroll view carries.
+ * The screen's scroll view and the safe bottom inset, measured from the live
+ * DOM. The scroll view is found as the scrollable ancestor of the screen's
+ * wordmark rather than by a test id, so every state is measured the same way
+ * whatever id its scroll view carries.
+ *
+ * THE MEMBER BAR IS NOT MEASURED HERE ANY MORE, AND THAT IS THE POINT.
+ * `/contribute` and `/move` are focused flows now: they wear no tab bar, so
+ * "the scroll view stops where the raised action begins" has nothing to
+ * measure against and would pass vacuously on a missing element. Under the
+ * Director's ruling 3 (`5789966395`) the replacement is AT-REST REACHABILITY
+ * ABOVE THE SAFE BOTTOM INSET — the control the member can see must be one
+ * their thumb actually reaches, and must not sit under the home indicator.
  */
 async function geometry(page: Page): Promise<Geometry> {
   return page.evaluate(() => {
@@ -134,84 +142,73 @@ async function geometry(page: Page): Promise<Geometry> {
     let el: Element | null = document.querySelector('[data-testid="wsf-contribute-wordmark"]');
     while (el && !isScroller(el)) el = el.parentElement;
     if (!el) throw new Error('no scroll view around the contribute screen');
-    const bar = document.querySelector('[data-testid="wsf-member-tabs"]');
-    const move = document.querySelector('[data-testid="wsf-member-tab-move"]');
-    if (!bar || !move) throw new Error('the shell bar is not rendered');
+    const readInset = () => {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom,0px);width:0';
+      document.body.appendChild(probe);
+      const h = Math.round(probe.getBoundingClientRect().height);
+      probe.remove();
+      return h;
+    };
     return {
       scrollBottom: Math.round(el.getBoundingClientRect().bottom),
-      barTop: Math.round(bar.getBoundingClientRect().top),
-      moveTop: Math.round(move.getBoundingClientRect().top),
-      scrollRange: el.scrollHeight - el.clientHeight,
+      safeBottom: readInset(),
+      viewportBottom: Math.round(window.innerHeight),
     };
   });
 }
 
 /**
- * Walks the screen's scroll view through its whole range in 8px steps and, at
- * every offset, resolves a tap at the centre of each control that is ON
- * SCREEN -- its centre inside the scroll view's own box. Returns, per control,
- * the offsets at which that tap would land on the shell instead.
+ * At rest, is each named control one the member can actually tap?
  *
- * The on-screen test matters. A control below the fold has a centre that may
- * coincide with the bar's coordinates, and `elementFromPoint` there answers
- * with the bar -- correctly, since the control is not on screen. That is not
- * the defect. The defect is a control the member can see whose tap the shell
- * takes, and only a centre inside the scroll view's box can be that.
+ * Returns, per control, why it is not — empty when it is. "At rest" is the
+ * state the member arrives in, without scrolling: the whole point of the
+ * accepted short-phone rule is that the primary is reachable on arrival, not
+ * after hunting for it.
+ *
+ * `elementFromPoint` at the control's own centre is the honest question,
+ * because it asks what the browser would hand a tap. A control that renders
+ * but is covered answers with whatever covers it.
  */
-async function offsetsHandedToTheShell(
+async function unreachableAtRest(
   page: Page,
-  testIds: readonly string[] | 'all',
-): Promise<Record<string, number[]>> {
+  testIds: readonly string[],
+): Promise<Record<string, string>> {
   return page.evaluate((ids) => {
-    const shell = document.querySelector('[data-testid="wsf-member-tabs"]');
-    if (!shell) throw new Error('the shell bar is not rendered');
-    const isScroller = (el: Element) => {
-      const cs = getComputedStyle(el);
-      return cs.overflowY === 'auto' || cs.overflowY === 'scroll';
+    const out: Record<string, string> = {};
+    const readInset = () => {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom,0px);width:0';
+      document.body.appendChild(probe);
+      const h = Math.round(probe.getBoundingClientRect().height);
+      probe.remove();
+      return h;
     };
-    let scroller: Element | null = document.querySelector('[data-testid="wsf-contribute-wordmark"]');
-    while (scroller && !isScroller(scroller)) scroller = scroller.parentElement;
-    if (!scroller) throw new Error('no scroll view around the contribute screen');
-    const controls: Element[] =
-      ids === 'all'
-        ? Array.from(
-            document.querySelectorAll('button, a[href], [role="button"], [role="link"], input'),
-          ).filter((el) => !shell.contains(el))
-        : ids.map((id) => document.querySelector(`[data-testid="${id}"]`)).filter((el): el is Element => el != null);
-    const labelOf = (el: Element) =>
-      el.getAttribute('data-testid') ||
-      el.getAttribute('aria-label') ||
-      (el.textContent || '').trim().slice(0, 40) ||
-      el.tagName.toLowerCase();
-    const max = scroller.scrollHeight - scroller.clientHeight;
-    const offsets: number[] = [];
-    for (let y = 0; y < max; y += 8) offsets.push(y);
-    offsets.push(max);
-    const out: Record<string, number[]> = {};
-    for (const el of controls) out[labelOf(el)] = [];
-    const box = scroller.getBoundingClientRect();
-    const start = scroller.scrollTop;
-    for (const y of offsets) {
-      scroller.scrollTop = y;
-      for (const el of controls) {
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) continue;
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
-        if (cx < box.left || cx > box.right || cy < box.top || cy > box.bottom) continue;
-        const hit = document.elementFromPoint(cx, cy);
-        if (hit && shell.contains(hit)) out[labelOf(el)].push(y);
+    const safeBottom = readInset();
+    for (const id of ids) {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      if (!el) {
+        out[id] = 'not rendered';
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) {
+        out[id] = 'rendered with no box';
+        continue;
+      }
+      if (r.bottom > window.innerHeight - safeBottom) {
+        out[id] = `runs below the safe bottom inset (bottom ${Math.round(r.bottom)}, limit ${Math.round(window.innerHeight - safeBottom)})`;
+        continue;
+      }
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      if (!hit || !(el === hit || el.contains(hit) || hit.contains(el))) {
+        out[id] = `a tap at its centre lands on ${hit ? (hit.getAttribute('data-testid') ?? hit.tagName) : 'nothing'}`;
       }
     }
-    scroller.scrollTop = start;
     return out;
   }, testIds);
-}
-
-function nothingHandedToTheShell(report: Record<string, number[]>): Record<string, number[]> {
-  const clean: Record<string, number[]> = {};
-  for (const key of Object.keys(report)) clean[key] = [];
-  return clean;
 }
 
 async function horizontalOverflowPx(page: Page): Promise<number> {
@@ -228,7 +225,13 @@ async function arriveAtMove(page: Page): Promise<void> {
   // The goal anchor is what sets the card's height; the frame is not the
   // arrival state until it is there.
   await expect(page.getByTestId('wsf-contribute-context-percent')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+  /*
+    MOVE IS A FOCUSED FLOW AND WEARS NO MEMBER BAR. This used to assert the bar
+    VISIBLE here; the Director's ruling 1 makes MOVE and `/contribute` barless,
+    so the assertion is inverted rather than deleted — it still pins something,
+    and it would fail loudly if the chrome ever came back.
+  */
+  await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
 }
 
 for (const height of ALL_HEIGHTS) {
@@ -241,7 +244,7 @@ for (const height of ALL_HEIGHTS) {
       deviceScaleFactor: 2,
     });
 
-    test(`MOVE step: the raised action never covers "I'm done" or "Skip timer", and both take a real tap`, async ({
+    test(`MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap`, async ({
       page,
     }) => {
       const fx = await seed('mv', 1);
@@ -249,24 +252,19 @@ for (const height of ALL_HEIGHTS) {
       await arriveAtMove(page);
       await saveFrame(page, path.join(OUT, `contribute-move-390x${height}.png`));
 
-      // 1. The allocation: the scroll view stops where the raised action begins.
+      // 1. The allocation: the screen owns its whole height, with no bar to clear.
       const g = await geometry(page);
       expect(
         g.scrollBottom,
-        `the scroll view runs under the raised action (scroll view ends at ${g.scrollBottom}, the circle starts at ${g.moveTop})`,
-      ).toBeLessThanOrEqual(g.moveTop);
+        `the scroll view runs past the viewport (ends at ${g.scrollBottom}, viewport ${g.viewportBottom})`,
+      ).toBeLessThanOrEqual(g.viewportBottom);
 
-      // The primary is completely clear on arrival -- the accepted Page 2 rule.
-      const done = await page.getByTestId('wsf-contribute-done').boundingBox();
-      expect(done).not.toBeNull();
-      expect(Math.round(done!.y + done!.height)).toBeLessThanOrEqual(g.moveTop);
-
-      // 2. At rest and at every scroll offset, neither control's centre belongs to the shell.
-      const handed = await offsetsHandedToTheShell(page, [
+      // 2. At rest, both controls are reachable and clear of the safe inset.
+      const blocked = await unreachableAtRest(page, [
         'wsf-contribute-done',
         'wsf-contribute-skip-timer',
       ]);
-      expect(handed).toEqual({ 'wsf-contribute-done': [], 'wsf-contribute-skip-timer': [] });
+      expect(blocked, `a control the member can see is not one they can tap: ${JSON.stringify(blocked)}`).toEqual({});
 
       // 3. Real taps, no force. Each reaches the entry step through onDoneMoving.
       await page.getByTestId('wsf-contribute-skip-timer').tap();
@@ -289,7 +287,7 @@ for (const height of SHORT_HEIGHTS) {
       deviceScaleFactor: 2,
     });
 
-    test('entry, review, confirmed, unknown and refused all keep every control clear of the raised action', async ({
+    test('entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset', async ({
       page,
     }) => {
       test.setTimeout(120_000);
@@ -307,19 +305,25 @@ for (const height of SHORT_HEIGHTS) {
         const g = await geometry(page);
         expect(
           g.scrollBottom,
-          `${state}: the scroll view runs under the raised action (ends at ${g.scrollBottom}, circle at ${g.moveTop})`,
-        ).toBeLessThanOrEqual(g.moveTop);
+          `${state}: the scroll view runs past the viewport (ends at ${g.scrollBottom}, viewport ${g.viewportBottom})`,
+        ).toBeLessThanOrEqual(g.viewportBottom);
+        await expect(page.getByTestId('wsf-member-tabs'), `${state}: a focused flow is wearing member chrome`).toHaveCount(0);
+        const blockedHere = await unreachableAtRest(page, [primaryTestId]);
+        expect(blockedHere, `${state}: the primary is not reachable at rest: ${JSON.stringify(blockedHere)}`).toEqual({});
         const primary = await page.getByTestId(primaryTestId).boundingBox();
         expect(primary, `${state}: ${primaryTestId} is not rendered`).not.toBeNull();
+        /*
+          THE PRIMARY IS CLEAR ON ARRIVAL, MEASURED AGAINST THE SAFE INSET
+          RATHER THAN AGAINST A BAR THAT NO LONGER EXISTS. The accepted rule was
+          always "the member can see AND tap the primary the moment they
+          arrive"; the raised action was only how that was measured while the
+          bar was there. `unreachableAtRest` above already hit-tests it, and
+          this pins the geometry that makes it true.
+        */
         expect(
           Math.round(primary!.y + primary!.height),
-          `${state}: the primary action is not clear on arrival`,
-        ).toBeLessThanOrEqual(g.moveTop);
-        const handed = await offsetsHandedToTheShell(page, 'all');
-        expect({ state, handedToTheShell: handed }).toEqual({
-          state,
-          handedToTheShell: nothingHandedToTheShell(handed),
-        });
+          `${state}: the primary action runs under the safe bottom inset`,
+        ).toBeLessThanOrEqual(g.viewportBottom - g.safeBottom);
       };
 
       // ---- entry -> review -> confirmed, the ordinary path -----------------

@@ -478,7 +478,7 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     await expectLegible(page, 'wsf-kiosk-finish-error');
   });
 
-  test('ordinary personal contribution is untouched and keeps its tabs', async ({ page }) => {
+  test('ordinary personal contribution is untouched and keeps its own way back', async ({ page }) => {
     test.setTimeout(240_000);
     const fx = await seedKiosk('d');
     // The same route and the same account, WITHOUT the kiosk flag: a member on
@@ -488,24 +488,68 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}`);
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
 
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
-    for (const key of ['home', 'community', 'activity', 'you', 'move']) {
-      await expect(page.getByTestId(`wsf-member-tab-${key}`)).toBeVisible();
-    }
-    // Present is not the same as reachable: the bar has to own the point a
-    // thumb actually lands on, which is how W5 measured it.
-    const box = await page.getByTestId('wsf-member-tab-you').boundingBox();
-    expect(box, 'the You tab has a box').not.toBeNull();
+    /*
+      THE CONTROL IS THE SCREEN'S OWN WAY BACK, NOT THE MEMBER TAB BAR.
+      RE-EXPRESSED UNDER THE DIRECTOR'S RULING 2 (`5789966395`).
+
+      This test's job has never changed: prove the kiosk correction is scoped
+      to the kiosk rather than blanket, by showing that the same route and the
+      same account WITHOUT the flag is untouched. Until the shell migration it
+      did that with the member tab bar, because the bar was the difference.
+
+      `/contribute` is a focused flow now and wears no bar for anybody, so the
+      bar has stopped being a discriminator — for the kiosk OR for an ordinary
+      member. Keeping it would have proved nothing about scoping and everything
+      about a screenshot.
+
+      What still differs is stronger, and it is inside the screen rather than
+      in the shell, so no navigation change can quietly take it away:
+      `app/contribute/[goalId].tsx` renders the kiosk `Finish` pressable OR the
+      ordinary `wsf-contribute-back` link, never both. So an ordinary member is
+      proven ordinary by having their OWN way back to the exact context they
+      came from, by the absence of the kiosk's Finish chrome, and by the
+      absence of an idle deadline. That is what "untouched" was always meant to
+      mean; the bar was only ever how it was measured.
+
+      The method is W1B's and W5's, unchanged: present is not the same as
+      reachable, so the point a thumb actually lands on is hit-tested.
+    */
+    const back = page.getByTestId('wsf-contribute-back');
+    await expect(back, 'an ordinary member has their own way back').toBeVisible();
+
+    const box = await back.boundingBox();
+    expect(box, 'the Back control has a box').not.toBeNull();
     const hit = await page.evaluate(
       ({ x, y }) => {
         const el = document.elementFromPoint(x, y);
-        return Boolean(el?.closest('[data-testid="wsf-member-tabs"]'));
+        return Boolean(el?.closest('[data-testid="wsf-contribute-back"]'));
       },
       { x: (box?.x ?? 0) + (box?.width ?? 0) / 2, y: (box?.y ?? 0) + (box?.height ?? 0) / 2 }
     );
-    expect(hit, 'an ordinary member can still reach their own tabs').toBe(true);
+    expect(hit, 'an ordinary member can actually reach their way back').toBe(true);
+
+    // None of the kiosk's own semantics are present for them.
+    await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-kiosk-finish-bar')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-kiosk-idle-deadline')).toHaveCount(0);
+
+    /*
+      AND IT REALLY RETURNS THEM TO THEIR MEMBER CONTEXT. A link that renders
+      is not a way back; this follows it and lands on the member shell, which
+      is the property the bar's presence used to stand in for.
+    */
+    await back.click();
+    await expect(page.getByTestId('wsf-member-tabs'), 'Back returns an ordinary member to their shell').toBeVisible({
+      timeout: 40_000,
+    });
+
     await page.waitForTimeout(500);
-    await saveFrame(page, frame('ordinary-contribution-keeps-its-tabs-tablet-800x1280.png'));
+    /*
+      The frame keeps its name. It is accepted evidence of THIS test, and the
+      Director's ruling 4 is that accepted frames are never overwritten — so
+      this producer no longer writes it. A successor frame for the barless
+      contribution screen is captured under the new packet path instead.
+    */
   });
 
   test('a repeated ?kiosk parameter is one verdict, not two', async ({ page }) => {
@@ -528,8 +572,15 @@ test.describe('kiosk confinement · the states a correction could quietly break'
     // failing closed must not mean treating every duplicate as a kiosk.
     await page.goto(`/contribute/${fx.goalId}?kiosk=0&kiosk=no`);
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
-    await expect(page.getByTestId('wsf-member-tabs')).toBeVisible();
+    /*
+      The bar assertion that used to sit here is gone, not weakened:
+      `/contribute` is barless for everyone now, so it discriminated nothing.
+      The line below already carried "this is ordinary" on its own — a
+      duplicate `?kiosk` with no recognised value must NOT be read as a kiosk,
+      and the absence of the Finish chrome is exactly that claim.
+    */
     await expect(page.getByTestId('wsf-kiosk-finish-chrome')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-contribute-back'), 'and it keeps its ordinary way back').toBeVisible();
   });
 
   test('the boundary: this is in-app confinement, not a device lockdown', async ({ page }) => {
