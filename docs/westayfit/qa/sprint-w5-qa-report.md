@@ -1394,3 +1394,42 @@ Verification head local and unpushed, named by its parents. Emulator fixtures, o
 W1B's. The Director's AFTER review of the two changed frames (via #440) is separate and these
 results do not stand in for it. No product edit, no staging action, no pin edit, no approval or
 merge recommendation.
+
+
+## Base advance to `ba774eff` — re-verified, and three cases re-pinned
+
+`claude/wsf-app-shell` moved from `c8f38e3` to **`ba774eff`** (#435, the responsive public
+display). It touches **product source** — `app/display/[goalId].tsx` and a new
+`src/ui/displayLayout.ts` — so the kiosk verdicts were not carried over on an argument.
+
+Established first: every file the kiosk journey renders is **byte-identical to `c8f38e3`** —
+`src/kioskSession.ts`, `src/ui/MemberTabBar.tsx`, `app/contribute/[goalId].tsx`,
+`app/kiosk/[goalId].tsx`, `app/_layout.tsx`, `app/you.tsx`, `app/activity.tsx` — and neither the
+kiosk route nor the contribution screen references `displayLayout`. Then the suite was **re-run
+anyway**, because a two-minute run is better evidence than that paragraph.
+
+    17 cases, 17 as expected, 0 unexpected
+      14 passing
+       3 tripwires pinned ahead of their product (K13, K15, K16)
+
+### Why three cases are failing on purpose again
+
+K13, K15 and K16 assert the idle-Finish contract from #436 (`84acea5`) — **verified PASSING
+there**, and deliberately not in this base. On the base they fail because the behaviour does not
+exist yet. That is not a regression and not a defect, and saying so is the whole point of
+marking them rather than leaving the suite red and unexplained. `test.fail()` again, not a skip
+and not a softened assertion: the bodies still run, the assertions are the same ones that passed
+at `84acea5`, and each retires itself the moment the base carries #436.
+
+### One thing `test.fail()` does not do, learned here
+
+K16 first came back **`timedOut`**, which `test.fail()` does **not** absorb — Playwright treats a
+timeout as its own status, so a tripwire pinned ahead of its product reported as an *unexpected*
+result. The cause was a click on a Finish control that does not exist on that base, waiting out
+the whole test timeout. The case now asserts its precondition with a bounded timeout
+(`a settled kiosk screen offers Finish (introduced by #436)`), so it fails in seconds and names
+the missing fact instead of hanging for five minutes.
+
+Worth writing down because it generalises: **a tripwire only works if its failure mode is a
+failed assertion.** One that hangs reports as a broken run, which is exactly the confusion
+between a harness problem and a finding that this report has already had to correct twice.
