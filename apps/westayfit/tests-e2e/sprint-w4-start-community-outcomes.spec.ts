@@ -95,6 +95,29 @@ async function wheelUntilInView(page: Page, testId: string, maxSteps = 40): Prom
   throw new Error(`${testId} never came into view after ${maxSteps} wheel steps`);
 }
 
+/** #22C55E and #91CB7D, as a browser reports them. */
+const ACTION_GREEN_RGB = 'rgb(34, 197, 94)';
+const PROGRESS_GREEN_RGB = 'rgb(145, 203, 125)';
+
+/**
+ * The colour a control is actually painted, walking up from the labelled node
+ * to whichever ancestor carries the fill — react-native-web puts the testID on
+ * the pressable and the background can sit on it or on its wrapper.
+ */
+async function paintedBackground(page: Page, testId: string): Promise<string> {
+  return page.evaluate((id) => {
+    let el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+    if (!el) throw new Error(`${id} is not rendered`);
+    const transparent = (v: string) => v === 'rgba(0, 0, 0, 0)' || v === 'transparent' || v === '';
+    for (let i = 0; i < 4 && el; i += 1) {
+      const bg = getComputedStyle(el).backgroundColor;
+      if (!transparent(bg)) return bg;
+      el = el.parentElement;
+    }
+    return 'rgba(0, 0, 0, 0)';
+  }, testId);
+}
+
 test.describe('start-community outcomes', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -413,5 +436,111 @@ test.describe('start-community stays a usable form', () => {
     const field = await elementState(page, { testId: 'wsf-start-name' });
     expect(field.covered, 'the name field is covered while focused').toBe(false);
     expect(field.box.h).toBeGreaterThanOrEqual(44);
+  });
+});
+
+/**
+ * BOARD 00: #22C55E IS A PRIMARY ACTION, #91CB7D IS CONFIRMED PROGRESS.
+ *
+ * Every primary on this route has to be the first of those. It was not:
+ * `kit.primaryButton` carries the progress green, so the two recovery
+ * primaries and both guard primaries rendered in the colour reserved for a
+ * reported number. `SubmitButton`'s own primary was already correct, which is
+ * why Create community needs verifying rather than changing.
+ *
+ * Asserted as the BROWSER paints it, not as the stylesheet declares it.
+ */
+test.describe('primary actions are painted as primary actions', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  // ONE MEMBER PER TEST. Signing a second account in on a page that is already
+  // signed in never reaches /signin, so these are four contexts, not one.
+
+  test('the signed-out guard', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.goto('/start-community');
+    await expect(page.getByTestId('wsf-start-signed-out')).toBeVisible({ timeout: 25_000 });
+    expect(await paintedBackground(page, 'wsf-start-signed-out-signin')).toBe(ACTION_GREEN_RGB);
+  });
+
+  test('the unverified guard', async ({ page }) => {
+    test.setTimeout(150_000);
+    // Verified is what the form requires, so an unverified member meets the
+    // other guard. Same emulator path as the helper, minus the verify step.
+    const email = `wsf-sc-${stampId()}@example.com`;
+    const password = `Pw-${randomBytes(9).toString('base64url')}`;
+    const res = await fetch(
+      'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key',
+      {
+        method: 'POST',
+        headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true }),
+      },
+    );
+    if (!res.ok) throw new Error(`emulator signUp failed: ${res.status}`);
+    // Not `signInVia`: that helper waits for Home or the profile step, and an
+    // unverified sign-in lands on /verify-email, which is the whole point here.
+    await page.goto('/signin');
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-signin-email').fill(email);
+    await page.getByTestId('wsf-signin-password').fill(password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL(/\/verify-email/, { timeout: 20_000 });
+    await page.goto('/start-community');
+    await expect(page.getByTestId('wsf-start-unverified')).toBeVisible({ timeout: 25_000 });
+    expect(await paintedBackground(page, 'wsf-start-unverified-verify')).toBe(ACTION_GREEN_RGB);
+  });
+
+  test('the form, and the unconfirmed recovery beside its tertiary retry', async ({ page }) => {
+    test.setTimeout(180_000);
+    // Create community — already action green through SubmitButton. Verified,
+    // not redesigned.
+    const me = await member(true);
+    await signInVia(page, me.email, me.password);
+    await openStart(page);
+    expect(await paintedBackground(page, 'wsf-start-submit')).toBe(ACTION_GREEN_RGB);
+
+    await fillValid(page, 'Painted Green');
+    await page.route(CREATE_URL, async (route: Route) => {
+      await route.fetch().catch(() => undefined);
+      await route.abort('failed').catch(() => undefined);
+    });
+    await page.getByTestId('wsf-start-submit').click();
+    await expect(page.getByTestId('wsf-start-check-communities')).toBeVisible({ timeout: 30_000 });
+    await page.unroute(CREATE_URL);
+
+    expect(await paintedBackground(page, 'wsf-start-check-communities')).toBe(ACTION_GREEN_RGB);
+    const retry = await paintedBackground(page, 'wsf-start-submit');
+    expect(retry, 'the deliberate retry is painted as the primary action').not.toBe(
+      ACTION_GREEN_RGB,
+    );
+  });
+
+  test('the profile refusal’s way forward', async ({ page }) => {
+    test.setTimeout(150_000);
+    const me = await member(false);
+    await signInVia(page, me.email, me.password);
+    await openStart(page);
+    await fillValid(page, 'Painted Green');
+    await page.getByTestId('wsf-start-submit').click();
+    await expect(page.getByTestId('wsf-start-profile')).toBeVisible({ timeout: 30_000 });
+    expect(await paintedBackground(page, 'wsf-start-profile')).toBe(ACTION_GREEN_RGB);
+  });
+
+  test('no control on this route is painted in the progress green', async ({ page }) => {
+    test.setTimeout(150_000);
+    const me = await member(true);
+    await signInVia(page, me.email, me.password);
+    await openStart(page);
+    const offenders = await page.evaluate((progress) => {
+      const out: string[] = [];
+      for (const n of Array.from(document.querySelectorAll('[data-testid^="wsf-start"]'))) {
+        if (getComputedStyle(n as HTMLElement).backgroundColor === progress) {
+          out.push((n as HTMLElement).dataset.testid ?? '?');
+        }
+      }
+      return out;
+    }, PROGRESS_GREEN_RGB);
+    expect(offenders, 'progress green is reserved for a confirmed number').toEqual([]);
   });
 });

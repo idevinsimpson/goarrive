@@ -27,7 +27,7 @@ import {
   type JoinPolicy,
 } from '../src/startCommunityOutcome';
 import { ButtonLink } from '../src/ui/ButtonLink';
-import { ERROR_RED, INK_QUIET, kit } from '../src/ui/kit';
+import { ACTION_GREEN, ERROR_RED, INK_QUIET, elevation, kit } from '../src/ui/kit';
 import { OptionGroup, OptionRow } from '../src/ui/OptionRow';
 
 type CreateCommunityResponse = { groupId: string };
@@ -191,8 +191,8 @@ export default function StartCommunity() {
       >
         <ButtonLink
           href="/signin"
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
+          style={action.primary}
+          textStyle={action.primaryText}
           testID="wsf-start-signed-out-signin"
           label="Sign in"
         />
@@ -210,8 +210,8 @@ export default function StartCommunity() {
         {/* One state, one job, one obvious primary (clause 12). */}
         <ButtonLink
           href="/verify-email"
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
+          style={action.primary}
+          textStyle={action.primaryText}
           testID="wsf-start-unverified-verify"
           label="Verify email"
         />
@@ -377,8 +377,8 @@ export default function StartCommunity() {
       {profileBlocked ? (
         <ButtonLink
           href="/profile-setup"
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
+          style={action.primary}
+          textStyle={action.primaryText}
           testID="wsf-start-profile"
           label="Complete your profile"
         />
@@ -387,8 +387,8 @@ export default function StartCommunity() {
       {outcome.kind === 'unconfirmed' ? (
         <ButtonLink
           href={COMMUNITY_LIST_HREF}
-          style={kit.primaryButton}
-          textStyle={kit.primaryButtonText}
+          style={action.primary}
+          textStyle={action.primaryText}
           testID="wsf-start-check-communities"
           label="Check your communities"
         />
@@ -459,6 +459,34 @@ export default function StartCommunity() {
     </FormShell>
   );
 }
+
+/**
+ * A PRIMARY ACTION IS ACTION GREEN, INCLUDING WHEN IT IS A LINK.
+ *
+ * Board 00 gives #22C55E to primary actions and #91CB7D to confirmed progress,
+ * and `kit.primaryButton` carries the progress green — so every `ButtonLink`
+ * on this route rendered a primary action in the colour reserved for a
+ * reported number. `SubmitButton`'s own primary was already correct
+ * (`AuthFormPrimitives`, ACTION_GREEN on #04260F), which is why Create
+ * community and Open <community> needed nothing: this restates that same
+ * treatment for the link-shaped primaries rather than inventing a second one.
+ *
+ * LOCAL ON PURPOSE. `kit.primaryButton` is shared by screens this route does
+ * not own, and correcting it here would repaint all of them on someone else's
+ * behalf. The shared token stays exactly as it is.
+ */
+const action = StyleSheet.create({
+  primary: {
+    backgroundColor: ACTION_GREEN,
+    borderRadius: 16,
+    minHeight: 52,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...elevation.action,
+  },
+  primaryText: { color: '#04260F', fontSize: 17, fontWeight: '900', textAlign: 'center' },
+});
 
 /** The outcome card, in the shape `/join/[joinCode]` already uses for one. */
 const card = StyleSheet.create({
