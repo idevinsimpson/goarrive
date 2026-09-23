@@ -259,3 +259,212 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
     await context.close();
   }
 });
+
+/**
+ * MOVE AS A FOCUS SHEET — the Director's actual-pixel hold (`5795268359`).
+ *
+ * The migration had the presentation right and the screen wrong: the outer
+ * stack presented `/move` as a transparent modal, and the screen then painted
+ * an opaque cream surface across the whole viewport, so the tab underneath was
+ * mounted but invisible, there was no Close, and the screen still reserved the
+ * tab bar's height it no longer had. It read as another page.
+ *
+ * These are the proofs the ruling asks for, and they are about what can be
+ * SEEN and TOUCHED rather than about what is in the document.
+ */
+test('MOVE opens as a sheet over the tab the member was on, and Close returns to it', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+
+  const stamp = stampId();
+  const email = `wsf-w9-sheet-${stamp}@example.com`;
+  const password = 'Sup3rSecret!23';
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Alex Rivera');
+  const groupId = `w9sheet-${stamp}`;
+  await seedCommunity({
+    groupId,
+    displayName: 'Alpharetta Morning Movers',
+    joinPolicy: 'private',
+    members: [{ uid, role: 'member' }],
+  });
+  await seedActiveGoal({
+    goalId: `w9sheetgoal-${stamp}`,
+    groupId,
+    ownerUid: uid,
+    title: 'October Squat Challenge',
+    target: 5000,
+    unit: 'squats',
+    total: 1847,
+  });
+  await seedActiveGoal({
+    goalId: `w9sheetgoal2-${stamp}`,
+    groupId,
+    ownerUid: uid,
+    title: 'Morning Mile Streak',
+    target: 300,
+    unit: 'miles',
+    total: 96,
+  });
+
+  const context = await browser.newContext({
+    viewport: PHONE,
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  try {
+    await signInVia(page, email, password);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-community-goal-hero')).toBeVisible({ timeout: 40_000 });
+
+    /** Everything about the sheet that has to be true wherever it is opened from. */
+    const sheetIsASheet = async (from: string) => {
+      await expect(page.getByTestId('wsf-move-sheet')).toBeVisible({ timeout: 30_000 });
+
+      // IT IS BOUNDED. A panel that starts at the top of the viewport is a
+      // page with a different name; this one leaves the context above it.
+      const sheetBox = (await page.getByTestId('wsf-move-sheet').boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(
+        Math.round(sheetBox.y),
+        `${from}: the sheet starts at the top of the viewport, so nothing is behind it`,
+      ).toBeGreaterThan(0);
+      expect(
+        Math.round(sheetBox.y + sheetBox.height),
+        `${from}: the sheet does not reach the bottom of the viewport`,
+      ).toBeGreaterThanOrEqual(viewport.height - 2);
+
+      // AND THE CONTEXT SHOWS THROUGH. A scrim at full opacity hides exactly
+      // what the transparent presentation exists to keep.
+      const scrim = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="wsf-move-scrim"]');
+        if (!(el instanceof HTMLElement)) return null;
+        const r = el.getBoundingClientRect();
+        const bg = getComputedStyle(el).backgroundColor;
+        const alpha = /rgba?\(([^)]+)\)/.exec(bg)?.[1].split(',').map((n) => Number(n.trim()));
+        return {
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          alpha: alpha && alpha.length === 4 ? alpha[3] : 1,
+        };
+      });
+      expect(scrim, `${from}: the sheet has no scrim`).not.toBeNull();
+      expect(scrim!.alpha, `${from}: the scrim is opaque, so there is no context to see`).toBeLessThan(
+        0.9,
+      );
+      expect(scrim!.w, `${from}: the scrim does not cover the width`).toBeGreaterThanOrEqual(
+        viewport.width - 1,
+      );
+      expect(scrim!.h, `${from}: the scrim does not cover the height`).toBeGreaterThanOrEqual(
+        viewport.height - 1,
+      );
+
+      /*
+        NOTHING OF THE MEMBER CHROME CAN BE TOUCHED. Sampled along the bar
+        rather than at one point: a scrim with a hole in it would pass a single
+        centre reading. The top bar is asked the same question, because it
+        belongs to the covered tab and must be covered with it.
+      */
+      for (const testId of ['wsf-member-tabs', 'wsf-member-topbar']) {
+        const reachable = await page.evaluate((id) => {
+          const el = document.querySelector(`[data-testid="${id}"]`);
+          if (!(el instanceof HTMLElement)) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const y = Math.round(r.y + r.height / 2);
+          for (let i = 1; i <= 9; i += 1) {
+            const x = Math.round(r.x + (r.width * i) / 10);
+            const top = document.elementFromPoint(x, y);
+            if (top instanceof Node && el.contains(top)) return true;
+          }
+          return false;
+        }, testId);
+        expect(
+          reachable,
+          `${from}: ${testId} can still be touched under the MOVE sheet`,
+        ).toBe(false);
+      }
+
+      // AND THERE IS ONE EXPLICIT WAY OUT, at a real touch size.
+      const closeBox = (await page.getByTestId('wsf-move-close').boundingBox())!;
+      expect(Math.round(closeBox.width), `${from}: Close is under 44px wide`).toBeGreaterThanOrEqual(
+        44,
+      );
+      expect(
+        Math.round(closeBox.height),
+        `${from}: Close is under 44px tall`,
+      ).toBeGreaterThanOrEqual(44);
+    };
+
+    /*
+      1 · FROM HOME. The tab underneath keeps a planted mark and a planted,
+      non-vacuous scroll, and Close brings back that exact screen.
+    */
+    expect(await markNode(page, 'wsf-community'), 'Home was marked').toBe(true);
+    const homeScroll = await setScroll(page, 'wsf-community', 180);
+    expect(homeScroll, 'Home has somewhere to scroll to').not.toBeNull();
+    expect(homeScroll!, 'the planted Home scroll is not vacuous').toBeGreaterThan(40);
+
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await expect(page.getByTestId('wsf-move-choose')).toBeVisible({ timeout: 30_000 });
+    await sheetIsASheet('from Home');
+    expect(
+      await markSurvives(page, 'wsf-community'),
+      'from Home: MOVE replaced the tab underneath instead of opening over it',
+    ).toBe(true);
+
+    await page.getByTestId('wsf-move-close').click();
+    await expect(page.getByTestId('wsf-community-goal-hero')).toBeVisible({ timeout: 30_000 });
+    expect(
+      await markSurvives(page, 'wsf-community'),
+      'from Home: Close came back to a rebuilt screen',
+    ).toBe(true);
+    expect(
+      await scrollOf(page, 'wsf-community'),
+      'from Home: Close came back to the top instead of where the member was',
+    ).toBe(homeScroll);
+
+    /*
+      2 · FROM YOU. The tab that is NOT the fallback destination, so a replaced
+      screen could not be mistaken for a preserved one.
+    */
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-name')).toBeVisible({ timeout: 30_000 });
+    expect(await markNode(page, 'wsf-you-name'), 'You was marked').toBe(true);
+
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await expect(page.getByTestId('wsf-move-choose')).toBeVisible({ timeout: 30_000 });
+    await sheetIsASheet('from You');
+    expect(
+      await markSurvives(page, 'wsf-you-name'),
+      'from You: MOVE replaced the tab underneath instead of opening over it',
+    ).toBe(true);
+
+    await page.getByTestId('wsf-move-close').click();
+    await expect(page.getByTestId('wsf-you-name')).toBeVisible({ timeout: 30_000 });
+    expect(
+      await markSurvives(page, 'wsf-you-name'),
+      'from You: Close came back to a rebuilt You, or to Home',
+    ).toBe(true);
+
+    /*
+      3 · COLD. A pasted or deep-linked /move covered nothing, so there is
+      nothing to go back to — and Close must still take the member somewhere
+      rather than being a control that does nothing.
+    */
+    await page.goto('/move');
+    await expect(page.getByTestId('wsf-move-choose')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-move-close')).toBeVisible();
+    await page.getByTestId('wsf-move-close').click();
+    await expect(page.getByTestId('wsf-community-goal-hero')).toBeVisible({ timeout: 40_000 });
+    expect(
+      new URL(page.url()).pathname,
+      'a cold MOVE closed to something other than the canonical member destination',
+    ).toMatch(/^\/(community\/[^/]+)?$/);
+  } finally {
+    await context.close();
+  }
+});
