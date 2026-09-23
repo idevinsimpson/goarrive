@@ -1135,16 +1135,59 @@ await test('no rewrite was removed and the site and codebase are untouched', () 
   assert.equal(STAGING_HOSTING.functions[0].codebase, 'westayfit');
 });
 
-await test('/move/{goalId} still has NO rewrite here — reported, not fixed in this packet', () => {
-  // A finding, pinned so it cannot be lost: apps/westayfit/app/move/[goalId].tsx
-  // exists and exports /move/__dynamic.html, the app's own config carries
-  // `/move/**`, and this operational file does not. A direct load or refresh of
-  // /move/{goalId} on staging therefore 404s today. The packet reserving this
-  // file said "nothing else in that file", so it is NOT added here; this case
-  // asserts the gap so that closing it is a deliberate act and re-opening it
-  // fails a test.
-  assert.equal(firstMatch(stagingRewrites, '/move/some-goal'), null,
-    'if this now matches, the /move gap was closed — update this case deliberately');
+await test('the /move dynamic route has its rewrite', () => {
+  // This case REPLACES a temporary one that asserted the absence of this rule.
+  // A test whose success requires the defect is a test that has to be deleted
+  // the moment the defect is fixed, so it is gone rather than inverted in place.
+  const hit = firstMatch(stagingRewrites, '/move/some-goal');
+  assert.ok(hit, '/move/{goalId} matches no rewrite');
+  assert.equal(hit.source, '/move/**');
+  assert.equal(hit.destination, '/move/__dynamic.html');
+});
+
+await test('THE DEFECT: the main 340e141 list matched /move/{goalId} with nothing at all', () => {
+  // The rewrite list exactly as it stood on main 340e141 — no /move rule and no
+  // catch-all that could stand in for one. Unlike the members case, which was
+  // quietly served the wrong document, this one had no match at all, so a
+  // direct load or refresh fell through to Hosting's 404.
+  //
+  // SOURCE-DERIVED, NOT OBSERVED: no request was made to the staging site from
+  // here. This asserts what the config does, which is the only thing a config
+  // test can assert.
+  const before = stagingRewrites.filter((r) => r.source !== '/move/**' && r.source !== '/community/*/members');
+  assert.equal(firstMatch(before, '/move/some-goal'), null);
+});
+
+await test('bare /move is not what this rule is for, and static content decides it', () => {
+  // apps/westayfit/app/move/index.tsx exports a static document, and Firebase
+  // Hosting applies a rewrite only when no static file matches the request. So
+  // /move is served by that document whether or not this pattern would also
+  // match it — which is why the app's own config has carried the identical
+  // `/move/**` rule all along. Pinned as a statement about the rule's shape:
+  // it is the dynamic child route that needs the rewrite.
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal').destination, '/move/__dynamic.html');
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal/deeper').destination, '/move/__dynamic.html');
+});
+
+await test('the app config on THIS branch cannot be used to cross-check, and that is the finding', () => {
+  // The obvious test — assert the staging list matches the app's
+  // firebase.westayfit.json — cannot be written where this suite runs.
+  //
+  // MEASURED: that file carries 0 rewrites on main and 0 on this branch, and
+  // 12 only on the app-shell lineage (37367fd). The rules live on the
+  // CANDIDATE, the operational copy lives on main, and no single checkout holds
+  // both. That is precisely why the two files' own "Keep the two in sync"
+  // comment is enforced by nothing, and why two rules went missing here while
+  // being present there.
+  //
+  // So this case pins the asymmetry rather than pretending to close it: if the
+  // app config on this branch ever gains rewrites, a real cross-check becomes
+  // possible and this case should be replaced by one.
+  const app = JSON.parse(fs.readFileSync('firebase.westayfit.json', 'utf8'));
+  assert.deepEqual(app.hosting.rewrites ?? [], [],
+    'the app config now carries rewrites on this branch — replace this case with a real cross-check');
+  assert.equal(STAGING_HOSTING.hosting.site, 'westayfit-staging');
+  assert.notEqual(app.hosting.site, STAGING_HOSTING.hosting.site);
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);
