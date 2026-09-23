@@ -79,6 +79,7 @@ jobs:
               (f'{NS}/board-07/WE_STAY_FIT_NORTH_STAR_BOARD_07_CHAMPION_MANAGEMENT_FINAL.png', 'Board 07 · champion management · REVIEWED 2026-09-22 (PR #416 comment 5785727716) · original 2x'),
               (f'{NS}/board-08/WE_STAY_FIT_NORTH_STAR_BOARD_08_GOAL_SETUP_FINAL.png', 'Board 08 · goal setup · REVIEWED 2026-09-22 (PR #409 comment 5786034310) · original 2x'),
               (f'{NS}/board-09/WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL.png', 'Board 09 · lifecycle / history · REVIEWED 2026-09-22 (PR #412 comment 5786014162) · original 2x'),
+              (f'{NS}/board-11/WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL.png', 'Board 11 · single-goal kiosk · REVIEWED 2026-09-23 as a dated PRE-FIX current-build record (PR #423 comments 5786608901 / 5786639647); shared-device kiosk use HELD · original 2x'),
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_INDEX_REVIEW_1x.png', 'REVIEW COPY · INDEX at 1x, same module (WSF_BOARD_SCALE=1)'),
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_00_BRAND_FOUNDATION_FINAL_REVIEW_1x.png', 'REVIEW COPY · Board 00 at 1x, same module'),
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_01_HOME_FINAL_REVIEW_1x.png', 'REVIEW COPY · Board 01 at 1x, same module'),
@@ -90,6 +91,7 @@ jobs:
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_07_CHAMPION_MANAGEMENT_FINAL_REVIEW_1x.png', 'Board 07 · 1x review copy'),
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_08_GOAL_SETUP_FINAL_REVIEW_1x.png', 'Board 08 · 1x review copy'),
               (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_09_LIFECYCLE_HISTORY_FINAL_REVIEW_1x.png', 'Board 09 · 1x review copy'),
+              (f'{NS}/review-copies/WE_STAY_FIT_NORTH_STAR_BOARD_11_SINGLE_GOAL_KIOSK_FINAL_REVIEW_1x.png', 'Board 11 · 1x review copy'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
           TOTAL_MAX = 48 * 1024 * 1024
