@@ -16,6 +16,7 @@ import {
   stampId,
   tsField,
 } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * CURRENT-BUILD CAPTURES of the Champion's contextual Manage sheet, for
@@ -109,8 +110,7 @@ async function openCommunity(page: Page, groupId: string): Promise<void> {
 
 /** Open the sheet through the real quiet control, as a Champion does. */
 async function openManage(page: Page): Promise<void> {
-  await expect(page.getByTestId('wsf-community-manage')).toBeVisible({ timeout: 25_000 });
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-manage-title')).toBeVisible();
 }

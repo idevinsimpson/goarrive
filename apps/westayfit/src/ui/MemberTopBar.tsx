@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -61,6 +61,24 @@ export function MemberTopBar({
   onMenuToggle: (next: boolean) => void;
 }) {
   const insets = useSafeAreaInsets();
+  /*
+    CLOSING THE MENU HANDS FOCUS BACK TO THE CONTROL THAT OPENED IT.
+
+    A menu row is gone the moment it is chosen, so without this the browser
+    drops focus to the document body and a keyboard member is returned to the
+    top of the page. It matters more now that the menu holds a route's own
+    action: the Manage sheet restores focus to whatever was focused when it
+    opened, so if that was a row which no longer exists, Escape leaves focus
+    nowhere. Returning it to the button means the sheet has something real to
+    give it back to.
+  */
+  const menuButtonRef = useRef<{ focus?: () => void } | null>(null);
+  const wasOpen = useRef(menuOpen);
+  useEffect(() => {
+    if (wasOpen.current && !menuOpen) menuButtonRef.current?.focus?.();
+    wasOpen.current = menuOpen;
+  }, [menuOpen]);
+
   return (
     <View
       // `zIndex` so the open menu sheet lies over the page body rather than
@@ -89,6 +107,7 @@ export function MemberTopBar({
         </Pressable>
 
         <Pressable
+          ref={menuButtonRef as never}
           onPress={() => onMenuToggle(!menuOpen)}
           style={styles.menuTap}
           accessibilityRole="button"

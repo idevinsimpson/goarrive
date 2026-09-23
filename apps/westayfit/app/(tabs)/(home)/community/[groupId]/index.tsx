@@ -54,6 +54,7 @@ import {
 } from '../../../../../src/shareGoalDisplay';
 import { wsfTheme } from '../../../../../src/theme';
 import { PROGRESS_GREEN } from '../../../../../src/ui/brandAssets';
+import { useMemberShellAction } from '../../../../../src/ui/memberShellActions';
 import { ButtonLink } from '../../../../../src/ui/ButtonLink';
 import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
@@ -96,6 +97,7 @@ import {
   ON_NAVY_MUTED,
   ON_NAVY_RULE,
   SURFACE,
+  TEXT_MUTED,
   display,
   elevation,
   kit,
@@ -1025,6 +1027,34 @@ export default function CommunityPage() {
   // Coming back to this screen (from a contribution, say) re-reads progress.
   // The first focus is the mount, which the effect above already covers.
   const focusedBefore = useRef(false);
+  /*
+    MANAGE, OFFERED BY THE SHELL, FOR A CHAMPION LOOKING AT THIS COMMUNITY.
+
+    Registered here rather than drawn below: the row it used to live in is
+    gone. Three conditions, all read from what this screen already knows —
+    the page is loaded, the role on it is foundingChampion, and there is an
+    account. Anything else offers nothing, which is how an ordinary member
+    never sees it.
+
+    `onPress` opens the SAME sheet the row used to open, by flipping the same
+    state. The scope is the account and the community, so changing either
+    unregisters before it registers, and the whole thing is torn down when the
+    screen loses focus — a tab switch included, since this screen stays mounted
+    underneath the tab a member moves to.
+  */
+  const championHere =
+    state.kind === 'ready' && state.role === 'foundingChampion' && Boolean(user?.uid);
+  useMemberShellAction(
+    championHere
+      ? {
+          key: 'manage-community',
+          label: 'Manage community',
+          onPress: () => setManageOpen(true),
+        }
+      : null,
+    `${user?.uid ?? 'none'}:${groupId}`,
+  );
+
   useFocusEffect(
     useCallback(() => {
       if (focusedBefore.current) setProgressReloadToken((n) => n + 1);
@@ -3226,32 +3256,22 @@ export default function CommunityPage() {
       {...({ 'data-state': 'ready' } as Record<string, unknown>)}
     >
       <View style={styles.inner}>
-        {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar
-            carries it and its tap is the one gesture that goes Home. A copy
-            here stacked a second wordmark under the bar, and its own Home
-            gesture navigated INTO the tab tree from inside it, which pushed a
-            new screen instead of revealing the mounted one.
+        {/* NO PAGE CHROME ROW AT ALL — THE SHELL CARRIES BOTH OF ITS CONTROLS.
 
-            AND THE ROW GOES WITH IT WHEN IT IS EMPTY. Champion tools still get
-            their own row; an ordinary member has nothing to put in one, and
-            leaving it rendered reserved 34px of the first viewport plus the
-            column's 14px gap for nothing at all — under a bar that already
-            costs 52. That is what pushed the first momentum row below the tab
-            bar at 390x844. */}
-        {isChampion ? (
-          <View style={styles.productHeader}>
-            <Pressable
-              onPress={() => setManageOpen(true)}
-              accessibilityRole="button"
-              aria-expanded={manageOpen}
-              accessibilityLabel="Manage: Champion tools"
-              style={styles.manageButton}
-              testID="wsf-community-manage"
-            >
-              <Text style={styles.manageButtonText}>Manage</Text>
-            </Pressable>
-          </View>
-        ) : null}
+            The wordmark went first: the persistent member top bar carries it,
+            and its tap is the one gesture that goes Home. A copy here stacked a
+            second wordmark under the bar, and its own Home gesture navigated
+            INTO the tab tree from inside it, which pushed a new screen instead
+            of revealing the mounted one.
+
+            Manage followed it, on the Director's ruling. Under a persistent
+            bar this row was a second masthead: an ordinary member paid 34px
+            plus the column's 14px gap for an empty row, and a Champion paid 44
+            plus 14 for a single control — which put the goal hero outside the
+            220px product-area budget on the Champion's own view. The trigger
+            is now registered into the bar's menu while this screen is focused
+            (see `useMemberShellAction` above); the sheet, its state and its
+            behaviour are untouched and still live here. */}
         {renderManageSheet()}
 
         {/*
@@ -4071,30 +4091,6 @@ const styles = StyleSheet.create({
   // 18 -> 14. The command-centre rhythm the target sets is denser than the
   // page had; four sections at 18 spent most of what the shorter hero freed.
   inner: { maxWidth: 640, width: '100%', gap: 14 },
-  productHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    // The row still offers a 44px target — the wordmark's own Pressable does
-    // that — but the row no longer reserves 44px of the first viewport for a
-    // mark that is not what the member came for.
-    minHeight: 34,
-    // SLICE 2. The wordmark became a tappable way Home, and a Pressable does
-    // not shrink the way a bare mark did: at 200% text zoom the Manage
-    // control was pushed past the right edge. The row wraps and both children
-    // may shrink, so the pair stays on the screen at any width.
-    flexWrap: 'wrap',
-    columnGap: 8,
-    rowGap: 4,
-  },
-  manageButton: {
-    backgroundColor: '#ECE8E0',
-    borderRadius: wsfTheme.radius.pill,
-    paddingHorizontal: 16,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  manageButtonText: { color: NAVY, fontWeight: '700', fontSize: 14 },
   identity: { gap: 2 },
   identityEyebrow: {
     color: ACTION_GREEN_DEEP,
@@ -4105,7 +4101,19 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   presenceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 1 },
-  presenceText: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17, fontWeight: '500' },
+  /*
+    INK_QUIET -> TEXT_MUTED, FOR CONTRAST RATHER THAN FOR TASTE.
+
+    `INK_QUIET` (#6B7C93) on cream is **3.9:1** — axe measures it, and WCAG AA
+    wants 4.5:1 for text this size. It was failing before this branch and axe
+    could not say so: the line used to sit at y=209, overlapping the navy hero
+    that starts at 210, and an overlap makes the check INCOMPLETE rather than a
+    violation. Deleting the page's chrome row lifted the line onto plain cream,
+    where the check can finish, and it fails. `TEXT_MUTED` (#5A6B85) is the
+    design system's own muted token and measures **5.0:1** on the same cream,
+    so this is a swap to an existing token, not a new colour.
+  */
+  presenceText: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17, fontWeight: '500' },
   switchChip: {
     minHeight: 32,
     justifyContent: 'center',
