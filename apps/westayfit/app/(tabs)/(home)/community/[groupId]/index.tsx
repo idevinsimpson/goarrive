@@ -3226,15 +3226,20 @@ export default function CommunityPage() {
       {...({ 'data-state': 'ready' } as Record<string, unknown>)}
     >
       <View style={styles.inner}>
-        {/* Product chrome: the full wordmark, compact; Champion tools behind one quiet control. */}
-        <View style={styles.productHeader}>
-          {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar
-              carries it and its tap is the one gesture that goes Home. A copy
-              here stacked a second wordmark under the bar, and its own Home
-              gesture navigated INTO the tab tree from inside it, which pushed a
-              new screen instead of revealing the mounted one. The Champion
-              control beside it is untouched. */}
-          {isChampion ? (
+        {/* THE WORDMARK IS THE SHELL'S NOW. The persistent member top bar
+            carries it and its tap is the one gesture that goes Home. A copy
+            here stacked a second wordmark under the bar, and its own Home
+            gesture navigated INTO the tab tree from inside it, which pushed a
+            new screen instead of revealing the mounted one.
+
+            AND THE ROW GOES WITH IT WHEN IT IS EMPTY. Champion tools still get
+            their own row; an ordinary member has nothing to put in one, and
+            leaving it rendered reserved 34px of the first viewport plus the
+            column's 14px gap for nothing at all — under a bar that already
+            costs 52. That is what pushed the first momentum row below the tab
+            bar at 390x844. */}
+        {isChampion ? (
+          <View style={styles.productHeader}>
             <Pressable
               onPress={() => setManageOpen(true)}
               accessibilityRole="button"
@@ -3245,8 +3250,8 @@ export default function CommunityPage() {
             >
               <Text style={styles.manageButtonText}>Manage</Text>
             </Pressable>
-          ) : null}
-        </View>
+          </View>
+        ) : null}
         {renderManageSheet()}
 
         {/*
