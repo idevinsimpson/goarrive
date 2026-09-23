@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, type TextInput } from 'react-native';
@@ -123,7 +123,10 @@ const NAVIGATION_GRACE_MS = 1500;
 export default function StartCommunity() {
   const { ready, user } = useWsfAuth();
   const [name, setName] = useState('');
-  const [nameTouched, setNameTouched] = useState(false);
+  // Two separate facts, because Q3 needs them apart. Leaving the field short
+  // turns its border red and moves NOTHING; the sentence waits for a press.
+  const [nameBlurred, setNameBlurred] = useState(false);
+  const [triedSubmit, setTriedSubmit] = useState(false);
   const [groupType, setGroupType] = useState<GroupType>('familyFriends');
   const [joinPolicy, setJoinPolicy] = useState<JoinPolicy>(defaultJoinPolicyFor('familyFriends'));
   const [submitting, setSubmitting] = useState(false);
@@ -131,22 +134,31 @@ export default function StartCommunity() {
   const nameRef = useRef<TextInput>(null);
 
   /*
-    THREE REFS, BECAUSE A CREATE OUTLIVES THE RENDER THAT STARTED IT.
+    THREE REFS AND THE NAVIGATOR, BECAUSE A CREATE OUTLIVES THE RENDER THAT
+    STARTED IT.
 
     `inFlight` is the duplicate guard, and it is a ref rather than the
     `submitting` state because state lands a tick late: two taps inside one
     frame both read `submitting === false` and both send a create, which is two
-    communities. The ref flips synchronously.
+    communities. The ref flips synchronously. It is HELD once a create is
+    confirmed — see the end of `onSubmit`.
 
-    `alive` and `activeUid` decide whether a settled call may still speak. A
-    member who navigates away, or signs into another account while the request
-    is out, must not have the previous account's result written onto their
-    screen.
+    `alive` and `activeUid` decide whether a settled call may still speak at
+    all: an unmounted screen, or a result that belongs to another account, says
+    nothing.
+
+    `navigation.isFocused()` decides whether it may still MOVE the member.
+    Mounted is not the same as here. "Back to home" is a push, so this form
+    stays mounted — hidden — under the Home the member went to; and a
+    `router.replace` with no source replaces the FOCUSED route, which by then is
+    that Home. Checking only `alive` pulled a member off the page they chose,
+    into a community, seconds after they left (M5).
   */
   const inFlight = useRef(false);
   const alive = useRef(true);
   const activeUid = useRef<string | null>(null);
   const navTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigation = useNavigation();
   const uid = user?.uid ?? null;
 
   useEffect(() => {
@@ -161,8 +173,14 @@ export default function StartCommunity() {
     const previous = activeUid.current;
     activeUid.current = uid;
     // A result belongs to the account that asked for it. On a switch, drop it
-    // rather than leave the new account looking at the old one's community.
-    if (previous !== null && previous !== uid) setOutcome({ kind: 'idle' });
+    // rather than leave the new account looking at the old one's community —
+    // and release the guard, which may be held for the old account's create:
+    // the new account's first create is its own, not a duplicate.
+    if (previous !== null && previous !== uid) {
+      setOutcome({ kind: 'idle' });
+      inFlight.current = false;
+      setSubmitting(false);
+    }
   }, [uid]);
 
   const selectGroupType = (next: GroupType) => {
@@ -215,22 +233,42 @@ export default function StartCommunity() {
           testID="wsf-start-unverified-verify"
           label="Verify email"
         />
+        {/* M4 — ONE WAY OUT. On the barless shell this gate has no tabs, and
+            "Verify email" is forward progress, not an exit. The same quiet
+            link the form itself ends with, at its 44 px touch height. */}
+        <SecondaryLink href="/" label="Back to home" testID="wsf-start-unverified-back" />
       </FormShell>
     );
   }
 
   const trimmedName = name.trim();
   const problem = nameProblem(name);
-  // No red before the member has tried: "give it a name" waits for a submit
-  // attempt or for them to leave the field. The ceiling is different — they
-  // have demonstrably typed something, and the count is only useful while they
-  // can still see what they are cutting.
+  /*
+    Q3 — NOTHING MAY MOVE BETWEEN PRESS AND RELEASE.
+
+    Pressing Create blurs the field first. This used to insert "Give your
+    community a name." under the field on that blur, which is ABOVE the
+    button: at 390x844 and 430x932, with the field still partly on screen, the
+    button moved ~52 px between press and release, the release landed on the
+    summary line, and the press did nothing at all (W7, 16/16 at each class).
+
+    So leaving the field short now changes only the border's COLOUR — the same
+    1.5 px width, so no layout moves — and the sentence arrives with the press
+    that asks for it, which also puts focus on the field. That removes the
+    movement by construction: no timing, no scroll anchoring, and no reliance
+    on which element the browser gives focus to on a click.
+
+    The ceiling message is unchanged: it appears while typing, when no press is
+    in flight, and the count is only useful while they can still see what to
+    cut.
+  */
   const nameMessage =
     problem === 'long'
       ? nameLongMessage(trimmedName.length)
-      : problem === 'short' && nameTouched
+      : problem === 'short' && triedSubmit
         ? NAME_SHORT_MESSAGE
         : null;
+  const nameLooksWrong = problem !== null && (nameBlurred || triedSubmit || problem === 'long');
 
   const typeLabel = GROUP_TYPE_OPTIONS.find((o) => o.value === groupType)?.label ?? '';
   const policyLabel = JOIN_POLICY_OPTIONS.find((o) => o.value === joinPolicy)?.label ?? '';
@@ -244,7 +282,8 @@ export default function StartCommunity() {
     if (problem) {
       // The button stays tappable; an invalid name sends the member to the
       // field with the message under it, and nothing is sent to the server.
-      setNameTouched(true);
+      // This runs on the press itself, so it is the press that validates.
+      setTriedSubmit(true);
       nameRef.current?.focus();
       return;
     }
@@ -288,8 +327,21 @@ export default function StartCommunity() {
         setOutcome(classifyCreateFailure(e));
       }
     } finally {
-      inFlight.current = false;
-      if (alive.current) setSubmitting(false);
+      /*
+        THE GUARD IS RELEASED ONLY WHEN NOTHING WAS CREATED.
+
+        This used to release unconditionally, before the navigation below had
+        landed — so after a CONFIRMED create, Create community was live again
+        through the transition and through the whole grace period, and a
+        second tap sent a second create: a second community, the exact
+        failure this route exists to prevent. Once a create is confirmed the
+        form is finished; the only ways on are the navigation below or the
+        Open action, and neither sends anything.
+      */
+      if (!created) {
+        inFlight.current = false;
+        if (alive.current) setSubmitting(false);
+      }
     }
 
     if (!created) return;
@@ -302,6 +354,20 @@ export default function StartCommunity() {
       if (!alive.current || activeUid.current !== requestedBy) return;
       setOutcome({ kind: 'created', ...reached });
     };
+
+    /*
+      M5 — THE MEMBER LEFT, SO THE MEMBER STAYS WHERE THEY WENT.
+
+      If this form is no longer the focused screen, it does not navigate. The
+      create has still happened, so the form becomes the created card where it
+      sits — hidden under wherever they are — and a member who comes back to
+      it finds Open rather than a fresh form that would make a second one.
+    */
+    if (!navigation.isFocused()) {
+      offerTheCommunity();
+      return;
+    }
+
     try {
       router.replace(`/community/${reached.groupId}`);
     } catch {
@@ -309,9 +375,10 @@ export default function StartCommunity() {
       offerTheCommunity();
       return;
     }
-    // …and the web, which does not. If we are still mounted after the grace
-    // period, the navigation did not happen; the guards inside make this a
-    // no-op when it did.
+    // …and the web, which does not. The replace above targets this screen,
+    // because this screen is the focused one, so a successful navigation
+    // removes it; still being mounted after the grace period means it did not
+    // happen. The guards inside make this a no-op when it did.
     if (navTimer.current) clearTimeout(navTimer.current);
     navTimer.current = setTimeout(offerTheCommunity, NAVIGATION_GRACE_MS);
   }
@@ -399,7 +466,8 @@ export default function StartCommunity() {
         ref={nameRef}
         value={name}
         onChangeText={setName}
-        onBlur={() => setNameTouched(true)}
+        onBlur={() => setNameBlurred(true)}
+        style={nameLooksWrong ? card.fieldInvalid : undefined}
         autoCapitalize="words"
         returnKeyType="done"
         testID="wsf-start-name"
@@ -513,4 +581,7 @@ const card = StyleSheet.create({
   noteTitle: { color: '#0B1F3A', fontSize: 15, fontWeight: '900' },
   body: { color: INK_QUIET, fontSize: 14, lineHeight: 20 },
   retryNote: { color: INK_QUIET, fontSize: 13, lineHeight: 18, marginTop: 8 },
+  /** Colour only. The shared input's border is already 1.5 px, so changing its
+   * colour moves nothing — which is the whole point (Q3). */
+  fieldInvalid: { borderColor: ERROR_RED },
 });

@@ -400,34 +400,264 @@ test.describe('start-community outcomes', () => {
     expect(await page.getByTestId('wsf-start-error').count()).toBe(0);
   });
 
-  test('leaving the page while a create is open leaves no stray outcome', async ({ page }) => {
-    test.setTimeout(150_000);
+  /**
+   * M5 — A MEMBER WHO LEAVES MID-CREATE STAYS WHERE THEY WENT.
+   *
+   * This REPLACES a test that used `page.goto`: a full document reload, which
+   * destroys the JavaScript realm, so the guard it claimed to prove was never
+   * exercised and the test passed with the guard deleted. The real journey is
+   * the route's own "Back to home", which is a PUSH: the form stays mounted,
+   * hidden, under the Home the member went to, and a `router.replace` with no
+   * source replaces the FOCUSED route — that Home. On 5c28e45 the late success
+   * therefore pulled the member off Home into the new community.
+   *
+   * The request may still finish server-side; that is fine. What must not
+   * happen is the member being moved, or anything being painted where they are.
+   */
+  test('leaving by Back to home mid-create leaves the member on Home when the create lands', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
     const me = await member(true);
+    const creates = countCreates(page);
     await signInVia(page, me.email, me.password);
-    await openStart(page);
-    await fillValid(page, 'Unmounted Mid Flight');
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
 
     const gate: { release: () => void } = { release: () => {} };
     const held = new Promise<void>((resolve) => {
       gate.release = resolve;
     });
     await page.route(CREATE_URL, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
       await held;
-      await route.abort('failed').catch(() => undefined);
+      await route.continue().catch(() => undefined);
     });
 
+    await fillValid(page, 'Left Before It Landed');
     await page.getByTestId('wsf-start-submit').click();
-    await page.goto('/you');
-    await expect(page.getByTestId('wsf-start')).toHaveCount(0);
+    await page.waitForTimeout(400);
+    await page.getByTestId('wsf-start-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
 
     gate.release();
-    await page.waitForTimeout(1500);
+    // Long enough for the create to settle AND for the 1.5 s navigation grace.
+    await page.waitForTimeout(4_000);
     await page.unroute(CREATE_URL);
-    // The abandoned call does not paint anything onto the page that replaced it.
-    expect(await page.getByTestId('wsf-start-outcome').count()).toBe(0);
-    expect(await page.getByTestId('wsf-start-error').count()).toBe(0);
+
+    expect(new URL(page.url()).pathname, 'the late success moved the member after they left').toBe('/');
+    expect(creates(), 'more than one create left the browser').toBe(1);
+    expect(await communityNames(me.uid), 'the create did not commit exactly once').toEqual([
+      'Left Before It Landed',
+    ]);
+    // Nothing from the form is painted where the member is. VISIBLE, not
+    // counted: the left form is still in the DOM, hidden, by design — which
+    // is also what lets a member who comes back find Open instead of a fresh
+    // form that would make a second community.
+    for (const id of ['wsf-start-created', 'wsf-start-outcome', 'wsf-start-error']) {
+      expect(await page.getByTestId(id).and(page.locator(':visible')).count(), `${id} is painted on Home`).toBe(0);
+    }
   });
 });
+
+/*
+  M4 — THE BARLESS UNVERIFIED GATE HAS A WAY OUT.
+
+  On W9's shell this gate has no tabs, and "Verify email" is forward progress,
+  not an exit. Hit-tested at the control's own centre, at rest, because a link
+  that exists but sits under something is not a way out.
+*/
+test.describe('the unverified gate', () => {
+  test.use({ viewport: { width: 390, height: 640 } });
+
+  test('offers Back to home at a real touch size, reachable at its own centre', async ({ page }) => {
+    test.setTimeout(150_000);
+    const email = `wsf-sc-${stampId()}@example.com`;
+    const password = `Pw-${randomBytes(9).toString('base64url')}`;
+    const res = await fetch(
+      'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key',
+      {
+        method: 'POST',
+        headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true }),
+      },
+    );
+    if (!res.ok) throw new Error(`emulator signUp failed: ${res.status}`);
+    await page.goto('/signin');
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-signin-email').fill(email);
+    await page.getByTestId('wsf-signin-password').fill(password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL(/\/verify-email/, { timeout: 20_000 });
+
+    await page.goto('/start-community');
+    await expect(page.getByTestId('wsf-start-unverified')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('wsf-member-tabs')).toHaveCount(0);
+
+    await wheelUntilInView(page, 'wsf-start-unverified-back');
+    const back = await elementState(page, { testId: 'wsf-start-unverified-back' });
+    expect(back.inView, 'Back to home is not in view').toBe(true);
+    expect(back.covered, 'something covers Back to home at its own centre').toBe(false);
+    expect(back.box.h, 'Back to home is under the 44 px touch minimum').toBeGreaterThanOrEqual(44);
+
+    await page.getByTestId('wsf-start-unverified-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+  });
+});
+
+/*
+  Q3 — THE FIRST INVALID PRESS DOES WHAT IT SAYS.
+
+  W7's reproducer, on the positions W7 measured: the name field still partly
+  on screen when Create community is pressed. On 5c28e45 the blur inserted the
+  sentence ABOVE the button, the button moved ~52 px between press and release,
+  and the press did nothing — 16/16 at 390x844 and 16/16 at 430x932. The
+  instrument is W7's, deliberately: placement relative to the route's own
+  scroller, the pointer verified on the button before pressing, and SUBMITTED
+  read from focus() calls on the field or focus now on it — never from the
+  error's presence, which the blur alone used to produce.
+
+  390x640 cannot fail first: wherever the whole button is on screen there, the
+  field is already above the viewport. It stays as a regression guard and says
+  how many risky positions it reached (none).
+*/
+async function watchFieldFocus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __w4fc: number };
+    w.__w4fc = 0;
+    const orig = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function (this: HTMLElement, ...a: unknown[]) {
+      if (this.dataset?.testid === 'wsf-start-name') w.__w4fc += 1;
+      return orig.apply(this, a as []);
+    };
+  });
+}
+
+async function placeSubmitAt(
+  page: Page,
+  scrollTop: number,
+): Promise<{ scrollTop: number; max: number; inputBottom: number; cx: number; cy: number; valid: boolean }> {
+  return page.evaluate((st) => {
+    const btn = document.querySelector('[data-testid="wsf-start-submit"]') as HTMLElement;
+    let sc: HTMLElement | null = btn;
+    while (sc && !(sc.scrollHeight > sc.clientHeight + 1)) sc = sc.parentElement;
+    if (!sc) throw new Error('no scroller above the submit');
+    sc.scrollTop = st;
+    const s = sc.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    const i = (document.querySelector('[data-testid="wsf-start-name"]') as HTMLElement).getBoundingClientRect();
+    const cx = b.left + b.width / 2;
+    const cy = b.top + b.height / 2;
+    let n = document.elementFromPoint(cx, cy) as HTMLElement | null;
+    while (n && !n.dataset?.testid) n = n.parentElement;
+    return {
+      scrollTop: Math.round(sc.scrollTop),
+      max: sc.scrollHeight - sc.clientHeight,
+      inputBottom: Math.round(i.bottom),
+      cx,
+      cy,
+      valid: b.top >= s.top && b.bottom <= s.bottom && !!n && n.dataset.testid === 'wsf-start-submit',
+    };
+  }, scrollTop);
+}
+
+type FirstPress = { kind: 'mouse' | 'touch'; ms: number };
+
+async function pressOnce(page: Page, press: FirstPress, x: number, y: number): Promise<void> {
+  if (press.kind === 'mouse') {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(press.ms);
+    await page.mouse.up();
+    return;
+  }
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(press.ms);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}
+
+for (const vp of [
+  { width: 390, height: 844, risky: true },
+  { width: 430, height: 932, risky: true },
+  { width: 390, height: 640, risky: false },
+]) {
+  for (const press of [
+    { kind: 'mouse', ms: 5 },
+    { kind: 'mouse', ms: 120 },
+    { kind: 'touch', ms: 80 },
+    { kind: 'touch', ms: 150 },
+  ] as FirstPress[]) {
+    test.describe(`Q3 first invalid press @${vp.width}x${vp.height} ${press.kind} ${press.ms} ms`, () => {
+      test.use(
+        press.kind === 'touch'
+          ? { viewport: vp, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
+          : { viewport: vp },
+      );
+
+      test(`validates and shows the error on that same press, field partly visible`, async ({ page }) => {
+        test.setTimeout(300_000);
+        const me = await member(true);
+        await signInVia(page, me.email, me.password);
+        await openStart(page);
+        const max = await page.evaluate(() => {
+          const b = document.querySelector('[data-testid="wsf-start-submit"]') as HTMLElement;
+          let sc: HTMLElement | null = b;
+          while (sc && !(sc.scrollHeight > sc.clientHeight + 1)) sc = sc.parentElement;
+          return sc ? sc.scrollHeight - sc.clientHeight : 0;
+        });
+        const stops = [...new Set([max - 60, max - 20, max].map((v) => Math.max(0, v)))];
+
+        const rows: string[] = [];
+        const bad: string[] = [];
+        let pressed = 0;
+        let risky = 0;
+        for (const st of stops) {
+          await openStart(page);
+          await watchFieldFocus(page);
+          // Focus stays in the field: the press must blur it, as a member's does.
+          await page.getByTestId('wsf-start-name').fill('a');
+          const p = await placeSubmitAt(page, st);
+          await page.waitForTimeout(150);
+          if (!p.valid) {
+            rows.push(`scrollTop ${p.scrollTop}/${p.max}: button clipped or covered, not pressed`);
+            continue;
+          }
+          pressed += 1;
+          if (p.inputBottom > 0) risky += 1;
+          await pressOnce(page, press, p.cx, p.cy);
+          await page.waitForTimeout(600);
+          const o = await page.evaluate(() => {
+            const fc = (window as unknown as { __w4fc: number }).__w4fc;
+            const a = document.activeElement as HTMLElement | null;
+            const active = a?.dataset?.testid ?? a?.tagName.toLowerCase() ?? 'null';
+            const err = document.querySelector('[data-testid="wsf-start-name-error"]') as HTMLElement | null;
+            const r = err?.getBoundingClientRect();
+            return {
+              submitted: fc > 0 || active === 'wsf-start-name' || active === 'wsf-start-name-error',
+              exposed: !!r && r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight,
+              active,
+            };
+          });
+          const verdict = !o.submitted ? 'SWALLOWED' : !o.exposed ? 'ERROR-OFFSCREEN' : 'SUBMITTED';
+          const row = `scrollTop ${p.scrollTop}/${p.max} fieldBottom=${p.inputBottom} -> ${verdict} (focus=${o.active})`;
+          rows.push(row);
+          if (verdict !== 'SUBMITTED') bad.push(row);
+        }
+        test.info().annotations.push({ type: 'positions', description: rows.join(' | ') });
+        test.info().annotations.push({ type: 'risky-positions', description: String(risky) });
+        expect(pressed, `no pressable position was found: ${rows.join(' | ')}`).toBeGreaterThan(0);
+        // NOT VACUOUS: at the classes where the defect lived, the field really
+        // was on screen for at least one press.
+        if (vp.risky) expect(risky, `never pressed with the field on screen: ${rows.join(' | ')}`).toBeGreaterThan(0);
+        expect(bad, 'first presses that did not validate and show the error').toEqual([]);
+      });
+    });
+  }
+}
 
 /**
  * The surface has to stay usable, not only correct: the shared navigation is
