@@ -69,8 +69,25 @@ function callableUrl(name: string): string {
   return `${FUNCTIONS_EMULATOR}/${PROJECT_ID}/us-central1/${name}`;
 }
 
-async function firestoreWrite(docPath: string, fields: Record<string, unknown>): Promise<void> {
-  const url = `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}`;
+/**
+ * A PATCH WITHOUT A MASK REPLACES THE DOCUMENT.
+ *
+ * The first draft of this file dropped the `updateMask` the existing display
+ * specs pass, so flipping one boolean on a seeded goal wiped its title,
+ * target, unit, status and zone — and the refusal that followed looked like
+ * the product refusing to recover. It was this helper deleting the goal's
+ * contents. The mask is not optional in spirit: any write to an existing
+ * document names the fields it means.
+ */
+async function firestoreWrite(
+  docPath: string,
+  fields: Record<string, unknown>,
+  updateMask?: string[]
+): Promise<void> {
+  const mask = updateMask?.length
+    ? '?' + updateMask.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&')
+    : '';
+  const url = `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}${mask}`;
   const res = await fetch(url, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
@@ -445,7 +462,11 @@ test.describe('recovery is an explicit act', () => {
     await expect(page.getByTestId('wsf-display-not-available')).toBeVisible({ timeout: 30_000 });
 
     // Authorize it behind the screen's back; the refusal must hold.
-    await firestoreWrite(`wsfGoals/${goalId}`, { aggregateDisplayAuthorized: { booleanValue: true } });
+    await firestoreWrite(
+      `wsfGoals/${goalId}`,
+      { aggregateDisplayAuthorized: { booleanValue: true } },
+      ['aggregateDisplayAuthorized']
+    );
     await page.waitForTimeout(6_000);
     await expect(page.getByTestId('wsf-display-not-available')).toBeVisible();
     await expect(page.getByTestId('wsf-display-total-line')).toHaveCount(0);
