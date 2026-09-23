@@ -75,3 +75,45 @@ stale 46-function emulator, `5794840586` §10).
    label remains "email delivery blocked at runtime; signup smoke incomplete".
 
 Prepared by L0. Not deployed, not authorized, not a change to `main`.
+
+## Addendum 2026-09-23 ~15:30Z — owner authorization to deploy accepted work to staging incrementally
+
+Owner instruction relayed at #365 `5797657663`: "Let's start getting our staging
+deployed as we go." This supersedes the frontend-only hold for the reviewed
+sprint; L0 remains sole integrator and release operator; releases are
+serialized and each one still passes the applicable acceptance checks.
+
+**First release:** candidate `37367fd` (or W9's exact accepted head if it is
+integrated first). Authorized scope: the candidate's reviewed functions
+(three callables, application-level member checks and privacy contract
+preserved), the single `wsfContributions` COLLECTION composite index on
+`westayfit-staging` only, the members hosting rewrite on the operational
+staging config, the reviewed verifier / config / pin changes, and the staging
+workflow dispatch. Not authorized: merging the app PR into `main`, production,
+broader IAM / WIF grants, impersonation, credential hunting, secret / mail
+changes, access-control bypass, the shared index catalog, deleting indexes.
+
+**Sequence (nothing run at the time of writing):**
+1. PR #448 (verifier; W3 `d794c61` → L0 `b81d6c6`) → W5 review → §6 step 8
+   correction if it holds → merge to `main`.
+2. W3 packet `5797676140`: members rewrite in `firebase.westayfit.staging.json`
+   ahead of the catch-all (+ test) and the single-index operator procedure.
+3. Index creation: **not** done by the workflow (firestore is absent from the
+   staging config by design). Operator / console action against
+   `westayfit-staging` by an identity with `datastore.indexes.create`; L0 holds
+   no cloud credential in this session. READY receipt recorded on #365 before
+   any query that needs it.
+4. Pin PR to `main`: `approvedAppSha` = candidate, `candidateAddedFunctions` =
+   the three, `expectedPriorFunctions` = 46 (BEFORE is 46 for the creating
+   deploy), package label restated with the email and kiosk holds.
+5. Dispatch `deploy`; expected `INVENTORY_BEFORE=46`, `INVENTORY_AFTER=49`,
+   `VERIFY=pass`, hosted marker = candidate.
+6. Transport for the three callables: the deploy SA cannot set invoker IAM
+   on newly created services (workflow ~L495; verifier L61–86), so they arrive
+   SHUT; opening them is `run.services.setIamPolicy` on the three services in
+   `westayfit-staging` — an operator-track action, not L0's and not the
+   workflow's. `VERIFY=pass` with transport SHUT is not a working feature.
+7. Served claim only after: index READY; reachability + member / non-member /
+   name-off / activity-off checks; members deep link; exact marker; narrow
+   smoke + cleanup; tested rollback accounting for retained services and the
+   verifier's EXPECTED set. Email and shared / unattended kiosk holds carried.
