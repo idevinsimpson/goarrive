@@ -79,7 +79,10 @@ another goal** stays a secondary because demoting it is the point.
 It is a route-local style, not an edit to `kit.primaryButton`: the kit belongs to another
 surface, and one screen's ruling is not licence to restyle every button in the product. The fill
 is now **asserted** by the producer (`rgb(34, 197, 94)`, and explicitly not the progress green),
-so a later edit that reaches for `kit.primaryButton` here fails before a frame is written.
+so a later edit that reaches for `kit.primaryButton` here fails before a frame is written. The
+route's own wordmark — its sole chrome, since this is a focused flow — is asserted the same way,
+so a shell or chrome pass that removed it from this route fails here rather than being noticed
+by a human comparing frames.
 
 ### The follow-up: the fourth primary
 
