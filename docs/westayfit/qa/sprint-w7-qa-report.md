@@ -852,7 +852,277 @@ branch is taken as a base.
 
 ---
 
-# Check 12 — further checkpoints
+# Check 12 — packet 10 FINAL: W9's migrated shell at `41f80f3`
 
-Awaiting L0's routing. Packet 10 (W9's shell) remains held pending its corrected
-successor SHA; W7 verifies that successor, never `7466158` and never `494af36`.
+**Packet 10 FINAL** — L0 `5797409315`, Director `5797396895`, W9 `5797354159`.
+ACK `5797575130`. Verified on a **local merge of `41f80f3` with app-shell
+`37367fd`, never pushed**. New spec:
+`apps/westayfit/tests-e2e/sprint-w7-shell-successor-verify.spec.ts`.
+
+**Verdict: PASS on all eight items, with two shortfalls named** — one missing
+frame (item 7) and one flaky test in W9's own suite (item 8). Neither is a
+product defect; both are W9's to close.
+
+## 12.0 · Setup, re-derived
+
+`41f80f3f76b0279e968976483afdebe8d0334bf6` was the **live head** of
+`claude/wsf-app-shell-nav` at ACK time. `37367fd` is **not** an ancestor of it
+— merge-base `740a763` — so L0's "local merge with `37367fd`" is a real merge
+with content on both sides, not a fast-forward. It merged clean, taking two
+files from the base side (`sprint-w6-goal-setup-after-capture.spec.ts` and a
+README), and every product blob checked after the merge is byte-identical to
+`41f80f3`. 38 commits, 120 files, 35 product files under `app/` and `src/`.
+
+Backend, `firestore.rules`, both hosting configs and `package.json` are
+**unchanged** against `37367fd`, and the `1041a1f` members-rewrite mirror is
+present, so the running emulators were valid for this tree without restart.
+
+## 12.1 · Results by item
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Manage / query delta | **PASS** — §12.2 |
+| 2 | MOVE true focus sheet | **PASS** — §12.3, and confirmed in the frames' own pixels §12.6 |
+| 3 | Members link ≥44px | **PASS**, and the 43 mutant run by W7 — §12.4 |
+| 4 | Contribution / kiosk protections | **PASS 19/19**, proof shown non-vacuous — §12.5 |
+| 5 | Shell invariants | **PASS** — §12.3 |
+| 6 | Ordinary `build:web`, no tree deletion | **PASS** — exit 0 over a pre-existing 31-entry tree, zero error lines |
+| 7 | Frames | **PASS on 12 of 13** — the Champion hamburger frame does not exist, §12.6 |
+| 8 | Counts, separated | **PASS**, with one flaky test named — §12.7 |
+
+Runs: **W9's own 22/22** first clean run. **Kiosk 19/19.** **Unit 821/821**
+across 48 files — W9's number exactly. **W7's own spec 6/6**, twice
+consecutively with identical measurements.
+
+## 12.2 · Item 1 — the Manage and query delta
+
+- **One sheet, not two.** `manageOpen` exists exactly once
+  (`community/[groupId]/index.tsx:417`) and `wsf-community-manage-panel`
+  exactly once (:2511). `memberShellActions.tsx` only calls back into the
+  screen's own state. No second implementation.
+- **The nineteen suites.** Commit `120887bf` touches 20 files: **18 existing
+  spec files** mechanically updated, **1 new** spec, plus the new
+  `helpers/memberShell.ts`. W9's "nineteen" counts the 19 `.spec.ts` files
+  including the new one. Stated precisely rather than smoothed.
+- **`INK_QUIET` → `TEXT_MUTED`, computed here rather than taken on report.**
+  `INK_QUIET` `#6B7C93` on cream `#F7F5F0` is **3.91:1** — W9 said 3.9, and it
+  fails AA's 4.5:1. `TEXT_MUTED` `#5A6B85` is **4.97:1**. Confirmed.
+  **Chased, and it is not a shipping issue:** `INK_QUIET` survives on
+  `slotNote` in `MemberTopBar` (11.5px on a CREAM sheet — the same failing
+  3.91:1). But `slotNote` renders only for `kind: 'slot'`, and the shipping
+  menu (`app/(tabs)/_layout.tsx`) is built from `action` and `link` only;
+  `slot` appears solely in the gated `design-target/shell-next` prototype. The
+  failing token never reaches a shipping surface.
+- **The `tapInView` fix relaxes nothing — checked, not accepted.** A flake fix
+  in a shared helper is exactly where an assertion quietly weakens. The patched
+  helper still throws on `!found` and on `!inView`, and `elementState` computes
+  `inView: inside && !covered`, so the uncovered check *is* enforced. The diff
+  is 28 added lines and 1 removed; everything after the settle loop is
+  untouched.
+- **The `?groupId=` regression is narrow, not relaxed** — four explicit claims
+  (exact pathname; `groupId` the only permitted param and only as a redundant
+  copy; one community rendered and it is the one the path names; survives a
+  cold load), with the reverted tidy-up recorded. Passes.
+
+## 12.3 · Items 2 and 5 — measured with a harder instrument
+
+Re-running another lane's suite measures whether their code agrees with their
+tests. W7's own spec therefore asks what theirs does not:
+
+- **Hit-testing, not presence.** "The bar is covered" and "the bar cannot be
+  touched" are different claims, and only the second is the property a focus
+  sheet exists to have. Every reachability claim goes through
+  `document.elementFromPoint` at the control's own centre.
+- **The Close is a control, exercised by clicking it** — never `page.goBack()`,
+  which would prove the browser works rather than that the sheet has a way out.
+
+Measured at `41f80f3`:
+
+| Claim | Result |
+|---|---|
+| Close named, visible, ≥44×44, reachable at its own centre | holds, `aria-label="Close"` |
+| All five tab controls unreachable while the sheet is open | holds — and each was reachable *before* it opened, so the claim is not vacuous |
+| The tab underneath is the same instance (host-node mark survives) | holds |
+| The sheet draws no top bar, tab bar, wordmark or hamburger of its own | holds |
+| Close returns to the same instance at the same scroll | holds — Home planted **160** and returned **160** |
+| From **You**, returns to `/you`, same instance, same scroll | holds — range **159px** at 360×480, planted and returned |
+| Cold `/move` has a reachable Close that leads into the shell, not back to `/move` | holds |
+| Reduced motion keeps the hierarchy | holds — scrim still `rgba(...)` with `0 < alpha < 1`, Close reachable, bar unreachable, tab alive |
+| One top bar, one box, one wordmark on all four tabs | holds — identical x/y/w/h across Home, Community, Activity, You |
+| Hamburger ≥44×44 wherever offered | holds |
+| Settings is a utility entry | holds — a real `link` to `/settings`, not a slot |
+| `move/[goalId].tsx` untouched | **blob-identical** to `37367fd`: `94e9cb6a…` |
+| No obsolete `MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG` reservation in MOVE | holds — the import is gone; only a comment recording that it used to be there |
+
+## 12.4 · Item 3 — the members link, and the 43 mutant W7 ran itself
+
+Measured independently: **350×44**, matching W9's number. W7 also asked the
+harder question in its own instrument — that the **top, middle and bottom** of
+the box each belong to the pressable rather than to a padded ancestor. They do.
+
+**The 43 mutant, run here rather than read from W9's report.** With
+`minHeight` set to 43 the measurement reports `350x43` and fails:
+
+```
+Error: "See everyone in this community" is 43px tall, under the 44px floor
+  Expected: >= 44
+  Received:    43
+```
+
+Restored and re-verified blob-identical (`19ea8329…`).
+
+**Recorded, not a finding:** at the arrival scroll the **bottom of the link is
+covered by the raised MOVE control** — a hit test there returns
+`wsf-member-tab-move`. W9's commit says it scrolls clear for this reason; W7
+reproduces the observation first, so the reason for the scroll is evidence
+rather than folklore, then does the same. The link is the right height; this is
+a note about where the raised action sits.
+
+## 12.5 · Item 4 — and the vacuity W1B warned about
+
+**19/19**: `sprint-w1b-kiosk-confinement` **10**, `sprint-w1b-kiosk-idle-finish`
+**9**. All nine idle-finish tests ran **by name**, including *"the probe itself
+cannot mistake an unreadable auth store for an empty one"* — the one W1B said
+matters most (`5791649248`). **The 8-of-9 short count does not recur here.**
+
+W1B's concern (`5792637993`) was that the six-point proof can pass vacuously,
+and on inspection the concern is well founded in shape: every one of the six
+points is an **absence** assertion, and `MemberTabBar.tsx:123`'s own comment now
+calls the kiosk predicate "DEFENCE IN DEPTH" because a route outside `(tabs)`
+structurally cannot have a bar. A proof that passes because the defect is
+unreachable is not the same as a proof that would notice.
+
+**So it was made to fail.** First attempt was too coarse — turning the kiosk
+flag off wholesale broke the fixture (`wsf-contribute-entry-screen resolved to 2
+elements`) before the contract ran, which proves nothing and is reported as a
+fixture failure, not a result. The surgical mutant — **one** member destination
+injected into the very screen the proof runs on — makes it fail at **both**
+classes including the 390×640 fixture, on the contract assertion itself:
+
+```
+Error: expect(locator).toHaveCount(expected) failed
+  Expected: 0
+  Received: 1
+```
+
+after a full 7.2s walk-up to the real screen. **The proof is non-vacuous.**
+Product restored and verified blob-identical (`8f506c6b…`); the suite passes
+again on the restored build.
+
+## 12.6 · Item 7 — the frames, and the one that is missing
+
+**The strip is present in every frame, by geometry.** All 12 route frames are
+their device height **+18** (390×658 and 390×862), which is exactly the
+`BANNER` the easel adds; the label text is asserted by W9's own spec.
+
+**The MOVE pair proves the focus sheet in its own pixels.** Decoded and compared
+against `cd5089b`, the head before the focus-sheet commit:
+
+| | upper band, dominant colours |
+|---|---|
+| `cd5089b` | `rgb(11,31,58)` (opaque NAVY page) and white |
+| `41f80f3` | `rgb(148,155,161)` and cream `rgb(247,245,240)` showing through |
+
+`rgb(148,155,161)` is **exactly** `rgba(11,31,53,0.42)` composited over cream —
+computed independently, matching to the last digit. The prior screen is legible
+behind the scrim, and where the You card sits behind it the pixels read
+`rgb(11,31,55)`, which is the same scrim over NAVY `#0B1F3A`. Row-profiling
+shows the layout the source describes: full-bleed scrim, then a **bottom-
+anchored cream sheet** (`maxHeight: '88%'`) reaching the viewport edge with
+white cards inside it — **no reserved band** where the tab bar used to be.
+
+**THE SHORTFALL.** L0's item 7 names
+`MIGRATED-g-champion-menu-open-390x640.png`. It **does not exist** — not in the
+successor directory, not anywhere in `docs/`, and `git log --all --diff-filter=A`
+finds it was **never added in any branch**. W9's capture spec defines six scenes
+`a`–`f` over two devices (12 frames) plus the contact sheet; there is no `g`
+scene and nothing references that filename. The 13th file present is
+`MIGRATED-contact-sheet.png`, not the Champion frame. `docs/design-target/review/champion-manage/`
+is W8's earlier evidence and is unrelated.
+
+## 12.7 · Item 8 — counts, kept apart
+
+**Whole e2e: 404 tests — 359 passed, 4 failed, 41 skipped.** Reconciled exactly:
+W9 reports 355 / 3 / 41, and W7's spec contributed **5** tests at the time of
+that run (the sixth was added afterwards). 355 + 3 = 358 non-skipped; 358 + 5 =
+**363** = 359 + 4. Skips match at **41**.
+
+First-run failures, listed apart and each read rather than assumed:
+
+| Test | First run | Serial rerun | What it is |
+|---|---|---|---|
+| `event-return.spec.ts:230` | fail (element not found) | **pass** (4.1s) | load-related, consistent with W9's "serial reruns passing" |
+| W7 `from Home` | fail (Close covered) | **pass** | **mine** — I hit-tested mid-slide; fixed by settling the sheet's box |
+| W7 `a cold /move` | fail | **pass** | same cause, same fix |
+| `sprint-w9-shell-production.spec.ts:91` | fail (160 vs 218) | **fails again** | **flaky in W9's suite — see below** |
+
+### The one W9 should look at
+
+`sprint-w9-shell-production.spec.ts:91` fails on *"tapping the tab you are on
+threw the scroll away"*, `Expected: 160  Received: 218`. It failed in the full
+suite **and** on the serial rerun. Run alone and serially three more times it
+gave **pass, pass, fail** — so across four serial attempts it failed twice.
+**W9's "serial reruns passing" does not hold for this test here.**
+
+**It is not a product defect, and W7 can show that.** My own first draft hit the
+identical 160→218 signature, and the cause is the fixture, not the shell: the
+scroll is planted as soon as Home's hero appears, but Home's presence and
+activity reads land afterwards and the content grows by ~58px underneath the
+planted offset. Waiting ~800ms for the page to settle before planting makes my
+equivalent assertion pass every time, and W9's *other* production test — MOVE
+opening over the tab and closing back onto it — passes throughout. The
+behaviour the test is guarding is real and holds; the test will redden CI at
+roughly one run in two until it settles the page before it measures.
+
+## 12.8 · W7's own errors in this check, recorded
+
+Four, all mine, all fixed rather than worked around:
+
+1. **Hit-testing a moving sheet.** Passed in isolation, failed twice in the full
+   parallel suite. The sheet slides; a hit test mid-travel reads coordinates the
+   control has already left. Fixed by settling the sheet's box.
+2. **A five-minute hang instead of a diagnosis.** `boundingBox()` waits for a
+   re-attach, so a sheet that opened and went away burned the whole test
+   timeout with nothing but "waiting for locator". Replaced with a direct
+   geometry read that can report **ABSENT** and the page's URL — which is what
+   produced finding 3.
+3. **A fixture that asked the product the wrong question.** Six communities with
+   none chosen made MOVE replace to Home, correctly: `app/move/index.tsx` says
+   *"No community, or several with none chosen: Home already owns both of those
+   questions."* My test waited for a sheet the product was right not to show.
+   Fixed by having the member open a community first, as a member would.
+4. **A scroll claim that was nearly vacuous.** `/you` does not overflow at
+   390×844; it gave 10px at 390×640 and **none** once a community had been
+   visited. Rather than condition the assertion away or drop it, the test moved
+   to 360×480, where the range is a real **159px**, and prints the range it
+   measured. The ancestor-only scroll walk (which W9's helper also uses) was
+   also wrong here: You's scroller is a **descendant**, so the instrument now
+   looks both ways.
+
+## 12.9 · Bound and hygiene
+
+Emulators only (`demo-wsf-local`), 49 callables. `ts:check` exit 0.
+`check-evidence-intact` exit 0 at every checkpoint — **9 frozen / 20 accepted,
+no byte changed**. Artifacts and `test-results` cleaned after every run and
+nothing from them committed; the 37 artifact files under `tests-e2e/artifacts`
+are pre-existing and identical at `37367fd` and `41f80f3`. Every mutant was
+restored and re-verified **blob-identical** before the next measurement.
+Verification only: **no product edit retained, no edit to any W9 or W1B test, no
+capture written, no frame rebaselined, no target called an AFTER.**
+
+**Complete result logs retained** per `5796198857`, unfiltered, including every
+failure's full error text and the mutant runs.
+
+**One mid-check environment failure, diagnosed once and not looped.** W9's suite
+first reported 22/22 *failed* with `TypeError: fetch failed`. That was a harness
+collapse, not a product result: the emulators had been reaped because I
+launched them as `nohup … &` inside a background task, so the wrapper exited and
+took the child with it. Restarted as the task's own foreground process; 49
+callables loaded, an unauthenticated callable correctly returned 401, and the
+re-run was 22/22 passed. The failed run is reported as what it was.
+
+---
+
+# Check 13 — further checkpoints
+
+Awaiting L0's routing. The W4-on-accepted-shell seam check follows W9's PASS.
