@@ -372,7 +372,7 @@ export default function DisplayGoal() {
             <WsfWordmark variant="navy" height={22} testID="wsf-display-wordmark" />
           </View>
           <View style={styles.phoneHero} testID="wsf-display-phone-hero">
-            <View style={[styles.genericBlock, big ? { maxWidth: Math.round(720 * tf) } : null]}>
+            <View style={styles.genericBlock}>
               <Text
                 style={styles.genericHeadline}
                 accessibilityRole="header"
@@ -419,7 +419,7 @@ export default function DisplayGoal() {
         testID={copy.testID}
         {...({ dataSet: { layout: wide ? 'wide' : 'phone', tier } } as Record<string, unknown>)}
       >
-        <View style={styles.genericBlock}>
+        <View style={[styles.genericBlock, big ? { maxWidth: Math.round(720 * tf) } : null]}>
           <WsfWordmark
             variant="white"
             height={tier === 'collective' ? 64 : tier === 'booth' ? 44 : tier === 'portrait' ? 34 : 22}
