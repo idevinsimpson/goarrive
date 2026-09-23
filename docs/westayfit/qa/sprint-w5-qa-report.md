@@ -1774,3 +1774,107 @@ packet attached them to a head that cannot produce them. Not a defect.
 establish a working member feature (item 6) — that needs the separately
 authorized transport step and a member / non-member / privacy smoke. No live
 call, secret, deploy or dispatch was made, and nothing here folds into #393.
+
+---
+
+## DELTA PACKET — W3's packet-2 corrections (L0 `5798510976`)
+
+Heads by `rev-parse`: #448 `5de3c71681f23dfe83c518d9f96c1f36cc308168` (docs only over the
+already-reviewed `b81d6c65`, +208 / −6), #449 `10019faa7ae3ee981ff1026174f97b0851c8088b`
+(over `main` `340e1417`, +106, two files). The accepted 24 / 0 carries; nothing from
+`b81d6c6` is disturbed, which is what makes this a delta rather than a restart.
+
+**Six items: PASS. Two findings, neither blocking, plus one sequencing note.**
+
+### Item 1 — rewrite correctness: PASS
+
+`/community/*/members → /community/__dynamic/members.html` sits at index **1**, after
+`/community/*/challenge` (0) and before `/community/**` (2); the config diff against
+`main` is exactly one line and the other ten rules are untouched.
+
+**Five mutations re-derived here rather than taken on report** — accepting "five caught"
+from the author verifies nothing. Each is caught (`exit=1`): rule removed; moved after the
+catch-all; destination changed to the home document; source `*` → `**`; challenge rule
+removed. Baseline `workflow-contract: 61 passed`, exit 0.
+
+The negative is real, and it is the point of the finding: under `main`'s list the first
+rule matching `/community/g123/members` is `/community/**` → `/community/__dynamic.html`,
+i.e. the community **home**, not a 404. Source-derived from the rewrite table; no request
+was made and none is claimed.
+
+### Item 2 — destination exists at the candidate: PASS
+
+`apps/westayfit/app/community/[groupId]/members.tsx` exists at `37367fd2` (blob
+`829795d0`), and `inject_meta.py` replaces each `[param]` segment with `__dynamic`, so
+`community/__dynamic/members.html` is emitted.
+
+W3's build-guard finding is **confirmed in source**: `inject_meta.py:68` hardcodes
+`HOSTING_CONFIG = REPO_ROOT / "firebase.westayfit.json"` — the **app** config. The guard
+therefore cannot catch a staging-config omission, which is exactly how this gap survived.
+
+### Item 3 — §6a doc correction: PASS, with one defect
+
+§6a states everything required: a retaining rollback re-pin keeps the exact
+`candidateAddedFunctions` list; `expectedPriorFunctions` describes the **measured** BEFORE;
+removing the key while services remain is invalid; function removal is a separately
+designed operation; `VERIFY=pass` with transport SHUT is not a working feature; and no
+"permanently 49". Consistent with the item 4 I confirmed.
+
+**FINDING D1 (low, documentation accuracy).** §6a cites `verify-deployment.mjs:182` as
+where the three are reported `present but not expected`. On the head the document ships
+with (`5de3c716`) that report is at **line 272**; line 182 is inside the turn-service name
+list. On `main` the report is at 186 and 182 is the `unexpected` computation, so the
+citation was imprecise before the +108-line change and is simply wrong after it. It is a
+line number a reader consults mid-rollback, which is when a wrong one costs most.
+
+### Item 4 — index procedure: PASS
+
+One index only, derived from the query rather than the request; `index.ts:9597` at
+`37367fd2` is exactly
+`.collection('wsfContributions').where('communityGroupId','==',groupId).orderBy('createdAt','desc')`,
+matching the declared COLLECTION index (`communityGroupId` ASC, `createdAt` DESC).
+
+**`wsfCommunityMembers` needs none — checked, not assumed:** it queries `wsfMemberships`
+with two equality filters and a `limit`, no `orderBy`, which single-field indexes serve.
+
+Also present and correct: explicit `--project=westayfit-staging`; the catalog deploy
+refused with its pruning hazard named; `datastore.indexes.create` on an operator identity
+with an explicit refusal to widen the deploy SA; `READY` vs `CREATING` vs `NEEDS_REPAIR`;
+`FAILED_PRECONDITION` before READY; rollback = leave the index. The unexecuted-command
+statement **is** present, at §3: *"I could not execute or version-check this command — no
+`gcloud` call is permitted to me and none was made."*
+
+### Item 5 — sequence alignment: PASS on ordering, one gap
+
+§6 already matches the Director's corrected ordering: index **READY** (step 3) precedes
+the pin (4) and the dispatch (5); the transport is read at step 6, **after** the deploy;
+the smoke follows at 7. No wording implies a pre-deploy transport measurement of services
+that do not yet exist.
+
+**FINDING D2 (low, completeness).** The corrected sequence also requires, before dispatch,
+*a named legitimate operator with the applicable access and an agreed post-deploy
+handoff*. §6 does not state that as a precondition — step 6 says only that opening the
+services "is a separate approval". No handoff document exists on either branch; L0's
+receipt references `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md`, which is **not**
+present at `5de3c716` or `10019faa`.
+
+### Item 6 — `/move/**` excluded, and one sequencing note
+
+Confirmed absent from #449's config, as stated. **Note for the merge order, not a defect
+in this delta:** `10019faa` carries a case at `workflow-contract.test.mjs:891` whose
+success *requires* the `/move` gap — it asserts `firstMatch(stagingRewrites,
+'/move/some-goal')` is `null`. The Director has already ordered that inverted in W3's
+packet 3 ("do not preserve a test whose success requires the defect"). If #449 merges to
+`main` before packet 3 lands, `main` briefly carries a test that passes only while the
+defect exists and fails the moment it is fixed. Sequencing, and the packet-3 review closes
+it.
+
+### Numbers, as the runs printed them
+
+| head | suites | self-counted + node:test | exit |
+| --- | --- | --- | --- |
+| #448 `5de3c716` | 13 | 231 + 66 = **297** (unchanged from `b81d6c6`; docs only) | 0 |
+| #449 `10019faa` | 13 | 225 + 66 = **291** | 0 |
+
+Both match the packet exactly. No live call, secret, deploy, dispatch or IAM; W3's files
+read, never edited.
