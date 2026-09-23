@@ -144,6 +144,52 @@ for (const { w, h } of CLASSES) {
       }
     });
 
+    /**
+     * THE TWO GUARDS, ADDED WITH THE COLOUR CORRECTION.
+     *
+     * They are AFTER frames of THIS route's signed-out and unverified states,
+     * from the real gates — no fixture, no drawing. They exist because the
+     * Board 00 correction touches their primaries too (`kit.primaryButton`
+     * carried the progress green), and a fix with no pixel behind it is a
+     * claim rather than evidence. New filenames, so the #428 allowlist needs
+     * the six of them added.
+     */
+    test('the signed-out and unverified gates, whose primaries the fix also touched', async ({
+      page,
+    }) => {
+      test.setTimeout(180_000);
+
+      await page.goto('/start-community');
+      await expect(page.getByTestId('wsf-start-signed-out')).toBeVisible({ timeout: 25_000 });
+      await expect(page.getByTestId('wsf-start-signed-out-signin')).toBeVisible();
+      await saveFrame(page, path.join(OUT, `AFTER-start-gate-signed-out-${c}.png`));
+
+      // Unverified: the same emulator signup the helpers use, minus the verify
+      // step, so the gate is met for the reason it exists.
+      const email = `wsf-after-${stampId()}@example.com`;
+      const password = `Pw-${randomBytes(9).toString('base64url')}`;
+      const res = await fetch(
+        'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key',
+        {
+          method: 'POST',
+          headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
+          body: JSON.stringify({ email, password, returnSecureToken: true }),
+        },
+      );
+      if (!res.ok) throw new Error(`emulator signUp failed: ${res.status}`);
+      await page.goto('/signin');
+      await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('wsf-signin-email').fill(email);
+      await page.getByTestId('wsf-signin-password').fill(password);
+      await page.getByTestId('wsf-signin-submit').click();
+      await page.waitForURL(/\/verify-email/, { timeout: 20_000 });
+
+      await page.goto('/start-community');
+      await expect(page.getByTestId('wsf-start-unverified')).toBeVisible({ timeout: 25_000 });
+      await expect(page.getByTestId('wsf-start-unverified-verify')).toBeVisible();
+      await saveFrame(page, path.join(OUT, `AFTER-start-gate-unverified-${c}.png`));
+    });
+
     test('the profile refusal, from a member who really has no profile', async ({ page }) => {
       test.setTimeout(180_000);
       await signedIn(page, false);
