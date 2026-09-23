@@ -323,6 +323,24 @@ export default function You() {
       {profile.memberSince ? (
         <Text style={s.since} testID="wsf-you-since">{`Member since ${profile.memberSince}`}</Text>
       ) : null}
+      {/*
+        SETTINGS — AN ORDINARY ROW INSIDE THE PAGE, NOT A HEADER GEAR.
+        The social lane's proposal drew a gear in the top-right chrome; that was
+        refused because W9 owns the persistent header and hamburger, and a
+        second utility affordance in that corner would either fight W9's or
+        become dead. A working row here is real on arrival and can be exposed
+        from the hamburger later with nothing left to wire up.
+      */}
+      <Pressable
+        onPress={() => router.push('/settings')}
+        style={s.settingsRow}
+        testID="wsf-you-settings"
+        accessibilityRole="link"
+        accessibilityLabel="Settings"
+      >
+        <Text style={s.settingsText}>Settings</Text>
+        <Text style={s.settingsChevron}>›</Text>
+      </Pressable>
       {/* The account row lives in the field so it is above the fold at every
           class, and so Sign out is never below a list that failed to load. */}
       <View style={s.account}>
@@ -629,6 +647,16 @@ const s = StyleSheet.create({
   name: { color: ON_NAVY },
   since: { color: ON_NAVY_MUTED, fontSize: 13, fontWeight: '600' },
 
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: HAIRLINE,
+  },
+  settingsText: { color: ON_NAVY, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  settingsChevron: { color: ON_NAVY_MUTED, fontSize: 20, fontWeight: '700' },
   account: {
     marginTop: 10,
     flexDirection: 'row',
