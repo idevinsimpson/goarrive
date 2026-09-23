@@ -1,4 +1,4 @@
-# WSF — visual-review export for PR #436's kiosk idle-Finish child: the 8 PNGs
+# WSF — visual-review export for PR #436's kiosk idle-Finish child: the 9 PNGs
 # W1B adds under docs/design-target/review/kiosk-idle-finish/ (actual captures
 # of the real kiosk contribution route at the child commit e4243f1, one commit
 # on the accepted #427 head 6690370: closed goal, goal not found and load error
@@ -59,7 +59,7 @@ jobs:
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
           KI = 'docs/design-target/review/kiosk-idle-finish'
-          # THE EXACT ALLOWLIST: the 8 AFTER PNGs PR #436 adds under kiosk-idle-finish/ — W1B's actual
+          # THE EXACT ALLOWLIST: the 9 AFTER PNGs PR #436 adds under kiosk-idle-finish/ — W1B's actual
           # captures at the PR head this job checks out, original committed bytes only. AFTER means
           # 'what the build renders at this commit'; DELIVERED, not accepted.
           allow = [
@@ -70,6 +70,7 @@ jobs:
               (f'{KI}/kiosk-load-error-tablet-800x1280.png', 'AFTER · actual kiosk contribution route at this commit (idle-Finish child of accepted 6690370) · DELIVERED, not accepted · kiosk-load-error-tablet-800x1280.png'),
               (f'{KI}/kiosk-load-error-short-phone-390x640.png', 'AFTER · actual kiosk contribution route at this commit (idle-Finish child of accepted 6690370) · DELIVERED, not accepted · kiosk-load-error-short-phone-390x640.png'),
               (f'{KI}/kiosk-load-error-with-unresolved-tablet-800x1280.png', 'AFTER · actual kiosk contribution route at this commit (idle-Finish child of accepted 6690370) · DELIVERED, not accepted · kiosk-load-error-with-unresolved-tablet-800x1280.png'),
+              (f'{KI}/kiosk-load-error-with-unresolved-short-phone-390x640.png', 'AFTER · actual kiosk contribution route at this commit (idle-Finish child of accepted 6690370) · DELIVERED, not accepted · new in the corrected successor · kiosk-load-error-with-unresolved-short-phone-390x640.png'),
               (f'{KI}/kiosk-not-found-signout-failed-tablet-800x1280.png', 'AFTER · actual kiosk contribution route at this commit (idle-Finish child of accepted 6690370) · DELIVERED, not accepted · kiosk-not-found-signout-failed-tablet-800x1280.png'),
           ]
           PER_FILE_MAX = 8 * 1024 * 1024
