@@ -152,7 +152,7 @@ The named-operator row is a **precondition of dispatch**, not a request for scop
 narrow staging authority is already granted and recorded (#365 `5797657663` /
 `5797754279`, ordering `5798443901`). The handoff document for this release lane is
 `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md` (#448,
-`dfcce291426aa45c69a6faf3835cd4a4d3f29c2c`, blob `7cae9186`); it defers the index command
+`29000435a18c61c9223e0278fed07d3814c04480`, blob `36b7df13`); it defers the index command
 to **this** document and currently leaves the operator **unassigned**. Its other operations
 — including the transport correction's permission and its read-back — are **its** rows, and
 are deliberately not restated here so the two documents cannot drift apart.
