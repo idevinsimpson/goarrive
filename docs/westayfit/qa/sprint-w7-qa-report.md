@@ -4,7 +4,7 @@ Worker: **W7 — INDEPENDENT JOURNEY QA**
 Branch: `claude/wsf-sprint-w7-journey-qa`
 Starting SHA: `a193b43086ee0564b8edf99083ab164c08f9ceff` (`claude/wsf-app-shell`, verified by `git rev-parse HEAD` at session start, not assumed)
 Assignment: PR #365 comment 5787366259, section "W7 — INDEPENDENT JOURNEY QA".
-Session: `session_0196eWn3hsB1BduPkKM8y5md` (Claude Code Remote, the owner's included subscription; no API billing).
+Session: `session_01PjqZ76c16dHJyxHaMvCoE5` (Claude Code Remote, `claude-opus-5`; the owner's included subscription, no API billing). Predecessor: `session_0196eWn3hsB1BduPkKM8y5md`, retired at `5787486366` for the model correction only.
 
 ## Scope and constraints held
 
@@ -14,20 +14,88 @@ Session: `session_0196eWn3hsB1BduPkKM8y5md` (Claude Code Remote, the owner's inc
 - Existing `e5-goal-form` coverage is reused, not re-created. W5's kiosk suite is not duplicated.
 - Findings route through L0 to W6; W7 takes no fix ownership.
 
-## Environment — verified, not assumed
+## Session continuity
+
+This report was opened by `session_0196eWn3hsB1BduPkKM8y5md`, which L0 retired at `5787486366` solely to put W7 on the sprint's recorded worker model. The replacement session is **`session_01PjqZ76c16dHJyxHaMvCoE5`** (`claude-opus-5`, configured and last-served; reasoning effort not exposed to the session and therefore not stated). It resumed from the pushed `5fddc36` on the same branch, in the same PR #434, under the same file reservation. Its container started empty, so every environment row below was re-established and re-proved in this session — the predecessor's proof is not carried over.
 
 | Step | Command | Result |
 |---|---|---|
 | Install | `npm ci` at root, `apps/westayfit`, `functions-westayfit` | exit 0 each |
 | Functions build | `npm --prefix functions-westayfit run build` | exit 0 |
-| Web build | `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1 npm run build:web` (in `apps/westayfit`) | exit 0 |
-| Emulators | `METADATA_SERVER_DETECTION=none npx -y firebase-tools emulators:start --config firebase.westayfit.emulators.json --project demo-wsf-local` | hosting 5010, firestore 8080, auth 9099 answer; functions 5001 loaded 46 functions incl. `wsfCreateGoal` |
-| Browser | `WSF_PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome` | Playwright drives the pre-installed Chromium; no `playwright install` run |
-| Stack smoke | `WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 npm --prefix apps/westayfit run test:e2e -- e5-goal-form.spec.ts` | **3 passed, 0 failed (16.4s)** |
-| Evidence guard after the run | `node scripts/westayfit/check-evidence-intact.mjs` | frozen BEFORE 9 paths intact; accepted TARGET/AFTER 20 paths intact |
+| Web build | `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1 npm --prefix apps/westayfit run build:web` | exit 0 |
+| Emulators | `METADATA_SERVER_DETECTION=none npx -y firebase-tools emulators:start --config firebase.westayfit.emulators.json --project demo-wsf-local` | ready; hosting 5010, firestore 8080, auth 9099, functions 5001 all answer; `wsfCreateGoal` initialised |
+| Browser | `WSF_PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome` | the pre-installed Chromium; `playwright install` not run |
+| Stack smoke | `… npm --prefix apps/westayfit run test:e2e -- e5-goal-form.spec.ts` | **3 passed, 0 failed (13.8s)** |
+| Evidence guard | `node scripts/westayfit/check-evidence-intact.mjs` | exit 0 — 9 frozen, 20 accepted, no byte changed |
 
-Artifacts reverted and `test-results` cleaned after every e2e run; none committed.
+---
 
-## Status
+# Check 1 — W4's `/?view=communities` (PR #432, head `de8f567`): **PASS**
 
-- Packet 1 — `/goals/new` creation-result / recovery contract on the pinned code: **IN PROGRESS** (ACK posted; the probe `apps/westayfit/tests-e2e/sprint-w7-goal-setup-contract.spec.ts` is the first artifact to follow).
+Routed by the Director (`5787475396` §2) and repeated in L0's handover note (`5787486366`, routing note 1) as W7's first ready-candidate check. One independent focused run. No screenshot rebaseline, no full-app audit, no duplication of W5's kiosk suite.
+
+**Verdict: PASS.** Every case the routing named holds on `de8f567`, and the opt-in half of the suite is demonstrated to fail on the unmodified base, so the pass is a measurement and not a vacuum.
+
+## How it was run, and on what
+
+| | |
+|---|---|
+| Product under test | `de8f567` (`claude/wsf-sprint-w4-home-view-communities`), source review PASS `5787470558` |
+| How | `git merge --no-commit --no-ff de8f567` into the W7 working tree — **a local merge that was never pushed and was aborted after the run**. `git diff de8f567 -- apps/westayfit/app/index.tsx` was empty, i.e. the product file exercised was byte-identical to the candidate's. |
+| Spec | `apps/westayfit/tests-e2e/sprint-w7-home-view-communities.spec.ts` — W7's own file, written from the candidate's stated contract, **not** a re-run of `sprint-w4-home-view-communities.spec.ts` |
+| Branch hygiene | W7's branch carries only the W7 spec and this report. No product source, no W4 file. |
+
+## Why a separate spec, and what it adds
+
+The candidate's prose states that *"the array expo-router returns for a repeated `?view=`"* keeps today's behaviour. **The candidate's own spec never exercises a repeated param** — its four default-preserving variants are `?view=banana`, `?view=`, `?view=Communities` and `?viewer=communities`. The repeated cases were therefore an asserted-but-untested half of the contract, and are the reason this check was routed to an independent worker. Two further gaps are covered here: the opt-in arriving **alongside other params** (the shape a real F6 link will have), and *"nothing is written, nothing is remembered"* checked **from the absent state**, which is the direction that can actually regress.
+
+## Results on `de8f567` — 7 passed, 0 failed (9.5s)
+
+| # | Case | Result |
+|---|---|---|
+| 1 | Repeated `view`, every order — `?view=communities&view=communities`, `?view=banana&view=communities`, `?view=communities&view=banana`, `?view=&view=communities` | **default holds** — the community opens, the list is never rendered |
+| 2 | Repeated unknown — `?view=x&view=y`, `?view=COMMUNITIES&view=Communities` | **default holds** |
+| 3 | Single exact value, alone and beside unrelated params — `?view=communities`, `?view=communities&from=create`, `?from=x&view=communities` | **opts in** — the list renders, Home stays at `/`; bare `/` before and after still opens the community |
+| 4 | Three communities, nothing remembered, opt-in navigation | the per-account key `wsf.currentCommunity.<uid>` is **still absent afterwards** — nothing written |
+| 5 | Three communities, remembered one is **neither the newest nor the only one** | bare `/` opens the remembered one; the opt-in lists all three including the two never opened; the repeated form still opens the remembered one; the key is **unchanged** across the whole round trip |
+| 6 | Zero communities | `?view=…` in bare, single and repeated form is inert — empty state, still at `/`, nothing remembered |
+| 7 | Signed out, with the param in single, doubled and mixed form | signed-out Home every time; **`wsf-home-my-list` renders zero times** |
+
+## The negative control — the pass is not vacuous
+
+The same spec was then run against the **unmodified base** `a193b43` (merge aborted, web rebuilt from base, emulators untouched):
+
+```
+2 failed
+  › the single exact value opts in, alongside unrelated params
+  › a remembered community that is not the newest still opens, and the list shows the rest
+5 passed (28.0s)
+```
+
+Both failures were read, not assumed, and both are the correct failure: `Error: "?view=communities" did not reach the list … waiting for getByTestId('wsf-home-my-list') … element(s) not found` — the list never renders on base because Home opens the community, which is precisely the behaviour `de8f567` changes. No fixture failed; no harness collapsed; sign-in, seeding and the signed-out gate all worked identically in both runs.
+
+The other five tests pass on **both** heads, and that is the intended shape: they assert the *default*, the signed-out gate and the no-write claim, none of which the candidate is supposed to move. They are non-regression checks, and stating otherwise would overclaim them.
+
+## One finding, recorded as an observation rather than a defect
+
+The repeated-param results let the mechanism be pinned down rather than assumed, and it is worth recording because the candidate's comment asserts it without testing it:
+
+- `?view=banana&view=communities` did **not** opt in → the value is not last-wins.
+- `?view=communities&view=banana` did **not** opt in → it is not first-wins either.
+- `?view=communities&view=communities` did **not** opt in.
+
+So a repeated key does not reduce to a bare string on this path, which is consistent with the array `useLocalSearchParams` is documented to return, and `wantsCommunityList` (a strict `view === 'communities'`) rejects it. **The safety-relevant direction is the one that matters and it is sound: no accidental or mixed URL was able to switch the default off.** The cosmetic converse — a member who somehow arrives at `?view=communities&view=communities` gets the community opened rather than the list — is the conservative outcome, not a defect, and no change is requested for it.
+
+## Constraints held during this check
+
+No product source was written or modified on the W7 branch; no screenshot was captured or rebaselined; no creative verdict was given; nothing was deployed. `node scripts/westayfit/check-evidence-intact.mjs` → exit 0 (9 frozen, 20 accepted, no byte changed) after the runs; `npm --prefix apps/westayfit run ts:check` → exit 0; `artifacts/` reverted and `test-results/` cleaned after every e2e run, and neither is committed.
+
+## Routing
+
+PASS reported to L0 on PR #434 with the product SHA `de8f567`, plus one deduplicated pointer on #365. W7 takes no fix ownership and claims no acceptance: L0 integrates, the Director accepts.
+
+---
+
+# Check 2 — `/goals/new` creation-result / recovery contract (pinned `a193b43`)
+
+**IN PROGRESS.** Artifact to follow: `apps/westayfit/tests-e2e/sprint-w7-goal-setup-contract.spec.ts`.
