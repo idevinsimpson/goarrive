@@ -40,19 +40,22 @@ import {
  *
  * MEASURED MATRIX. BEFORE = W4's delivered `5c28e45` (product tree
  * `e5cfabd6`, identical to `d467754 ⊕ dd86721`; the delivery changed only
- * specs and frames), run with this file. Old shell = `d467754 ⊕ 37367fd`,
- * from W7's diagnostic runs (#434 `5800875664`), not yet re-run with this file.
+ * specs and frames), run with this file. Old shell = `d467754 ⊕ 37367fd`
+ * (`05d2aef9`, local, never pushed), run with this file.
  *
  *   test                                  old shell   BEFORE (5c28e45)   correct fix
- *   SEAM-1 390x844, 4 press methods          FAIL        FAIL ×4          PASS
- *   SEAM-1 430x932, 4 press methods          FAIL        FAIL ×4          PASS
- *   SEAM-1 390x640, 4 press methods          pass        PASS ×4          PASS  (see below)
+ *   SEAM-1 390x844, 4 press methods          FAIL ×4     FAIL ×4          PASS
+ *   SEAM-1 430x932, 4 press methods          FAIL ×4     FAIL ×4          PASS
+ *   SEAM-1 390x640, 4 press methods          PASS ×4     PASS ×4          PASS  (see below)
  *   SEAM-2  list opt-in survives the click    PASS        FAIL             PASS  (Q2 — W9's)
  *   SEAM-2b reload with a remembered group    PASS        FAIL             PASS  (Q2 — W9's)
  *   SEAM-3  unverified gate way out           PASS        FAIL             PASS  (M4 — ruling pending)
  *   SEAM-4  leaving mid-create                FAIL        FAIL             PASS  (M5 — ruling pending)
+ *   SEAM-1 CONTROL ×8 (reader can see a pass)  —           PASS ×8          PASS
+ *   SEAM-4 CONTROL (assertions satisfiable)    —           PASS             PASS
  *   BARLESS ×4 states                         FAIL        PASS             PASS
- *   CONTROL instruments see chrome            n/a         PASS             PASS
+ *   CONTROL instruments see chrome            n/a (no     PASS             PASS
+ *                                             top bar)
  *   FRAMES calibration on d467754             PASS        PASS             PASS
  *   FRAMES delivery (WSF_W7_DELIVERY_SHA)     —           PASS on 5c28e45  PASS
  *
@@ -345,6 +348,67 @@ for (const vp of [
   }
 }
 
+/**
+ * SEAM-1 POSITIVE CONTROL — the instrument can read SUBMITTED on this build.
+ * SEAM-1 has never passed at 390x844 or 430x932 on any build, so without this
+ * a correct fix could fail for an instrument reason. Same fixture, placement,
+ * press and outcome reader as SEAM-1, at max scroll (field on screen); the only
+ * difference is a TEST-SIDE capture listener that cancels the default of a
+ * mousedown on Create, so pressing it does not blur the field and nothing is
+ * revealed mid-press — the shape of the fix "don't move the control being
+ * pressed". The click still fires, so onSubmit runs as it would after a fix.
+ * No product file is touched; it proves the reader, not a fix.
+ *
+ * Two other controls were tried and rejected as geometry-dependent (measured,
+ * QA report Check 14): excluding the field from scroll anchoring (submits at
+ * 390x844, not at 430x932, where content above the field becomes the anchor),
+ * and taking the error out of flow (submits at both, but the out-of-flow error
+ * lands off screen at 390x844).
+ */
+for (const vp of [
+  { width: 390, height: 844 },
+  { width: 430, height: 932 },
+]) {
+  for (const press of PRESSES) {
+    const label = `${press.kind} ${press.ms} ms`;
+    test.describe(`SEAM-1 CONTROL @${vp.width}x${vp.height} ${label}`, () => {
+      test.use(
+        press.kind === 'touch'
+          ? { viewport: vp, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
+          : { viewport: vp },
+      );
+      test(`CONTROL the SEAM-1 reader sees a first press submit when the button stays put @${vp.width}x${vp.height} ${label}`, async ({ page }) => {
+        test.setTimeout(300_000);
+        const me = await person(`c1${vp.height}${press.kind[0]}${press.ms}`);
+        await signInVia(page, me.email, me.password);
+        await openForm(page);
+        await watchFieldFocus(page);
+        await page.evaluate(() => {
+          document.addEventListener(
+            'mousedown',
+            (e) => {
+              if ((e.target as HTMLElement | null)?.closest('[data-testid="wsf-start-submit"]')) e.preventDefault();
+            },
+            true,
+          );
+        });
+        await page.getByTestId('wsf-start-name').fill('a');
+        const p = await placeAt(page, await maxScroll(page));
+        await page.waitForTimeout(150);
+        expect(p.valid, 'the button is not pressable at max scroll').toBe(true);
+        expect(p.inputBottom, 'the field is not on screen — the control would be vacuous').toBeGreaterThan(0);
+        const under = await pressAt(page, press, p.cx, p.cy);
+        await page.waitForTimeout(600);
+        const o = await outcome(page);
+        const row = `scrollTop ${p.scrollTop}/${p.max} field[${p.inputTop}..${p.inputBottom}] under-at-release=${under} focus=${o.active} error=${o.errorBox}`;
+        console.log(`[SEAM-1 CONTROL ${vp.width}x${vp.height} ${label}] ${row}`);
+        expect(o.submitted, `the reader did not see the submit: ${row}`).toBe(true);
+        expect(o.exposed, `the error is not on screen: ${row}`).toBe(true);
+      });
+    });
+  }
+}
+
 test.describe('SEAM-2/3/4', () => {
   test.use({ viewport: PHONE });
 
@@ -476,7 +540,10 @@ test.describe('SEAM-2/3/4', () => {
     await page.waitForTimeout(400);
     await page.getByTestId('wsf-start-back').click();
     await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
-    await expect(page.getByTestId('wsf-member-topbar').last()).toBeVisible({ timeout: 20_000 });
+    // Home has rendered for a member with no community yet (the create is held).
+    // Shell-independent on purpose: waiting for the new shell's top bar made this
+    // a fixture failure on the old shell, where there is no top bar.
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 20_000 });
     gate.release();
     // Long enough for the create to settle and for W4's 1.5 s navigation grace.
     await page.waitForTimeout(4_000);
@@ -484,6 +551,47 @@ test.describe('SEAM-2/3/4', () => {
     expect(creates, 'more than one create left the browser').toBe(1);
     expect(await communitiesOf(me.uid), 'the create did not commit exactly once').toHaveLength(1);
     expect(await visibleCount(page, 'wsf-start-created'), 'a created card is painted on the page the member is on').toBe(0);
+  });
+
+  /**
+   * SEAM-4 POSITIVE CONTROL — the four assertions can all hold together in this
+   * harness. The same journey, but the held create's RESPONSE is lost (the
+   * server commits, the page never hears back), so there is no late success to
+   * navigate on. Expected: still on `/`, one request, one community, no created
+   * card. SEAM-4 has never passed on any build; this shows it is satisfiable.
+   */
+  test('SEAM-4 CONTROL with no late success to act on, the member stays where they went', async ({ page }) => {
+    test.setTimeout(300_000);
+    const me = await person('c4');
+    await signInVia(page, me.email, me.password);
+    await page.goto('/');
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('wsf-home-start').last().click();
+    await expect(page.getByTestId('wsf-start-name')).toBeVisible({ timeout: 25_000 });
+    let creates = 0;
+    const gate: { release: () => void } = { release: () => {} };
+    const held = new Promise<void>((r) => {
+      gate.release = r;
+    });
+    await page.route(CREATE, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      creates += 1;
+      await held;
+      await route.fetch().catch(() => undefined);
+      await route.abort('connectionreset').catch(() => undefined);
+    });
+    await page.getByTestId('wsf-start-name').fill('W7 Barless Control');
+    await page.getByTestId('wsf-start-submit').click();
+    await page.waitForTimeout(400);
+    await page.getByTestId('wsf-start-back').click();
+    await page.waitForURL((u) => u.pathname === '/', { timeout: 20_000 });
+    await expect(page.getByTestId('wsf-home-start').last()).toBeVisible({ timeout: 20_000 });
+    gate.release();
+    await page.waitForTimeout(4_000);
+    expect(new URL(page.url()).pathname, 'the control moved the member').toBe('/');
+    expect(creates, 'more than one create left the browser').toBe(1);
+    expect(await communitiesOf(me.uid), 'the server did not commit exactly once').toHaveLength(1);
+    expect(await visibleCount(page, 'wsf-start-created'), 'a created card is painted').toBe(0);
   });
 });
 

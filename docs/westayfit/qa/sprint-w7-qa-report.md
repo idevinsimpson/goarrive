@@ -1325,8 +1325,272 @@ overclaimed.
 
 ---
 
-# Check 14 — further checkpoints
+# Check 14 — pre-staging W4's barless `/start-community`: five seam findings, and a check that discriminates before the fix
 
-**Queued, not yet SENT:** W4's barless recomposition of `/start-community` on
-exact `dd86721` (L0 `5799845823`). As of 17:55Z W4's branch is still at
-`d467754`, so nothing is owed until that delivery exists.
+**Not a verdict.** This is the pre-staging of W7's reserved check on W4's
+barless recomposition of `/start-community` on the integrated shell (L0
+`5799845823`). The findings were posted as they were measured:
+
+| post | what |
+|---|---|
+| #434 `5800444443` | early warning: Q1, Q2, Q3 |
+| #434 `5800531433` | Q3 corrected: pre-existing, not shell-introduced |
+| #434 `5800875664` | round 2: M4, M5; Q1 numbers corrected; a check-10 weakness owned |
+| #394 `5801188904` | the exact Q3 reproducer, for W4, on W4's own head |
+| #434 `5801192836` | the reproducer on record; holding for the combined candidate |
+
+Routing is L0's and the Director's (`5800515228`, `5800587063`,
+`5800785846`): Q3 and Q1 to W4, Q2 to W9. M4 and M5 await a ruling.
+
+## 14.1 · The builds, re-derived
+
+W4's `d467754` does **not** sit on `37367fd`: its merge base with the shell
+line is `de8f5677`. So "d467754 against dd86721" is not a single-variable
+comparison, and every attribution below uses a clean pair built locally and
+never pushed:
+
+| build | what it is | root tree |
+|---|---|---|
+| `05d2aef9` | old shell: `d467754` ⊕ `37367fd` | — |
+| `738d8710` | BEFORE: `d467754` ⊕ `dd86721` | `e5cfabd6` |
+| `787c530` | W4's own merge of `dd86721` | `e5cfabd6` |
+| `5c28e45` | W4's delivery (composition + Q1) | product delta vs `787c530`: **none** (specs and frames only) |
+
+`05d2aef9` → `738d8710` differs, across app, src and package, by exactly
+`37367fd` → `dd86721`, i.e. W9's shell and nothing else. **W4's head runs the
+same app as my BEFORE build**, so the pre-staged measurements apply to it
+unchanged, and the matrix in 14.7 was re-measured on `5c28e45` itself.
+
+## 14.2 · The findings
+
+| | finding | attribution | severity | owner (L0) |
+|---|---|---|---|---|
+| **Q3** | the first invalid press on Create is swallowed | pre-existing route pattern, already in `4ad05964` (the file's first commit in this history); the shell only made it certain at 390×844 | low | W4 |
+| **Q2** | "Check your communities" loses `?view=communities` on the in-app click | shell-triggered: Expo Router's URL sync, on a root-Stack → `(tabs)` crossing | low–moderate | W9 |
+| **Q1** | W4's `communityNames` reads one page, then filters in the client | W4 test harness only | test integrity: medium | W4 — **fixed at `5c28e45`** |
+| **M4** | on the barless shell the unverified gate's only control is "Verify email" | shell-attributable (the bar was the other way out) | moderate | ruling pending |
+| **M5** | leaving mid-create by "Back to home" pulls the member into the new community | pre-existing on both shells | moderate | ruling pending |
+
+## 14.3 · Q3 — what is measured
+
+**Mechanism.** With an invalid name in the field, pressing Create blurs the
+field. `onBlur` sets `nameTouched`, and the error renders **above** the button
+(`d467754:app/start-community.tsx:402, 407`). The button drops 52 px during the
+press, the release lands on `wsf-start-summary`, and RN-web fires `onPress`
+only from a native click on the Pressable, so `onSubmit` never runs.
+
+**Scroll anchoring works on both shells.** Chrome anchors on the first
+visible node in DOM order, which sits above the error's insertion point, so it
+applies no compensation. At 390×844 max scroll that node is the name field:
+excluding the field from anchor selection makes the same press submit
+(measured on `dd86721`, at max scroll at 390×844: `scrollTop` 387 → 439
+during the hold, the button stays at 712, and the press submits).
+My first account ("the shell suppresses anchoring") was wrong, and I corrected
+it publicly in `5800531433`.
+
+**What the shell changed.** Removing the bar grows the scroller at 390×844 from
+768 to 844 px. At max `scrollTop` 387 the field is then still at −11..39, so
+**every** pressable position swallows. On the old shell it depended on
+position. On `37367fd` (bar present), `scrollTop` 374 and 394 swallowed
+(pointer verified on the button, field partly visible), and positions with the
+field fully off screen submitted.
+
+**On W4's head `5c28e45`**, with a fresh page per press and the pointer
+verified on the button:
+
+| class | pressable `scrollTop` (field y) | mouse 5 | mouse 120 | touch 80 | touch 150 |
+|---|---|---|---|---|---|
+| 390×844 | 327 (49..99) · 347 · 367 · 387 (−11..39) | swallowed 4/4 | swallowed 4/4 | swallowed 4/4 | swallowed 4/4 |
+| 430×932 | 252 (157..207) · 272 · 292 · 312 (97..147) | swallowed 4/4 | swallowed 4/4 | swallowed 4/4 | swallowed 4/4 |
+| 390×640 | 310 (−134..−84) · 330 · 350 · 370 | submitted 4/4 | submitted 4/4 | submitted 4/4 | submitted 4/4 |
+
+**The state at release:**
+
+- **Mouse, 120 ms.** The pointer is over `wsf-start-summary` at the end of the hold.
+- **Touch.** The element under the finger at the end of the hold is still `wsf-start-submit`, so the displacement comes after the lift, and the press is swallowed all the same. It is the same blur-driven reveal: cancelling the default of `mousedown` (for a touch, the compatibility `mousedown` after the lift) keeps the field focused and makes the touch press submit (14.7, SEAM-1 CONTROL).
+- **After a swallowed press,** focus stays on `wsf-start-submit`, the field gets no `focus()` call, and the error *is* on screen. Blur alone shows it, which is why a blur-only assertion cannot see this defect.
+
+**390×640 cannot fail first.** At every position where the whole button is on
+screen, the field's bottom is at y ≤ −84, so the risky condition does not exist
+at that class. W4's non-reproduction at 390×640 (`5800735927`) is therefore
+correct and consistent with this finding. In the pre-staged spec that class is a
+regression guard only.
+
+**CANNOT-MEASURE:** WebKit / iOS Safari. Only Chromium is installed, and WebKit
+has no scroll anchoring, so the old build's behaviour there is unknown.
+
+## 14.4 · Q2 — what is measured
+
+On the clean pair, reached in-app from Home and brought to the unconfirmed state
+by a lost response:
+
+| | history on the click | after a reload |
+|---|---|---|
+| `05d2aef9` (old shell) | `pushState /?view=communities` | kept; list shown |
+| `738d8710` (shell) | `pushState /` | a member with a remembered older community lands **inside that older community** |
+
+It is one defect: the click drops the query. The reload is its consequence,
+because a bare `/` opens the remembered community by design. W4's own
+measurement (`5800735927`) agrees once the two reloads are told apart: a reload
+of a *directly loaded* `/?view=communities` keeps the list, and so does the
+served cold-load contract (check 1, 7/7 on `dd86721`).
+
+The root cause is reasoned from source, not observed. Expo Router 6.0.24's URL
+sync serializes the raw emitted state, and after a crossing from the root Stack
+into the not-yet-mounted `(tabs)` the query sits only in nested params, so it
+never reaches the URL. It is the same rule as W9's documented `?groupId=` seam,
+with the opposite effect.
+
+## 14.5 · Q1 — what is measured
+
+`GET …/documents/wsfCommunityGroups?pageSize=300` on the emulator returns
+**150** documents with a `nextPageToken`, in `__name__` ascending order. The
+collection held 918 at 18:30:07Z; an earlier "878" was never saved and is
+withdrawn. Each target existed once per run. The page-1 hit counts (1, 2, 2)
+equal the observed pass counts of W4's `:135`, `:176` and `:318` (1/5, 2/5,
+2/5).
+
+Worse than the false FAILs are the false PASSes: `:247 toHaveLength(0)` and
+the exact-count checks at `:224`, `:318` and `:369` cannot see a document
+beyond page 1. **W4 fixed the helper at `5c28e45`** with a server-side
+`runQuery` on `createdByUserId` (`5800735927` B). I have not yet independently
+verified that fix; it is part of the combined-candidate check.
+
+## 14.6 · M4, M5, and a weakness in my own check 10
+
+**M4.** The unverified gate's reachable controls, hit-tested at their own
+centres:
+
+| build | reachable controls |
+|---|---|
+| old shell | `wsf-start-unverified-verify` plus the five member tabs |
+| barless shell | **only** `wsf-start-unverified-verify` → `/verify-email` |
+
+W9's own focused-flow standard is one explicit way out, at a real touch size
+(`sprint-w9-shell-production.spec.ts:429`), and "Verify email" is a way
+forward, not a way out.
+
+**M5.** "Back to home" is a push (`ButtonLink` with `replace=false`), so the
+form stays mounted with `alive.current` true. When a create that was in flight
+succeeds after the member has left, the guarded `router.replace` still
+navigates them to `/community/<new id>`. This happens on both shells. On the
+barless shell this push is the only in-app exit, and the DOM then holds 2
+`(tabs)` instances, 1 of them visible. What that count means (Back behaviour,
+memory) is **CANNOT-ESTABLISH** from what I measured.
+
+**Owned.** My check-10 item-8 test ("leaving mid-flight paints no outcome on
+the next page", accepted) ended with `expect(pathname).not.toBe('/start-community')`.
+`/community/<id>` satisfies that, so the test would have passed with the member
+pulled into the new community. The property it proved, that nothing is painted,
+holds. The property its title implies, that the member stays where they went,
+was never asserted, and it fails.
+
+## 14.7 · The pre-staged check
+
+`apps/westayfit/tests-e2e/sprint-w7-start-community-barless-verify.spec.ts`
+was first pushed at `2d01ef36`, the revision the #394 reproducer names; the
+positive controls and one fixture correction were added in the next commit. It
+was written before the delivery existed, so it discriminates rather than being
+fitted to the delivery. Which revision produced each column:
+
+| column | revision run |
+|---|---|
+| `5c28e45` | one full run of blob `677039dd`; the committed blob differs from it only in the header comment |
+| old shell | a full run of the `2d01ef36` blob, plus SEAM-4 re-run (2×) after its wait fix |
+
+The controls were not run on the old shell.
+
+| test | old shell `05d2aef9` | **`5c28e45`** | correct fix |
+|---|---|---|---|
+| SEAM-1 390×844, 4 press methods | FAIL ×4 | **FAIL ×4** | PASS |
+| SEAM-1 430×932, 4 press methods | FAIL ×4 | **FAIL ×4** | PASS |
+| SEAM-1 390×640, 4 press methods | PASS ×4 | PASS ×4 (guard only) | PASS |
+| SEAM-1 CONTROL ×8: the reader can see a pass | — | PASS ×8 | PASS |
+| SEAM-2 / 2b: list opt-in through click and reload | PASS / PASS | **FAIL / FAIL** | PASS (W9's) |
+| SEAM-3: unverified way out | PASS | **FAIL** | PASS (ruling pending) |
+| SEAM-4: leaving mid-create | FAIL 2/2 | **FAIL 2/2** | PASS (ruling pending) |
+| SEAM-4 CONTROL: the assertions are satisfiable | — | PASS | PASS |
+| BARLESS × 4 states | FAIL ×4 (tab bar visible) | PASS ×4 | PASS |
+| CONTROL: FormShell page inside `(tabs)` | n/a (the old shell has no top bar) | PASS | PASS |
+| FRAMES calibration on `d467754` (21 of 24 show the old bar) | PASS | PASS | PASS |
+| FRAMES delivery (`WSF_W7_DELIVERY_SHA=5c28e45`) | — | **PASS** | PASS |
+
+On `5c28e45` the result is 12 failed and 20 passed. **Every failure stops at its
+own defect assertion.** The tallies:
+
+| failure message | count |
+|---|---|
+| "first presses that did not submit and show the error" | 8 |
+| "the opt-in left the URL on the click" | 1 |
+| "the reload opened the remembered older community" | 1 |
+| "the only way off the unverified gate is to verify" | 1 |
+| "the late success navigated the member after they left" | 1 |
+
+**The old-shell sweep shows the position dependence directly** (390×844, 120 ms
+mouse). Positions 374 and 394, with the field at −27..23 and −47..3, swallow.
+Positions 414 and 434, with the field fully off screen, submit.
+
+**Why the controls exist.** SEAM-1 (at 390×844 and 430×932) and SEAM-4 had
+never passed on any build, so a correct fix could have failed them for an
+instrument reason. The controls are test-side only:
+
+- **SEAM-1.** The same fixture, placement, press and reader, at max scroll, with a capture listener that cancels the default of a `mousedown` on Create. The press then does not blur the field, and nothing is revealed mid-press.
+- **SEAM-4.** The same journey, but the create's response is lost after the server commits, so there is no late success to act on.
+
+**Two SEAM-1 controls were rejected as geometry-dependent.** Their logs are
+retained.
+
+- **Excluding the field from scroll anchoring** submits at 390×844 but not at 430×932. There, content above the field is also in view and becomes the anchor.
+- **Taking the error out of flow** submits at both, but at 390×844 the out-of-flow error lands off screen (−35..5).
+
+**A local product mutant was refused.** I first tried the SEAM-1 and SEAM-4
+controls as a local product mutant, never to be committed. The session's
+permission layer refused the edit before anything ran. The product tree was
+confirmed clean afterwards, and the test-side controls above replace it.
+
+**FRAMES delivery** on `5c28e45` confirms, from git objects, that W4's 24 frames
+have the right names and sizes, that none shows the old bar, and that the 21
+signed-in frames were re-shot. This is a pre-check of the composition, not a
+verdict. The `start-community-next` directory is still not covered by
+`check-evidence-intact.mjs`.
+
+## 14.8 · The adversarial review
+
+A read-only workflow of ten agents attacked Q1–Q3 before they were posted: an
+archaeology pass per finding, refutation lenses, and a synthesis.
+
+- **Q1: CONFIRMED,** with the corrections in 14.5.
+- **Q2: CONFIRMED** on the clean pair.
+- **Q3: REFUTED AS FIRST STATED.** The narrower finding in 14.3 survives, and it independently re-derived the anchoring correction.
+
+Its hygiene demands, and where each stands:
+
+| demand | status |
+|---|---|
+| use the clean pair | **done** throughout |
+| save the spec revision behind the Q3j/Q3k and M4/M5 logs | **done** — the final diagnostic spec is saved in the evidence directory as `sprint-w7-diag-seam.final-11194c3f.spec.ts`; the diagnostic spec itself is never committed |
+| stamp the build SHA in every log | **not done** for the diagnostic logs; every run of the pre-staged spec from the `5c28e45` runs on starts with a `served build:` line, read from the served bundle, and the spec blob |
+| WebKit | **CANNOT-MEASURE** (only Chromium is installed) |
+
+## 14.9 · W7's own errors in this pre-staging
+
+1. **Q3's first mechanism was wrong** ("the shell suppresses anchoring"). Corrected in `5800531433`.
+2. **Two old-base rows placed the pointer relative to the window**, so it landed on the tab bar. Redone relative to the scroller, with the pointer verified on the button.
+3. **Q1's numbers were wrong** (300 and 878). Corrected in `5800875664`.
+4. **The check-10 item-8 assertion was too weak** (14.6).
+5. **Two launch errors before measuring, today.** The first SEAM-1 run had no Chromium path set. The second ran against a build without the emulator and auth flags. No test body ran in either, and neither is reported as a result.
+6. **SEAM-4's first old-shell run was a fixture failure.** It waited for the new shell's top bar, which the old shell does not have. The wait is now shell-independent (`wsf-home-start`), and both builds were re-run 2×2: each run failed at the defect assertion.
+7. **Two positive controls were geometry-dependent** and were replaced (14.7).
+
+## 14.10 · Bound and hygiene
+
+Emulators only (`demo-wsf-local`), Chromium only.
+
+- **Clean pairs:** built locally, never pushed.
+- **Edits:** no product edit, no edit to another worker's spec, no frame written.
+- **Checks at every checkpoint:** `ts:check` exit 0, and `check-evidence-intact` exit 0 (9 frozen, 20 accepted).
+- **After every run:** artifacts and `test-results` cleaned.
+- **Logs:** retained, unfiltered, in the session's evidence directory (not committed).
+
+**Next:** L0's combined candidate (W4's Q3 head ⊕ W9's Q2 head ⊕ W8's
+freshness head on `f2f901a`), checked as one tree (`5800787974` §2).
