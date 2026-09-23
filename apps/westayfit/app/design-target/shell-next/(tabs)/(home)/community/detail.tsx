@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { ShellNextPage } from '../../../../../src/ui/shellNext/ShellNextPage';
+import { ShellNextPage } from '../../../../../../src/ui/shellNext/ShellNextPage';
 
 /**
  * Stands for production `/community/[groupId]`. PROTOTYPE ONLY.

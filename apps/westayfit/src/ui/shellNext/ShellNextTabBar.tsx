@@ -45,7 +45,9 @@ import { recordNav, recordPress } from './shellNextProbe';
  */
 
 const TABS: { name: string; key: 'home' | 'community' | 'activity' | 'you'; label: string }[] = [
-  { name: 'index', key: 'home', label: 'Home' },
+  // The Home tab is a route GROUP, so its navigator route name is the
+  // group's own name. The URL it serves is still bare '/'.
+  { name: '(home)', key: 'home', label: 'Home' },
   { name: 'community', key: 'community', label: 'Community' },
   { name: 'activity', key: 'activity', label: 'Progress' },
   { name: 'you', key: 'you', label: 'You' },

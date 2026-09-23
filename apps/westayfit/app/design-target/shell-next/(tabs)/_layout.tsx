@@ -130,7 +130,7 @@ export default function ShellNextTabsLayout() {
             />
           )}
         >
-          <Tabs.Screen name="index" />
+          <Tabs.Screen name="(home)" />
           <Tabs.Screen name="community" />
           <Tabs.Screen name="activity" />
           <Tabs.Screen name="you" />

@@ -1,5 +1,3 @@
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../MemberTabBar';
-
 /**
  * THE GEOMETRY CONTRACT FOR THE PROPOSED MEMBER SHELL.
  *
@@ -68,16 +66,15 @@ export const SHELL_PAGE_GUTTER = 18;
 export const SHELL_COLUMN_MAX = 640;
 
 /**
- * THE BOTTOM FOOTPRINT IS NOT REDEFINED HERE. It is imported from the shipping
- * bar, so "one bottom-bar footprint across member tabs" is provable rather
- * than asserted: if the production numbers move, the prototype moves with
- * them and any capture taken from it is still honest.
+ * THE BOTTOM FOOTPRINT LIVES IN `shellNextBottomInset.ts`, NOT HERE.
+ *
+ * It has to import the shipping `MemberTabBar` to reuse that bar's real
+ * numbers, and `MemberTabBar` imports expo-router, whose source is untranspiled
+ * TSX. The repository's vitest config does not inline it and is not in this
+ * packet's reservation, so importing it here would make this module — and
+ * every plain number in it — unreachable from a unit test.
+ *
+ * Splitting it keeps both properties: the numbers below can be asserted
+ * directly, and the bottom footprint is still imported from the shipping bar
+ * rather than retyped beside it.
  */
-export const SHELL_BOTTOM_BAR_BODY = MEMBER_TAB_BAR_BODY;
-export const SHELL_MOVE_OVERHANG = MEMBER_TAB_MOVE_OVERHANG;
-
-/**
- * What the bottom bar occludes, for a page that wants its last control to stay
- * reachable. The caller adds the live safe-area bottom inset.
- */
-export const SHELL_BOTTOM_INSET = SHELL_BOTTOM_BAR_BODY + SHELL_MOVE_OVERHANG;

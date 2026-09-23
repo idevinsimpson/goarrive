@@ -42,10 +42,44 @@ production route under `app/`, `functions-westayfit/**`, `firestore.*`,
 `scripts/westayfit/check-evidence-intact.mjs`, another worker's specs, and
 every frozen BEFORE or accepted TARGET/AFTER image.
 
-## Contents (filled as the packet lands)
+## Contents
 
-- `ARCHITECTURE.md` — true Tabs vs the minimum-change shell, decided with code.
-- `CONFLICT-MAP.md` — file-level dependencies on W8 / W4 / W6 / W2 / W1B.
-- `before/` — current-build frames.
-- `target/` — proposed frames, each carrying a PROPOSED / NOT ACCEPTED strip
-  inside the image.
+| Path | What it is |
+| --- | --- |
+| `ARCHITECTURE.md` | Deliverable (A). True Tabs vs the minimum-change shell, decided with code and measurements — including the one place the proposal is measurably worse than today. |
+| `CONFLICT-MAP.md` | Deliverable (E). The production files W9 *would* reserve, and every dependency on W8 / W4 / W6 / W2 / W1B. Nothing in it is reserved yet. |
+| `before/` | Current-build frames and `chrome-geometry.json`, captured from the **real** member routes at this branch's start SHA — not reused from an accepted package, so there is no stale-blob question. |
+| `target/` | Deliverable (C). Proposed frames at 390×844 and 390×640 for Home → Community → Progress → You → MOVE open → MOVE close, plus a contact sheet. Each frame carries a PROPOSED / NOT ACCEPTED strip **inside** the image. |
+
+## The code and the checks
+
+| Path | What it is |
+| --- | --- |
+| `apps/westayfit/app/design-target/shell-next/**` | Deliverable (B). A runnable prototype behind the existing `EXPO_PUBLIC_WSF_USE_EMULATORS` gate. |
+| `apps/westayfit/src/ui/shellNext/**` | The prototype's top bar, tab bar, page scaffold, geometry contract and instrumentation. |
+| `apps/westayfit/tests-e2e/sprint-w9-shell-nav.spec.ts` | Deliverable (D) and the deep-link / history contract. Asserts, so it runs in the ordinary suite and writes nothing. |
+| `apps/westayfit/tests-e2e/sprint-w9-current-shell-before.spec.ts` | Measures the shipping routes' top chrome and asserts they do **not** agree with each other. |
+| `apps/westayfit/tests-e2e/sprint-w9-shell-capture.spec.ts` | Produces `target/`, and asserts each frame's device size and its label. |
+| `apps/westayfit/tests/sprint-w9-shell-geometry.test.ts` | The geometry contract and the shipping shell's own rules, as unit checks. |
+
+## Results at the head of this branch
+
+- `sprint-w9-*` e2e — **11 passed / 0 failed**.
+- `sprint-w9-shell-geometry` vitest — **11 passed / 0 failed**.
+- Regression baseline `ui-app-shell`, `ui-kiosk`, `ui-matrix` — **8 passed / 0 failed**.
+- `ts:check` clean; `check-evidence-intact.mjs` frozen 9 / accepted 20 intact.
+- An ordinary run without `WSF_CAPTURE_FRAMES` writes **zero bytes**: 24 files
+  in this package, sha256 identical before and after.
+
+## The headline numbers
+
+| | Shipping build | Proposed |
+| --- | --- | --- |
+| Wordmark across the four tabs | navy 22 / navy 22 / **white 17** / absent on `/move` | one navy 22, every tab |
+| Top-bar box across the four tabs | four different compositions | **1** distinct value |
+| Page-title origin across the four tabs | 66 / 66 / 68 / — | **1** distinct value |
+| Reselect the active tab | `router.replace` → remount | **0** navigations, **0** remounts |
+| Leave a tab and come back | rebuilt from scratch | **0** remounts, still mounted |
+| History added by 3 tab switches | — | **1** entry |
+| Bar under the MOVE page | present, raised MOVE and all | occluded; MOVE has no tab route |
+| Back from a community detail | returns to the list | **leaves the app** — see ARCHITECTURE.md §3.1 |

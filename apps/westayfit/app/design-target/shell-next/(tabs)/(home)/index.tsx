@@ -1,8 +1,8 @@
 import { Link } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
-import { NAVY } from '../../../../src/ui/kit';
-import { ShellNextPage } from '../../../../src/ui/shellNext/ShellNextPage';
+import { NAVY } from '../../../../../src/ui/kit';
+import { ShellNextPage } from '../../../../../src/ui/shellNext/ShellNextPage';
 
 /** Stands for production `/`. The URL here is /design-target/shell-next —
  *  the `(tabs)` group contributes no segment. */
@@ -14,7 +14,7 @@ export default function ShellNextHome() {
       lede="Stands in for the real Home. This packet proposes the shell around the page, not the page."
     >
       <Link href="/design-target/shell-next/community/detail?groupId=demo-group" style={styles.link} testID="wsf-shell-next-home-to-group">
-        Open a community detail (proves /community/&lt;id&gt; deep-links)
+        Open a community detail (stays in the Home tab, as it does today)
       </Link>
     </ShellNextPage>
   );

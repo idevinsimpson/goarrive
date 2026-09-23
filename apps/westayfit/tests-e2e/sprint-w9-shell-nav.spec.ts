@@ -24,17 +24,20 @@ const BASE = '/design-target/shell-next';
  *  addresses, unchanged. The mapping is the architecture claim, so it is a
  *  table the test walks rather than a sentence in a document. */
 const ROUTES = [
-  { proto: BASE, pathname: BASE, production: '/', page: 'home', title: 'Home' },
-  { proto: `${BASE}/community`, pathname: `${BASE}/community`, production: '/community', page: 'community', title: 'Community' },
+  { proto: BASE, pathname: BASE, production: '/', page: 'home', title: 'Home', tab: 'home' },
+  { proto: `${BASE}/community`, pathname: `${BASE}/community`, production: '/community', page: 'community', title: 'Community', tab: 'community' },
   {
     proto: `${BASE}/community/detail?groupId=demo-group`,
     pathname: `${BASE}/community/detail`,
     production: '/community/[groupId]',
     page: 'community-detail',
     title: 'A community',
+    // Served by the HOME tab, not the Community tab — see the tab-ownership
+    // test below and (home)/_layout.tsx for why.
+    tab: 'home',
   },
-  { proto: `${BASE}/activity`, pathname: `${BASE}/activity`, production: '/activity', page: 'activity', title: 'Your progress' },
-  { proto: `${BASE}/you`, pathname: `${BASE}/you`, production: '/you', page: 'you', title: 'You' },
+  { proto: `${BASE}/activity`, pathname: `${BASE}/activity`, production: '/activity', page: 'activity', title: 'Your progress', tab: 'activity' },
+  { proto: `${BASE}/you`, pathname: `${BASE}/you`, production: '/you', page: 'you', title: 'You', tab: 'you' },
 ] as const;
 
 type Probe = { mounts: Record<string, number>; navs: string[]; presses: string[] };
@@ -111,20 +114,81 @@ test.describe('W9 shell prototype', () => {
 
       await expect(page.getByTestId('wsf-shell-next-topbar')).toBeVisible();
       await expect(page.getByTestId('wsf-shell-next-tabs')).toBeVisible();
+
+      /*
+        AND THE RIGHT TAB IS LIT ON ARRIVAL.
+
+        This is where the mapping stops being cosmetic. `/community` lights
+        Community; `/community/<detail>` lights HOME, because in the shipping
+        build `/` resolves to the community detail and Home stays lit on it
+        (`MEMBER_TABS[0].match` is `p === '/' || p.startsWith('/community/')`).
+        Two sibling URLs, two different tabs — the arrangement that had to be
+        proven rather than assumed, and it survives a cold load of either.
+      */
+      await expect(
+        page.getByTestId(`wsf-shell-next-tab-${route.tab}`),
+        `${route.production}: the wrong tab is lit`,
+      ).toHaveAttribute('data-current', 'true');
+      const lit = await page.locator('[data-testid^="wsf-shell-next-tab-"][data-current="true"]').count();
+      expect(lit, `${route.production}: ${lit} tabs claimed to be current`).toBe(1);
     }
 
     /*
-      AND THE DETAIL PUSHES INSIDE THE COMMUNITY TAB RATHER THAN REPLACING IT.
-      Back returns to the list without leaving the tab, which is the behaviour
-      a nested stack buys and a flat `router.replace` shell cannot offer.
+      OPENING A COMMUNITY FROM THE LIST MOVES TO THE HOME TAB — AND COSTS A
+      BROWSER BACK ENTRY THAT TODAY'S SHELL PROVIDES. This is the one place
+      where the proposal is measurably WORSE than the build it replaces, so it
+      is asserted rather than described, and ARCHITECTURE.md puts it to the
+      Director as the open risk rather than burying it in a passing suite.
+
+      What happens: the link crosses from the Community tab to the Home tab,
+      react-navigation performs a tab jump, and on web a tab jump REPLACES the
+      history entry instead of pushing one. `history.length` does not move. The
+      URL and the lit tab both change correctly and both tabs stay mounted, but
+      a browser Back from the detail leaves the app entirely, because there is
+      no entry behind it to return to.
+
+      Measured: history 2 -> 2 across the jump, and `page.goBack()` lands on
+      about:blank.
     */
     await open(page, `${BASE}/community`);
+    await expect(page.getByTestId('wsf-shell-next-tab-community')).toHaveAttribute('data-current', 'true');
+    const historyOnList = await page.evaluate(() => history.length);
+
     await page.getByTestId('wsf-shell-next-community-to-group').click();
     await page.getByTestId('wsf-shell-next-page-community-detail').waitFor({ state: 'visible' });
+
+    // The URL and the lit tab are both right.
+    expect(new URL(page.url()).pathname).toBe(`${BASE}/community/detail`);
+    await expect(page.getByTestId('wsf-shell-next-tab-home')).toHaveAttribute('data-current', 'true');
     await expect(page.getByTestId('wsf-shell-next-tabs')).toBeVisible();
-    await page.goBack();
+
+    // Both tabs are still mounted, so nothing was thrown away by the jump.
+    await expect(page.getByTestId('wsf-shell-next-page-community')).toBeAttached();
+    await expect(page.getByTestId('wsf-shell-next-page-community-detail')).toBeAttached();
+
+    /*
+      THE COST, PINNED DOWN. If a future change makes a cross-tab jump push
+      properly, this assertion fails and somebody reads the note above and
+      deletes it deliberately. That is the right way for a known defect to be
+      recorded: as a failing-when-fixed check, not as a silent absence.
+    */
+    const historyOnDetail = await page.evaluate(() => history.length);
+    // eslint-disable-next-line no-console
+    console.log(`[W9] cross-tab link history: ${historyOnList} -> ${historyOnDetail}`);
+    expect(
+      historyOnDetail,
+      'a cross-tab jump now pushes a history entry — the known back-button gap may be fixed',
+    ).toBe(historyOnList);
+
+    /*
+      THE IN-APP WAY BACK DOES WORK, and it is the one a member on a phone
+      actually uses: the Community tab still holds the list, mounted, and
+      tapping it returns there.
+    */
+    await page.getByTestId('wsf-shell-next-tab-community').click();
     await page.getByTestId('wsf-shell-next-page-community').waitFor({ state: 'visible' });
     expect(new URL(page.url()).pathname).toBe(`${BASE}/community`);
+    await expect(page.getByTestId('wsf-shell-next-tab-community')).toHaveAttribute('data-current', 'true');
   });
 
   test('the top bar and the first content sit at exactly the same place on every tab', async ({ page }) => {
@@ -362,6 +426,33 @@ test.describe('W9 shell prototype', () => {
     const during = await probe(page);
     expect(during.mounts.activity, 'the tab underneath was torn down by the sheet').toBe(mountsBefore);
     await expect(page.getByTestId('wsf-shell-next-page-activity')).toBeAttached();
+
+    /*
+      AND IT IS ACTUALLY PAINTED THERE, NOT MERELY IN THE DOCUMENT.
+
+      Being attached is not the claim. The claim is that the member can see the
+      screen they came from behind the sheet, and the first capture of this
+      frame failed it: the outer Stack's `contentStyle` gave every screen an
+      opaque cream ground, the sheet's scene included, so the "context
+      underneath" was cream behind a scrim — a flat grey rectangle — while this
+      test still passed on attachment alone.
+
+      `elementsFromPoint` is the honest question, because it returns the stack
+      of elements the browser would actually hit at that point and skips
+      anything not rendered. If the tab underneath is in that list at a point
+      well above the sheet, it is laid out and painted there.
+    */
+    const paintedUnderneath = await page.evaluate(
+      ({ x, y }) => {
+        const stack = document.elementsFromPoint(x, y);
+        return stack.some((el) => el.closest('[data-testid="wsf-shell-next-page-activity"]') !== null);
+      },
+      { x: 195, y: 180 },
+    );
+    expect(
+      paintedUnderneath,
+      'the sheet is over a blank ground rather than over the real previous tab',
+    ).toBe(true);
 
     await page.getByTestId('wsf-shell-next-move-close').click();
     await page.getByTestId('wsf-shell-next-move-sheet').waitFor({ state: 'detached' });

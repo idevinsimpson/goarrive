@@ -4,12 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CARD_BORDER, CREAM, INK_QUIET, NAVY, SURFACE, TEXT_MUTED, display } from '../kit';
 import { recordMount } from './shellNextProbe';
-import {
-  SHELL_BOTTOM_INSET,
-  SHELL_COLUMN_MAX,
-  SHELL_FIRST_CONTENT,
-  SHELL_PAGE_GUTTER,
-} from './shellNextMetrics';
+import { SHELL_BOTTOM_INSET } from './shellNextBottomInset';
+import { SHELL_COLUMN_MAX, SHELL_FIRST_CONTENT, SHELL_PAGE_GUTTER } from './shellNextMetrics';
 
 /**
  * THE COMMON PAGE SCAFFOLD FOR THE PROTOTYPE'S TABS. PROTOTYPE ONLY.

@@ -49,6 +49,16 @@ export default function ShellNextPrototypeLayout() {
         name="move/index"
         options={{
           presentation: 'transparentModal',
+          /*
+            THE SCENE MUST NOT BE PAINTED. `screenOptions.contentStyle` below
+            gives every screen an opaque cream ground, which is right for a
+            page and fatal for a sheet: with it, the "context underneath" was
+            cream behind the scrim rather than the member's actual tab, and the
+            first capture of this frame came out a flat grey rectangle. The
+            claim is that the real previous tab stays visible underneath, so
+            the sheet's own scene is transparent and the tab paints itself.
+          */
+          contentStyle: { backgroundColor: 'transparent' },
           // Restrained, native-feeling, and short. A sheet that slides is
           // legible as "this came up over what I was doing"; anything more
           // decorative is motion for its own sake. A member who has asked for
