@@ -19,7 +19,7 @@ the new jest config).
 | `functions-westayfit/src/expo-prize/trigger.ts` | 40 | `onContributionCreatedBody` — the proposed trigger's body, **unregistered** |
 | `functions-westayfit/src/expo-prize/status.ts` | 34 | `classifyEntryStatus` |
 | `functions-westayfit/src/expo-prize/index.ts` | 14 | barrel; **not** re-exported from `src/index.ts` |
-| `functions-westayfit/jest.expo-prize.config.cjs` | 21 | new config; `tests/expo-prize/**`; same isolation setup file; no npm script |
+| `functions-westayfit/jest.expo-prize.config.cjs` | 20 | new config; `tests/expo-prize/**`; same isolation setup file; no npm script |
 | `functions-westayfit/tests/expo-prize/{fixtures,pure.test,award.test,form.test,cap.test,reconcile.test}.ts` | 1248 | the matrix |
 
 `tsc --noEmit -p functions-westayfit/tsconfig.json`: 0 errors (strict, `noUnusedLocals`,
