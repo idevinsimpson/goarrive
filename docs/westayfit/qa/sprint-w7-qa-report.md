@@ -2045,7 +2045,7 @@ Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 
 ---
 
-# Check 19 — W8's first-focus settle `9d30c38b` on app-shell `a1dcced`: **PASS on the routed items; the in-flight race reproduces (X7d, X7e); account isolation: see 19.4**
+# Check 19 — W8's first-focus settle `9d30c38b` on app-shell `a1dcced`: **PASS on the routed items; the in-flight race reproduces (X7d, X7e); the cross-account settle leak reproduces from a second tab (X7g)**
 
 Routed by the Director in #434 `5804104996` (L0 #462 `5804113250`; the
 account-cancellation source concern #462 `5804115569`, W8's source reading
@@ -2094,17 +2094,58 @@ holding at 12 s.
 
 **The smallest same-file correction, for W8's lane** (W8 has pre-staged the same shape locally, `5804147831`; W7 edits nothing): (a) let the settle **fill** a slot still `loading` with its confirmed result; (b) give the progress reads a per-goal sequence so an answer issued earlier never overwrites one applied later. Fail-first is X7d and X7e as committed.
 
-## 19.4 · Account isolation of the settle (X7f)
+## 19.4 · Account isolation of the settle (X7f, X7g): **the leak reproduces from a second tab**
 
-**Not yet measured.** The probe (A's return settle answers held; A signs out and B
-signs in inside the app; B's own credit read before and after the release)
-did not reach its measurement on two runs: its in-app sign-in step failed at
-the sign-in form after the sign-out. Nothing about the product is claimed
-from that. It is being corrected per the Director's `5805389722` (the marked
-instance must survive or the race is CANNOT-MEASURE; the held answers must be
-shown delivered after B's figure loaded, with a release latch tied to B being
-ready rather than a fixed hold; every sampled state, not only the last, must
-be free of A's 20). The result follows as an addendum with the exact tree.
+Both probes follow the Director's rules (`5805389722`): A's return settle
+answers (the pulse and own-credit pair issued 2.6 s after a return) are held
+behind a **latch** released only once B's own figure is on screen; each held
+answer records whether it was **delivered** or aborted; every sampled state
+is asserted, not the last one alone. A and B are members of the same
+community; B has recorded 5, A 20.
+
+**X7f, the in-app switch (You → Sign out → Home's Sign in → B).** The held
+pair was delivered after B's figure had loaded, and B's own part read **5 in
+every sample**. But the marked Community did **not** survive: You's sign-out
+replaces to `/` and unmounts it; B's arrival mounts a new instance. So on
+this path the same-instance race is **CANNOT-MEASURE by construction**, and no
+leak was observed. (Its first four runs stopped at the sign-in form because
+B's `arrive()` opened `/signin` while A was still signed in; a harness
+error, fixed.)
+
+**X7g, the account change made from another tab (the instance survives).**
+Firebase auth is shared across the tabs of one browser. The first tab keeps
+A's Community mounted while a second tab signs A out and signs B in. On the
+first tab the same screen then shows B's figures (bReady: B's own part read
+5 at +5.1–5.9 s); in one of the runs the DOM mark was still on the root, in
+the others the auth change had re-rendered the root node while the component
+lived on. Then the latch released A's held pair, both delivered:
+
+| build | B's own part before the release | after the release |
+|---|---|---|
+| `09cf5fd0` (W8's delivery), **2 / 2 runs** | "You've added 5 squats to this goal." | **"You've added 20 squats to this goal."** within 320 ms of the release |
+| `7ee70e4f` (baseline), 1 run | "You've added 5 squats to this goal." | **"You've added 20 squats to this goal."** within 330 ms of the release (the marked instance survived) |
+
+**Reading.** The settle effect's cleanup is keyed to its token alone (W8's
+source reading `5804147831`); an account change does not cancel it, and
+`shown.kind === 'ok'` is true again once B's figures load, so A's answer is
+written into B's slot: **A's own contribution figure is shown to B**, the
+shared total being the same for both. This is the exposure the Director
+described (`5804115569`), reproduced in the browser, not inferred from the
+source.
+
+**Inherited or changed.** The return-path settle is `eff65b0`'s, in the
+accepted candidate; `9d30c38b` adds the first-focus settle, which widens the
+window to a fresh mount but does not create the path. **Severity:** one
+account's own contribution figure on another account's screen on a shared
+browser, on the same community, when the sign-out happens in another tab
+within ~3 s of a return; it persists until the next read.
+
+**The smallest same-file correction, for W8's lane:** cancel the settle on
+an account or community change (the effect also keyed on `user.uid` and
+`groupId`, a handled-token ref so no new read is issued), and the sequence
+guard from 19.3. W8 has pre-staged exactly this (`5804147831`). Fail-first is
+X7g as committed; X7f stays as the in-app control (no leak; instance
+unmounted).
 
 ## 19.5 · Bound and hygiene
 

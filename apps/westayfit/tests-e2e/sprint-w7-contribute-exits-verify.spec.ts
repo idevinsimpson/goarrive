@@ -77,6 +77,16 @@ import {
  * 379 ms after the last pre-write poll), and X5s held the sentinel 15 s until
  * the round trip, with 2 roots and 2 tab bars. PRE-EXISTING, like the
  * duplicate it follows from.
+ *
+ * ON W8's FIRST-FOCUS SETTLE (9d30c38b on a1dcced = 09cf5fd0; Check 19): X5,
+ * X5s and X7 corrected at ~2.8–3.0 s; X7b/X7c cancel; X7d and X7e FAIL (the
+ * held-answer races, inherited); X7f CANNOT-MEASURE the same instance (the
+ * in-app sign-out unmounts it; no leak); X7g FAILS 2/2: A's held settle answer
+ * lands on B's screen as B's own part after an account change from another
+ * tab. ON W9's OPTION 1 (945d6736 on a1dcced = f8d818c5; Check 20): X6 PASS
+ * (address, marked list, 1,867 at +508 ms), X6b PASS (held return read
+ * delivered after B's list loaded; nothing of A on it), X5/X5s PASS with one
+ * Community root.
  */
 
 test.use({ viewport: { width: 390, height: 844 } });
@@ -946,6 +956,13 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await page.getByTestId('wsf-contribute-review').last().click();
     await page.getByTestId('wsf-contribute-submit').last().click();
     await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
+    // B signs out first: /signin sends a signed-in member away, so A could
+    // never reach the form otherwise (the cause of this probe's first runs
+    // stopping at the sign-in form).
+    await page.goto('/you');
+    await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('wsf-you-signout').last().click();
+    await expect(page.locator('[data-testid="wsf-home-signin"]:visible').first()).toBeVisible({ timeout: 20_000 });
     await arrive(page, fx);
     await markVisibleCommunity(page);
     await contributeFromCommunity(page, fx);
@@ -992,7 +1009,7 @@ test.describe('W9 contribution exits, independent instruments', () => {
       const x = await page.evaluate(() => ({
         url: location.pathname + location.search,
         marked: !!document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]'),
-        markedRendered: (document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]') as HTMLElement | null)?.offsetParent !== null,
+        markedRendered: ((el) => !!el && el.offsetParent !== null)(document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]') as HTMLElement | null),
         visible: Array.from(document.querySelectorAll('[data-testid]')).filter((el) => (el as HTMLElement).offsetParent !== null).map((el) => (el as HTMLElement).dataset.testid!).filter((t) => /^wsf-(home|signin|community|you|member-tabs)/.test(t)).slice(0, 25),
       }));
       test.info().annotations.push({ type: `after ${step}`, description: JSON.stringify(x) });
@@ -1152,5 +1169,115 @@ test.describe('W9 contribution exits, independent instruments', () => {
       expect(x.aAnywhere, `A's community name was on B's screen at ${x.t} ms`).toBe(false);
     }
     expect(after.cards.sort()).toEqual([...bGroups].sort());
+  });
+
+  /*
+    X7g — THE SAME RACE WHERE THE INSTANCE SURVIVES: an account change WITHOUT
+    navigation. X7f showed the in-app sign-out (You → Sign out → "/") unmounts
+    the Community, so that path cannot race. Firebase auth is shared across
+    tabs of one browser: here B signs out A and signs in from a SECOND tab,
+    while the first tab keeps A's Community mounted (its own signed-out state,
+    then B's figures on the same instance). A's return settle pair, held in
+    the first tab, is released only after B's own figure is on that same
+    instance. B's own part must stay B's 5, in every sample.
+  */
+  test('X7g the same instance across an account change made from another tab: the old settle answer never becomes the new account\'s figure', async ({ page, context }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x7g');
+    const b = { email: `w7ex-x7gb-${fx.groupId}@example.com`, password: `Aa1!${randomBytes(6).toString('hex')}`, uid: '' };
+    b.uid = await seedVerifiedUser(b.email, b.password);
+    await seedProfile(b.uid, 'Sam Field');
+    await seedMembership(fx.groupId, b.uid, 'member');
+    await arrive(page, { ...fx, email: b.email, password: b.password, uid: b.uid });
+    await page.getByTestId(`wsf-community-goal-link-${fx.goalId}`).last().click();
+    await expect(page.getByTestId('wsf-contribute-move-screen').last()).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-contribute-done').last().click();
+    await page.getByTestId('wsf-contribute-entry').last().fill('5');
+    await page.getByTestId('wsf-contribute-review').last().click();
+    await page.getByTestId('wsf-contribute-submit').last().click();
+    await expect(page.getByTestId('wsf-contribute-receipt').last()).toBeVisible({ timeout: 40_000 });
+    await page.goto('/you');
+    await page.getByTestId('wsf-you-signout').last().click();
+    await expect(page.locator('[data-testid="wsf-home-signin"]:visible').first()).toBeVisible({ timeout: 20_000 });
+    await arrive(page, fx);
+    await markVisibleCommunity(page);
+    await contributeFromCommunity(page, fx);
+    expect(await serverTotal(fx.goalId)).toBe(SEEDED + 25);
+    await pressLabelledExit(page, 'Back to community');
+    await expect(page.locator(`[data-testid="wsf-community-goal-total-${fx.goalId}"]:visible`).first()).toContainText((SEEDED + 25).toLocaleString('en-US'), { timeout: 15_000 });
+    await page.waitForTimeout(4_000);
+    expect(await ownPart(page, fx.goalId), "precondition: A's own part").toMatch(/\b20\b/);
+
+    let armedAt = Number.POSITIVE_INFINITY;
+    let releaseLatch: () => void = () => {};
+    const released = new Promise<void>((r) => { releaseLatch = r; });
+    const held: Array<{ name: string; issuedMs: number; releasedMs: number; delivered: boolean | null }> = [];
+    await page.route(/\/us-central1\/(wsfGoalPulse|wsfMyContribution)$/, async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const now = Date.now();
+      if (now - armedAt < 2_000 || now - armedAt > 3_600) return route.continue();
+      const name = /\/(wsf[A-Za-z]+)$/.exec(route.request().url())![1]!;
+      const entry = { name, issuedMs: now - armedAt, releasedMs: -1, delivered: null as boolean | null };
+      held.push(entry);
+      await released;
+      entry.releasedMs = Date.now() - armedAt;
+      try {
+        await route.continue();
+        entry.delivered = true;
+      } catch {
+        entry.delivered = false;
+      }
+    });
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1_000);
+    armedAt = Date.now();
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(3_700);
+    const heldNames = held.map((h) => h.name).sort();
+
+    // The account changes in ANOTHER tab; the first tab is not navigated.
+    const tab2 = await context.newPage();
+    await tab2.goto('/you');
+    await expect(tab2.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
+    await tab2.getByTestId('wsf-you-signout').last().click();
+    await expect(tab2.locator('[data-testid="wsf-home-signin"]:visible').first()).toBeVisible({ timeout: 20_000 });
+    await tab2.goto('/signin');
+    await expect(tab2.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    await tab2.getByTestId('wsf-signin-email').fill(b.email);
+    await tab2.getByTestId('wsf-signin-password').fill(b.password);
+    await tab2.getByTestId('wsf-signin-submit').click();
+    await tab2.waitForURL(/\/(profile-setup)?$/, { timeout: 20_000 });
+    // Back in the first tab: the same instance shows B's figure?
+    const state = async () =>
+      page.evaluate(() => ({
+        url: location.pathname,
+        marked: !!document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]'),
+        markedRendered: ((el) => !!el && el.offsetParent !== null)(document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]') as HTMLElement | null),
+        signedOutState: document.querySelectorAll('[data-testid="wsf-community-signed-out"]').length,
+      }));
+    const bReady = await expect.poll(() => ownPart(page, fx.goalId), { timeout: 40_000 }).toMatch(/\b5\b/).then(() => true).catch(() => false);
+    const bLoadedAt = Date.now() - armedAt;
+    const afterB = await state();
+    const beforeRelease = await ownPart(page, fx.goalId);
+    releaseLatch();
+    const samples: string[] = [];
+    const until = Date.now() + 8_000;
+    while (Date.now() < until) {
+      samples.push(`${Date.now() - armedAt}ms:${await ownPart(page, fx.goalId)}`);
+      await page.waitForTimeout(300);
+    }
+    const m = { heldNames, held, bReady, bLoadedAtMs: bLoadedAt, afterB, beforeRelease, samples: samples.filter((x, i, a) => i === 0 || x.split(':')[1] !== a[i - 1]!.split(':')[1]) };
+    test.info().annotations.push({ type: 'X7g measured', description: JSON.stringify(m) });
+    await tab2.close();
+    expect(heldNames, "precondition: A's settle pair was held").toEqual(['wsfGoalPulse', 'wsfMyContribution']);
+    // The DOM mark is recorded, not asserted: the auth change re-renders the
+    // screen's root node (the mark goes with it) while the component instance
+    // and its effects live on — which a held answer of A's changing B's screen
+    // proves better than any attribute could.
+    expect(bReady, "precondition: B's own figure loaded on the screen the first tab kept").toBe(true);
+    expect(held.every((h) => h.releasedMs > bLoadedAt && h.delivered === true), `held answers not delivered after B loaded: ${JSON.stringify(held)}`).toBe(true);
+    for (const x of samples) expect(x, `A's 20 was on B's screen: ${JSON.stringify(m)}`).not.toMatch(/:.*\b20\b/);
+    expect(samples[samples.length - 1], "B's own part after the release").toMatch(/\b5\b/);
   });
 });
