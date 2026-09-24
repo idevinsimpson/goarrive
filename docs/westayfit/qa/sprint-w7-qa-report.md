@@ -2574,3 +2574,89 @@ Check 25's functional / privacy / atomicity PASS on the parent carries; nothing 
 | behaviour delta | none: the source change is the literal-to-escape rewrite of one bound in `freeze.ts` and two in the fixtures; no other source or test line changed |
 
 The successor's commit message text is not product or evidence; no rewrite requested. **Status:** verified on `24d95cfe`; not accepted, not integrated; W7 accepts, integrates and stages nothing.
+
+# Check 26 — EXP3A's private "My entries" read `80615cae` on exact parent `24d95cfe` (#471): **one DEFECT on item 5 (the stored-pool integrity boundary); every other routed item PASS; the smallest correction named and shown sufficient locally; `80615cae` unchanged**
+
+Routed by the Director on #434 (`5816403548`; source disposition #471 `5816403835`). Checks 22–25D carried where their dependencies are unchanged (every file of the lane other than the seven delivered ones is byte-identical to `24d95cfe`).
+
+## 26.1 · Scope, verified by git and grep
+
+- `24d95cfe..80615cae` is **one commit**, sole parent `24d95cfe` (`rev-list --count` 1), exactly **7 files** inside the reservation (+859 / −9): new `receipt.ts` (250 lines), new `receipt.test.ts`, `src/expo-prize/index.ts` (one barrel line), `CONTRACT.md`, `TEST-MATRIX.md`, `README.md`, `EVIDENCE.md`. `fixtures.ts` untouched.
+- No `readMyEntries` / `receipt` / `expo-prize` / `wsfPromotion` reference in `functions-westayfit/src/index.ts`, `package.json`, `tsconfig.json`, `firestore.rules`, `firestore.indexes.json`, `firebase*.json`, `.github`, `apps/westayfit/app`, `apps/westayfit/src` or the root `package.json`: no root export, callable, trigger, rules, index, config, package, app, workflow or deployment wiring. Nothing is reachable.
+- Detached worktree at `80615cae`, never pushed; `git diff --quiet` after every mutation, after the trial patch below, and at the end.
+
+## 26.2 · Lane and typecheck
+
+| run | result |
+|---|---|
+| EXP lane at `80615cae`, once, documented command shape | **127 passed, 0 failed, 0 pending** (10 files; `receipt` 11 = R1–R8 emulator + P9–P11 pure) |
+| `tsc --noEmit -p functions-westayfit/tsconfig.json` | **0 errors** |
+| real core after the six mutation restores | **127 / 127** |
+
+Initial run only; no failures, reruns or skips.
+
+## 26.3 · The routed items, proved (W7's instrument `sprint-w7-exp3a.test.ts` on `80615cae`; own seeding through the real `wsfContribute`, `ingestContribution`, `enablePromotion`, `closePromotion` and `freezePromotion`, every cutoff waited out on Firestore's own clock; raw reads; every lane document compared byte-for-byte **including `updateTime`** around the reads)
+
+| item | result |
+|---|---|
+| **2 · non-vacuous account isolation; sequential and concurrent switching on one deps object** | **PASS**: six (uid, promotion) pairs with distinct true values `[3, 1, 0, 2, 0, 4]` (a stranger and a second promotion included) read **24 times sequentially** and **18 times concurrently** on one `deps`, every answer exact; no value carried between subjects |
+| **3 · current count is confirmed positive-integer entries only** | **PASS**: six entries for one member — `revoked`, `pending`, `tickets: "two"`, `0`, `2.5` count zero and one `confirmed 3` counts 3 → **3** while the entrant tally says 99; the other member 2 (`receipt.ts:98-106`) |
+| **4 · provisional → settled through `frozen` / `drawn` / `archived`, zero states included** | **PASS**: 2 / 0 (never linked) / 0 (linked, every entry revoked before the freeze) provisional; the same under `closing`; **2 / 0 (no link) / 0 (absent from the pool)** settled under each of the three statuses; entries edited to 50 tickets after the freeze do not move the settled 2; `draft`, `disabled`, an unknown status, a missing promotion, a malformed uid and a malformed promotion id → `unavailable` with the reason only in the trace |
+| **5a · configuration drift and missing / corrupt / unbound pool fences** | **PASS**: before the freeze, `entrantCap` 4 and a rerouted `eligibleGoalIds` → `unavailable`, restored → 2; after the freeze: missing pool → `poolMissing`; an edited range with the stale digest → `poolCorrupt`; another promotion's intact pool → `poolUnbound`; the intact pool with the promotion's stamped digest edited → `poolUnbound`; **the intact pool with `ruleVersion` + 1 and its digest recomputed and stamped** → `poolUnbound`; **the same with a foreign `enabledConfigDigest`** → `poolUnbound`; drift after the freeze → `configDrift`; every restore → 2 (`receipt.ts:213-229`) |
+| **5b · the whole stored-pool integrity boundary with a recomputed digest** | **DEFECT** — §26.4 |
+| **6 · exact allow-list, deep privacy, no mutation** | **PASS**: every receipt is exactly `{status, tickets, settled}` or `{status}`; 29 forbidden strings (uids, entrant ids, promotion and goal ids, digests, operator uid, attempt ids, contribution paths, collection names, trace reasons) absent from every serialised receipt; 15 provisional / unavailable and 6 settled reads changed **no** lane document (`updateTime` included) and created none; the transaction is `{ readOnly: true }` (`receipt.ts:248`) |
+| **carried** | Checks 22–25D: `award.ts`, `enable.ts`, `close.ts`, `freeze.ts`, `pool.ts`, `policy.ts`, `status.ts`, `reconcile.ts`, `form.ts`, `trigger.ts`, `adjudicate.ts`, `fixtures.ts` and their tests are byte-identical to `24d95cfe`; nothing rerun beyond the lane |
+
+## 26.4 · The defect: a structurally malformed pool with a consistent digest answers with a count
+
+**The Director's item 5 standard** (#471 `5816403835`): "recomputed-digest malformed ranges, total/entrant-count inconsistency, overlap/gap/duplicate entrants must not yield a member count." **The contract's own shape** (`CONTRACT.md:256`, `:341`): ranges "sorted by entrant id, contiguous from 1".
+
+**What the head checks.** `storedPoolIntact` (`pool.ts:166-195`) verifies field types and that the stored digest equals the digest recomputed from the stored content — nothing about the ranges' shape. `ticketsFromPool` (`receipt.ts:113-125`) inspects **only the reading member's own range(s)**: a malformed or duplicated own range → `null` → `unavailable`; every other range is skipped unread. Between them (`receipt.ts:218-238`) no code checks ordering, contiguity, overlap, gaps, `totalTickets` or `entrantCount`.
+
+**Measured** (instrument D2; twelve pools, each with `poolDigest` recomputed from its own content and stamped on the promotion, so only structure can refuse it; two members, a = 2 tickets, b = 1 in the intact pool):
+
+| stored-pool shape (digest consistent, stamped) | member a | member b |
+|---|---|---|
+| overlap (b's range overlaps a's: 1–2 and 2–3) | **COUNT 2** | **COUNT 2** |
+| gap (1–2, then 5–5) | **COUNT 2** | **COUNT 1** |
+| duplicate other entrant (b listed twice) | **COUNT 2** | unavailable |
+| `totalTickets` 99 with the intact ranges | **COUNT 2** | **COUNT 1** |
+| `entrantCount` 7 with the intact ranges | **COUNT 2** | **COUNT 1** |
+| not starting at 1 (2–3, 4–4) | **COUNT 2** | **COUNT 1** |
+| unsorted ranges (the intact ranges reversed) | **COUNT 2** | **COUNT 1** |
+| other range malformed (b: 3–2) | **COUNT 2** | unavailable |
+| other range non-integer (b: 2.5–3) | **COUNT 2** | unavailable |
+| own range malformed (a: 2–1) | unavailable | **COUNT 1** |
+| own entrant duplicated (a listed twice) | unavailable | **COUNT 1** |
+| empty `ranges` with `totalTickets` 3, `entrantCount` 2 | **COUNT 0** | **COUNT 0** |
+
+**12 of 12** shapes yield a member count for at least one member; the intact pool restored → 2 / 1. Nothing in the read is wrong about the member's *own* range, but a pool that cannot be the frozen pool (its shape is not one `buildPool` can produce, `pool.ts:136-145`) is answered from rather than refused. Not a privacy leak; a truth fence the Director required that is absent. The freeze replay guard (`freeze.ts:280`, `:367`) relies on the same `storedPoolIntact`, so the gap is the pool module's, surfaced here at the first reader.
+
+**Smallest source correction, named** (either form; preserve `80615cae`, new commit only):
+
+- **(a) inside the EXP3A reservation** — in `receipt.ts`, a pure `poolStructurallyValid(pool)` applied at the `poolCorrupt` fence (`:218`): `ranges` non-empty; `entrantCount === ranges.length`; entrant ids strictly increasing by code unit (unique and sorted); every `ticketStart` / `ticketEnd` an integer with `ticketEnd >= ticketStart`; the first `ticketStart` 1 and each next `ticketStart` the previous `ticketEnd + 1`; `totalTickets` equal to the last `ticketEnd`. About 18 lines and one changed condition.
+- **(b) one shared boundary** — the same invariants inside `storedPoolIntact` (`pool.ts`), which also hardens the freeze replay fence; that file is outside EXP3A's reservation and is the Director's call.
+
+**Shown sufficient, locally only:** form (a) applied to the worktree copy of `receipt.ts` (+20 / −1) → D2 **0 of 12** shapes yield a count (every row `unavailable`, trace `poolCorrupt`); C, D1 still pass; the full lane **127 / 127**; `tsc` 0. The worktree was then restored (`git diff --quiet` true). Nothing delivered, nothing pushed; W7 writes no product source.
+
+## 26.5 · The six disclosed controls (M19–M24), re-applied on the worktree copy of `receipt.ts` and restored
+
+| mutation (EXP1 `EVIDENCE.md` §EXP3A `:348-353`) | EXP1 recorded | measured here | caught by |
+|---|---|---|---|
+| M19 pending / revoked filter removed | 2 failed / 9 | **2 / 9** | R4, P10 |
+| M20 pool-intact check removed | 1 / 10 | **1 / 10** | R6 |
+| M21 pool-binding check removed | 1 / 10 | **1 / 10** | R6 |
+| M22 settled flag lies | 4 / 7 | **4 / 7** | R5, R6, R7, R8 |
+| M23 allow-list removed (`sealReceipt` spreads its input) | 1 / 10 | **1 / 10** | P9 only |
+| M24 configuration gate removed on the current path | 2 / 9 | **2 / 9** | R6, R8 |
+
+Each fails for its intended reason with EXP1's exact count. (M20 removes the digest check and is caught by R6's edited-range row; no delivered row exercises a digest-consistent malformed pool, which is why §26.4 was not visible to the delivered controls.)
+
+## 26.6 · Notes, bound and hygiene
+
+- **Reading note, not a defect:** the prefix cursor in `receipt.ts:154` and two lines of `receipt.test.ts` (`:94`, `:411`) end in a **literal** U+F8FF (bytes `EF A3 BF`, invisible in most views) — the shape `24d95cfe` had just rewritten to the escape `` in `freeze.ts` and `fixtures.ts`. Measured correct (the member's own entries are found); the same one-line readability rewrite applies if wanted.
+- **Two fixture corrections of mine, before any verdict:** (1) test C closed the promotion explicitly and then the shared `closeAndFreeze` closed it again → `alreadyClosing`; the helper now accepts either outcome. (2) test D1 froze a second promotion over the **same goal**, whose first pass admitted the first promotion's two rows and correctly returned `notReady / newAcceptedEntries` — exactly the EXP2B behaviour Check 25 proved and the same fixture error EXP1 disclosed for R6; the helper now re-runs the pass while `notReady`, bounded at five, never masking a non-`frozen` outcome. Neither touched a measurement.
+- **The committed instrument fails by design on `80615cae`** at D2's final assertion (`expect(counted).toEqual([])`), the measured defect; A, B, C, D1 and E pass (5 / 6). It passes 6 / 6 with correction (a) applied.
+- **Kept unmeasured / unbuilt, as required:** live-Firestore semantics (read-only transactions, the equality + document-name query, index-freedom), reachability (no callable), post-freeze revocation, the form store, draw, wiring, UI, deployment.
+- Evidence: `docs/westayfit/qa/sprint-w7-exp3a.test.ts`, run from the scratch directory against the detached worktree with `W7_EXP1_WT=../wt-exp3a`. `ts:check` 0; guard 9 / 20; no artifacts committed.
+- **Status:** tested on `80615cae`; delivered by EXP1, **not accepted** (one defect on the routed item 5), not integrated; W7 accepts, integrates and stages nothing and modifies no delivery.
