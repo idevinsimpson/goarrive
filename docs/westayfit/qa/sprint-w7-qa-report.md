@@ -2660,3 +2660,50 @@ Each fails for its intended reason with EXP1's exact count. (M20 removes the dig
 - **Kept unmeasured / unbuilt, as required:** live-Firestore semantics (read-only transactions, the equality + document-name query, index-freedom), reachability (no callable), post-freeze revocation, the form store, draw, wiring, UI, deployment.
 - Evidence: `docs/westayfit/qa/sprint-w7-exp3a.test.ts`, run from the scratch directory against the detached worktree with `W7_EXP1_WT=../wt-exp3a`. `ts:check` 0; guard 9 / 20; no artifacts committed.
 - **Status:** tested on `80615cae`; delivered by EXP1, **not accepted** (one defect on the routed item 5), not integrated; W7 accepts, integrates and stages nothing and modifies no delivery.
+
+## 26D · Delta-only verification of the EXP3A integrity successor `ed5e0838` on exact parent `80615cae` (Director #434 `5817579314`; delivery #471 `5817447300`): **PASS on every routed item; the Check 26 defect closed on the head; no defect**
+
+Check 26's PASS rows (items 1–4, 5a, 6, 7) carry: `receipt.ts`, `freeze.ts`, `fixtures.ts` and every other source file of the lane are byte-identical to `80615cae`; nothing outside the focused rows was rerun.
+
+### 26D.1 · Scope, verified by git and grep
+
+| item | verified |
+|---|---|
+| lineage | `ed5e0838` has the single parent `80615cae`; `rev-list --count 80615cae..ed5e0838` = 1; `80615cae` untouched |
+| the delta | exactly **8 files, +246 / −5**: `pool.ts` (+42 / −2), `pool.test.ts` (+45), `receipt.test.ts` (+61), `freeze.test.ts` (+45), `CONTRACT.md`, `EVIDENCE.md`, `README.md`, `TEST-MATRIX.md`; every path under `functions-westayfit/src/expo-prize/`, `functions-westayfit/tests/expo-prize/` or `docs/westayfit/expo-prize/` |
+| wiring | grep for `expo-prize`, `wsfPromotion`, `readMyEntries`, `poolStructurallyValid`, `storedPoolIntact` outside the reservation on the head → only `functions-westayfit/jest.expo-prize.config.cjs`, the lane's own pre-existing test config (present since Check 22; not in this delta); no root export, callable, rules, index, config, package, app, workflow or deployment path |
+| the correction, read as source | form (b) as ruled: a pure `poolStructurallyValid` (`pool.ts:175-196`) — `ranges` non-empty; `entrantCount === ranges.length`; entrant ids matching `ENTRANT_ID_RE` and strictly increasing by `byCodeUnit` (unique and sorted); `ticketStart` / `ticketEnd` safe integers, `ticketStart >= 1`, `ticketEnd >= ticketStart`; the first start 1 and each next start the previous end + 1; `totalTickets` equal to the final end — applied inside `storedPoolIntact` after the field-type checks and before the digest recompute (`:223`). These are exactly the invariants `buildPool` guarantees (`pool.ts:136-145`), so the builder's output cannot be refused. Both readers of `storedPoolIntact` — the member read (`receipt.ts:218`) and the frozen replay fence (`freeze.ts:280`, `:367`) — are hardened without a source change to either |
+
+### 26D.2 · Runs (worktree at `ed5e0838`; emulators only)
+
+| run | result |
+|---|---|
+| focused changed rows `pool` + `receipt` + `freeze`, **first run** | **39 / 39** (pool 9, receipt 12, freeze 18); 0 failures, 0 reruns, 0 skips |
+| full lane, 10 files | **130 / 130** |
+| `tsc --noEmit -p functions-westayfit/tsconfig.json` | **0 errors** |
+| full lane after the M25 restore | **130 / 130** |
+
+### 26D.3 · The boundary, proved by W7's own instrument (`sprint-w7-exp3b.test.ts`; the twelve Check 26 D2 shapes, each with `poolDigest` recomputed from its own content and stamped on the promotion; real award, close and freeze; pool, promotion and marker set compared byte-for-byte including `updateTime` around every read and replay)
+
+| item | result |
+|---|---|
+| the 12 recomputed-and-stamped shapes refuse **both** member reads | **12 / 12**: a and b both `unavailable`, trace `poolCorrupt` on every shape (Check 26 measured 12 / 12 counted on the parent) |
+| the same shapes refuse the frozen replay | **12 / 12**: `freezePromotion` → `fenced / poolCorrupt` on every shape; pool and promotion byte-identical, marker count unchanged |
+| the builder's pool still works | intact pool restored → **2 / 1** settled; `freezePromotion` → `{ outcome: 'frozen', replay: true }` with the same `poolDigest`; before any shape the same baseline held |
+| Check 26's instrument on the head | `sprint-w7-exp3a.test.ts` **6 / 6** on `ed5e0838` (D2 now **0 of 12** shapes yield a count; A, B, C, D1, E unchanged) — the committed Check 26 instrument fails by design only on `80615cae` |
+
+### 26D.4 · The disclosed control (M25), re-applied on the worktree copy of `pool.ts` and restored
+
+| mutation (EXP1 `EVIDENCE.md` §EXP3A successor) | EXP1 recorded | measured here | caught by |
+|---|---|---|---|
+| M25 structural check removed (`if (!poolStructurallyValid(…)) return false;` → `if (false && …)`) | 3 failed / 36 | **3 / 36** | P12, R9, freeze 12b |
+
+Fails for its intended reason with EXP1's exact count; the real core 130 / 130 after the restore. Not rerun, as ruled: M13–M24, the callable batteries, the concurrency runs.
+
+### 26D.5 · Notes, bound and hygiene
+
+- **One instrument fault of mine, before the verdict:** my first draft expected the frozen replay to return `outcome: 'replay'`; the freeze contract returns `{ outcome: 'frozen', replay: true }` for a replay of the frozen state (`freeze.ts:281`, type at `:113`). Corrected to that shape; no measurement affected (the run had not reached the shapes).
+- The reading note (literal U+F8FF at `receipt.ts:154`, `receipt.test.ts:94`, `:411`) is unchanged on the head, as EXP1 disclosed; not a defect.
+- **Kept unmeasured / unbuilt, as required:** live-Firestore semantics, reachability, post-freeze revocation, the form store, draw, wiring, UI, deployment; `poolVersion` remains type-checked only (no version invariant was asked for).
+- Evidence: `docs/westayfit/qa/sprint-w7-exp3b.test.ts` (helpers shared with the Check 26 instrument), run from the scratch directory with `W7_EXP1_WT=../wt-exp3b`. `ts:check` 0; guard 9 / 20; no artifacts committed.
+- **Status:** tested on `ed5e0838`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
