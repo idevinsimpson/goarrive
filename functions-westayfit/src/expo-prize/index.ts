@@ -12,3 +12,4 @@ export * from './status';
 export * from './award';
 export * from './reconcile';
 export * from './trigger';
+export * from './enable';

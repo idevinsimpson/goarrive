@@ -43,6 +43,14 @@ export type PromotionPolicy = {
   entrantCap: number | null;
   /** goalId -> communityGroupId. A goal is eligible only under its own community. */
   eligibleGoals: ReadonlyMap<string, string>;
+  /**
+   * DERIVED, never read from a caller or a document: the sorted goal ids of
+   * `eligibleGoals`. The enable step persists it (the trigger body routes on
+   * it) and `readPromotion` refuses a document whose stored array disagrees.
+   */
+  eligibleGoalIds: readonly string[];
+  /** The explicit operator list, sorted and unique. Nonempty; a decision like the others. */
+  operatorUids: readonly string[];
   windowStartMs: number;
   windowEndMs: number;
   /** Entries one qualifying community-interest form provides. */
@@ -147,6 +155,27 @@ export function validatePromotionConfig(raw: unknown): PolicyValidation {
     problems.push({ field: 'windowEndsAt', reason: 'windowEndsAt must be after windowStartsAt.' });
   }
 
+  const operatorUids: string[] = [];
+  if (!Array.isArray(doc.operatorUids) || doc.operatorUids.length === 0) {
+    problems.push({
+      field: 'operatorUids',
+      reason: 'operatorUids must name at least one operator — Champions are not operators by role.',
+    });
+  } else {
+    for (const raw of doc.operatorUids as unknown[]) {
+      const uid = idOrNull(raw);
+      if (!uid) {
+        problems.push({ field: 'operatorUids', reason: 'each operator must be a valid uid.' });
+        continue;
+      }
+      if (operatorUids.includes(uid)) {
+        problems.push({ field: 'operatorUids', reason: `operator ${uid} is listed twice.` });
+        continue;
+      }
+      operatorUids.push(uid);
+    }
+  }
+
   const formBonusEntries = doc.formBonusEntries;
   if (
     typeof formBonusEntries !== 'number' ||
@@ -167,11 +196,25 @@ export function validatePromotionConfig(raw: unknown): PolicyValidation {
       repeatRule: repeatRule as RepeatRule,
       entrantCap: doc.entrantCap as number | null,
       eligibleGoals,
+      eligibleGoalIds: deriveEligibleGoalIds(eligibleGoals),
+      operatorUids: [...operatorUids].sort(),
       windowStartMs: windowStartMs as number,
       windowEndMs: windowEndMs as number,
       formBonusEntries: formBonusEntries as number,
     },
   };
+}
+
+/** The canonical routing array: the eligible goal ids, sorted, from the validated map. */
+export function deriveEligibleGoalIds(eligibleGoals: ReadonlyMap<string, string>): string[] {
+  return [...eligibleGoals.keys()].sort();
+}
+
+/** Does a stored `eligibleGoalIds` equal the derived canonical array exactly (order included)? */
+export function storedEligibleGoalIdsMatch(stored: unknown, policy: PromotionPolicy): boolean {
+  if (!Array.isArray(stored)) return false;
+  if (stored.length !== policy.eligibleGoalIds.length) return false;
+  return stored.every((v, i) => v === policy.eligibleGoalIds[i]);
 }
 
 /**
@@ -188,6 +231,8 @@ export function configDigest(policy: PromotionPolicy): string {
     repeatRule: policy.repeatRule,
     entrantCap: policy.entrantCap,
     eligibleGoals: goals,
+    eligibleGoalIds: [...policy.eligibleGoalIds],
+    operatorUids: [...policy.operatorUids],
     windowStartMs: policy.windowStartMs,
     windowEndMs: policy.windowEndMs,
     formBonusEntries: policy.formBonusEntries,
@@ -220,6 +265,12 @@ export function readPromotion(raw: unknown | undefined): PromotionRead {
   const validation = validatePromotionConfig(doc);
   if (!validation.ok) {
     return { kind: 'fenced', reason: 'invalidConfig', status, problems: validation.problems };
+  }
+  // F5: the routing array the trigger body reads must be exactly the derived
+  // one. A document whose array is missing, forged, reordered or edited after
+  // enablement is drift, whatever its digest says.
+  if (!storedEligibleGoalIdsMatch(doc.eligibleGoalIds, validation.policy)) {
+    return { kind: 'fenced', reason: 'configDrift', status };
   }
   const digest = doc.enabledConfigDigest;
   if (typeof digest !== 'string' || digest !== configDigest(validation.policy)) {

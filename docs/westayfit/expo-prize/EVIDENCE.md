@@ -150,18 +150,66 @@ Behaviour of every delivered row unchanged; the suite passes 68 / 68 after these
 - This file: the server SDK's pessimistic locking and the fifth-attempt throw; the
   line-count table.
 
+## EXP2A — the enable transition (Director #467 `5810305427`)
+
+**Delivered** as new commits on `63a2c4df` (integrated in development `61dd7b6a`); no rewrite.
+Files: `src/expo-prize/enable.ts` (new), `policy.ts` (operators required; `eligibleGoalIds`
+derived and digested; `readPromotion` drift-fences a stored array that disagrees),
+`index.ts` (barrel), `tests/expo-prize/enable.test.ts` (new), `pure.test.ts`, `fixtures.ts`
+(seeds go through the same derivation), and the three docs. Still nothing exported from
+`src/index.ts`; nothing callable, triggered, wired or deployed.
+
+**Measured, real core** (same emulator command): **83 / 83** on the first run — no initial
+failure, no rerun, no skip. `enable.test.ts` 9 (all emulator), `pure.test.ts` 45 (+6
+pure-core rows), the EXP1 suites unchanged in count. `tsc --noEmit` 0 errors.
+
+| proof | row | result |
+| --- | --- | --- |
+| 1 invalid / missing decision → no write | `repeatRule`, `entrantCap` 0 and absent, `operatorUids` empty, inverted window, empty goals, `ruleVersion` 0 → `refused / invalidConfig` naming the field; the document is byte-identical after | pass |
+| 2 forged array replaced; later drift fences | draft seeded with `['forged', goalB]` → enabled with the sorted derived pair; reordered → `fenced / configDrift` for `ingestContribution` and for the trigger body's routed award; widened → fenced; removed → the trigger body no longer routes and a direct ingest is fenced; restored exactly → adjudication resumes | pass |
+| 3 entrant under a draft → refused, incl. cap null → number | enabled cap-less, one admission, set back to draft with cap 1 → `fenced / enableArtefactsPresent`; artefacts scrubbed → `fenced / entrantsExist`; a stale link alone and a nonzero counter alone each refuse; `entrantCount` stays 0 (never initialised) | pass |
+| 4 other statuses cannot enable or mutate | `enabled`, `closing`, `disabled`, `frozen`, `drawn`, `archived` → `fenced / notDraft`, document byte-identical; a second enable on an enabled document is fenced and the first enablement untouched; a post-enable cap edit is `configDrift` for the award and enable cannot bless it | pass |
+| 5 concurrency | eight concurrent enables on one draft → exactly 1 `enabled`, 7 `fenced / notDraft`; one digest, one `enabledAt`, the derived array; three runs | pass |
+| 6 award and persistence unchanged | fenced under the draft (contribution intact), accepted after enable, replay on the second ingest, a later contribution accepted without a new entrant; both contribution rows keep their counts | pass |
+
+**Failing-before controls** (one mutation, targeted suite, restored, then the real core 83 / 83
+and the existing callable suites 81 / 81 in the same session):
+
+| mutation | line changed | result | rows that caught it |
+| --- | --- | --- | --- |
+| M8 fence admits `enabled` | `enable.ts` `status !== 'draft'` → also allows `enabled` | **4 failed** / 5 | proof 4, proof 5 ×3 |
+| M9 admission check removed | `enable.ts` `if (await anyAdmission(…))` → `if (false && …)` | **1 failed** / 8 | proof 3 |
+| M10 stored array trusted | `enable.ts` writes `doc.eligibleGoalIds` when present instead of the derived array | **2 failed** / 7 | the first-enable row, proof 2 |
+| M11 drift check on the array removed | `policy.ts` `storedEligibleGoalIdsMatch` gate → `false &&` | **2 failed** / 52 | proof 2, pure readPromotion ordering |
+| M12 artefact check removed | `enable.ts` `enabledConfigDigest / enabledAt` gate → `if (false)` | **1 failed** / 8 | proof 3 |
+
+**Unmeasured / limitations, stated plainly:**
+- The enable-vs-award race (an admission landing while the enable transaction runs) is not
+  driven: under `draft` the award is fenced before it writes, so an admission can only
+  pre-exist from an earlier enablement, which proof 3 covers. The prefix queries inside the
+  transaction are the emulator's semantics; live Firestore query-in-transaction contention
+  was not measured (no live project is authorised).
+- Operators are part of the digest, so an operator change after enablement fences awards.
+  That is a stated consequence, not a measured product decision; nothing reads the list
+  for authorisation yet.
+- `closing → frozen`, the pool, and W7 G's convergence and start-after-cutoff guards are
+  not built and not measured here.
+- Nothing is reachable: no callable invokes `enablePromotion`; the grep for `expo-prize` /
+  `wsfPromotion` across `src/index.ts`, rules, indexes, firebase configs, `.github`, the
+  app and the package files still returns nothing.
+
 ## The next seam
 
 In order, each its own reserved and reviewed packet:
 
-1. **Wiring (L0 reservation on `src/index.ts`)**: one operator-authorised `onCall`
-   exposing `reconcilePromotion` / `reconcileGoal`, and the decision on the trigger.
-2. **Owner decisions into a real (still disabled) promotion document**: repeat rule,
+1. **Close → reconcile → freeze** with W7 G's pool-relevant convergence and the
+   server-clock start-after-cutoff guard, writing `wsfPromotionPools/{promotionId}`.
+2. **Wiring (L0 reservation on `src/index.ts`)**: one operator-authorised `onCall`
+   exposing `enablePromotion` / `reconcilePromotion` / `reconcileGoal`, and the decision on
+   the trigger.
+3. **Owner decisions into a real (still disabled) promotion document**: repeat rule,
    cap-or-null, eligible goals and window, form store, operators.
-3. **"My entries"**: a member-only read that returns `classifyEntryStatus` for the caller's
+4. **"My entries"**: a member-only read that returns `classifyEntryStatus` for the caller's
    own contributions and nothing about anyone else; no counts on any shared surface.
-4. **Close → reconcile → freeze**: the transition that requires `converged` and writes
-   `wsfPromotionPools/{promotionId}` with the immutable ticket mapping, count, rule version
-   and digest.
 5. **Draw**: unbiased server selection over tickets, one persisted result per prize before
    reveal, redraws and exclusions with audit; then manual private winner contact.

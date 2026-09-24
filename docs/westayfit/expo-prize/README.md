@@ -9,7 +9,7 @@ instruction behind it: "Have fable begin this now."
 | --- | --- |
 | branch | `claude/wsf-expo-prize` |
 | base | `16cf96dcbecc4b64cfd9a11a5ae7acd770cc1453` (development head at release; W2's `bcadc245` merge landed afterwards and touches none of this lane's paths) |
-| target | draft PR into `claude/wsf-app-shell`; L0 is the only integrator |
+| target | draft PRs into `claude/wsf-app-shell` (#467 merged at `63a2c4d`; EXP2A on a successor PR); L0 is the only integrator |
 | reservation | `functions-westayfit/src/expo-prize/**`, `functions-westayfit/tests/expo-prize/**`, `docs/westayfit/expo-prize/**` (all absent at the base), plus the new `functions-westayfit/jest.expo-prize.config.cjs` (reservation request: a new file, because the callable config matches `tests/callable/**` only) |
 | not reserved | `functions-westayfit/src/index.ts`, `firestore.rules`, `firestore.indexes.json`, `firebase*.json`, `.firebaserc`, any `package.json` / lockfile, shared UI, `app/event/[goalId].tsx`, `app/contribute/[goalId].tsx`, anything under `.github/` |
 
@@ -20,7 +20,7 @@ instruction behind it: "Have fable begin this now."
 | `README.md` | this index and the lane's status |
 | `CONTRACT.md` | Packet A: the durable contract, resolutions (a)–(f) from source, schema, state machine, transaction boundaries, open owner decisions |
 | `TEST-MATRIX.md` | Packet A: the focused failure-catching test matrix Packet B implements |
-| `EVIDENCE.md` | Packet B: measured results at exact SHAs, control evidence, limitations, next seam |
+| `EVIDENCE.md` | Packet B and EXP2A: measured results at exact SHAs, control evidence, limitations, next seam |
 
 ## Status
 
@@ -31,9 +31,11 @@ this branch), **accepted** (the Director's product acceptance), **integrated**
 | checkpoint | delivered | accepted | integrated |
 | --- | --- | --- | --- |
 | setup (branch, PR #467, this index) | `087b667` | — | — |
-| Packet A (contract / schema / state machine / test matrix) | `966a63e` (`CONTRACT.md`, `TEST-MATRIX.md`) | — | — |
-| Packet B (disabled isolated core + emulator tests) | `3fbfb0a` code + tests (67/67 on the emulators; 7/7 mutations caught; existing suites 81/81) + `8a434dd` (`EVIDENCE.md`); W7 Check 22 on `8a434dd`: no defect in a delivered row | — | — |
+| Packet A (contract / schema / state machine / test matrix) | `966a63e` (`CONTRACT.md`, `TEST-MATRIX.md`) | Director `5810220569` (with B) | development `61dd7b6a` |
+| Packet B (disabled isolated core + emulator tests) | `3fbfb0a` code + tests (67/67 on the emulators; 7/7 mutations caught; existing suites 81/81) + `8a434dd` (`EVIDENCE.md`); W7 Check 22 on `8a434dd`: no defect in a delivered row | Director `5810220569` (at `63a2c4d`) | development `61dd7b6a` |
 | W7 Check 22 corrections (docs + four code notes, 68/68) | `3b9963c`, pushed under the owner-environment rule (no unpushed commits) disclosed in #467 `5808389267`, not on a release | — | — |
+| evidence-truth correction (two doc lines) | `63a2c4d` | Director `5810220569` | development `61dd7b6a` (L0 `5810260515`) |
+| **EXP2A** enable transition (D + F5 closed; `enable.ts`, `enable.test.ts`, policy derivation + drift fence) | this commit (see EVIDENCE.md §EXP2A) | — | — |
 
 ## Test command
 

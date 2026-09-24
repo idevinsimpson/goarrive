@@ -29,6 +29,7 @@ import {
 import {
   COLLECTIONS,
   configDigest,
+  deriveEligibleGoalIds,
   validatePromotionConfig,
   type EligibleGoal,
   type PromotionStatus,
@@ -245,8 +246,11 @@ export type PromotionSeed = {
   windowEndsAt?: Date;
   formBonusEntries?: number;
   ruleVersion?: number;
+  operatorUids?: string[];
   /** Write a digest that does not match (config drift). */
   digest?: 'valid' | 'stale' | 'absent';
+  /** Override the stored routing array (F5 fixtures); default is the derived sorted one. */
+  eligibleGoalIds?: unknown;
 };
 
 export async function seedPromotion(seed: PromotionSeed): Promise<string> {
@@ -256,11 +260,14 @@ export async function seedPromotion(seed: PromotionSeed): Promise<string> {
     ruleVersion: seed.ruleVersion ?? 1,
     repeatRule: seed.repeatRule ?? 'perContribution',
     eligibleGoals: seed.goals,
-    eligibleGoalIds: seed.goals.map((g) => g.goalId),
+    eligibleGoalIds:
+      seed.eligibleGoalIds !== undefined
+        ? seed.eligibleGoalIds
+        : deriveEligibleGoalIds(new Map(seed.goals.map((g) => [g.goalId, g.communityGroupId]))),
     windowStartsAt: Timestamp.fromDate(seed.windowStartsAt ?? new Date(now - 86_400_000)),
     windowEndsAt: Timestamp.fromDate(seed.windowEndsAt ?? new Date(now + 86_400_000)),
     formBonusEntries: seed.formBonusEntries ?? 1,
-    operatorUids: [],
+    operatorUids: seed.operatorUids ?? [uniq('op')],
     createdAt: Timestamp.now(),
   };
   if ('entrantCap' in seed) doc.entrantCap = seed.entrantCap;

@@ -72,7 +72,7 @@ rules section `firestore.rules:1198–…`, the same posture as `wsfContribution
 
 | collection | holds | never holds |
 | --- | --- | --- |
-| `wsfPromotions/{promotionId}` | configuration: status, rule version, eligible goals (map), `eligibleGoalIds` (the array the trigger body routes on — **must be derived from the map and digested by the enable step, which is not built**; today it is fixture-written and unvalidated, W7 F5), window, cap, bonus policy, repeat rule, operator uids, config digest | entrants, entries, contact |
+| `wsfPromotions/{promotionId}` | configuration: status, rule version, eligible goals (map), `eligibleGoalIds` (derived sorted array the trigger body routes on — written by the enable step, digested, drift-fenced; EXP2A), window, cap, bonus policy, repeat rule, operator uids (nonempty, digested), config digest, `enabledAt` | entrants, entries, contact |
 | `wsfPromotionEntrants/{promotionId}_{entrantId}` | the opaque entrant: `entrantId` (random), `identityBasis` (`firebaseUid` \| `paperSlip`), `createdAt`, `mergedInto` (reserved, human-reviewed) | uid, email, phone, name |
 | `wsfPromotionEntrantLinks/{promotionId}_uid_{uid}` | uid → entrantId, one per uid per promotion; the only place a uid meets an entrant | contact |
 | `wsfPromotionContacts/{promotionId}_{entrantId}` | the private prize-only contact record (schema only in A+B; no writer exists) | anything a community, kiosk or display surface reads |
@@ -162,10 +162,10 @@ writes : wsfPromotionSources/{p}_{sourceKey}         create (verdict accepted|re
   entry id (the receipt's own source row is `f_{receiptId}`) — two independent guards.
   **Cap**: the transaction that would create the (cap+1)-th entrant records the source
   `refused / capReached`; the server SDK's transactions lock the documents they read, so
-  concurrent last-slot claims admit exactly one. **Known seam (W7 D, not built):** under
-  `entrantCap: null` the counter is never written, so an enable step that later sets a cap
-  must initialise `entrantCount` from the entrant documents inside the enabling transaction
-  or refuse a cap change once any entrant exists; this packet has no enable step.
+  concurrent last-slot claims admit exactly one. **W7 D, closed by EXP2A (§d′):** under
+  `entrantCap: null` the counter is never written, and the enable transition refuses to
+  enable a draft under which any admission exists, so a cap can never be added or changed
+  after an admission and no partial counter is ever initialised.
 - **Rule version and config digest.** `ruleVersion` is stored on every source row and
   entry. At `enabled` the operator's configuration is digested (`enabledConfigDigest`); the
   ingest recomputes the digest from the fields it reads and refuses on mismatch
@@ -173,7 +173,7 @@ writes : wsfPromotionSources/{p}_{sourceKey}         create (verdict accepted|re
   silently re-adjudicating.
 - **Repeat rule** is explicit and required at enablement: `perContribution` (each distinct
   accepted contribution is an entry) or `perGoal` (one entry per goal per entrant). The
-  eventual published rule is the owner's; there is no enable step in this packet, and the
+  eventual published rule is the owner's; the enable step (§d′) refuses to enable and the
   code refuses to **adjudicate** under a promotion without a value (`readPromotion` →
   `invalidConfig`) rather than defaulting to "one per unique activity".
 
@@ -201,6 +201,48 @@ which counts recorded refusals as writes and therefore toggles on post-cutoff mo
 (W7 G); and (2) a **start-after-cutoff-by-server-clock** check, because a pass that begins
 before `windowEndsAt` has passed on Firestore's clock cannot prove a pre-cutoff commit is
 not still in flight, and a maximum observed `createdAt` is not a proof of absence.
+
+### (d′) The enable transition — EXP2A (Director #467 `5810305427`)
+
+`enablePromotion(deps, promotionId)` in `src/expo-prize/enable.ts`, unexported. One
+transaction, one write, exactly `draft → enabled`:
+
+```
+reads  : wsfPromotions/{p}                       must be `draft`; must carry no enabledConfigDigest / enabledAt
+         wsfPromotionEntrants  prefix {p}_ (limit 1)   any row ⇒ fenced entrantsExist
+         wsfPromotionEntrantLinks prefix {p}_ (limit 1) any row ⇒ fenced entrantsExist
+         wsfPromotionCounters/{p}                 entrantCount > 0 ⇒ fenced entrantsExist
+decide : validatePromotionConfig(doc) — every decision explicit, now including a nonempty
+         validated operatorUids; eligibleGoalIds DERIVED (sorted) from the validated map,
+         never read from the document or a caller
+write  : update { status: 'enabled', eligibleGoalIds: <derived>, enabledConfigDigest, enabledAt: serverTimestamp() }
+```
+
+| outcome | when | written |
+| --- | --- | --- |
+| `fenced / notDraft` | any status but `draft` (`enabled`, `closing`, `disabled`, `frozen`, `drawn`, `archived`) | nothing |
+| `fenced / enableArtefactsPresent` | a draft already carrying a digest or `enabledAt` (an enabled document set back by hand) | nothing |
+| `fenced / entrantsExist` | any entrant, link or counted admission under the promotion | nothing |
+| `refused / invalidConfig` | a missing or invalid decision, each named | nothing |
+| `enabled` | otherwise | the four fields above, atomically |
+
+- **D closed (Director ruling):** a cap can never be added or changed after an admission.
+  Enable fails closed on any admission; after enablement, every configuration field is
+  covered by the digest (`readPromotion` fences `configDrift`), and there is no re-enable.
+  No counter is ever initialised from entrant documents.
+- **F5 closed:** `eligibleGoalIds` is derived and persisted by enable, covered by the
+  digest, and `readPromotion` refuses a stored array that is missing, reordered, widened or
+  edited (`configDrift`) — so both direct adjudication and the trigger body's routing are
+  fenced by drift. A caller's or document's array is replaced, never trusted.
+- **Operators are a decision:** `operatorUids` must be nonempty and valid; it is part of
+  the digest, so an operator change after enablement is drift. That is a consequence the
+  Director may relax later (a separate operator-roster document would do it); nothing in
+  this packet reads the list for authorisation, since no callable exists.
+- **Concurrency:** two enables read the same draft; one commits; the other's read set
+  changed, the SDK retries it, it reads `enabled` and is fenced. One write means no partial
+  state.
+- **Not here:** `closing → frozen`, the pool, and the freeze's convergence / start-after-
+  cutoff guards (W7 G) — the next packet.
 
 ### (e) The community-interest form and its trusted receipt seam
 
@@ -250,6 +292,7 @@ functions-westayfit/src/expo-prize/adjudicate.ts    deterministic source adjudic
 functions-westayfit/src/expo-prize/award.ts         the transaction: ingest contribution / form receipt
 functions-westayfit/src/expo-prize/reconcile.ts     bounded page reconciliation
 functions-westayfit/src/expo-prize/status.ts        confirmed / pending / not-entered classifier (pure)
+functions-westayfit/src/expo-prize/enable.ts        the draft → enabled transaction (EXP2A)
 functions-westayfit/src/expo-prize/index.ts         module barrel — NOT exported from src/index.ts
 functions-westayfit/tests/expo-prize/*.test.ts      emulator tests
 functions-westayfit/jest.expo-prize.config.cjs      NEW config (existing configs match tests/callable only) — reservation request
@@ -282,7 +325,7 @@ Control, run in this container before writing any test: the existing
    slice (default-deny), a rules block only if a member-facing read ("My entries") ships.
 5. Existing W8 staging permission does not cover this system; a separate release action.
 
-**Unresolved owner decisions (configurable; the code refuses to adjudicate without them):**
+**Unresolved owner decisions (configurable; the code refuses to enable or adjudicate without them):**
 
 | decision | where it lands |
 | --- | --- |

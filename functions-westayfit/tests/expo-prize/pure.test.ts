@@ -13,8 +13,10 @@ import {
   classifyEntryStatus,
   configDigest,
   contributionDocIdFromPath,
+  deriveEligibleGoalIds,
   EMPTY_TALLY,
   readPromotion,
+  storedEligibleGoalIdsMatch,
   validatePromotionConfig,
   withinWindow,
 } from '../../src/expo-prize';
@@ -27,6 +29,8 @@ function baseConfig(): Record<string, unknown> {
     repeatRule: 'perContribution',
     entrantCap: null,
     eligibleGoals: [{ goalId: 'goalA', communityGroupId: 'grpA' }],
+    eligibleGoalIds: ['goalA'],
+    operatorUids: ['op1'],
     windowStartsAt: Timestamp.fromMillis(now - 1000),
     windowEndsAt: Timestamp.fromMillis(now + 1000),
     formBonusEntries: 1,
@@ -53,6 +57,10 @@ describe('[pure] row 23 — enabling requires explicit decisions', () => {
     ['ruleVersion', (c: Record<string, unknown>) => delete c.ruleVersion],
     ['ruleVersion', (c: Record<string, unknown>) => (c.ruleVersion = 0)],
     ['formBonusEntries', (c: Record<string, unknown>) => (c.formBonusEntries = -1)],
+    ['operatorUids', (c: Record<string, unknown>) => delete c.operatorUids],
+    ['operatorUids', (c: Record<string, unknown>) => (c.operatorUids = [])],
+    ['operatorUids', (c: Record<string, unknown>) => (c.operatorUids = ['ok', 'bad id!'])],
+    ['operatorUids', (c: Record<string, unknown>) => (c.operatorUids = ['dup', 'dup'])],
   ])('refuses with the field named: %s', (field, mutate) => {
     const c = baseConfig();
     mutate(c);
@@ -107,8 +115,48 @@ describe('[pure] row 25 — the digest is canonical and drift is detected', () =
     expect(readPromotion(withDigest)).toMatchObject({ kind: 'active', status: 'enabled' });
     expect(readPromotion({ ...withDigest, status: 'closing' })).toMatchObject({ kind: 'active', status: 'closing' });
     expect(readPromotion({ ...withDigest, ruleVersion: 2 })).toMatchObject({ kind: 'fenced', reason: 'configDrift' });
+    // F5: the stored routing array must be exactly the derived one.
+    expect(readPromotion({ ...withDigest, eligibleGoalIds: undefined })).toMatchObject({ kind: 'fenced', reason: 'configDrift' });
+    expect(readPromotion({ ...withDigest, eligibleGoalIds: ['goalA', 'goalZ'] })).toMatchObject({ kind: 'fenced', reason: 'configDrift' });
+    expect(readPromotion({ ...withDigest, eligibleGoalIds: [] })).toMatchObject({ kind: 'fenced', reason: 'configDrift' });
+    expect(readPromotion({ ...withDigest, operatorUids: ['op1', 'op2'] })).toMatchObject({ kind: 'fenced', reason: 'configDrift' });
     for (const status of ['frozen', 'drawn', 'archived']) {
       expect(readPromotion({ ...withDigest, status })).toMatchObject({ kind: 'fenced', reason: 'promotionInactive' });
+    }
+  });
+});
+
+describe('[pure] EXP2A — eligibleGoalIds is derived, sorted, and part of the digest', () => {
+  test('derivation sorts and ignores caller order; the policy carries it', () => {
+    const v = validatePromotionConfig({
+      ...baseConfig(),
+      eligibleGoals: [
+        { goalId: 'zeta', communityGroupId: 'g' },
+        { goalId: 'alpha', communityGroupId: 'g' },
+        { goalId: 'mid', communityGroupId: 'g' },
+      ],
+      eligibleGoalIds: ['forged'],
+    });
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.policy.eligibleGoalIds).toEqual(['alpha', 'mid', 'zeta']);
+      expect(deriveEligibleGoalIds(v.policy.eligibleGoals)).toEqual(['alpha', 'mid', 'zeta']);
+      expect(storedEligibleGoalIdsMatch(['alpha', 'mid', 'zeta'], v.policy)).toBe(true);
+      expect(storedEligibleGoalIdsMatch(['zeta', 'alpha', 'mid'], v.policy)).toBe(false);
+      expect(storedEligibleGoalIdsMatch(['forged'], v.policy)).toBe(false);
+      expect(storedEligibleGoalIdsMatch(undefined, v.policy)).toBe(false);
+    }
+  });
+
+  test('operators are sorted into the policy and a different operator set changes the digest', () => {
+    const a = validatePromotionConfig({ ...baseConfig(), operatorUids: ['b', 'a'] });
+    const b = validatePromotionConfig({ ...baseConfig(), operatorUids: ['a', 'b'] });
+    const c = validatePromotionConfig({ ...baseConfig(), operatorUids: ['a'] });
+    expect(a.ok && b.ok && c.ok).toBe(true);
+    if (a.ok && b.ok && c.ok) {
+      expect(a.policy.operatorUids).toEqual(['a', 'b']);
+      expect(configDigest(a.policy)).toBe(configDigest(b.policy));
+      expect(configDigest(a.policy)).not.toBe(configDigest(c.policy));
     }
   });
 });
