@@ -1286,4 +1286,46 @@ test.describe('W9 contribution exits, independent instruments', () => {
     for (const x of samples) expect(x, `A's 20 was on B's screen: ${JSON.stringify(m)}`).not.toMatch(/:.*\b20\b/);
     expect(samples[samples.length - 1], "B's own part after the release").toMatch(/\b5\b/);
   });
+
+  /*
+    X7h — THE SETTLE TIMER FIRES BEFORE THE GOAL LIST IS READY (W8's third
+    boundary, #462 `5805516792`). A direct entry whose first wsfListGoals
+    answer is held 4 s, past the 2.6 s timer, and whose first pulse (which can
+    only follow the list) is answered stale. On 9d30c38b the timer found no
+    list, consumed its token and issued nothing: the stale figure stays. The
+    contract: the settle owed is issued once the list lands, and the total is
+    the server's within the settle bound of the list's arrival.
+  */
+  test('X7h a goal list that lands after the settle timer still gets its settle: the stale first read is corrected', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('x7h');
+    await arrive(page, fx);
+    await contributeFromCommunity(page, fx);
+    expect(await serverTotal(fx.goalId)).toBe(SEEDED + 20);
+    let armedAt = Number.POSITIVE_INFINITY;
+    let listHeld = 0;
+    await page.route('**/us-central1/wsfListGoals', async (route: Route) => {
+      if (route.request().method() !== 'POST' || Date.now() < armedAt || listHeld > 0) return route.continue();
+      listHeld += 1;
+      await new Promise((r) => setTimeout(r, 4_000));
+      await route.continue().catch(() => undefined);
+    });
+    const stub = await staleFirstPulses(page, 1);
+    const pulses = watchCalls(page, ['wsfGoalPulse']);
+    stub.arm();
+    armedAt = Date.now();
+    const enteredAt = Date.now();
+    await page.goto(`/community/${fx.groupId}`);
+    const timeline = await sampleTotal(page, fx.goalId, enteredAt, enteredAt + 14_000);
+    const listLandedAt = 4_000 + (pulses[0] ? 0 : 0);
+    const firstShown = timeline.find(([, v]) => v !== null) ?? null;
+    const correctedAt = timeline.find(([t, v]) => v === SEEDED + 20 && t > (firstShown?.[0] ?? 0))?.[0] ?? null;
+    const m = { listHeld, timeline: changes(timeline), pulsesMs: pulses.map((p) => p.at - enteredAt), staleServedMs: stub.served, firstShownMs: firstShown?.[0] ?? null, correctedAtMs: correctedAt, at14s: timeline[timeline.length - 1]![1] };
+    test.info().annotations.push({ type: 'X7h measured', description: JSON.stringify(m) });
+    expect(listHeld, 'precondition: the goal list answer was held past the timer').toBe(1);
+    expect(stub.served.length, 'precondition: the first pulse (after the list) was answered stale').toBe(1);
+    expect(m.at14s, `the stale figure stays after a late goal list: ${JSON.stringify(m)}`).toBe(SEEDED + 20);
+    expect(pulses.length, 'no settle read followed the late goal list').toBeGreaterThanOrEqual(2);
+    void listLandedAt;
+  });
 });
