@@ -2504,3 +2504,59 @@ Each fails for its intended reason; no broader mutation work was done.
 - **Unmeasured:** the enable-vs-award race (an admission landing while enable runs — the award fences under `draft`, so only a pre-existing admission is possible, which is covered); live Firestore query-in-transaction contention; W7 G / `closing → frozen` / the pool; wiring, UI, deployment.
 - Evidence: `docs/westayfit/qa/sprint-w7-exp2a.test.ts`; `sprint-w7-exp1-concurrency.test.ts` (operator named); run from the scratch directory against the detached worktree with `W7_EXP1_WT`. `ts:check` 0; guard 9 / 20; no artifacts committed.
 - **Status:** tested on `41cb6dff`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
+
+# Check 25 — EXP2B's close → reconcile → freeze `e0171fd1` on exact parent `41cb6dff` (#470): **PASS on every item; the changed boundaries proved by W7's own instrument; all nine disclosed controls fail for their intended reasons; nothing weakened; no defect**
+
+Routed by the Director on #434 (`5813669831`; source disposition #470 `5813666025`). Checks 22–24 carried where their dependencies are unchanged (`enable.ts`, `policy.ts`, `adjudicate.ts`, `form.ts`, `status.ts`, `trigger.ts` and the six earlier test files are byte-identical to `41cb6dff`).
+
+## 25.1 · Scope, verified by git and grep
+
+- `41cb6dff..e0171fd1` is **two commits** (`6cc0a36e` code / tests / docs → `e0171fd1` evidence), a linear chain on the parent (`merge-base --is-ancestor` true, `rev-list --count` 2), exactly **14 files** inside the reservation (+1850 / −25): new `close.ts` (63), `freeze.ts` (412), `pool.ts` (195), `close.test.ts`, `freeze.test.ts`, `pool.test.ts`; changed `award.ts` (two collection names, two refs), `reconcile.ts` (the page query extracted as `contributionPageQuery` / `clampPageSize`, behaviour unchanged), `index.ts` (barrel), `fixtures.ts`, and the four docs.
+- No `expo-prize` / `wsfPromotion` reference in `functions-westayfit/src/index.ts`, `package.json`, `tsconfig.json`, `firestore.rules`, `firestore.indexes.json`, `firebase*.json`, `.github`, `apps/westayfit/app`, `apps/westayfit/src` or the root `package.json`: no root export, callable / trigger registration, rules, index, config, package, app, workflow or deployment wiring. "draw" occurs in `src/expo-prize` only as the `'drawn'` status name and in comments stating there is none; no selection, prize, winner or contact code exists.
+- Detached worktree at `e0171fd1`, never pushed, not edited (`git diff --quiet` after every mutation and at the end).
+
+## 25.2 · Lane and typecheck
+
+| run | result |
+|---|---|
+| EXP2B lane at `e0171fd1`, once, documented command shape | **116 passed, 0 failed, 0 pending** (59 s) — `pure` 45, `award` 14, `enable` 9, `pool` 8, `form` 6, `reconcile` 3, `close` 8, `cap` 6, `freeze` 17 |
+| `tsc --noEmit -p functions-westayfit/tsconfig.json` | **0 errors** |
+| real core after the nine mutation restores | **116 / 116** |
+
+Initial run only; no failures, reruns or skips. (EXP1's table says `close` 11 / `freeze` 16; the files hold 8 and 17 test cases — 25 either way — a count-by-row vs count-by-case difference, not a discrepancy in what ran.)
+
+## 25.3 · The changed boundaries, proved (W7's instrument `sprint-w7-exp2b.test.ts` on `e0171fd1`; own seeding through the real enable and close transitions, raw reads, the promotion and pool documents compared byte-for-byte **including `updateTime`** around every fenced or refused call; every cutoff waited out on Firestore's own clock by a `serverTimestamp()` probe read back)
+
+| boundary | result |
+|---|---|
+| **close is digest-valid, one-way, idempotent; fences are byte-identical no-writes** | **PASS**: `enabled` → `closing` with only `status` and `closingRequestedAt` changed (`close.ts:57-60`); three repeats → `alreadyClosing`, document identical; `enablePromotion` on it → `notDraft`; `draft` / `disabled` / `frozen` / `drawn` / `archived` / an unknown status → `fenced / notEnabled` identical; a cap edit after enablement → `configDrift`; `operatorUids: []` → `invalidConfig`; missing → `promotionMissing`; six concurrent closes → 1 `closed`, 5 `alreadyClosing` |
+| **only the read-back marker time permits a pass; a before-cutoff attempt writes only its marker** | **PASS**: with the cutoff 2.5 s ahead the attempt returned `notReady / beforeCutoff` with `startedAtMs` 2,460 ms before the cutoff, equal to the marker's stored `startedAt`, `pass: null`; exactly one new marker; promotion document and pool untouched (`freeze.ts:163-176`, `:381-386`); after Firestore's clock passed the cutoff the next attempt ran the pass and froze with `passStartedAtMs ≥ windowEndMs` |
+| **a missing pre-cutoff verdict is adjudicated safely and requires a subsequent clean pass; post-cutoff-only rows cannot toggle readiness** | **PASS**: one adjudicated and one unadjudicated pre-cutoff row → first attempt `notReady / newAcceptedEntries`, pass `{processed 2, replayed 1, newAccepted 1, preCutoffWithoutSource 1, postCutoffIgnored 0}`, the row now `replay`, nothing frozen; then a member moves after the cutoff → the next attempt **froze** with `{processed 3, replayed 2, newAccepted 0, preCutoffWithoutSource 0, postCutoffIgnored 1}`, `totalTickets 2`; the post-cutoff row carries a recorded `afterCutoff` refusal and is not in the pool (`freeze.ts:185-235`) — the exact G behaviour the old `converged` got wrong |
+| **bonus-bearing promotions refuse `formSourceUnbound` before a marker** | **PASS**: `formBonusEntries: 1`, closing, cutoff passed → `{refused, formSourceUnbound, attemptId: null}`; **0** markers, no pool, document identical (`freeze.ts:376-378`) |
+| **pool ordering, ranges, totals, digest and bounds deterministic; malformed / empty / oversize fail closed; stored output carries nothing sensitive** | **PASS**: 60 mixed entries (confirmed / pending / revoked) → byte-identical pool and digest over 8 shuffles; ranges contiguous from 1 in sorted entrant order, totals consistent, digest recomputable, an edited pool fails `storedPoolIntact`; empty, all-pending, a malformed id, a negative ticket and 20 000 long entrants each refused before any write (`pool.ts:106-160`). A real frozen pool (two entrants, 1 + 2 tickets from three contributions) holds exactly the ten documented keys, its ranges name the entrant documents' opaque ids, and its serialization contains **none** of 19 forbidden strings (both uids, the goal id, the group id, the three attempt ids, the three contribution ids, `c_` / `f_` / `b_`, `@`, the operator uid, `count`, `createdAt`, `userId`, `email`) |
+| **foreign / existing pools never overwritten; pool creation and `closing → frozen` atomic; concurrent finalizers and retries yield one byte-stable pool** | **PASS ×3**: a planted foreign pool under `closing` → `fenced / poolExistsWithoutFrozen`, pool and promotion byte-identical (`freeze.ts:286`); an abort after both writes were queued leaves no pool and `closing` (`:317-329`); six concurrent finalizers → exactly 1 `replay: false`, 5 `replay: true`, one digest, all receipts `{3 tickets, 3 entrants}`; three retries replay and the pool and promotion documents are byte-identical after them |
+| **after `frozen`, award / reconcile / enable / close cannot change the pool** | **PASS**: a post-freeze contribution persists as movement but its award is `fenced / promotionInactive`; `reconcilePromotion` `{processed 0, writes 0, converged false}`; enable `notDraft`; close `notEnabled`; freeze replays; pool and promotion byte-identical |
+| **award persistence, replay / dedupe, cap atomicity unchanged** | **PASS**: the Check 22 instrument on `e0171fd1` — A ×3 (`[accepted, replay ×5]`, one of everything, the contribution row's data and `updateTime` identical), B ×3 (1 bonus, 3 recorded refusals), C ×3 (exactly 2 of 6 under cap 2, all movement intact) |
+
+## 25.4 · The nine disclosed controls (M13–M18), re-applied on the worktree copy and restored
+
+| mutation (EXP1 `EVIDENCE.md` §EXP2B) | EXP1 recorded | measured here | caught by |
+|---|---|---|---|
+| M13 marker guard removed | 1 failed / 16 | **1 / 16** | proof 1 |
+| M14 missing-source guard removed (`preCutoffWithoutSource += 0`) | 3 / 14 | **3 / 14** | proofs 1, 2a, 2b |
+| M15 form fence removed | 1 / 16 | **1 / 16** | proof 5 |
+| M16 size fence removed (`pool.ts`) | 2 / 23 | **2 / 23** | proof 8, pool "oversize" |
+| M17a pool existence check removed | 1 / 16 | **1 / 16** | proof 12 |
+| M17b … plus `create` → `set` | 1 / 16 | **1 / 16** | proof 12 |
+| M17c pool written outside the transaction | 4 / 13 | **4 / 13** | proof 13, proof 9 ×3 |
+| M17d status change not on the promotion | 6 / 11 | **6 / 11** | proofs 1, 6, 9 ×3, 10 |
+| M18 post-cutoff rows counted against readiness | 1 / 16 | **1 / 16** | proof 3 (G is load-bearing) |
+
+Each fails for its intended reason with EXP1's exact count; no broader mutation work.
+
+## 25.5 · Notes, bound and hygiene
+
+- **One reading note, not a defect:** `freeze.ts:243` and two lines of `fixtures.ts` (`:292`, `:367`) end their prefix cursor with a **literal** U+F8FF character (bytes `EF A3 BF`), which renders as nothing in most terminals and diff views; `enable.ts:58` writes the same bound as the visible escape ``. Measured: the query is correct (the escape-free shape `endAt(prefix)` would return zero documents in the emulator, inside and outside a transaction; the literal returns the prefix set). A reviewer reading the source cannot see the character; the escape would make the bound reviewable. Behaviour is right.
+- **Kept unmeasured / unbuilt, as required:** live-Firestore semantics (query-in-transaction, commit-timestamp monotonicity, the marker argument), sustained-contention liveness (six concurrent finalizers ×3 here), form-store binding (`formSourceUnbound` is a refusal, not a seam), wiring, UI, draw, deployment, drift injected mid-pass.
+- Evidence: `docs/westayfit/qa/sprint-w7-exp2b.test.ts`, run from the scratch directory against the detached worktree with `W7_EXP1_WT`; the Check 22 concurrency instrument reused. `ts:check` 0; guard 9 / 20; no artifacts committed.
+- **Status:** tested on `e0171fd1`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
