@@ -310,12 +310,14 @@ describe('award — one contribution, one entry', () => {
     expect(r.outcome).toBe('accepted');
     const s = await promotionState(p);
     const { links, ...rest } = s;
-    const leaked = deepStrings(rest).filter((v) => v.includes(uid));
+    // Values AND document ids (W7: the first draft scanned values only).
+    const ids = [...Object.keys(rest.entrants), ...Object.keys(rest.sources), ...Object.keys(rest.entries), ...Object.keys(rest.tallies)];
+    const leaked = [...deepStrings(rest), ...ids].filter((v) => v.includes(uid));
     // The source key and entry id embed the canonical contribution id, which
     // contains the uid by construction (it is wsfContributions' own key). That
     // is the ONE place the identity appears outside the link, and it names the
     // ledger row, not a person: assert nothing ELSE carries it.
-    const allowed = new Set([`c_${c.docId}`, c.path]);
+    const allowed = new Set([`c_${c.docId}`, c.path, `${p}_c_${c.docId}`]);
     for (const v of leaked) expect(allowed.has(v)).toBe(true);
     expect(Object.keys(rest.entrants)[0]).not.toContain(uid);
     expect(Object.values(rest.entries)[0].entrantId).not.toContain(uid);

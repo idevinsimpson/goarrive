@@ -6,9 +6,13 @@
  * wsfGoalMemberTotals, wsfCombinedCredits or any turn document, so a failed
  * award leaves accepted movement exactly as performContribution committed it.
  *
- * Every write is a create under a deterministic id (or a merge on the
- * entrant's own tally), which is what makes replay, duplicate delivery,
- * out-of-order delivery and interrupted reconciliation converge.
+ * The durable rows (source, entry, entrant, link) are creates under
+ * deterministic ids; the counter and the tally are increment merges and the
+ * entrant id is random, so their idempotence is borrowed from the
+ * co-transactional creates: they commit only when the creates do. A losing
+ * transaction is retried by the SDK (ABORTED), observes the source row and
+ * replays. That is what makes replay, duplicate delivery, out-of-order
+ * delivery and interrupted reconciliation converge.
  *
  * The only cross-entrant document is wsfPromotionCounters/{promotionId}, read
  * and incremented once per entrant, and only when a cap is configured. There
@@ -172,11 +176,11 @@ function writeEntrantIfNew(
   return true;
 }
 
-function storedVerdict(raw: unknown): Verdict {
+function storedVerdict(raw: unknown, sourceKey: string): Verdict {
   const d = (raw ?? {}) as Record<string, unknown>;
   if (d.verdict === 'accepted' && typeof d.entryId === 'string') {
     const kind = d.kind === 'formReceipt' ? 'formBonus' : 'movement';
-    return { verdict: 'accepted', kind, sourceKey: '', entryId: d.entryId };
+    return { verdict: 'accepted', kind, sourceKey, entryId: d.entryId };
   }
   return { verdict: 'refused', reason: (d.reason as RefusalReason) ?? 'sourceMalformed' };
 }
@@ -208,7 +212,7 @@ export async function ingestContribution(
 
     const sourceSnap = await tx.get(r.source(sourceKey));
     if (sourceSnap.exists) {
-      return { outcome: 'replay', verdict: storedVerdict(sourceSnap.data()) } as IngestResult;
+      return { outcome: 'replay', verdict: storedVerdict(sourceSnap.data(), sourceKey) } as IngestResult;
     }
 
     const rowSnap = await tx.get(db.doc(contributionPath));
@@ -291,11 +295,6 @@ export async function ingestFormReceipt(
   }
   const sourceKey = formSourceKey(receiptId);
 
-  // Re-read the receipt server-side, outside the transaction (the seam is not
-  // Firestore in general). The verdict inside the transaction depends only on
-  // what it returned plus the transactional reads.
-  const receipt = await deps.formSource.read(receiptId);
-
   return db.runTransaction(async (tx) => {
     const promoSnap = await tx.get(r.promotion);
     const promotion = readPromotion(promoSnap.exists ? promoSnap.data() : undefined);
@@ -306,9 +305,15 @@ export async function ingestFormReceipt(
 
     const sourceSnap = await tx.get(r.source(sourceKey));
     if (sourceSnap.exists) {
-      return { outcome: 'replay', verdict: storedVerdict(sourceSnap.data()) } as IngestResult;
+      return { outcome: 'replay', verdict: storedVerdict(sourceSnap.data(), sourceKey) } as IngestResult;
     }
 
+    // Re-read the receipt server-side, BEHIND the fence and the dedupe: a
+    // fenced promotion or a replay never touches the seam. The seam is not
+    // Firestore in general, so this read is outside the transaction's read
+    // set; a retried transaction re-reads it, and the verdict depends only on
+    // what it returned plus the transactional reads.
+    const receipt = await deps.formSource.read(receiptId);
     if (!receipt) return { outcome: 'refused', reason: 'unknownReceipt', recorded: false } as IngestResult;
     if (receipt.subjectUid !== args.claimantUid) {
       return { outcome: 'refused', reason: 'subjectMismatch', recorded: false } as IngestResult;

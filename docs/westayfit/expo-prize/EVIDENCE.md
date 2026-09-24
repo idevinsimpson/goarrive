@@ -11,16 +11,16 @@ the new jest config).
 
 | file | lines | what |
 | --- | --- | --- |
-| `functions-westayfit/src/expo-prize/policy.ts` | 226 | typed contract, `validatePromotionConfig`, `configDigest`, `readPromotion` (the fence), `withinWindow` |
-| `functions-westayfit/src/expo-prize/adjudicate.ts` | 191 | pure verdicts: `contributionDocIdFromPath`, `readContributionRow`, `adjudicateContribution`, `adjudicateFormReceipt`, the source/entry id functions |
-| `functions-westayfit/src/expo-prize/award.ts` | 366 | `ingestContribution`, `ingestFormReceipt` — one transaction per source (CONTRACT §d), `refs`, `COLLECTIONS` |
-| `functions-westayfit/src/expo-prize/form.ts` | 40 | `FormReceiptSource` (the trusted seam) and the synthetic `InMemoryFormReceiptSource` |
-| `functions-westayfit/src/expo-prize/reconcile.ts` | 141 | `reconcileGoal` (one bounded page), `reconcilePromotion` (full pass, `converged`) |
-| `functions-westayfit/src/expo-prize/trigger.ts` | 43 | `onContributionCreatedBody` — the proposed trigger's body, **unregistered** |
-| `functions-westayfit/src/expo-prize/status.ts` | 33 | `classifyEntryStatus` |
-| `functions-westayfit/src/expo-prize/index.ts` | 15 | barrel; **not** re-exported from `src/index.ts` |
+| `functions-westayfit/src/expo-prize/policy.ts` | 240 | typed contract, `validatePromotionConfig`, `configDigest`, `readPromotion` (the fence), `withinWindow` |
+| `functions-westayfit/src/expo-prize/adjudicate.ts` | 181 | pure verdicts: `contributionDocIdFromPath`, `readContributionRow`, `adjudicateContribution`, `adjudicateFormReceipt`, the source/entry id functions |
+| `functions-westayfit/src/expo-prize/award.ts` | 376 | `ingestContribution`, `ingestFormReceipt` — one transaction per source (CONTRACT §d), `refs`, `COLLECTIONS` |
+| `functions-westayfit/src/expo-prize/form.ts` | 37 | `FormReceiptSource` (the trusted seam) and the synthetic `InMemoryFormReceiptSource` |
+| `functions-westayfit/src/expo-prize/reconcile.ts` | 138 | `reconcileGoal` (one bounded page), `reconcilePromotion` (full pass, `converged`) |
+| `functions-westayfit/src/expo-prize/trigger.ts` | 40 | `onContributionCreatedBody` — the proposed trigger's body, **unregistered** |
+| `functions-westayfit/src/expo-prize/status.ts` | 34 | `classifyEntryStatus` |
+| `functions-westayfit/src/expo-prize/index.ts` | 14 | barrel; **not** re-exported from `src/index.ts` |
 | `functions-westayfit/jest.expo-prize.config.cjs` | 21 | new config; `tests/expo-prize/**`; same isolation setup file; no npm script |
-| `functions-westayfit/tests/expo-prize/{fixtures,pure.test,award.test,form.test,cap.test,reconcile.test}.ts` | 1215 | the matrix |
+| `functions-westayfit/tests/expo-prize/{fixtures,pure.test,award.test,form.test,cap.test,reconcile.test}.ts` | 1248 | the matrix |
 
 `tsc --noEmit -p functions-westayfit/tsconfig.json`: 0 errors (strict, `noUnusedLocals`,
 `noImplicitReturns`). `npm run build` would compile the module into the gitignored `lib/`;
@@ -45,12 +45,12 @@ already keeps it out of the repo). The isolation setup file refused nothing: pro
 
 | suite | tests | kind |
 | --- | --- | --- |
-| `pure.test.ts` | 38 | **pure core only** — no Firestore; proves logic, not atomicity |
+| `pure.test.ts` | 39 | **pure core only** — no Firestore; proves logic, not atomicity |
 | `award.test.ts` | 14 | emulator; rows 1–7, 18, 20, 21, 22, 24, 25, 26, trigger body |
 | `form.test.ts` | 6 | emulator; rows 8, 8b, 9, 10, 11+12, cutoff/disabled bonus |
 | `cap.test.ts` | 6 | emulator; row 13 ×3, 14, 15, explicit no-cap |
 | `reconcile.test.ts` | 3 | emulator; rows 16, 17, fenced pass |
-| **total** | **67 passed, 0 failed** | three consecutive full runs after the last code change |
+| **total** | **68 passed, 0 failed** (67 at `8a434dd`; one pure case added by the W7 corrections) | three consecutive full runs at `8a434dd`, one after the corrections |
 
 Every emulator row creates its movement through the real `wsfContribute`, and rows 3 and 4
 through the real turn callables (`wsfJoinTurnLine → wsfCallNext → wsfTurnReady →
@@ -61,9 +61,12 @@ fixtures shaped like them.
 **Concurrency claims rest on real emulator transactions**, not mocks: row 2b (six
 concurrent first ingestions of one contribution → 1 accepted, 5 replay), row 8b (four
 concurrent receipts for one subject → 1 bonus), row 13 (six concurrent first-time entrants
-against a cap of 2 → exactly 2 admitted, three runs). The emulator implements Firestore's
-optimistic transaction semantics; production contention behaviour is the same model but
-was not measured against a live project (none is authorised).
+against a cap of 2 → exactly 2 admitted, three runs). The server SDK's transactions lock
+the documents they read (pessimistic; `@google-cloud/firestore` 7.x, default 5 attempts):
+a loser is retried and then replays, and a fifth consecutive loss throws rather than
+recording — the end state is identical either way, liveness under sustained contention is
+not measured. Production behaviour is the same model but was not measured against a live
+project (none is authorised).
 
 ## Failing-before controls (one mutation at a time, targeted suite, then restored)
 
@@ -125,6 +128,27 @@ alone passed 25/25 as the harness control.
   id to a member must publish a derived opaque id, not this one.
 - The emulator warns about IPv6 port probes (`EAFNOSUPPORT ::1`) in this container; it
   binds IPv4 and the runs are unaffected.
+
+## Corrections after W7 Check 22 (`5808214593`)
+
+Behaviour of every delivered row unchanged; the suite passes 68 / 68 after these:
+
+- `award.ts`: `storedVerdict` returns the real source key on replay (was `''`); the form
+  receipt is re-read **behind** the fence and the dedupe, so a fenced promotion or a replay
+  never touches the seam; the header no longer claims every write is create-or-noop.
+- `status.ts`: `classifyEntryStatus` takes `goalEligible` and answers `notEntered /
+  goalNotInPromotion` for a contribution to an unlisted goal instead of `pending`.
+- Tests: row 26 scans document ids as well as values; row 10 scans the entrant and link
+  documents too; one pure case added for the unlisted goal.
+- `CONTRACT.md`: ABORTED-retry-then-replay (not ALREADY_EXISTS); idempotence borrowed from
+  the co-transactional creates; `b_{entrantId}` vs `f_{receiptId}`; `tickets` / `goalId` on
+  entries and `entryCount` counting tickets; "refuses to adjudicate" (no enable step
+  exists); cites `:3550` and `resolveTurnEvent :7646–7710`; `eligibleGoalIds` named in the
+  schema as derived-and-digested-at-enable (W7 F5, not built); the cap-after-enable seam
+  (W7 D, not built); the freeze's pool-relevant convergence and start-after-cutoff guard
+  (W7 G, not built).
+- This file: the server SDK's pessimistic locking and the fifth-attempt throw; the
+  line-count table.
 
 ## The next seam
 

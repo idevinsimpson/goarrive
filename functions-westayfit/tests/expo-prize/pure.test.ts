@@ -183,16 +183,21 @@ describe('[pure] the movement verdict ignores count and holds the row to the win
 
 describe('[pure] row 19 — pending and unknown are distinct from confirmed', () => {
   test('the four answers', () => {
-    expect(classifyEntryStatus({ promotion: 'active', contributionExists: true, source: null })).toEqual({ status: 'pending' });
-    expect(classifyEntryStatus({ promotion: 'active', contributionExists: true, source: { verdict: 'accepted' } })).toEqual({ status: 'confirmed' });
-    expect(classifyEntryStatus({ promotion: 'active', contributionExists: true, source: { verdict: 'refused', reason: 'afterCutoff' } })).toEqual({ status: 'notEntered', reason: 'afterCutoff' });
-    expect(classifyEntryStatus({ promotion: 'active', contributionExists: false, source: null })).toEqual({ status: 'unknown' });
+    expect(classifyEntryStatus({ promotion: 'active', goalEligible: true, contributionExists: true, source: null })).toEqual({ status: 'pending' });
+    expect(classifyEntryStatus({ promotion: 'active', goalEligible: true, contributionExists: true, source: { verdict: 'accepted' } })).toEqual({ status: 'confirmed' });
+    expect(classifyEntryStatus({ promotion: 'active', goalEligible: true, contributionExists: true, source: { verdict: 'refused', reason: 'afterCutoff' } })).toEqual({ status: 'notEntered', reason: 'afterCutoff' });
+    expect(classifyEntryStatus({ promotion: 'active', goalEligible: true, contributionExists: false, source: null })).toEqual({ status: 'unknown' });
+  });
+
+  test('a contribution to a goal the promotion never listed is not "pending" (W7 note)', () => {
+    expect(classifyEntryStatus({ promotion: 'active', goalEligible: false, contributionExists: true, source: null })).toEqual({ status: 'notEntered', reason: 'goalNotInPromotion' });
+    expect(classifyEntryStatus({ promotion: 'active', goalEligible: false, contributionExists: false, source: null })).toEqual({ status: 'unknown' });
   });
 
   test('row 21 (pure half): an inactive promotion is never "pending", whatever else is true', () => {
     for (const promotion of ['inactive', 'missing'] as const) {
-      expect(classifyEntryStatus({ promotion, contributionExists: true, source: null })).toEqual({ status: 'notEntered', reason: 'promotionInactive' });
-      expect(classifyEntryStatus({ promotion, contributionExists: true, source: { verdict: 'accepted' } })).toEqual({ status: 'notEntered', reason: 'promotionInactive' });
+      expect(classifyEntryStatus({ promotion, goalEligible: true, contributionExists: true, source: null })).toEqual({ status: 'notEntered', reason: 'promotionInactive' });
+      expect(classifyEntryStatus({ promotion, goalEligible: true, contributionExists: true, source: { verdict: 'accepted' } })).toEqual({ status: 'notEntered', reason: 'promotionInactive' });
     }
   });
 });

@@ -90,7 +90,7 @@ describe('form receipt — one bonus, server-verified', () => {
     expect(b.outcome).toBe('accepted');
     const s = await promotionState(p);
     expect(count(s.entries)).toBe(2);
-    for (const doc of [...Object.values(s.entries), ...Object.values(s.sources), ...Object.values(s.tallies)]) {
+    for (const doc of [...Object.values(s.entries), ...Object.values(s.sources), ...Object.values(s.tallies), ...Object.values(s.entrants), ...Object.values(s.links)]) {
       expect(Object.keys(doc).some((k) => /consent|marketing|optIn/i.test(k))).toBe(false);
     }
     const shapes = Object.values(s.entries).map((e) => ({ kind: e.kind, status: e.status, tickets: e.tickets }));

@@ -36,7 +36,7 @@ built in A+B.
 | `completeTurnEntry` calls `performContribution` with the attempt the turn minted; contribution first, bookkeeping second | `:8819–8833` |
 | Station completion (`wsfCompleteTurn`) and phone completion (`wsfCompleteMyTurn`) both go through `completeTurnEntry` | `:8939 / :8970` and `:8999 / :9021` |
 | Contributions are immutable; a correction is a new row on `wsfGoalAdjustments/{goalId}_{correctionId}` that moves totals, never the contribution | `:4191`, `:4821` |
-| `/event/[goalId]` resolves a **turn event** (`goal:<id>` or `setup:<id>`) through `resolveTurnEvent`; the route parameter is a goal id or a setup id, never a promotion | `:7985–8010`, `TurnEntryDoc.eventKey` |
+| `/event/[goalId]` resolves a **turn event** (`goal:<id>` or `setup:<id>`) through `resolveTurnEvent`; the route parameter is a goal id or a setup id, never a promotion | `resolveTurnEvent` `:7646–7710`, `wsfEventContext` `:7985–8010`, `TurnEntryDoc.eventKey` |
 
 **Decisions.**
 - **Movement source identity** = `(promotionId, goalId, uid, attemptId)`. The source key is
@@ -72,13 +72,13 @@ rules section `firestore.rules:1198–…`, the same posture as `wsfContribution
 
 | collection | holds | never holds |
 | --- | --- | --- |
-| `wsfPromotions/{promotionId}` | configuration: status, rule version, eligible goals, window, cap, bonus policy, repeat rule, operator uids, config digest | entrants, entries, contact |
+| `wsfPromotions/{promotionId}` | configuration: status, rule version, eligible goals (map), `eligibleGoalIds` (the array the trigger body routes on — **must be derived from the map and digested by the enable step, which is not built**; today it is fixture-written and unvalidated, W7 F5), window, cap, bonus policy, repeat rule, operator uids, config digest | entrants, entries, contact |
 | `wsfPromotionEntrants/{promotionId}_{entrantId}` | the opaque entrant: `entrantId` (random), `identityBasis` (`firebaseUid` \| `paperSlip`), `createdAt`, `mergedInto` (reserved, human-reviewed) | uid, email, phone, name |
 | `wsfPromotionEntrantLinks/{promotionId}_uid_{uid}` | uid → entrantId, one per uid per promotion; the only place a uid meets an entrant | contact |
 | `wsfPromotionContacts/{promotionId}_{entrantId}` | the private prize-only contact record (schema only in A+B; no writer exists) | anything a community, kiosk or display surface reads |
 | `wsfPromotionSources/{promotionId}_{sourceKey}` | adjudication of one observed source: `kind`, `verdict` (`accepted` \| `refused`), `reason`, `ruleVersion`, `canonicalPath`, `sourceCommittedAt`, `entryId` | the count, the contact |
-| `wsfPromotionEntries/{promotionId}_{entryId}` | one entry: `entrantId`, `kind` (`movement` \| `formBonus` \| `paper`), `status` (`confirmed` \| `pending` \| `revoked`), `sourceKey`, `ruleVersion`, `awardedAt` | uid, name |
-| `wsfPromotionEntrantTallies/{promotionId}_{entrantId}` | per-entrant counters read inside the award transaction: `entryCount`, `formBonusAwarded`, `movementGoals` (map goalId → true) | anything global |
+| `wsfPromotionEntries/{promotionId}_{entryId}` | one entry: `entrantId`, `kind` (`movement` \| `formBonus` \| `paper`), `status` (`confirmed` \| `pending` \| `revoked`), `tickets` (1 for movement, `formBonusEntries` for the bonus), `goalId` (movement only), `sourceKey`, `ruleVersion`, `awardedAt` | uid, name |
+| `wsfPromotionEntrantTallies/{promotionId}_{entrantId}` | per-entrant counters read inside the award transaction: `entryCount` (counts **tickets**, not entry documents), `formBonusAwarded`, `movementGoals` (map goalId → true) | anything global |
 | `wsfPromotionCounters/{promotionId}` | `entrantCount` — the only cross-entrant document, touched once per entrant, only when a cap is configured | ticket counts |
 | `wsfPromotionPools/{promotionId}` | **next phase**: the frozen, immutable ticket mapping, count, rule version, digest | — |
 | `wsfPromotionDraws/{promotionId}_{prizeId}` | **next phase**: one persisted draw result per prize before reveal; redraws and exclusions with audit | — |
@@ -112,10 +112,13 @@ Admin SDK. Two supported transports are specified; both call the same idempotent
    Firestore database location, which this lane cannot read. Packet B tests the handler
    body in isolation by calling it with a synthetic event; no trigger is registered.
 
-**Convergence.** Every ingestion is one transaction whose writes are all
-create-or-noop under deterministic ids (§d). So at-least-once delivery, duplicate
-delivery, out-of-order delivery and an interrupted reconciliation all converge to the same
-end state: run it again. The reconciliation query is
+**Convergence.** Every ingestion is one transaction whose durable rows (source, entry,
+entrant, link) are `create`s under deterministic ids; the counter and the tally are
+`increment` merges and the entrant id is random, so their idempotence is borrowed from the
+co-transactional creates rather than being their own (§d). A transaction that loses a race
+is retried by the SDK (ABORTED) and then observes the source row and returns `replay`. So
+at-least-once delivery, duplicate delivery, out-of-order delivery and an interrupted
+reconciliation all converge to the same end state: run it again. The reconciliation query is
 `wsfContributions.where('goalId','==',goalId).orderBy(FieldPath.documentId()).startAfter(cursor).limit(pageSize)`
 — an equality on one field ordered by document name, chosen because it needs **no
 composite index** (`firestore.indexes.json` is not reserved). The cutoff is evaluated in
@@ -138,7 +141,7 @@ reads  : wsfPromotions/{p}                          status, ruleVersion, digest,
          wsfPromotionEntrantTallies/{p}_{entrantId}  one-time bonus, per-goal rule, entry count   (only if entrant exists)
          wsfPromotionCounters/{p}                    only when creating an entrant AND a cap is configured
 writes : wsfPromotionSources/{p}_{sourceKey}         create (verdict accepted|refused, reason, ruleVersion)
-         wsfPromotionEntries/{p}_{entryId}           create, entryId == sourceKey (movement) or f_{entrantId} (bonus)
+         wsfPromotionEntries/{p}_{entryId}           create, entryId == sourceKey c_{contributionId} (movement) or b_{entrantId} (bonus; its source row is f_{receiptId})
          wsfPromotionEntrantTallies/{p}_{entrantId}  merge
          wsfPromotionEntrants + EntrantLinks          create, only for a first accepted source
          wsfPromotionCounters/{p}                    increment entrantCount, only on entrant creation under a cap
@@ -152,11 +155,17 @@ writes : wsfPromotionSources/{p}_{sourceKey}         create (verdict accepted|re
   tally is the only document two of one person's contributions contend on. The single
   promotion-wide counter is touched at most once per entrant, and only if a cap is
   configured. The promotion document is read, never written, by ingestion.
-- **Dedupe** is the source row's `create` (fails with ALREADY_EXISTS on a race) plus the
-  deterministic entry id. **One-time bonus** is `tally.formBonusAwarded` plus the
-  deterministic `f_{entrantId}` id — two independent guards. **Cap**: the transaction that
-  would create the (cap+1)-th entrant records the source `refused / capReached`; Firestore
-  serializability makes concurrent last-slot claims admit exactly one.
+- **Dedupe** is the source row's `create` plus the deterministic entry id. A concurrent
+  duplicate loses the transaction's read-set check, is retried (ABORTED), observes the row
+  and returns `replay`; ALREADY_EXISTS is not retryable and is not expected to be reached.
+  **One-time bonus** is `tally.formBonusAwarded` plus the deterministic `b_{entrantId}`
+  entry id (the receipt's own source row is `f_{receiptId}`) — two independent guards.
+  **Cap**: the transaction that would create the (cap+1)-th entrant records the source
+  `refused / capReached`; the server SDK's transactions lock the documents they read, so
+  concurrent last-slot claims admit exactly one. **Known seam (W7 D, not built):** under
+  `entrantCap: null` the counter is never written, so an enable step that later sets a cap
+  must initialise `entrantCount` from the entrant documents inside the enabling transaction
+  or refuse a cap change once any entrant exists; this packet has no enable step.
 - **Rule version and config digest.** `ruleVersion` is stored on every source row and
   entry. At `enabled` the operator's configuration is digested (`enabledConfigDigest`); the
   ingest recomputes the digest from the fields it reads and refuses on mismatch
@@ -164,8 +173,9 @@ writes : wsfPromotionSources/{p}_{sourceKey}         create (verdict accepted|re
   silently re-adjudicating.
 - **Repeat rule** is explicit and required at enablement: `perContribution` (each distinct
   accepted contribution is an entry) or `perGoal` (one entry per goal per entrant). The
-  eventual published rule is the owner's; the code refuses to enable a promotion without a
-  value and never defaults to "one per unique activity".
+  eventual published rule is the owner's; there is no enable step in this packet, and the
+  code refuses to **adjudicate** under a promotion without a value (`readPromotion` →
+  `invalidConfig`) rather than defaulting to "one per unique activity".
 
 **Lifecycle and write fence.**
 
@@ -182,11 +192,15 @@ draft ──enable──▶ enabled ──close──▶ closing ──freeze─
 | `closing` | yes | same cutoff test on `createdAt`; late *processing* of an early *commit* is accepted |
 
 **Authoritative cutoff** = the contribution's own `createdAt`, the server timestamp written
-inside `performContribution`'s transaction (`:3549`), compared with the promotion's
-`windowEndsAt`. Wall-clock at processing time is irrelevant. `closing → frozen` is
-permitted only when a full reconciliation pass over every eligible goal reports zero
-unprocessed rows with `createdAt < windowEndsAt` (next phase builds the transition; B
-builds the pass and the fence).
+inside `performContribution`'s transaction (`:3550`), compared with the promotion's
+`windowEndsAt`. Wall-clock at processing time is irrelevant to a row's eligibility.
+`closing → frozen` (next phase) needs two guards this packet does not build: (1) a
+**pool-relevant** convergence — a full pass that accepted no new row and observed no
+pre-cutoff row without a source row — rather than `reconcilePromotion`'s `converged`,
+which counts recorded refusals as writes and therefore toggles on post-cutoff movement
+(W7 G); and (2) a **start-after-cutoff-by-server-clock** check, because a pass that begins
+before `windowEndsAt` has passed on Firestore's clock cannot prove a pre-cutoff commit is
+not still in flight, and a maximum observed `createdAt` is not a proof of absence.
 
 ### (e) The community-interest form and its trusted receipt seam
 
@@ -268,7 +282,7 @@ Control, run in this container before writing any test: the existing
    slice (default-deny), a rules block only if a member-facing read ("My entries") ships.
 5. Existing W8 staging permission does not cover this system; a separate release action.
 
-**Unresolved owner decisions (configurable; the code refuses to enable without them):**
+**Unresolved owner decisions (configurable; the code refuses to adjudicate without them):**
 
 | decision | where it lands |
 | --- | --- |

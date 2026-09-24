@@ -32,7 +32,8 @@ this branch), **accepted** (the Director's product acceptance), **integrated**
 | --- | --- | --- | --- |
 | setup (branch, PR #467, this index) | `087b667` | — | — |
 | Packet A (contract / schema / state machine / test matrix) | `966a63e` (`CONTRACT.md`, `TEST-MATRIX.md`) | — | — |
-| Packet B (disabled isolated core + emulator tests) | `3fbfb0a` code + tests (67/67 on the emulators; 7/7 mutations caught; existing suites 81/81) + this commit (`EVIDENCE.md`) | — | — |
+| Packet B (disabled isolated core + emulator tests) | `3fbfb0a` code + tests (67/67 on the emulators; 7/7 mutations caught; existing suites 81/81) + `8a434dd` (`EVIDENCE.md`); W7 Check 22 on `8a434dd`: no defect in a delivered row | — | — |
+| W7 Check 22 corrections (docs + four code notes, 68/68) | this commit, pushed only on release | — | — |
 
 ## Test command
 
