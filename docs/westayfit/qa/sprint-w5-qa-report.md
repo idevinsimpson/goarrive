@@ -2366,3 +2366,42 @@ Two of these were independently reproduced by a skeptic. The remaining skeptic c
 **New observation (low):** `apps/westayfit/package-lock.json` also changed across `c8f38e3..7ee70e4`: +1 line, the `@react-navigation/bottom-tabs` entry that mirrors the declared `apps/westayfit/package.json` dependency. It is unchanged since `f2f901a`. The notes' "NINE protected files" list and their UNCHANGED list both omit it, so the protected delta is ten files, not nine. v2 counts ten.
 
 **Integration fact:** #452 merged to `main` as `cc30f1d3` (parents `18dd21eb`, `2f286e94`). Its tree `5090c963` is byte-identical to the reviewed pin's. Staging still serves `c8f38e3`, and nothing has been dispatched.
+
+## PACKET — run-receipt check, staging run 47 (`35937603929`) (L0 `5804106757` / `5805115660`)
+
+**Run:** workflow_dispatch from `main` `cc30f1d3` with `app_sha` `7ee70e4f…`, 00:15–00:26Z, conclusion **failure**. The source is
+job logs read through the GitHub API: gate, deploy (985 lines, read in full by grep), hosted-verify (977 lines, read in
+full by grep). The run's log zip host is blocked by this container's proxy, so the artifacts were not downloaded;
+their digests are quoted from the logs.
+
+| row | result | evidence |
+| --- | --- | --- |
+| gate resolution | **PASS** | `CANDIDATE=7ee70e4f4db73c9d3fd475ef4729d3eb51064619` (requested = approved) |
+| artifact identity | **PASS** | build "Confirm the checkout is the approved commit" ✓; deploy "artifact belongs to 7ee70e4f…"; downloaded artifact sha256 `ccac6043…` |
+| hosting-route step | **PASS, ran live** | deploy step 7 (after Confirm 6, before Authenticate 9): `CANDIDATE_REWRITES=12`, `ROUTES=pass`. This is the first production-path run of #450 / #460. |
+| preflight | **PASS** | `PREFLIGHT_BEFORE=46`, `PREFLIGHT_BASELINE_MATCHES_APPROVAL=true` |
+| inventory | **PASS** | `INVENTORY_BEFORE=46`, `INVENTORY_AFTER=49`, `EXPECTED_INVENTORY=49`; `CREATED_THIS_DEPLOY` = `APPROVED_ADDITIONS` = exactly the three; `PREEXISTING_TRANSPORT_VERIFIED=22/22` |
+| transport of the three (feature readiness; W3's lane) | **NOT READY** | "Failed to set the IAM Policy" ×3, and per-service `invoker_iam_check_enabled` (SHUT) for all three. Operation 2 by a named operator is required. |
+| hosted marker | **served on the channel as `7ee70e4` at 00:24:04Z** (hosted-verify "PASS correct staging build — health marker 7ee70e4") | The deploy verifier's single `/health` read at 00:22:34.99, ~1.9 s after "release complete", did not match. That is the **only** VERIFY failure (`VERIFY=failed (1)`). The read has no retry (`verify-deployment.mjs:365`). A propagation race is the likely explanation, **not proven**. |
+| hosted-verify | **6 results, 1 FAIL** | FAIL = Package E suite, `waitFor(getByTestId('wsf-community-manage'))` timed out. Root cause below. |
+| cleanup | **PASS** | `CLEANUP_STATUS=COMPLETE`, 91/91 documents deleted, 6/6 users already absent |
+
+**The Package E FAIL is drift in the hosted smoke, not a product defect in `7ee70e4`, and not caused by the SHUT transport.**
+- The operational smoke `hosted-package-e-smoke.mjs` (last changed 2026-09-20) opens Manage with the in-page button
+  `wsf-community-manage` (`:422–424`).
+- W9's shell migration `0b2d50cf` (in `f2f901a`, not in the served `c8f38e3`, whose run 46 passed Package E) removed that
+  button. Manage became the founding Champion's context action in the top-bar menu:
+  `wsf-member-topbar-menu-button` → `wsf-member-topbar-menu-manage-community`, opening the unchanged `wsf-community-manage-panel`.
+- The candidate's own e2e suite was adapted (`tests-e2e/helpers/memberShell.ts`: `openMemberManage`, `manageOffered`). The ops smoke was not.
+
+**Second consequence, more serious for the evidence:** the smoke's three negative checks now count a testID that no longer
+exists, so they pass whatever the product does. They are the "member does NOT have Manage" checks at `:545`, `:1056` and
+`:1261`. The Champion-only boundary has **no working hosted check** until the smoke asks the menu, as `manageOffered` does.
+
+**Proposed fix (not mine to make; ops file):**
+- `openManage` opens the menu and clicks the `manage-community` row.
+- The three negative checks open the menu and count that row, returning false when no bar is rendered.
+- A contract case pins both locators.
+
+**Status:** receipts read. Staging's served state is not claimed; the Director's served conditions are not met (transport SHUT;
+Package E unverified). This is not an approval.
