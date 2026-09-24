@@ -13,6 +13,7 @@ import {
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
+import { ACTION_GREEN } from '../../src/ui/kit';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
 import {
   displayFreshnessSize,
@@ -836,7 +837,10 @@ const styles = StyleSheet.create({
   genericBody: { color: HERO_MUTED, fontSize: 17, lineHeight: 24, textAlign: 'center' },
   genericBodyWide: { fontSize: 26, lineHeight: 34 },
   recheckButton: {
-    backgroundColor: PROGRESS_GREEN,
+    // An action, not a confirmed number: Board 00 reserves PROGRESS_GREEN for
+    // confirmed progress, and a wall-display action is still an action
+    // (Director 5796783829, released 5800718059).
+    backgroundColor: ACTION_GREEN,
     paddingHorizontal: 28,
     minHeight: 54,
     justifyContent: 'center',
