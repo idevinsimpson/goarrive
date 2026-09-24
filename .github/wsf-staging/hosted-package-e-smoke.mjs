@@ -410,19 +410,113 @@ async function staysAbsent(locator, durationMs = 6_000) {
   }
 }
 
+// --- manage surface helpers (contract-tested from source, see hosted-smoke-contract.test.mjs) ---
 /**
- * The Champion's per-goal display controls are in the Manage sheet.
+ * WHERE THE CHAMPION'S MANAGE SHEET IS OPENED FROM depends on which candidate
+ * is deployed, and this harness has to drive the real control rather than one
+ * that no longer exists. Every `wsf-goal-display-auth-*` element is inside the
+ * sheet either way; nothing about the assertions on those controls changes.
  *
- * Community Home carries one quiet "Manage" control; every
- * `wsf-goal-display-auth-*` element is inside the sheet it opens. Opening it
- * is the real interaction a Champion performs, so every Champion visit here
- * goes through it. Nothing about the assertions on those controls changes.
+ *   7ee70e4 (the accepted shell): Community Home registers "Manage community"
+ *   with the persistent top bar's menu — wsf-member-topbar-menu-button opens
+ *   wsf-member-topbar-menu, whose wsf-member-topbar-menu-manage-community row
+ *   opens wsf-community-manage-panel. The row exists only while the page is
+ *   ready AND the account is the foundingChampion, so its absence from an
+ *   ordinary member's menu is a real boundary, not a render that never came.
+ *
+ *   c8f38e3 (the rollback candidate): Community Home draws its own quiet
+ *   wsf-community-manage control, for a Champion only, and has no shell menu.
+ *
+ * Run 47 waited for wsf-community-manage against 7ee70e4 and timed out: the
+ * control had moved, not the sheet. Each surface is recognised by a marker its
+ * page draws for EVERY role (the shell's bar; the legacy page's wordmark), so a
+ * member's page is identified the same way a Champion's is. Recognising
+ * neither is a FAIL — never a skip, never a pass — because a harness that
+ * cannot tell what it is looking at has nothing to assert.
  */
-async function openManage(page) {
-  await visible(page.getByTestId('wsf-community-manage'));
-  await page.getByTestId('wsf-community-manage').click();
-  await visible(page.getByTestId('wsf-community-manage-panel'));
+const MANAGE_SURFACES = Object.freeze({
+  shell: Object.freeze({
+    marker: 'wsf-member-topbar',
+    menuButton: 'wsf-member-topbar-menu-button',
+    menu: 'wsf-member-topbar-menu',
+    manageItem: 'wsf-member-topbar-menu-manage-community',
+  }),
+  legacy: Object.freeze({
+    marker: 'wsf-community-wordmark',
+    manageControl: 'wsf-community-manage',
+  }),
+});
+const MANAGE_PANEL = 'wsf-community-manage-panel';
+
+async function manageSurface(page, timeout = 20_000) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const [shell, legacy] = await Promise.all([
+      page.getByTestId(MANAGE_SURFACES.shell.marker).count(),
+      page.getByTestId(MANAGE_SURFACES.legacy.marker).count(),
+    ]);
+    assert(!(shell > 0 && legacy > 0), 'Both Manage surfaces are on the page at once; the harness cannot tell which candidate this is');
+    if (shell > 0) return 'shell';
+    if (legacy > 0) return 'legacy';
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  assert(false, `Neither Manage surface is on the page (no ${MANAGE_SURFACES.shell.marker}, no ${MANAGE_SURFACES.legacy.marker}): not a Community Home this harness recognises`);
 }
+
+/**
+ * Opening the sheet is the real interaction a Champion performs, so every
+ * Champion visit here goes through it. On the shell, a Champion whose row
+ * never appears fails at the row, by name.
+ */
+async function openManage(page, { timeout = 20_000 } = {}) {
+  const surface = await manageSurface(page, timeout);
+  if (surface === 'shell') {
+    const { menuButton, menu, manageItem } = MANAGE_SURFACES.shell;
+    await visible(page.getByTestId(menuButton), timeout);
+    await page.getByTestId(menuButton).click();
+    await visible(page.getByTestId(menu), timeout);
+    await visible(page.getByTestId(manageItem), timeout);
+    await page.getByTestId(manageItem).click();
+  } else {
+    const { manageControl } = MANAGE_SURFACES.legacy;
+    await visible(page.getByTestId(manageControl), timeout);
+    await page.getByTestId(manageControl).click();
+  }
+  await visible(page.getByTestId(MANAGE_PANEL), timeout);
+}
+
+/**
+ * The ordinary member's side of the same boundary. Counting the old control
+ * at zero proved nothing once that control was gone for everyone. On the
+ * shell the proof is the interaction the member can actually perform: open
+ * the menu they do have, show that Manage community is not among its rows
+ * (and stays absent for a moment), and close it again. On the legacy surface
+ * the control is drawn only for a Champion, so its absence is still the whole
+ * proof. Callers have already proven the page loaded (the goal link is
+ * visible), so absence here is a boundary and not a race.
+ */
+async function assertMemberHasNoManage(page, { who = 'Member', timeout = 20_000, holdMs = 2_000 } = {}) {
+  const surface = await manageSurface(page, timeout);
+  if (surface === 'shell') {
+    const { menuButton, menu, manageItem } = MANAGE_SURFACES.shell;
+    await visible(page.getByTestId(menuButton), timeout);
+    await page.getByTestId(menuButton).click();
+    await visible(page.getByTestId(menu), timeout);
+    const deadline = Date.now() + holdMs;
+    for (;;) {
+      assert((await page.getByTestId(manageItem).count()) === 0, `${who} unexpectedly has the Champion Manage surface (Manage community is in the menu)`);
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await page.getByTestId(menuButton).click();
+    await page.getByTestId(menu).waitFor({ state: 'hidden', timeout });
+  } else {
+    assert((await page.getByTestId(MANAGE_SURFACES.legacy.manageControl).count()) === 0, `${who} unexpectedly has the Champion Manage surface (the legacy Manage control is drawn)`);
+  }
+  assert((await page.getByTestId(MANAGE_PANEL).count()) === 0, `${who} unexpectedly has the Champion Manage sheet open`);
+}
+// --- end manage surface helpers ---
 
 /**
  * The goal's published time zone, and the labels the display renders in it.
@@ -541,8 +635,8 @@ async function caseRoundTrip(browser) {
     await visible(member.getByTestId(`wsf-community-goal-link-${goalId}`));
     assert((await member.getByTestId(`wsf-goal-display-auth-${goalId}`).count()) === 0, 'Member unexpectedly has display authorization control');
     // The controls moved into the Champion-only Manage sheet, so the absence
-    // of that surface is now part of the same boundary.
-    assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'Member unexpectedly has the Champion Manage surface');
+    // of the way into that sheet is part of the same boundary.
+    await assertMemberHasNoManage(member);
 
     await toggle.click();
     await textContains(state, 'Public display is authorized for this goal.');
@@ -1053,7 +1147,7 @@ async function caseVisualProof(browser) {
     await signInPage(member, fx.member);
     await member.goto(`${BASE_URL}/community/${fx.groupId}`);
     await visible(member.getByTestId(`wsf-community-goal-link-${goalId}`), 30_000);
-    assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'Member unexpectedly has the Champion Manage surface');
+    await assertMemberHasNoManage(member);
     await snap(member, '11-phone-community-home');
 
     await member.goto(`${BASE_URL}/contribute/${goalId}`);
@@ -1258,7 +1352,7 @@ async function caseW4W7W8Browser(browser) {
     assert(!momentum.includes(fx.member.uid) && !momentum.includes(fx.champion.uid), 'Momentum copy leaked a uid');
     await visible(member.locator('[data-testid^="wsf-community-goal-share-"]').first());
     assert((await member.getByTestId('wsf-community-qr-section').count()) === 0, 'A member can see the Champion join QR section');
-    assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'A member has the Manage surface');
+    await assertMemberHasNoManage(member, { who: 'A member' });
     await snap(member, '17-phone-community-home-w7-share-momentum');
     // W4: the counting guide on the entry screen, from the goal's guide key.
     await member.goto(`${BASE_URL}/contribute/${goalId}`);
