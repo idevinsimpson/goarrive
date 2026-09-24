@@ -2547,7 +2547,7 @@ export default function CommunityPage() {
         </Text>
         <Text
           style={[
-            onDark ? styles.heroStatus : styles.statusLine,
+            onDark ? [styles.heroStatus, styles.heroStatusInRow] : styles.statusLine,
             phase === 'nearGoal' ? (onDark ? styles.heroStatusNear : styles.statusLineNear) : null,
           ]}
           testID={`wsf-community-goal-status-${goal.goalId}`}
@@ -2563,12 +2563,10 @@ export default function CommunityPage() {
           testID={`wsf-community-goal-total-${goal.goalId}`}
         >
           {/*
-            ON THE HERO THE COUNT LEADS AND WHAT IT IS OUT OF FOLLOWS, so the
-            line breaks between them rather than wrapping mid-phrase. Both
-            halves stay inside ONE Text node with a newline between them: the
-            element's text is still "1,847 of 5,000 squats", which is what the
-            journey and a11y specs assert, and both halves come from one helper
-            so they cannot drift.
+            ON THE HERO THE COUNT LEADS AND WHAT IT IS OUT OF FOLLOWS. Both
+            halves stay inside ONE Text node: the element's text is
+            "1,847 of 5,000 squats", which is what the journey and a11y specs
+            assert, and both halves come from one helper so they cannot drift.
           */}
           {/*
             HOME-POLISH-1. ONE LINE: THE COUNT, THEN WHAT IT IS OUT OF, on a
@@ -3721,24 +3719,13 @@ export default function CommunityPage() {
                     unconfirmed or failed read keeps the neutral eyebrow.
                   */}
                   {/*
-                    SLICE 1. The neutral "What we're doing" labelled what the
-                    card's own content already said, and cost a row at the most
-                    expensive point on a phone. "Goal reached" is real news and
-                    keeps the slot; the label does not.
-                  */}
-                  {/*
-                    NO STANDING SLOGAN IN THIS SLOT.
-
-                    A communal line stood here for one pass. It is out: it is
-                    not part of the approved verbal hierarchy, and a sentence
-                    that is always true is a sentence that says nothing by the
-                    second time a member sees it. The slot belongs to real
-                    state news, so it carries "Goal reached" when that is true
-                    and nothing at all when it is not.
-
-                    Whose effort this is gets said where it is a fact rather
-                    than a slogan: the identity block above the hero names the
-                    community and its members.
+                    NO SLOGAN IN THIS SLOT. Slice 1 removed a neutral "What
+                    we're doing" label, and a communal slogan stood here for one
+                    pass and went too: a sentence that is always true says
+                    nothing by the second visit. What holds the slot now is a
+                    plain name for the card (below), which the accepted
+                    HOME-POLISH-1 reference draws, and "Goal reached" replaces
+                    it whenever that is true.
                   */}
                   {/*
                     HOME-POLISH-1. THE SLOT NAMES WHAT THE CARD IS, UNLESS
@@ -4435,8 +4422,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   humanLine: { color: wsfTheme.colors.textMuted, fontSize: 17, lineHeight: 24 },
-  // W7. One quiet line between the hero and "Your part": a fact about the
-  // community's goals, not a leaderboard and not a nudge.
+  // W7. One quiet line above the feed: a fact about the community's goals,
+  // not a leaderboard and not a nudge.
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   /*
     HOME-POLISH-1. THE FEED SITS ON THE PAGE, NOT IN A BOX. The accepted
@@ -4566,8 +4553,6 @@ const styles = StyleSheet.create({
   // in it rather than at the top of a hole.
   progressArea: { justifyContent: 'center', gap: 2 },
   weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingBottom: 2 },
-  // The numbers sit in their own recessed panel, so the progress area reads as
-  // an instrument rather than as text floating on the card.
   /*
     HOME-POLISH-1. THE NUMBERS SIT ON THE CARD, NOT IN A PANEL INSIDE IT. The
     recessed panel made a box inside the box; the accepted reference lets the
@@ -4594,7 +4579,10 @@ const styles = StyleSheet.create({
   heroTotalCount: { ...display.lg, color: CREAM },
   heroTotalRest: { color: ON_NAVY_MUTED, fontSize: 14, fontWeight: '600', lineHeight: 20 },
   heroPercent: { color: PROGRESS_GREEN, fontSize: 13, lineHeight: 18, fontWeight: '800' },
-  heroStatus: { color: HERO_MUTED, fontSize: 13, lineHeight: 18, textAlign: 'right', flexShrink: 1 },
+  heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  // HOME-POLISH-1. What is left, at the right end of the row under the bar.
+  // Only this line: the loading line and "Reached on …" keep heroStatus.
+  heroStatusInRow: { fontSize: 13, lineHeight: 18, textAlign: 'right', flexShrink: 1 },
   // HOME-POLISH-1. How far, and how far to go, as one row under the bar.
   heroFactsRow: {
     flexDirection: 'row',
