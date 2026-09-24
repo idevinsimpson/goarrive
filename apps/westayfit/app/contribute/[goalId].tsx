@@ -258,6 +258,26 @@ function leaveFor(href: string, navigation: Dispatches): void {
   router.dismissTo(href as never);
 }
 
+/**
+ * RECOVERY-PORT-1. A LINK THAT IS NOT AN ANCHOR HAS TO ANSWER THE KEYBOARD
+ * ITSELF. react-native-web leaves Enter on `role="link"` to the browser -- it
+ * assumes an `<a href>` underneath -- and these exits have no href on purpose
+ * (they pop or dismiss rather than push). So a focused exit ignored Enter:
+ * measured on the base and on the port, the member pressed Enter on "Back to
+ * community" and stayed where they were (WCAG 2.1.1). Enter is a link's key;
+ * Space is left to the page, as it is for a real link.
+ */
+type KeyLike = { key?: string; repeat?: boolean; nativeEvent?: { key?: string; repeat?: boolean } };
+function enterActivates(go: () => void): Record<string, unknown> {
+  return {
+    onKeyDown: (e: KeyLike) => {
+      const key = e.key ?? e.nativeEvent?.key;
+      const repeat = e.repeat ?? e.nativeEvent?.repeat;
+      if (key === 'Enter' && !repeat) go();
+    },
+  };
+}
+
 /** Looks like `ButtonLink`; lands on the member's mounted tabs. */
 function ReturnButton({
   href,
@@ -280,6 +300,7 @@ function ReturnButton({
       accessibilityRole="link"
       accessibilityLabel={label}
       onPress={() => leaveFor(href, navigation)}
+      {...enterActivates(() => leaveFor(href, navigation))}
     >
       <Text style={textStyle}>{label}</Text>
     </Pressable>
@@ -1215,6 +1236,7 @@ export default function ContributeToGoal() {
           accessibilityRole="link"
           accessibilityLabel={backLabel}
           onPress={() => returnToMemberContext(backHref)}
+          {...enterActivates(() => returnToMemberContext(backHref))}
         >
           <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
             {backLabel}
@@ -1597,7 +1619,7 @@ export default function ContributeToGoal() {
       standing and no community -- exactly what it lacked before.
     */
     const panelStacked = windowWidth < 300;
-    const receiptWeWidth = windowHeight < 700 ? 96 : 120;
+    const receiptWeWidth = windowHeight < 700 ? 96 : 104;
     return screen(
       <>
         {renderChrome(false)}
@@ -2514,16 +2536,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 13,
     paddingBottom: 10,
-    paddingLeft: 18,
+    paddingLeft: 16,
     paddingRight: 12,
     borderBottomWidth: 1,
     borderBottomColor: CARD_BORDER,
   },
   sheetTitle: { color: wsfTheme.colors.text, fontSize: 22, lineHeight: 28, fontWeight: '400' },
-  sheetBody: { paddingTop: 18, paddingHorizontal: 20, paddingBottom: 22, gap: 12 },
+  // 16 at the sides, not the reference's 20: the page already keeps 20 from
+  // the screen's edge, where the reference's sheet keeps 12.
+  sheetBody: { paddingTop: 18, paddingHorizontal: 16, paddingBottom: 22, gap: 12 },
   // A short phone gives the sheet's air, never its content.
   sheetBodyShort: { paddingTop: 12, paddingBottom: 12, gap: 8 },
-  sheetActions: { paddingHorizontal: 20, paddingBottom: 22 },
+  sheetActions: { paddingHorizontal: 16, paddingBottom: 22 },
   sheetActionsShort: { paddingBottom: 14 },
   sheetActionsInline: { marginTop: 4, gap: 10 },
   stepHeading: { color: wsfTheme.colors.text, fontSize: 24, lineHeight: 28, fontWeight: '400' },
@@ -2531,7 +2555,7 @@ const styles = StyleSheet.create({
   // Two actions share a row, the outline one first and the green one last, as
   // the reference sets them; below about 300px of room they stack.
   pair: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pairButton: { flexGrow: 1, flexBasis: 130, minWidth: 0, minHeight: 54 },
+  pairButton: { flexGrow: 1, flexBasis: 130, minWidth: 0, minHeight: 54, paddingHorizontal: 10 },
 
   // The receipt's badge: the reference's pill, carrying the canonical eyebrow.
   // Progress green at 30% on white is the reference's own badge colour.
@@ -2607,7 +2631,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   sharedTotal: { color: CREAM },
-  sharedCount: { color: CREAM, fontSize: 28, lineHeight: 34, fontWeight: '700' },
+  sharedCount: { color: CREAM, fontSize: 26, lineHeight: 32, fontWeight: '700' },
   sharedRest: { color: HERO_MUTED, fontSize: 13, fontWeight: '700' },
   sharedTrack: {
     height: 8,
