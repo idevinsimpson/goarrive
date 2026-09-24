@@ -2328,3 +2328,41 @@ the pin moved. Its self-test on a local, never-pushed simulated pin gave 11/11 c
 - Dispatch still needs the operator preflight and the index READY receipt.
 - The hosting check used a modelled dist, not a real build of `7ee70e4`.
 - No Actions runner was used.
+
+### Addendum — the red team found bypasses in my harness; v2 closes them; the #452 verdict is unchanged
+
+**Instrument correction 14 (mine).** Before relying on `sprint-w5-pin-452-final-delta-verify.mjs`, I red-teamed it with
+adversarial probes (workflow `wf_31f83f28-07c`). It showed that v1 (`86b4d519`) could be passed by wrong pins:
+- **Extra parent.** An extra "ours" parent carrying the candidate's 168-commit history, with none of its content, passed 11/11.
+- **Main not merged.** A pin without `main` merged in passed E0–E7, and E8–E10 then ran on a merge the harness had synthesized.
+- **Weak prose checks.** E2 and E6 accepted:
+  - a gutted `packageLabel`, with the dispatch, index, kiosk and SHUT guards removed;
+  - an NBSP-disguised "#450 under review";
+  - a `_fullCandidateNote` still based on `f2f901a`;
+  - a rewritten rollback note;
+  - duplicate JSON keys.
+- **Not demonstrated, but real gaps:** a symlink-mode approval; a single-branch candidate anchor; an uncaught crash in a heavy row hiding every row; leaked temp directories.
+
+Two of these were independently reproduced by a skeptic. The remaining skeptic checks did not run because the session budget ran out; the extra-parent bypass carries its own measured output.
+
+**v2** adds the following, and each check has its own SELFTEST mutant:
+- **E0 ancestry:** `main` must be in the pin; new commits must be first-parent only; any side parent must be on `main`.
+- **E1:** a raw diff with mode `100644` pinned, and `main` merged in as a hard requirement.
+- **E2:** canonical JSON, `ed8649ec`'s key order, and only `approvedAppSha`, `packageLabel` and `_fullCandidateNote` may change.
+- **E6 structure:** the label must be `ed8649ec`'s label verbatim except the one `(PR #450, under review) will enforce.` sentence, whose replacement cites `13accc5` as an ancestor of `main`. The note must start with the candidate, and hidden characters are rejected.
+- **E3:** the candidate must be reachable from app-shell or the candidate branch.
+- **E8–E10:** run on the pin itself and crash-contained.
+- **E9:** compared suite by suite against `ed8649ec` ⊕ `main`.
+- **ONLY:** a probing run prints PARTIAL and exits 3.
+
+**Results:**
+- **SELFTEST:** the control passes 11/11, and **17/17 mutants** are caught (the 8 from v1 plus 9 red-team shapes).
+- **The real pin `2f286e94`, re-run under v2 with MAIN `18dd21eb`: 11/11.**
+  - E0: 2 new commits, both first-parent.
+  - E6: the label's only interior change is the #450 sentence, now "(PR #450, merged as 13accc5; … #460 18dd21e) enforces.", behind a 1,664-character prefix. It has no hidden characters.
+  - E9: 14 suites and 326 on both sides.
+- **The verdict does not change.** It also rested on the hand read of the three-field diff and the full prose.
+
+**New observation (low):** `apps/westayfit/package-lock.json` also changed across `c8f38e3..7ee70e4`: +1 line, the `@react-navigation/bottom-tabs` entry that mirrors the declared `apps/westayfit/package.json` dependency. It is unchanged since `f2f901a`. The notes' "NINE protected files" list and their UNCHANGED list both omit it, so the protected delta is ten files, not nine. v2 counts ten.
+
+**Integration fact:** #452 merged to `main` as `cc30f1d3` (parents `18dd21eb`, `2f286e94`). Its tree `5090c963` is byte-identical to the reviewed pin's. Staging still serves `c8f38e3`, and nothing has been dispatched.
