@@ -719,17 +719,21 @@ test.describe('W9 contribution exits, independent instruments', () => {
 
     const sample = () =>
       page.evaluate((groupId) => {
-        const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2) as HTMLElement | null;
         const lists = Array.from(document.querySelectorAll('[data-testid="wsf-home-my-list"]')) as HTMLElement[];
         const shownList = lists.find((el) => el.offsetParent !== null) ?? null;
         const cardEl = shownList?.querySelector(`[data-testid="wsf-home-community-${groupId}"]`) as HTMLElement | null;
-        const m = cardEl ? /\d[\d,]*/.exec(cardEl.innerText) : null;
+        // The card's total is the "<total> of <target>" pair, not the first digit
+        // on the card (the community's name carries a 7).
+        const m = cardEl ? /(\d[\d,]*) of (\d[\d,]*)/.exec(cardEl.innerText) : null;
+        // Hit-tested at the CARD's own centre: what is in front where the card is drawn.
+        const rect = cardEl?.getBoundingClientRect();
+        const hit = rect ? (document.elementFromPoint(rect.left + rect.width / 2, Math.min(rect.top + rect.height / 2, window.innerHeight - 1)) as HTMLElement | null) : (document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2) as HTMLElement | null);
         return {
           path: location.pathname + location.search,
-          foreground: hit?.closest('[data-testid="wsf-home-my-list"]') ? 'list' : hit?.closest('[data-testid="wsf-community"]') ? 'community' : (hit?.closest('[data-testid]') as HTMLElement | null)?.dataset.testid ?? '-',
+          foreground: hit?.closest(`[data-testid="wsf-home-community-${groupId}"]`) ? 'list' : hit?.closest('[data-testid="wsf-community"]') ? 'community' : (hit?.closest('[data-testid]') as HTMLElement | null)?.dataset.testid ?? '-',
           listMarked: shownList?.getAttribute('data-w7-list') === 'kept',
           lists: lists.length,
-          cardTotal: m ? Number(m[0].replace(/,/g, '')) : null,
+          cardTotal: m ? Number(m[1]!.replace(/,/g, '')) : null,
           communityRoots: document.querySelectorAll('[data-testid="wsf-community"]').length,
           tabBars: document.querySelectorAll('[data-testid="wsf-member-tabs"]').length,
           historyLength: history.length,

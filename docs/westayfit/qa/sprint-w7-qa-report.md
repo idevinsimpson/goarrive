@@ -2117,3 +2117,58 @@ Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 - Checks 16–18 are not rerun.
 
 **Status:** tested on `09cf5fd0`; not accepted, integrated or staged by W7.
+
+---
+
+# Check 20 — W9's option 1 `945d6736` on app-shell `a1dcced`: **PASS on every routed item**
+
+Routed by the Director in #434 `5804129224` and L0 `5804180055` (PR #464;
+Director `5803510323` for the contract). The delivery is
+`945d6736ed6cb96b9a144a10f97a8fb02d5e213d` on `claude/wsf-w9-home-return-refresh`,
+two commits from exactly `7ee70e4f` (`635de78`, the exit half of `37082fd`
+with its authorship; `945d673`, Home's return re-read). Outside the frozen
+candidate `7ee70e4`.
+
+## 20.1 · What was tested, exactly
+
+- **Composition, recorded.** `945d6736` merged locally onto `a1dcced` as `f8d818c5`, never pushed; root tree **`7859d2cd`**, equal to L0's dry-merge tree. Four files, byte-identical to `945d6736`: Home `d86fdc19`, the contribution exit helper `367352d1`, W9's exits spec `b22f450a`, W9's new home-return spec `01405208`. No W8 or W4 file, no protected path.
+- **The change, from the diff.** "Back to home" dispatches `POP_TO (tabs)/(home)` (the Home tab as it stands) instead of `dismissTo('/')`; Home bumps a return token on every focus but the first and re-reads its list quietly (nothing cleared; a failed list read re-reads the figures alone; cancelled on account change); cards keep their figure until the new read returns; the open-the-community decision is taken once per account.
+- **Build.** The composition itself (exit 0, stamp `f8d818c5`), served from the emulator; serial runs. Baseline `7ee70e4f`.
+
+## 20.2 · Per item
+
+| # | routed item | result | measured on `f8d818c5` (`a1dcced` ⊕ `945d6736`) |
+|---|---|---|---|
+| 1 | **X6**, the explicit `/?view=communities` list → MOVE → committed +20 (own-only receipt) → "Back to home" | **PASS** | At +4 s: address **`/?view=communities`**, the **marked** list in front at the card's own centre, 1 list, 0 Community roots, 1 tab bar, history length unchanged (4 → 4); the card read the server's **1,867 at +508 ms** after the press and held at 10 s. A query reload keeps the address and shows 1,867. On `7ee70e4f`: the address became `/community/<id>` and the list was gone |
+| 2 | **X5 / X5s**, Goal Setup → first contribution → "Back to home" | **PASS** | **1 Community root** (the mounted one; the duplicate is gone), 1 tab bar; the return settle corrected 0 → 20 at +2,824 ms (X5, no stub) and the sentinel at +2,810 ms (X5s), holding |
+| 3 | **X6b**, one held Home-return read across an in-app account switch (corrected probe) | **PASS** | A's return `wsfMyCommunities` was held from +42 ms and **delivered** at +3,941 ms, after B's list had loaded at +3,918 ms (the latch); B's two cards were the same in every sample and after; A's community name appeared nowhere. On `7ee70e4f` Home has no return re-read, so nothing is held there: the path is this delivery's |
+| 4 | **cold exits**: X3c, X4 | **PASS** | the arrow and "Back to home" replace on a cold arrival; Home resolves afresh (`/` then `/community/<id>`), Back leaves no contribution entry |
+| 5 | **the exits kept**: X1, X1s ×2, X2, X3, X3b | **PASS** | same instance, scroll, server total; the return settle at +2,585 / +2,611 ms |
+| 6 | **R1m** (Home over time; M5's journey) | measured | Home still on `/` at +4 s and +30 s with 1 create; after a Progress → Home round trip Home **now names the community** (its return re-read) **without moving the member**; a reload opens it |
+| 7 | **W9's two specs** from the composed tree (home-return 6 + exits 7) | **PASS 13/13** | tsc 0; guard 9 / 20 |
+| — | Safari | **CANNOT-MEASURE** | Chromium only |
+
+Reselect no-op, the failed list read keeping the list, and Back-to-list not
+redirecting are W9's own cases (6 / 6 here); F1 (my reselect case, on
+Community) passed in Check 19 on the same day's shell.
+
+## 20.3 · My instrument error in this check
+
+X6's first run on the composition **failed on my reader**: it took the card's
+first integer, which is the "7" in "W7 Exit Movers", and hit-tested the screen
+centre, which is Home's Start control rather than the card. It now reads the
+"<total> of <target>" pair and hit-tests the card's own centre. The address,
+mark, history and tab-bar readings were right on the first run. The baseline
+result on `7ee70e4f` (fails at the address) is unaffected: that assertion comes
+first.
+
+## 20.4 · Bound and hygiene
+
+Chromium only; Safari is CANNOT-MEASURE. Emulators only.
+
+- **Verification builds:** local and never pushed (`f8d818c5`; `7ee70e4f` for the baseline).
+- **Edits:** no product edit; no other worker's spec edited. W9's specs ran from the composed tree.
+- **After every run:** artifacts and `test-results` cleaned. `ts:check` 0; guard 9 / 20.
+- W8's `9d30c38b` is **not** in this composition; the two deltas were checked apart, as routed.
+
+**Status:** tested on `f8d818c5`; not accepted, integrated or staged by W7.
