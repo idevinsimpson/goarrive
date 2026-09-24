@@ -10,7 +10,7 @@ process.env.METADATA_SERVER_DETECTION = process.env.METADATA_SERVER_DETECTION ||
 process.env.GCLOUD_PROJECT = 'demo-wsf-local';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
-import { Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import type { HttpsError } from 'firebase-functions/v2/https';
 
 import {
@@ -289,7 +289,7 @@ export async function setPromotion(promotionId: string, patch: Record<string, un
 export async function promotionState(promotionId: string) {
   const db = getFirestore();
   const read = async (collection: string) => {
-    const snap = await db.collection(collection).orderBy('__name__').startAt(`${promotionId}_`).endAt(`${promotionId}_`).get();
+    const snap = await db.collection(collection).orderBy('__name__').startAt(`${promotionId}_`).endAt(`${promotionId}_\uf8ff`).get();
     const out: Record<string, Record<string, unknown>> = {};
     for (const d of snap.docs) out[d.id] = d.data();
     return out;
@@ -326,4 +326,82 @@ export function shuffle<T>(xs: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+// ── EXP2B: close / freeze helpers ──────────────────────────────────────────
+
+/** A promotion document as stored (undefined when missing). */
+export async function promotionDoc(promotionId: string): Promise<Record<string, unknown> | undefined> {
+  const snap = await getFirestore().doc(`${COLLECTIONS.promotions}/${promotionId}`).get();
+  return snap.exists ? (snap.data() as Record<string, unknown>) : undefined;
+}
+
+/** Byte-comparable view of a document (Timestamps → millis, keys sorted). */
+export function comparable(doc: unknown): string {
+  const norm = (v: unknown): unknown => {
+    if (v instanceof Timestamp) return { __ts: v.toMillis() };
+    if (Array.isArray(v)) return v.map(norm);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, x]) => [k, norm(x)])
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(norm(doc));
+}
+
+export async function poolDoc(promotionId: string): Promise<Record<string, unknown> | undefined> {
+  const snap = await getFirestore().doc(`${COLLECTIONS.pools}/${promotionId}`).get();
+  return snap.exists ? (snap.data() as Record<string, unknown>) : undefined;
+}
+
+/** Every freeze-attempt marker under a promotion, by attempt id. */
+export async function freezeAttempts(promotionId: string): Promise<Record<string, Record<string, unknown>>> {
+  const snap = await getFirestore()
+    .collection(COLLECTIONS.freezeAttempts)
+    .orderBy('__name__')
+    .startAt(`${promotionId}_`)
+    .endAt(`${promotionId}_\uf8ff`)
+    .get();
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const d of snap.docs) out[d.id.slice(promotionId.length + 1)] = d.data();
+  return out;
+}
+
+/**
+ * Wait until FIRESTORE'S OWN CLOCK is at or past `ms`, by committing a probe
+ * with serverTimestamp() and reading it back. The local clock is never
+ * consulted for the decision — the same discipline the freeze uses.
+ */
+export async function awaitServerTimePast(ms: number): Promise<number> {
+  const ref = getFirestore().collection('_probe').doc();
+  for (;;) {
+    await ref.set({ at: FieldValue.serverTimestamp() });
+    const snap = await ref.get();
+    const at = (snap.data() as { at: Timestamp }).at.toMillis();
+    if (at >= ms) return at;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+}
+
+/** Seed an already-closing promotion (digest valid) whose cutoff is `cutoffInMs` from now. */
+export async function seedClosing(
+  goals: EligibleGoal[],
+  opts: { cutoffInMs: number; repeatRule?: RepeatRule; entrantCap?: number | null; formBonusEntries?: number; status?: PromotionStatus }
+): Promise<{ promotionId: string; windowEndMs: number }> {
+  const windowEndsAt = new Date(Date.now() + opts.cutoffInMs);
+  const seed: PromotionSeed = {
+    status: opts.status ?? 'closing',
+    goals,
+    repeatRule: opts.repeatRule ?? 'perContribution',
+    windowStartsAt: new Date(Date.now() - 86_400_000),
+    windowEndsAt,
+    formBonusEntries: opts.formBonusEntries ?? 0,
+  };
+  if ('entrantCap' in opts) seed.entrantCap = opts.entrantCap;
+  const promotionId = await seedPromotion(seed);
+  return { promotionId, windowEndMs: windowEndsAt.getTime() };
 }

@@ -52,6 +52,10 @@ export const COLLECTIONS = {
   entries: 'wsfPromotionEntries',
   tallies: 'wsfPromotionEntrantTallies',
   counters: 'wsfPromotionCounters',
+  /** EXP2B: the immutable frozen pool, one per promotion (CONTRACT §d″). */
+  pools: 'wsfPromotionPools',
+  /** EXP2B: one server-timestamped marker per freeze attempt (CONTRACT §d″). */
+  freezeAttempts: 'wsfPromotionFreezeAttempts',
 } as const;
 
 export type AwardDeps = {
@@ -80,6 +84,8 @@ export function refs(db: Firestore, promotionId: string) {
     link: (uid: string) => db.doc(`${COLLECTIONS.entrantLinks}/${promotionId}_uid_${uid}`),
     tally: (entrantId: string) => db.doc(`${COLLECTIONS.tallies}/${promotionId}_${entrantId}`),
     counter: db.doc(`${COLLECTIONS.counters}/${promotionId}`),
+    pool: db.doc(`${COLLECTIONS.pools}/${promotionId}`),
+    freezeAttempt: (attemptId: string) => db.doc(`${COLLECTIONS.freezeAttempts}/${promotionId}_${attemptId}`),
   };
 }
 
