@@ -1,5 +1,14 @@
 # `/goals/new` — matched AFTER
 
+> **HISTORICAL — accepted, and no longer the current build.** These fifteen frames are the route
+> as accepted under the **floating member tab bar**, and they stay byte-identical. Since W9's
+> shell migration (integrated at `dd86721`) `/goals/new` is a focused flow outside `(tabs)`: no
+> bar renders over it, and the 140 px foot reserve these frames were built around was removed
+> (Director `5800455297` §2). The current route is photographed in
+> [`../after-barless/`](../after-barless/README.md), awaiting review. Where this README, below,
+> describes the bar, the reserve, the route "as it now ships" or what the producer writes, it is
+> describing how these frames were made; the producer now writes `../after-barless/`.
+
 The accepted target, implemented on the real route and photographed the way the BEFOREs were.
 
 **These are AFTERs and nothing else is.** Every frame is `apps/westayfit/app/goals/new.tsx` as it
@@ -142,6 +151,10 @@ nothing but the ruling.
 on. `node scripts/westayfit/check-evidence-intact.mjs` is clean.
 
 ## Reproducing
+
+These frames **cannot be reproduced** any more, and that is on purpose: the producer now writes
+`../after-barless/`, and the build no longer draws the bar they show. The command below is kept
+as the record of how they were made.
 
 ```
 EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1 \

@@ -23,7 +23,14 @@ import {
  * wrote both sets would rewrite accepted evidence as a side effect of
  * capturing an AFTER — exactly the failure `check-evidence-intact.mjs` exists
  * to catch. Two producers, one job each: that one writes `target/` and never
- * runs gated again, this one writes `after/` and nothing else.
+ * runs gated again, this one writes `after-barless/` and nothing else.
+ *
+ * WHY `after-barless/` AND NOT `after/`. The fifteen frames in `after/` are
+ * the ACCEPTED record of this route as it shipped under the floating member
+ * tab bar. Since W9's migration the route is a focused flow outside `(tabs)`,
+ * with no bar and no reserve for one, so a gated run now photographs a
+ * different page. It writes beside the accepted set, never over it
+ * (Director `5800455297` §2); `after/` is historical and byte-identical.
  *
  * NOTHING IS DRAWN HERE. Every frame is the shipped route entered the real
  * way — the community's own "Start a goal" control — with the same fixtures
@@ -54,7 +61,10 @@ import {
  * nothing.
  */
 
-const OUT = path.resolve(__dirname, '../../../docs/design-target/review/goal-setup-next/after');
+const OUT = path.resolve(
+  __dirname,
+  '../../../docs/design-target/review/goal-setup-next/after-barless',
+);
 
 const MAIN = { width: 390, height: 844 } as const;
 const SHORT = { width: 390, height: 640 } as const;
@@ -180,6 +190,84 @@ async function assertNoLivingWe(page: Page): Promise<void> {
   ).toBe(0);
 }
 
+/** `kit.page`'s own paddingBottom — the only foot this route keeps. */
+const KIT_PAGE_FOOT_PX = 48;
+
+/**
+ * THE ROUTE IS BARLESS, AND ITS FOOT IS ITS OWN.
+ *
+ * Presence proves nothing here. Pushed from a tab — the way a Champion
+ * arrives — this Stack route sits over the mounted `(tabs)` screen, so
+ * `wsf-member-tabs` is IN the DOM, hidden; opened cold (the refusal and the
+ * arrival guard below) it is absent. Three checks, each able to fail on its
+ * own, and each true either way:
+ *
+ *   - no copy of the named bar is visible;
+ *   - a press 8 px above the bottom edge, at the left, the centre and the
+ *     right, lands inside this route's own scroller — which a bar or overlay
+ *     under any name would take instead. (A layer with `pointer-events: none`
+ *     takes no press, and is not seen by this check.)
+ *   - the scroller's foot is no deeper than `kit.page`'s. The 140 px reserve
+ *     for the floating bar was dead space once the bar left (measured
+ *     `5800472286`), and this is what keeps it from coming back.
+ */
+async function assertBarlessFoot(page: Page, containerTestId: string, at: string): Promise<void> {
+  // Counted, not `toBeHidden()`: a hidden copy may be there, so a second,
+  // visible one would make a strict locator throw rather than state the defect.
+  await expect(
+    page.getByTestId('wsf-member-tabs').filter({ visible: true }),
+    `${at}: a member tab bar is visible over a focused route`,
+  ).toHaveCount(0);
+  const foot = await page.getByTestId(containerTestId).evaluate((el: Element) => {
+    let scroller: HTMLElement | null = el as HTMLElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    if (!scroller || !scroller.firstElementChild) return null;
+    const route = scroller;
+    const y = window.innerHeight - 8;
+    const strangers = [8, window.innerWidth / 2, window.innerWidth - 8].flatMap((x) => {
+      const hit = document.elementFromPoint(x, y);
+      if (hit && route.contains(hit)) return [];
+      const name = hit ? (hit.closest('[data-testid]')?.getAttribute('data-testid') ?? hit.tagName) : 'nothing';
+      return [`x=${Math.round(x)}: ${name}`];
+    });
+    return {
+      paddingBottom: parseFloat(getComputedStyle(scroller.firstElementChild).paddingBottom),
+      strangers,
+    };
+  });
+  expect(foot, `${at}: the route's own scroller was not found`).not.toBeNull();
+  expect(
+    foot!.strangers,
+    `${at}: something other than this route takes a press at its foot`,
+  ).toEqual([]);
+  expect(
+    foot!.paddingBottom,
+    `${at}: the foot is deeper than kit.page's — a reserve for a bar that is not here`,
+  ).toBeLessThanOrEqual(KIT_PAGE_FOOT_PX);
+}
+
+/**
+ * Reachable means WHOLE and PRESSABLE, not merely touching the viewport:
+ * scrolled into view programmatically (`scrollIntoViewIfNeeded`, not a finger
+ * drag), then entirely inside it, and the element a press at its centre
+ * actually lands on. Where a control must ALREADY be on screen — where a
+ * press left the Champion — the caller asserts that first, before this
+ * scrolls anything.
+ */
+async function expectReachable(page: Page, testId: string, at: string): Promise<void> {
+  const target = page.getByTestId(testId);
+  await target.scrollIntoViewIfNeeded();
+  await expect(target, `${at}: ${testId} is not wholly on screen`).toBeInViewport({ ratio: 1 });
+  const landsOnIt = await target.evaluate((el: Element) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return Boolean(hit && el.contains(hit));
+  });
+  expect(landsOnIt, `${at}: a press on ${testId} lands on something else`).toBe(true);
+}
+
 /**
  * The parts of the accepted target that are structure rather than pixels, and
  * that a later edit could quietly undo. Asserted on every class.
@@ -253,6 +341,7 @@ for (const [cls, viewport] of [
 
       await fillCore(page);
       await assertAcceptedShape(page, cls);
+      await assertBarlessFoot(page, 'wsf-new-goal-form', `${cls} form`);
 
       // ---- the form from the top: the spine and the payoff -------------
       // The claim the target was accepted on: the goal phrase is on screen
@@ -291,8 +380,11 @@ for (const [cls, viewport] of [
       await expect(submit).toHaveText('Start this goal');
       await expectActionGreen(page, 'wsf-new-goal-submit', cls);
       // Whole, not clipped: the control that agrees to the review is on
-      // screen with it, which is the defect the target exists to fix.
-      await expect(submit).toBeInViewport();
+      // screen with it, which is the defect the target exists to fix —
+      // asserted as framed, before anything else scrolls. At the short class
+      // this is also the primary action reachable at rest.
+      await expect(submit, `${cls}: the commit is not on screen with the review`).toBeInViewport();
+      await expectReachable(page, 'wsf-new-goal-submit', `${cls} at rest`);
       await shoot(page, `AFTER-summary-commit-${cls}`);
     });
 
@@ -322,6 +414,7 @@ for (const [cls, viewport] of [
         `${cls}: the refusal still offers the action the server just refused`,
       ).toBe(0);
       await expect(page.getByTestId('wsf-new-goal-refused-back')).toBeVisible();
+      await assertBarlessFoot(page, 'wsf-new-goal-form', `${cls} refused`);
       // The work is not lost.
       await expect(page.getByTestId('wsf-new-goal-title')).toHaveValue(TITLE);
       await frameOn(page, 'wsf-new-goal-error');
@@ -379,7 +472,13 @@ for (const [cls, viewport] of [
       const check = page.getByTestId('wsf-new-goal-check-goals');
       await expect(check).toHaveText('Check community goals');
       await expect(check).toHaveAttribute('href', `/community/${fx.groupId}`);
-      await expect(check).toBeInViewport();
+      // On screen where the press left the Champion — nothing has scrolled
+      // since — and only then whole and pressable.
+      await expect(
+        check,
+        `${cls} unknown: the resolving action is not on screen after the press`,
+      ).toBeInViewport();
+      await expectReachable(page, 'wsf-new-goal-check-goals', `${cls} unknown`);
       await expectActionGreen(page, 'wsf-new-goal-check-goals', cls);
       // And the demoted retry is still NOT an action: promoting it with the
       // same fill would undo the whole point of demoting it.
@@ -407,15 +506,15 @@ for (const [cls, viewport] of [
       */
       // Run the form's own scroller to its end rather than nudging one
       // element into view. `scrollIntoViewIfNeeded` stops as soon as the
-      // element's box is inside the viewport, which on this route means
-      // resting it directly under the floating tab bar — the very thing the
-      // route's new foot reserve exists to prevent. At the end of the scroll
-      // that reserve is what holds the consequence line clear of the bar, so
-      // this frame is also the evidence that the reserve works.
+      // element's box is inside the viewport, leaving the consequence line on
+      // the very edge of the frame; at the end of the scroll the whole foot
+      // of the state is in it. It is also where a stale reserve would show,
+      // as a band of nothing under the last line, so the foot is checked here.
       await scrollFormToEnd(page);
       const retry = page.getByTestId('wsf-new-goal-submit');
       await expect(retry).toBeInViewport();
       await expect(page.getByText('your community will have two.')).toBeInViewport();
+      await assertBarlessFoot(page, 'wsf-new-goal-form', `${cls} unknown, end of scroll`);
       await shoot(page, `AFTER-unconfirmed-retry-INJECTED-NETWORK-${cls}`);
       await page.unroute(callableUrl('wsfCreateGoal'));
     });
@@ -441,12 +540,60 @@ for (const [cls, viewport] of [
         `/contribute/${goalId}`,
       );
       await expectActionGreen(page, 'wsf-new-goal-goto-contribute', cls);
+      await assertBarlessFoot(page, 'wsf-new-goal-created', `${cls} created`);
+      await expectReachable(page, 'wsf-new-goal-goto-contribute', `${cls} created`);
       await expect(created).toContainText('Your goal is live');
       await expect(created).toContainText('30,000 squats');
       // The phrase is the TARGET, not a total: nobody has contributed yet.
       await assertNoLivingWe(page);
       await shoot(page, `AFTER-created-${cls}`);
     });
+
+    /*
+      THE SHORT PHONE WITH ITS KEYBOARD UP. Modelled the way
+      `ui-mobile-acceptance` models it — the last text field keeps focus and
+      the on-screen keyboard takes the bottom 344 px — but from the short
+      class, so 640 becomes 296: the least room this route is asked to work
+      in. From there the commit must still be reachable by keys alone, then
+      whole on screen and pressable; and a press on it must actually create.
+    */
+    if (cls === '390x640') {
+      test('with the keyboard up, the primary action is still reachable', async ({ page }) => {
+        test.setTimeout(150_000);
+        const fx = await seedChampionAndMember('kb');
+        await signInVia(page, fx.email, fx.password);
+        await openForm(page, fx.groupId);
+        await fillCore(page);
+
+        const lastField = page.getByTestId('wsf-new-goal-unit');
+        await lastField.focus();
+        await page.setViewportSize({ width: 390, height: 640 - 344 });
+        await page.waitForTimeout(400);
+        await expect(lastField, 'the last text field lost focus when the keyboard rose').toBeFocused();
+        await assertBarlessFoot(page, 'wsf-new-goal-form', '390x296 keyboard');
+
+        // By keys alone: Tab from the last text field reaches the commit.
+        let reachedByTab = false;
+        for (let i = 0; i < 40 && !reachedByTab; i++) {
+          await page.keyboard.press('Tab');
+          reachedByTab = await page
+            .getByTestId('wsf-new-goal-submit')
+            .evaluate((el: Element) => el === document.activeElement);
+        }
+        expect(reachedByTab, '390x296 keyboard: Tab never reaches Start this goal').toBe(true);
+
+        // Whole and pressable at 390x296, and a tap on it creates.
+        await expectReachable(page, 'wsf-new-goal-submit', '390x296 keyboard');
+        await expectActionGreen(page, 'wsf-new-goal-submit', '390x296 keyboard');
+        await shoot(page, 'AFTER-keyboard-submit-390x296');
+        await page.getByTestId('wsf-new-goal-submit').tap();
+        await expect(page.getByTestId('wsf-new-goal-created')).toBeVisible({ timeout: 45_000 });
+        expect(
+          await page.getByTestId('wsf-new-goal-created').getAttribute('data-goal-id'),
+          '390x296 keyboard: the press did not create a goal',
+        ).toBeTruthy();
+      });
+    }
   });
 }
 
@@ -500,6 +647,8 @@ test.describe('390x844 · the arrival guard', () => {
     await expect(home).toHaveText('Go to your communities');
     await expect(home).toHaveAttribute('href', '/');
     await expectActionGreen(page, 'wsf-new-goal-home', '390x844');
+    await assertBarlessFoot(page, 'wsf-new-goal-form', '390x844 arrival guard');
+    await expectReachable(page, 'wsf-new-goal-home', '390x844 arrival guard');
     await assertNoLivingWe(page);
     await shoot(page, 'AFTER-no-community-390x844');
   });
