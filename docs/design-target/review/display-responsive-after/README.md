@@ -161,17 +161,33 @@ real reproduction was on 23 Sep (#365 `5800564889`), at both `8165b52` and
 differed only inside the clock text, identically at both SHAs.
 
 **Frozen clock (23 Sep, later).** The producer now pins the page's clock to
-this set's own minute (`FROZEN_AT` in the spec: 2026-09-23T01:48Z, rendered
-under UTC / en-US) and seeds the recent additions relative to that instant, so
-its frames reproduce byte-for-byte across runs at different wall times (three
-gated runs, ten frames, all identical; a mutant with the clock left real fails
-the new assertions with the wall-clock text). Against this accepted set, six of
-the eight now reproduce exactly: both refused, both long-strings, and the
-1920×1080 progress and stale frames. `AFTER-progress-800x1280.png` and
-`AFTER-stale-INJECTED-NETWORK-800x1280.png` differ in one clock digit only
-(156 px each, a 12×15 px box in the header): at the original capture the
-portrait test ran at 1:47 AM while the others ran at 1:48. They stay exactly as
-accepted; this note records the difference rather than recapturing them.
+the minute this set was captured in (`FROZEN_AT` in the spec:
+2026-09-23T01:48Z, rendered under UTC / en-US) and seeds the recent additions
+relative to that instant. A gated run writes **eight** frames: six here
+(progress, stale and long-strings at both classes) and the check-again-green
+pair; it no longer writes the refused pair here. Three gated runs at different
+wall minutes (22:32:25Z, 22:32:56Z, 22:33:45Z) gave eight byte-identical frames
+run to run. Against the accepted record, **four of the six written here
+reproduce exactly** (both long-strings, the 1920×1080 progress and stale), and
+the check-again-green pair reproduces its own committed bytes.
+`AFTER-progress-800x1280.png` and `AFTER-stale-INJECTED-NETWORK-800x1280.png`
+differ in one clock digit only (156 px each, a 12×15 px box in the header): at
+the original capture the portrait test ran at 1:47 AM while the other four
+clock-bearing frames read 1:48. The `AFTER-refused-*` pair was not written and
+is not re-evidenced; it is historical (above). Nothing under `after/` was
+rewritten or re-committed: each run's output was restored, and the restore is
+shown by `git diff --stat HEAD -- …/after …/check-again-green` being empty —
+not by `check:evidence`, which does not list these directories. The mutant
+proof: with the clock left real, the freshness-line assertion fails with the
+wall-clock text at both classes; the recent-line assertion in the matched-AFTER
+test fails at every wall time after `FROZEN_AT`, while the long-strings test's
+freshness assertion alone would pass during the 01:48 UTC minute of any day.
+
+**Correction (23 Sep, 23:05Z).** The first version of the paragraph above said
+"ten frames" and "six of the eight reproduce exactly: both refused …". The
+producer writes eight, and the refused pair here is never among them — the same
+mistake the earlier correction describes, made again. The counts above are the
+true ones.
 
 ```
 AFTER-progress-800x1280.png              AFTER-progress-1920x1080.png

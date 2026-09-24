@@ -78,16 +78,24 @@ const OPEN_PERIOD = 'Open · Ends Mon, Oct 5';
  * seeded relative to the SAME instant, so "1 min ago" is one minute by the
  * page's clock, not by the seed process's.
  *
- * THE INSTANT IS THE MINUTE THE ACCEPTED FRAMES WERE CAPTURED IN — six of the
- * eight read 1:48 AM; the portrait progress and stale pair ran a minute earlier
- * and read 1:47 — so the accepted record and a fresh run agree on the clock
- * text wherever they can, rather than differing by construction. The page's
- * zone and locale are pinned to what that capture ran under (a UTC container,
- * en-US Chromium), so the same frame comes out of a container set to any zone.
+ * THE INSTANT IS THE MINUTE THE ACCEPTED FRAMES WERE CAPTURED IN. Six of the
+ * eight carry a clock: four read 1:48 AM, and the portrait progress and stale
+ * pair, shot a minute earlier, read 1:47; the refused pair prints no clock. So
+ * the accepted record and a fresh run agree on the clock text wherever they
+ * can, rather than differing by construction. The page's zone and locale are
+ * pinned to what that capture ran under (a UTC container, en-US Chromium), so
+ * the same frame comes out of a container set to any zone.
  *
  * WHAT STAYS REAL: document ids and seed stamps (uniqueness across runs), and
  * the createdAt / updatedAt fields no frame prints. Nothing in the product is
  * touched; this is the producer being honest about what it can promise.
+ *
+ * ONE LATENT COUPLING. The mark's Animated.timing path measures its progress
+ * with Date.now(), so under a fixed clock a transition would never advance.
+ * Today `livingWeTransition()` returns null and the fill is set, not animated;
+ * if a transition is ever approved, this producer must advance the clock
+ * (`clock.install` + `runFor`) rather than fix it, or it would photograph a
+ * stalled fill without saying so.
  */
 const FROZEN_AT = new Date('2026-09-23T01:48:00.000Z');
 const FROZEN_CLOCK = '1:48 AM'; // FROZEN_AT, as the page prints it under UTC / en-US
@@ -443,7 +451,9 @@ for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE
     test.use({ viewport, deviceScaleFactor: 1, isMobile: false, hasTouch: false, timezoneId: 'UTC', locale: 'en-US' });
 
     // Before any route script runs, so every navigation in the test sees the
-    // same instant. `setFixedTime` pins `Date` and leaves the timers real.
+    // same instant. `setFixedTime` pins `Date` and keeps timers running
+    // (Playwright drives its fake timers from the real clock), so the poll and
+    // the stale pill behave as they do on a wall.
     test.beforeEach(async ({ page }) => {
       await page.clock.setFixedTime(FROZEN_AT);
     });

@@ -47,7 +47,8 @@ to `ACTION_GREEN` `#22C55E` (from `src/ui/kit.ts`).
 - The eight accepted AFTER frames stay byte-identical to `8165b52`.
 - Under the producer's frozen clock (the later, test-only change; see
   `display-responsive-after/README.md`, "Frozen clock") this pair carries no
-  clock and came back byte-identical in three gated runs.
+  clock and came back byte-identical run to run in three gated runs, and
+  identical to the committed pair.
 
 ## Limits
 
