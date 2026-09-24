@@ -297,6 +297,14 @@ type GoalProgress =
       /** null when the member-authorized read was not made (a closed goal). */
       repeatPolicy: RepeatPolicy | null;
       at: Date;
+      /**
+       * When the read that produced this figure was ISSUED (ms). Two readers
+       * write here — the ordinary read and the settle — and either can land
+       * after the other. The later-issued read is the fresher one, whatever
+       * order the answers arrive in, so a landing never overwrites a figure
+       * from a read issued after it.
+       */
+      issuedAt: number;
     }
   | { kind: 'failed' };
 
@@ -357,13 +365,21 @@ export default function CommunityPage() {
     THE SECOND LOOK, once the pulse cache has certainly expired.
 
     `wsfGoalPulse` serves a shared total from a 2 s server cache
-    (PULSE_CACHE_TTL_MS). The contribution screen reads the pulse while the
-    member is there, so a return straight from the receipt can re-read inside
-    that window and be handed the total from BEFORE the contribution: "You've
-    added 20" beside an unchanged shared total, and nothing ever corrects it.
-    So a return also schedules one quiet re-read just past the window. It
-    only replaces figures that were already on screen, never shows loading,
-    and a failure leaves what is there.
+    (PULSE_CACHE_TTL_MS). The server drops the entry when a contribution
+    commits, but a read that BEGAN before the commit can finish after that
+    drop and pin the pre-contribution total for the next 2 s — and the
+    contribution screen reads the pulse while the member is there. So a
+    screen that reads once inside that window is handed "You've added 20"
+    beside an unchanged shared total, and nothing ever corrects it.
+
+    EVERY FOCUS, THE FIRST INCLUDED, therefore schedules one quiet re-read
+    just past the window. A return straight from the receipt is one way into
+    the window (W1B measured it on #453). A FRESH mount is the other: a
+    "Back to home" that builds a new Community after a contribution reads
+    the stale total on arrival and, with no return to trigger a second look,
+    keeps it (W7 measured 0 against 20 at 15 s, #434 5803764263). The
+    re-read only replaces figures that were already on screen, never shows
+    loading, and a failure leaves what is there.
   */
   const [settleToken, setSettleToken] = useState(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1073,6 +1089,7 @@ export default function CommunityPage() {
         })
       )
     );
+    const issuedAt = Date.now();
     for (const goal of openGoals) {
       (async () => {
         try {
@@ -1088,16 +1105,23 @@ export default function CommunityPage() {
               : Promise.resolve(null),
           ]);
           if (cancelled) return;
-          setProgress((prev) => ({
-            ...prev,
-            [goal.goalId]: {
-              kind: 'ok',
-              pulse: pulseResult.data,
-              ownCredit: ownResult ? ownResult.data.ownCredit : null,
-              repeatPolicy: ownResult ? resolveRepeatPolicy(ownResult.data.repeatPolicy) : null,
-              at: new Date(),
-            },
-          }));
+          setProgress((prev) => {
+            // A slow first read landing AFTER the settle has already filled
+            // the slot must not put the older answer back (see `issuedAt`).
+            const shown = prev[goal.goalId];
+            if (shown?.kind === 'ok' && shown.issuedAt > issuedAt) return prev;
+            return {
+              ...prev,
+              [goal.goalId]: {
+                kind: 'ok',
+                pulse: pulseResult.data,
+                ownCredit: ownResult ? ownResult.data.ownCredit : null,
+                repeatPolicy: ownResult ? resolveRepeatPolicy(ownResult.data.repeatPolicy) : null,
+                at: new Date(),
+                issuedAt,
+              },
+            };
+          });
         } catch {
           if (cancelled) return;
           // A failed re-read does not take down figures already on screen.
@@ -1113,55 +1137,100 @@ export default function CommunityPage() {
   }, [ready, user, groupId, goalsState, progressReloadToken]);
 
   // The settle read (see `settleToken`). Same two callables as above, for the
-  // open goals whose figures are already on screen; it never writes `loading`
-  // or `failed`, so it cannot blank or downgrade anything.
+  // open goals. It replaces a figure already on screen, or FILLS a slot the
+  // ordinary read has not answered yet — a slow first read must not leave the
+  // stale total in charge — and it never writes `loading` or `failed`, so it
+  // cannot blank or downgrade anything.
+  //
+  // THE SETTLE BELONGS TO THE ACCOUNT AND COMMUNITY IT WAS SCHEDULED FOR. Its
+  // cleanup runs on a change of either, not only on the next token, because a
+  // response that lands after a switch would otherwise find the NEW account's
+  // figure on screen and overwrite it with the old account's own credit. A
+  // handled-token ref keeps the context change from issuing a read of its own:
+  // one settle per focus, never one per context.
+  //
+  // THE READINESS BOUNDARY. The timer can fire before the goal list has
+  // answered (a slow first list read). The token is then left UNHANDLED — not
+  // consumed — so the settle it owes is still issued when the list lands, and
+  // is issued one full window AFTER that landing: the ordinary read that the
+  // landing triggers can itself be served from the cache, and only a read
+  // issued past the window can confirm it. A settle owed to a list that never
+  // loads is never issued; nothing polls for it.
+  const handledSettle = useRef(0);
+  const settleDeferred = useRef(false);
   useEffect(() => {
     if (!wsfAuthEnabled) return;
-    if (settleToken === 0) return;
-    if (!ready || !user || !groupId || goalsState.kind !== 'loaded') return;
-    let cancelled = false;
-    const functions = getFirebaseFunctions();
-    for (const goal of goalsState.goals.filter((g) => g.status === 'active')) {
-      (async () => {
-        try {
-          const pulseFn = httpsCallable<{ goalId: string }, PulseTotals>(functions, 'wsfGoalPulse');
-          const ownFn = httpsCallable<{ goalId: string }, MyContributionResponse>(
-            functions,
-            'wsfMyContribution'
-          );
-          const [pulseResult, ownResult] = await Promise.all([
-            pulseFn({ goalId: goal.goalId }),
-            ownFn({ goalId: goal.goalId }).catch(() => null),
-          ]);
-          if (cancelled) return;
-          setProgress((prev) => {
-            const shown = prev[goal.goalId];
-            if (!shown || shown.kind !== 'ok') return prev;
-            return {
-              ...prev,
-              [goal.goalId]: {
-                kind: 'ok',
-                pulse: pulseResult.data,
-                ownCredit: ownResult ? ownResult.data.ownCredit : shown.ownCredit,
-                repeatPolicy: ownResult
-                  ? resolveRepeatPolicy(ownResult.data.repeatPolicy)
-                  : shown.repeatPolicy,
-                at: new Date(),
-              },
-            };
-          });
-        } catch {
-          // The figures on screen stand.
-        }
-      })();
+    if (settleToken === 0 || settleToken === handledSettle.current) return;
+    if (!ready || !user || !groupId) return;
+    if (goalsState.kind !== 'loaded') {
+      settleDeferred.current = true;
+      return;
     }
+    handledSettle.current = settleToken;
+    const deferred = settleDeferred.current;
+    settleDeferred.current = false;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const functions = getFirebaseFunctions();
+    const openGoals = goalsState.goals.filter((g) => g.status === 'active');
+    const read = () => {
+      timer = null;
+      const issuedAt = Date.now();
+      for (const goal of openGoals) {
+        (async () => {
+          try {
+            const pulseFn = httpsCallable<{ goalId: string }, PulseTotals>(
+              functions,
+              'wsfGoalPulse'
+            );
+            const ownFn = httpsCallable<{ goalId: string }, MyContributionResponse>(
+              functions,
+              'wsfMyContribution'
+            );
+            const [pulseResult, ownResult] = await Promise.all([
+              pulseFn({ goalId: goal.goalId }),
+              ownFn({ goalId: goal.goalId }).catch(() => null),
+            ]);
+            if (cancelled) return;
+            setProgress((prev) => {
+              const shown = prev[goal.goalId];
+              if (!shown || shown.kind === 'failed') return prev;
+              const held = shown.kind === 'ok' ? shown : null;
+              // A figure from a read issued after this settle is the fresher
+              // one; and a still-loading slot is filled only when the member's
+              // own part came back too, so a half-answer never stands in.
+              if (held && held.issuedAt > issuedAt) return prev;
+              if (!held && !ownResult) return prev;
+              return {
+                ...prev,
+                [goal.goalId]: {
+                  kind: 'ok',
+                  pulse: pulseResult.data,
+                  ownCredit: ownResult ? ownResult.data.ownCredit : held!.ownCredit,
+                  repeatPolicy: ownResult
+                    ? resolveRepeatPolicy(ownResult.data.repeatPolicy)
+                    : held!.repeatPolicy,
+                  at: new Date(),
+                  issuedAt,
+                },
+              };
+            });
+          } catch {
+            // The figures on screen stand.
+          }
+        })();
+      }
+    };
+    if (deferred) timer = setTimeout(read, PULSE_SETTLE_MS);
+    else read();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-    // Deliberately keyed on the token alone: the read is a one-off, not a
-    // subscription to the goal list.
+    // Keyed on the token, the context and the list's READINESS — not on the
+    // list itself: the read is a one-off, not a subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settleToken]);
+  }, [settleToken, user?.uid, groupId, ready, goalsState.kind]);
 
   // Coming back to this screen (from a contribution, say) re-reads progress.
   // The first focus is the mount, which the effect above already covers.
@@ -1198,15 +1267,18 @@ export default function CommunityPage() {
     useCallback(() => {
       // A return re-reads the goal list first; progress follows from it
       // (or directly, if that read fails), so progress is read once, not twice.
-      if (focusedBefore.current) {
-        setReturnToken((n) => n + 1);
-        if (settleTimer.current) clearTimeout(settleTimer.current);
-        settleTimer.current = setTimeout(() => {
-          settleTimer.current = null;
-          setSettleToken((n) => n + 1);
-        }, PULSE_SETTLE_MS);
-      }
+      // The first focus is the mount, which the ordinary reads already cover.
+      if (focusedBefore.current) setReturnToken((n) => n + 1);
       focusedBefore.current = true;
+      // The settle read is scheduled on EVERY focus, the mount included: a
+      // fresh mount can land inside the pulse cache window just as a return
+      // can (see `settleToken`). One timer at a time; the cleanup below clears
+      // it when the screen loses focus, so a blur before 2.6 s reads nothing.
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => {
+        settleTimer.current = null;
+        setSettleToken((n) => n + 1);
+      }, PULSE_SETTLE_MS);
       // Leaving the screen closes the Champion tools sheet. The sheet is a
       // portal over the whole window, and the stack keeps this screen
       // mounted underneath the next one, so an open sheet would otherwise
