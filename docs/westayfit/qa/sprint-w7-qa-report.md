@@ -2297,3 +2297,11 @@ hold **together**.
 | tsc; guard; Safari | 0; 9 / 20; CANNOT-MEASURE |
 
 **Status:** tested on `d03e957b`; not accepted, integrated or staged by W7.
+
+## 21.7 · Disposition and integration identity (recorded 02:15Z)
+
+- **Accepted.** The Director accepted `95b08857` for development integration on Check 21 and §21.6 (#365 `5806120492` §1, 02:00Z): X7d / X7e ordering, the two-tab X7g, X7h readiness, blur / account cancellation, read-free reselect, own / shared and failed-read meanings and the one-root return journey; group change recorded as construction evidence, not a driven measurement; no presentation change, no export.
+- **Integrated by L0** as merge commit **`16cf96dc`** on `claude/wsf-app-shell` (#365 `5806149542`; #462 `5806147774`).
+- **Identity, re-derived here rather than taken from the receipt:** `16cf96dc` has parents `0827e4d2` and `95b08857`; its root tree is **`3f73beeb`, byte-identical to the tree of my local composition `d03e957b`** (§21.6); the two files are `32ff6c93` / `e0724949`, as on `95b08857`; the diff to `0827e4d2` is exactly those two files; `apps/westayfit/app` tree `38e67f1f`. The build measured in §21.6 was therefore the integrated tree, stamp aside.
+- **Kept distinct:** delivered (Check 21, `8179aae3`; §21.6, `7a366ced`) → accepted (`5806120492`) → integrated (`16cf96dc`). Not staged: the frozen pin stays `7ee70e4f`; the served build keeps the inherited limitation until a later pin.
+- **W7's part is complete.** Nothing is routed; the sprint's 03:00Z stop applies.
