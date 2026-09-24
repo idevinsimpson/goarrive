@@ -16,3 +16,4 @@ export * from './enable';
 export * from './close';
 export * from './pool';
 export * from './freeze';
+export * from './receipt';

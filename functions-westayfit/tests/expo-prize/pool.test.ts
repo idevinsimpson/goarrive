@@ -15,8 +15,10 @@ import {
   canonicalPoolJson,
   poolDigest,
   poolSerializedBytes,
+  poolStructurallyValid,
   storedPoolIntact,
   type PoolEntryInput,
+  type PoolRecord,
 } from '../../src/expo-prize';
 import { deepStrings, shuffle } from './fixtures';
 
@@ -147,6 +149,49 @@ describe('pool builder (pure)', () => {
       expect(s).not.toContain(attemptId);
       expect(s).not.toMatch(/^c_|^f_|^b_/);
       expect(s).not.toContain('@');
+    }
+  });
+
+  test('P12: a structurally malformed pool with a recomputed, consistent digest is NOT intact (W7 Check 26 item 5b, the 12 D2 shapes)', () => {
+    const base = buildPool([e('a', 2), e('b', 1)], meta);
+    if (!base.ok) throw new Error(base.problem.reason);
+    const intact = base.pool;
+    expect(storedPoolIntact(intact)).toBe(true);
+    expect(poolStructurallyValid(intact)).toBe(true);
+    // Each shape is re-stamped with the digest of ITS OWN content, so the
+    // digest test alone passes; only the structural invariants refuse it.
+    const restamp = (body: Omit<PoolRecord, 'poolDigest'>): PoolRecord => ({ ...body, poolDigest: poolDigest(body) });
+    const { poolDigest: _d, ...body } = intact;
+    const shapes: Array<[string, PoolRecord]> = [
+      ['overlap (1–2 and 2–3)', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 1, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 2, ticketEnd: 3 }] })],
+      ['gap (1–2, 5–5)', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 1, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 5, ticketEnd: 5 }], totalTickets: 5 })],
+      ['duplicate other entrant', restamp({ ...body, ranges: [...body.ranges, { entrantId: 'b', ticketStart: 4, ticketEnd: 4 }], totalTickets: 4, entrantCount: 3 })],
+      ['totalTickets 99, intact ranges', restamp({ ...body, totalTickets: 99 })],
+      ['entrantCount 7, intact ranges', restamp({ ...body, entrantCount: 7 })],
+      ['not starting at 1 (2–3, 4–4)', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 2, ticketEnd: 3 }, { entrantId: 'b', ticketStart: 4, ticketEnd: 4 }], totalTickets: 4 })],
+      ['unsorted (intact ranges reversed)', restamp({ ...body, ranges: [...body.ranges].reverse() })],
+      ['other range malformed (3–2)', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 1, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 3, ticketEnd: 2 }] })],
+      ['non-integer (2.5–3)', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 1, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 2.5, ticketEnd: 3 }] })],
+      ['own range malformed (a: 2–1)', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 2, ticketEnd: 1 }, { entrantId: 'b', ticketStart: 2, ticketEnd: 3 }] })],
+      ['own entrant duplicated', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 1, ticketEnd: 1 }, { entrantId: 'a', ticketStart: 2, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 3, ticketEnd: 3 }], entrantCount: 3 })],
+      ['empty ranges, totalTickets 3, entrantCount 2', restamp({ ...body, ranges: [] })],
+      // Beyond the twelve: an invalid entrant id, an unsafe integer, a start below 1.
+      ['invalid entrant id', restamp({ ...body, ranges: [{ entrantId: 'a/b', ticketStart: 1, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 3, ticketEnd: 3 }] })],
+      ['unsafe integer end', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 1, ticketEnd: 2 }, { entrantId: 'b', ticketStart: 3, ticketEnd: 2 ** 53 }], totalTickets: 2 ** 53 })],
+      ['start below 1', restamp({ ...body, ranges: [{ entrantId: 'a', ticketStart: 0, ticketEnd: 1 }, { entrantId: 'b', ticketStart: 2, ticketEnd: 2 }], totalTickets: 2 })],
+    ];
+    for (const [label, pool] of shapes) {
+      // The digest test alone would accept every one of these.
+      const { poolDigest: stored, ...rest } = pool;
+      expect([label, poolDigest(rest) === stored]).toEqual([label, true]);
+      expect([label, poolStructurallyValid(pool)]).toEqual([label, false]);
+      expect([label, storedPoolIntact(pool)]).toEqual([label, false]);
+    }
+    // The builder's own output, at every size tried, stays accepted.
+    for (const n of [1, 2, 7, 40]) {
+      const built = buildPool(Array.from({ length: n }, (_, i) => e(`ent_${(i * 31) % 17}`, 1 + (i % 4))), meta);
+      if (!built.ok) throw new Error(built.problem.reason);
+      expect(storedPoolIntact(built.pool)).toBe(true);
     }
   });
 });

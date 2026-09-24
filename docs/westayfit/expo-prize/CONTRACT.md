@@ -1,6 +1,6 @@
 # Expo prize-drawing core — Packet A contract
 
-**Status: contract delivered on `claude/wsf-expo-prize`; A+B and EXP2A accepted and integrated (README); EXP2B (§d″) delivered, not accepted, not integrated; nothing enabled, nothing deployed.**
+**Status: contract delivered on `claude/wsf-expo-prize`; A+B, EXP2A and EXP2B (§d″) accepted and integrated (README); EXP3A (§d‴) delivered, not accepted, not integrated; nothing enabled, nothing deployed.**
 Every `file:line` below is cited at base `16cf96dcbecc4b64cfd9a11a5ae7acd770cc1453`
 (`index.ts` = `functions-westayfit/src/index.ts`). Packet reference: #365 `5806424724`.
 
@@ -342,7 +342,12 @@ sorted by code-unit order, ranges are laid out contiguously from 1, and the
 digest is SHA-256 of the canonical JSON `{poolVersion, ruleVersion,
 enabledConfigDigest, totalTickets, entrantCount, ranges: [[entrantId, start,
 end], …]}`. The same entries in any order give byte-identical output.
-`storedPoolIntact` re-derives the digest from a stored pool's own content.
+`storedPoolIntact` holds a stored pool to that exact structure
+(`poolStructurallyValid`: non-empty, `entrantCount` = range count, ids strictly
+increasing, safe-integer 1-based ranges, contiguous from 1, `totalTickets` = the
+final end) **and** re-derives the digest from its content; a pool that was edited
+and re-stamped fails closed for the freeze replay and the member read alike
+(W7 Check 26 item 5b).
 
 **Not here.** No draw, no random selection, no prize, no exclusion, no redraw,
 no winner or contact access, no member or public surface, no operator
@@ -350,6 +355,40 @@ authorisation wiring, no export from `src/index.ts`, no rules, index or config
 change, no form-store binding. The form enumerator seam is deliberately absent
 rather than stubbed, so nothing can pretend to prove a bonus-bearing pool.
 
+### (d‴) The private "My entries" read — EXP3A (Director #365 `5815271789`)
+
+`readMyEntries(deps, { uid, promotionId })` in `src/expo-prize/receipt.ts`, unexported.
+The `uid` is the TRUSTED authenticated subject a future server surface takes from its
+auth context; the promotion id names the promotion. Nothing else is accepted: no count, no
+entrant id, no caller-named anything. Every read is inside one **read-only transaction**,
+so the module cannot write.
+
+**The answer is one of two shapes, built only through `sealReceipt` (an allow-list):**
+
+| promotion status | answer | how |
+| --- | --- | --- |
+| `enabled`, `closing` | `{ status: 'ok', tickets: n, settled: false }` | configuration must validate, carry the derived array and match its digest (else `unavailable`); the uid's link → entrant; `n` = sum of the entrant's own `confirmed` entries' positive integer `tickets` (`pending` / `revoked` / malformed count zero); no link → `n = 0` |
+| `frozen`, `drawn`, `archived` | `{ status: 'ok', tickets: n, settled: true }` | configuration must still validate and match (drift after freeze fails closed); the pool must exist, pass `storedPoolIntact`, and be **this** promotion's pool (`enabledConfigDigest` and `ruleVersion` equal the configuration's, `poolDigest` equals the digest the freeze stamped on the promotion) — else `unavailable`; `n` = the entrant's range width from the pool, zero when absent; no link → `n = 0` |
+| `draft`, `disabled`, unknown, missing; malformed ids | `{ status: 'unavailable' }` | nothing is owed and nothing is promised |
+
+`unavailable` carries **no reason on the wire**. An optional `trace` hook in the deps
+receives the reason (`promotionInactive`, `invalidConfig`, `configDrift`, `poolMissing`,
+`poolCorrupt`, `poolUnbound`, `linkMissing`, …) for tests and server logs; it never receives
+an id and never reaches the member.
+
+**What the receipt never contains:** a uid, an entrant id, a source key, a contribution /
+attempt / entry / goal id, a name, email or contact, a timestamp, a range endpoint, the
+pool digest, the entrant count, the pool total, a prediction, odds, a rank, another entrant,
+or a winner claim. The only number is the member's own `tickets`.
+
+**Truth boundaries.** `settled:false` is the member's own confirmed-entry count as of the
+read: it moves with the *award* (`ingestContribution`), not with the contribution, and it
+excludes `pending` and `revoked` entries by status. `settled:true` is what the immutable pool
+recorded for that entrant at the freeze; an operator revocation after the freeze (no writer
+exists; next phase) would have to re-freeze under a new rule to change it, which this core
+does not do. The tally document is **not** consulted for either answer.
+
+**Not here.** No callable, no route, no UI, no rules block, no index, no prize, no draw.
 ### (e) The community-interest form and its trusted receipt seam
 
 **What exists.** The public site (Lovable + Supabase, `westay.fit`) owns marketing and
@@ -402,6 +441,7 @@ functions-westayfit/src/expo-prize/enable.ts        the draft → enabled transa
 functions-westayfit/src/expo-prize/close.ts         the enabled → closing transaction (EXP2B)
 functions-westayfit/src/expo-prize/pool.ts          the pure, deterministic, privacy-safe pool builder (EXP2B)
 functions-westayfit/src/expo-prize/freeze.ts        the closing → frozen transition: marker, pass, atomic pool (EXP2B)
+functions-westayfit/src/expo-prize/receipt.ts       the private "My entries" read: read-only, allow-listed receipt (EXP3A)
 functions-westayfit/src/expo-prize/index.ts         module barrel — NOT exported from src/index.ts
 functions-westayfit/tests/expo-prize/*.test.ts      emulator tests
 functions-westayfit/jest.expo-prize.config.cjs      NEW config (existing configs match tests/callable only) — reservation request
