@@ -83,6 +83,52 @@ test.describe('HOME-POLISH-1 · the hero names its card, and news replaces the n
     await expect(page.getByTestId('wsf-community-goal-label')).toHaveCount(0);
   });
 
+  test('at 200% zoom (195 px): no sideways scroll, the label on one line, the total breaking after the count', async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('z', 1847);
+    // Six visible members, so the faces row is at its widest (five and "+N").
+    for (const [i, name] of ['Marcus Reed', 'Leah Brooks', 'Priya Nair', 'Tom Okafor', 'Sam Ortiz'].entries()) {
+      const uid = `w9hph-extra${i}-${stampId()}`;
+      await seedMembership(fx.groupId, uid, 'member');
+      await seedProfile(uid, name);
+    }
+    const ctx = await browser.newContext({ viewport: { width: 195, height: 844 }, deviceScaleFactor: 2 });
+    try {
+      const page = await ctx.newPage();
+      await signInVia(page, fx.email, fx.password);
+      await page.goto(`/community/${fx.groupId}`);
+      await expect(page.getByTestId(`wsf-community-goal-total-${fx.goalId}`)).toContainText('1,847', {
+        timeout: 40_000,
+      });
+      await expect(page.getByTestId('wsf-presence-row')).toBeVisible({ timeout: 30_000 });
+      await page.waitForTimeout(1_000);
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect.soft(overflow, 'the page scrolls sideways at 195 px').toBeLessThanOrEqual(0);
+
+      const label = (await page.getByTestId('wsf-community-goal-label').boundingBox())!;
+      expect.soft(label.height, 'the card label wraps to two lines at 195 px').toBeLessThanOrEqual(16);
+
+      const lines = await page.getByTestId(`wsf-community-goal-total-${fx.goalId}`).evaluate((el) => {
+        const spans = Array.from(el.children) as HTMLElement[];
+        const count = spans[0]!.getBoundingClientRect();
+        const rest = spans[1]!.getClientRects()[0]!;
+        // On one line the smaller span's box already sits lower than the
+        // count's, so "lower" proves nothing: a new line starts at or below
+        // the count's own bottom edge.
+        return { countBottom: Math.round(count.bottom), restTop: Math.round(rest.top) };
+      });
+      expect.soft(
+        lines.restTop,
+        'the total broke inside "of … squats" instead of after the count',
+      ).toBeGreaterThanOrEqual(lines.countBottom - 2);
+    } finally {
+      await ctx.close();
+    }
+  });
+
   test('"Checking progress…" stays centred on the hero while the read is out', async ({ page }) => {
     test.setTimeout(180_000);
     const fx = await seed('c', 1847);

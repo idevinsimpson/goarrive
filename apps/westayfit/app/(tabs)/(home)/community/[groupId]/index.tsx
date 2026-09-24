@@ -1951,7 +1951,8 @@ export default function CommunityPage() {
     : null;
   // The display tier steps down rather than the mark disappearing.
   const heroTotalCompact = shortViewport ? { fontSize: 27, lineHeight: 31 } : null;
-  const factsCompact = shortViewport ? { gap: 3, paddingTop: 6, paddingBottom: 7, marginTop: 2 } : null;
+  // HOME-POLISH-1. No panel padding: the recessed panel it padded is gone.
+  const factsCompact = shortViewport ? { gap: 3, marginTop: 2 } : null;
   // The presence line is the cheapest thing in the band to shrink, and the
   // only one whose meaning survives at 12px.
   const presenceCompact = shortViewport ? { fontSize: 12, lineHeight: 16 } : null;
@@ -1972,9 +1973,11 @@ export default function CommunityPage() {
   // the title above it or the actions below it.
   // SLICE 1. 118 -> 74: the freshness row (44px) moved below the actions, so
   // the space reserved for it inside the progress area moves with it.
-  // HOME-POLISH-1. 74 -> 66: the facts are one total line, the bar and one row
-  // now, without the recessed panel's padding, so the reserve follows them.
-  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 66;
+  // HOME-POLISH-1. 74 -> 66 (53 on a short viewport): the facts are one total
+  // line, the bar and one row now, without the recessed panel's padding, so
+  // the reserve follows them.
+  const progressAreaMinHeight =
+    Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + (shortViewport ? 53 : 66);
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
@@ -2580,7 +2583,12 @@ export default function CommunityPage() {
               <Text style={[styles.heroTotalCount, heroTotalCompact]}>
                 {totalOfTargetParts(sharedTotal, target, unit).count}
               </Text>
-              {' '}
+              {/*
+                The break returns where the line cannot hold both halves: at
+                about 200% zoom the hero is ~123 px wide, and a space let the
+                line break inside "of 5,000 squats" instead of after the count.
+              */}
+              {heroContentWidth < 200 ? '\n' : ' '}
               <Text style={styles.heroTotalRest}>
                 {totalOfTargetParts(sharedTotal, target, unit).rest}
               </Text>
@@ -3606,7 +3614,8 @@ export default function CommunityPage() {
           */}
           <View style={styles.presenceBand}>
             {presence !== null && presence.people.length > 0 ? (
-              <PresenceRow people={presence.people} />
+              // Four faces at about 200% zoom: five and "+N" are wider than the band.
+              <PresenceRow people={presence.people} max={windowWidth < 240 ? 4 : 5} />
             ) : null}
             <View style={styles.presenceFacts}>
               <View style={styles.presenceRow}>
@@ -3744,7 +3753,10 @@ export default function CommunityPage() {
                   ) : (
                     <View style={styles.heroLabelRow}>
                       <View style={styles.heroLabelDot} />
-                      <Text style={styles.heroEyebrow} testID="wsf-community-goal-label">
+                      <Text
+                        style={[styles.heroEyebrow, windowWidth < 240 ? styles.heroLabelNarrow : null]}
+                        testID="wsf-community-goal-label"
+                      >
                         Community goal
                       </Text>
                     </View>
@@ -4539,6 +4551,9 @@ const styles = StyleSheet.create({
   // and the eyebrow, on one line.
   heroLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   heroLabelDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: PROGRESS_GREEN },
+  // At about 200% zoom the tracked label is wider than the hero; it keeps one
+  // line (the height "Goal reached" has) by tightening its tracking.
+  heroLabelNarrow: { letterSpacing: 0.8 },
   heroTitle: {
     color: CREAM,
     fontSize: 22,
