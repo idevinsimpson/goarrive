@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-09-23._
+_Last refreshed: 2026-09-24._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -376,3 +376,9 @@ Three gaps were found and closed in succession for the westayfit staging hosting
 **Catch-all silently satisfying multi-segment probe (#460):** the assertions were using longer paths (e.g., `/members/123`) that the catch-all rule matched even when no per-route rewrite existed. A one-segment path (e.g., `/members`) is required to prove the dedicated rule rather than the catch-all. Additionally, the verification step itself must run live — a dry-run step exits 0 without issuing any HTTP request, providing false confidence identical to a vacuous-pass CI gate.
 
 Lesson: for any new route in a multi-app Firebase Hosting project, (a) add a dedicated rewrite rule, (b) verify it with a one-segment GET against the live serving config, and (c) check every app's config when multiple apps share a deployment. The cold-reload lesson (PR #356) is a prerequisite — SPA navigation is not a substitute for cold-reload proof — and this lesson adds: catch-all matches are not a substitute for per-route proof.
+
+### CI Harness Smoke Must Navigate from the Candidate's Actual Menu Surface (PR #466)
+When a CI smoke test navigates to a product screen via a menu or navigation control, the path used must match the surface the *current candidate* actually provides — not an assumed menu structure from a prior candidate version. The hosted Package E smoke (W3) was opening Manage via a path that existed on prior candidates; the 7ee70e4 candidate's persistent menu shell restructured navigation, causing the smoke to fail.
+
+Lesson: when a candidate pin advances to a version that restructures navigation (e.g. adds a persistent shell, moves a menu item to a different surface, renames a control), update the smoke harness in the same PR. A smoke that hardcodes a prior candidate's menu path is not testing the current candidate — it is testing an already-retired surface. The same principle extends beyond menus: any harness step that locates a control by position, text from a prior build, or assumed hierarchy must be re-verified whenever the candidate advances. Semantic locators (role, testID, visible label) age better than structural ones.
+
