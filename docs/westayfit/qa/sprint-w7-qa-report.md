@@ -2403,3 +2403,52 @@ Four of the seven recorded mutations were reproduced (the packet asked for at le
 - `ts:check` 0; evidence guard 9 frozen / 20 accepted intact; no artifacts committed.
 - Not measured: live Firestore contention (the server SDK holds locks on read documents and defaults to 5 attempts; the emulator resolves at commit — end state identical, liveness not identical); that a live server timestamp equals the transaction's commit instant (measured against the emulator's process clock only); the trigger as a registered trigger; any store behind the receipt adapter; the enable / close / freeze / draw transitions (not built).
 - **Status:** tested only. W7 accepts, integrates and stages nothing.
+
+# Check 23 — EXP1's delta `3b9963c9` on reviewed `8a434dd7` (#467), delta only: **PASS on every item; the six changed behaviours proved on the successor and shown failing on the reviewed head; nothing weakened**
+
+Routed by the Director on #434 (`5808655361`; disposition #467 `5808655210`). Check 22's batteries (67 / 67 ×3, 81 / 81, the concurrency re-derivation, the mutations) are carried, not rerun.
+
+## 23.1 · Scope, verified by git
+
+- `8a434dd7..3b9963c9` is **one commit**, exactly **eight files**, all inside the reservation: `docs/westayfit/expo-prize/{CONTRACT,EVIDENCE,README}.md`, `src/expo-prize/{award,status}.ts`, `tests/expo-prize/{award,form,pure}.test.ts` (+114 / −58). Nothing outside the lane; `functions-westayfit/src/index.ts`, `firestore.rules`, `firestore.indexes.json`, `firebase*.json` and `apps/westayfit/app` contain no `expo-prize` / `wsfPromotion` reference at `3b9963c9` — no export, registration, rules, index, config, route or deployment path.
+- Detached worktree at `3b9963c9`, never pushed, not edited (`git diff --quiet` after every mutation and at the end).
+
+## 23.2 · Suite and typecheck
+
+| run | result |
+|---|---|
+| EXP1 suite at `3b9963c9`, once, documented command shape | **68 passed, 0 failed** — `pure` 39 (+1), `award` 14, `form` 6, `cap` 6, `reconcile` 3 |
+| `tsc --noEmit -p functions-westayfit/tsconfig.json` | **0 errors** |
+
+Initial run; no rerun was needed.
+
+## 23.3 · The changed behaviour, proved (W7's instrument `sprint-w7-exp1-delta23.test.ts`, run against **both** heads through `W7_EXP1_WT`)
+
+| item | on `3b9963c9` | on `8a434dd7` (fail-first) |
+|---|---|---|
+| **1** replay reports the actual non-empty source key | **PASS**: movement replay `sourceKey` = `c_{goalId}_{uid}_{attemptId}` = `entryId`; form replay `sourceKey` = `f_{receiptId}`, `entryId` = `b_{entrantId}` (`award.ts:179-184`, `:215`, `:308`) | FAIL: `sourceKey: ''` |
+| **2** disabled / frozen and replay paths do not call `FormReceiptSource` | **PASS**: a spy store counted **0 reads** across `disabled`, `frozen`, `draft` and a missing promotion (all `fenced`, nothing written), then **exactly 1 read** for the accepted claim and **0 further reads** across three replays (`award.ts:306-316`: the read sits behind the fence and the dedupe) | FAIL: 4 reads for the four fenced claims, 4 for the accepted claim + 3 replays |
+| **3** a retried transaction re-reads the receipt and cannot reuse a stale one | **PASS**: the spy's first read invalidates the transaction's read of the promotion document (an unrelated, undigested field) so the SDK retries; **3a** same answer on the retry → 2 reads, `accepted`, one of everything; **3b** the store's answer changes to another subject on the retry → 2 reads, `refused / subjectMismatch`, **nothing written** | FAIL: 1 read in both; 3b **accepted the stale receipt** |
+| **4** an unlisted goal yields `notEntered / goalNotInPromotion`, never `pending` | **PASS**: `classifyEntryStatus({ active, goalEligible: false, contributionExists: true, source: null })` → `notEntered / goalNotInPromotion` (`status.ts:30`); the four original answers and the inactive-never-pending rule unchanged | FAIL: `pending` |
+| **5** privacy scans include document ids and entrant / link documents | **PASS by diff and by mutation**: row 26 now scans the ids of entrants, sources, entries and tallies as well as values (`award.test.ts:313-319`), row 10 now scans entrants and links (`form.test.ts:93`). Controls on the worktree copy, each restored: entrant id derived from the uid → **row 26 fails (1 / 1)**; a `marketingOptIn` field on the entrant document → **row 10 fails (1 / 1)** | the same mutations were not scannable before (values-only; entries / sources / tallies only) |
+| **6** docs record the Check 22 corrections and keep D / G / F5 explicitly not built | **PASS by reading**: `CONTRACT.md` — ABORTED-retry-then-replay (`:158-160`), idempotence borrowed from the co-transactional creates (`:115-120`), `b_{entrantId}` / `f_{receiptId}` (`:144`, `:161-162`), `tickets` / `goalId` and `entryCount` counting tickets (`:80-81`), "refuses to adjudicate" (`:176-178`, `:285`), cites `:3550` and `resolveTurnEvent :7646-7710`, `eligibleGoalIds` "must be derived … by the enable step, **which is not built**" (`:75`), the cap seam "**W7 D, not built**" (`:165-168`), the freeze's two guards "this packet does not build" (`:195-203`); `EVIDENCE.md` — pessimistic locking and the fifth-attempt throw (`:64-69`), a "Corrections after W7 Check 22" section naming D / G / F5 as not built (`:132-151`), the line-count table now matching `wc -l` for every source and test file (one residual: the jest config is 20 lines, listed as 21). `README.md:36` says the corrections commit is "pushed only on release"; it was pushed under the owner's environment rule (EXP1 said so, #467 `5808389267`) — a one-line status inaccuracy, not a claim about behaviour |
+
+## 23.4 · Nothing weakened — reconfirmed on the successor with W7's own instrument
+
+| property | on `3b9963c9` |
+|---|---|
+| contribution persistence + dedupe (A ×3) | **PASS**: six concurrent first ingestions → `[accepted, replay ×5]`, one of everything, the contribution row's data and `updateTime` identical |
+| one bonus under contention (B ×3) | **PASS**: 1 accepted, 3 refused `bonusAlreadyAwarded` recorded |
+| cap atomicity (C ×3) | **PASS**: exactly 2 of 6 under cap 2, counter 2, all six contributions and totals intact, replay admits nobody |
+| form path under a cap (E1, E2) | **PASS** |
+| D (cap after cap-less admissions) | still fails at its contract assertion — **by design, not built**, exactly as the docs now say |
+
+The diff itself touches no adjudication rule, no write, no id, no fence order: `award.ts` moves the receipt read from before the transaction to after the fence and the dedupe inside it, and passes the known `sourceKey` into `storedVerdict`; `status.ts` adds one input and one early return; the tests widen two scans.
+
+## 23.5 · Bound and hygiene
+
+- No edits to EXP1; no visual export; emulators only; no cloud action. Initial results are reported above; no reruns were needed and none were taken.
+- Unmeasured: the same as Check 22 (live contention, live server-timestamp semantics, the trigger as a trigger, a real receipt store, the unbuilt transitions). Item 3's retry was forced by invalidating the transaction's read set through the spy; a naturally contended retry was not separately driven.
+- Evidence: `docs/westayfit/qa/sprint-w7-exp1-delta23.test.ts` and the updated `sprint-w7-exp1-jest.config.cjs` (worktree selectable by `W7_EXP1_WT`); the earlier Check 22 files unchanged.
+- `ts:check` 0; evidence guard 9 / 20 intact; no artifacts committed.
+- **Status:** tested on `3b9963c9`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
