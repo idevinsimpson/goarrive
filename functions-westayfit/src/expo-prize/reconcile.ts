@@ -10,7 +10,7 @@
  * end state is the same and the pass that finds nothing new to write is the
  * proof of convergence.
  */
-import { FieldPath, type Firestore } from 'firebase-admin/firestore';
+import { FieldPath, type Firestore, type Query } from 'firebase-admin/firestore';
 
 import { CONTRIBUTIONS_COLLECTION } from './adjudicate';
 import { ingestContribution, refs, type AwardDeps } from './award';
@@ -33,6 +33,31 @@ export type ReconcilePage = {
   done: boolean;
 };
 
+/** Clamp a requested page size to the bounded range every pass uses. */
+export function clampPageSize(pageSize: number): number {
+  return Math.max(1, Math.min(500, Math.floor(pageSize)));
+}
+
+/**
+ * THE ONE PAGE QUERY. Equality on `goalId`, ordered by document name, after
+ * a cursor, bounded. Shared by the reconciliation pass and the freeze pass
+ * (EXP2B) so both walk the ledger in exactly the same order and shape.
+ */
+export function contributionPageQuery(
+  db: Firestore,
+  goalId: string,
+  cursor: string | null | undefined,
+  pageSize: number
+): Query {
+  let query = db
+    .collection(CONTRIBUTIONS_COLLECTION)
+    .where('goalId', '==', goalId)
+    .orderBy(FieldPath.documentId())
+    .limit(pageSize);
+  if (cursor) query = query.startAfter(cursor);
+  return query;
+}
+
 export async function reconcileGoal(
   deps: ReconcileDeps,
   promotionId: string,
@@ -40,13 +65,8 @@ export async function reconcileGoal(
   opts: { cursor?: string | null; pageSize: number }
 ): Promise<ReconcilePage> {
   const db: Firestore = deps.db;
-  const pageSize = Math.max(1, Math.min(500, Math.floor(opts.pageSize)));
-  let query = db
-    .collection(CONTRIBUTIONS_COLLECTION)
-    .where('goalId', '==', goalId)
-    .orderBy(FieldPath.documentId())
-    .limit(pageSize);
-  if (opts.cursor) query = query.startAfter(opts.cursor);
+  const pageSize = clampPageSize(opts.pageSize);
+  const query = contributionPageQuery(db, goalId, opts.cursor, pageSize);
 
   const page: ReconcilePage = {
     processed: 0,

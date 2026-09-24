@@ -46,6 +46,44 @@ dedupe read removed, the cap check inverted, the cutoff compared to wall-clock i
 `createdAt`) and must fail; then against the real core and must pass. A row that cannot
 be made to fail is reported as such, not counted as a proof.
 
+## EXP2B rows — close → reconcile → freeze (CONTRACT §d″; #365 `5811972490`)
+
+Suites: `close.test.ts` (emulator), `freeze.test.ts` (emulator), `pool.test.ts` (**pure**).
+Every pre-cutoff contribution is made through the real `wsfContribute` before the
+promotion is seeded with a cutoff a moment ahead; the cutoff is then waited out on
+Firestore's own clock (`awaitServerTimePast`: a probe committed with `serverTimestamp()`
+and read back), never the process clock.
+
+| # | proves | how | kind |
+| --- | --- | --- | --- |
+| C1 | close is one write | `enabled` + valid digest → `closed`; only `status` and `closingRequestedAt` (a server `Timestamp`) differ | emulator |
+| C2 | repeated close is idempotent and cannot reopen | three more closes → `alreadyClosing`, byte-identical (first timestamp kept); `enablePromotion` on it → `fenced / notDraft` | emulator |
+| C3 | every other status is fenced, no write | `draft`, `disabled`, `frozen`, `drawn`, `archived` → `fenced / notEnabled`, byte-identical; missing → `promotionMissing` | emulator |
+| C4 | drift / invalid config cannot close | cap edited, stale digest → `fenced / configDrift`; `repeatRule` removed → `fenced / invalidConfig`; byte-identical | emulator |
+| C5 | concurrent closes | 8 concurrent → 1 `closed`, 7 `alreadyClosing`, one timestamp; three runs | emulator (concurrent) |
+| C6 | the write fence under `closing` | closed **before** the cutoff; a pre-cutoff commit processed after close → `accepted`; a post-cutoff commit → `refused / afterCutoff`; the old `reconcilePromotion.converged` recorded for contrast | emulator |
+| F1 | a before-cutoff server marker cannot freeze; a later marker begins the pass | cutoff 2.5 s ahead → `notReady / beforeCutoff`, marker with `startedAt` = the returned `startedAtMs` < `windowEndMs`, no source row, no pool, still `closing`; after the server clock passes → the pass runs (`newAcceptedEntries`), then `frozen` | emulator |
+| F2a | a pre-cutoff row without a source blocks even when its verdict is a refusal | `perGoal`, second round un-ingested → `notReady / preCutoffSourceMissing` with `newAccepted 0`; both verdicts now durable; next pass `frozen` | emulator |
+| F2b | accepted and refused pre-cutoff sources are both accounted for | `perGoal` + `entrantCap 1`, three un-ingested rows → first pass `newAccepted 1`, refusals `goalAlreadyEntered` + `capReached` recorded; second pass `replayed 3` → `frozen`, 1 ticket | emulator |
+| F3 | post-cutoff-only rows do not prevent a clean pass (W7 G) | pre row ingested; two post-cutoff commits un-ingested → **first** attempt `frozen`, `postCutoffIgnored 2`, both refusals recorded; a sibling promotion through `reconcilePromotion` reports `writes 2, converged false` for the same rows | emulator |
+| F4 | committed before cutoff, processed after close → included | contribute, `closePromotion`, wait, freeze → `notReady / newAcceptedEntries`, then `frozen` with the entry; the contribution row unchanged | emulator |
+| F5 | `formBonusEntries > 0` refuses freeze | `refused / formSourceUnbound`, byte-identical promotion, **no marker**, no pool, repeatable; the zero-bonus twin over the same row freezes | emulator |
+| F6 | deterministic, digest-intact, privacy-safe pool | 3 entrants × (3, 1, 2) tickets → `totalTickets 6`, ranges sorted and contiguous from 1, widths by entrant, `storedPoolIntact`; exact key set of the pool and of every range; deep scan for every uid, the goal id, every attempt id and contribution id, `c_`/`f_`/`b_` keys and entry ids; promotion carries `frozen`, `poolDigest`, `frozenAt`, `freezeAttemptId` | emulator |
+| F7 | zero tickets refused | no contributions → `refused / poolEmpty`, no pool, still `closing`, marker noted; repeat identical | emulator |
+| F8 | oversize refused before any write | `maxPoolBytes 120` over 3 entrants → `refused / poolTooLarge` with measured bytes, no pool, still `closing`; the real bound then freezes the same pool | emulator |
+| F9 | concurrent freeze attempts → one byte-stable pool; retries replay | 6 concurrent → exactly 1 `replay:false`, 5 `replay:true`, one digest; 6 markers, one `frozen/replay:false`; three retries `replay:true` with the same digest; pool and promotion byte-identical after; three runs | emulator (concurrent) |
+| F10 | `frozen` fences every later award path | `readPromotion` → `promotionInactive`; ingest of a post-cutoff row and of the already-awarded pre-cutoff row → `fenced`; `reconcilePromotion` → `converged false, processed 0`; enable → `notDraft`; close → `notEnabled`; second freeze → replay; classifier → `notEntered / promotionInactive`; promotion byte-identical | emulator |
+| F11 | fences write nothing, not even a marker | `draft`, `enabled`, `disabled`, `drawn`, `archived` → `notClosing`; drift → `configDrift`; invalid → `invalidConfig`; missing → `promotionMissing`; `freezeAttempts` empty | emulator |
+| F12 | an existing pool is never overwritten; a frozen promotion without an intact pool is fenced | foreign pool under `closing` → `fenced / poolExistsWithoutFrozen`, pool byte-identical, still `closing`; `frozen` with no pool → `poolMissingWhileFrozen`; with an edited pool → `poolCorrupt`; no marker | emulator |
+| F13 | the freeze transaction is atomic | `beforeFreezeCommit` throws → no pool, promotion byte-identical; retry → `frozen` | emulator |
+| F14 | the pass covers every eligible goal and every page | 2 goals, 7 rows, `pageSize 2` → `goals 2, processed 7`; pool spans goals, 3 entrants, 7 tickets | emulator |
+| P1–P8 | pool builder | aggregation / canonical order / contiguous ranges; order-independence over 10 shuffles; digest covers rule version, enablement digest and every range, edited pool detected; bonus tickets count, `pending` / `revoked` excluded; zero → `poolEmpty`; malformed entry → whole pool refused; oversize against the real 512 KiB bound (12 000 entrants) and against an override; exact allowed key set and no sensitive string | **pure** |
+
+**Mutation controls for EXP2B** are recorded in EVIDENCE.md §EXP2B: marker guard
+removed, missing-source guard removed, form fence removed, size fence removed, pool
+`create` → `set` with the existence check removed, pool write dropped from the
+transaction.
+
 **Not in the matrix (next phases, designed for in CONTRACT.md):** the "My entries"
-receipt surface, operator controls, paper import and duplicate review, close → freeze with
-the immutable pool digest, the draw, redraws, exclusions, winner contact and claim.
+receipt surface, operator controls, paper import and duplicate review, the form-store
+binding and its enumerator, the draw, redraws, exclusions, winner contact and claim.

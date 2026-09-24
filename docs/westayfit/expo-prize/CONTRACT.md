@@ -1,6 +1,6 @@
 # Expo prize-drawing core — Packet A contract
 
-**Status: proposed contract, delivered on `claude/wsf-expo-prize`; not accepted, not integrated, nothing enabled.**
+**Status: contract delivered on `claude/wsf-expo-prize`; A+B and EXP2A accepted and integrated (README); EXP2B (§d″) delivered, not accepted, not integrated; nothing enabled, nothing deployed.**
 Every `file:line` below is cited at base `16cf96dcbecc4b64cfd9a11a5ae7acd770cc1453`
 (`index.ts` = `functions-westayfit/src/index.ts`). Packet reference: #365 `5806424724`.
 
@@ -80,7 +80,8 @@ rules section `firestore.rules:1198–…`, the same posture as `wsfContribution
 | `wsfPromotionEntries/{promotionId}_{entryId}` | one entry: `entrantId`, `kind` (`movement` \| `formBonus` \| `paper`), `status` (`confirmed` \| `pending` \| `revoked`), `tickets` (1 for movement, `formBonusEntries` for the bonus), `goalId` (movement only), `sourceKey`, `ruleVersion`, `awardedAt` | uid, name |
 | `wsfPromotionEntrantTallies/{promotionId}_{entrantId}` | per-entrant counters read inside the award transaction: `entryCount` (counts **tickets**, not entry documents), `formBonusAwarded`, `movementGoals` (map goalId → true) | anything global |
 | `wsfPromotionCounters/{promotionId}` | `entrantCount` — the only cross-entrant document, touched once per entrant, only when a cap is configured | ticket counts |
-| `wsfPromotionPools/{promotionId}` | **next phase**: the frozen, immutable ticket mapping, count, rule version, digest | — |
+| `wsfPromotionPools/{promotionId}` | **EXP2B (§d″)**: the frozen, immutable ticket ranges by opaque entrant, total, rule version, enablement digest, pool digest | uid, name, email, contact, contribution / source / attempt / entry id, goal id, member timestamp, count |
+| `wsfPromotionFreezeAttempts/{promotionId}_{attemptId}` | **EXP2B (§d″)**: one server-timestamped marker per freeze attempt plus its audit note | ids of any kind |
 | `wsfPromotionDraws/{promotionId}_{prizeId}` | **next phase**: one persisted draw result per prize before reveal; redraws and exclusions with audit | — |
 
 - **One uid is not proof of one human.** The link is uid → entrant, never merged
@@ -194,7 +195,7 @@ draft ──enable──▶ enabled ──close──▶ closing ──freeze─
 **Authoritative cutoff** = the contribution's own `createdAt`, the server timestamp written
 inside `performContribution`'s transaction (`:3550`), compared with the promotion's
 `windowEndsAt`. Wall-clock at processing time is irrelevant to a row's eligibility.
-`closing → frozen` (next phase) needs two guards this packet does not build: (1) a
+`closing → frozen` needs two guards that A+B did not build and EXP2B (§d″) does: (1) a
 **pool-relevant** convergence — a full pass that accepted no new row and observed no
 pre-cutoff row without a source row — rather than `reconcilePromotion`'s `converged`,
 which counts recorded refusals as writes and therefore toggles on post-cutoff movement
@@ -242,7 +243,112 @@ write  : update { status: 'enabled', eligibleGoalIds: <derived>, enabledConfigDi
   changed, the SDK retries it, it reads `enabled` and is fenced. One write means no partial
   state.
 - **Not here:** `closing → frozen`, the pool, and the freeze's convergence / start-after-
-  cutoff guards (W7 G) — the next packet.
+  cutoff guards (W7 G) — built by EXP2B, §d″.
+
+### (d″) Close → reconcile → freeze — EXP2B (Director #365 `5811972490`, transfer `5812848258`)
+
+Three unexported functions in `src/expo-prize/`: `closePromotion` (`close.ts`),
+`freezePromotion` (`freeze.ts`) and the pure pool builder (`pool.ts`). Two new
+collections, both Admin-SDK-only and default-deny like the rest:
+
+| collection | holds | never holds |
+| --- | --- | --- |
+| `wsfPromotionPools/{promotionId}` | the **immutable** pool: `poolVersion`, `ruleVersion`, `enabledConfigDigest`, `totalTickets`, `entrantCount`, `ranges[{entrantId, ticketStart, ticketEnd}]` (sorted by entrant id, contiguous from 1), `poolDigest`, `freezeAttemptId`, `passStartedAtMs` (the marker's server instant), `frozenAt` | a uid, name, email, contact, contribution / source / attempt / entry id, goal id, a member's own timestamp, a movement count |
+| `wsfPromotionFreezeAttempts/{promotionId}_{attemptId}` | one marker per freeze attempt: `startedAt: serverTimestamp()`, `ruleVersion`, `enabledConfigDigest`, `windowEndMs`, then an audit note (`outcome`, `reason`, pass counts, `finishedAt`) | ids of any kind |
+
+**Close** (`enabled → closing`), one transaction, one write:
+
+| outcome | when | written |
+| --- | --- | --- |
+| `closed` | status `enabled` and `readPromotion` active (config validates, stored array and digest match) | `status: 'closing'`, `closingRequestedAt: serverTimestamp()` |
+| `alreadyClosing` | status `closing` — idempotent; cannot reopen, cannot edit policy | nothing |
+| `fenced / notEnabled` | any other status (`draft`, `disabled`, `frozen`, `drawn`, `archived`) | nothing |
+| `fenced / configDrift` · `invalidConfig` · `promotionMissing` | the document is not the one that was enabled | nothing |
+
+A close may be requested before `windowEndsAt`. It changes no row's eligibility
+(the award's cutoff is the row's `createdAt` against `windowEndsAt` under
+`closing` exactly as under `enabled`, §d) and it is **not** evidence about the
+cutoff: the freeze never reads `closingRequestedAt`.
+
+**Freeze** (`closing → frozen` + the pool), four guards in this order, each
+failing closed:
+
+1. **Status and configuration, no write.** `frozen` replays the receipt from
+   the stored pool (fenced `poolMissingWhileFrozen` / `poolCorrupt` when the
+   pool is absent or its digest no longer matches its content). Anything but a
+   digest-valid `closing` is `fenced` (`notClosing`, `configDrift`,
+   `invalidConfig`, `promotionMissing`) with no marker.
+2. **Form completeness fails closed.** `formBonusEntries > 0` →
+   `refused / formSourceUnbound`, no marker: the trusted form store and its
+   enumerator are not chosen (§e), and a movement-only pass cannot prove a pool
+   that would include bonuses. A zero-bonus promotion freezes from movement.
+3. **The cutoff on Firestore's clock.** A marker is `create`d with
+   `serverTimestamp()` and read back; the resolved instant is the only clock
+   consulted. `startedAtMs < windowEndMs` → `notReady / beforeCutoff`, nothing
+   but the marker written; a later attempt replaces it. Process `Date.now()`, a
+   caller timestamp, the largest `createdAt` seen and the close request are
+   not proof and are not read.
+4. **The pool-relevant pass (W7 G), then the atomic freeze.** Starting after
+   the marker, every eligible goal's ledger is walked with the reconciliation's
+   own page query and each row goes through the idempotent `ingestContribution`.
+   Per row, classified by the **row's own `createdAt`**, never by the recorded
+   refusal alone:
+
+   | the award said | row `createdAt` | counted as |
+   | --- | --- | --- |
+   | `replay` | any | `replayed` — a durable verdict already existed |
+   | `accepted` | pre-cutoff | `newAccepted` **and** `preCutoffWithoutSource` |
+   | `refused` (recorded) | pre-cutoff | `preCutoffWithoutSource` — adjudicated safely on this pass |
+   | `refused` (recorded) | at/after cutoff | `postCutoffIgnored` — irrelevant to the pool, **ignored for readiness** |
+   | `refused` (not recorded) / unreadable row | — | `rowErrors` |
+   | `fenced` | — | the pass is void: `fenced` with the award's reason |
+
+   The pass is clean iff `rowErrors = newAccepted = preCutoffWithoutSource = 0`;
+   otherwise `notReady` (`rowErrors` > `newAcceptedEntries` >
+   `preCutoffSourceMissing`) and a subsequent clean full pass is required.
+   `reconcilePromotion.converged` is **not** used: it counts post-cutoff
+   refusals as writes and toggles on movement that can never enter the pool.
+
+   Then one transaction: re-read the promotion (still `closing`, still
+   digest-valid; `frozen` → replay), read the pool ref (must not exist:
+   `fenced / poolExistsWithoutFrozen`, never overwritten), read every
+   `wsfPromotionEntries/{p}_*` row in the transaction, `buildPool` (confirmed
+   entries only; `pending` / `revoked` carry no ticket), refuse `poolEmpty`
+   (zero tickets) or `poolTooLarge` (canonical JSON over
+   `POOL_MAX_SERIALIZED_BYTES = 512 KiB`, a conservative bound under the 1 MiB
+   document limit) **before** any write, then `tx.create(pool)` and
+   `tx.update(promotion, { status: 'frozen', frozenAt, poolDigest,
+   freezeAttemptId })` in the same commit. Never truncated, never `set`.
+
+**Why a clean pass after a post-cutoff marker is sufficient.** `createdAt` is
+`serverTimestamp()` resolved at the contribution's commit, and the marker is the
+same on the same clock; a contribution that commits after the marker therefore
+carries `createdAt ≥ startedAtMs ≥ windowEndMs` and is refused `afterCutoff`. A
+row committed before the marker exists in every page read after it (rows are
+immutable and walked in document-name order). So after a clean pass every
+pre-cutoff row has a durable verdict and no new pre-cutoff row can appear; the
+set of accepted entries is final, and the transaction reads it consistently.
+
+**Concurrency and idempotence.** Concurrent finalizers each write their own
+marker and run their own pass (all idempotent awards). One transaction commits
+the pool and the transition; every other reads `frozen` and returns the same
+receipt from the stored pool (`replay: true`). A retry after success replays
+and rewrites nothing. `frozen` is outside `AWARDING_STATUSES`, so the award,
+the trigger body, the reconciliation, enable and close are all fenced from the
+instant of the commit.
+
+**Pool determinism.** Tickets are summed per opaque `entrantId`, entrants are
+sorted by code-unit order, ranges are laid out contiguously from 1, and the
+digest is SHA-256 of the canonical JSON `{poolVersion, ruleVersion,
+enabledConfigDigest, totalTickets, entrantCount, ranges: [[entrantId, start,
+end], …]}`. The same entries in any order give byte-identical output.
+`storedPoolIntact` re-derives the digest from a stored pool's own content.
+
+**Not here.** No draw, no random selection, no prize, no exclusion, no redraw,
+no winner or contact access, no member or public surface, no operator
+authorisation wiring, no export from `src/index.ts`, no rules, index or config
+change, no form-store binding. The form enumerator seam is deliberately absent
+rather than stubbed, so nothing can pretend to prove a bonus-bearing pool.
 
 ### (e) The community-interest form and its trusted receipt seam
 
@@ -293,6 +399,9 @@ functions-westayfit/src/expo-prize/award.ts         the transaction: ingest cont
 functions-westayfit/src/expo-prize/reconcile.ts     bounded page reconciliation
 functions-westayfit/src/expo-prize/status.ts        confirmed / pending / not-entered classifier (pure)
 functions-westayfit/src/expo-prize/enable.ts        the draft → enabled transaction (EXP2A)
+functions-westayfit/src/expo-prize/close.ts         the enabled → closing transaction (EXP2B)
+functions-westayfit/src/expo-prize/pool.ts          the pure, deterministic, privacy-safe pool builder (EXP2B)
+functions-westayfit/src/expo-prize/freeze.ts        the closing → frozen transition: marker, pass, atomic pool (EXP2B)
 functions-westayfit/src/expo-prize/index.ts         module barrel — NOT exported from src/index.ts
 functions-westayfit/tests/expo-prize/*.test.ts      emulator tests
 functions-westayfit/jest.expo-prize.config.cjs      NEW config (existing configs match tests/callable only) — reservation request

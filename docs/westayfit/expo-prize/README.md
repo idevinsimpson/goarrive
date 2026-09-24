@@ -18,9 +18,9 @@ instruction behind it: "Have fable begin this now."
 | file | what it is |
 | --- | --- |
 | `README.md` | this index and the lane's status |
-| `CONTRACT.md` | Packet A: the durable contract, resolutions (a)–(f) from source, schema, state machine, transaction boundaries, open owner decisions |
-| `TEST-MATRIX.md` | Packet A: the focused failure-catching test matrix Packet B implements |
-| `EVIDENCE.md` | Packet B and EXP2A: measured results at exact SHAs, control evidence, limitations, next seam |
+| `CONTRACT.md` | Packet A: the durable contract, resolutions (a)–(f) from source, schema, state machine, transaction boundaries, open owner decisions; §d′ enable (EXP2A); §d″ close → freeze (EXP2B) |
+| `TEST-MATRIX.md` | Packet A: the focused failure-catching test matrix Packet B implements; EXP2B rows C1–C6, F1–F14, P1–P8 |
+| `EVIDENCE.md` | Packet B, EXP2A and EXP2B: measured results at exact SHAs, control evidence, limitations, next seam |
 
 ## Status
 
@@ -35,7 +35,8 @@ this branch), **accepted** (the Director's product acceptance), **integrated**
 | Packet B (disabled isolated core + emulator tests) | `3fbfb0a` code + tests (67/67 on the emulators; 7/7 mutations caught; existing suites 81/81) + `8a434dd` (`EVIDENCE.md`); W7 Check 22 on `8a434dd`: no defect in a delivered row | Director `5810220569` (at `63a2c4d`) | development `61dd7b6a` |
 | W7 Check 22 corrections (docs + four code notes, 68/68) | `3b9963c`, pushed under the owner-environment rule (no unpushed commits) disclosed in #467 `5808389267`, not on a release | — | — |
 | evidence-truth correction (two doc lines) | `63a2c4d` | Director `5810220569` | development `61dd7b6a` (L0 `5810260515`) |
-| **EXP2A** enable transition (D + F5 closed; `enable.ts`, `enable.test.ts`, policy derivation + drift fence) | this commit (see EVIDENCE.md §EXP2A) | — | — |
+| **EXP2A** enable transition (D + F5 closed; `enable.ts`, `enable.test.ts`, policy derivation + drift fence) | `41cb6dff` (see EVIDENCE.md §EXP2A) | Director #469 `5811301305` (W7 Check 24 clean) | development `5c897ab5` |
+| **EXP2B** close → reconcile → freeze core (G closed; `close.ts`, `pool.ts`, `freeze.ts`, three suites; packet #365 `5811972490`, transfer `5812848258`) | see EVIDENCE.md §EXP2B for the exact SHA | — | — |
 
 ## Test command
 

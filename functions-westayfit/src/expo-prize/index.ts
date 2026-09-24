@@ -13,3 +13,6 @@ export * from './award';
 export * from './reconcile';
 export * from './trigger';
 export * from './enable';
+export * from './close';
+export * from './pool';
+export * from './freeze';
