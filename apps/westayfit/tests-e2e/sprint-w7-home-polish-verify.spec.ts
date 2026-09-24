@@ -137,6 +137,7 @@ async function seed(variant: string): Promise<Fixture> {
     endsAt: variant === 'ended' ? new Date(Date.now() - 2 * 24 * 60 * 60_000) : undefined,
     repeatPolicy: variant === 'once' ? ('once' as const) : undefined,
   };
+  if (variant === 'noGoal') return { email, me, groupId, goalId, names };
   await seedGoal(goal);
   if (variant === 'quiet') {
     const dayStart = zonedDayStartMs(GOAL_TZ);
@@ -264,14 +265,19 @@ test.describe('W7 · Check 27 — HOME-POLISH-1 measured on the rendered route',
     } finally {
       await q.ctx.close();
     }
-    const nz = await seed('nullZone');
-    const n = await open(browser, nz, PHONE);
+    // No goal named: the server cannot establish a moved-today count (null), and the page says so by saying nothing.
+    // (An unreadable stored zone is not usable here: the goal's own progress read refuses it, so the hero shows the
+    // failed-read state, which the failed-read case measures; my first draft seeded that and mis-called it "null".)
+    const ng = await seed('noGoal');
+    const n = await open(browser, ng, PHONE);
     try {
-      await settledTotal(n.page, nz, '1,847');
-      await n.page.waitForTimeout(2_000);
+      await expect(n.page.getByTestId('wsf-community-no-goal')).toBeVisible({ timeout: 40_000 });
+      await n.page.waitForTimeout(3_000);
       await expect(n.page.getByTestId('wsf-community-contributors-today')).toHaveCount(0);
       await expect(n.page.getByTestId('wsf-community-hero-presence')).toHaveText('6 members');
-      console.info('W7 27.3 zero/null: quiet → "0 people moved today"; unreadable zone → no moved-today element, member count intact');
+      await expect(n.page.getByTestId('wsf-community-goal-label')).toHaveCount(0);
+      await expect(n.page.getByTestId('wsf-community-goal-eyebrow')).toHaveCount(0);
+      console.info('W7 27.3 zero/null: quiet → "0 people moved today"; no goal → the no-goal state, no moved-today element, no hero label, member count intact');
     } finally {
       await n.ctx.close();
     }
@@ -343,8 +349,13 @@ test.describe('W7 · Check 27 — HOME-POLISH-1 measured on the rendered route',
       const momentum = page.getByTestId('wsf-community-momentum-card');
       await expect(momentum).toContainText('Anonymous member');
       await expect(momentum).toContainText('Marcus Reed');
-      await expect(momentum).toContainText('Dana Whitfield');
+      // The feed shows the three most recent rows: the viewer (anonymous, 20m), Marcus (55m), Priya (anonymous, 3h).
+      // Tom (90m, activity-off) has no row; Dana (5h) is beyond the three. My first draft expected Dana and was wrong.
       const rows = await page.getByTestId('wsf-momentum-row').count();
+      expect(rows, 'three rows: the viewer, Marcus, Priya; Tom has none').toBe(3);
+      await expect(momentum).not.toContainText('Tom Okafor');
+      const momentumText = await momentum.innerText();
+      expect((momentumText.match(/Anonymous member/g) ?? []).length, 'two anonymous rows (the viewer and Priya)').toBe(2);
       const faces = (await page.getByTestId('wsf-presence-row').innerText().catch(() => '')).split(/\s+/).filter(Boolean);
       const initialsLeak = ['PN', 'AR'].filter((i) => faces.includes(i)); // name-off members: the anonymous mark is a shape, never initials
       console.info(`W7 27.6 privacy: rows=${rows}; feed names present: Marcus, Dana, Anonymous; absent: Priya, Tom, Alex; faces text=${JSON.stringify(faces)}; initials of private members on faces: ${JSON.stringify(initialsLeak)}`);

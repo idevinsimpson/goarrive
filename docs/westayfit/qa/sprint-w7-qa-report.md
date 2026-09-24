@@ -2707,3 +2707,80 @@ Fails for its intended reason with EXP1's exact count; the real core 130 / 130 a
 - **Kept unmeasured / unbuilt, as required:** live-Firestore semantics, reachability, post-freeze revocation, the form store, draw, wiring, UI, deployment; `poolVersion` remains type-checked only (no version invariant was asked for).
 - Evidence: `docs/westayfit/qa/sprint-w7-exp3b.test.ts` (helpers shared with the Check 26 instrument), run from the scratch directory with `W7_EXP1_WT=../wt-exp3b`. `ts:check` 0; guard 9 / 20; no artifacts committed.
 - **Status:** tested on `ed5e0838`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
+
+# Check 27 — W9's HOME-POLISH-1 candidate, exact review head `07df4d0f` (product `7588af6a`) on exact base `018cd297` (#472): **PASS on every routed item and every delta item; no defect; the stale seam measured and reported**
+
+Routed by L0 on #434 (`5819864092` on `30cb0740`; re-pointed to the successor `07df4d0f` as a delta, `5820309417`; Director #365 `5820278384`, #472 `5820308417`). Not a pixel verdict: the Director's VISUAL PASS on the successor is #472 `5820433336`. I had not started on `30cb0740`, so items 1–10 and D1–D5 ran once, together, on the successor.
+
+## 27.1 · Scope, verified by git and grep (items 1, 10, D1)
+
+| item | verified |
+|---|---|
+| lineage | `07df4d0f` on `claude/wsf-w9-home-polish-1`, **eight commits on exactly `018cd297`** (`efe21a15` → `fabe9068` → `402a6ad0` → `f7c3a97e` → `ccda4279` → `30cb0740` → `7588af6a` → `07df4d0f`) |
+| the delta | **22 files, +901 / −204**: the route (`32ff6c93` → `348a8f57` at `30cb0740` → `20ad2bdc` at the head; +344 / −204 against the base), the two `sprint-w9-home-polish-*` specs, nine MIGRATED + nine CANDIDATE PNGs and a README under `docs/design-target/review/home-polish-1/`; nothing else |
+| product trees | `apps/westayfit/src` `66d7feb1`, `.github` `1df5a0f5`, `functions-westayfit` `5a3f232e`, `firestore.rules`, both firebase configs, both `package.json`s identical to `018cd297`; `apps/westayfit/app` differs by the route only |
+| the route's data surface | imports: exactly one added (`TabGlyph`, an existing hook-free View-drawn glyph, `src/` unedited); the hook, callable and data-call multisets of the file are identical base → head (15 `useEffect`, 24 `useCallback`, 40 `useState`, 19 `httpsCallable`, 2 `getDoc`, 0 `onSnapshot` / `fetch`); no diff hunk falls inside the state / effect / callable declarations (lines ~300–1736) |
+| **D1** `ccda4279..7588af6a` | the route only (+152 / −81, blob `348a8f57` → `20ad2bdc`) plus the nine recaptured CANDIDATE PNGs; no call, effect or gating change; the string-literal delta is the `TabGlyph` import, the goal-state pill's styles (two `rgba` washes, weight `'500'` for `'900'`), and **one visible label: the own-row eyebrow "Your part" → "Your contribution"** (the three sentences beneath it byte-identical). W9's "no sentence changed" is accurate for the sentences; the label change is what W9 disclosed as the muted "YOUR CONTRIBUTION" label |
+| the whole delta's rendered text | exactly two changes: the new **"Community goal"** label (new testID `wsf-community-goal-label`) in the hero's top slot when there is no "Goal reached" news, and **"Your part" → "Your contribution"**; every other rendered sentence identical; one testID added, none removed; the goal-state text moved into a pill under the **same** testID; 110 → 109 conditionals (the removed one is the old strip's `featured ? … : null` wrapper, now inside the featured branch — equivalent gate) |
+| evidence hygiene (item 10) | every frame named MIGRATED or CANDIDATE, nothing named AFTER; 18 PNGs at 780×1724 / 780×1316 (390×844 / 390×640 at 2× plus the 18 px strip); no `artifacts/` or `test-results` in the delta; the evidence guard on the candidate's own checkout **9 frozen / 20 accepted intact**; my checkout of it `git diff --quiet` true throughout (one untracked copy of my instrument, removed after the runs) |
+
+## 27.2 · Environment
+
+The head built in its own worktree (`build:web`, exit 0, stamp `07df4d0f`), functions built from the same tree (identical to the base's), served by the local emulator stack (`demo-wsf-local`; hosting 5010, firestore 8080, auth 9099, functions 5001; 49 callables). The two fail-first builds (`fabe9068`, `402a6ad0`, both exit 0, stamped) served beside it by a static host carrying the same hosting rewrites, on 5011 / 5012, against the same emulators. Chromium only; Safari CANNOT-MEASURE. Every run serial (`--workers=1`), first run recorded, no rerun unless stated.
+
+## 27.3 · First runs on the served head (items 4, 5, 8, D2, D3, D5)
+
+| run | spec (from the candidate's checkout unless marked W7) | first run |
+|---|---|---|
+| A01 | `sprint-w9-home-polish-hero` (item 8) | **4 / 4** |
+| A02 | `sprint-w9-home-polish-capture` at CANDIDATE, ordinary run, writes nothing (item 8; the strip is asserted from the served commit on `/health`) | **4 / 4** |
+| A03–A06 | `ui-community-home`, `ui-journey`, `ui-matrix`, `ui-champion-torture` (the lane specs that pin the goal-state text; D2) | **3 / 3, 1 / 1, 2 / 2, 5 / 5** |
+| A07–A08 | `sprint-w8-community-freshness`, `sprint-w8-social-privacy` (W8 carry incl. the fold guard; item 4, D5) | **8 / 8, 6 / 6** |
+| A09–A14 | `sprint-w9-contribute-exits`, `-home-return`, `-community-list-address`, `-shell-production`, `-members-link-target`, `-shell-nav` (W9 carry; item 5) | **7 / 7, 6 / 6, 1 / 1, 3 / 3, 1 / 1, 9 / 9** |
+| A15–A17 | `ui-a11y`, `ui-mobile-acceptance`, `ui-visual-baseline` (the layout-critical set; D3) | **24 / 24, 8 / 8, 3 / 3** |
+| B01 (W7) | `sprint-w7-contribute-exits-verify`: X1, X1s ×2, X2, X3, X3b, X3c, X4, X5, X5s, X6, X6b, X7, X7b, X7c, **X7d, X7e, X7g, X7h** | **19 / 20** — the one failure is **X7f**, CANNOT-MEASURE exactly as in Checks 19–21 (the in-app sign-out unmounts the instance before B loads; no leak; its precondition assertion is what fails) |
+| B02 (W7) | `sprint-w7-community-freshness-verify` F1–F4 | **4 / 4** |
+| B03 (W7) | `sprint-w7-shell-successor-verify` (Close, You return, cold /move, reduced motion, remount mutant, MOVE error, members link 44 px, one top bar on every tab) | **8 / 8** |
+| B04 (W7) | `sprint-w7-social-privacy-verify` | **13 / 14** — the one failure is the fixture precondition of the stored-zone test ("the chosen zone does not actually disagree with UTC"): Pacific/Kiritimati's day only starts before UTC's between 00:00Z and 10:00Z, and this ran at 19:42Z. A callable-level test; the backend is byte-identical to the base; not a candidate result |
+| B05–B07 (W7) | `sprint-w7-social-delta-verify` (DOM privacy incl. the zero / null mutation), `-members-route-parity`, `-home-view-communities` | **9 / 9, 4 / 4, 7 / 7** |
+
+131 of 133 cases passed on the first run; the two failures are the standing CANNOT-MEASURE and a time-of-day fixture precondition, both W7's own instruments, neither a candidate result. No reruns.
+
+## 27.4 · W7's instrument on the head (`sprint-w7-home-polish-verify.spec.ts`; own seeding; items 3, 6, 7, 9, D2, D4)
+
+| case | measured |
+|---|---|
+| **3 + D2 open goal** | label **"Community goal"**, no "Goal reached"; the pill under `wsf-community-goal-period-*` reads **"Open · Ends Thu, Oct 1"**, on the label's row and to its right; total **"1,847 of 5,000 squats"** as one element; "36.9% complete"; actions **"Start moving"** and **"Already moved? Record squats"**; own row **"Your contribution" / "You’ve added 20 squats to this goal."**; no once statement; "5 people moved today"; freshness "Confirmed 7:43 PM" |
+| **3 reached** (5,040 of 5,000) | **"Goal reached"** takes the slot, the label is absent, the pill still the window: **the two never stand together** |
+| **3 + D2 ended** (window past) | pill **"Ended Tue, Sep 22"**, label present, no news eyebrow |
+| **3 proven zero / null** | quiet → **"0 people moved today"**; no goal → the no-goal state, **no** moved-today element, no hero label, "6 members" intact (rerun of a corrected case, §27.6) |
+| **3 failed first read** (pulse 500), both viewports | no total printed, pill **"Open"**, label present, the retry **centred (0.0 px off)** under its sentence and **above the tab bar** at 390×844 and 390×640 |
+| **3 + D4 once policy** (already contributed) | hero **"You’ve recorded 20 squats."**; own row **"Counted in the shared total above."**; no primary action and no record route are offered — the actions block is outside every hunk, so this is the base's behaviour, unchanged |
+| **D4 own-total source** (feed row 20, exact own total 33) | the own row says **33** (the progress read's `wsfMyContribution` figure); the feed row for the same member says 20: the row is the exact own total, not the feed |
+| **6 privacy** (viewer and Priya name-off; Tom activity-off) | page text carries none of: "Priya Nair", "Tom Okafor", "Alex Rivera", the viewer's email, any uid; feed **3 rows** (the viewer anonymous, Marcus named, Priya anonymous), **Tom has no row**, two "Anonymous member" rows; faces **DW LB MR TO** and no PN / AR (the anonymous mark is a shape); "5 people moved today" and the shared 1,847 unmoved (rerun of a corrected case, §27.6) |
+| **7 layout** | 390×844 and 390×640: one top bar, "Start moving" ends above the tab bar, document overflow 0, no horizontal scroller; **195 px**: overflow 0, no scroller, label **104×13** (one line), the total **"1,847 ⏎ of 5,000 squats"** (breaks after the count); **fold guard** with the Switch chip: first `wsf-momentum-row` bottom 737 above the tab bar's top 768 |
+| **9 the stale seam** | populated, settled at "Confirmed 7:45 PM"; every later pulse made to fail; **Refresh pressed** → the figure **"1,847 of 5,000 squats" stays**, the label stays **"Confirmed 7:45 PM"** (does not advance), **no error, no retry, no word of stale / unavailable anywhere**; then away to You and back with the read still failing → the same. **Meaning:** the figure is never misrepresented as newly confirmed (its stamp is the truthful last confirmation), but a failed refresh is silent — nothing tells the member the refresh did not happen. Exactly the README's statement; the refresh and catch paths are outside every hunk, so this is the base's (W8's accepted F4) behaviour carried, not introduced. **Reported, not fixed; not a defect of this delta.** |
+
+## 27.5 · Fail-first (item 8): W9's hero spec at the head, run against the two earlier builds W9 names
+
+| build | result | detail |
+|---|---|---|
+| `fabe9068` (5011) | **2 / 4** | "Checking progress…" **textAlign `right`** (expected `center`); the 195 px case: label **26 px** (> 16, two lines) and the total's rest top **462 < 481** (broke inside "of … squats"); the sideways-scroll half **passed** |
+| `402a6ad0` (5012) | **3 / 4** | the centred case passes; the 195 px case fails on the same two halves (26; 462 < 481); the sideways-scroll half **passed** |
+| `07df4d0f` (5010) | **4 / 4** | A01 |
+
+Exactly W9's disclosure (`5820238983`): the label and total defects reproduce on the earlier build; horizontal overflow did **not** reproduce on either earlier build, so, as the Director corrected, no claim that it was fixed.
+
+## 27.6 · Adversarial source review (four lenses, 21 agents) and notes for the Director
+
+- **No new data, no privacy surface, meaning intact** (three lenses, every finding verified, none refuted as wrong): presence faces, member count, moved-today, own total and momentum come from the same `wsfCommunityMembers` / `wsfMyCommunities` / `wsfCommunityActivity` / `wsfGoalPulse` + `wsfMyContribution` reads and the same render conditions as the base; `PresenceRow`'s `max` prop exists (`CommunityPresence.tsx:102`) and only bounds the drawn faces, "+N" being the real remainder; `TabGlyph` is data-free.
+- **Notes, not defects:** (i) "Ended …" now reads in the progress-green pill (the base drew it in muted hero ink) — the text and testID are unchanged; a pixel-level judgement for the Director. (ii) "Community goal" also renders while the pulse is loading and after a failed read (the pill then says "Open"), consistent with "the label unless there is news". (iii) Below 240 px the band draws four faces and "+N" where the base drew five. (iv) From source only, unmeasured: the progress area's reserve is a floor that a 195 px two-line total exceeds, so the actions can shift when the pulse lands at that width — present since `ccda4279`. (v) The one lens finding marked "defect" was the claim that `ccda4279..7588af6a` is text-free; it is not (the eyebrow label), but W9 disclosed that label in the commit message and the delivery, so it is recorded above as a note.
+- **Kept unmeasured:** pixels and typographic parity with the frozen Lovable reference (the Director's); Safari; the stale seam's fix (outside the reservation).
+
+## 27.7 · Own corrections, disclosed
+
+- **Push gate miss:** commit `6c8689d0` was pushed with a TS2322 in this instrument because my gate read the typecheck through a pipe and lost its exit code; corrected in the next commit `fe71c5a1` (ts:check 0). No evidence was affected.
+- **Two instrument errors on the first run (8 / 10):** (a) the "null" case seeded an unreadable stored zone, which the goal's own progress read refuses, so the hero showed the failed-read state rather than a null moved-today; re-pointed to the no-goal state. (b) The privacy case expected Dana in the feed; the feed shows the three most recent rows and Dana's contribution is the oldest. Both corrected and **those two cases rerun (2 / 2)**; the other eight cases stand on their first run.
+- The instrument ran from the candidate's checkout (an untracked copy, so it uses the helpers and W8's fixture the candidate's specs use); it is committed here only.
+
+**Status:** tested on `07df4d0f`; delivered by W9, visually passed by the Director, **not accepted overall, not integrated**; W7 accepts, integrates and stages nothing, writes no product source and takes no fix ownership.
