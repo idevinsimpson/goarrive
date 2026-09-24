@@ -2560,3 +2560,17 @@ Each fails for its intended reason with EXP1's exact count; no broader mutation 
 - **Kept unmeasured / unbuilt, as required:** live-Firestore semantics (query-in-transaction, commit-timestamp monotonicity, the marker argument), sustained-contention liveness (six concurrent finalizers ×3 here), form-store binding (`formSourceUnbound` is a refusal, not a seam), wiring, UI, draw, deployment, drift injected mid-pass.
 - Evidence: `docs/westayfit/qa/sprint-w7-exp2b.test.ts`, run from the scratch directory against the detached worktree with `W7_EXP1_WT`; the Check 22 concurrency instrument reused. `ts:check` 0; guard 9 / 20; no artifacts committed.
 - **Status:** tested on `e0171fd1`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
+
+## 25D · Delta-only verification of the EXP2B successor `24d95cfe` on exact parent `e0171fd1` (Director #434 `5815138664`): **PASS**
+
+Check 25's functional / privacy / atomicity PASS on the parent carries; nothing was rerun.
+
+| item | verified |
+|---|---|
+| lineage | `24d95cfe` has the single parent `e0171fd1`; `rev-list --count e0171fd1..24d95cfe` = 1 |
+| the delta | exactly three files, **+4 / −4**: `EVIDENCE.md:232` (`close` 11 / `freeze` 16 → `close` 8 / `freeze` 17; the 33 / 33 and 116 / 116 rows and every other measurement untouched); `freeze.ts:243` (literal U+F8FF → ``); `fixtures.ts:292`, `:367` (the same). Nothing else in the diff |
+| escapes reviewable and byte-equivalent | the three lines now read `` `${promotionId}_` `` in plain source; no literal U+F8FF (bytes `EF A3 BF`) remains in any file of the lane at `24d95cfe`; in Node, `'' === Buffer.from([0xef,0xa3,0xbf]).toString('utf8')` is `true` (code point `f8ff`), and the template form compares equal — the compiled query bound is byte-identical to the parent's |
+| labels truthful | Check 25's own run counted `close` 8 and `freeze` 17 cases (with `pool` 8 = 33 new; 116 total); `EVIDENCE.md:232` and the #470 body's measurements table now say 8 / 17 |
+| behaviour delta | none: the source change is the literal-to-escape rewrite of one bound in `freeze.ts` and two in the fixtures; no other source or test line changed |
+
+The successor's commit message text is not product or evidence; no rewrite requested. **Status:** verified on `24d95cfe`; not accepted, not integrated; W7 accepts, integrates and stages nothing.
