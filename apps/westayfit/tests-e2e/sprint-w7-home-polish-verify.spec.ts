@@ -168,8 +168,8 @@ async function settledTotal(page: Page, fx: Fixture, text: string): Promise<void
   await page.waitForTimeout(3_500); // past the settle window, so nothing moves under the measurement
 }
 
-function failPulse(page: Page): Promise<void> {
-  return page.route('**/wsfGoalPulse', (route: Route) =>
+async function failPulse(page: Page): Promise<void> {
+  await page.route('**/wsfGoalPulse', (route: Route) =>
     route.fulfill({ status: 500, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: { status: 'INTERNAL', message: 'progress unavailable (W7 injection)' } }) }),
   );
 }
