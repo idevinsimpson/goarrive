@@ -2,6 +2,42 @@
 Date: 2026-09-21
 Purpose: durable handoff for starting a fresh ChatGPT thread without relying on chat history.
 
+## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
+
+**Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star, `5819686459`; Lovable is an executable reference and source donor, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then everything below this section, which is preserved history. Workers read this section, their own packet and the thread deltas — not the archive.
+
+**Heads (2026-09-24 18:45Z).**
+
+| what | value |
+| --- | --- |
+| development `claude/wsf-app-shell` | `018cd297` (EXP1 → EXP3A integrated; nothing wired, exported or reachable) |
+| operational `main` | `cd881775` |
+| staging pin `approvedAppSha` | `7ee70e4` (frozen; never moved by follow-ups) |
+| served staging build | `7ee70e4` via run 47 `35937603929` (00:15Z; the deploy job deployed functions + hosting, then its verify step FAILED on the three transport-SHUT social services; hosted Package E 5 PASS / 1 FAIL) |
+| canonical roster / this brief | `claude/wsf-north-star-canonical` |
+
+**Active packets — at most two product packets + necessary ops.**
+
+| packet | owner · PR · state | next consumer |
+| --- | --- | --- |
+| **HOME-POLISH-1** (ordinary-member community Home) | W9 `session_01QRyWY2Yqg9eU7GBq4ATQCN` · #472 · candidate head **`30cb0740`** (product source `ccda4279`; six commits on `018cd297`; route `32ff6c93` → `348a8f57`; L0-verified reservation-only). W9 still owes focused results, known limitations and the intentional-differences list. | W7 **Check 27** (#434 `5819864092`, executing) + Director pixel verdict from exporter **#473** (run `36041941566` green, 26 pinned PNGs) → L0 integration by merge commit only after the explicit ACCEPTED of the exact SHA |
+| **OPS-DOC-1** (reconcile `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md` with run 47 and the deploy skill) | W3 `session_01J1CepL52CKS8SqaGSZFfLc` · #396 · RELEASED (see the W3 row for the packet id); docs only, one file, base `main` `cd881775` | W5 delta review (#395) → Director disposition → L0 carries to a `main`-based draft PR |
+| EXP1 prize lane | `session_012wBbh1M7m3i8WDZe5hHDUS` · HELD, no packet | Director |
+| W2 / W4 / W6 / W1B / W8 | parked | Director |
+
+**Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`; HOME-POLISH-1 reference **`544a385e`** / evidence head `872c32fc` (seven PNGs, sha256-matched by W9). Newer Lovable heads (`055c2573`, `d2d93988` closeout: bounded visual PASS on two frames; RECOVERY-TRUTH-1 released to Lovable) are **not** references for any canonical packet. One reference version per packet; no chasing HEAD. Journey roadmap 1–4: not released. See the Journey parity register below.
+
+**Served build vs feature readiness (distinct).** Authorized deployment: done (`7ee70e4` served). Capability: 49 functions deployed; the three social callables measured **transport-SHUT**; the single `wsfContributions` index **state unverified** (no READY receipt). Feature readiness: **not met** — Package E hosted row FAIL on run 47 (root cause corrected on `main` `cd881775`, unmeasured on staging); member / privacy smokes, members deep link and `/move/<goalId>` direct-load not run; email delivery blocked at runtime; shared / unattended kiosk use HELD by the owner.
+
+**Precise blockers.**
+1. Social staging readiness: a **named legitimate operator** for Operation 1 (index create + READY receipt) and Operation 2 (three `--no-invoker-iam-check` updates + schema-matched read-backs), then a verification run — never L0, never the deploy SA, no credential hunting, no repeat of denied probes.
+2. HOME-POLISH-1: W7's Check 27 verdict and the Director's pixel verdict; W9's owed notes.
+3. OPS-DOC-1: W3's ACK and pushed commit (its session is idle since 02:37Z; a comment on its PR may not wake it — if no ACK by the next backstop, L0 reports the exact thread + resume line once).
+
+**Operating rules in one line each.** One writer per file; only L0 integrates, by merge commit, after the Director's explicit ACCEPTED of an exact SHA; workers are reached only by comments on their own PRs; SENT ≠ ACK ≠ executing (a pushed checkpoint is execution); no new worker without explicit Director authorization; no deploy / IAM / secrets / force-push / empty commits by L0; frozen SHAs; real comment ids only; models and sessions preserved (at task boundaries L0 may propose Sonnet for routine bounded work; no switch without the owner).
+
+**Where the rest lives.** Journey parity register: section "Journey parity register" below. Roster rows (history per worker): "Sprint roster — Round 1". Everything else below is preserved historical material, superseded where this section says otherwise.
+
 ## Source of truth
 Use these in this order:
 1. WE STAY FIT Strategic Master v3.
