@@ -2,15 +2,41 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Browser, type Page, type Route } from '@playwright/test';
 
+import { openShellMenu } from './helpers/memberShell';
 import {
+  firestoreWrite,
   seedActiveGoal,
   seedCommunity,
+  seedMembership,
   seedProfile,
   seedShards,
   seedVerifiedUser,
   signInVia,
   stampId,
+  tsField,
 } from './helpers/mobile';
+
+/** A member's own credit on a goal, written the way wsfContribute writes it. */
+async function seedOwnCredit(goalId: string, uid: string, total: number): Promise<void> {
+  await firestoreWrite(`wsfGoalMemberTotals/${goalId}_${uid}`, {
+    goalId: { stringValue: goalId },
+    userId: { stringValue: uid },
+    total: { integerValue: String(total) },
+    contributionCount: { integerValue: '1' },
+    updatedAt: tsField(new Date()),
+  });
+}
+
+/** A second, ordinary member of an existing community. */
+async function newMemberOf(groupId: string, label: string) {
+  const id = stampId();
+  const email = `w8f-${label}-${id}@example.com`;
+  const password = `Pw-${randomBytes(9).toString('base64url')}`;
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Priya Nair');
+  await seedMembership(groupId, uid, 'member');
+  return { email, password, uid };
+}
 
 /**
  * COMMUNITY-DATA FRESHNESS ON A GENUINE RETURN (Director `5800485762`).
@@ -342,6 +368,224 @@ test.describe('Community data is current on a genuine return', () => {
       expect(held, 'the fresh mount issued its first pulse read').toBe(true);
       // And is corrected by the first-focus settle, just past the cache window.
       await expect(total()).toHaveText(/^20\s+of 5,000 squats$/, { timeout: 10_000 });
+    } finally {
+      await context.close();
+    }
+  });
+
+  /**
+   * A SLOW FIRST READ MUST NOT LEAVE THE STALE TOTAL IN CHARGE (Director
+   * #462 5804115569, boundary 1).
+   *
+   * The fresh mount's first pulse read is answered from the warm cache (0)
+   * and its answer is HELD past the 2.6 s settle. The settle must fill the
+   * still-empty slot with the confirmed 20, and the late-landing 0 — issued
+   * earlier — must not put the older answer back.
+   */
+  test('a first read that lands after the settle cannot re-stale the confirmed total', async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await champion('slow', true);
+    const { context, page } = await phone(browser);
+    try {
+      // Learn the page's own callable URL and bearer from a real request.
+      let pulseUrl = '';
+      let pulseAuth = '';
+      let pulseBody = '';
+      await page.route('**/wsfGoalPulse', async (route: Route) => {
+        const req = route.request();
+        pulseUrl = req.url();
+        pulseAuth = req.headers()['authorization'] ?? '';
+        pulseBody = req.postData() ?? '';
+        await route.continue();
+      });
+      await arrive(page, fx.email, fx.password, fx.groupId);
+      const total = () =>
+        visibleCommunity(page).getByTestId(`wsf-community-goal-total-${fx.goalId}`).first();
+      await expect(total()).toHaveText(/^0\s+of 5,000 squats$/, { timeout: 40_000 });
+      expect(pulseUrl, 'the page issued a pulse read').not.toBe('');
+      await page.unroute('**/wsfGoalPulse');
+
+      // Warm the cache at 0 NOW, move the confirmed total, then mount fresh:
+      // the mount's first read (well inside 2 s) is served the 0; the settle
+      // (2.6 s after focus) is issued after the window has closed.
+      const warm = await fetch(pulseUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: pulseAuth },
+        body: pulseBody,
+      });
+      expect(warm.status, 'warming the pulse cache').toBe(200);
+      await seedShards(fx.goalId, 20);
+
+      let heldStale: number | null = null;
+      let released = false;
+      await page.route('**/wsfGoalPulse', async (route: Route) => {
+        if (heldStale !== null) return route.fallback();
+        // Let the server answer (from the cache) at once, but deliver that
+        // answer to the page only after the settle has had its turn.
+        const response = await route.fetch();
+        const json = (await response.json()) as { result?: { sharedTotal?: number } };
+        heldStale = json.result?.sharedTotal ?? -1;
+        await new Promise((r) => setTimeout(r, 4_500));
+        released = true;
+        await route.fulfill({ response });
+      });
+      await page.goto(`/community/${fx.groupId}`);
+      await expect(visibleCommunity(page)).toHaveCount(1, { timeout: 40_000 });
+      await expect.poll(() => heldStale, { timeout: 30_000 }).not.toBeNull();
+      expect(heldStale, 'the held first read was served the pre-move total').toBe(0);
+      // The settle fills the slot with the confirmed total before the first
+      // read is delivered...
+      await expect(total()).toHaveText(/^20\s+of 5,000 squats$/, { timeout: 10_000 });
+      // ...and the late 0, issued earlier, does not overwrite it.
+      await expect.poll(() => released, { timeout: 15_000 }).toBe(true);
+      await page.waitForTimeout(1_500);
+      await expect(total()).toHaveText(/^20\s+of 5,000 squats$/);
+    } finally {
+      await context.close();
+    }
+  });
+
+  /**
+   * A SETTLE TIMER THAT FIRES BEFORE THE GOAL LIST IS READY MUST NOT CONSUME
+   * THE ONLY SETTLE (Director #462 5805389890, the readiness boundary).
+   *
+   * The fresh mount's goal-list read is HELD past the 2.6 s timer, so the
+   * timer fires with no goals to read. Just before the list is released the
+   * cache is warmed at 0 and the confirmed total moves to 20: the ordinary
+   * read the landing triggers is served the stale 0. The settle owed to that
+   * timer must still be issued, one window after the landing, and confirm 20.
+   * The stale 0 is asserted FIRST, so a list that landed early fails here
+   * rather than passing vacuously.
+   */
+  test('a settle timer that fires before the goal list is ready still settles once it lands', async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await champion('ready', true);
+    const { context, page } = await phone(browser);
+    try {
+      // Learn the page's own pulse URL and bearer from a real request.
+      let pulseUrl = '';
+      let pulseAuth = '';
+      let pulseBody = '';
+      await page.route('**/wsfGoalPulse', async (route: Route) => {
+        const req = route.request();
+        pulseUrl = req.url();
+        pulseAuth = req.headers()['authorization'] ?? '';
+        pulseBody = req.postData() ?? '';
+        await route.continue();
+      });
+      await arrive(page, fx.email, fx.password, fx.groupId);
+      const total = () =>
+        visibleCommunity(page).getByTestId(`wsf-community-goal-total-${fx.goalId}`).first();
+      await expect(total()).toHaveText(/^0\s+of 5,000 squats$/, { timeout: 40_000 });
+      expect(pulseUrl, 'the page issued a pulse read').not.toBe('');
+      await page.unroute('**/wsfGoalPulse');
+
+      // Hold the fresh mount's FIRST goal-list answer well past the 2.6 s
+      // timer. Just before releasing it, warm the pulse cache at 0 and move
+      // the confirmed total: the ordinary read the landing triggers is served
+      // the 0. Every later list read passes untouched.
+      let listHeld = false;
+      let listReleasedAt = 0;
+      await page.route('**/wsfListGoals', async (route: Route) => {
+        if (listHeld) return route.fallback();
+        listHeld = true;
+        const response = await route.fetch();
+        await new Promise((r) => setTimeout(r, 3_400));
+        const warm = await fetch(pulseUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: pulseAuth },
+          body: pulseBody,
+        });
+        expect(warm.status, 'warming the pulse cache with the old total').toBe(200);
+        await seedShards(fx.goalId, 20);
+        listReleasedAt = Date.now();
+        await route.fulfill({ response });
+      });
+      await page.goto(`/community/${fx.groupId}`);
+      await expect(visibleCommunity(page)).toHaveCount(1, { timeout: 40_000 });
+      await expect.poll(() => listReleasedAt, { timeout: 30_000 }).not.toBe(0);
+      // The window was hit: the landing's read shows the cached, pre-move 0.
+      await expect(total()).toHaveText(/^0\s+of 5,000 squats$/, { timeout: 10_000 });
+      // The settle owed to the early timer is still issued once the list has
+      // landed — one window later — and confirms the moved total.
+      await expect(total()).toHaveText(/^20\s+of 5,000 squats$/, { timeout: 10_000 });
+      expect(
+        Date.now() - listReleasedAt,
+        'the settle came after the landing, not with it',
+      ).toBeGreaterThan(2_000);
+    } finally {
+      await context.close();
+    }
+  });
+
+  /**
+   * THE SETTLE BELONGS TO THE ACCOUNT IT WAS SCHEDULED FOR (Director #462
+   * 5804115569, boundary 2).
+   *
+   * Account A's settle is in flight (its own-part answer is held). A signs out
+   * in-app and B signs in — the Community screen stays mounted through both,
+   * so nothing unmounts the pending settle — and B's figures load. Then A's
+   * answer is released. B's own part must stay B's, on every Community node
+   * in the document (a second instance the switch may have stacked included).
+   */
+  test('a settle from the previous account cannot overwrite the next account’s own part', async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await champion('acct', true);
+    const b = await newMemberOf(fx.groupId, 'other');
+    await seedOwnCredit(fx.goalId, fx.uid, 120);
+    await seedOwnCredit(fx.goalId, b.uid, 45);
+    const { context, page } = await phone(browser);
+    try {
+      await arrive(page, fx.email, fx.password, fx.groupId);
+      const yourPart = () => page.getByTestId(`wsf-community-your-part-${fx.goalId}`);
+      await expect(yourPart().first()).toContainText('120', { timeout: 40_000 });
+
+      // Hold A's NEXT own-part read: the first is the ordinary mount read
+      // (already landed), so the next one is the settle's.
+      let held: Route | null = null;
+      let heldResponse: Awaited<ReturnType<Route['fetch']>> | null = null;
+      await page.route('**/wsfMyContribution', async (route: Route) => {
+        if (held) return route.fallback();
+        held = route;
+        heldResponse = await route.fetch();
+      });
+      await expect.poll(() => held !== null, { timeout: 15_000 }).toBe(true);
+      // The handler stays registered: every later own-part read (B's mount
+      // read, B's settle) falls through; only A's held one waits.
+
+      // A signs out in-app; the screen stays mounted and offers Sign in.
+      await openShellMenu(page);
+      await page.getByTestId('wsf-member-topbar-menu-signout').last().click();
+      await expect(page.getByTestId('wsf-community-signed-out').last()).toBeVisible({
+        timeout: 30_000,
+      });
+      await page.getByTestId('wsf-community-signin').last().click();
+      await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 30_000 });
+      await page.getByTestId('wsf-signin-email').fill(b.email);
+      await page.getByTestId('wsf-signin-password').fill(b.password);
+      await page.getByTestId('wsf-signin-submit').click();
+      await page.waitForURL(new RegExp(`/community/${fx.groupId}`), { timeout: 40_000 });
+      await expect(visibleCommunity(page).getByTestId(`wsf-community-your-part-${fx.goalId}`)).toContainText(
+        '45',
+        { timeout: 40_000 },
+      );
+
+      // Release A's answer now that B's figure is on screen.
+      await held!.fulfill({ response: heldResponse! });
+      await page.waitForTimeout(2_000);
+      await expect(
+        visibleCommunity(page).getByTestId(`wsf-community-your-part-${fx.goalId}`),
+      ).toContainText('45');
+      expect(
+        await yourPart().filter({ hasText: '120' }).count(),
+        "the previous account's own part appears on a Community node",
+      ).toBe(0);
     } finally {
       await context.close();
     }
