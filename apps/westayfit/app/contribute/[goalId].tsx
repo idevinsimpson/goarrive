@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams, usePathname } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation, usePathname } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -228,20 +228,32 @@ function returnToMemberContext(href: string): void {
  * receipt and from an event screen. From any of those, `back()` lands
  * somewhere other than the community the button promised.
  *
- * `dismissTo` pops every focused route above the member's mounted tabs and
- * opens the destination there. For "Back to community", when that community
- * is already the screen on top of the Home tab (the ordinary journey), the
- * router keeps its key: the same mounted screen, its scroll and its loaded
- * state, and no second instance. For "Back to home" (the own-only receipt,
- * a goal that could not be read, a context not yet verified), Home opens and
- * resolves the member's communities afresh, which is the point of those
- * paths. With no tabs beneath (a cold or deep-linked arrival) either one
- * replaces this screen, so a dead-end contribution screen is not left in the
- * history.
+ * "BACK TO COMMUNITY" uses `dismissTo`: it pops every focused route above
+ * the member's mounted tabs and opens the community there. When that
+ * community is already the screen on top of the Home tab (the ordinary
+ * journey), the router keeps its key: the same mounted screen, its scroll and
+ * its loaded state, and no second instance.
+ *
+ * "BACK TO HOME" (the own-only receipt, a goal that could not be read, a
+ * context not yet verified, and Goal Setup's receipt, whose link carries no
+ * community) pops to the mounted tabs and selects the Home tab as it stands,
+ * which is exactly what pressing Home in the tab bar does. It does not open
+ * Home's index: over a mounted community that pushes the index, whose own
+ * redirect then builds a second copy of the community beneath the member.
+ *
+ * With no tabs beneath (a cold or deep-linked arrival) both replace this
+ * screen, so a dead-end contribution screen is not left in the history, and
+ * a cold Home resolves the member's communities as it always has.
  *
  * Sign in is not one of these: it is its own destination and stays a link.
  */
-function leaveFor(href: string): void {
+type Dispatches = { dispatch: (action: never) => void };
+
+function leaveFor(href: string, navigation: Dispatches): void {
+  if (href === '/') {
+    navigation.dispatch({ type: 'POP_TO', payload: { name: '(tabs)', params: { screen: '(home)' } } } as never);
+    return;
+  }
   router.dismissTo(href as never);
 }
 
@@ -259,13 +271,14 @@ function ReturnButton({
   testID: string;
   label: string;
 }) {
+  const navigation = useNavigation<Dispatches>();
   return (
     <Pressable
       style={StyleSheet.flatten(style)}
       testID={testID}
       accessibilityRole="link"
       accessibilityLabel={label}
-      onPress={() => leaveFor(href)}
+      onPress={() => leaveFor(href, navigation)}
     >
       <Text style={textStyle}>{label}</Text>
     </Pressable>
