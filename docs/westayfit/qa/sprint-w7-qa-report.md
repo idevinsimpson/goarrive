@@ -2268,3 +2268,32 @@ ran from the composed tree. Artifacts and `test-results` cleaned. Checks 16–20
 not rerun.
 
 **Status:** tested on `f02a96fa`; not accepted, integrated or staged by W7.
+
+## 21.6 · Addendum: the required proof list on development `0827e4d2` (W9 integrated)
+
+L0's routing (#434 `5805616781`, Director #365 `5805596087` §2) named the
+required proof and asked for the composition onto the development head
+`0827e4d2` (= `b1e64b3f` ⊕ W9's `945d6736`, integrated) or onto `a1dcced`,
+recorded either way. Both were done: 21.2–21.3 above on `b1e64b3f`, and this
+addendum on `0827e4d2`, so W8's successor and W9's option 1 are also shown to
+hold **together**.
+
+- **Composition, recorded.** `95b08857` merged locally onto `0827e4d2` as `d03e957b`, never pushed; root tree **`3f73beeb`**; the two files byte-identical to `95b08857` (`32ff6c93`, `e0724949`); nothing else changed. Built (stamp `d03e957b`) and served; serial runs.
+
+| required item | result on `d03e957b` (`0827e4d2` ⊕ `95b08857`) |
+|---|---|
+| **X7d**, initial read held past the settle | **PASS**: the settle filled the slot with 1,867 at +3,014 ms; the held stale answer (delivered) never shown |
+| **X7e**, a return's earlier read landing after the settle | **PASS**: 1,867 throughout, same marked instance |
+| **X7g**, the two-tab account change, A's settle released after B's figure | **PASS**: delivered at +5.74 s after B at +5.73 s; B's own part 5 in every sample |
+| **X7h**, timer-before-goal-list readiness (the first `wsfListGoals` held 4 s; the first pulse after it stale) | **PASS**: the list landed at ~+4.3 s, the stale 1,848 showed at +4,537 ms, the **owed settle was issued at +6,926 ms** (one window after the list) and corrected to 1,867 at +7,099 ms, holding at 14 s |
+| **account / blur cancellation** (X7c, X7b) | **PASS**: one pulse before leaving, none after a sign-out or a You-tab blur |
+| **group cancellation** | **not driven separately**: every path to another community blurs the instance first (the timer is cleared, X7b) and the effect is now keyed on `groupId`; a same-instance param change was not reproduced from any member path |
+| **reselect read-free** (X7's reselect step; F1) | **PASS**: 0 reads after the settle; F1 0 callables for 4 s |
+| **own / shared meanings** (X7) | **PASS**: "You've added 20 squats" while the shared total corrected 1,848 → 1,867 |
+| **failed / unknown meanings** (F4; W8's cases) | **PASS**: a failed return read leaves what is on screen; W8's spec 8/8 |
+| **the ordinary path** (X5, X5s, X1s ×2, F2, F3) | **PASS**: X5 / X5s now land on **one** Community root (W9's exit) and correct at +2,816 / +2,818 ms |
+| **X6** (W9's list journey, with W8 present) | **PASS**: address kept, marked list, 1,867 at +510 ms |
+| **X7f** | **CANNOT-MEASURE** the same instance in-app (unmounted); no leak |
+| tsc; guard; Safari | 0; 9 / 20; CANNOT-MEASURE |
+
+**Status:** tested on `d03e957b`; not accepted, integrated or staged by W7.

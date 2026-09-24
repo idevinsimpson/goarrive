@@ -86,7 +86,9 @@ import {
  * tab. ON W8's SUCCESSOR (95b08857 on b1e64b3f = f02a96fa; Check 21): X7d,
  * X7e and X7g PASS (the settle fills a loading slot, a later-issued figure is
  * never overwritten, the settle is cancelled on an account change); X7f stays
- * CANNOT-MEASURE; the ordinary path carries. ON W9's OPTION 1 (945d6736 on
+ * CANNOT-MEASURE; the ordinary path carries. The same on development
+ * 0827e4d2 ⊕ 95b08857 (d03e957b, W9 present), where X7h also passes: a goal
+ * list landing after the timer still gets its settle one window later. ON W9's OPTION 1 (945d6736 on
  * a1dcced = f8d818c5; Check 20): X6 PASS
  * (address, marked list, 1,867 at +508 ms), X6b PASS (held return read
  * delivered after B's list loaded; nothing of A on it), X5/X5s PASS with one
