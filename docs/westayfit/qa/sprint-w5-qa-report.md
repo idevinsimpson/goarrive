@@ -2405,3 +2405,72 @@ exists, so they pass whatever the product does. They are the "member does NOT ha
 
 **Status:** receipts read. Staging's served state is not claimed; the Director's served conditions are not met (transport SHUT;
 Package E unverified). This is not an approval.
+
+## PACKET: the hosted Package E smoke's Manage locator, W3 `dc639571` composed onto `main` `8c1aa40b`
+
+**Verdict: PASS.**
+
+**Reviewed:**
+- source `dc639571b69ac77f42c97bd094cc15a5c4b9bdb2`, a two-file delta over `d690435a`;
+- target `main` `8c1aa40b116e374b13e390d5ac44364fac99b9f0`;
+- the composition, built locally as tree `f6532601ba5cf95c21f59606b487dace73e08900` (`merge-tree --merge-base=dc639571^`).
+
+The composed patch over `main` is byte-identical to `dc639571^..dc639571`. On `main`, both files are blob-identical to those in `d690435a`.
+
+**Packets:**
+- Director `5805464194`, then `5805592534`;
+- W3 `5805442619`, then `5805517599`.
+
+### Measured
+
+| check | evidence kind | result |
+| --- | --- | --- |
+| scope | git | Exactly 2 files: the smoke and `hosted-smoke-contract.test.mjs`. No product, cloud, marker-retry, verifier or workflow change. |
+| run-all | local node | `main` 14 suites / 326 tests. Composed tree 14 / 337. W3 head 15 / 373 (this matches W3's message). All exit 0. The contract goes from 34 to 45. |
+| real surfaces in product code | source | On `7ee70e4`, the `MemberTopBar` menu button toggles the menu, and the `manage-community` row is registered only when the page is ready, the role is `foundingChampion` and there is a uid. On `c8f38e3`, `wsf-community-wordmark` is drawn for every role and `wsf-community-manage` only when `isChampion`. Neither candidate carries the other's marker. |
+| B1–B12 | mocked, independent model | The helpers' real source was run against a page model that renders elements late. The Champion reaches the panel on both surfaces. The member passes on both, and on the shell the menu is really opened and closed. A Champion row that registers 500 ms after the menu opens still fails the member check. Each of these fails: neither surface, both surfaces, a menu that won't close, a row that opens no panel, and a panel that is already open. |
+| X1–X11 | mutation | Every mutant fails the contract suite (9 mutants: X1–X5, X7 and X9–X11). They include: a member check that never opens the menu, a misspelt row id, "neither" falling back to legacy, the both-surfaces guard removed, an inverted hold, swapped detection, and a member site reverted to a bare count. |
+| S1–S7 | git, static | All 24 green-run PASS rows are identical by name and order. All nine `finally` cleanup blocks are byte-identical. There are 17 `wsf-goal-display-auth-*` references and 6 `openManage` sites, both unchanged. No bare count of the removed control remains. |
+| real browser | **local emulator + real web exports, Chromium 141** | Each candidate had 11 of 11 cases as required (details below). |
+| control | harness on `main` | Exits 1: the helpers are absent. |
+
+### Real-browser cases
+
+The helpers were sliced verbatim from `dc639571` by `sprint-w5-package-e-manage-browser-extract.mjs`. The candidates were built with `expo export` in emulator mode and served by the hosting emulator. Seeding used the repo's `tests-e2e/helpers/mobile.ts`. The contexts were desktop and the smoke's `PHONE_CONTEXT`.
+
+**`7ee70e4`, where `manageSurface` returned `shell`:**
+- P1: the Champion's `openManage` showed the panel on desktop and on phone.
+- P2: the member check passed. A poller saw the menu open on 20 of 21 samples, and it was hidden afterwards.
+- N1: a Champion put through the member check was rejected with "…Manage community is in the menu".
+- N2: a member's `openManage` was rejected at the row.
+- N3: `about:blank`, `/signin` and `/` signed out were each rejected with "Neither Manage surface".
+- N4: an injected legacy marker was rejected with "Both Manage surfaces".
+
+**`c8f38e3`, where `manageSurface` returned `legacy`:**
+- P1 and P2 passed.
+- N1 was rejected with "…the legacy Manage control is drawn".
+- N2 was rejected at `wsf-community-manage`.
+- N3 was rejected with "Neither".
+- N4: an injected shell marker was rejected with "Both".
+
+### Open gaps
+
+These are low severity. Each mutant survives the contract, but the smoke itself is correct:
+
+- **G1:** dropping the member check's final "panel closed" assertion.
+- **G2:** returning from `openManage` on the shell without waiting for the panel. The next Champion step waits on its own control anyway.
+- **G3:** the member hold `holdMs` cut to a single look. My B5 shows that the default 2 s catches a late row.
+
+The contract's fake page opens elements synchronously, so it cannot express G2 or G3.
+
+### Limits
+
+- **Emulator, not hosted staging.** The fixture was seeded by REST rather than by the smoke's `seedFixture`. Only fresh `goto` loads were tested. The helpers click without `.last()`, and a pushed in-app route could mount two shells; the smoke always navigates with a full `goto`.
+- **The legacy member check is a single instant count.** Its safety relies on the caller first waiting for the goal link. N1 shows the Champion's control is already drawn at that moment.
+- **No hosted Package E run was made.** Whether the hosted row turns green is still unmeasured until the operator's next run.
+
+**Status:** delivered by W3. This is a W5 review verdict: not accepted by the Director, not integrated, not staged, and not an approval to merge.
+
+**Evidence** (all under `docs/westayfit/qa/`):
+- `sprint-w5-package-e-manage-verify.mjs`, run as `ROOT=. REV=<tree|sha> BASE=<main> node …`. It reported 32/32 required rows on `f6532601` and on `dc639571`.
+- `sprint-w5-package-e-manage-browser-{extract.mjs,probe.spec.ts.txt,results.json}`. The probe used a synthetic emulator-only password.
