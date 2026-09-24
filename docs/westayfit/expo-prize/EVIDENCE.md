@@ -198,18 +198,114 @@ and the existing callable suites 81 / 81 in the same session):
   `wsfPromotion` across `src/index.ts`, rules, indexes, firebase configs, `.github`, the
   app and the package files still returns nothing.
 
+## EXP2B — close → reconcile → freeze core (Director #365 `5811972490`; transfer `5812848258`)
+
+**Delivered** as new commits on `41cb6dff` (EXP2A, accepted #469 `5811301305`, integrated in
+development `5c897ab5`); no rewrite; draft PR #470 into `claude/wsf-app-shell`. First commit
+`6cc0a36eed309448b372808a2184cae703917f07` (code, tests, CONTRACT §d″, TEST-MATRIX, README);
+this section's commit is the evidence commit named in the PR checkpoint. **Not accepted,
+not integrated, not deployed, nothing enabled, no draw.** Implementation session
+`session_012wBbh1M7m3i8WDZe5hHDUS`, the single replacement authorised by the transfer ruling.
+
+Files (reservation only): `src/expo-prize/close.ts` (new, 63 lines), `pool.ts` (new, 195),
+`freeze.ts` (new, 412), `award.ts` (+2 collection names, +2 refs), `reconcile.ts` (page query
+extracted as `contributionPageQuery` / `clampPageSize`; the `converged` comment now says what
+it is not), `index.ts` (barrel); `tests/expo-prize/close.test.ts` (new), `freeze.test.ts` (new),
+`pool.test.ts` (new), `fixtures.ts` (+`awaitServerTimePast`, `comparable`, `promotionDoc`,
+`poolDoc`, `freezeAttempts`, `seedClosing`); the three docs. `enable.ts`, `adjudicate.ts`,
+`policy.ts`, `form.ts`, `status.ts`, `trigger.ts` and every existing test file are
+byte-identical to `41cb6dff`. Still nothing exported from `src/index.ts`; the grep for
+`expo-prize` / `wsfPromotion` across `src/index.ts`, rules, indexes, firebase configs,
+`.github`, the app and the package files returns nothing.
+
+### How it was run
+
+Same command as above (README), firebase-tools 15 in a scratch directory outside the repo,
+`npm ci` for `functions-westayfit`, Java present, project `demo-wsf-local`, loopback only;
+the isolation setup refused nothing. `tsc --noEmit -p functions-westayfit/tsconfig.json`: 0 errors.
+
+### Measured, real core
+
+| run | result | initial failures | reruns | skips |
+| --- | --- | --- | --- | --- |
+| control at `41cb6dff`, before any change | 83 / 83 | 0 | 0 | 0 |
+| new suites only: `pool` 8 (**pure**), `close` 11 (emulator), `freeze` 16 (emulator) | 33 / 33 | 0 | 0 | 0 |
+| full lane suite, 9 files, at `6cc0a36e` | **116 / 116** | 0 | 0 | 0 |
+| existing callable control (`wsf-contribute`, `wsf-turn`, `wsf-combined-goal`), same session | 81 / 81 | 0 | 0 | 0 |
+| full lane suite again, after the mutation session below, same emulator session | 116 / 116 | 0 | 0 | 0 |
+
+Every emulator row makes its movement through the real `wsfContribute`; every cutoff is
+waited out on Firestore's clock (`awaitServerTimePast` commits a probe with `serverTimestamp()`
+and reads it back). Contributions are made **before** the promotion is seeded with its
+cutoff a moment ahead, so no row's eligibility depends on a race with the emulator.
+
+| packet proof | rows (TEST-MATRIX) | result |
+| --- | --- | --- |
+| close state / config fences, byte-identical no-write outcomes | C1–C4 | pass |
+| a before-cutoff server marker cannot freeze; a later resolved marker begins the pass | F1 | pass — `startedAtMs` < `windowEndMs` → `notReady / beforeCutoff`, marker only; after the server clock passes, the pass runs |
+| a missing pre-cutoff source → first pass `notReady`, second clean pass freezes; accepted and refused sources both accounted for | F2a, F2b, F4 | pass — F2a is the refusal-verdict case with `newAccepted 0` |
+| post-cutoff-only rows do not prevent a clean pool-relevant pass | F3 | pass — first attempt `frozen`, `postCutoffIgnored 2`; the old summary on a sibling: `writes 2, converged false` |
+| committed before cutoff, processed after close → included | F4 (and F1) | pass |
+| `formBonusEntries > 0` without an enumerable trusted source refuses freeze | F5 | pass — `refused / formSourceUnbound`, no marker; the zero-bonus twin freezes |
+| deterministic aggregation / ranges / digests, zero-ticket and oversize refusal, no sensitive fields | F6, F7, F8, P1–P8 | pass |
+| concurrent freeze attempts → one byte-stable pool; retries replay | F9 ×3, C5 ×3 | pass — 1 `replay:false`, 5 `replay:true`, one digest, one `frozen` marker, byte-identical after retries |
+| `frozen` fences every later award path | F10 | pass |
+| existing EXP2A enable, award persistence / dedupe / cap / privacy evidence unchanged | `enable`, `award`, `form`, `cap`, `reconcile`, `pure` | carried: the six suite files are byte-identical to `41cb6dff`, 83 / 83 within the 116; M8–M12 not re-run (their targets `enable.ts` / `policy.ts` are unchanged) |
+
+### Failing-before controls (one mutation at a time, targeted suites, restored, then the real core in full)
+
+Each mutation applied with `sed` on the named line inside one `emulators:exec` session, the
+targeted suite(s) run, the file restored from a copy and `git diff --quiet` on it confirmed
+clean before the next; the real core then ran in full in the same session (116 / 116).
+
+| mutation | line changed | suites | result | rows that caught it |
+| --- | --- | --- | --- | --- |
+| M13 post-cutoff marker guard removed | `freeze.ts` `if (startedAtMs < policy.windowEndMs)` → `if (false && …)` | freeze | **1 failed** / 16 | F1 |
+| M14 missing-source guard removed | `freeze.ts` `pass.preCutoffWithoutSource += 1` → `+= 0` | freeze | **3 failed** / 14 | F1, F2a, F2b |
+| M15 form-source fence removed | `freeze.ts` `if (policy.formBonusEntries > 0)` → `if (false && …)` | freeze | **1 failed** / 16 | F5 |
+| M16 size fence removed | `pool.ts` `if (serializedBytes > maxBytes)` → `if (false && …)` | freeze, pool | **2 failed** / 23 | F8, P7 |
+| M17a pool existence check removed | `freeze.ts` `if (poolSnap.exists) return … poolExistsWithoutFrozen` → `if (false && …)` | freeze | **1 failed** / 16 | F12 (the create-only write then throws ALREADY_EXISTS) |
+| M17b … and `create` → `set` | M17a plus `tx.create(r.pool, {` → `tx.set(r.pool, {` | freeze | **1 failed** / 16 | F12 (the foreign pool is overwritten) |
+| M17c pool written outside the transaction | `freeze.ts` `tx.create(r.pool, {` → `void r.pool.create({` | freeze | **4 failed** / 13 | F13 (pool survives the abort), F9 ×3 (five ALREADY_EXISTS) |
+| M17d status change not on the promotion | `freeze.ts` `tx.update(r.promotion, {` → `tx.update(r.freezeAttempt(attemptId), {` | freeze | **6 failed** / 11 | F1, F6, F9 ×3, F10 (pool without transition) |
+| M18 post-cutoff rows counted against readiness (the old broad behaviour) | `freeze.ts` `pass.postCutoffIgnored += 1` → `pass.preCutoffWithoutSource += 1` | freeze | **1 failed** / 16 | F3 (W7 G is load-bearing) |
+
+### Unmeasured / limitations, stated plainly
+
+- **No live-Firestore claim.** Query-in-transaction semantics (the freeze reads
+  `wsfPromotionEntries/{p}_*` inside its transaction) and the monotonicity of commit
+  timestamps that the marker argument rests on (CONTRACT §d″) are the emulator's as measured.
+  The reasoning is stated; the live behaviour is not.
+- **One clock in this container.** The emulator and the test process share the machine
+  clock, so the guard's use of the **server-resolved** instant rather than `Date.now()` is
+  proven by the code path (the local clock is never read) and by M13, not by inducing skew.
+- **Drift injected mid-pass** (between two ingests of one pass) is not driven. Drift before
+  the pass (F11), drift at the transaction's re-read (the re-read is in the code path; the
+  re-read fence is exercised only through the status checks in F9/F12) and the award's
+  own per-row drift fence (EXP2A proof 2) are.
+- **Liveness under sustained contention is not measured**: F9 drives six concurrent
+  finalizers three times; the server SDK's five-attempt retry applies as in Packet B.
+- **The size bound is conservative by construction** (512 KiB of canonical JSON against a
+  1 MiB document limit); the exact stored-document overhead was not measured on the emulator.
+- **`formSourceUnbound` is a refusal, not a seam.** No enumerator interface exists; binding
+  a real form store, and proving a bonus-bearing pool complete, is a later reviewed packet.
+- **Nothing is reachable.** No callable invokes `closePromotion` or `freezePromotion`; no
+  operator authorisation reads `operatorUids`; no draw exists.
+
 ## The next seam
 
 In order, each its own reserved and reviewed packet:
 
-1. **Close → reconcile → freeze** with W7 G's pool-relevant convergence and the
-   server-clock start-after-cutoff guard, writing `wsfPromotionPools/{promotionId}`.
+1. ~~**Close → reconcile → freeze**~~ — delivered by EXP2B above (W7 G closed), awaiting
+   W7 QA and Director acceptance.
 2. **Wiring (L0 reservation on `src/index.ts`)**: one operator-authorised `onCall`
-   exposing `enablePromotion` / `reconcilePromotion` / `reconcileGoal`, and the decision on
-   the trigger.
+   exposing `enablePromotion` / `reconcilePromotion` / `reconcileGoal` / `closePromotion` /
+   `freezePromotion`, and the decision on the trigger.
 3. **Owner decisions into a real (still disabled) promotion document**: repeat rule,
    cap-or-null, eligible goals and window, form store, operators.
-4. **"My entries"**: a member-only read that returns `classifyEntryStatus` for the caller's
+4. **The form store and its enumerator** (owner decision, CONTRACT §e), after which a
+   bonus-bearing promotion can freeze.
+5. **"My entries"**: a member-only read that returns `classifyEntryStatus` for the caller's
    own contributions and nothing about anyone else; no counts on any shared surface.
-5. **Draw**: unbiased server selection over tickets, one persisted result per prize before
+6. **Draw**: unbiased server selection over tickets, one persisted result per prize before
    reveal, redraws and exclusions with audit; then manual private winner contact.
