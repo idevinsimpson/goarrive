@@ -2213,3 +2213,58 @@ Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 - W8's `9d30c38b` is **not** in this composition; the two deltas were checked apart, as routed.
 
 **Status:** tested on `f8d818c5`; not accepted, integrated or staged by W7.
+
+---
+
+# Check 21 — W8's successor `95b08857` on app-shell `b1e64b3f`: **the three settle boundaries hold; X7d, X7e and X7g pass; the ordinary path carries**
+
+Released by the Director (`5805389722`: review only the correction delta once
+pushed) and L0 (`5805483567`); W8's delivery #462 `5805516792` /
+`5805532438`. ACK `5805583135`. The successor is
+`95b08857`, one commit after `9d30c38b` on `claude/wsf-community-freshness`,
+two files (the Community index and W8's spec).
+
+## 21.1 · What was tested, exactly
+
+- **Composition, recorded.** `95b08857` merged locally onto the app-shell head `b1e64b3f` (= `a1dcced` + one docs-only commit; the product trees under `apps/westayfit/app` and `src` are identical to `a1dcced`'s) as `f02a96fa`, never pushed; root tree **`a8887ba9`**. The diff against `b1e64b3f` is W8's two files, byte-identical to `95b08857`: the route `32ff6c93`, the spec `e0724949`. No Home, W4 or W9 file, no protected path.
+- **The change, from the diff.** Every progress read carries `issuedAt` and returns `prev` when the figure on screen came from a later-issued read; the settle may fill a still-`loading` slot with a confirmed result (never a failed one); the settle effect is keyed on the token, `user?.uid`, `groupId`, `ready` and the goal list's readiness, with a handled-token ref so a context change cancels an in-flight settle without issuing a new read, and a settle owed before the list is ready is issued once the list lands.
+- **Build.** The composition itself (exit 0, stamp `f02a96fa`), served from the emulator; serial runs. Baseline evidence: Check 19 on `9d30c38b` (`09cf5fd0`) and `7ee70e4f`, not rerun.
+
+## 21.2 · The fail-first cases, now
+
+| test | `9d30c38b` (Check 19) | `f02a96fa` (`b1e64b3f` ⊕ `95b08857`) |
+|---|---|---|
+| **X7d**, fresh mount, the initial read held 4 s and stale | FAIL: 1,848 at 12 s | **PASS.** The settle at +2,858 ms **filled the loading slot** with 1,867 at +3,030 ms; the held stale answer was delivered (+4.3 s) and **never shown**; 1,867 at 12 s |
+| **X7e**, a return, the return's first read held past the settle | FAIL: the late stale answer overwrote the settle | **PASS.** 1,867 throughout; the held answer (issued +103 ms, delivered ~+4.1 s) did not replace the settle's fresher figure (+2,643 ms); same marked instance |
+| **X7g**, an account change from a second tab, A's held settle released after B's figure loaded | FAIL 2/2: B's own part became A's 20 | **PASS.** Both held answers delivered at +5.88 s, after B's figure at +5.87 s; B's own part **5 in every sample** |
+| **X7f**, the in-app switch | CANNOT-MEASURE (instance unmounted); no leak | **CANNOT-MEASURE**, the same, no leak; the control stands |
+
+## 21.3 · The ordinary path carries
+
+| item | result on `f02a96fa` |
+|---|---|
+| X5 (no stub) / X5s | PASS: corrected at +2,827 / +2,811 ms (two Community roots here: W9's exit change is not in this composition) |
+| X7, the direct entry with a stale first read; own part; reselect | PASS: 1,867 at +3,006 ms, holding; "You've added 20 squats"; 0 reads on reselect |
+| X7b / X7c, blur / sign-out before 2.6 s | PASS: no pulse after leaving |
+| X1s, both legs | PASS: pulses at +66 / +2,577 ms and +68 / +2,610 ms |
+| W8's spec from the composed tree | PASS 8/8 |
+| tsc; guard | 0; 9 / 20 |
+| Safari | CANNOT-MEASURE |
+
+## 21.4 · My instrument note
+
+X7d's precondition asked for the stale sentinel to **reach the screen** before
+the property was judged. On the successor it never does: the settle fills the
+slot first and the sequence guard rejects the late answer, which is the fix
+working. The precondition is now that the held stale answer was **delivered**;
+whether it was ever shown is recorded (`staleEverShown: false` here, `true` on
+`9d30c38b` and `7ee70e4f`). No property changed.
+
+## 21.5 · Bound and hygiene
+
+Chromium only; Safari is CANNOT-MEASURE. Emulators only. Local builds, never
+pushed (`f02a96fa`). No product edit; no other worker's spec edited; W8's spec
+ran from the composed tree. Artifacts and `test-results` cleaned. Checks 16–20
+not rerun.
+
+**Status:** tested on `f02a96fa`; not accepted, integrated or staged by W7.

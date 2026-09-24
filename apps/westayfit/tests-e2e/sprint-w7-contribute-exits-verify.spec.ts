@@ -83,7 +83,11 @@ import {
  * held-answer races, inherited); X7f CANNOT-MEASURE the same instance (the
  * in-app sign-out unmounts it; no leak); X7g FAILS 2/2: A's held settle answer
  * lands on B's screen as B's own part after an account change from another
- * tab. ON W9's OPTION 1 (945d6736 on a1dcced = f8d818c5; Check 20): X6 PASS
+ * tab. ON W8's SUCCESSOR (95b08857 on b1e64b3f = f02a96fa; Check 21): X7d,
+ * X7e and X7g PASS (the settle fills a loading slot, a later-issued figure is
+ * never overwritten, the settle is cancelled on an account change); X7f stays
+ * CANNOT-MEASURE; the ordinary path carries. ON W9's OPTION 1 (945d6736 on
+ * a1dcced = f8d818c5; Check 20): X6 PASS
  * (address, marked list, 1,867 at +508 ms), X6b PASS (held return read
  * delivered after B's list loaded; nothing of A on it), X5/X5s PASS with one
  * Community root.
@@ -897,9 +901,11 @@ test.describe('W9 contribution exits, independent instruments', () => {
     const enteredAt = Date.now();
     await page.goto(`/community/${fx.groupId}`);
     const timeline = await sampleTotal(page, fx.goalId, enteredAt, enteredAt + 12_000);
-    const m = { timeline: changes(timeline), pulsesMs: pulses.map((p) => p.at - enteredAt), staleServedMs: stub.served, at12s: timeline[timeline.length - 1]![1] };
+    const m = { timeline: changes(timeline), pulsesMs: pulses.map((p) => p.at - enteredAt), staleServedMs: stub.served, staleEverShown: timeline.some(([, v]) => v === STALE), at12s: timeline[timeline.length - 1]![1] };
     test.info().annotations.push({ type: 'X7d measured', description: JSON.stringify(m) });
-    expect(m.timeline.some((c) => c.endsWith(`:${STALE}`)), 'the held stale read never reached the screen').toBe(true);
+    // Precondition: the held stale answer was DELIVERED (the stub served it). Whether it
+    // ever reached the screen is recorded: a build with a sequence guard rejects it.
+    expect(stub.served.length, 'the held stale read was never delivered').toBe(1);
     expect(m.at12s, `stale progress stays in view: ${JSON.stringify(m)}`).toBe(SEEDED + 20);
   });
 
