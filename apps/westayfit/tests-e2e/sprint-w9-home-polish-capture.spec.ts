@@ -61,8 +61,21 @@ const STAGE = (process.env.WSF_HOME_POLISH_STAGE ?? 'CANDIDATE').toUpperCase();
 if (STAGE !== 'MIGRATED' && STAGE !== 'CANDIDATE') {
   throw new Error(`WSF_HOME_POLISH_STAGE must be MIGRATED or CANDIDATE, not ${STAGE}`);
 }
-const LABEL =
-  STAGE === 'MIGRATED' ? 'MIGRATED BUILD / NOT ACCEPTED' : 'CANDIDATE · HOME-POLISH-1 / NOT ACCEPTED';
+
+/**
+ * THE BUILD IS READ, NOT ASSUMED. The stage comes from the environment, so a
+ * MIGRATED run against a candidate build would otherwise overwrite the
+ * baseline with candidate pixels and still say MIGRATED. The served build's
+ * own commit is on /health (stamped by `build:web`); it is read before any
+ * frame, checked against the stage, and printed in every frame's strip:
+ *   · MIGRATED must be the development base this packet started from;
+ *   · CANDIDATE must be anything else.
+ */
+const BASE_SHORT = '018cd29';
+
+function stripLabel(commit: string): string {
+  return `${STAGE} BUILD ${commit} / NOT ACCEPTED`;
+}
 
 /** The strip's height, added on top of the device height. */
 const BANNER = 18;
@@ -165,8 +178,21 @@ async function seed(state: State): Promise<Fixture> {
 }
 
 /** The easel: a labelled strip flush above an iframe of the device size. */
-async function easel(page: Page, width: number, height: number, src: string): Promise<FrameLocator> {
+async function easel(
+  page: Page,
+  width: number,
+  height: number,
+  src: string,
+): Promise<{ stage: FrameLocator; label: string }> {
   await page.goto('/health');
+  const commit = ((await page.getByTestId('wsf-health-commit').innerText()).match(/[0-9a-f]{7,40}/) ?? [''])[0];
+  expect(commit, 'the served build carries no commit stamp').not.toBe('');
+  if (STAGE === 'MIGRATED') {
+    expect(commit, 'MIGRATED frames must come from the development base build').toBe(BASE_SHORT);
+  } else {
+    expect(commit, 'CANDIDATE frames must not come from the base build').not.toBe(BASE_SHORT);
+  }
+  const label = stripLabel(commit);
   await page.evaluate(
     ({ w, h, banner, label, source }) => {
       document.documentElement.style.background = '#FFFFFF';
@@ -182,9 +208,9 @@ async function easel(page: Page, width: number, height: number, src: string): Pr
                   style="width:${w}px;height:${h}px;border:0;display:block;"></iframe>
         </div>`;
     },
-    { w: width, h: height, banner: BANNER, label: LABEL, source: src },
+    { w: width, h: height, banner: BANNER, label, source: src },
   );
-  return page.frameLocator('#wsf-w9hp-stage');
+  return { stage: page.frameLocator('#wsf-w9hp-stage'), label };
 }
 
 /** Wait until the state the frame is named for has actually rendered. */
@@ -277,7 +303,7 @@ async function capture(browser: Browser, state: State): Promise<void> {
     await signInVia(page, fx.email, PASSWORD);
     for (const device of DEVICES) {
       await page.setViewportSize({ width: device.width + 60, height: device.height + BANNER + 60 });
-      const stage = await easel(page, device.width, device.height, `/community/${fx.groupId}`);
+      const { stage, label } = await easel(page, device.width, device.height, `/community/${fx.groupId}`);
       await settled(stage, state, fx);
       await assertState(stage, state, fx);
       await assertActionAboveTabs(stage, state, fx, device.key);
@@ -286,11 +312,13 @@ async function capture(browser: Browser, state: State): Promise<void> {
       const box = (await frameEl.boundingBox())!;
       expect(Math.round(box.width), `${state} ${device.key}: frame width`).toBe(device.width);
       expect(Math.round(box.height), `${state} ${device.key}: frame height`).toBe(device.height + BANNER);
-      await expect(page.getByTestId('wsf-w9hp-banner')).toHaveText(LABEL);
+      await expect(page.getByTestId('wsf-w9hp-banner')).toHaveText(label);
 
       if (CAPTURE_FRAMES) {
         fs.mkdirSync(OUT, { recursive: true });
-        await frameEl.screenshot({ path: path.join(OUT, `${STAGE}-home-${state}-${device.key}.png`) });
+        // An injected failure says so in the filename, as every review package does.
+        const name = state === 'stale' ? 'stale-INJECTED-PULSE-FAILURE' : state;
+        await frameEl.screenshot({ path: path.join(OUT, `${STAGE}-home-${name}-${device.key}.png`) });
       }
 
       if (state === 'populated' && device.key === '390x844') {

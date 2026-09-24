@@ -1972,7 +1972,9 @@ export default function CommunityPage() {
   // the title above it or the actions below it.
   // SLICE 1. 118 -> 74: the freshness row (44px) moved below the actions, so
   // the space reserved for it inside the progress area moves with it.
-  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 74;
+  // HOME-POLISH-1. 74 -> 66: the facts are one total line, the bar and one row
+  // now, without the recessed panel's padding, so the reserve follows them.
+  const progressAreaMinHeight = Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + 66;
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
@@ -2506,7 +2508,8 @@ export default function CommunityPage() {
           <Pressable
             onPress={refreshProgress}
             accessibilityRole="button"
-            style={onDark ? styles.heroOutlineButton : styles.secondaryButton}
+            // HOME-POLISH-1. Centred under the centred sentence it answers.
+            style={onDark ? [styles.heroOutlineButton, styles.heroRetryCentered] : styles.secondaryButton}
             testID={`wsf-community-goal-progress-retry-${goal.goalId}`}
             accessibilityLabel={`Try again: ${goal.title} progress`}
           >
@@ -2534,39 +2537,8 @@ export default function CommunityPage() {
     // by, so the bar and the mark can never disagree, and neither can be
     // driven by the rounded percentage text.
     const barRatio = fillRatio(sharedTotal, target);
-    return (
-      <View style={onDark ? [styles.factsLarge, factsCompact] : styles.factsSmall}>
-        <Text
-          style={onDark ? styles.heroTotal : styles.totalSmall}
-          testID={`wsf-community-goal-total-${goal.goalId}`}
-        >
-          {/*
-            ON THE HERO THE COUNT LEADS AND WHAT IT IS OUT OF FOLLOWS, so the
-            line breaks between them rather than wrapping mid-phrase. Both
-            halves stay inside ONE Text node with a newline between them: the
-            element's text is still "1,847 of 5,000 squats", which is what the
-            journey and a11y specs assert, and both halves come from one helper
-            so they cannot drift.
-          */}
-          {onDark ? (
-            <>
-              <Text style={[styles.heroTotalCount, heroTotalCompact]}>
-                {totalOfTargetParts(sharedTotal, target, unit).count}
-              </Text>
-              {'\n'}
-              <Text style={styles.heroTotalRest}>
-                {totalOfTargetParts(sharedTotal, target, unit).rest}
-              </Text>
-            </>
-          ) : (
-            totalOfTargetLabel(sharedTotal, target, unit)
-          )}
-        </Text>
-        {onDark ? (
-          <View style={styles.track}>
-            <View style={[styles.trackFill, { width: `${barRatio * 100}%` }]} />
-          </View>
-        ) : null}
+    const percentAndStatus = (
+      <>
         <Text
           style={onDark ? styles.heroPercent : styles.percentSmall}
           testID={`wsf-community-goal-percent-${goal.goalId}`}
@@ -2582,6 +2554,54 @@ export default function CommunityPage() {
         >
           {statusLine(sharedTotal, target, status)}
         </Text>
+      </>
+    );
+    return (
+      <View style={onDark ? [styles.factsLarge, factsCompact] : styles.factsSmall}>
+        <Text
+          style={onDark ? styles.heroTotal : styles.totalSmall}
+          testID={`wsf-community-goal-total-${goal.goalId}`}
+        >
+          {/*
+            ON THE HERO THE COUNT LEADS AND WHAT IT IS OUT OF FOLLOWS, so the
+            line breaks between them rather than wrapping mid-phrase. Both
+            halves stay inside ONE Text node with a newline between them: the
+            element's text is still "1,847 of 5,000 squats", which is what the
+            journey and a11y specs assert, and both halves come from one helper
+            so they cannot drift.
+          */}
+          {/*
+            HOME-POLISH-1. ONE LINE: THE COUNT, THEN WHAT IT IS OUT OF, on a
+            shared baseline, as the accepted reference sets it. The separator
+            is a space now rather than a newline, so the element's text is
+            still exactly "1,847 of 5,000 squats"; the halves still come from
+            one helper and cannot drift.
+          */}
+          {onDark ? (
+            <>
+              <Text style={[styles.heroTotalCount, heroTotalCompact]}>
+                {totalOfTargetParts(sharedTotal, target, unit).count}
+              </Text>
+              {' '}
+              <Text style={styles.heroTotalRest}>
+                {totalOfTargetParts(sharedTotal, target, unit).rest}
+              </Text>
+            </>
+          ) : (
+            totalOfTargetLabel(sharedTotal, target, unit)
+          )}
+        </Text>
+        {onDark ? (
+          <View style={styles.track}>
+            <View style={[styles.trackFill, { width: `${barRatio * 100}%` }]} />
+          </View>
+        ) : null}
+        {/*
+          HOME-POLISH-1. On the hero the percentage and what is left read as
+          one row under the bar — how far, and how far to go — rather than as
+          two centred lines. The card keeps its own two-line stack, unwrapped.
+        */}
+        {onDark ? <View style={styles.heroFactsRow}>{percentAndStatus}</View> : percentAndStatus}
         {reachedOn ? (
           <Text
             style={onDark ? styles.heroStatus : styles.statusLine}
@@ -3576,50 +3596,64 @@ export default function CommunityPage() {
             OWN day, and it renders only when the server could prove it — a
             null renders nothing at all, never a substitute.
           */}
-          {presence !== null && presence.people.length > 0 ? (
-            <PresenceRow people={presence.people} />
-          ) : null}
-          <View style={styles.presenceRow}>
-            {memberCount != null ? (
-              <Text style={styles.presenceText} testID="wsf-community-hero-presence">
-                {memberCountLabel(memberCount)}
-              </Text>
-            ) : null}
-            {otherCommunityCount > 0 ? (
-              <Pressable
-                onPress={() => router.replace('/community')}
-                accessibilityRole="link"
-                accessibilityLabel={`Switch community. You are in ${otherCommunityCount + 1}.`}
-                style={styles.switchChip}
-                testID="wsf-community-hero-switch"
-              >
-                <Text style={styles.switchChipText}>Switch</Text>
-              </Pressable>
-            ) : null}
-          </View>
           {/*
-            A PROVEN ZERO IS DATA; ONLY `null` IS SILENCE.
-
-            `null` means the server could not establish the count — no goal
-            named, an unresolvable zone, a goal in another community, or a
-            bounded scan that did not reach past the window start — and it
-            renders nothing at all.
-
-            `0` means the server DID establish it and nobody has moved yet in
-            this goal's own day. An earlier revision suppressed that, on the
-            argument that a green zero is a discouraging thing to open with.
-            The Director overruled it and was right: hiding a known zero
-            collapses "known zero" into "unknown", which is precisely the
-            distinction the rest of this feature exists to keep. The screen
-            says what is true and lets the member decide how to feel about it.
+            HOME-POLISH-1. THE PEOPLE AND THE TWO FACTS ABOUT THEM SIT SIDE BY
+            SIDE, on one band, rather than stacked three lines deep. The faces
+            say who is here; the two lines beside them say how many, and how
+            many moved. Nothing is added or merged: the same three elements,
+            the same data, the same absences (no faces when nobody is visible,
+            no moved-today line when the server could not prove it). The band
+            wraps, so at a narrow width or a large text size the facts drop
+            under the faces instead of being squeezed.
           */}
-          {momentum !== null && momentum.contributorsToday !== null ? (
-            <Text style={styles.movedToday} testID="wsf-community-contributors-today">
-              {momentum.contributorsToday === 1
-                ? '1 person moved today'
-                : `${momentum.contributorsToday} people moved today`}
-            </Text>
-          ) : null}
+          <View style={styles.presenceBand}>
+            {presence !== null && presence.people.length > 0 ? (
+              <PresenceRow people={presence.people} />
+            ) : null}
+            <View style={styles.presenceFacts}>
+              <View style={styles.presenceRow}>
+                {memberCount != null ? (
+                  <Text style={styles.presenceText} testID="wsf-community-hero-presence">
+                    {memberCountLabel(memberCount)}
+                  </Text>
+                ) : null}
+                {otherCommunityCount > 0 ? (
+                  <Pressable
+                    onPress={() => router.replace('/community')}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Switch community. You are in ${otherCommunityCount + 1}.`}
+                    style={styles.switchChip}
+                    testID="wsf-community-hero-switch"
+                  >
+                    <Text style={styles.switchChipText}>Switch</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              {/*
+                A PROVEN ZERO IS DATA; ONLY `null` IS SILENCE.
+
+                `null` means the server could not establish the count — no goal
+                named, an unresolvable zone, a goal in another community, or a
+                bounded scan that did not reach past the window start — and it
+                renders nothing at all.
+
+                `0` means the server DID establish it and nobody has moved yet in
+                this goal's own day. An earlier revision suppressed that, on the
+                argument that a green zero is a discouraging thing to open with.
+                The Director overruled it and was right: hiding a known zero
+                collapses "known zero" into "unknown", which is precisely the
+                distinction the rest of this feature exists to keep. The screen
+                says what is true and lets the member decide how to feel about it.
+              */}
+              {momentum !== null && momentum.contributorsToday !== null ? (
+                <Text style={styles.movedToday} testID="wsf-community-contributors-today">
+                  {momentum.contributorsToday === 1
+                    ? '1 person moved today'
+                    : `${momentum.contributorsToday} people moved today`}
+                </Text>
+              ) : null}
+            </View>
+          </View>
           {humanLine ? (
             <Text style={styles.humanLine} testID="wsf-community-human-line">
               {humanLine}
@@ -3706,13 +3740,28 @@ export default function CommunityPage() {
                     than a slogan: the identity block above the hero names the
                     community and its members.
                   */}
+                  {/*
+                    HOME-POLISH-1. THE SLOT NAMES WHAT THE CARD IS, UNLESS
+                    THERE IS NEWS. The accepted reference labels the navy object
+                    as the community's goal, which is a fact about the card, not
+                    a slogan: it is true of every goal and says whose it is. Real
+                    news still takes the slot — "Goal reached", on a confirmed
+                    pulse only, exactly as before and under the same testID.
+                  */}
                   {p.kind === 'ok' &&
                   progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
                     'reachedOpen' ? (
                     <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
                       Goal reached
                     </Text>
-                  ) : null}
+                  ) : (
+                    <View style={styles.heroLabelRow}>
+                      <View style={styles.heroLabelDot} />
+                      <Text style={styles.heroEyebrow} testID="wsf-community-goal-label">
+                        Community goal
+                      </Text>
+                    </View>
+                  )}
                   <Text
                     style={[styles.heroTitle, heroTitleType]}
                     testID={`wsf-community-goal-title-${featured.goalId}`}
@@ -3825,6 +3874,44 @@ export default function CommunityPage() {
                   />
                 </View>
                 )}
+                {/*
+                  YOUR PART: exact own credit, no ranking, no comparison.
+
+                  HOME-POLISH-1. DIRECTLY UNDER THE ACTION, BEFORE THE FEED.
+                  The accepted reference reads hero → action → what I did →
+                  what everyone is doing; this strip used to sit below the feed
+                  and the members link, after other people's rows. Moved, not
+                  changed: the same source (the member's own server total from
+                  `wsfMyContribution`, carried on this goal's progress read),
+                  the same testID and the same sentences, so it still renders
+                  only when that exact figure came back, and never a guess.
+                */}
+                {p.kind === 'ok' && p.ownCredit != null ? (
+                  /*
+                    SLICE 2b. A COMPACT PERSONAL STRIP, NOT ANOTHER EQUAL CARD.
+                    It is one person's private line about a shared goal — a
+                    quiet strip with a green edge, so the hero above stays the
+                    only object with weight.
+                  */
+                  <View style={styles.personalStrip} testID={`wsf-community-your-part-${featured.goalId}`}>
+                    <Text style={styles.sectionEyebrow}>Your part</Text>
+                    {/*
+                      SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE. On a
+                      `once` goal already contributed to, the statement above
+                      says "You've recorded N unit.", so this strip says what
+                      that does not: that the part is counted, and where. It
+                      offers no route to contribute; the action above is the
+                      one route.
+                    */}
+                    <Text style={styles.body}>
+                      {p.ownCredit > 0
+                        ? (p.repeatPolicy === 'once'
+                            ? 'Counted in the shared total above.'
+                            : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`)
+                        : 'Your first contribution counts here.'}
+                    </Text>
+                  </View>
+                ) : null}
                 {/*
                   SLICE 1. Below the actions, not between the figures and the
                   primary control. It is maintenance metadata, and in the old
@@ -3949,64 +4036,7 @@ export default function CommunityPage() {
             <Text style={styles.peopleLinkChevron}>›</Text>
           </Pressable>
 
-          {/* Your part: exact own credit, no ranking, no comparison. */}
-          {featured
-            ? (() => {
-                const p = progress[featured.goalId];
-                if (!p || p.kind !== 'ok' || p.ownCredit == null) return null;
-                return (
-                  /*
-                    SLICE 2b. A COMPACT PERSONAL STRIP, NOT ANOTHER EQUAL CARD.
-                    This was a full white card with the same border, radius
-                    and padding as everything else below it, which is what
-                    made the page read as a stack rather than a hierarchy. It
-                    is one person's private line about a shared goal — a quiet
-                    strip with a green edge, no fill and no shadow, so the
-                    hero above stays the only object with weight.
-                  */
-                  <View style={styles.personalStrip} testID={`wsf-community-your-part-${featured.goalId}`}>
-                    <Text style={styles.sectionEyebrow}>Your part</Text>
-                    {/*
-                      SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE.
-                      On a `once` goal already contributed to, the hero above
-                      says "You've recorded N unit." Repeating it here as
-                      "You've added N unit to this goal" was the accepted
-                      redundancy from slice 1f. The hero keeps the number —
-                      it is the one in the first viewport — and this card
-                      carries what the hero does not: that the part is
-                      counted, and where.
-                    */}
-                    <Text style={styles.body}>
-                      {p.ownCredit > 0
-                        ? (p.repeatPolicy === 'once'
-                            ? 'Counted in the shared total above.'
-                            : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`)
-                        : 'Your first contribution counts here.'}
-                    </Text>
-                    {/*
-                      REPEAT POLICY. "Record more" is an invitation, and an
-                      invitation the server will refuse is worse than no
-                      invitation at all: on a goal that takes one contribution
-                      per member, a member who has already contributed is
-                      finished here, and saying so by saying nothing is more
-                      honest than sending them to a refusal screen. Their own
-                      credit above still tells them what they did.
-
-                      Only an EXPLICIT 'once' withholds it. An absent policy
-                      resolves to 'multiple' — unchanged behaviour — and keeps
-                      the link exactly as it was.
-                    */}
-                    {/*
-                      SLICE 1. REMOVED. This was the THIRD route to the
-                      contribution flow on one screen, after the hero's primary
-                      action and "I already moved" directly above it. "Your
-                      part" reports what the member has done; it does not
-                      re-ask. The action lives in the hero, once.
-                    */}
-                  </View>
-                );
-              })()
-            : null}
+          {/* Your part moved up, under the action (HOME-POLISH-1). */}
 
           {/* Other open goals keep their own separately labelled mark. */}
           {otherActive.map((goal) => {
@@ -4339,7 +4369,25 @@ const styles = StyleSheet.create({
     design system's own muted token and measures **5.0:1** on the same cream,
     so this is a swap to an existing token, not a new colour.
   */
-  presenceText: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17, fontWeight: '500' },
+  // HOME-POLISH-1. Beside the faces the count is the first of two facts, so it
+  // takes the page's ink and weight, as the accepted reference sets it; navy on
+  // cream also measures well above the muted token's 5.0:1.
+  presenceText: { color: wsfTheme.colors.text, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  /*
+    HOME-POLISH-1. The faces and the two facts about them share one band: faces
+    first, the member count and the moved-today line stacked beside them. It
+    wraps, so a narrow width or a large text size drops the facts under the
+    faces rather than squeezing either.
+  */
+  presenceBand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: 12,
+    rowGap: 4,
+    marginTop: 6,
+  },
+  presenceFacts: { flexShrink: 1, minWidth: 0, gap: 0 },
   switchChip: {
     minHeight: 32,
     justifyContent: 'center',
@@ -4390,13 +4438,15 @@ const styles = StyleSheet.create({
   // W7. One quiet line between the hero and "Your part": a fact about the
   // community's goals, not a leaderboard and not a nudge.
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  /*
+    HOME-POLISH-1. THE FEED SITS ON THE PAGE, NOT IN A BOX. The accepted
+    reference sets recent momentum as a titled section of rows on the light
+    ground, so the navy hero stays the only object with weight and the rows
+    read as people rather than as a card. Each row keeps its own hairline
+    (CommunityPresence's MomentumRow, unchanged).
+  */
   momentumCard: {
-    backgroundColor: SURFACE,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingTop: 6,
     gap: 2,
   },
   movedToday: {
@@ -4404,7 +4454,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 19,
     fontWeight: '800',
-    marginTop: 1,
   },
   peopleLink: {
     flexDirection: 'row',
@@ -4499,6 +4548,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1.6,
     textTransform: 'uppercase',
   },
+  // HOME-POLISH-1. The label that names the card: a small progress-green dot
+  // and the eyebrow, on one line.
+  heroLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  heroLabelDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: PROGRESS_GREEN },
   heroTitle: {
     color: CREAM,
     fontSize: 22,
@@ -4515,14 +4568,16 @@ const styles = StyleSheet.create({
   weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingBottom: 2 },
   // The numbers sit in their own recessed panel, so the progress area reads as
   // an instrument rather than as text floating on the card.
+  /*
+    HOME-POLISH-1. THE NUMBERS SIT ON THE CARD, NOT IN A PANEL INSIDE IT. The
+    recessed panel made a box inside the box; the accepted reference lets the
+    count, the bar and the row under it read straight off the navy surface.
+    The panel's padding was also the height that kept the feed's first row off
+    the first 390x844 screen once "Your part" moved above it.
+  */
   factsLarge: {
     alignItems: 'stretch',
     gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.20)',
-    borderRadius: 14,
-    paddingHorizontal: 13,
-    paddingTop: 8,
-    paddingBottom: 9,
     marginTop: 2,
   },
   track: {
@@ -4538,8 +4593,16 @@ const styles = StyleSheet.create({
   heroTotal: { textAlign: 'center' },
   heroTotalCount: { ...display.lg, color: CREAM },
   heroTotalRest: { color: ON_NAVY_MUTED, fontSize: 14, fontWeight: '600', lineHeight: 20 },
-  heroPercent: { color: PROGRESS_GREEN, fontSize: 13, fontWeight: '800', textAlign: 'center' },
-  heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  heroStatus: { color: HERO_MUTED, fontSize: 13, lineHeight: 18, textAlign: 'right', flexShrink: 1 },
+  // HOME-POLISH-1. How far, and how far to go, as one row under the bar.
+  heroFactsRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    columnGap: 12,
+  },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
   freshnessUtilityRow: {
@@ -4577,7 +4640,8 @@ const styles = StyleSheet.create({
     backgroundColor: SURFACE_WHITE,
     borderRadius: 20,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    // HOME-POLISH-1. 12 -> 10: the strip now sits in the first viewport.
+    paddingVertical: 10,
     gap: 2,
     borderLeftWidth: 3,
     borderLeftColor: PROGRESS_GREEN,
@@ -4654,6 +4718,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 6,
   },
+  // HOME-POLISH-1. The progress retry sits under its centred sentence.
+  heroRetryCentered: { alignSelf: 'center' },
   // ON THE NAVY HERO. Both "Try again" controls live inside the hero, so
   // their label is the hero's light ink. This was NAVY for one pass — the
   // share control moved out onto the cream page and took the colour with it,
