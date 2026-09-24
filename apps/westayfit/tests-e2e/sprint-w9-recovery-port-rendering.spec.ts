@@ -315,29 +315,51 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
     expect(control.seen.length, 'coming back sent something').toBe(sent);
     measure('return through the launcher', { restoredSameAttempt: true, sendsOnReturn: control.seen.length - sent });
 
-    // MOVE from the You tab (one open goal), then the route's own Back.
+    // Confirm the kept attempt (the server already has it), then the receipt's labelled exit.
+    const confirm = page.locator('[data-testid="wsf-contribute-reconcile"]:visible');
+    await confirm.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-contribute-receipt"]:visible')).toHaveAttribute(
+      'data-variant',
+      'alreadyRecorded',
+      { timeout: 30_000 },
+    );
+    const receiptExit = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
+    await expect(receiptExit).toHaveText('Back to community');
+    await receiptExit.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/community/${fx.groupId}`), { timeout: 20_000 });
+    await page.waitForTimeout(800);
+    measure('receipt → labelled exit', {
+      path: new URL(page.url()).pathname,
+      focus: await focusReading(page),
+      communityScreens: await page.locator('[data-testid="wsf-community"]').count(),
+    });
+
+    // A launcher that is not the community: MOVE from the You tab (one open
+    // goal), then the route's OWN Back -- Close / back to the actual opener.
     await page.goto('/you');
     const move = page.getByTestId('wsf-member-tab-move').last();
     await expect(move).toBeVisible({ timeout: 40_000 });
     await move.focus();
     await page.keyboard.press('Enter');
     await page.waitForURL(/\/contribute\//, { timeout: 40_000 });
-    // Past "Loading goal…": the kept attempt outranks the move step once the goal has loaded.
-    await expect(page.locator('[data-testid="wsf-contribute-pending"]:visible')).toBeVisible({ timeout: 40_000 });
-    measure('MOVE centre → contribute', { path: new URL(page.url()).pathname, showsKeptAttempt: true });
-    const back = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
-    await back.focus();
+    await expect(page.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    // Read the label once the community is verified (the label follows the context).
+    await expect(page.locator('[data-testid="wsf-contribute-community"]:visible')).toBeVisible({ timeout: 40_000 });
+    const ownBack = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
+    measure('MOVE centre (from You) → contribute', {
+      path: new URL(page.url()).pathname,
+      ownBackLabel: await ownBack.innerText(),
+    });
+    await ownBack.focus();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(1_500);
-    measure('MOVE centre → labelled exit', {
+    measure('MOVE centre (from You) → the route\'s own Back', {
       path: new URL(page.url()).pathname,
       focus: await focusReading(page),
       youTabCurrent: await page.getByTestId('wsf-member-tab-you').last().getAttribute('data-current').catch(() => null),
-      communityTabCurrent: await page
-        .getByTestId('wsf-member-tab-community')
-        .last()
-        .getAttribute('data-current')
-        .catch(() => null),
+      moveLauncherFocused: (await focusReading(page)).includes('wsf-member-tab-move'),
     });
   });
 });

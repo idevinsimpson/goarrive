@@ -1618,7 +1618,9 @@ export default function ContributeToGoal() {
       receipt (membership lost) has no shared fields, so it has no panel, no
       standing and no community -- exactly what it lacked before.
     */
-    const panelStacked = windowWidth < 300;
+    // Below 360px the column beside the mark is too narrow for a seven-digit
+    // total, which would break inside the number; the panel stacks instead.
+    const panelStacked = windowWidth < 360;
     const receiptWeWidth = windowHeight < 700 ? 96 : 104;
     return screen(
       <>
@@ -1743,7 +1745,11 @@ export default function ContributeToGoal() {
                   <Pressable
                     onPress={onAddMore}
                     accessibilityRole="button"
-                    style={[styles.secondaryButton, styles.pairButton]}
+                    style={[
+                      styles.secondaryButton,
+                      styles.pairButton,
+                      windowHeight < 700 ? styles.pairButtonShort : null,
+                    ]}
                     testID="wsf-contribute-record-more"
                   >
                     <Text style={styles.secondaryButtonText}>
@@ -1753,7 +1759,11 @@ export default function ContributeToGoal() {
                 ) : null}
                 <ReturnButton
                   href={hasShared ? backHref : '/'}
-                  style={[styles.primaryButton, styles.pairButton]}
+                  style={[
+                    styles.primaryButton,
+                    styles.pairButton,
+                    windowHeight < 700 && addMore ? styles.pairButtonShort : null,
+                  ]}
                   textStyle={styles.primaryButtonText}
                   testID="wsf-contribute-back"
                   label={hasShared ? backLabel : 'Back to home'}
@@ -1882,8 +1892,10 @@ export default function ContributeToGoal() {
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
             <Text style={styles.stepHeading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
-            <Text style={styles.pendingCount} testID="wsf-contribute-pending-count">
-              {`You entered ${effortLabel(pending.count, unitKnown)}.`}
+            <Text style={styles.stepBody} testID="wsf-contribute-pending-count">
+              {'You entered '}
+              <Text style={styles.pendingAmount}>{effortLabel(pending.count, unitKnown)}</Text>
+              {'.'}
             </Text>
             <Text style={styles.stepBody}>
               We don’t know whether this effort was recorded. Don’t record it again.
@@ -2111,7 +2123,6 @@ export default function ContributeToGoal() {
         <View style={styles.sheet} testID="wsf-contribute-review-screen">
           {renderSheetHead(params.mode === 'move' ? 'Start moving' : 'Already moved')}
           <View style={styles.sheetBody}>
-            <Text style={styles.eyebrowMuted}>Review</Text>
             <Text style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
             <View style={styles.reviewBox}>
               <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
@@ -2510,9 +2521,9 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 24,
   },
-  // RECOVERY-PORT-1. The kept attempt's amount, the one strong line in the
-  // sentence block (the reference sets the amount bold inside its paragraph).
-  pendingCount: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '700' },
+  // RECOVERY-PORT-1. The kept attempt's amount, bold inside its sentence, as
+  // the reference sets "+20 squats" inside its paragraph.
+  pendingAmount: { color: wsfTheme.colors.text, fontWeight: '700' },
 
   /* ---- RECOVERY-PORT-1: the sheet the recovery states sit on -------------
      Read off the frozen reference (Lovable `02cb35c4`, `styles.css` and the
@@ -2528,7 +2539,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 8,
     borderWidth: 1,
     borderColor: CARD_BORDER,
-    overflow: 'hidden',
+    // Nothing inside paints into the corners, so nothing needs clipping, and
+    // clipping cut the green action's shadow off at a hard edge.
     ...elevation.card,
   },
   sheetHead: {
@@ -2550,12 +2562,19 @@ const styles = StyleSheet.create({
   sheetActions: { paddingHorizontal: 16, paddingBottom: 22 },
   sheetActionsShort: { paddingBottom: 14 },
   sheetActionsInline: { marginTop: 4, gap: 10 },
-  stepHeading: { color: wsfTheme.colors.text, fontSize: 24, lineHeight: 28, fontWeight: '400' },
+  stepHeading: { color: wsfTheme.colors.text, fontSize: 24, lineHeight: 27, fontWeight: '400' },
   stepBody: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 21 },
   // Two actions share a row, the outline one first and the green one last, as
   // the reference sets them; below about 300px of room they stack.
   pair: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pairButton: { flexGrow: 1, flexBasis: 130, minWidth: 0, minHeight: 54, paddingHorizontal: 10 },
+  // Each action is as wide as its label and the pair wraps when both labels
+  // do not fit one row, so a label never breaks inside its button: the
+  // review's Edit and Record share a row, the receipt's longer pair stacks.
+  // react-native-web Views default to flexShrink 0, so it is set.
+  pairButton: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', minWidth: 0, minHeight: 54, paddingHorizontal: 12 },
+  // A short phone keeps the receipt's pair on one row even though its labels
+  // then wrap: stacked, the way back would fall below a 640px screen.
+  pairButtonShort: { flexBasis: 130, paddingHorizontal: 10 },
 
   // The receipt's badge: the reference's pill, carrying the canonical eyebrow.
   // Progress green at 30% on white is the reference's own badge colour.
@@ -2592,7 +2611,10 @@ const styles = StyleSheet.create({
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   tile: {
     flexGrow: 1,
-    flexBasis: 130,
+    flexShrink: 1,
+    // Two tiles side by side from about 150px each; narrower, they stack, so
+    // a seven-digit figure never breaks inside itself.
+    flexBasis: 150,
     minWidth: 0,
     backgroundColor: CREAM,
     borderRadius: 12,
