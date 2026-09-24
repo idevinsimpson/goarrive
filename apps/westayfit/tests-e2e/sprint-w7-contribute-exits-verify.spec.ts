@@ -951,21 +951,28 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await page.waitForTimeout(4_000);
     expect(await ownPart(page, fx.goalId), "precondition: A's own part").toMatch(/\b20\b/);
 
-    // Hold A's return settle: every pulse / own-credit request issued 2.0–3.6 s
-    // after the return is answered only after HOLD_MS, unchanged.
-    const HOLD_MS = 14_000;
+    // Hold A's return settle (the pulse / own-credit pair issued 2.0–3.6 s after
+    // the return) until B's own figure is on screen: a latch, not a timer. Each
+    // held answer records whether it was delivered to the page or aborted.
     let armedAt = Number.POSITIVE_INFINITY;
-    const held: Array<{ name: string; issuedMs: number; releasedMs: number }> = [];
+    let releaseLatch: () => void = () => {};
+    const released = new Promise<void>((r) => { releaseLatch = r; });
+    const held: Array<{ name: string; issuedMs: number; releasedMs: number; delivered: boolean | null }> = [];
     await page.route(/\/us-central1\/(wsfGoalPulse|wsfMyContribution)$/, async (route: Route) => {
       if (route.request().method() !== 'POST') return route.continue();
       const now = Date.now();
       if (now - armedAt < 2_000 || now - armedAt > 3_600) return route.continue();
       const name = /\/(wsf[A-Za-z]+)$/.exec(route.request().url())![1]!;
-      const entry = { name, issuedMs: now - armedAt, releasedMs: -1 };
+      const entry = { name, issuedMs: now - armedAt, releasedMs: -1, delivered: null as boolean | null };
       held.push(entry);
-      await new Promise((r) => setTimeout(r, HOLD_MS));
+      await released;
       entry.releasedMs = Date.now() - armedAt;
-      await route.continue().catch(() => undefined);
+      try {
+        await route.continue();
+        entry.delivered = true;
+      } catch {
+        entry.delivered = false;
+      }
     });
     await page.getByTestId('wsf-member-tab-you').last().click();
     await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
@@ -973,46 +980,62 @@ test.describe('W9 contribution exits, independent instruments', () => {
     armedAt = Date.now();
     await page.getByTestId('wsf-member-tab-home').last().click();
     await page.waitForTimeout(3_700); // the settle's requests are now issued and held
+    const heldNames = held.map((h) => h.name).sort();
 
-    // Switch to B inside the app.
+    // Switch to B inside the app. The state after each step is recorded, so a
+    // step that does not reach the sign-in form is a fact, not a guess.
+    const state = async (step: string) => {
+      const x = await page.evaluate(() => ({
+        url: location.pathname + location.search,
+        marked: !!document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]'),
+        markedRendered: (document.querySelector('[data-testid="wsf-community"][data-w7-exit="kept"]') as HTMLElement | null)?.offsetParent !== null,
+        visible: Array.from(document.querySelectorAll('[data-testid]')).filter((el) => (el as HTMLElement).offsetParent !== null).map((el) => (el as HTMLElement).dataset.testid!).filter((t) => /^wsf-(home|signin|community|you|member-tabs)/.test(t)).slice(0, 25),
+      }));
+      test.info().annotations.push({ type: `after ${step}`, description: JSON.stringify(x) });
+      return x;
+    };
     await page.getByTestId('wsf-member-tab-you').last().click();
     await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
     await page.getByTestId('wsf-you-signout').last().click();
     const signin = page.locator('[data-testid="wsf-home-signin"]:visible').first();
     await expect(signin).toBeVisible({ timeout: 20_000 });
+    const afterSignOut = await state('sign-out');
     await signin.click();
-    // Diagnostic (recorded on failure): where the press landed and what is in front.
-    const diag = async () =>
-      page.evaluate(() => {
-        const vis = Array.from(document.querySelectorAll('[data-testid]')).filter((el) => (el as HTMLElement).offsetParent !== null).map((el) => (el as HTMLElement).dataset.testid).filter((t) => /^wsf-(home|signin|community|you)/.test(t ?? '')).slice(0, 30);
-        return { url: location.pathname + location.search, visible: vis };
-      });
-    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 }).catch(async (e) => {
-      test.info().annotations.push({ type: 'sign-in step diagnostic', description: JSON.stringify(await diag()) });
-      throw e;
-    });
-    await page.getByTestId('wsf-signin-email').fill(b.email);
+    await page.waitForTimeout(2_000);
+    const afterPress = await state('the sign-in press');
+    const form = page.getByTestId('wsf-signin-email');
+    if ((await form.count()) === 0 || !(await form.isVisible())) {
+      // Second route to the same form, in-app: the address bar is not used.
+      await page.locator('[data-testid="wsf-home-signin"]:visible').first().click({ force: true }).catch(() => undefined);
+      await page.waitForTimeout(2_000);
+    }
+    await expect(form, `the sign-in form did not open in-app: ${JSON.stringify({ afterSignOut, afterPress })}`).toBeVisible({ timeout: 10_000 });
+    await form.fill(b.email);
     await page.getByTestId('wsf-signin-password').fill(b.password);
     await page.getByTestId('wsf-signin-submit').click();
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe(`/community/${fx.groupId}`);
     await expect.poll(() => ownPart(page, fx.goalId), { timeout: 30_000 }).toMatch(/\b5\b/);
     const bLoadedAt = Date.now() - armedAt;
+    const afterB = await state("B's arrival");
     const sameInstance = (await reading(page)).marked;
     const beforeRelease = await ownPart(page, fx.goalId);
-    // Wait past the release, sampling B's own part.
+    releaseLatch();
+    // Sample B's own part through and past the release.
     const samples: string[] = [];
-    while (Date.now() - armedAt < 3_600 + HOLD_MS + 4_000) {
+    const until = Date.now() + 8_000;
+    while (Date.now() < until) {
       samples.push(`${Date.now() - armedAt}ms:${await ownPart(page, fx.goalId)}`);
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(300);
     }
-    const afterRelease = await ownPart(page, fx.goalId);
-    const m = { held, bLoadedAtMs: bLoadedAt, sameInstance, beforeRelease, afterRelease, samples: samples.filter((x, i, a) => i === 0 || x.split(':')[1] !== a[i - 1]!.split(':')[1]) };
+    const m = { heldNames, held, bLoadedAtMs: bLoadedAt, sameInstance, afterB, beforeRelease, samples: samples.filter((x, i, a) => i === 0 || x.split(':')[1] !== a[i - 1]!.split(':')[1]) };
     test.info().annotations.push({ type: 'X7f measured', description: JSON.stringify(m) });
-    expect(held.length, "precondition: A's settle requests were held").toBeGreaterThan(0);
-    expect(held.every((h) => h.releasedMs > bLoadedAt), "precondition: the hold was released only after B's figure had loaded").toBe(true);
+    expect(heldNames, "precondition: A's settle pair (pulse + own credit) was held").toEqual(['wsfGoalPulse', 'wsfMyContribution']);
+    expect(sameInstance, 'CANNOT-MEASURE the same-instance race: the marked Community did not survive the account switch').toBe(true);
+    expect(held.every((h) => h.releasedMs > bLoadedAt), "precondition: released only after B's figure had loaded").toBe(true);
+    expect(held.every((h) => h.delivered === true), `a held answer was not delivered to the page: ${JSON.stringify(held)}`).toBe(true);
     expect(beforeRelease, "B's own part before the release").toMatch(/\b5\b/);
-    expect(afterRelease, `A's own credit reached B's screen: ${JSON.stringify(m)}`).toMatch(/\b5\b/);
-    expect(afterRelease).not.toMatch(/\b20\b/);
+    for (const x of samples) expect(x, `A's 20 was on B's screen: ${JSON.stringify(m)}`).not.toMatch(/:.*\b20\b/);
+    expect(samples[samples.length - 1], "B's own part after the release").toMatch(/\b5\b/);
   });
 
   /*
@@ -1045,20 +1068,28 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await expect(page.getByTestId('wsf-you-identity').last()).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1_000);
 
-    const HOLD_MS = 14_000;
     let armedAt = Number.POSITIVE_INFINITY;
-    const held: Array<{ name: string; issuedMs: number; releasedMs: number }> = [];
+    let releaseLatch: () => void = () => {};
+    const released = new Promise<void>((r) => { releaseLatch = r; });
+    const held: Array<{ name: string; issuedMs: number; releasedMs: number; delivered: boolean | null }> = [];
     await page.route(/\/us-central1\/(wsfMyCommunities|wsfListGoals)$/, async (route: Route) => {
       if (route.request().method() !== 'POST') return route.continue();
       const now = Date.now();
-      // Only the return's own reads (the first 3 s after the return) are held.
+      // Only the return's own reads (the first 3 s after the return) are held,
+      // until B's list is on screen (a latch, not a timer); each records
+      // whether it was delivered or aborted.
       if (now < armedAt || now - armedAt > 3_000) return route.continue();
       const name = /\/(wsf[A-Za-z]+)$/.exec(route.request().url())![1]!;
-      const entry = { name, issuedMs: now - armedAt, releasedMs: -1 };
+      const entry = { name, issuedMs: now - armedAt, releasedMs: -1, delivered: null as boolean | null };
       held.push(entry);
-      await new Promise((r) => setTimeout(r, HOLD_MS));
+      await released;
       entry.releasedMs = Date.now() - armedAt;
-      await route.continue().catch(() => undefined);
+      try {
+        await route.continue();
+        entry.delivered = true;
+      } catch {
+        entry.delivered = false;
+      }
     });
     armedAt = Date.now();
     await page.getByTestId('wsf-member-tab-home').last().click();
@@ -1097,18 +1128,25 @@ test.describe('W9 contribution exits, independent instruments', () => {
         };
       });
     const before = await listOf();
-    const samples: string[] = [];
-    while (Date.now() - armedAt < 3_000 + HOLD_MS + 4_000) {
-      samples.push(`${Date.now() - armedAt}ms:${(await listOf()).cards.join('+')}`);
-      await page.waitForTimeout(500);
+    releaseLatch();
+    const samples: Array<{ t: number; cards: string[]; aAnywhere: boolean }> = [];
+    const until = Date.now() + 8_000;
+    while (Date.now() < until) {
+      const l = await listOf();
+      samples.push({ t: Date.now() - armedAt, cards: l.cards.sort(), aAnywhere: l.aAnywhere });
+      await page.waitForTimeout(300);
     }
     const after = await listOf();
-    const m = { held, bLoadedAtMs: bLoadedAt, before, after, samples: samples.filter((x, i, a) => i === 0 || x.split(':')[1] !== a[i - 1]!.split(':')[1]) };
+    const m = { held, bLoadedAtMs: bLoadedAt, before, after, samples: samples.filter((x, i, a) => i === 0 || x.cards.join() !== a[i - 1]!.cards.join() || x.aAnywhere !== a[i - 1]!.aAnywhere) };
     test.info().annotations.push({ type: 'X6b measured', description: JSON.stringify(m) });
-    expect(held.length, "precondition: A's return re-read was issued and held (none on a build with no return re-read)").toBeGreaterThan(0);
+    expect(held.map((h) => h.name).includes('wsfMyCommunities'), "precondition: A's return list read was issued and held (none on a build with no return re-read)").toBe(true);
     expect(held.every((h) => h.releasedMs > bLoadedAt), "precondition: released only after B's list had loaded").toBe(true);
+    expect(held.every((h) => h.delivered === true), `a held answer was not delivered to the page: ${JSON.stringify(held)}`).toBe(true);
     expect(before.cards.sort(), "B's list before the release").toEqual([...bGroups].sort());
-    expect(after.cards.sort(), `A's held answer changed B's list: ${JSON.stringify(m)}`).toEqual([...bGroups].sort());
-    expect(after.aAnywhere, "A's community name is on B's screen").toBe(false);
+    for (const x of samples) {
+      expect(x.cards, `A's held answer changed B's list at ${x.t} ms: ${JSON.stringify(m)}`).toEqual([...bGroups].sort());
+      expect(x.aAnywhere, `A's community name was on B's screen at ${x.t} ms`).toBe(false);
+    }
+    expect(after.cards.sort()).toEqual([...bGroups].sort());
   });
 });
