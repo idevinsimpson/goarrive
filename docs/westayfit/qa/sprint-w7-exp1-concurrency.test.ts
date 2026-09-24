@@ -102,7 +102,8 @@ async function promotion(groupId: string, goalId: string, entrantCap: number | n
     windowStartsAt: Timestamp.fromMillis(now - 3_600_000),
     windowEndsAt: Timestamp.fromMillis(now + 3_600_000),
     formBonusEntries: 1,
-    operatorUids: [],
+    // Nonempty since EXP2A (41cb6dff) requires an operator decision; ignored by earlier heads.
+    operatorUids: ['w7operator'],
   };
   const v = validatePromotionConfig(doc);
   if (!v.ok) throw new Error('W7 fixture: promotion does not validate: ' + JSON.stringify(v.problems));

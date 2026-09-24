@@ -2452,3 +2452,55 @@ The diff itself touches no adjudication rule, no write, no id, no fence order: `
 - Evidence: `docs/westayfit/qa/sprint-w7-exp1-delta23.test.ts` and the updated `sprint-w7-exp1-jest.config.cjs` (worktree selectable by `W7_EXP1_WT`); the earlier Check 22 files unchanged.
 - `ts:check` 0; evidence guard 9 / 20 intact; no artifacts committed.
 - **Status:** tested on `3b9963c9`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
+
+# Check 24 — EXP2A's enable transition `41cb6dff` on exact parent `63a2c4df` (#469): **PASS on every item; the seven boundaries proved by W7's own instrument; the five mutation controls fail for their intended reasons; persistence, dedupe and cap atomicity unchanged**
+
+Routed by the Director on #434 (`5811159705`; source disposition #469 `5811159960`). Checks 22 / 23 batteries carried where dependencies are unchanged; W7 G, wiring, UI and deployment stay unbuilt / unmeasured.
+
+## 24.1 · Scope, verified by git and grep
+
+- `63a2c4df..41cb6dff` is **one commit**, exactly **nine files**, all inside the reservation: `src/expo-prize/enable.ts` (new, 105), `policy.ts`, `index.ts` (barrel), `tests/expo-prize/enable.test.ts` (new, 260), `fixtures.ts`, `pure.test.ts`, and the three docs (+585 / −20). `3b9963c9` is an ancestor; the parent is the merged #467 head.
+- No `expo-prize` / `wsfPromotion` reference in `functions-westayfit/src/index.ts`, `firestore.rules`, `firestore.indexes.json`, `firebase*.json`, `.github`, `apps/westayfit/app` or `apps/westayfit/src` at `41cb6dff`: no root export, callable / trigger registration, rules, index, config, UI or workflow wiring. The barrel export (`index.ts:15`) is inside the module and nothing imports the module.
+- Detached worktree at `41cb6dff`, never pushed, not edited (`git diff --quiet` after every mutation and at the end).
+
+## 24.2 · Suite and typecheck
+
+| run | result |
+|---|---|
+| EXP2A core at `41cb6dff`, once, documented command shape | **83 passed, 0 failed, 0 pending** — `pure` 45, `award` 14, `form` 6, `cap` 6, `reconcile` 3, `enable` 9 (all emulator; proof 5 ×3) |
+| `tsc --noEmit -p functions-westayfit/tsconfig.json` | **0 errors** |
+| real core after the five mutations were restored | **83 / 83** |
+
+Initial run only; no failures, no reruns, no skips.
+
+## 24.3 · The changed boundaries, proved (W7's instrument `sprint-w7-exp2a.test.ts` on `41cb6dff`; own seeding, raw reads, the promotion document compared byte-for-byte **including `updateTime`** around every fenced or refused call)
+
+| boundary | result |
+|---|---|
+| **invalid / missing decisions → no write, field named** | **PASS**: 16 cases (`repeatRule` missing / bogus; `entrantCap` missing / 0 / 1.5; `eligibleGoals` empty / half-formed; window inverted / start missing; `ruleVersion` missing / 0; `formBonusEntries` −1; `operatorUids` missing / empty / invalid / duplicate) → `refused / invalidConfig` naming the field; document unchanged including `updateTime` (`enable.ts:88-91`) |
+| **stored routing array replaced by the sorted derived ids; drift fences, never reroutes** | **PASS**: three goals listed out of order with a forged array → enabled with the sorted derived triple, digest = `configDigest(validate(doc))`, `enabledAt` a server `Timestamp` (`enable.ts:93-102`; `policy.ts:208-211`). Then **missing**, **reordered**, **widened**, **edited** and **narrowed** arrays each → `readPromotion` `fenced / configDrift`, a direct ingest `fenced / configDrift`, no source row written; where the trigger body still finds the document by `array-contains` (reordered / widened / edited / narrowed) its routed award is `fenced / configDrift`, and when the array is missing it is not routed at all; a goal smuggled into the array only never awards; the exact derived array restores adjudication (`policy.ts:269-274`) |
+| **any entrant, uid link or nonzero counter blocks enable, incl. a cap-null promotion returned to draft** | **PASS**: enabled cap-less, one real admission (counter never written); set back to `draft` with `entrantCap: 1` → `fenced / enableArtefactsPresent`, unchanged; artefacts scrubbed → `fenced / entrantsExist`, unchanged, counter still absent (never initialised); on fresh drafts an entrant document alone, a uid link alone and a counter of 1 alone each → `fenced / entrantsExist`, unchanged; a counter of **0** alone does not block (`enable.ts:51-68`, `:80-85`) |
+| **all non-draft states and enable artefacts block without mutation** | **PASS**: `enabled`, `closing`, `disabled`, `frozen`, `drawn`, `archived` and an unknown status → `fenced / notDraft`, unchanged; a draft carrying a digest only, `enabledAt` only, or both → `fenced / enableArtefactsPresent`, unchanged; a missing document → `promotionMissing`; a second enable on an enabled document is fenced and the enablement byte-identical (`enable.ts:76-82`) |
+| **concurrent enables → one immutable enablement, no partial state** | **PASS ×3**: eight concurrent `enablePromotion` on one draft → exactly 1 `enabled`, 7 `fenced / notDraft` (status `enabled`); the document carries `enabled`, the sorted derived array, one digest equal to `configDigest(validate(doc))` and equal to the winner's returned digest, one server `enabledAt`; `readPromotion` active (the one `tx.update`, `enable.ts:97-102`, and the SDK's ABORTED retry of the losers) |
+| **operator uids nonempty / valid / unique, canonical for the digest, not exposed** | **PASS**: validation refuses missing, empty, invalid and duplicate (`policy.ts:158-177`); `['b','a']` and `['a','b']` digest identically and differ from `['a']` (sorted into the policy, `:200`; digested, `:235`); after enable and a real award, the operator uid appears in **0** documents across sources, entries, entrants, links, tallies, counters, contributions and member totals (a full-collection string scan) — it lives in `wsfPromotions` only, which has no rules block (catch-all deny) and no reader; a post-enable operator edit is `configDrift`. Nothing reads the list for authorisation (no callable exists) |
+| **award persistence, replay / dedupe, contribution integrity unchanged** | **PASS**: W7's Check 22 instrument on `41cb6dff` (fixture now names an operator, as the candidate requires): A ×3 six concurrent first ingestions → `[accepted, replay ×5]`, one of everything, the contribution row's data and `updateTime` identical; B ×3 one bonus, three recorded refusals; C ×3 exactly 2 of 6 under cap 2, counter 2, all six contributions and totals intact, replay admits nobody |
+
+## 24.4 · The five disclosed mutation controls, re-applied on the worktree copy and restored
+
+| mutation (EXP1 `EVIDENCE.md` §EXP2A) | EXP1 recorded | measured here | caught by |
+|---|---|---|---|
+| M8 fence admits `enabled` (`enable.ts` `status !== 'draft'` → also `enabled`) | 4 failed / 5 | **4 / 5** | proof 4, proof 5 ×3 — an enabled document re-enabled / eight enables not converging |
+| M9 admission check removed (`if (false && await anyAdmission(…))`) | 1 / 8 | **1 / 8** | proof 3 — the admitted draft enables |
+| M10 stored array trusted on enable | 2 / 7 | **2 / 7** | the first-enable row and proof 2 — the forged array survives |
+| M11 array drift check removed in `readPromotion` (`policy.ts`) | 2 / 52 | **2 / 52** | proof 2 and the pure `readPromotion` ordering — a reordered array adjudicates |
+| M12 artefact check removed (`if (false)`) | 1 / 8 | **1 / 8** | proof 3 — the returned-to-draft document passes the artefact gate (and is then caught only by `entrantsExist`, which the row asserts first) |
+
+Each fails for its intended reason; no broader mutation work was done.
+
+## 24.5 · Docs and bound
+
+- `CONTRACT.md` §(d′) describes exactly the transaction read here (reads, decide, one write; the outcome table); D and F5 are marked closed with the Director's rulings; "W7 G … not built" and "the next packet" are explicit (`CONTRACT.md:239-241`; `EVIDENCE.md` §EXP2A "Unmeasured"). `EVIDENCE.md` §EXP2A's 83 / 83, five controls and unmeasured list match what was measured here.
+- One reading note, not a defect: `readPromotion` now requires `operatorUids` and an exact stored `eligibleGoalIds`, so any promotion document written before EXP2A (e.g. fixture-seeded with `operatorUids: []`) is `invalidConfig` / `configDrift` until re-enabled through `enablePromotion`. No such document exists outside tests; the contract's "every decision explicit" intends it.
+- **Unmeasured:** the enable-vs-award race (an admission landing while enable runs — the award fences under `draft`, so only a pre-existing admission is possible, which is covered); live Firestore query-in-transaction contention; W7 G / `closing → frozen` / the pool; wiring, UI, deployment.
+- Evidence: `docs/westayfit/qa/sprint-w7-exp2a.test.ts`; `sprint-w7-exp1-concurrency.test.ts` (operator named); run from the scratch directory against the detached worktree with `W7_EXP1_WT`. `ts:check` 0; guard 9 / 20; no artifacts committed.
+- **Status:** tested on `41cb6dff`; delivered by EXP1, not accepted, not integrated; W7 accepts, integrates and stages nothing.
