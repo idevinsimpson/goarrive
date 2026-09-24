@@ -30,8 +30,8 @@ this branch), **accepted** (the Director's product acceptance), **integrated**
 
 | checkpoint | delivered | accepted | integrated |
 | --- | --- | --- | --- |
-| setup (branch, PR, this index) | pending push | — | — |
-| Packet A (contract / schema / state machine / test matrix) | — | — | — |
+| setup (branch, PR #467, this index) | `087b667` | — | — |
+| Packet A (contract / schema / state machine / test matrix) | this commit (`CONTRACT.md`, `TEST-MATRIX.md`) | — | — |
 | Packet B (disabled isolated core + emulator tests) | — | — | — |
 
 ## Hard boundaries
