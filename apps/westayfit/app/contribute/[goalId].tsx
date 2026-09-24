@@ -77,9 +77,10 @@ import {
   progressPhase,
   statusLine,
   totalOfTargetLabel,
+  totalOfTargetParts,
 } from '../../src/ui/progressFormat';
 
-import { ACTION_GREEN, ON_ACTION, elevation } from '../../src/ui/kit';
+import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation } from '../../src/ui/kit';
 import {
   MEMBER_TAB_MOVE_OVERHANG,
   shellAppliesTo,
@@ -1306,6 +1307,21 @@ export default function ContributeToGoal() {
       </View>
     ) : null;
 
+  /*
+    RECOVERY-PORT-1. THE RECOVERY STATES SIT ON ONE SURFACE, AS THE ACCEPTED
+    REFERENCE DRAWS THEM (Lovable `02cb35c4`, `move.tsx` / `ui.tsx`): a white
+    sheet with a header that names what it holds, a hairline under it, then the
+    step. The reference is a bottom sheet over Home; this route is a whole
+    screen, so the sheet is a surface on the page rather than an overlay, and
+    it has no Close in its header -- the ways out stay the route's own labelled
+    exits (Director ruling `5821650392` §3, recorded as a difference on #474).
+  */
+  const renderSheetHead = (title: string) => (
+    <View style={styles.sheetHead}>
+      <Text style={styles.sheetTitle}>{title}</Text>
+    </View>
+  );
+
   const renderTestNote = () =>
     wsfUsingEmulators ? (
       <Text style={styles.testNote} testID="wsf-contribute-test-banner">
@@ -1564,126 +1580,169 @@ export default function ContributeToGoal() {
     const variant = resultVariant(r, sharedBeforeRef.current);
     const copy = resultCopy(r, communityName, unitKnown, sharedBeforeRef.current);
     const hasShared = variant !== 'ownOnly';
+    const ownUnit = hasShared ? r.unit : (r.unit ?? unitKnown);
+    const addMore = canAddMore(repeatPolicy, r);
+    /*
+      RECOVERY-PORT-1. THE RECEIPT IN THE REFERENCE'S ORDER: what was recorded
+      (a badge, then the addition as the heading), the member's own numbers
+      (their addition and their total in this goal, side by side), the
+      community's standing in a navy panel with the Living WE, and then the way
+      on. It was a whole navy page with the member's own total as a caption
+      under everything; the reference puts the member's part before the
+      community's, and the one navy object on the sheet is the shared one.
+
+      Every figure is the server's own, from this receipt: `addedCount`,
+      `ownCredit`, `sharedTotal` / `target` / `unit` / `status`. An own-only
+      receipt (membership lost) has no shared fields, so it has no panel, no
+      standing and no community -- exactly what it lacked before.
+    */
+    const panelStacked = windowWidth < 300;
+    const receiptWeWidth = windowHeight < 700 ? 96 : 120;
     return screen(
       <>
-        {renderChrome(false, 'dark')}
-        <View
-          style={[styles.receipt, windowHeight < 700 ? styles.receiptShort : null]}
-          testID="wsf-contribute-receipt"
-          // D-2. The outcome replaces the form in place rather than by
-          // navigating, so the receipt has to announce itself.
-          aria-live="polite"
-          {...({ dataSet: { variant } } as Record<string, unknown>)}
-        >
-          <Text style={styles.heroEyebrow}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
-          {/*
-            THE AMOUNT, AT THE SIZE OF THE MOMENT. The exact number this member
-            just recorded -- theirs, not the community's -- is what the screen
-            opens on. `addedCount` is the server's own figure from the receipt,
-            so this is a bigger rendering of a fact the screen already carried,
-            not a new claim.
-          */}
-          <Text
-            style={[styles.receiptAmount, windowHeight < 700 ? styles.receiptAmountShort : null]}
-            testID="wsf-contribute-result-amount"
+        {renderChrome(false)}
+        <View style={styles.sheet}>
+          {renderSheetHead('Contribution receipt')}
+          <View
+            style={[styles.sheetBody, windowHeight < 700 ? styles.sheetBodyShort : null]}
+            testID="wsf-contribute-receipt"
+            // D-2. The outcome replaces the form in place rather than by
+            // navigating, so the receipt has to announce itself.
+            aria-live="polite"
+            {...({ dataSet: { variant } } as Record<string, unknown>)}
           >
-            {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
-          </Text>
-          <Text style={styles.receiptHeadline} testID="wsf-contribute-result-headline" {...HEADING_1}>
-            {copy.headline}
-          </Text>
-          <Text style={styles.receiptSubline} testID="wsf-contribute-result-subline">
-            {copy.subline}
-          </Text>
-          {hasShared ? (
-            <>
-              <View style={styles.weWrap}>
-                <LivingWeProgress
-                  completed={r.sharedTotal}
-                  target={r.target}
-                  unit={r.unit}
-                  width={heroWeWidth}
-                  surface="dark"
-                  testID="wsf-contribute-we"
+            <View style={styles.badge}>
+              <View style={styles.badgeCheck} />
+              <Text style={styles.badgeText}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
+            </View>
+            <Text style={styles.stepHeading} testID="wsf-contribute-result-headline" {...HEADING_1}>
+              {copy.headline}
+            </Text>
+            <Text style={styles.receiptSubline} testID="wsf-contribute-result-subline">
+              {copy.subline}
+            </Text>
+            <View style={styles.tiles}>
+              <View style={styles.tile}>
+                <Text style={styles.tileLabel}>Your addition</Text>
+                {/* The exact number recorded -- theirs, not the community's. */}
+                <Text style={styles.tileValue} testID="wsf-contribute-result-amount">
+                  {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
+                </Text>
+              </View>
+              {/* The shipped sentence, kept whole under its testID: the label
+                  and the figure are one line for every reader and spec. */}
+              <View style={styles.tile} testID="wsf-contribute-own-credit">
+                <Text style={styles.tileLabel}>{'Your total on this goal: '}</Text>
+                <Text style={styles.tileValue}>
+                  {formatCount(r.ownCredit)}
+                  {ownUnit ? <Text style={styles.tileUnit}>{` ${ownUnit}`}</Text> : null}
+                </Text>
+              </View>
+            </View>
+            {hasShared ? (
+              <>
+                <View style={[styles.sharedPanel, panelStacked ? styles.sharedPanelStacked : null]}>
+                  <View style={styles.sharedWe}>
+                    <LivingWeProgress
+                      completed={r.sharedTotal}
+                      target={r.target}
+                      unit={r.unit}
+                      width={receiptWeWidth}
+                      surface="dark"
+                      testID="wsf-contribute-we"
+                    />
+                  </View>
+                  <View style={styles.sharedText}>
+                    <Text style={styles.sharedLabel}>
+                      {context.kind === 'verified' ? `Shared total · ${context.goalTitle}` : 'Shared total'}
+                    </Text>
+                    <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total">
+                      <Text style={styles.sharedCount}>
+                        {totalOfTargetParts(r.sharedTotal, r.target, r.unit).count}
+                      </Text>
+                      {' '}
+                      <Text style={styles.sharedRest}>
+                        {totalOfTargetParts(r.sharedTotal, r.target, r.unit).rest}
+                      </Text>
+                    </Text>
+                    <View style={styles.sharedTrack}>
+                      <View
+                        style={[
+                          styles.sharedTrackFill,
+                          { width: `${fillRatio(r.sharedTotal, r.target) * 100}%` },
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.sharedMeta}>
+                      <Text style={styles.sharedPercent} testID="wsf-contribute-percent">
+                        {`${percentLabel(r.sharedTotal, r.target)} complete`}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.sharedStatus,
+                          progressPhase(r.sharedTotal, r.target, r.status) === 'nearGoal'
+                            ? styles.sharedStatusNear
+                            : null,
+                        ]}
+                        testID="wsf-contribute-status"
+                      >
+                        {statusLine(r.sharedTotal, r.target, r.status)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                {copy.standing ? (
+                  <Text style={styles.stepBody} testID="wsf-contribute-result-standing">
+                    {copy.standing}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+          </View>
+          {/* The receipt carries its own numbers; the anchor would repeat them. */}
+          <View style={[styles.sheetActions, windowHeight < 700 ? styles.sheetActionsShort : null]}>
+            {kiosk ? (
+              renderKioskFinish('confirmed')
+            ) : (
+              /*
+                REPEAT POLICY. The goal now publishes one, so the result can offer
+                a second contribution where the server will actually accept it --
+                'multiple', goal still active, and a receipt that carried shared
+                state. Under 'once' this is absent and the result ends where it
+                always did.
+
+                RECOVERY-PORT-1. The reference ends its receipt on one green
+                action, the way back to the community, with the other choice
+                beside it in outline. The labelled exit is that action here; the
+                offer to record more is the outlined one.
+              */
+              <View style={styles.pair}>
+                {addMore ? (
+                  <Pressable
+                    onPress={onAddMore}
+                    accessibilityRole="button"
+                    style={[styles.secondaryButton, styles.pairButton]}
+                    testID="wsf-contribute-record-more"
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {recordMoreLabel(hasShared ? r.unit : unitKnown)}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <ReturnButton
+                  href={hasShared ? backHref : '/'}
+                  style={[styles.primaryButton, styles.pairButton]}
+                  textStyle={styles.primaryButtonText}
+                  testID="wsf-contribute-back"
+                  label={hasShared ? backLabel : 'Back to home'}
                 />
               </View>
-              <View style={styles.heroFacts}>
-                <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
-                  {totalOfTargetLabel(r.sharedTotal, r.target, r.unit)}
-                </Text>
-                <Text style={styles.heroPercent} testID="wsf-contribute-percent">
-                  {`${percentLabel(r.sharedTotal, r.target)} complete`}
-                </Text>
-                <Text
-                  style={[
-                    styles.heroStatus,
-                    progressPhase(r.sharedTotal, r.target, r.status) === 'nearGoal'
-                      ? styles.heroStatusNear
-                      : null,
-                  ]}
-                  testID="wsf-contribute-status"
-                >
-                  {statusLine(r.sharedTotal, r.target, r.status)}
-                </Text>
-              </View>
-              {copy.standing ? (
-                <Text style={styles.heroStanding} testID="wsf-contribute-result-standing">
-                  {copy.standing}
-                </Text>
-              ) : null}
-            </>
-          ) : null}
-        </View>
-        <Text style={styles.receiptOwn} testID="wsf-contribute-own-credit">
-          {`Your total on this goal: ${effortLabel(r.ownCredit, hasShared ? r.unit : (r.unit ?? unitKnown))}`}
-        </Text>
-        {/* The receipt carries its own numbers; the anchor would repeat them. */}
-        <View style={styles.actions}>
-          {kiosk ? (
-            renderKioskFinish('confirmed', 'dark')
-          ) : (
-            <>
-            {/*
-              REPEAT POLICY. The goal now publishes one, so the result can offer
-              a second contribution where the server will actually accept it —
-              'multiple', goal still active, and a receipt that carried shared
-              state. Under 'once' this is absent and the result ends where it
-              always did.
-
-              It carries Community Home's existing wording, "Record more {unit}",
-              rather than a second name for the same act. The two are never on
-              screen together — they are on different screens — and Community
-              Home now withholds its own offer on a goal this member has already
-              finished, so the product makes the offer once or not at all.
-            */}
-            {canAddMore(repeatPolicy, r) ? (
-              <Pressable
-                onPress={onAddMore}
-                accessibilityRole="button"
-                style={styles.primaryButton}
-                testID="wsf-contribute-record-more"
-              >
-                <Text style={styles.primaryButtonText}>
-                  {recordMoreLabel(hasShared ? r.unit : unitKnown)}
-                </Text>
-              </Pressable>
-            ) : null}
-            <ReturnButton
-              href={hasShared ? backHref : '/'}
-              style={canAddMore(repeatPolicy, r) ? styles.ghostDark : styles.primaryButton}
-              textStyle={
-                canAddMore(repeatPolicy, r) ? styles.ghostDarkText : styles.primaryButtonText
-              }
-              testID="wsf-contribute-back"
-              label={hasShared ? backLabel : 'Back to home'}
-            />
-            </>
-          )}
+            )}
+          </View>
         </View>
         {renderTestNote()}
       </>,
-      'wsf-contribute-screen',
-      'dark'
+      'wsf-contribute-screen'
     );
   }
 
@@ -1694,20 +1753,24 @@ export default function ContributeToGoal() {
       <>
         {renderChrome(false)}
         {renderGoalAnchor()}
+        {/* RECOVERY-PORT-1. The same sheet as the other outcomes; the words,
+            the controls and where they go are unchanged. */}
         <View
-          style={styles.card}
+          style={styles.sheet}
           testID="wsf-contribute-refused"
           aria-live="polite"
           {...({ dataSet: { reason: refusal.reason } } as Record<string, unknown>)}
         >
+          {renderSheetHead('Your attempt')}
+          <View style={styles.sheetBody}>
           <Text style={styles.eyebrowMuted}>Not recorded</Text>
-          <Text style={styles.heading} testID="wsf-contribute-refused-headline" {...HEADING_1}>
+          <Text style={styles.stepHeading} testID="wsf-contribute-refused-headline" {...HEADING_1}>
             {copy.headline}
           </Text>
-          <Text style={styles.body} testID="wsf-contribute-refused-body">
+          <Text style={styles.stepBody} testID="wsf-contribute-refused-body">
             {copy.body}
           </Text>
-          <View style={styles.actions}>
+          <View style={styles.sheetActionsInline}>
             {refusal.reason === 'invalid' ? (
               <Pressable
                 onPress={onRefusalEdit}
@@ -1740,6 +1803,7 @@ export default function ContributeToGoal() {
               )
             )}
           </View>
+          </View>
         </View>
         {renderTestNote()}
       </>,
@@ -1752,10 +1816,13 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.card} testID="wsf-contribute-recording" aria-live="polite">
-          <ActivityIndicator color={NAVY} size="large" />
-          <Text style={styles.heading} {...HEADING_1}>Recording your contribution…</Text>
-          <Text style={styles.body}>{effortLabel(pending.count, unitKnown)}</Text>
+        <View style={styles.sheet} testID="wsf-contribute-recording" aria-live="polite">
+          {renderSheetHead('Your attempt')}
+          <View style={styles.sheetBody}>
+            <ActivityIndicator color={NAVY} size="large" />
+            <Text style={styles.stepHeading} {...HEADING_1}>Recording your contribution…</Text>
+            <Text style={styles.stepBody}>{effortLabel(pending.count, unitKnown)}</Text>
+          </View>
         </View>
         {renderTestNote()}
       </>,
@@ -1777,35 +1844,51 @@ export default function ContributeToGoal() {
           member cannot safely do. The target drew the anchor here; that was
           wrong, and ui-contribute-torture-2 caught it.
         */}
-        <View style={styles.pendingCard} testID="wsf-contribute-pending" aria-live="polite">
-          <Text style={styles.eyebrowMuted}>Not confirmed yet</Text>
-          <Text style={styles.heading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
-          <Text style={styles.body}>
-            We don’t know whether this effort was recorded. Don’t record it again.
-          </Text>
-          <Text style={styles.pendingCount} testID="wsf-contribute-pending-count">
-            {`You entered ${effortLabel(pending.count, unitKnown)}.`}
-          </Text>
-          <Pressable
-            onPress={onReconcile}
-            disabled={submitting}
-            accessibilityRole="button"
-            style={styles.primaryButton}
-            testID="wsf-contribute-reconcile"
-          >
-            <Text style={styles.primaryButtonText}>Confirm this contribution</Text>
-          </Pressable>
-          <Text style={styles.caption}>
-            This sends the same attempt again. If it already reached us, it will not count twice.
-          </Text>
-          {/* Not true on a shared device: the visitor is about to be signed
-              out of it. The kiosk says where the attempt actually is instead
-              (KIOSK_UNRESOLVED_NOTICE, on the Finish bar below). */}
-          {kiosk ? null : (
-            <Text style={styles.caption}>
-              You can leave this page. The same attempt will be here when you come back.
+        {/*
+          RECOVERY-PORT-1. THE REFERENCE'S ORDER, ON THE ACCEPTED WORDS: a plain
+          title, the attempt that is kept and its amount, the one sentence about
+          what is and is not known, ONE action, and the honest caption under it.
+
+          THE REFERENCE'S TRUTH IS NOT PORTED WITH ITS SHAPE (Director ruling
+          `5821650392` §1). Its button reads a simulated ledger and cannot
+          write; ours sends the same attempt again, which records it if it never
+          landed. So the words stay the canonical ones: nothing here says the
+          shared total is untouched, nothing offers to discard the attempt, and
+          nothing says "nothing was counted" -- none of that is known.
+        */}
+        <View style={styles.sheet} testID="wsf-contribute-pending" aria-live="polite">
+          {renderSheetHead('Your attempt')}
+          <View style={styles.sheetBody}>
+            <Text style={styles.stepHeading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
+            <Text style={styles.pendingCount} testID="wsf-contribute-pending-count">
+              {`You entered ${effortLabel(pending.count, unitKnown)}.`}
             </Text>
-          )}
+            <Text style={styles.stepBody}>
+              We don’t know whether this effort was recorded. Don’t record it again.
+            </Text>
+            <View style={styles.sheetActionsInline}>
+              <Pressable
+                onPress={onReconcile}
+                disabled={submitting}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                testID="wsf-contribute-reconcile"
+              >
+                <Text style={styles.primaryButtonText}>Confirm this contribution</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.stepBody}>
+              This sends the same attempt again. If it already reached us, it will not count twice.
+            </Text>
+            {/* Not true on a shared device: the visitor is about to be signed
+                out of it. The kiosk says where the attempt actually is instead
+                (KIOSK_UNRESOLVED_NOTICE, on the Finish bar below). */}
+            {kiosk ? null : (
+              <Text style={styles.stepBody}>
+                You can leave this page. The same attempt will be here when you come back.
+              </Text>
+            )}
+          </View>
         </View>
         <View style={styles.actions}>
           {kiosk ? (
@@ -1996,34 +2079,47 @@ export default function ContributeToGoal() {
       <>
         {renderChrome(false)}
         {renderGoalAnchor()}
-        <View style={styles.card} testID="wsf-contribute-review-screen">
-          <Text style={styles.eyebrowMuted}>Review</Text>
-          <Text style={styles.heading} {...HEADING_1}>Review your contribution</Text>
-          <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
-            {`${formatCount(reviewCount)} ${unit}`}
-          </Text>
-          <Text style={styles.body} testID="wsf-contribute-repeat-notice">
-            {repeatNotice(repeatPolicy)}
-          </Text>
-          <View style={styles.actions}>
-            <Pressable
-              onPress={onRecord}
-              disabled={submitting}
-              accessibilityRole="button"
-              style={styles.primaryButton}
-              testID="wsf-contribute-submit"
-            >
-              <Text style={styles.primaryButtonText}>{`Record ${formatCount(reviewCount)} ${unit}`}</Text>
-            </Pressable>
-            <Pressable
-              onPress={onEdit}
-              disabled={submitting}
-              accessibilityRole="button"
-              style={styles.secondaryButton}
-              testID="wsf-contribute-edit"
-            >
-              <Text style={styles.secondaryButtonText}>Edit</Text>
-            </Pressable>
+        {/*
+          RECOVERY-PORT-1. The reference's review: a sheet named for the way in,
+          the step as its heading, the amount in its own box with what it will
+          be recorded as, then Edit and the green action side by side. The
+          words, the controls and the no-write-before-Record boundary are
+          unchanged.
+        */}
+        <View style={styles.sheet} testID="wsf-contribute-review-screen">
+          {renderSheetHead(params.mode === 'move' ? 'Start moving' : 'Already moved')}
+          <View style={styles.sheetBody}>
+            <Text style={styles.eyebrowMuted}>Review</Text>
+            <Text style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
+            <View style={styles.reviewBox}>
+              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
+                {formatCount(reviewCount)}
+                <Text style={styles.reviewUnit}>{` ${unit}`}</Text>
+              </Text>
+              <Text style={styles.reviewNote} testID="wsf-contribute-repeat-notice">
+                {repeatNotice(repeatPolicy)}
+              </Text>
+            </View>
+            <View style={[styles.sheetActionsInline, styles.pair]}>
+              <Pressable
+                onPress={onEdit}
+                disabled={submitting}
+                accessibilityRole="button"
+                style={[styles.secondaryButton, styles.pairButton]}
+                testID="wsf-contribute-edit"
+              >
+                <Text style={styles.secondaryButtonText}>Edit</Text>
+              </Pressable>
+              <Pressable
+                onPress={onRecord}
+                disabled={submitting}
+                accessibilityRole="button"
+                style={[styles.primaryButton, styles.pairButton]}
+                testID="wsf-contribute-submit"
+              >
+                <Text style={styles.primaryButtonText}>{`Record ${formatCount(reviewCount)} ${unit}`}</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
         {renderYourPart(reviewCount)}
@@ -2392,15 +2488,153 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 24,
   },
-  pendingCard: {
-    backgroundColor: '#FFF8E8',
-    borderRadius: 16,
-    padding: 20,
-    gap: 12,
+  // RECOVERY-PORT-1. The kept attempt's amount, the one strong line in the
+  // sentence block (the reference sets the amount bold inside its paragraph).
+  pendingCount: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '700' },
+
+  /* ---- RECOVERY-PORT-1: the sheet the recovery states sit on -------------
+     Read off the frozen reference (Lovable `02cb35c4`, `styles.css` and the
+     six recovery frames, measured): a white surface with an 18px top corner
+     and an 8px bottom one; a header that names what it holds over a hairline;
+     the step in a 24px regular heading; 14/21 muted sentences; one 54px green
+     action. Tokens are this product's own (NAVY, CREAM, the kit's greens). */
+  sheet: {
+    backgroundColor: wsfTheme.colors.surface,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
     borderWidth: 1,
-    borderColor: '#EAD9A6',
+    borderColor: CARD_BORDER,
+    overflow: 'hidden',
+    ...elevation.card,
   },
-  pendingCount: { color: wsfTheme.colors.text, fontSize: 18, fontWeight: '800' },
+  sheetHead: {
+    minHeight: 56,
+    justifyContent: 'center',
+    paddingTop: 13,
+    paddingBottom: 10,
+    paddingLeft: 18,
+    paddingRight: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: CARD_BORDER,
+  },
+  sheetTitle: { color: wsfTheme.colors.text, fontSize: 22, lineHeight: 28, fontWeight: '400' },
+  sheetBody: { paddingTop: 18, paddingHorizontal: 20, paddingBottom: 22, gap: 12 },
+  // A short phone gives the sheet's air, never its content.
+  sheetBodyShort: { paddingTop: 12, paddingBottom: 12, gap: 8 },
+  sheetActions: { paddingHorizontal: 20, paddingBottom: 22 },
+  sheetActionsShort: { paddingBottom: 14 },
+  sheetActionsInline: { marginTop: 4, gap: 10 },
+  stepHeading: { color: wsfTheme.colors.text, fontSize: 24, lineHeight: 28, fontWeight: '400' },
+  stepBody: { color: wsfTheme.colors.textMuted, fontSize: 14, lineHeight: 21 },
+  // Two actions share a row, the outline one first and the green one last, as
+  // the reference sets them; below about 300px of room they stack.
+  pair: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pairButton: { flexGrow: 1, flexBasis: 130, minWidth: 0, minHeight: 54 },
+
+  // The receipt's badge: the reference's pill, carrying the canonical eyebrow.
+  // Progress green at 30% on white is the reference's own badge colour.
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 7,
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: 'rgba(145,203,125,0.30)',
+  },
+  // A tick drawn from two borders, so nothing depends on a font's glyph.
+  badgeCheck: {
+    width: 6,
+    height: 10,
+    marginTop: -3,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    borderColor: ON_ACTION,
+    transform: [{ rotate: '45deg' }],
+  },
+  badgeText: {
+    color: ON_ACTION,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  // On white the progress green is too pale to read; its deep action edge is not.
+  receiptSubline: { color: ACTION_GREEN_DEEP, fontSize: 15, lineHeight: 21, fontWeight: '700' },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tile: {
+    flexGrow: 1,
+    flexBasis: 130,
+    minWidth: 0,
+    backgroundColor: CREAM,
+    borderRadius: 12,
+    padding: 12,
+    gap: 2,
+  },
+  tileLabel: {
+    color: wsfTheme.colors.textMuted,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  tileValue: { color: NAVY, fontSize: 28, lineHeight: 34, fontWeight: '700' },
+  tileUnit: { color: wsfTheme.colors.textMuted, fontSize: 15, fontWeight: '700' },
+  // The one navy object on the sheet is the community's: the Living WE beside
+  // the shared total, its track and where it stands.
+  sharedPanel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: NAVY,
+    borderRadius: 14,
+    padding: 14,
+  },
+  sharedPanelStacked: { flexDirection: 'column', alignItems: 'stretch', gap: 10 },
+  sharedWe: { alignItems: 'center', justifyContent: 'center' },
+  sharedText: { flex: 1, minWidth: 0, gap: 3 },
+  sharedLabel: {
+    color: HERO_MUTED,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  sharedTotal: { color: CREAM },
+  sharedCount: { color: CREAM, fontSize: 28, lineHeight: 34, fontWeight: '700' },
+  sharedRest: { color: HERO_MUTED, fontSize: 13, fontWeight: '700' },
+  sharedTrack: {
+    height: 8,
+    marginTop: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(247,245,240,0.18)',
+    overflow: 'hidden',
+  },
+  sharedTrackFill: { height: '100%', borderRadius: 999, backgroundColor: PROGRESS_GREEN },
+  sharedMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    columnGap: 14,
+    rowGap: 2,
+    marginTop: 2,
+  },
+  sharedPercent: { color: PROGRESS_GREEN, fontSize: 11, lineHeight: 15, fontWeight: '700' },
+  sharedStatus: { color: HERO_MUTED, fontSize: 11, lineHeight: 15 },
+  // A4. Same near-goal emphasis as Community Home's hero and the public
+  // display: the last stretch is the one line worth leaning on.
+  sharedStatusNear: { color: CREAM, fontWeight: '700' },
+
+  // The review's amount in its own box, with what it will be recorded as.
+  reviewBox: { backgroundColor: CREAM, borderRadius: 14, padding: 16, gap: 8 },
+  reviewUnit: { color: wsfTheme.colors.textMuted, fontSize: 15, fontWeight: '800', letterSpacing: 0 },
+  reviewNote: { color: wsfTheme.colors.textMuted, fontSize: 13, lineHeight: 19 },
   eyebrowMuted: {
     color: wsfTheme.colors.textMuted,
     fontSize: 12,
@@ -2446,16 +2680,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   heroHeadline: { color: CREAM, fontSize: 28, fontWeight: '800', lineHeight: 34, letterSpacing: -0.3 },
-  heroSubline: { color: PROGRESS_GREEN, fontSize: 18, fontWeight: '700', lineHeight: 24 },
   weWrap: { alignItems: 'center', paddingTop: 14, paddingBottom: 6 },
   heroFacts: { alignItems: 'center', gap: 2 },
   heroTotal: { color: CREAM, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
-  heroPercent: { color: PROGRESS_GREEN, fontSize: 19, fontWeight: '700', textAlign: 'center' },
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   // A4. Same near-goal emphasis as Community Home's hero and the public
   // display: the last stretch is the one line worth leaning on.
   heroStatusNear: { color: CREAM, fontWeight: '700' },
-  heroStanding: { color: CREAM, fontSize: 15, lineHeight: 21, textAlign: 'center', paddingTop: 6 },
 
   // entry
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -2542,28 +2773,29 @@ const styles = StyleSheet.create({
 
   // buttons
   actions: { gap: 10, marginTop: 4 },
+  // RECOVERY-PORT-1. The reference's action: 54 tall at a 12 corner (Home's).
   primaryButton: {
     backgroundColor: ACTION_GREEN,
-    borderRadius: 16,
+    borderRadius: wsfTheme.radius.md,
     minHeight: 54,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
     ...elevation.action,
   },
-  primaryButtonText: { color: ON_ACTION, fontSize: 17, fontWeight: '900', textAlign: 'center' },
+  primaryButtonText: { color: ON_ACTION, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   secondaryButton: {
     alignSelf: 'stretch',
     backgroundColor: wsfTheme.colors.surface,
     borderWidth: 1.5,
     borderColor: NAVY,
-    borderRadius: 14,
+    borderRadius: wsfTheme.radius.md,
     minHeight: 48,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  secondaryButtonText: { color: NAVY, fontSize: 14, fontWeight: '800', textAlign: 'center' },
   chromeLinkTextDark: { color: CREAM },
   /* The dark colourways for the kiosk's end-of-session controls. The light
      ones are unchanged: the unresolved and refusal screens are cream, and
@@ -2574,51 +2806,6 @@ const styles = StyleSheet.create({
   captionOnDark: { color: HERO_MUTED },
   kioskErrorDark: { color: '#FFB4AE' },
 
-  /* ---- the confirmed receipt: the whole page is the moment --------------- */
-  receipt: { alignItems: 'center', gap: 6, paddingTop: 6 },
-  /* The short phone gives rhythm, never the moment: the mark and the numbers
-     stay, the air between them goes, so the way onward clears the tab bar. */
-  receiptShort: { gap: 2, paddingTop: 0 },
-  receiptAmount: {
-    color: CREAM,
-    fontSize: 76,
-    lineHeight: 82,
-    fontWeight: '900',
-    letterSpacing: -3,
-    textAlign: 'center',
-  },
-  receiptAmountShort: { fontSize: 52, lineHeight: 56, letterSpacing: -2 },
-  receiptHeadline: {
-    color: CREAM,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  receiptSubline: {
-    color: PROGRESS_GREEN,
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  receiptOwn: {
-    color: HERO_MUTED,
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'center',
-  },
-  ghostDark: {
-    alignSelf: 'stretch',
-    borderRadius: 16,
-    minHeight: 48,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(247,245,240,0.22)',
-  },
-  ghostDarkText: { color: CREAM, fontSize: 15, fontWeight: '800', textAlign: 'center' },
   tertiaryButton: { alignSelf: 'center', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   tertiaryButtonText: { color: NAVY, fontSize: 15, fontWeight: '600', textDecorationLine: 'underline' },
   testNote: { color: wsfTheme.colors.textMuted, fontSize: 11, textAlign: 'center', letterSpacing: 1, textTransform: 'uppercase' },
