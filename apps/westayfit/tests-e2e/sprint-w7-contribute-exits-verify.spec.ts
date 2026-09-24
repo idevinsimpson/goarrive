@@ -978,9 +978,19 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await page.getByTestId('wsf-member-tab-you').last().click();
     await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
     await page.getByTestId('wsf-you-signout').last().click();
-    await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId('wsf-home-signin').last().click();
-    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    const signin = page.locator('[data-testid="wsf-home-signin"]:visible').first();
+    await expect(signin).toBeVisible({ timeout: 20_000 });
+    await signin.click();
+    // Diagnostic (recorded on failure): where the press landed and what is in front.
+    const diag = async () =>
+      page.evaluate(() => {
+        const vis = Array.from(document.querySelectorAll('[data-testid]')).filter((el) => (el as HTMLElement).offsetParent !== null).map((el) => (el as HTMLElement).dataset.testid).filter((t) => /^wsf-(home|signin|community|you)/.test(t ?? '')).slice(0, 30);
+        return { url: location.pathname + location.search, visible: vis };
+      });
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 }).catch(async (e) => {
+      test.info().annotations.push({ type: 'sign-in step diagnostic', description: JSON.stringify(await diag()) });
+      throw e;
+    });
     await page.getByTestId('wsf-signin-email').fill(b.email);
     await page.getByTestId('wsf-signin-password').fill(b.password);
     await page.getByTestId('wsf-signin-submit').click();
@@ -1058,9 +1068,19 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await page.getByTestId('wsf-member-tab-you').last().click();
     await expect(page.getByTestId('wsf-you-signout').last()).toBeVisible({ timeout: 20_000 });
     await page.getByTestId('wsf-you-signout').last().click();
-    await expect(page.getByTestId('wsf-home-signin').last()).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId('wsf-home-signin').last().click();
-    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+    const signin = page.locator('[data-testid="wsf-home-signin"]:visible').first();
+    await expect(signin).toBeVisible({ timeout: 20_000 });
+    await signin.click();
+    // Diagnostic (recorded on failure): where the press landed and what is in front.
+    const diag = async () =>
+      page.evaluate(() => {
+        const vis = Array.from(document.querySelectorAll('[data-testid]')).filter((el) => (el as HTMLElement).offsetParent !== null).map((el) => (el as HTMLElement).dataset.testid).filter((t) => /^wsf-(home|signin|community|you)/.test(t ?? '')).slice(0, 30);
+        return { url: location.pathname + location.search, visible: vis };
+      });
+    await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 }).catch(async (e) => {
+      test.info().annotations.push({ type: 'sign-in step diagnostic', description: JSON.stringify(await diag()) });
+      throw e;
+    });
     await page.getByTestId('wsf-signin-email').fill(b.email);
     await page.getByTestId('wsf-signin-password').fill(b.password);
     await page.getByTestId('wsf-signin-submit').click();

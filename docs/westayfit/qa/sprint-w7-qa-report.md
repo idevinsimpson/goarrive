@@ -2042,3 +2042,78 @@ Chromium only; Safari is CANNOT-MEASURE. Emulators only.
 - **Session model:** the owner switched this session with `/model` at ~22:20Z; `session_context.model` now reads `claude-fable-5-1`. Checks 14–17 and the runs above before that switch were on `claude-opus-5-5`; the R1 ×2 rerun and this report are after it.
 
 **Status:** tested on `7ee70e4f`; not accepted, integrated or staged by W7.
+
+---
+
+# Check 19 — W8's first-focus settle `9d30c38b` on app-shell `a1dcced`: **PASS on the routed items; the in-flight race reproduces (X7d, X7e); account isolation: see 19.4**
+
+Routed by the Director in #434 `5804104996` (L0 #462 `5804113250`; the
+account-cancellation source concern #462 `5804115569`, W8's source reading
+`5804147831`). ACK `5804124123`. The delivery is
+`9d30c38b8693f6288e27dc7ca5a167910d3135a1` on `claude/wsf-community-freshness`,
+one commit after `eff65b0`. It stays outside the frozen candidate `7ee70e4`.
+
+## 19.1 · What was tested, exactly
+
+- **Composition, recorded.** `9d30c38b` merged locally onto the integrated app-shell head `a1dcced013f659c3e1b600fa5a3deca0b53cbdd5` as one local merge commit `09cf5fd0`, never pushed. Root tree **`b5f8de30`**, equal to the tree W8 reported. The diff against `a1dcced` is exactly W8's two files, each byte-identical to `9d30c38b`: the Community route (`5bd84cca`) and W8's spec (`072859a5`). No Home file, no W4 or W9 file, no protected path.
+- **The change, from the diff.** The 2.6 s settle timer is now scheduled on every focus, the first (the mount) included, with the cleanup clearing it on blur. Nothing else moves; no presentation change.
+- **Build.** The composition itself (exit 0, stamp `09cf5fd0`), served from the emulator. Everything ran serially. Baseline: `7ee70e4f`, built exactly earlier.
+
+## 19.2 · Per item
+
+| # | routed item | result | measured on `09cf5fd0` (`a1dcced` ⊕ `9d30c38b`) |
+|---|---|---|---|
+| 1 | **X5**, the warm "Back to home" fresh mount, no stub | **PASS** | The fresh screen's first pulse left 386 ms after the last pre-write poll (inside the cache window) and showed **0**; the first-focus settle read at +2,562 ms corrected it to **20** at +2,825 ms. On `7ee70e4f` (and `9f27c6e`, `6c98f485`): stale 0 at 10 s |
+| 2 | **X5s**, first reads forced stale | **PASS** | Sentinel at +255 ms; corrected to 20 at **+2,809 ms**; holding at 15 s. Two Community roots, one tab bar: the known duplicate, unchanged by this data-only delta |
+| 3 | **X7**, a direct `/community/<id>` entry with a stale first read (independent of any exit) | **PASS** | Stale 1,848 at +433 ms; a second pulse at +2,820 ms; **1,867 at +3,006 ms**, holding at 12 s. On `7ee70e4f`: one pulse, 1,848 at 12 s |
+| 4 | **own part distinct** | **PASS** | While the shared total corrected 1,848 → 1,867, "Your part" read "You've added 20 squats to this goal." throughout |
+| 5 | **reselect after the settle** | **PASS** | Reselecting Home after the settle issued **0** reads (pulse, own credit, goal list, activity, members) in 4 s |
+| 6 | **X7b / X7c**, a blur or an account change before 2.6 s | **PASS** | One pulse before leaving; **no** pulse after a You-tab blur or a sign-out (controls; also pass on `7ee70e4f`, which has no first-focus timer) |
+| 7 | **X1s**, the return settle (both legs) | **PASS** | Pulses at +60 / +2,567 ms and +88 / +2,612 ms; the return path is unchanged |
+| 8 | **F1–F4**, the four freshness cases | **PASS 4/4** | |
+| 9 | **W8's spec** from the composed tree, ×2 | **PASS 10/10** | |
+| 10 | tsc; guard | 0; 9 / 20 | on the composed tree |
+| — | Safari | **CANNOT-MEASURE** | Chromium only |
+
+## 19.3 · The in-flight race, measured (the Director's concrete limit)
+
+Both tests hold a read's answer past the settle and let every other read
+through. They assert what the member should get: the server's 1,867,
+holding at 12 s.
+
+| test | `09cf5fd0` (W8's delivery) | `7ee70e4f` (baseline) |
+|---|---|---|
+| **X7d**, fresh mount: the **initial** pulse held 4 s and answered stale | **FAIL.** The settle fired at +2,914 ms while the slot was still `loading`, so its answer was dropped; the held stale read landed at +4,634 ms; **1,848 at 12 s** | **FAIL**: one pulse, 1,848 at 12 s (no settle at all) |
+| **X7e**, a **return**: the return's first pulse held 4 s and answered stale, the settle at 2.6 s answering fresh | **FAIL.** 1,867 on screen; the settle answered fresh at +2,651 ms; the held stale read landed at +4,427 ms and **overwrote** it; **1,848 at 12 s**, on the same marked instance | **FAIL**, the same (+2,658 / +4,170 ms) |
+
+**Reading, from the source at `9d30c38b`:**
+- The settle read replaces only a slot already `'ok'` (index.tsx ≈1145): a slot still `loading` at 2.6 s is left to the read in flight. That is W8's disclosed limit, and X7d shows it leaves stale progress in view with no second look.
+- The ordinary progress read (mount and return) has **no sequence guard**: whichever answer lands last wins. X7e shows a stale answer issued earlier landing after the settle's fresh one and overwriting it. This half is **not in W8's disclosure**; it is on the return path too.
+
+**Pre-existing or changed.** Both outcomes are **inherited**: on `7ee70e4f` the fresh mount is stale regardless, and the return path is `eff65b0`'s, in the accepted candidate. `9d30c38b` narrows the fresh-mount case to the slow-initial-read window and changes nothing on the return path. Neither is newly introduced; neither is solved. **Severity:** the stale figure lasts until the next focus or a reload; the member's own part is unaffected in these two cases; the trigger needs the first read to take longer than 2.6 s (fresh mount) or to land after the settle's answer (return), which on the emulator needs a held answer and on a slow network needs none.
+
+**The smallest same-file correction, for W8's lane** (W8 has pre-staged the same shape locally, `5804147831`; W7 edits nothing): (a) let the settle **fill** a slot still `loading` with its confirmed result; (b) give the progress reads a per-goal sequence so an answer issued earlier never overwrites one applied later. Fail-first is X7d and X7e as committed.
+
+## 19.4 · Account isolation of the settle (X7f)
+
+**Not yet measured.** The probe (A's return settle answers held; A signs out and B
+signs in inside the app; B's own credit read before and after the release)
+did not reach its measurement on two runs: its in-app sign-in step failed at
+the sign-in form after the sign-out. Nothing about the product is claimed
+from that. It is being corrected per the Director's `5805389722` (the marked
+instance must survive or the race is CANNOT-MEASURE; the held answers must be
+shown delivered after B's figure loaded, with a release latch tied to B being
+ready rather than a fixed hold; every sampled state, not only the last, must
+be free of A's 20). The result follows as an addendum with the exact tree.
+
+## 19.5 · Bound and hygiene
+
+Chromium only; Safari is CANNOT-MEASURE. Emulators only.
+
+- **Verification builds:** local and never pushed (`09cf5fd0`; `7ee70e4f` for the baseline column).
+- **Edits:** no product edit; no other worker's spec edited. W8's spec ran from the composed tree.
+- **After every run:** artifacts and `test-results` cleaned.
+- **Checks:** `ts:check` 0; guard 9 / 20.
+- Checks 16–18 are not rerun.
+
+**Status:** tested on `09cf5fd0`; not accepted, integrated or staged by W7.
