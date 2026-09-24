@@ -56,6 +56,7 @@ import { wsfTheme } from '../../../../../src/theme';
 import { PROGRESS_GREEN } from '../../../../../src/ui/brandAssets';
 import { useMemberShellAction } from '../../../../../src/ui/memberShellActions';
 import { ButtonLink } from '../../../../../src/ui/ButtonLink';
+import { TabGlyph } from '../../../../../src/ui/TabGlyph';
 import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
 import { buildKioskUrl, currentOrigin } from '../../../../../src/ui/kioskLink';
@@ -3744,32 +3745,43 @@ export default function CommunityPage() {
                     news still takes the slot — "Goal reached", on a confirmed
                     pulse only, exactly as before and under the same testID.
                   */}
-                  {p.kind === 'ok' &&
-                  progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
-                    'reachedOpen' ? (
-                    <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
-                      Goal reached
-                    </Text>
-                  ) : (
-                    <View style={styles.heroLabelRow}>
-                      <View style={styles.heroLabelDot} />
-                      <Text
-                        style={[styles.heroEyebrow, windowWidth < 240 ? styles.heroLabelNarrow : null]}
-                        testID="wsf-community-goal-label"
-                      >
-                        Community goal
+                  {/*
+                    HOME-POLISH-1. THE LABEL AND THE GOAL'S STATE SHARE THE TOP
+                    ROW, as the reference sets them: the name of the card at the
+                    left, the state in a pill at the right. The pill carries the
+                    same line it did under the title — the whole window, with
+                    its end date, in the same words and under the same testID —
+                    not the reference's bare "OPEN". The row wraps, so a narrow
+                    screen drops the pill under the label rather than squeezing.
+                  */}
+                  <View style={styles.heroTopRow}>
+                    {p.kind === 'ok' &&
+                    progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
+                      'reachedOpen' ? (
+                      <Text style={styles.heroEyebrow} testID="wsf-community-goal-eyebrow">
+                        Goal reached
                       </Text>
-                    </View>
-                  )}
+                    ) : (
+                      <View style={styles.heroLabelRow}>
+                        <View style={styles.heroLabelDot} />
+                        <Text
+                          style={[styles.heroEyebrow, windowWidth < 240 ? styles.heroLabelNarrow : null]}
+                          testID="wsf-community-goal-label"
+                        >
+                          Community goal
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={styles.heroStatePill} testID={`wsf-community-goal-period-${featured.goalId}`}>
+                      {windowLabel}
+                    </Text>
+                  </View>
                   <Text
                     style={[styles.heroTitle, heroTitleType]}
                     testID={`wsf-community-goal-title-${featured.goalId}`}
                     {...HEADING_2}
                   >
                     {featured.title}
-                  </Text>
-                  <Text style={styles.heroMeta} testID={`wsf-community-goal-period-${featured.goalId}`}>
-                    {windowLabel}
                   </Text>
                   {/*
                     The progress area keeps its height while the pulse is on
@@ -3887,28 +3899,39 @@ export default function CommunityPage() {
                 */}
                 {p.kind === 'ok' && p.ownCredit != null ? (
                   /*
-                    SLICE 2b. A COMPACT PERSONAL STRIP, NOT ANOTHER EQUAL CARD.
-                    It is one person's private line about a shared goal — a
-                    quiet strip with a green edge, so the hero above stays the
-                    only object with weight.
+                    SLICE 2b. A COMPACT PERSONAL LINE, NOT ANOTHER EQUAL CARD.
+                    It is one person's private line about a shared goal, so the
+                    hero above stays the only object with weight.
+
+                    HOME-POLISH-1. A ROW ON THE PAGE, AS THE REFERENCE DRAWS IT:
+                    a pale round tile carrying the Progress tab's own glyph (the
+                    reference uses its tab icon the same way), a quiet label,
+                    and the sentence. No card, no green edge. The sentences are
+                    unchanged; the reference's bare figure and its "Part of our
+                    shared N" are not copied (see the PR's list of differences).
                   */
-                  <View style={styles.personalStrip} testID={`wsf-community-your-part-${featured.goalId}`}>
-                    <Text style={styles.sectionEyebrow}>Your part</Text>
-                    {/*
-                      SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE. On a
-                      `once` goal already contributed to, the statement above
-                      says "You've recorded N unit.", so this strip says what
-                      that does not: that the part is counted, and where. It
-                      offers no route to contribute; the action above is the
-                      one route.
-                    */}
-                    <Text style={styles.body}>
-                      {p.ownCredit > 0
-                        ? (p.repeatPolicy === 'once'
-                            ? 'Counted in the shared total above.'
-                            : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`)
-                        : 'Your first contribution counts here.'}
-                    </Text>
+                  <View style={styles.contributionRow} testID={`wsf-community-your-part-${featured.goalId}`}>
+                    <View style={styles.contributionTile}>
+                      <TabGlyph name="activity" color={ACTION_GREEN_DEEP} />
+                    </View>
+                    <View style={styles.contributionText}>
+                      <Text style={styles.contributionEyebrow}>Your contribution</Text>
+                      {/*
+                        SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE. On a
+                        `once` goal already contributed to, the statement above
+                        says "You've recorded N unit.", so this line says what
+                        that does not: that the part is counted, and where. It
+                        offers no route to contribute; the action above is the
+                        one route.
+                      */}
+                      <Text style={styles.contributionBody}>
+                        {p.ownCredit > 0
+                          ? (p.repeatPolicy === 'once'
+                              ? 'Counted in the shared total above.'
+                              : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`)
+                          : 'Your first contribution counts here.'}
+                      </Text>
+                    </View>
                   </View>
                 ) : null}
                 {/*
@@ -4347,10 +4370,11 @@ const styles = StyleSheet.create({
   // page had; four sections at 18 spent most of what the shorter hero freed.
   inner: { maxWidth: 640, width: '100%', gap: 14 },
   identity: { gap: 2 },
+  // HOME-POLISH-1. 10 -> 11, the reference's eyebrow size.
   identityEyebrow: {
     color: ACTION_GREEN_DEEP,
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
     letterSpacing: 1.6,
     textTransform: 'uppercase',
@@ -4405,11 +4429,14 @@ const styles = StyleSheet.create({
     // 1 demoted this to 20 because at 32 it shouted over a goal title sitting
     // directly under it; the goal title is inside a navy hero now and has its
     // own weight, so the two no longer compete for the same register.
+    // HOME-POLISH-1. 800 -> 500: the reference sets the community's name
+    // large and in a medium weight, so its size carries it and the navy hero
+    // below stays the heaviest thing on the screen.
     color: wsfTheme.colors.text,
     fontSize: 26,
-    fontWeight: '800',
+    fontWeight: '500',
     lineHeight: 31,
-    letterSpacing: -0.6,
+    letterSpacing: -0.3,
     marginTop: 2,
   },
   // The community name is a stored string of up to 80 characters sitting in a
@@ -4448,11 +4475,13 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     gap: 2,
   },
+  // HOME-POLISH-1. 14 -> 12: the second of the two facts beside the faces,
+  // at the reference's size.
   movedToday: {
     color: ACTION_GREEN_DEEP,
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: '800',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
   },
   peopleLink: {
     flexDirection: 'row',
@@ -4474,18 +4503,22 @@ const styles = StyleSheet.create({
   peopleLinkText: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   peopleLinkChevron: { color: INK_QUIET, fontSize: 20, fontWeight: '700' },
   section: { gap: 8 },
+  // HOME-POLISH-1. 12 -> 11, one eyebrow size across the page, as the
+  // reference sets its section labels.
   sectionEyebrow: {
     color: ACTION_GREEN_DEEP,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.5,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 1.6,
     textTransform: 'uppercase',
   },
 
   // ---- the hero: navy surface, cream type, green for confirmed progress ----
   hero: {
     backgroundColor: NAVY,
-    borderRadius: 24,
+    // HOME-POLISH-1. 24 -> 22, the reference's corner.
+    borderRadius: 22,
     paddingHorizontal: 16,
     // TIGHTENED FOR THE SOCIAL FOLD. The Director's AFTER review required the
     // first momentum row to be VISIBLE above the tab bar at 390x844, and said
@@ -4493,8 +4526,10 @@ const styles = StyleSheet.create({
     // shrinking the Living WE into a minor icon or hiding an action. This is
     // that recovery: the hero's own frame gives up a few points, the mark keeps
     // its dominance.
-    paddingTop: 10,
-    paddingBottom: 10,
+    // HOME-POLISH-1. 10 -> 16 / 14, toward the reference's frame: the state
+    // moved up beside the label, and the line it freed is spent here.
+    paddingTop: 16,
+    paddingBottom: 14,
     gap: 4,
     // overflow clips the light and the bloom to the card's own corners.
     overflow: 'hidden',
@@ -4541,8 +4576,8 @@ const styles = StyleSheet.create({
   },
   heroEyebrow: {
     color: PROGRESS_GREEN,
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
     letterSpacing: 1.6,
     textTransform: 'uppercase',
@@ -4550,18 +4585,42 @@ const styles = StyleSheet.create({
   // HOME-POLISH-1. The label that names the card: a small progress-green dot
   // and the eyebrow, on one line.
   heroLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  // HOME-POLISH-1. The label at the left, the goal's state at the right.
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    columnGap: 8,
+    rowGap: 4,
+  },
+  // The reference's state pill: progress green on a faint wash of itself.
+  // #91CB7D on that wash over the navy measures about 6.8:1.
+  heroStatePill: {
+    color: PROGRESS_GREEN,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: wsfTheme.radius.pill,
+    backgroundColor: 'rgba(145,203,125,0.15)',
+    overflow: 'hidden',
+  },
   heroLabelDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: PROGRESS_GREEN },
   // At about 200% zoom the tracked label is wider than the hero; it keeps one
-  // line (the height "Goal reached" has) by tightening its tracking.
-  heroLabelNarrow: { letterSpacing: 0.8 },
+  // line (the height "Goal reached" has) by stepping down to 10 and tightening
+  // its tracking.
+  heroLabelNarrow: { fontSize: 10, lineHeight: 13, letterSpacing: 0.8 },
+  // HOME-POLISH-1. 22/800 -> 23/500: the reference names the goal in a medium
+  // weight, so the shared total under the mark is the one heavy figure here.
   heroTitle: {
     color: CREAM,
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 27,
-    letterSpacing: -0.4,
+    fontSize: 23,
+    fontWeight: '500',
+    lineHeight: 28,
+    letterSpacing: -0.3,
   },
-  heroMeta: { color: HERO_MUTED, fontSize: 15, lineHeight: 20 },
   heroBody: { color: CREAM, fontSize: 16, lineHeight: 22 },
   heroCentered: { alignItems: 'center', gap: 8 },
   // Reserved room for the mark and the facts; the loading line sits centred
@@ -4592,12 +4651,14 @@ const styles = StyleSheet.create({
   // and at 24 it was smaller than the community's own name.
   heroTotal: { textAlign: 'center' },
   heroTotalCount: { ...display.lg, color: CREAM },
-  heroTotalRest: { color: ON_NAVY_MUTED, fontSize: 14, fontWeight: '600', lineHeight: 20 },
-  heroPercent: { color: PROGRESS_GREEN, fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  // HOME-POLISH-1. The reference's small facts: 13 beside the count, 11 under
+  // the bar.
+  heroTotalRest: { color: ON_NAVY_MUTED, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 11, lineHeight: 15, fontWeight: '700' },
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   // HOME-POLISH-1. What is left, at the right end of the row under the bar.
   // Only this line: the loading line and "Reached on …" keep heroStatus.
-  heroStatusInRow: { fontSize: 13, lineHeight: 18, textAlign: 'right', flexShrink: 1 },
+  heroStatusInRow: { fontSize: 11, lineHeight: 15, textAlign: 'right', flexShrink: 1 },
   // HOME-POLISH-1. How far, and how far to go, as one row under the bar.
   heroFactsRow: {
     flexDirection: 'row',
@@ -4636,20 +4697,29 @@ const styles = StyleSheet.create({
   // the pair sat flush against the fixed navigation, which reads as the screen
   // running out rather than as a composition ending.
   actionsShort: { marginBottom: 14 },
-  // ONE FLOWING SECTION, NOT A TILE. The member's own part leads with a green
-  // edge; anything that belongs with it continues under a hairline rather than
-  // starting a second box of equal weight beside it.
-  personalStrip: {
-    backgroundColor: SURFACE_WHITE,
+  // HOME-POLISH-1. The member's own part as the reference sets it: a row on the
+  // page, a 40px tile, a quiet label over the sentence. No card around it.
+  contributionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 2 },
+  // A tint of the progress green behind the Progress glyph; the glyph itself
+  // is the action green's deep edge, measured well above 3:1 on the tint.
+  contributionTile: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    paddingHorizontal: 14,
-    // HOME-POLISH-1. 12 -> 10: the strip now sits in the first viewport.
-    paddingVertical: 10,
-    gap: 2,
-    borderLeftWidth: 3,
-    borderLeftColor: PROGRESS_GREEN,
-    ...elevation.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(145,203,125,0.24)',
   },
+  contributionText: { flexShrink: 1, minWidth: 0, gap: 1 },
+  contributionEyebrow: {
+    color: TEXT_MUTED,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  contributionBody: { color: wsfTheme.colors.text, fontSize: 15, lineHeight: 20, fontWeight: '600' },
   // SLICE 2. The identity band: the community's name, then the one presence
   // fact, separated from the goal below by a hairline rather than a gap, so
   // the hero reads as one object and not two stacked cards.
@@ -4681,7 +4751,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: HAIRLINE,
     backgroundColor: SURFACE_WHITE,
-    borderRadius: 16,
+    borderRadius: wsfTheme.radius.md,
     minHeight: 44,
     paddingHorizontal: 18,
     justifyContent: 'center',
@@ -4691,16 +4761,17 @@ const styles = StyleSheet.create({
   // THE ACTION GREEN, NOT THE PROGRESS GREEN. They are separate tokens on
   // purpose: a button must never be able to restate what the Living WE is
   // saying about the shared total.
+  // HOME-POLISH-1. The reference's action: 54 tall, 12 at the corner.
   primaryButton: {
     backgroundColor: ACTION_GREEN,
-    borderRadius: 16,
-    minHeight: 52,
+    borderRadius: wsfTheme.radius.md,
+    minHeight: 54,
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
     ...elevation.action,
   },
-  primaryButtonText: { color: ON_ACTION, fontSize: 17, fontWeight: '900', textAlign: 'center' },
+  primaryButtonText: { color: ON_ACTION, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   heroOutlineButtonWide: {
     borderWidth: 1.5,
     borderColor: HAIRLINE,
