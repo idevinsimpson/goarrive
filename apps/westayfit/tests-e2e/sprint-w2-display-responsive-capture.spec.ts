@@ -62,6 +62,44 @@ const CLOSED_START = '2026-08-02T03:00:00.000Z';
 const CLOSED_END = '2026-08-16T03:59:00.000Z';
 const OPEN_PERIOD = 'Open · Ends Mon, Oct 5';
 
+/*
+ * THE CLOCK IS FROZEN, SO A FRAME CAN BE REPRODUCED.
+ *
+ * The display prints the device's own clock on its freshness line ("Confirmed
+ * 1:48 AM") and ages each recent addition against the device's current minute
+ * ("+20 squats · 1 min ago"). Both are pure functions of `Date` in the page,
+ * so a frame captured at a different wall time differs in exactly those pixels
+ * and nothing else — which is what made "I re-ran the producer and the frames
+ * came back byte-identical" impossible to be true (README, Correction 23 Sep).
+ *
+ * So the page's `Date` is pinned before the route loads. Timers keep running
+ * (the poll still ticks every 2 s, the stale pill still appears on its own);
+ * only what the page believes the time IS stands still. The additions are
+ * seeded relative to the SAME instant, so "1 min ago" is one minute by the
+ * page's clock, not by the seed process's.
+ *
+ * THE INSTANT IS THE MINUTE THE ACCEPTED FRAMES WERE CAPTURED IN. Six of the
+ * eight carry a clock: four read 1:48 AM, and the portrait progress and stale
+ * pair, shot a minute earlier, read 1:47; the refused pair prints no clock. So
+ * the accepted record and a fresh run agree on the clock text wherever they
+ * can, rather than differing by construction. The page's zone and locale are
+ * pinned to what that capture ran under (a UTC container, en-US Chromium), so
+ * the same frame comes out of a container set to any zone.
+ *
+ * WHAT STAYS REAL: document ids and seed stamps (uniqueness across runs), and
+ * the createdAt / updatedAt fields no frame prints. Nothing in the product is
+ * touched; this is the producer being honest about what it can promise.
+ *
+ * ONE LATENT COUPLING. The mark's Animated.timing path measures its progress
+ * with Date.now(), so under a fixed clock a transition would never advance.
+ * Today `livingWeTransition()` returns null and the fill is set, not animated;
+ * if a transition is ever approved, this producer must advance the clock
+ * (`clock.install` + `runFor`) rather than fix it, or it would photograph a
+ * stalled fill without saying so.
+ */
+const FROZEN_AT = new Date('2026-09-23T01:48:00.000Z');
+const FROZEN_CLOCK = '1:48 AM'; // FROZEN_AT, as the page prints it under UTC / en-US
+
 const LONG_COMMUNITY = 'The Greater Maple Street and Riverside Parish Movers, Walkers and Early Risers Association';
 const LONG_TITLE = 'Squats, lunges, step-ups and everything else we can count together before the end of this month';
 
@@ -175,7 +213,11 @@ async function seedAdditions(goalId: string): Promise<void> {
   for (const [i, e] of entries.entries()) {
     await firestoreWrite(
       `wsfGoals/${goalId}/recentAdditions/rspattempt${String(i).padStart(4, '0')}${randomBytes(4).toString('hex')}`,
-      { amount: { integerValue: String(e.amount) }, at: { stringValue: new Date(Date.now() - e.minutesAgo * 60_000).toISOString() } }
+      // Relative to the page's frozen clock, not this process's: the age label
+      // is computed in the page, and both sides are floored to the minute, so
+      // an addition seeded a whole number of minutes before FROZEN_AT reads as
+      // exactly that many minutes ago.
+      { amount: { integerValue: String(e.amount) }, at: { stringValue: new Date(FROZEN_AT.getTime() - e.minutesAgo * 60_000).toISOString() } }
     );
   }
 }
@@ -406,7 +448,15 @@ for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE
   const size = `${viewport.width}x${viewport.height}`;
 
   test.describe(`${cls} · ${size}`, () => {
-    test.use({ viewport, deviceScaleFactor: 1, isMobile: false, hasTouch: false });
+    test.use({ viewport, deviceScaleFactor: 1, isMobile: false, hasTouch: false, timezoneId: 'UTC', locale: 'en-US' });
+
+    // Before any route script runs, so every navigation in the test sees the
+    // same instant. `setFixedTime` pins `Date` and keeps timers running
+    // (Playwright drives its fake timers from the real clock), so the poll and
+    // the stale pill behave as they do on a wall.
+    test.beforeEach(async ({ page }) => {
+      await page.clock.setFixedTime(FROZEN_AT);
+    });
 
     test('every phase keeps its exact values', async ({ page }) => {
       test.setTimeout(300_000);
@@ -460,6 +510,17 @@ for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE
       await expect(page.getByTestId('wsf-display-period')).toHaveText(OPEN_PERIOD);
       await expect(page.getByTestId('wsf-display-recent')).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId('wsf-display-recent-line')).toHaveCount(5);
+      // The frozen clock is in force at the moment of capture: the freshness
+      // line prints the pinned instant, and each age is measured from it. On a
+      // producer running on the wall clock these read whatever time it is.
+      await expect(page.getByTestId('wsf-display-confirmed-at')).toHaveText(`Confirmed ${FROZEN_CLOCK}`);
+      await expect(page.getByTestId('wsf-display-recent-line')).toHaveText([
+        '+20 squats · 1 min ago',
+        '+35 squats · 4 min ago',
+        '+12 squats · 9 min ago',
+        '+50 squats · 14 min ago',
+        '+25 squats · 22 min ago',
+      ]);
       await expect(page.getByTestId('wsf-display-we')).toHaveCount(1);
       expect(await nodesOutsideCanvas(page)).toEqual([]);
       await page.waitForTimeout(250);
@@ -469,7 +530,7 @@ for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE
       dropping = true;
       await expect(page.getByTestId('wsf-display-stale')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('wsf-display-stale')).toHaveText('Connection interrupted');
-      await expect(page.getByTestId('wsf-display-confirmed-at')).toContainText('Last confirmed');
+      await expect(page.getByTestId('wsf-display-confirmed-at')).toHaveText(`Last confirmed ${FROZEN_CLOCK}`);
       await expect(page.getByTestId('wsf-display-total-line')).toHaveText('241 of 500 squats');
       await expect(page.getByTestId('wsf-display-we')).toHaveCount(1);
       await expect(page.getByTestId('wsf-display-screen')).toHaveAttribute('data-stale', 'true');
@@ -537,6 +598,7 @@ for (const [cls, viewport] of [['portrait', PORTRAIT], ['collective', COLLECTIVE
         .getByTestId('wsf-display-goal-title')
         .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
       expect(size$, 'a long title still reads at distance').toBeGreaterThan(24);
+      await expect(page.getByTestId('wsf-display-confirmed-at')).toHaveText(`Confirmed ${FROZEN_CLOCK}`);
       await shoot(page, `AFTER-long-strings-${size}`);
     });
   });
