@@ -37,7 +37,7 @@ this branch), **accepted** (the Director's product acceptance), **integrated**
 | evidence-truth correction (two doc lines) | `63a2c4d` | Director `5810220569` | development `61dd7b6a` (L0 `5810260515`) |
 | **EXP2A** enable transition (D + F5 closed; `enable.ts`, `enable.test.ts`, policy derivation + drift fence) | `41cb6dff` (see EVIDENCE.md §EXP2A) | Director #469 `5811301305` (W7 Check 24 clean) | development `5c897ab5` |
 | **EXP2B** close → reconcile → freeze core (G closed; `close.ts`, `pool.ts`, `freeze.ts`, three suites; packet #365 `5811972490`, transfer `5812848258`) | `e0171fd1` + truth/readability successor `24d95cfe` (PR #470; EVIDENCE.md §EXP2B) | Director #470 `5815201024` (W7 Check 25 + 25D clean) | development `68d159c1` |
-| **EXP3A** private "My entries" read core (`receipt.ts`, `receipt.test.ts`; packet #365 `5815271789`) | see EVIDENCE.md §EXP3A for the exact SHA | — | — |
+| **EXP3A** private "My entries" read core (`receipt.ts`, `receipt.test.ts`; packet #365 `5815271789`) | `80615cae` (PR #471) + the stored-pool integrity successor (`pool.ts`; W7 Check 26 item 5b, Director `5816858655`); exact SHA in EVIDENCE.md §EXP3A | — | — |
 
 ## Test command
 

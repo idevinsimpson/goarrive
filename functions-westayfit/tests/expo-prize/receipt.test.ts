@@ -34,6 +34,7 @@ import {
   closePromotion,
   freezePromotion,
   ingestContribution,
+  poolDigest,
   readMyEntries,
   sealReceipt,
   ticketsFromEntries,
@@ -411,6 +412,66 @@ describe('EXP3A private "My entries" read', () => {
       const strangers = await db.collection(collection).orderBy('__name__').startAt(`${p}_uid_nobody`).endAt(`${p}_uid_nobody`).get();
       expect(strangers.size).toBe(0);
     }
+  });
+});
+
+describe('EXP3A R9 — the stored-pool integrity boundary (W7 Check 26 item 5b)', () => {
+  test('R9: all 12 D2 shapes, each re-stamped with its own recomputed digest and stamped on the promotion, yield no member count', async () => {
+    const { groupId, goalId, goals } = await scene();
+    const a = await member(groupId, 'a');
+    const b = await member(groupId, 'b');
+    const rows = [await contribute(a, goalId, 1), await contribute(a, goalId, 2), await contribute(b, goalId, 3)];
+    const { promotionId: p, windowEndMs } = await seedClosing(goals, { cutoffInMs: 1200 });
+    for (const c of rows) expect(await ingestContribution({ db: getFirestore() }, p, c.path)).toMatchObject({ outcome: 'accepted' });
+    await awaitServerTimePast(windowEndMs);
+    expect(await freezePromotion({ db: getFirestore() }, p)).toMatchObject({ outcome: 'frozen', totalTickets: 3, entrantCount: 2 });
+    const db = getFirestore();
+    const poolRef = db.doc(`${COLLECTIONS.pools}/${p}`);
+    const intact = (await poolRef.get()).data() as Record<string, unknown> & PoolRecord;
+    const ranges = intact.ranges as Array<{ entrantId: string; ticketStart: number; ticketEnd: number }>;
+    const [first, second] = ranges;
+    expect(await readMyEntries(deps(), { uid: a, promotionId: p })).toEqual({ status: 'ok', tickets: 2, settled: true });
+    expect(await readMyEntries(deps(), { uid: b, promotionId: p })).toEqual({ status: 'ok', tickets: 1, settled: true });
+
+    const rebody = (over: Partial<PoolRecord>) => {
+      const { poolDigest: _d, frozenAt: _f, freezeAttemptId: _i, passStartedAtMs: _m, ...body } = intact as Record<string, unknown>;
+      const merged = { ...(body as Omit<PoolRecord, 'poolDigest'>), ...over };
+      return { ...merged, poolDigest: poolDigest(merged) };
+    };
+    const r = (entrantId: string, ticketStart: number, ticketEnd: number) => ({ entrantId, ticketStart, ticketEnd });
+    const shapes: Array<[string, PoolRecord]> = [
+      ['overlap', rebody({ ranges: [r(first.entrantId, 1, 2), r(second.entrantId, 2, 3)] })],
+      ['gap', rebody({ ranges: [r(first.entrantId, 1, 2), r(second.entrantId, 5, 5)], totalTickets: 5 })],
+      ['duplicate other entrant', rebody({ ranges: [...ranges, r(second.entrantId, 4, 4)], totalTickets: 4, entrantCount: 3 })],
+      ['totalTickets 99', rebody({ totalTickets: 99 })],
+      ['entrantCount 7', rebody({ entrantCount: 7 })],
+      ['not starting at 1', rebody({ ranges: [r(first.entrantId, 2, 3), r(second.entrantId, 4, 4)], totalTickets: 4 })],
+      ['unsorted', rebody({ ranges: [...ranges].reverse() })],
+      ['other range malformed', rebody({ ranges: [r(first.entrantId, 1, 2), r(second.entrantId, 3, 2)] })],
+      ['non-integer', rebody({ ranges: [r(first.entrantId, 1, 2), r(second.entrantId, 2.5, 3)] })],
+      ['own range malformed', rebody({ ranges: [r(first.entrantId, 2, 1), r(second.entrantId, 2, 3)] })],
+      ['own entrant duplicated', rebody({ ranges: [r(first.entrantId, 1, 1), r(first.entrantId, 2, 2), r(second.entrantId, 3, 3)], entrantCount: 3 })],
+      ['empty ranges', rebody({ ranges: [] })],
+    ];
+    expect(shapes.length).toBe(12);
+    for (const [label, pool] of shapes) {
+      await poolRef.set(pool);
+      await setPromotion(p, { poolDigest: pool.poolDigest });
+      for (const uid of [a, b]) {
+        const d = deps();
+        const got = await readMyEntries(d, { uid, promotionId: p });
+        expect([label, got]).toEqual([label, { status: 'unavailable' }]);
+        expect([label, d.traces]).toEqual([label, ['poolCorrupt']]);
+      }
+      // And the freeze's replay fence refuses the same stored pool.
+      expect([label, (await freezePromotion({ db }, p)).outcome, (await freezePromotion({ db }, p) as { reason?: string }).reason]).toEqual([label, 'fenced', 'poolCorrupt']);
+    }
+    // The intact pool restored → the counts return.
+    await poolRef.set(intact);
+    await setPromotion(p, { poolDigest: intact.poolDigest });
+    expect(await readMyEntries(deps(), { uid: a, promotionId: p })).toEqual({ status: 'ok', tickets: 2, settled: true });
+    expect(await readMyEntries(deps(), { uid: b, promotionId: p })).toEqual({ status: 'ok', tickets: 1, settled: true });
+    expect(await freezePromotion({ db }, p)).toMatchObject({ outcome: 'frozen', replay: true, totalTickets: 3 });
   });
 });
 

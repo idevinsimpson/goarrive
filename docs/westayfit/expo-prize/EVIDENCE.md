@@ -370,6 +370,50 @@ cutoff).
 - **M23 is caught by the pure allow-list row only** (see the table): a future call site
   that passed a richer object would rely on `sealReceipt`; the pure test is what pins it.
 
+### EXP3A successor — the stored-pool integrity boundary (W7 Check 26 item 5b; Director #471 `5816858655`)
+
+**The defect, as W7 measured it on `80615cae`:** `storedPoolIntact` checked field types and
+digest equality only, and `ticketsFromPool` inspected the reading member's own range only,
+so a stored pool that had been edited **and re-stamped with the digest of its edited
+content** — overlapping or gapped ranges, a wrong `totalTickets` or `entrantCount`, ranges
+not starting at 1, unsorted, a malformed or duplicated other range, or empty ranges —
+answered with a member count (12 of 12 shapes for at least one member). No privacy leak;
+a truth defect. The freeze's replay fence relied on the same check.
+
+**The correction (form b, the shared boundary, as ruled):** `poolStructurallyValid` in
+`pool.ts`, applied inside `storedPoolIntact` before the digest test: ranges non-empty;
+`entrantCount === ranges.length`; entrant ids valid and strictly increasing by code unit;
+`ticketStart` / `ticketEnd` safe integers, 1-based, end ≥ start; the first start is 1 and
+every later start is the previous end + 1; `totalTickets` equals the final end; then the
+recomputed digest must still match. No migration or repair: a malformed stored pool fails
+closed for the member read (`poolCorrupt`) and for the freeze replay (`fenced /
+poolCorrupt`). The builder's own output is unchanged and stays accepted. `receipt.ts` and
+`freeze.ts` are untouched: both already route through `storedPoolIntact`.
+
+Files (the Director's expanded reservation for this correction only): `src/expo-prize/pool.ts`
+(+42 / −2), `tests/expo-prize/pool.test.ts` (P12: the 12 D2 shapes plus three more, each
+re-stamped, refused; builder output at four sizes accepted), `tests/expo-prize/receipt.test.ts`
+(R9: the 12 shapes re-stamped **and stamped on the promotion** against the real read → both
+members `unavailable` / `poolCorrupt`, the freeze replay fenced, the intact pool restored →
+2 / 1 and replay), `tests/expo-prize/freeze.test.ts` (proof 12b: six malformed shapes → `fenced /
+poolCorrupt`, nothing written, no marker; restored → replay with the same receipt), this file,
+TEST-MATRIX, CONTRACT (one sentence on the pool schema), README.
+
+| run | result | initial failures | reruns | skips |
+| --- | --- | --- | --- | --- |
+| focused first run: `pool` + `receipt` + `freeze` (39 cases) | **39 / 39** | 0 | 0 | 0 |
+| full lane, 10 files (127 + 3 new rows) | **130 / 130** | 0 | 0 | 0 |
+| full lane again after the control, same session | 130 / 130 | 0 | 0 | 0 |
+| `tsc --noEmit -p functions-westayfit/tsconfig.json` | 0 errors | | | |
+
+| mutation | line changed | result | rows that caught it |
+| --- | --- | --- | --- |
+| M25 structural check removed | `pool.ts` `if (!poolStructurallyValid(…)) return false;` → `if (false && …)` | **3 failed** / 36 | P12, R9, freeze 12b |
+
+Not re-run, as ruled: M13–M24, the callable batteries, the concurrency runs. Check 26's
+PASS rows carry. `poolVersion` is still only type-checked (the builder writes `1`; a version
+invariant was not asked for and is not added).
+
 ## The next seam
 
 In order, each its own reserved and reviewed packet:

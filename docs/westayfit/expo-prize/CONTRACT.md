@@ -342,7 +342,12 @@ sorted by code-unit order, ranges are laid out contiguously from 1, and the
 digest is SHA-256 of the canonical JSON `{poolVersion, ruleVersion,
 enabledConfigDigest, totalTickets, entrantCount, ranges: [[entrantId, start,
 end], …]}`. The same entries in any order give byte-identical output.
-`storedPoolIntact` re-derives the digest from a stored pool's own content.
+`storedPoolIntact` holds a stored pool to that exact structure
+(`poolStructurallyValid`: non-empty, `entrantCount` = range count, ids strictly
+increasing, safe-integer 1-based ranges, contiguous from 1, `totalTickets` = the
+final end) **and** re-derives the digest from its content; a pool that was edited
+and re-stamped fails closed for the freeze replay and the member read alike
+(W7 Check 26 item 5b).
 
 **Not here.** No draw, no random selection, no prize, no exclusion, no redraw,
 no winner or contact access, no member or public surface, no operator

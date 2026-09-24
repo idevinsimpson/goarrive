@@ -160,8 +160,45 @@ export function buildPool(
 }
 
 /**
- * Re-derive the digest of a stored pool from its own ranges and compare. A
- * pool whose stored digest does not match its content has been edited.
+ * The canonical structure every pool `buildPool` writes, checked on a STORED
+ * pool before anyone answers from it. PURE. A pool that passes the digest
+ * test but not this one was not produced by the builder: it was edited and
+ * re-stamped, and it must fail closed (W7 Check 26, item 5b).
+ *
+ *   - ranges non-empty; entrantCount === ranges.length
+ *   - entrant ids valid and strictly increasing by code unit (hence unique)
+ *   - ticketStart / ticketEnd safe integers, 1-based, end >= start
+ *   - the first start is 1 and every later start is the previous end + 1
+ *   - totalTickets equals the final end
+ */
+export function poolStructurallyValid(pool: {
+  totalTickets: number;
+  entrantCount: number;
+  ranges: readonly TicketRange[];
+}): boolean {
+  const { ranges } = pool;
+  if (!Array.isArray(ranges) || ranges.length === 0) return false;
+  if (pool.entrantCount !== ranges.length) return false;
+  let expectedStart = 1;
+  let previousId: string | null = null;
+  for (const r of ranges) {
+    if (typeof r.entrantId !== 'string' || !ENTRANT_ID_RE.test(r.entrantId)) return false;
+    if (previousId !== null && byCodeUnit(previousId, r.entrantId) >= 0) return false;
+    if (!Number.isSafeInteger(r.ticketStart) || !Number.isSafeInteger(r.ticketEnd)) return false;
+    if (r.ticketStart < 1 || r.ticketEnd < r.ticketStart) return false;
+    if (r.ticketStart !== expectedStart) return false;
+    expectedStart = r.ticketEnd + 1;
+    previousId = r.entrantId;
+  }
+  return pool.totalTickets === expectedStart - 1;
+}
+
+/**
+ * Is a stored pool exactly a pool the builder could have written? Field
+ * types, the canonical structure (`poolStructurallyValid`), and the digest
+ * re-derived from its own content — all three. A pool whose stored digest
+ * does not match its content has been edited; a pool whose structure is not
+ * canonical has been edited and re-stamped. Either fails closed.
  */
 export function storedPoolIntact(raw: unknown): raw is PoolRecord {
   if (!raw || typeof raw !== 'object') return false;
@@ -183,6 +220,7 @@ export function storedPoolIntact(raw: unknown): raw is PoolRecord {
   ) {
     return false;
   }
+  if (!poolStructurallyValid({ totalTickets: d.totalTickets, entrantCount: d.entrantCount, ranges })) return false;
   const recomputed = poolDigest({
     poolVersion: d.poolVersion,
     ruleVersion: d.ruleVersion,

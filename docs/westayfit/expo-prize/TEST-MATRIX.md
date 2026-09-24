@@ -100,8 +100,11 @@ freeze wrote; a `pure` block for the three helpers.
 | R7 | payload allow-list and deep privacy scan | exact key sets `{status,tickets,settled}` / `{status}`; the receipt JSON contains none of every string the lane stores for the promotion (entrant, link, source, entry, tally, pool and promotion documents and ids) nor the uids, goal, group, attempt and contribution ids; the only numeric field is `tickets`; plain prototype, no symbols | emulator |
 | R8 | a read never mutates | every lane document under two promotions byte-identical **including `updateTime`** after 9 reads (ok / stranger / drifted-unavailable), and again after the freeze across 6 settled reads; no document appears for a stranger uid in any lane collection | emulator |
 | P9–P11 | `sealReceipt` allow-list and non-count refusal; `ticketsFromEntries` confirmed-positive-integer rule; `ticketsFromPool` width / absent-zero / unusable-null | — | **pure** |
+| R9 | the stored-pool integrity boundary (W7 Check 26 item 5b) | the 12 D2 shapes (overlap, gap, duplicate other entrant, `totalTickets` 99, `entrantCount` 7, not starting at 1, unsorted, other range malformed, non-integer, own range malformed, own entrant duplicated, empty ranges), each re-stamped with its recomputed digest and stamped on the promotion → both members `unavailable` (`poolCorrupt`) and the freeze replay `fenced / poolCorrupt`; the intact pool restored → 2 / 1 and a replay | emulator |
+| P12 | `storedPoolIntact` refuses every structurally malformed pool whose digest is consistent | the 12 shapes plus an invalid entrant id, an unsafe integer and a start below 1 → `poolStructurallyValid` false, `storedPoolIntact` false while `poolDigest(rest) === stored`; the builder's output at 1 / 2 / 7 / 40 entrants accepted | **pure** |
+| F12b | a malformed frozen replay fences | six re-stamped shapes under `frozen` → `fenced / poolCorrupt`, pool byte-identical, no new marker; restored → replay with the same digest | emulator |
 
-**Failure controls for EXP3A** are recorded in EVIDENCE.md §EXP3A.
+**Failure controls for EXP3A** (M19–M24, and M25 for the integrity boundary) are recorded in EVIDENCE.md §EXP3A.
 
 **Not in the matrix (next phases, designed for in CONTRACT.md):** the callable that would
 expose the "My entries" read, operator controls, paper import and duplicate review, the form-store

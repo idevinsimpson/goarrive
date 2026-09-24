@@ -39,6 +39,7 @@ import {
   enablePromotion,
   freezePromotion,
   ingestContribution,
+  poolDigest,
   readPromotion,
   reconcilePromotion,
   storedPoolIntact,
@@ -459,6 +460,50 @@ describe('EXP2B freeze transition', () => {
     await getFirestore().doc(`${COLLECTIONS.pools}/${q}`).set(foreign);
     expect(await freezePromotion(deps(), q)).toEqual({ outcome: 'fenced', reason: 'poolCorrupt', status: 'frozen', attemptId: null });
     expect(await freezeAttempts(q)).toEqual({});
+  });
+
+  test('proof 12b: a structurally malformed stored pool with a recomputed digest cannot replay as frozen (W7 Check 26 item 5b)', async () => {
+    const { groupId, goalId, goals } = await scene();
+    const a = await member(groupId, 'a');
+    const b = await member(groupId, 'b');
+    const rows = [await contribute(a, goalId, 1), await contribute(b, goalId, 1)];
+    const { promotionId: p, windowEndMs } = await seedClosing(goals, { cutoffInMs: 1000 });
+    for (const c of rows) expect(await ingestContribution(deps(), p, c.path)).toMatchObject({ outcome: 'accepted' });
+    await awaitServerTimePast(windowEndMs);
+    const first = frozen(await freezePromotion(deps(), p));
+    const poolRef = getFirestore().doc(`${COLLECTIONS.pools}/${p}`);
+    const intact = (await poolRef.get()).data() as Record<string, unknown>;
+    const ranges = intact.ranges as Array<{ entrantId: string; ticketStart: number; ticketEnd: number }>;
+    const { poolDigest: _d, frozenAt: _f, freezeAttemptId: _i, passStartedAtMs: _m, ...body } = intact;
+    const restamp = (over: Record<string, unknown>) => {
+      const merged = { ...body, ...over } as Parameters<typeof poolDigest>[0];
+      return { ...merged, poolDigest: poolDigest(merged) };
+    };
+    const shapes: Array<[string, Record<string, unknown>]> = [
+      ['overlap', restamp({ ranges: [{ ...ranges[0], ticketStart: 1, ticketEnd: 1 }, { ...ranges[1], ticketStart: 1, ticketEnd: 2 }] })],
+      ['gap', restamp({ ranges: [{ ...ranges[0] }, { ...ranges[1], ticketStart: 5, ticketEnd: 5 }], totalTickets: 5 })],
+      ['totalTickets wrong', restamp({ totalTickets: 99 })],
+      ['entrantCount wrong', restamp({ entrantCount: 7 })],
+      ['unsorted', restamp({ ranges: [...ranges].reverse() })],
+      ['empty ranges', restamp({ ranges: [] })],
+    ];
+    for (const [label, pool] of shapes) {
+      await poolRef.set(pool);
+      await setPromotion(p, { poolDigest: pool.poolDigest });
+      const r = await freezePromotion(deps(), p);
+      expect([label, r]).toEqual([label, { outcome: 'fenced', reason: 'poolCorrupt', status: 'frozen', attemptId: null }]);
+      // The digest alone would have passed: it was recomputed from the malformed content.
+      expect(storedPoolIntact(pool)).toBe(false);
+      // Nothing written by the fenced replay: the malformed pool is exactly as planted, no marker.
+      expect(comparable(await poolDoc(p))).toBe(comparable(pool));
+    }
+    expect(await freezeAttempts(p)).toEqual(Object.fromEntries(Object.entries(await freezeAttempts(p)).filter(([k]) => k === first.attemptId)));
+    // Restored → replay works again, same receipt.
+    await poolRef.set(intact);
+    await setPromotion(p, { poolDigest: intact.poolDigest });
+    const again = frozen(await freezePromotion(deps(), p));
+    expect(again.replay).toBe(true);
+    expect(again.poolDigest).toBe(first.poolDigest);
   });
 
   test('proof 13: a freeze transaction that aborts before commit leaves no pool and no transition; a retry then freezes', async () => {
