@@ -60,6 +60,23 @@ On every frame, on both stages:
 
 That is Director ruling `5821650392` §2: a disclosed capability difference.
 
+## Reference provenance (a limitation, as the Director asked in #458 `5822960670`)
+
+The reference was read through the Lovable connector at exactly `02cb35c4` and hash-checked against its manifest
+`recovery-truth-1.json`.
+- **Sources:** 7 of the 8 manifest rows match byte for byte: `src/demo/model.ts`, `store.tsx`, `move.tsx`,
+  `overlays.tsx`, `screens/home.tsx`, `screens/progress.tsx` and `src/styles.css`.
+- **Frames:** all six recovery frames decode to their recorded sha256. The two 390×640 frames are recorded in
+  the manifest at `02cb35c4`. The four 390×844 frames are "carried from 1c480c6b source provenance", and their
+  hashes were read from the manifest at that named commit.
+- **The one mismatch is test-only bookkeeping.** `scripts/recovery-truth.test.ts` at `02cb35c4` has **nine**
+  cases, sha256 `91722b16ae4cbd2c3e89c3a1a928d245107192a9f140816511bbe74dc55ee391`. The manifest's
+  `355686c244588c4393bd1b562657394d4c2a9ac68ba427663686f171633c3c99` describes the older eight-case form. The
+  served file adds one case, "reproduces the legacy contradiction before hydration migration" (its lines 15–21).
+  Per the Director, the served file is authoritative and the manifest row is stale for that one file.
+- **Nothing in the canonical route takes the demo test or the demo store as authority.** Behaviour follows the
+  frozen reference's reviewed semantics and the Director's rulings (`5821650392`).
+
 ## Reproducing
 
 ```sh
