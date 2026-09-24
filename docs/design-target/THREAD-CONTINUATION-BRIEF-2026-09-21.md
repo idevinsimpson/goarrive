@@ -6,7 +6,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star and source donor, `5819686459`, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then the preserved history below. Workers read this section, their own packet and the thread deltas.
 
-**Heads (2026-09-24 21:10Z).**
+**Heads (2026-09-24 21:25Z).**
 
 | what | value |
 | --- | --- |
@@ -21,8 +21,8 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | packet | owner · PR · state | next consumer |
 | --- | --- | --- |
 | **RECOVERY-PORT-1** (contribution recovery states matched to the frozen RECOVERY-TRUTH-1 reference) | W9 `session_01QRyWY2Yqg9eU7GBq4ATQCN` · #458 `5821470793` · RELEASED 20:35Z; base `6f994f5a`; reservation `app/contribute/[goalId].tsx` + `sprint-w9-recovery-port-*` specs + `docs/design-target/review/recovery-port-1/`; ruling `5821650392` folded in (`5821671216`); handoff qualifications (`5822128606`) folded in on #458; **NOT ACKed — session IDLE since 20:06:57Z; needs the owner's resume (reported once, #365 `5821993438`; comments are not a wake)** | W7 bounded review (priority over its reference diagnosis) → Director pixels → L0 |
-| **OPS-DOC-1** (reconcile `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md` with run 47 and the deploy skill) | W3 `session_01J1CepL52CKS8SqaGSZFfLc` · #396 · **DELIVERED `1d52c854`** (one file, blob `49b0f2c9`; L0-verified: clean `cherry-pick -x` onto `cd881775`, run-all passes) | **reviewer W7** (#434 `5822117639`, first priority; W5 routing withdrawn `5822128384`, W5 stays stopped) — **ROUTED**; W7 `session_01PjqZ76c16dHJyxHaMvCoE5` RUNNING / connected at 20:58Z, no ACK yet → Director disposition → L0 draft PR of `1d52c854` into `main` (no merge / deploy) |
-| W7 item 2 — narrow focus diagnosis of the reference at Lovable `06198931` (`res.json.recording.focusAfter` empty; instrumentation vs product; no product edits) | W7 · #434 `5822117639` · ROUTED, after OPS-DOC-1 and only while no W9 candidate is delivered | Director |
+| **OPS-DOC-1** (reconcile `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md` with run 47 and the deploy skill) | W3 `session_01J1CepL52CKS8SqaGSZFfLc` · #396 · **DELIVERED `1d52c854`** (one file, blob `49b0f2c9`; L0-verified: clean `cherry-pick -x` onto `cd881775`, run-all passes) | W7 review **DELIVERED** §28 `d40b6917` (#434 `5822268191`; ACK `5822142996`): PASS on all six items, five precision findings F1–F5, none false. **Director: CHANGES REQUIRED (#396 `5822324385`)** — ONE surgical successor commit by W3 in the same file (separate the verifier's single marker failure from the workflow's later failed-release guard on the functions step's exit 2; "within two seconds"; `setIamPolicy` = repository diagnosis, log names `roles/functions.admin`); then W7 checks only the wording delta → L0 carries the successor as a draft PR into `main`. W3 `session_01J1CepL52CKS8SqaGSZFfLc` IDLE / connected since 19:29Z — needs the owner's resume (reported once on #365) |
+| W7 item 2 — narrow focus diagnosis of the reference at Lovable `06198931` (`res.json.recording.focusAfter` empty; instrumentation vs product; no product edits) | W7 · #434 `5822117639` · ACKed, EXECUTING after §28, only while no W9 candidate is delivered | Director |
 | EXP1 prize lane | `session_012wBbh1M7m3i8WDZe5hHDUS` · HELD, no packet | Director |
 | W2 / W4 / W6 / W1B / W8 | parked | Director |
 
@@ -33,7 +33,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 **Precise blockers.**
 1. Social staging readiness: a **named legitimate operator** for Operation 1 (index create + READY receipt) and Operation 2 (three `--no-invoker-iam-check` updates + schema-matched read-backs), then a verification run — never L0, never the deploy SA, no credential hunting, no repeat of denied probes.
 2. RECOVERY-PORT-1: no W9 ACK; W9 idle since 20:06:57Z — owner resume line: "Read #458 comments 5821470793 and 5821671216 and execute RECOVERY-PORT-1".
-3. OPS-DOC-1: W7's delta review (#434 `5822117639`), then the Director's disposition.
+3. OPS-DOC-1: W3's successor commit (#396 `5822324385`); W3 idle since 19:29Z — owner resume line: "Read #396 comment 5822324385 and push the OPS-DOC-1 successor commit".
 
 **Operating rules.** One writer per file; only L0 integrates, by merge commit, after the Director's explicit ACCEPTED of an exact SHA; workers are reached only by comments on their own PRs; SENT ≠ ACK ≠ executing (a pushed checkpoint is execution); no new worker without Director authorization; no deploy / IAM / secrets / force-push / empty commits by L0; frozen SHAs; real comment ids only; models and sessions preserved (Sonnet proposals only at task boundaries; no switch without the owner).
 
