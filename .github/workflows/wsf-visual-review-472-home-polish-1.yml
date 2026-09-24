@@ -3,8 +3,9 @@
 # 544a385e / 872c32fc governs composition; the frozen frames live in that
 # project, not in this repository): the nine MIGRATED and nine CANDIDATE PNGs
 # W9 adds under docs/design-target/review/home-polish-1/ at its exact head
-# (30cb07402564bbdd43381c2051c2509ecd2c86fb; product source ccda4279; W7's
-# Check 27 routed; visual acceptance pending), plus the accepted Page 01 Home
+# (successor 07df4d0ff0e77f14a2f3d5720ebedddc77427688, product source 7588af6a,
+# after the 30cb0740 / ccda4279 export the Director passed visually; W7's
+# Check 27 routed as a delta; visual acceptance pending), plus the accepted Page 01 Home
 # references, the accepted social-presence AFTER frames the Home destination
 # already renders, and the owner's boards — exported as a workflow artifact with
 # a manifest that pins each file to that commit (owner direction PR #365
@@ -60,7 +61,7 @@ jobs:
           head = git('rev-parse', 'HEAD')
           if head != want:
               sys.exit(f'checked-out HEAD {head} is not the PR head {want}')
-          # THE EXACT ALLOWLIST: W9's 18 MIGRATED / CANDIDATE frames (every one
+          # THE EXACT ALLOWLIST (unchanged paths; the CANDIDATE bytes are 7588af6a's): W9's 18 MIGRATED / CANDIDATE frames (every one
           # carrying its stage, served build and NOT ACCEPTED in an in-image strip;
           # none an AFTER) at the PR head this job checks out, original committed
           # bytes only; plus the accepted Page 01 Home TARGET / AFTER, the accepted
