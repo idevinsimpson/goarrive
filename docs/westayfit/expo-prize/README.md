@@ -18,9 +18,9 @@ instruction behind it: "Have fable begin this now."
 | file | what it is |
 | --- | --- |
 | `README.md` | this index and the lane's status |
-| `CONTRACT.md` | Packet A: the durable contract, resolutions (a)–(f) from source, schema, state machine, transaction boundaries, open owner decisions; §d′ enable (EXP2A); §d″ close → freeze (EXP2B) |
-| `TEST-MATRIX.md` | Packet A: the focused failure-catching test matrix Packet B implements; EXP2B rows C1–C6, F1–F14, P1–P8 |
-| `EVIDENCE.md` | Packet B, EXP2A and EXP2B: measured results at exact SHAs, control evidence, limitations, next seam |
+| `CONTRACT.md` | Packet A: the durable contract, resolutions (a)–(f) from source, schema, state machine, transaction boundaries, open owner decisions; §d′ enable (EXP2A); §d″ close → freeze (EXP2B); §d‴ the private "My entries" read (EXP3A) |
+| `TEST-MATRIX.md` | Packet A: the focused failure-catching test matrix Packet B implements; EXP2B rows C1–C6, F1–F14, P1–P8; EXP3A rows R1–R8, P9–P11 |
+| `EVIDENCE.md` | Packet B, EXP2A, EXP2B and EXP3A: measured results at exact SHAs, control evidence, limitations, next seam |
 
 ## Status
 
@@ -36,7 +36,8 @@ this branch), **accepted** (the Director's product acceptance), **integrated**
 | W7 Check 22 corrections (docs + four code notes, 68/68) | `3b9963c`, pushed under the owner-environment rule (no unpushed commits) disclosed in #467 `5808389267`, not on a release | — | — |
 | evidence-truth correction (two doc lines) | `63a2c4d` | Director `5810220569` | development `61dd7b6a` (L0 `5810260515`) |
 | **EXP2A** enable transition (D + F5 closed; `enable.ts`, `enable.test.ts`, policy derivation + drift fence) | `41cb6dff` (see EVIDENCE.md §EXP2A) | Director #469 `5811301305` (W7 Check 24 clean) | development `5c897ab5` |
-| **EXP2B** close → reconcile → freeze core (G closed; `close.ts`, `pool.ts`, `freeze.ts`, three suites; packet #365 `5811972490`, transfer `5812848258`) | see EVIDENCE.md §EXP2B for the exact SHA | — | — |
+| **EXP2B** close → reconcile → freeze core (G closed; `close.ts`, `pool.ts`, `freeze.ts`, three suites; packet #365 `5811972490`, transfer `5812848258`) | `e0171fd1` + truth/readability successor `24d95cfe` (PR #470; EVIDENCE.md §EXP2B) | Director #470 `5815201024` (W7 Check 25 + 25D clean) | development `68d159c1` |
+| **EXP3A** private "My entries" read core (`receipt.ts`, `receipt.test.ts`; packet #365 `5815271789`) | see EVIDENCE.md §EXP3A for the exact SHA | — | — |
 
 ## Test command
 

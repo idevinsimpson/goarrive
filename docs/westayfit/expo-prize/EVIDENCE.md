@@ -292,6 +292,84 @@ clean before the next; the real core then ran in full in the same session (116 /
 - **Nothing is reachable.** No callable invokes `closePromotion` or `freezePromotion`; no
   operator authorisation reads `operatorUids`; no draw exists.
 
+## EXP3A — the private "My entries" read core (Director #365 `5815271789`)
+
+**Delivered** as new commits on `24d95cfe` (EXP2B successor, accepted #470 `5815201024`,
+integrated in development `68d159c1`; `24d95cfe` is an ancestor of that head and the
+reservation is byte-identical at both, so the branch was not merged forward — new commits
+only, no rewrite). Draft PR into `claude/wsf-app-shell`; the exact SHA is in the PR
+checkpoint. **Not accepted, not integrated, not deployed; no callable, no UI, nothing
+reachable.** Session `session_012wBbh1M7m3i8WDZe5hHDUS`.
+
+Files (reservation only): `src/expo-prize/receipt.ts` (new, 250 lines), module
+`index.ts` (one barrel line), `tests/expo-prize/receipt.test.ts` (new), the four docs.
+`fixtures.ts` was **not** changed (the focused test needed no new helper). Everything else
+in the lane is byte-identical to `24d95cfe`; nothing outside the reservation is touched.
+
+### Measured, real core (same emulator command; `tsc --noEmit -p functions-westayfit/tsconfig.json` 0 errors)
+
+| run | result | initial failures | reruns | skips |
+| --- | --- | --- | --- | --- |
+| `receipt.test.ts` alone, **first run** | **10 / 11** | **1** — R6 | — | 0 |
+| `receipt.test.ts` alone, after the fixture correction below | 11 / 11 | 0 | 1 (the correction run) | 0 |
+| full lane, 10 files, before the controls | **127 / 127** | 0 | 0 | 0 |
+| full lane, 10 files, after the controls, same session | 127 / 127 | 0 | 0 | 0 |
+
+**The one initial failure, stated plainly:** R6 builds a "foreign" pool by freezing a
+second promotion and copying its pool over the first's. My first draft seeded that second
+promotion over the **same goal**, so its freeze pass walked the first promotion's earlier
+row too, adjudicated it, and correctly returned `notReady` — the freeze behaved exactly as
+EXP2B specifies; the fixture was wrong. Corrected by giving the second promotion its own
+goal (`tests/expo-prize/receipt.test.ts`, the "other" scene in R6; no source change). One
+rerun after the correction: 11 / 11.
+
+`receipt.test.ts`: 8 emulator rows (R1–R8) + 3 pure rows (P9–P11) = 11 cases. Every
+emulator row reads documents the real award and freeze wrote (real `wsfContribute`,
+`ingestContribution`, `closePromotion`, `freezePromotion` after the server clock passes the
+cutoff).
+
+| packet proof | rows | result |
+| --- | --- | --- |
+| account isolation | R3 | pass — eight mixed reads on one deps, sequential and concurrent, each its own value |
+| account switching with no carried value | R3 | pass |
+| provisional → settled | R5 (and R2 for `closing`) | pass — same count before and after the freeze, `settled` flips; `drawn` / `archived` identical |
+| pending / revoked exclusion | R4 | pass — tally still 4, read says 2; malformed `tickets` counts zero |
+| link-missing states | R2, R5, R6 | pass — current zero before, final zero after an intact freeze; a link to an entrant absent from the pool is final zero; a malformed link reads as missing |
+| corrupt / missing pool fences | R6 | pass — edited range, deleted pool, another promotion's intact pool, edited stamped digest, drift after freeze → `unavailable`; restored → the count returns |
+| payload allow-list / deep privacy scan | R7 (and every row via `assertShape`) | pass — exact key sets; none of the strings the lane stores for the promotion appears; the only number is `tickets` |
+| no mutation | R8 | pass — every lane document byte-identical **including `updateTime`** across ok / stranger / drifted-unavailable reads and across settled reads; no document for a stranger uid |
+| draft / disabled / missing → unavailable | R1 | pass; malformed ids → `unavailable`; extra `tickets` / `entrantId` input fields ignored |
+| functions TypeScript | — | 0 errors |
+
+### Disclosed failure controls (one mutation at a time, `receipt.test.ts`, file restored and confirmed identical, then the real core 127 / 127 in the same session)
+
+| mutation | line changed | result | rows that caught it |
+| --- | --- | --- | --- |
+| M19 pending / revoked filter removed | `receipt.ts` `if (e.status !== 'confirmed') continue;` → `if (false && …)` | **2 failed** / 9 | R4, P10 |
+| M20 pool-intact check removed | `receipt.ts` `if (!storedPoolIntact(pool)) {` → `if (false && …)` | **1 failed** / 10 | R6 |
+| M21 pool-binding check removed (digest / rule version / stamped digest) | `receipt.ts` the three-way binding `if` → `if (false)` | **1 failed** / 10 | R6 |
+| M22 settled flag lies (frozen answers `settled:false`) | `receipt.ts` the settled return → `settled: false` | **4 failed** / 7 | R5, R6, R7, R8 |
+| M23 allow-list removed (`sealReceipt` spreads its input) | `receipt.ts` `return { status, tickets, settled }` → `return { ...input, … }` | **1 failed** / 10 | P9 only — the real call sites already pass minimal objects, so the emulator scan cannot see this one; the pure row is the guard |
+| M24 configuration gate removed on the current path | `receipt.ts` first `if (!config.ok) {` → `if (false && …)` | **2 failed** / 9 | R6, R8 |
+
+### Unmeasured / limitations, stated plainly
+
+- **No live-Firestore claim.** Read-only transactions and the equality-plus-document-name
+  query for the member's own entries (`where('entrantId','==',…)` + `orderBy(documentId)`
+  + prefix bounds, the reconcile's index-free shape) are the emulator's semantics as
+  measured; index-freedom against the live project is reasoned, not proven, as for the
+  reconciliation query.
+- **Nothing is reachable.** No callable takes an auth context and calls `readMyEntries`;
+  the "trusted uid" is a contract on that future caller, proven here only by the input
+  type and by R1's ignored extra fields. Authorisation, rate limits and the surface's own
+  privacy are that packet's.
+- **Post-freeze revocation** is not modelled: `settled:true` answers from the immutable
+  pool by design; no revocation writer exists.
+- **`unavailable` is reasonless on the wire.** The `trace` hook receives the reason and no
+  id; it is a dependency-injection seam for tests and server logs, not a member field.
+- **M23 is caught by the pure allow-list row only** (see the table): a future call site
+  that passed a richer object would rely on `sealReceipt`; the pure test is what pins it.
+
 ## The next seam
 
 In order, each its own reserved and reviewed packet:
@@ -305,7 +383,7 @@ In order, each its own reserved and reviewed packet:
    cap-or-null, eligible goals and window, form store, operators.
 4. **The form store and its enumerator** (owner decision, CONTRACT §e), after which a
    bonus-bearing promotion can freeze.
-5. **"My entries"**: a member-only read that returns `classifyEntryStatus` for the caller's
-   own contributions and nothing about anyone else; no counts on any shared surface.
+5. ~~**"My entries"**~~ — the read core is delivered by EXP3A above; the member-only
+   callable that exposes it (auth context → trusted uid) is wiring, item 2.
 6. **Draw**: unbiased server selection over tickets, one persisted result per prize before
    reveal, redraws and exclusions with audit; then manual private winner contact.

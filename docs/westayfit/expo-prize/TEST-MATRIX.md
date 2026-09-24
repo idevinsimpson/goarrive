@@ -84,6 +84,25 @@ removed, missing-source guard removed, form fence removed, size fence removed, p
 `create` → `set` with the existence check removed, pool write dropped from the
 transaction.
 
-**Not in the matrix (next phases, designed for in CONTRACT.md):** the "My entries"
-receipt surface, operator controls, paper import and duplicate review, the form-store
+## EXP3A rows — the private "My entries" read (CONTRACT §d‴; #365 `5815271789`)
+
+Suite: `receipt.test.ts` — emulator rows R1–R8 against documents the real award and
+freeze wrote; a `pure` block for the three helpers.
+
+| # | proves | how | kind |
+| --- | --- | --- | --- |
+| R1 | draft, disabled, missing and malformed ids are unavailable; a caller cannot smuggle a count or an entrant | `draft` / `disabled` → `unavailable` (trace `promotionInactive`); missing → `promotionMissing`; empty / slashed / path-shaped ids → `invalidInput`; extra `tickets` / `entrantId` fields on the input are ignored | emulator |
+| R2 | exact current count under `enabled` and `closing`, `settled:false`; link-missing is current zero | 3 real awards → 3; another member → 0; a never-seen uid → 0; a 4th contribution moves the count only once awarded; after `closePromotion` still provisional | emulator |
+| R3 | account isolation and switching carry nothing | a=3, b=1, c=0 on p and a=2 on q; eight sequential reads on one deps object in mixed order, then the same eight concurrently → each its own value | emulator |
+| R4 | pending / revoked exclusion; the tally is not consulted | 4 awards; one entry set `revoked`, one `pending` → 2 while the tally still says 4; a malformed `tickets` counts zero → 1 | emulator |
+| R5 | provisional → settled; link-missing becomes final zero; `drawn` / `archived` answer from the pool | a=2, b=1, z=0 provisional; real freeze after the server clock passes; a=2 / b=1 / z=0 `settled:true`; `drawn` and `archived` identical; the pool total (3) never appears | emulator |
+| R6 | fail closed before and after freeze | drift and invalid config before freeze → `unavailable`; after freeze: edited range → `poolCorrupt`, deleted pool → `poolMissing`, another promotion's intact pool copied in → `poolUnbound`, the promotion's stamped `poolDigest` edited → `poolUnbound`, config drift after freeze → `configDrift`; each restored → the count returns; a link to an entrant absent from the pool → final zero; a malformed link → link-missing | emulator |
+| R7 | payload allow-list and deep privacy scan | exact key sets `{status,tickets,settled}` / `{status}`; the receipt JSON contains none of every string the lane stores for the promotion (entrant, link, source, entry, tally, pool and promotion documents and ids) nor the uids, goal, group, attempt and contribution ids; the only numeric field is `tickets`; plain prototype, no symbols | emulator |
+| R8 | a read never mutates | every lane document under two promotions byte-identical **including `updateTime`** after 9 reads (ok / stranger / drifted-unavailable), and again after the freeze across 6 settled reads; no document appears for a stranger uid in any lane collection | emulator |
+| P9–P11 | `sealReceipt` allow-list and non-count refusal; `ticketsFromEntries` confirmed-positive-integer rule; `ticketsFromPool` width / absent-zero / unusable-null | — | **pure** |
+
+**Failure controls for EXP3A** are recorded in EVIDENCE.md §EXP3A.
+
+**Not in the matrix (next phases, designed for in CONTRACT.md):** the callable that would
+expose the "My entries" read, operator controls, paper import and duplicate review, the form-store
 binding and its enumerator, the draw, redraws, exclusions, winner contact and claim.
