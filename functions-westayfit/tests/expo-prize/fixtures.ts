@@ -289,7 +289,7 @@ export async function setPromotion(promotionId: string, patch: Record<string, un
 export async function promotionState(promotionId: string) {
   const db = getFirestore();
   const read = async (collection: string) => {
-    const snap = await db.collection(collection).orderBy('__name__').startAt(`${promotionId}_`).endAt(`${promotionId}_`).get();
+    const snap = await db.collection(collection).orderBy('__name__').startAt(`${promotionId}_`).endAt(`${promotionId}_\uf8ff`).get();
     const out: Record<string, Record<string, unknown>> = {};
     for (const d of snap.docs) out[d.id] = d.data();
     return out;
@@ -364,7 +364,7 @@ export async function freezeAttempts(promotionId: string): Promise<Record<string
     .collection(COLLECTIONS.freezeAttempts)
     .orderBy('__name__')
     .startAt(`${promotionId}_`)
-    .endAt(`${promotionId}_`)
+    .endAt(`${promotionId}_\uf8ff`)
     .get();
   const out: Record<string, Record<string, unknown>> = {};
   for (const d of snap.docs) out[d.id.slice(promotionId.length + 1)] = d.data();

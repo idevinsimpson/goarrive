@@ -240,7 +240,7 @@ async function readEntriesInTx(tx: Transaction, db: Firestore, promotionId: stri
     .collection(COLLECTIONS.entries)
     .orderBy(FieldPath.documentId())
     .startAt(`${promotionId}_`)
-    .endAt(`${promotionId}_`);
+    .endAt(`${promotionId}_\uf8ff`);
   const snap = await tx.get(q);
   return snap.docs.map((d) => {
     const x = d.data() as Record<string, unknown>;

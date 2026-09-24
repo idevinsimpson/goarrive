@@ -229,7 +229,7 @@ the isolation setup refused nothing. `tsc --noEmit -p functions-westayfit/tsconf
 | run | result | initial failures | reruns | skips |
 | --- | --- | --- | --- | --- |
 | control at `41cb6dff`, before any change | 83 / 83 | 0 | 0 | 0 |
-| new suites only: `pool` 8 (**pure**), `close` 11 (emulator), `freeze` 16 (emulator) | 33 / 33 | 0 | 0 | 0 |
+| new suites only: `pool` 8 (**pure**), `close` 8 (emulator), `freeze` 17 (emulator) | 33 / 33 | 0 | 0 | 0 |
 | full lane suite, 9 files, at `6cc0a36e` | **116 / 116** | 0 | 0 | 0 |
 | existing callable control (`wsf-contribute`, `wsf-turn`, `wsf-combined-goal`), same session | 81 / 81 | 0 | 0 | 0 |
 | full lane suite again, after the mutation session below, same emulator session | 116 / 116 | 0 | 0 | 0 |
