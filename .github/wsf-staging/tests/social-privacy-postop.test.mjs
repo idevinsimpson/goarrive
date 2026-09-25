@@ -21,22 +21,33 @@ async function test(name, fn) {
   console.log(`  ok  ${name}`);
 }
 
-await test('a callable-shaped answer means the request reached the function', () => {
+await test('OPEN only on the handler\'s own answer to no identity: HTTP 401 + callable UNAUTHENTICATED', () => {
   assert.equal(classifyTransport(401, JSON.stringify({ error: { message: 'Sign in first.', status: 'UNAUTHENTICATED' } })), 'open');
-  assert.equal(classifyTransport(200, JSON.stringify({ result: { ok: true } })), 'open');
-  assert.equal(classifyTransport(403, JSON.stringify({ error: { message: 'Members only.', status: 'PERMISSION_DENIED' } })), 'open');
+  // the real callable envelope may carry more fields; they do not disqualify it
+  assert.equal(classifyTransport(401, JSON.stringify({ error: { message: 'Sign in first.', status: 'UNAUTHENTICATED', details: null } })), 'open');
 });
 
-await test('a bare 401/403 is SHUT: Cloud Run refused before any code ran', () => {
+await test('F1: a JSON-shaped 403 PERMISSION_DENIED is SHUT, never open (W5 R1b)', () => {
+  assert.equal(classifyTransport(403, JSON.stringify({ error: { code: 403, message: 'Permission denied', status: 'PERMISSION_DENIED' } })), 'shut');
+  assert.equal(classifyTransport(403, JSON.stringify({ error: { message: 'Members only.', status: 'PERMISSION_DENIED' } })), 'shut');
+  assert.equal(classifyTransport(401, JSON.stringify({ error: { status: 'PERMISSION_DENIED' } })), 'shut', 'a 401 with the wrong callable status is not the handler answering');
+  assert.equal(classifyTransport(403, JSON.stringify({ error: { status: 'UNAUTHENTICATED' } })), 'shut', 'UNAUTHENTICATED on a 403 is not the callable protocol');
+});
+
+await test('a bare 401/403 is SHUT: refused before any code ran', () => {
   assert.equal(classifyTransport(403, '<html><body><h1>Error: Forbidden</h1></body></html>'), 'shut');
   assert.equal(classifyTransport(401, ''), 'shut');
-  assert.equal(classifyTransport(403, JSON.stringify({ error: 'Forbidden' })), 'shut', 'an error without a callable status is not the function answering');
+  assert.equal(classifyTransport(403, JSON.stringify({ error: 'Forbidden' })), 'shut');
 });
 
-await test('anything else is UNKNOWN, never open and never shut', () => {
+await test('anything else is UNKNOWN, never open: 5xx, 2xx, not found, malformed', () => {
   assert.equal(classifyTransport(500, 'upstream connect error'), 'unknown');
+  assert.equal(classifyTransport(503, JSON.stringify({ error: { status: 'UNAVAILABLE' } })), 'unknown');
+  assert.equal(classifyTransport(200, JSON.stringify({ result: { ok: true } })), 'unknown', 'a result to a call with no identity is unexpected, not proof');
+  assert.equal(classifyTransport(200, JSON.stringify({ result: null })), 'unknown');
   assert.equal(classifyTransport(404, '<html>Not Found</html>'), 'unknown');
   assert.equal(classifyTransport(502, ''), 'unknown');
+  assert.equal(classifyTransport(401, '{not json'), 'shut', 'a malformed 401 is still a refusal, and never open');
 });
 
 await test('a row passes only when every check passes; a fail outranks a block; no checks is blocked', () => {

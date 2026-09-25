@@ -14,10 +14,11 @@
  *
  * FIRST, TRANSPORT — AND NOTHING IS WRITTEN WHILE THE SETTER IS SHUT. Each of
  * the three social services is probed with an unauthenticated call, which
- * writes nothing. A callable-shaped answer (UNAUTHENTICATED) means the request
- * reached the function; a bare 401/403 with no callable body means Cloud Run
- * refused it before any code ran. If the setter is SHUT every row is BLOCKED
- * and the run exits 3 without creating a single fixture.
+ * writes nothing. Only HTTP 401 with callable status UNAUTHENTICATED proves
+ * the request reached the handler; any other 401 or 403 — a JSON-shaped
+ * PERMISSION_DENIED included — is SHUT, and anything else is UNKNOWN. Unless
+ * the setter is proven OPEN every row is BLOCKED and the run exits 3 without
+ * creating a single fixture.
  *
  * THE INDEX. wsfCommunityActivity needs the wsfContributions composite index.
  * The function does not catch a missing-index error, so the caller sees a
@@ -57,18 +58,23 @@ export const SOCIAL_SERVICES = Object.freeze([
 ]);
 
 /**
- * What an UNAUTHENTICATED probe's answer says about transport.
- *   open    — a callable-protocol answer: the request reached the function
- *   shut    — 401/403 with no callable body: refused before any code ran
- *   unknown — anything else (5xx, network, a shape this file does not know)
+ * What the UNAUTHENTICATED probe of one of the three auth-required social
+ * callables says about transport. Not a general transport detector: it is
+ * read only against a call carrying no identity, where the handler itself has
+ * exactly one possible answer.
+ *   open    — HTTP 401 with callable status UNAUTHENTICATED: the handler ran
+ *             and refused the missing identity. The only proof of reachability.
+ *   shut    — any other 401 or 403, JSON-shaped or not (a PERMISSION_DENIED
+ *             body included): refused before the handler's own answer
+ *   unknown — anything else (5xx, 2xx, network, malformed): never open
  */
 export function classifyTransport(status, bodyText) {
   let body = null;
   try { body = bodyText ? JSON.parse(bodyText) : null; } catch { body = null; }
-  const callableShaped =
-    body !== null && typeof body === 'object' &&
-    (typeof body?.error?.status === 'string' || Object.prototype.hasOwnProperty.call(body, 'result'));
-  if (callableShaped) return 'open';
+  const callableStatus = body !== null && typeof body === 'object' && typeof body?.error?.status === 'string'
+    ? body.error.status
+    : null;
+  if (status === 401 && callableStatus === 'UNAUTHENTICATED') return 'open';
   if (status === 401 || status === 403) return 'shut';
   return 'unknown';
 }
