@@ -20,25 +20,25 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | packet | owner · PR · SHAs | last receipt | next consumer · wake |
 | --- | --- | --- | --- |
 | **Integrated + served** | W9: RECOVERY-PORT-1 `86c160ae`, RETURN-CONTINUITY-1 `9f73aaa6`, FOCUS-RETURN-1 `64b01967` | W7 Checks 29 / 32 / 30+33; Director ACCEPTED | in `502b1e8d`; carried seams per #477 / #478 receipts |
-| **APP-FEEL-PARITY-1** (Director `5834082617` §A) | W9 · `claude/wsf-w9-app-feel-parity-1` from `502b1e8d`; checkpoint 1 = loading composition + one-goal MOVE sheet | **ACKed, executing** (#477 `5834278781`); no head yet; W7 baseline Check 35 `76030bd0` as evidence | W9 checkpoint → L0 git → Director → W7 → L0 → stage |
-| **MOVEMENT-PILLS-1** (§B) | W6 · `claude/wsf-w6-movement-pills-1`; `goals/new.tsx` + `MovementPicker.tsx` + `movementSelection.ts` | **ACKed, executing** (#456 `5834258147`); no head yet | W6 checkpoint → L0 git → Director → W7 → L0 |
-| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` (4 new files, `scripts/westayfit/staging-demo/`) | Director review `5834407330`: **held for correction** (auth-error handling, concurrent-safe apply, fixture ownership) | W3 successor → L0 git → W7 ops review; seed path proposal `5834452422`; index / Operation 2 unresolved |
+| **APP-FEEL-PARITY-1** (Director `5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` (8 files; + new `moveSheetRoute.ts`, `sheetMotion.ts`) | L0 git (#482 `5834596012`): tsc 0, vitest 875, guard 9/20, no W6 overlap; frames / timeline / discrepancies pending | W9 completes cp1 → exporter → Director → W7 (#434 `5834554003`) → L0 |
+| **MOVEMENT-PILLS-1** (§B) | W6 · `claude/wsf-w6-movement-pills-1`; `goals/new.tsx` + `MovementPicker.tsx` + `movementSelection.ts` | ACKed, executing (#456 `5834258147`); multi-movement must meet Director #456 `5834379218` (persisted movement IDs, correct MOVE guidance) — not accepted on shared units | W6 checkpoint → L0 git → Director → W7 → L0 |
+| **SOCIAL-STAGING-DEMO-1** (§C) + **SEED-MODE** (`5834565485` §2) | W3 · `bcfef524` held for correction (`5834407330`); then a PLAN / APPLY / VERIFY `social-demo-seed` mode PR into `main` (existing WIF identity) | handoff #396 `5834598414` | W3 → W7 → Director → L0 PLAN → APPLY / VERIFY; index + Operation 2 unresolved |
 | JOIN-VISIBILITY-1 | W9 · deferred behind APP-FEEL-PARITY-1 (#477 `5832790261`) | never started | after §A |
 | **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
 | **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | `eda58218`: W7 Check 31 PASS (#434 `5827152233`); **Director ACCEPTED AS ISOLATED R&D CORE ONLY** (#475 `5827675294`) | no Expo port, integration or staging; next evidence is the owner's phone trial; no video or personal data stored |
-| **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | frozen `a84e6764` / `8c61cd72`: limited R&D handoff, fake-camera evidence (`5826104270`) | **NOT READY**; no Expo task or port before the owner's phone test |
+| **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab) | Director · remix `c1b16a13` | frozen `a84e6764` / `8c61cd72` | **NOT READY**; no port before the owner's phone test |
 
 **W7's queue:** Check 35 delivered (`76030bd0`); next, the parity successors. Item 2 (reference focus diagnosis, #434 `5822117639`) not run, still deferred.
 
 **STAGING — served `502b1e8d`** (run 48 green). **Runbook: `skills/wsf-staging-deploy/SKILL.md` on `main`** (owner cadence `5832907406`: stable accepted milestones stage without another prompt; linked from `CLAUDE.md` / `AGENTS.md`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
 
-**Waiting on the owner:** the lab phone test in `5826104270` (squat tallies, second person, step-out; no video). EXP1 held; W2 / W4 / W6 / W1B / W8 parked; W5 stopped.
+**Waiting on the owner:** the lab phone test (`5826104270`). EXP1 held; W2 / W4 / W1B / W8 parked; W5 stopped.
 
 **Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **NORTHSTAR-OVERNIGHT-1 (First Useful Visit) ACCEPTED as the next frozen reference** (`5825523052`): product `a15a610e`, evidence `973e1141`, finalizer `80fc8738`; reuse its states and wording, not its demo mechanics; moves no active packet. Port qualifications `5825762390` (Back / Close labels; zero-own guidance only on an open eligible goal; corrected captions). Candidate next slice: JOIN-VISIBILITY-1, `/join` only; owner undecided.
 
 **Served vs readiness.** Served `502b1e8d`; three social callables transport-SHUT; index unverified. Readiness **not met**: social smokes, members deep link, `/move` direct load not run; email blocked; shared kiosk HELD.
 
-**Precise blockers.** (1) Social staging needs a named operator for the index READY receipt and the three invoker updates + read-backs, then a verification run. (2) FOCUS-RETURN-1 before the recovery journey is staged.
+**Precise blockers.** Social staging: index READY receipt and the three invoker updates + read-backs (no capable identity found); the seed awaits the reviewed `social-demo-seed` mode.
 
 **Operating rules.** One writer per file; only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA; SENT ≠ ACK ≠ executing; no new or replacement worker; no deploy / IAM / secrets / force-push by L0; real comment ids only; models change only by the owner. **Worker wake (owner, `5834363586`; audit `5834410975`):** handoff comment on the worker's own current PR; if no ACK and the session is idle, **one** deduplicated one-shot `create_trigger` bound to that worker's session (released in-lane task only; never busy, never interrupt); closed only on ACK. **Not yet proven.** Merged / closed PRs drop subscriptions; workers arrange their own subscriptions + check-ins.
 
