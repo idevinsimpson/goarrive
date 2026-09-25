@@ -145,7 +145,7 @@ export function planDocuments(f, { ownerUid, anchorMs, joinCodes = {} }) {
       createdByUserId: `seed-${mark}`, lifecycleStatus: 'active', isSample: true,
       demoFixture: { id: mark, version: f.version, anchorMs }, createdAt: created, updatedAt: created,
     } });
-    ownerMemberships.push({ path: `wsfMemberships/${c.groupId}_${ownerUid}`, data: { groupId: c.groupId, userId: ownerUid, role: 'foundingChampion', membershipStatus: 'active', createdAt: created, updatedAt: created } });
+    ownerMemberships.push({ path: `wsfMemberships/${c.groupId}_${ownerUid}`, data: { groupId: c.groupId, userId: ownerUid, role: 'foundingChampion', membershipStatus: 'active', demoFixture: mark, createdAt: created, updatedAt: created } });
     for (const m of c.members) {
       const row = { groupId: c.groupId, userId: m.uid, role: 'member', membershipStatus: 'active', demoFixture: mark, createdAt: created, updatedAt: created };
       if (m.name) row.communityNameVisibility = m.name;
@@ -208,6 +208,31 @@ export function classifyContribution(actual, want, priorAtMs) {
   const at = createdAt instanceof Timestamp ? createdAt.toMillis() : createdAt?.getTime?.();
   if (at === want.atMs) return 'unchanged';
   if (priorAtMs !== undefined && at === priorAtMs) return 'reanchor';
+  return 'drift';
+}
+
+/**
+ * The owner's membership row in a sample group. The fixture creates it with
+ * its marker and then never writes it again: whatever the owner changes there
+ * (his privacy choices) is his. A row WITHOUT the marker was not written by
+ * this fixture and is foreign.
+ */
+export function classifyOwnerMembership(actual, fixtureId) {
+  if (actual === undefined) return 'absent';
+  return actual.demoFixture === fixtureId ? 'owned' : 'foreign';
+}
+/**
+ * A deterministic recent-addition document. It is the fixture's only when its
+ * LINKED contribution row is the fixture's (contributionClass is not absent or
+ * foreign) and its amount matches that row. A document at the path with no
+ * fixture row beside it, or with a different amount, is a collision: foreign.
+ */
+export function classifyAddition(actual, contributionClass, want, priorAtMs) {
+  if (actual === undefined) return contributionClass === 'foreign' ? 'foreign' : 'absent';
+  if (contributionClass === 'absent' || contributionClass === 'foreign') return 'foreign';
+  if (actual.amount !== want.identity.count) return 'foreign';
+  if (actual.at === isoMinute(want.atMs)) return 'unchanged';
+  if (priorAtMs !== undefined && actual.at === isoMinute(priorAtMs)) return 'reanchor';
   return 'drift';
 }
 
@@ -291,6 +316,21 @@ async function main() {
     const s = await db.doc(d.path).get();
     const k = classifyContribution(s.exists ? s.data() : undefined, d, priorByPath.get(d.path)?.atMs);
     cls[k].push({ ...d, kindOf: 'contribution' });
+    const a = await db.doc(d.additionPath).get();
+    const ka = classifyAddition(a.exists ? a.data() : undefined, k, d, priorByPath.get(d.path)?.atMs);
+    // an addition that simply follows its row (created or moved with it) is
+    // not listed twice; only a collision, drift, or an orphaned gap is
+    if (ka === 'foreign') cls.foreign.push({ path: d.additionPath, kindOf: 'recentAddition' });
+    else if (ka === 'drift') cls.drift.push({ path: d.additionPath, kindOf: 'recentAddition' });
+    else if (ka === 'absent' && k !== 'absent') cls.absent.push({ ...d, path: d.additionPath, kindOf: 'recentAddition' });
+  }
+  const ownerKept = [];
+  for (const d of now.ownerMemberships) {
+    const s = await db.doc(d.path).get();
+    const k = classifyOwnerMembership(s.exists ? s.data() : undefined, f.fixtureId);
+    if (k === 'foreign') cls.foreign.push({ path: d.path, kindOf: 'ownerMembership' });
+    else if (k === 'absent') cls.absent.push({ ...d, kindOf: 'ownerMembership' });
+    else ownerKept.push(d.path);
   }
   // a foreign owner of the counters: shard or member-total docs that exist under a fixture goal whose goal doc is foreign are covered by the goal; a
   // member-total row for a synthetic uid that no fixture contribution explains is foreign
@@ -317,6 +357,7 @@ async function main() {
   console.log(`REANCHOR=${cls.reanchor.length} [${kinds(cls.reanchor)}]`);
   console.log(`UNCHANGED=${cls.unchanged.length}`);
   console.log(`DRIFT=${cls.drift.length} [${kinds(cls.drift)}]${cls.drift.length ? ' kept, not reset: ' + cls.drift.map((d) => d.path).join(', ') : ''}`);
+  console.log(`OWNER_MEMBERSHIPS_KEPT=${ownerKept.length} (created by this fixture earlier; never rewritten, his changes are his)`);
   console.log(`FOREIGN=${cls.foreign.length}${cls.foreign.length ? ': ' + cls.foreign.map((d) => d.path).join(', ') : ''}`);
   const receipt = { fixtureId: f.fixtureId, project: args.project, mode: args.mode, ownerUid, anchor: new Date(anchorMs).toISOString(), classes: Object.fromEntries(Object.entries(cls).map(([k, v]) => [k, v.map((d) => d.path)])) };
   const writeReceipt = () => { if (args.receipt) writeFileSync(args.receipt, JSON.stringify(receipt, null, 2)); };
@@ -349,7 +390,7 @@ async function main() {
   }
 
   if (args.mode === 'cleanup') {
-    const paths = new Set([...now.entities.map((d) => d.path), ...now.ownerMemberships.map((d) => d.path)]);
+    const paths = new Set([...now.entities.map((d) => d.path), ...ownerKept]);
     let ownerRows = 0;
     for (const g of goalIds) {
       for (let i = 0; i < SHARD_COUNT; i += 1) paths.add(`wsfGoalCounters/${g}/shards/${i}`);
@@ -371,7 +412,8 @@ async function main() {
   // ---- apply ----
   let written = 0;
   // 1. entities: create absent, move reanchor-only ones; drift is kept
-  const entityWrites = [...cls.absent, ...cls.reanchor].filter((d) => d.kindOf !== 'contribution');
+  const ENTITY_KINDS = new Set(['profile', 'group', 'membership', 'goal']);
+  const entityWrites = [...cls.absent, ...cls.reanchor].filter((d) => ENTITY_KINDS.has(d.kindOf));
   for (const d of entityWrites) {
     await db.runTransaction(async (tx) => {
       const s = await tx.get(db.doc(d.path));
@@ -381,11 +423,14 @@ async function main() {
       else if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
     });
   }
-  // 2. the owner's membership rows: created where absent, never rewritten
-  for (const d of now.ownerMemberships) {
+  // 2. the owner's membership rows: created where absent, never rewritten;
+  //    a row that appeared without the marker since classification aborts
+  for (const d of cls.absent.filter((x) => x.kindOf === 'ownerMembership')) {
     await db.runTransaction(async (tx) => {
       const s = await tx.get(db.doc(d.path));
-      if (!s.exists) { tx.create(db.doc(d.path), d.data); written += 1; }
+      const k = classifyOwnerMembership(s.exists ? s.data() : undefined, f.fixtureId);
+      if (k === 'absent') { tx.create(db.doc(d.path), d.data); written += 1; }
+      else if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
     });
   }
   // 3. the ledger: one transaction per row, exactly as wsfContribute records one
@@ -400,16 +445,30 @@ async function main() {
         tx.create(ref, { ...d.identity, createdAt: at });
         tx.set(db.doc(d.shardPath), { count: FieldValue.increment(d.identity.count) }, { merge: true });
         tx.set(db.doc(d.totalPath), { goalId: d.identity.goalId, userId: d.identity.userId, total: FieldValue.increment(d.identity.count), contributionCount: FieldValue.increment(1), updatedAt: at }, { merge: true });
-        tx.set(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
+        // create, never set: an unrelated document at this path aborts the transaction
+        tx.create(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
         written += 1;
       } else if (k === 'reanchor') {
-        // timestamps only; counts, shards and totals are untouched
+        // timestamps only; counts, shards and totals are untouched. The linked
+        // addition moves only while it is still provably this row's.
+        const aRef = db.doc(d.additionPath);
+        const a = await tx.get(aRef);
+        const ka = classifyAddition(a.exists ? a.data() : undefined, k, d, priorByPath.get(d.path)?.atMs);
+        if (ka === 'foreign') throw new Error(`${d.additionPath} is not this fixture's`);
         tx.update(ref, { createdAt: at });
-        tx.set(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
+        if (ka === 'reanchor') tx.update(aRef, { at: isoMinute(d.atMs) });
+        else if (ka === 'absent') tx.create(aRef, { amount: d.identity.count, at: isoMinute(d.atMs) });
         written += 1;
       } else if (k === 'foreign') {
         throw new Error(`${d.path} became foreign during the run`);
       }
+    });
+  }
+  // 3b. an addition missing beside an existing fixture row: create-only
+  for (const d of cls.absent.filter((x) => x.kindOf === 'recentAddition')) {
+    await db.runTransaction(async (tx) => {
+      const r = db.doc(d.additionPath);
+      if (!(await tx.get(r)).exists) { tx.create(r, { amount: d.identity.count, at: isoMinute(d.atMs) }); written += 1; }
     });
   }
   // 4. a reanchor on a sample group the owner has edited: move only the

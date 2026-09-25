@@ -113,6 +113,10 @@ node ../scripts/westayfit/staging-demo/seed-social-demo.mjs --cleanup --confirm-
   - **ours, unchanged**;
   - **ours, drifted:** for example a goal the owner edited while reviewing. It is kept and reported as `DRIFT`, never reset, and verify then reports `VERIFY=drift`;
   - **foreign:** it has no fixture marker, or a ledger row does not match the fixture. It aborts the run, cleanup included.
+
+  Two kinds of path follow their own rule:
+  - **The owner's membership in each sample group** is created once with the fixture marker. After that it is never written again, because his privacy choices there are his, and the product's own writes merge, so the marker survives them. Cleanup deletes such a row only when it carries the marker. A row there without the marker is foreign.
+  - **A recent-addition document** belongs to the fixture only beside its own fixture contribution row, with the same amount. It is created only where absent, and moved on a reanchor only while that link holds. Any other document at that path is foreign.
 - **Refusals:**
   - any project other than `westayfit-staging`, and any emulator run not on a `demo-*` project;
   - a missing `--owner-uid`;

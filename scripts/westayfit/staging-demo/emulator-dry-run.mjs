@@ -174,6 +174,10 @@ const foreignCases = [
   ['wsfMemberProfiles/wsfdemo-m03', { displayName: 'A real person' }],
   ['wsfGoals/wsfdemo-goal-movers-squats', { title: 'someone else’s goal', communityGroupId: 'elsewhere' }],
   ['wsfMemberships/wsfdemo-sample-walkers_wsfdemo-m04', { groupId: 'wsfdemo-sample-walkers', userId: 'wsfdemo-m04', role: 'member', membershipStatus: 'active' }],
+  // the OWNER's row in a sample group that this fixture did not write, carrying his explicit preference
+  [`wsfMemberships/wsfdemo-sample-movers_${OWNER}`, { groupId: 'wsfdemo-sample-movers', userId: OWNER, role: 'member', membershipStatus: 'active', communityActivityVisibility: 'private' }],
+  // an unrelated document at a deterministic recent-addition path
+  [`wsfGoals/${'wsfdemo-goal-movers-squats'}/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01`, { amount: 999, at: 'not the fixture' }],
 ];
 for (const [p, data] of foreignCases) {
   await db.doc(p).set(data);
@@ -184,7 +188,7 @@ for (const [p, data] of foreignCases) {
   assert.equal(await snapshot(), s0, `${p}: nothing may be written`);
   await db.doc(p).delete();
 }
-ok(`a foreign document at any of ${foreignCases.length} kinds of fixture path (group, profile, goal, membership) makes apply refuse with FOREIGN named and zero writes`);
+ok(`a foreign document at any of ${foreignCases.length} kinds of fixture path (group, profile, goal, membership, the owner's sample membership, a recent-addition path) makes apply refuse with FOREIGN named and zero writes, his preference included`);
 
 // ---- plan writes nothing ----
 const s0 = await snapshot();
@@ -279,6 +283,30 @@ const v3 = await seed(['--verify', ...base]);
 assert.equal(line(v3.out, 'VERIFY'), 'drift', v3.out);
 assert.match(v3.out, /REANCHOR=0/);
 ok(`--reanchor with ${hookRows2.length} owner contributions interleaved: timestamps move, none lost (ledger ${tA.ledger} = shards = member totals), the owner's goal edit is still kept`);
+
+// ---- cleanup fails closed on an unowned owner membership and on a recent-addition collision ----
+{
+  const ownerRow = `wsfMemberships/wsfdemo-sample-movers_${OWNER}`;
+  const kept = (await db.doc(ownerRow).get()).data();
+  await db.doc(ownerRow).set({ groupId: 'wsfdemo-sample-movers', userId: OWNER, role: 'member', membershipStatus: 'active', communityActivityVisibility: 'private' });
+  const sA = await snapshot();
+  const cA = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId]);
+  assert.equal(cA.code, 3, cA.out);
+  assert.match(cA.out, new RegExp(`FOREIGN=1: ${ownerRow.replace(/[/]/g, '\\/')}`));
+  assert.equal(await snapshot(), sA, 'nothing deleted');
+  assert.equal((await db.doc(ownerRow).get()).get('communityActivityVisibility'), 'private', 'his preference survives');
+  await db.doc(ownerRow).set(kept);
+  const addPath = `wsfGoals/${GOAL_A}/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01`;
+  const keptAdd = (await db.doc(addPath).get()).data();
+  await db.doc(addPath).set({ amount: 999, at: 'not the fixture' });
+  const sB = await snapshot();
+  const cB = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId]);
+  assert.equal(cB.code, 3, cB.out);
+  assert.match(cB.out, new RegExp(`FOREIGN=1: ${addPath.replace(/[/]/g, '\\/')}`));
+  assert.equal(await snapshot(), sB, 'nothing deleted');
+  await db.doc(addPath).set(keptAdd);
+  ok("cleanup refuses, deleting nothing, over an owner sample-membership this fixture did not write (his preference kept) and over a recent-addition collision");
+}
 
 // ---- cleanup fails closed on a foreign document, then deletes only the fixture ----
 await db.doc('wsfMemberProfiles/wsfdemo-m07').set({ displayName: 'Now somebody else' });
