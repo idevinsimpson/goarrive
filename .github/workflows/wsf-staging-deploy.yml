@@ -74,6 +74,11 @@ on:
           # added here runs nothing until a job names it. Only the preflight
           # job names this one.
           - mail-preflight
+          # `social-demo-seed` seeds, verifies or plans the retained SYNTHETIC
+          # sample communities for the owner's review (SOCIAL-STAGING-DEMO-1).
+          # Only the `social-demo-seed` job names it: no build, no deploy, no
+          # repin, no functions update, no hosted suite, no cleanup.
+          - social-demo-seed
 
       # WHY A RECOVERY MODE EXISTS.
       # Run 35495928362 created synthetic users and documents on staging and
@@ -90,6 +95,27 @@ on:
       # build, no deploy, no 24-row suite, no deployment verification.
       recover_run_id:
         description: "cleanup-recovery only. The workflow run id IN THIS REPOSITORY whose wsf-player-evidence artifact holds the manifest to clean up."
+        required: false
+        type: string
+
+      # social-demo-seed only. These three reach the job through `env:` and are
+      # judged by social-demo-inputs.mjs BEFORE it authenticates; none is ever
+      # written into a shell line.
+      demo_action:
+        description: "social-demo-seed only. plan (read-only, default), apply (needs demo_plan_digest from a reviewed plan) or verify (read-only). No cleanup or reanchor here."
+        required: false
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - verify
+      demo_owner_uid:
+        description: "social-demo-seed only. The uid of the owner's EXISTING, email-verified staging account, from its Auth record. Never a display name."
+        required: false
+        type: string
+      demo_plan_digest:
+        description: "social-demo-seed apply only. The PLAN_DIGEST a reviewed plan run printed for this owner and this operational commit."
         required: false
         type: string
 
@@ -1095,3 +1121,122 @@ jobs:
           # logs, and the domain is the half that has to match a verified one.
           WSF_EMAIL_FROM: ${{ vars.WSF_EMAIL_FROM }}
         run: node .github/wsf-staging/mail-preflight.mjs "$STAGING_PROJECT"
+
+  # ---------------------------------------------------------------------------
+  # THE RETAINED SYNTHETIC SOCIAL REVIEW FIXTURE (SOCIAL-STAGING-DEMO-1).
+  #
+  # Runs scripts/westayfit/staging-demo/seed-social-demo.mjs, as reviewed on
+  # this operational commit, against westayfit-staging with the existing deploy
+  # identity. The script itself refuses any other project, verifies the owner
+  # from his Auth record, fails closed on every Auth error but not-found and on
+  # any foreign document at a fixture path, creates no Auth account and never
+  # overwrites a counter.
+  #
+  # WHAT THIS JOB CANNOT DO, structurally: every job in this file gates on an
+  # explicit equality list of modes, and `social-demo-seed` is named here and
+  # nowhere else, so gate, config, build, deploy, hosted-verify, player-journey,
+  # cleanup-recovery and mail-preflight all skip. It installs from the reviewed
+  # functions-westayfit lockfile with --ignore-scripts. It offers no cleanup and
+  # no reanchor: the fixture is RETAINED for the owner's review.
+  #
+  # APPLY IS BOUND TO A REVIEWED PLAN. It re-plans in this job and applies only
+  # if that plan's digest (owner, fixture, operational commit and every fixture
+  # path by class) equals the demo_plan_digest a reviewed plan run printed. A
+  # changed owner, commit or staging state yields a different digest.
+  #
+  # Seeded rows are not evidence that the social features work; that needs the
+  # served member / non-member / privacy calls.
+  # ---------------------------------------------------------------------------
+  social-demo-seed:
+    if: ${{ inputs.mode == 'social-demo-seed' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # Judged before any credential exists. The values come in through env
+      # only, and the seed flag written back comes from a fixed table.
+      - name: Validate the seed inputs before using a credential
+        id: seed-inputs
+        env:
+          DEMO_ACTION: ${{ inputs.demo_action }}
+          DEMO_OWNER_UID: ${{ inputs.demo_owner_uid }}
+          DEMO_PLAN_DIGEST: ${{ inputs.demo_plan_digest }}
+        run: node ops/.github/wsf-staging/social-demo-inputs.mjs
+
+      # The reviewed lockfile on this operational commit pins firebase-admin.
+      # --ignore-scripts: no package lifecycle code runs in a job that can mint
+      # a credential.
+      - name: Install the seed dependencies from the reviewed lockfile
+        working-directory: ops/functions-westayfit
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Plan, apply or verify the synthetic sample communities
+        id: seed
+        working-directory: ops/functions-westayfit
+        env:
+          DEMO_OWNER_UID: ${{ inputs.demo_owner_uid }}
+          DEMO_PLAN_DIGEST: ${{ inputs.demo_plan_digest }}
+          SEED_FLAG: ${{ steps.seed-inputs.outputs.flag }}
+          WSF_OPERATIONAL_SHA: ${{ github.sha }}
+          EVIDENCE: ${{ github.workspace }}/wsf-social-demo-evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE"
+          SEED=../scripts/westayfit/staging-demo/seed-social-demo.mjs
+          DIGEST=../.github/wsf-staging/social-demo-plan-digest.mjs
+          case "$SEED_FLAG" in
+            --plan)
+              node "$SEED" --plan --project "$STAGING_PROJECT" --owner-uid "$DEMO_OWNER_UID" --receipt "$EVIDENCE/plan-receipt.json"
+              DEMO_PLAN_DIGEST= node "$DIGEST" "$EVIDENCE/plan-receipt.json" ;;
+            --apply)
+              node "$SEED" --plan --project "$STAGING_PROJECT" --owner-uid "$DEMO_OWNER_UID" --receipt "$EVIDENCE/plan-receipt.json"
+              node "$DIGEST" "$EVIDENCE/plan-receipt.json"
+              node "$SEED" --apply --project "$STAGING_PROJECT" --owner-uid "$DEMO_OWNER_UID" --receipt "$EVIDENCE/apply-receipt.json"
+              node "$SEED" --verify --project "$STAGING_PROJECT" --owner-uid "$DEMO_OWNER_UID" --receipt "$EVIDENCE/verify-receipt.json" ;;
+            --verify)
+              node "$SEED" --verify --project "$STAGING_PROJECT" --owner-uid "$DEMO_OWNER_UID" --receipt "$EVIDENCE/verify-receipt.json" ;;
+            *)
+              echo "::error::unexpected seed flag"; exit 1 ;;
+          esac
+
+      - name: Scan evidence before upload
+        id: scan-social-demo-evidence
+        if: always()
+        run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-social-demo-evidence"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-social-demo-evidence.outcome == 'success' }}
+        with:
+          name: wsf-social-demo-evidence
+          path: wsf-social-demo-evidence
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Require the seed step and the evidence scan to have passed
+        if: always()
+        run: |
+          set -euo pipefail
+          [ "${{ steps.scan-social-demo-evidence.outcome }}" = "success" ] \
+            || { echo "::error::the evidence scan rejected the seed evidence"; exit 1; }
+          [ "${{ steps.seed.outcome }}" = "success" ] \
+            || { echo "::error::the seed step did not succeed; nothing may be read as seeded or verified"; exit 1; }
