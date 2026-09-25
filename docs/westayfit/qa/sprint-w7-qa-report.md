@@ -3732,3 +3732,39 @@ This was run in a detached worktree, locally only. There was **no dispatch and n
 | the regression suites | — | apply rechecks T1–T7: 7/7 (C1 / C2 remain harness-invalid, superseded by B3 / B4); static collisions 6/6; Auth 4/4; real-`wsfContribute` races 6/6; privacy 1/1 |
 
 **Status:** reviewed on `2a251083`. Nothing is accepted or dispatched. A #484 head carrying `2a251083` would need only a blob-identity check plus `run-all`.
+
+## 40 · APP-FEEL-PARITY-1 checkpoint 2 (#487), product `be21eab44ee969cfc55543d759aece8ba51780c8`, evidence head `09dd16b2561d2bd23944ceeb483aa2eb03614fd7` (Director #434 `5839322767`; W7 ACK `5839329631`): **PASS on items 1–7; one precision note (stale comments)**
+
+**Lineage, verified by git:**
+- `91392f9d` (development) → `299d1c3f` → `7c5a5962` → `be21eab4`.
+- **Product:** `(tabs)/_layout.tsx`, `(tabs)/(home)/index.tsx`, `(tabs)/(home)/community/[groupId]/index.tsx`, `(tabs)/community/index.tsx`, `move/index.tsx`, `src/ui/MemberTopBar.tsx` and the new `src/memberReads.ts`, plus W9's specs.
+- **`be21eab4..09dd16b2`:** frames, receipts, the README and the producer only. It touches **no** `app/` or `src/` file.
+
+**Builds and instrument.**
+- Builds are emulator-flagged and stamped: `be21eab4` on 5019, and `91392f9d` on 5020 as the fail-before.
+- The spec is `apps/westayfit/tests-e2e/sprint-w7-app-feel-cp2-verify.spec.ts` (E1–E5, plus the E4c control). It counts instances per DOM element, records every painted loading frame, reads scroll, records browser Back, counts callables, and watches for a text across the page.
+- Results: **`be21eab4` 7 / 7**. **`91392f9d` fails 5 of 7**, all on the defects cp2 fixes. E4 and E5 pass on both, as expected: the base has no shared layer, and E5 is unchanged behaviour.
+
+**Fixture corrections, disclosed:**
+- E4's sign-in first used a link that the signed-out Community tab does not render, then an unbounded click on a tab bar that is absent when signed out.
+- It now reaches `/signin` through the router's own `popstate` path. It asserts a **same-document marker** across both accounts, so a reload cannot hollow out the isolation proof.
+- E4 was rerun alone, then the whole file was rerun on both builds.
+
+| # | row | `91392f9d` (fail-before) | `be21eab4` |
+|---|---|---|---|
+| **1** | MOVE no goal → "Go to your community" (390×640 and 390×844; MOVE opened from You) | the current tab stays **You**; **2 tab bars, 2 community screens, the loading screen painted (109 frames)**; browser Back returns to **`/move` with the sheet** | **Home** tab; 1 tab bar, 1 community screen (0 instances added); **0 loading frames**; browser Back does **not** return to `/move`. Scroll: that community (no goal) is too short to scroll at either size (0 → 0); retention is shown by it being the same instance. **PASS** |
+| **2** | MOVE read error (**INJECTED** `wsfListGoals` 500) → "Go Home" | You stays current; **2 tab bars, 1 instance added, loading 133 frames, "Opening your community…" painted**; Back → `/move` | **Home tab as it stands**: 1 tab bar, 0 instances added, 0 loading, **scroll 300 → 300** (nontrivial, on the same screen); Back does not return to `/move`. **PASS** |
+| **3** | wordmark from the Community tab, pointer then Enter | pointer: **a second community, loading 141 frames, scroll 300 → 0**, 9 callables; Enter: **nothing happens** (the Community tab stays current) | pointer and Enter each: **Home selected, 0 instances added, 0 loading, scroll 300 → 300**. Only the community's own focus refresh runs (`wsfListGoals`, `wsfGoalPulse`, `wsfMyContribution`, `wsfCommunityMembers`, `wsfCommunityActivity`, once each); `wsfMyCommunities` is not re-read. **PASS** |
+| **4** | shared reads, per account; refusal forgets | isolation holds (there is no shared layer) | **In one document across both accounts** (a same-document marker, no reload): A signs out from the menu and B signs in; **A's community name never appears** in B's session. B's second membership is **deleted on the server**, and B opens it from Home's list: "not a member" is shown. B's **first Community-tab visit then paints the loading state** (not remembered rows), and the refused community is **not listed**. **PASS** |
+| **4c** | positive control: the first Community-tab visit after Home | **whole-page skeleton painted (76 frames)** | **0 skeleton frames**; the current panel is up at about 100 ms; the fresh `wsfMyCommunities` and `wsfListGoals` still run. **PASS**. So the shared layer is used, and E4 shows it is per-account and forgets on refusal |
+| **5** | Community Home's warm recall is withdrawn; the Champion's deliberate reload semantics | Retry trace `loading → error` | **Source:** the final `goalsState` logic is byte-for-byte the base's (`setGoalsState({kind:'loading'})` on every read, and `failed` on error). `peekGoals` is no longer imported by the community page. The `7c5a5962` "stand on warm" branch is gone (confirmed per commit). **Behaviour (INJECTED 500s):** a Retry on the goals error goes `loading → error` and reports the failure, and recovers when the read succeeds, identically on both builds. **PASS** |
+| **6** | committed evidence at `09dd16b2` | — | `MANIFEST.sha256` lists **64 PNGs; `sha256sum -c` verifies 64 / 64**, and its file set equals the PNGs present. All **64 frame references in the 16 JSON receipts match the manifest**. CANDIDATE receipts are labelled `CANDIDATE BUILD be21eab4`, and the README names product `be21eab4` and MIGRATED `91392f9d`. The receipts' before / after counts agree with this table (for example, move-error-home: 1 instance, 0 loading, scroll 120 → 120). **PASS** |
+| **7** | the 441 / 1 / 20 first run: `sprint-w9-shell-capture.spec.ts:83` timed out | — | **Outside the delta:** the prototype tree (`app/design-target/shell-next`, `src/ui/shellNext`) has no diff over `91392f9d..be21eab4`, and imports none of the changed modules (it only names its own routes). **Rerun:** it passes **3 / 3 on `be21eab4` and 3 / 3 on `91392f9d`** in isolation (about 1.8 s each). The first-run timeout **was not reproduced**. It is carried as W9 reported it, **undiagnosed and not relabelled a flake**. **PASS (carry allowed)** |
+
+**Precision note P1.** `community/[groupId]/index.tsx` at `be21eab4` still carries two comments from the withdrawn warm recall: "Loading only when there is nothing … (a warm re-entry keeps its last goals until this lands)" and "Warm goals already on screen stay …". The code beneath them does neither. These are comments only, but they describe behaviour that no longer exists.
+
+**Carried, not rerun:** all cp1, shell and mounted-tab proofs (Checks 36–36C), and the D1 / F3 / F2 rows. **Not in scope:** Community / Progress / You visual parity, the stale CURRENT row after a switch (checkpoint 3), and Progress's first-visit skeleton.
+
+**Limits:** Chromium web on local emulators, at 390×640 and 390×844; E4 was one page and two synthetic accounts. No device-speed claim, and no native, Safari or assistive-technology measurement.
+
+**Status:** tested on `be21eab4` / `09dd16b2`. Nothing is accepted, integrated or staged.
