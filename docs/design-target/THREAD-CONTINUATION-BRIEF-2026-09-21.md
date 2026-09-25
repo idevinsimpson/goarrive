@@ -4,23 +4,23 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 21:30Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 22:20Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`0b460ce3`** = served `91392f9d` + W9 cp2 `09dd16b2` (tree `054f6166` = accepted head; tsc 0, guard 9/20, vitest 891) |
-| `main` | `e20994a7` (Merge #486: pin → `91392f9d`; earlier: OPS-DOC-1 #476, skill #480, pointers #481) |
-| staging pin | `approvedAppSha` `91392f9d`, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED `5838304652` after W7 Check 39 `5838198472`) |
-| served staging | **`91392f9d`**, run 49 `36179721264`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0 (social excluded), cleanup COMPLETE 349 / 349 (#365 `5838524319`–`5838527660`) |
+| development `claude/wsf-app-shell` | **`0b460ce3`** (served, run 50) = `91392f9d` + W9 cp2 `09dd16b2` (tree `054f6166` = accepted head; tsc 0, guard 9/20, vitest 891) |
+| `main` | `a4b228a5` (Merge #488: pin → `0b460ce3`; before it `e20994a7` Merge #486; earlier: OPS-DOC-1 #476, skill #480, pointers #481) |
+| staging pin | `approvedAppSha` `0b460ce3`, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED #488 `5840250100` after W7 Check 42 `5840011694`) |
+| served staging | **`0b460ce3`**, run 50 `36194540250`: 49 → 49, created none, `VERIFY=pass`, marker `0b460ce`, hosted 24 / 0 (social excluded), cleanup COMPLETE 349 / 349 (#365 `5840424362`–`5840427110`); before it `91392f9d` via run 49 |
 
 **Active packets.**
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
 | **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · #482 · cp1 `7dc46cda` | **ACCEPTED** `5837302206` (W7 36C closed F2) → **integrated `91392f9d`** (#482 `5837323466`); Chromium only; cp2 warm state / Settings / panel styling / icon / instructions remain; W9 continues cp2 | **SERVED** via run 49 |
-| **APP-FEEL-PARITY-1 cp2** | W9 · #487 · product `be21eab4` / head `09dd16b2` | **ACCEPTED** `5839590439` (W7 Check 40 PASS) → **integrated `0b460ce3`** (#487 `5839611556`); W7 P1 stale comments ride next touch; Progress skeleton, stale CURRENT, motion, route parity remain; W9 → cp3 | **pin #488 `12a4c61d`** → `0b460ce3` (L0 git `5839864059`: one file, prior 49, run-all green) → **W7 Check 42** (#434 `5839864203`, renumbered `5839889244`; 41 = perf baseline `5839767320`) → Director → L0 merge → ONE dispatch |
+| **APP-FEEL-PARITY-1 cp2** | W9 · #487 · product `be21eab4` / head `09dd16b2` | **ACCEPTED** `5839590439` (W7 Check 40 PASS) → **integrated `0b460ce3`** (#487 `5839611556`); W7 P1 stale comments ride next touch; Progress skeleton, stale CURRENT, motion, route parity remain; W9 → cp3 | **SERVED** via run 50 (pin #488 `12a4c61d`, W7 Check 42 PASS, Director ACCEPTED `5840250100`, merged `a4b228a5`) |
 | **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` → integrated `00d6d44e`; multiple movements, icon parity, native / AT proof, W7 N1 remain; seam direction accepted `5836170255`, no release | **SERVED** via run 49 (pin #486 merged `e20994a7`) |
 | **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `6c1d115e` | Director HOLD `5836331823` → successor `6c1d115e` (`5836628700`), then G2a / G1b successor `2a251083`, carried into #484 `4c1ac1d9` (L0 `5839042928`) | W7 changed rows → Director |
 | **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `736ebd77` on `main` `7e423a48` | seed carried blob-identical; M8 test +39; workflow unchanged since `8f8c4530`; run-all green (L0 git on #484) | W7 changed rows → Director → L0 PLAN → APPLY / VERIFY |
@@ -33,7 +33,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Staging.** Runbook: **`skills/wsf-staging-deploy/SKILL.md` on `main`** (linked from `CLAUDE.md` / `AGENTS.md`). Each stable accepted integrated milestone stages without another owner prompt: pin via a worker → independent check → Director accept → L0 merges the pin → one dispatch → deployment / served-marker / hosted / cleanup receipts.
 
-**Served vs readiness.** Served `91392f9d` (run 49). Node 20 functions runtime decommissions 2026-10-30 (deploy warning; backend, Director's call). Social is **not ready**: three social callables SHUT (Operation 2: no capable identity; the deployer is measured unable) and the `wsfContributions` index unmeasured, no READY receipt; social smokes, members deep link and `/move` direct load not run; email blocked; shared kiosk HELD. The sample seed is a separate path through the reviewed `social-demo-seed` mode and does not by itself prove social.
+**Served vs readiness.** Served `0b460ce3` (run 50). Node 20 functions runtime decommissions 2026-10-30 (deploy warning; backend, Director's call). Social is **not ready**: three social callables SHUT (Operation 2: no capable identity; the deployer is measured unable) and the `wsfContributions` index unmeasured, no READY receipt; social smokes, members deep link and `/move` direct load not run; email blocked; shared kiosk HELD. The sample seed is a separate path through the reviewed `social-demo-seed` mode and does not by itself prove social.
 
 **Waiting on the owner:** the lab phone test (`5826104270`). EXP1 held; W2 / W4 / W1B / W8 parked; W5 stopped.
 
