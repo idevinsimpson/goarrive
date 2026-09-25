@@ -3552,3 +3552,46 @@ W3's own emulator dry run passes 21/21 on `06bcb288` and 22/22 on the candidate.
 - **B-P2.** The digest binds the fixture, the project, the owner, the operational commit and **the fixture paths by class**, not document content. A change of content inside the same class, such as further edits to a drifted goal, does not change the digest. The seed's own drift handling keeps those edits.
 
 **Status:** reviewed only. Nothing is accepted, merged or dispatched. There was no staging access and no cloud call. G1 and G2 go to W3 and the Director for disposition. The M8 test gap and P1 / B-P1 / B-P2 are precision items.
+
+## 38 · W6 MOVEMENT-PILLS-1 (#483), exact `eeb5eed02d1f8f3beb1ee9a4c5368f575de98527` (L0 #434 `5836118476`; Director `5836100138`, clarification `5836170056`; W7 ACK `5836287971`): **PASS on rows 1–6; no defect; one note**
+
+**Scope.** This is the corrected single-movement subset, not multi-movement support.
+
+**Builds.** Emulator-flagged builds, each stamped and served beside the emulators (`demo-wsf-local`):
+
+| build | role | port |
+|---|---|---|
+| `eeb5eed0` | candidate | 5016 |
+| `03cfddba` | the fail-before head, an ancestor of the candidate | 5017 |
+| `502b1e8d` | base | 5010 |
+
+**Candidate delta.** `502b1e8d..eeb5eed0` is 4 commits.
+- Product: `app/goals/new.tsx`, plus the new `src/movementSelection.ts` and `src/ui/MovementPicker.tsx`.
+- Also: W6's specs, unit tests and a new `review/movement-pills-1/`.
+
+**Instrument:** `apps/westayfit/tests-e2e/sprint-w7-movement-pills-verify.spec.ts` (M1–M5).
+- Candidate: **6/6** on the final file.
+- `03cfddba`: M1, M2 and M2r **fail**, as intended (fail-before).
+- Base: M1 fails, because the pill is absent.
+
+**Fixture corrections, disclosed:**
+- The first `03cfddba` run hung. Two unbounded reads caused it: the Something else pill, which that build does not render, and a `scrollIntoViewIfNeeded` call. That run ended in my runner timeout, exit 124.
+- The stale base run started with the same file was stopped.
+- Every read is now bounded. M1 and M2 were rerun on `03cfddba` and M1 on the base, and the final file was rerun 6/6 on the candidate.
+- None of this changes a product result.
+
+| row | measured on `eeb5eed0` | fail-before `03cfddba` | result |
+|---|---|---|---|
+| **1** single choice, replacing | The picker is a `radiogroup`. Squats then Push-ups leaves **only `push-ups`** checked, with the chosen unit shown as "push-ups". Submit sends **one** `wsfCreateGoal`: `{unit: "push-ups", activityGuideKey: "push-ups", target: 1200, …}`. The emulator goal reads `unit` push-ups and `activityGuideKey` push-ups. **After a reload in the product:** the community total reads "0 of 1,200 push-ups", and the contribution screen's guide is "How we count push-ups … Count one push-up when your arms are straight again …". | `role=group`; **both** checked; chosen unit "squats + push-ups" | **PASS** |
+| **2a** the rendered route | M2r: real clicks on Squats then Push-ups (the valid sequential selection) send one request, `{unit: "push-ups", activityGuideKey: "push-ups"}`, and store one goal, the same. | **Real journey: request and stored goal `{unit: "squats + push-ups", activityGuideKey: "reps"}`** | **PASS** |
+| **2b** unsupported several / mixed state, **INJECTED** | The picker's own `onChange` is called with `['squats','push-ups']`, then `['squats','steps']`. That state is not reachable through the rendered single-choice route. Both are checked. The reason is on screen: "A goal with several movements can't be started yet. Choose one movement." / "Squats and steps are counted differently, so they can't share one total. Choose one movement." Submit has `aria-disabled="true"`. A **forced click sends 0 requests**. **Calling the submit handler itself** (INJECTED) also sends 0 requests and sets the unit field error to the same sentence. | The same injected state is **submitted**: `{unit: "squats + push-ups", activityGuideKey: "reps"}`, and the form moves to its created screen | **PASS** |
+| **3** Something else | The draft "burpees" is typed first. Laps hides the field (chosen unit "laps", phrase "1,200 laps"). Something else brings back **"burpees"** ("1,200 burpees"). Squats, Sit-ups, then Something else again: still **"burpees"**. The control is **144.9 × 44 px** and reachable at its centre after a movement is picked. Submitting under Something else sends `unit: "burpees"` **with no `activityGuideKey` key at all**, and the stored goal has no such field. | — | **PASS** |
+| **4** keyboard and semantics | Each pill and Something else is a `radio` whose accessible name is its label (exactly 1 each). There is one `radiogroup` named "Movements". Tab from the target field goes: unit field, then Squats, Push-ups, Sit-ups, Steps, Laps, Something else, then the duration options, repeat and submit. Space on Sit-ups selects only Sit-ups (`aria-checked`); Space on Something else selects only Something else. | — | **PASS** (note N1) |
+| **5** 390×640 | After picking Steps the phrase is at 451–484, inside the 640 px viewport. Each target is reachable at its centre after an ordinary scroll of the page's own 640 px scroller: phrase 303–336, last pill row (Something else) 298–342, submit 522–576. | — | **PASS** |
+| **6** evidence integrity | `docs/design-target/review/goal-setup-next/` is tree **`ff5e70fd50a0f198d7535d057296a686147d04bd`** at both `502b1e8d` and `eeb5eed0`. `git diff --quiet` shows no byte change, and a hash of the `ls-tree` listing is identical (`d22d7dd0…`). The evidence guard is intact. | — | **PASS** |
+
+**N1 (note, not graded):** each radio is its own Tab stop (6 stops), and arrow keys were not measured. That meets the routed "Tab reaches each pill". The common radio-group pattern is one Tab stop plus arrow keys, so this is recorded for the Director's judgement.
+
+**Limits:** Chromium web only, at 390×844 and 390×640. No Safari, no real device and no assistive-technology session. The multi / mixed state is reachable only by injection on this build, and is labelled as such.
+
+**Status:** tested on `eeb5eed0`. Nothing is accepted, integrated or staged.
