@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 16:55Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 17:10Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -19,16 +19,16 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | successor `b497ce4c` (L0 git `5834964867`; tsc 0, vitest 875, guard 9/20): **W7 Check 36B** closed D1 / F3 (Director `5835326729`); **F2 open** — scrims tabbable, focus containment must be panel-only, orienting focus after step replacement; evidence `f9ca3d5d` (no product delta; tsc 0, vitest 875) → **Director pixel PASS `5835484423` / `5835521562`**; W9 owes the F2 successor with rendered-DOM proof + README receipt-colour text fix; Lovable discrepancies carried to W9's final MOVE parity checkpoint, not waived | W9 F2 → W7 affected rows → Director pixels → L0 integrate → pin → ONE dispatch (cp1 is its own milestone; `5835326935`) |
+| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | successor `b497ce4c` (L0 git `5834964867`; tsc 0, vitest 875, guard 9/20): **W7 Check 36B** closed D1 / F3 (Director `5835326729`); **F2 open** — scrims tabbable, focus containment must be panel-only, orienting focus after step replacement; evidence `f9ca3d5d` (no product delta; tsc 0, vitest 875) → **Director pixel PASS `5835484423` / `5835521562`**; W9 session RUNNING on F2 since 16:59Z (no L0 wake: busy; `5836240722`), ACK pending; owes the F2 successor with rendered-DOM proof + README receipt-colour text fix; Lovable discrepancies carried to W9's final MOVE parity checkpoint, not waived | W9 F2 → W7 affected rows → Director pixels → L0 integrate → pin → ONE dispatch (cp1 is its own milestone; `5835326935`) |
 | **MOVEMENT-PILLS-1** (§B) | W6 · **#483** `eeb5eed0` on `502b1e8d` | single-movement subset: shortcut removed, several / mixed refused, explicit Something else; L0 git `5836116882` (tsc 0, vitest 891, guard 9/20, `goal-setup-next/` unchanged); **Director source + pixel PASS `5836096616`**; W7 **Check 38** (#434 `5836118476`); owner's multiple-movement request NOT done — seam **design direction accepted** `5836170255` (4 invariants carried to a future packet naming file ownership); no implementation release; `eeb5eed0` stays immutable for W7 | W7 → Director → L0 integrate → stage |
-| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | corrections **delivered `06bcb288`** (#396 `5835533146`; 3 files, dry run 21/21 per W3); routed to **W7 Check 37** (#434 `5835728833`) | W7 → Director |
-| **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `8f8c4530` on `main` `7e423a48` | L0 git `5835726079` (carried seed blob-identical; workflow +145 / −0; run-all green); W7 Check 37 | W7 → Director → L0 PLAN → APPLY / VERIFY |
+| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | `06bcb288` held (Director `5835619402`: ownership gaps) → successor **`9f8b55f6`** (#396 `5835731366`), carried in #484 | W7 changed-behaviour review → Director |
+| **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `5765b0ea` on `main` `7e423a48` | L0 git `5835726079` (workflow +145 / −0); `5765b0ea` = seed successor only, run-all green; **W7 37B** (`5836268427`): criteria 4–6 PASS, M8 gap (seed job permissions unpinned), B-P1 owner uid in log / receipt | W7 → Director → L0 PLAN → APPLY / VERIFY |
 | JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
 | OPS-DOC-1 | W3 · #476 | **merged** `273ce3ae` (Director `5835685064`; `c45760e8` carried `-x`; blob `1f7f8132`) | done |
 | MOVEMENT-VISION-1 | W10 · #475 · `eda58218` | accepted as isolated R&D core only (`5827675294`) | owner phone trial; no port or staging |
 | MOVEMENT-VISION-NORTHSTAR-1 | Director · Lovable remix `c1b16a13` (frozen `a84e6764` / `8c61cd72`) | NOT READY | owner phone trial |
 
-**W7:** Check 36B delivered (D1 / F3 closed, F2 open). Order: W9 F2 rows → Check 38 (W6) → Check 37 (W3 seed + #484).
+**W7:** Check 36B delivered (D1 / F3 closed, F2 open). Order: W9 F2 rows → Check 38 (W6) → rest of Check 37 (seed successor).
 
 **Staging.** Runbook: **`skills/wsf-staging-deploy/SKILL.md` on `main`** (linked from `CLAUDE.md` / `AGENTS.md`). Each stable accepted integrated milestone stages without another owner prompt: pin via a worker → independent check → Director accept → L0 merges the pin → one dispatch → deployment / served-marker / hosted / cleanup receipts.
 
