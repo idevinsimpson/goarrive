@@ -22,14 +22,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **Integrated + served** | W9: RECOVERY-PORT-1 `86c160ae`, RETURN-CONTINUITY-1 `9f73aaa6`, FOCUS-RETURN-1 `64b01967` | W7 Checks 29 / 32 / 30+33; Director ACCEPTED | in `502b1e8d`; carried seams per #477 / #478 receipts |
 | **APP-FEEL-PARITY-1** (Director `5834082617` §A) | W9 · `claude/wsf-w9-app-feel-parity-1` from `502b1e8d`; checkpoint 1 = loading composition + one-goal MOVE sheet | **ACKed, executing** (#477 `5834278781`); no head yet; W7 baseline Check 35 `76030bd0` as evidence | W9 checkpoint → L0 git → Director → W7 → L0 → stage |
 | **MOVEMENT-PILLS-1** (§B) | W6 · `claude/wsf-w6-movement-pills-1`; `goals/new.tsx` + `MovementPicker.tsx` + `movementSelection.ts` | **ACKed, executing** (#456 `5834258147`); no head yet | W6 checkpoint → L0 git → Director → W7 → L0 |
-| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` (remote `bcfef524`); seed prep; operator path | **ACKed, executing** (#396 `5834234852`) | W3 delivery → L0 git → Director; operator for index + Operation 2 |
+| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` (4 new files, `scripts/westayfit/staging-demo/`) | Director review `5834407330`: **held for correction** (auth-error handling, concurrent-safe apply, fixture ownership) | W3 successor → L0 git → W7 ops review; seed path proposal `5834452422`; index / Operation 2 unresolved |
 | JOIN-VISIBILITY-1 | W9 · deferred behind APP-FEEL-PARITY-1 (#477 `5832790261`) | never started | after §A |
 | **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
 | **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | `eda58218`: W7 Check 31 PASS (#434 `5827152233`); **Director ACCEPTED AS ISOLATED R&D CORE ONLY** (#475 `5827675294`) | no Expo port, integration or staging; next evidence is the owner's phone trial; no video or personal data stored |
 | **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | frozen `a84e6764` / `8c61cd72`: limited R&D handoff, fake-camera evidence (`5826104270`) | **NOT READY**; no Expo task or port before the owner's phone test |
-| W7 item 2: reference focus diagnosis (Lovable `06198931`) | W7 · #434 `5822117639` | not run (preview host refused by W7's proxy) | last in W7's queue |
 
-**W7's queue:** item 2.
+**W7's queue:** Check 35 delivered (`76030bd0`); next, the parity successors. Item 2 (reference focus diagnosis) dropped as superseded.
 
 **STAGING — served `502b1e8d`** (run 48 green). **Runbook: `skills/wsf-staging-deploy/SKILL.md` on `main`** (owner cadence `5832907406`: stable accepted milestones stage without another prompt; linked from `CLAUDE.md` / `AGENTS.md`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
 
