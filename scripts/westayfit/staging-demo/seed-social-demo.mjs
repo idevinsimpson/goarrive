@@ -332,13 +332,36 @@ async function main() {
     else if (k === 'absent') cls.absent.push({ ...d, kindOf: 'ownerMembership' });
     else ownerKept.push(d.path);
   }
-  // a foreign owner of the counters: shard or member-total docs that exist under a fixture goal whose goal doc is foreign are covered by the goal; a
-  // member-total row for a synthetic uid that no fixture contribution explains is foreign
+  // THE COUNTERS. Every deterministic shard and synthetic member-total path is
+  // classified here, before any fixture write. A fixture goal is created in
+  // ONE transaction with all ten of its shards, each carrying the marker, so
+  // under a goal of ours every shard is marked from birth; the product's own
+  // increments merge and keep it. Under a goal that does not exist yet, any
+  // shard is pre-existing and therefore foreign. Synthetic member totals are
+  // written only by this fixture and carry the marker too.
+  for (const c of f.communities) {
+    for (const g of c.goals) {
+      const gs = await db.doc(`wsfGoals/${g.goalId}`).get();
+      const goalState = !gs.exists ? 'absent' : gs.get('demoFixture') === f.fixtureId ? 'ours' : 'foreign';
+      for (let i = 0; i < SHARD_COUNT; i += 1) {
+        const path = `wsfGoalCounters/${g.goalId}/shards/${i}`;
+        const sh = await db.doc(path).get();
+        if (goalState === 'absent' && sh.exists) cls.foreign.push({ path, kindOf: 'shard' });
+        else if (goalState === 'ours' && (!sh.exists || sh.get('demoFixture') !== f.fixtureId)) cls.foreign.push({ path, kindOf: 'shard' });
+      }
+    }
+  }
+  const totalPaths = [...new Set(now.contributions.map((c) => c.totalPath))];
+  for (const path of totalPaths) {
+    const mt = await db.doc(path).get();
+    if (mt.exists && mt.get('demoFixture') !== f.fixtureId) cls.foreign.push({ path, kindOf: 'memberTotal' });
+  }
+  // a member-total row for a synthetic uid that no fixture contribution explains is foreign
   for (const g of goalIds) {
     const mts = await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get();
     for (const d of mts.docs) {
       const uid = d.get('userId');
-      if (uid?.startsWith(f.syntheticUidPrefix) && !now.contributions.some((c) => c.totalPath === d.ref.path)) cls.foreign.push({ path: d.ref.path, kindOf: 'memberTotal' });
+      if (uid?.startsWith(f.syntheticUidPrefix) && !totalPaths.includes(d.ref.path)) cls.foreign.push({ path: d.ref.path, kindOf: 'memberTotal' });
     }
   }
   const ownerFingerprint = async () => {
@@ -390,104 +413,176 @@ async function main() {
   }
 
   if (args.mode === 'cleanup') {
-    const paths = new Set([...now.entities.map((d) => d.path), ...ownerKept]);
+    // Each document is re-read INSIDE its own delete transaction and deleted
+    // only if it is still provably this fixture's at that instant. Anything
+    // that changed ownership after classification (a leave-and-rejoin that
+    // rewrote the owner's row without the marker, a replaced profile) is
+    // preserved, and the cleanup fails naming it.
+    const mark = f.fixtureId;
+    const marked = (data) => data?.demoFixture === mark;
+    const groupMarked = (data) => data?.demoFixture?.id === mark;
+    const plan = [];
     let ownerRows = 0;
     for (const g of goalIds) {
-      for (let i = 0; i < SHARD_COUNT; i += 1) paths.add(`wsfGoalCounters/${g}/shards/${i}`);
-      // everything recorded against a sample goal goes with the goal: seeded rows and any the owner added while reviewing
-      for (const d of (await db.collection('wsfContributions').where('goalId', '==', g).get()).docs) { if (!d.get('userId')?.startsWith(f.syntheticUidPrefix)) ownerRows += 1; paths.add(d.ref.path); }
-      for (const d of (await db.collection(`wsfGoals/${g}/recentAdditions`).get()).docs) paths.add(d.ref.path);
-      for (const d of (await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get()).docs) paths.add(d.ref.path);
+      const goalRef = db.doc(`wsfGoals/${g}`);
+      // rows attached to a sample goal go with it, while the goal is still ours
+      const attached = (path, rowOk) => plan.push({ path, goalRef, ok: rowOk });
+      for (const d of (await db.collection('wsfContributions').where('goalId', '==', g).get()).docs) {
+        if (!d.get('userId')?.startsWith(f.syntheticUidPrefix)) ownerRows += 1;
+        attached(d.ref.path, (x) => x?.goalId === g);
+      }
+      for (const d of (await db.collection(`wsfGoals/${g}/recentAdditions`).get()).docs) attached(d.ref.path, (x) => typeof x?.amount === 'number');
+      for (const d of (await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get()).docs) {
+        attached(d.ref.path, (x) => x?.goalId === g && (!String(x?.userId).startsWith(f.syntheticUidPrefix) || marked(x)));
+      }
+      for (let i = 0; i < SHARD_COUNT; i += 1) attached(`wsfGoalCounters/${g}/shards/${i}`, marked);
     }
+    for (const d of now.entities.filter((x) => x.kind === 'goal')) plan.push({ path: d.path, ok: marked });
+    for (const d of now.entities.filter((x) => x.kind === 'membership')) plan.push({ path: d.path, ok: marked });
+    for (const p of ownerKept) plan.push({ path: p, ok: marked });
+    for (const d of now.entities.filter((x) => x.kind === 'group')) plan.push({ path: d.path, ok: groupMarked });
+    for (const d of now.entities.filter((x) => x.kind === 'profile')) plan.push({ path: d.path, ok: marked });
+    await testInterleave(db);
     let deleted = 0;
-    for (const p of [...paths].sort()) { const r = db.doc(p); if ((await r.get()).exists) { await r.delete(); deleted += 1; } }
+    const preserved = [];
+    for (const item of plan) {
+      const outcome = await db.runTransaction(async (tx) => {
+        const ref = db.doc(item.path);
+        const snap = await tx.get(ref);
+        const goal = item.goalRef ? await tx.get(item.goalRef) : null;
+        if (!snap.exists) return 'absent';
+        if (goal && !(goal.exists && marked(goal.data()))) return 'preserved: its sample goal is no longer this fixture\'s';
+        if (!item.ok(snap.data())) return 'preserved: no longer provably this fixture\'s';
+        tx.delete(ref);
+        return 'deleted';
+      });
+      if (outcome === 'deleted') deleted += 1;
+      else if (outcome !== 'absent') preserved.push(`${item.path} (${outcome})`);
+    }
     const after = await ownerFingerprint();
-    console.log(`CLEANUP_DELETED=${deleted} (fixture paths: ${paths.size}; rows the owner recorded on the sample goals: ${ownerRows})`);
+    console.log(`CLEANUP_DELETED=${deleted} (fixture paths: ${plan.length}; rows the owner recorded on the sample goals: ${ownerRows})`);
+    console.log(`CLEANUP_PRESERVED=${preserved.length}${preserved.length ? ': ' + preserved.join(', ') : ''}`);
     console.log(`OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=${before === after}`);
-    receipt.deleted = [...paths].sort();
+    receipt.deleted = deleted;
+    receipt.preserved = preserved;
     writeReceipt();
+    if (preserved.length) fail(3, 'cleanup preserved documents whose ownership changed during the run; they are named above');
     process.exit(before === after ? 0 : 4);
   }
 
   // ---- apply ----
-  let written = 0;
-  // 1. entities: create absent, move reanchor-only ones; drift is kept
-  const ENTITY_KINDS = new Set(['profile', 'group', 'membership', 'goal']);
-  const entityWrites = [...cls.absent, ...cls.reanchor].filter((d) => ENTITY_KINDS.has(d.kindOf));
-  for (const d of entityWrites) {
-    await db.runTransaction(async (tx) => {
-      const s = await tx.get(db.doc(d.path));
-      const k = classifyEntity(s.exists ? s.data() : undefined, d.data, priorByPath.get(d.path)?.data, d.kind, f.fixtureId);
-      if (k === 'absent') { tx.create(db.doc(d.path), d.data); written += 1; }
-      else if (k === 'reanchor') { tx.set(db.doc(d.path), d.data); written += 1; }
-      else if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
-    });
-  }
-  // 2. the owner's membership rows: created where absent, never rewritten;
-  //    a row that appeared without the marker since classification aborts
-  for (const d of cls.absent.filter((x) => x.kindOf === 'ownerMembership')) {
-    await db.runTransaction(async (tx) => {
-      const s = await tx.get(db.doc(d.path));
-      const k = classifyOwnerMembership(s.exists ? s.data() : undefined, f.fixtureId);
-      if (k === 'absent') { tx.create(db.doc(d.path), d.data); written += 1; }
-      else if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
-    });
-  }
-  // 3. the ledger: one transaction per row, exactly as wsfContribute records one
-  for (const d of [...cls.absent, ...cls.reanchor].filter((x) => x.kindOf === 'contribution')) {
-    await db.runTransaction(async (tx) => {
-      const ref = db.doc(d.path);
-      const s = await tx.get(ref);
-      const k = classifyContribution(s.exists ? s.data() : undefined, d, priorByPath.get(d.path)?.atMs);
-      await testInterleave(db);
-      const at = Timestamp.fromMillis(d.atMs);
-      if (k === 'absent') {
-        tx.create(ref, { ...d.identity, createdAt: at });
-        tx.set(db.doc(d.shardPath), { count: FieldValue.increment(d.identity.count) }, { merge: true });
-        tx.set(db.doc(d.totalPath), { goalId: d.identity.goalId, userId: d.identity.userId, total: FieldValue.increment(d.identity.count), contributionCount: FieldValue.increment(1), updatedAt: at }, { merge: true });
-        // create, never set: an unrelated document at this path aborts the transaction
-        tx.create(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
-        written += 1;
-      } else if (k === 'reanchor') {
-        // timestamps only; counts, shards and totals are untouched. The linked
-        // addition moves only while it is still provably this row's.
-        const aRef = db.doc(d.additionPath);
-        const a = await tx.get(aRef);
-        const ka = classifyAddition(a.exists ? a.data() : undefined, k, d, priorByPath.get(d.path)?.atMs);
-        if (ka === 'foreign') throw new Error(`${d.additionPath} is not this fixture's`);
-        tx.update(ref, { createdAt: at });
-        if (ka === 'reanchor') tx.update(aRef, { at: isoMinute(d.atMs) });
-        else if (ka === 'absent') tx.create(aRef, { amount: d.identity.count, at: isoMinute(d.atMs) });
-        written += 1;
-      } else if (k === 'foreign') {
-        throw new Error(`${d.path} became foreign during the run`);
-      }
-    });
-  }
-  // 3b. an addition missing beside an existing fixture row: create-only
-  for (const d of cls.absent.filter((x) => x.kindOf === 'recentAddition')) {
-    await db.runTransaction(async (tx) => {
-      const r = db.doc(d.additionPath);
-      if (!(await tx.get(r)).exists) { tx.create(r, { amount: d.identity.count, at: isoMinute(d.atMs) }); written += 1; }
-    });
-  }
-  // 4. a reanchor on a sample group the owner has edited: move only the
-  //    fixture's own bookkeeping field, never his edit
-  if (args.reanchor) {
-    for (const c of f.communities) {
-      await db.runTransaction(async (tx) => {
-        const ref = db.doc(`wsfCommunityGroups/${c.groupId}`);
-        const s = await tx.get(ref);
-        if (s.exists && s.get('demoFixture.id') === f.fixtureId && s.get('demoFixture.anchorMs') !== anchorMs) {
-          tx.update(ref, { 'demoFixture.anchorMs': anchorMs });
-          written += 1;
+  // Writes commit row by row. If a collision appears after classification the
+  // run STOPS at that row: nothing is overwritten or deleted, the rows already
+  // committed are fixture-owned and listed, and a later run reconciles them
+  // (it classifies them as unchanged and creates only what is missing).
+  const written = [];
+  const commit = async (path, fn) => { if (await db.runTransaction(fn)) written.push(path); };
+  try {
+    // 1. entities: create absent, move reanchor-only ones; drift is kept. A
+    //    goal is created together with its ten marked shards, or not at all.
+    const ENTITY_KINDS = new Set(['profile', 'group', 'membership', 'goal']);
+    for (const d of [...cls.absent, ...cls.reanchor].filter((x) => ENTITY_KINDS.has(x.kindOf))) {
+      await commit(d.path, async (tx) => {
+        const s = await tx.get(db.doc(d.path));
+        const shardRefs = d.kind === 'goal' ? Array.from({ length: SHARD_COUNT }, (_, i) => db.doc(`wsfGoalCounters/${d.path.split('/')[1]}/shards/${i}`)) : [];
+        const shards = await Promise.all(shardRefs.map((r) => tx.get(r)));
+        const k = classifyEntity(s.exists ? s.data() : undefined, d.data, priorByPath.get(d.path)?.data, d.kind, f.fixtureId);
+        if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
+        if (k === 'absent') {
+          const taken = shards.find((x) => x.exists);
+          if (taken) throw new Error(`${taken.ref.path} exists before its goal; refusing to merge into it`);
+          tx.create(db.doc(d.path), d.data);
+          for (const r of shardRefs) tx.create(r, { count: 0, demoFixture: f.fixtureId });
+          return true;
         }
+        if (k === 'reanchor') { tx.set(db.doc(d.path), d.data); return true; }
+        return false;
       });
     }
+    // 2. the owner's membership rows: created where absent, never rewritten
+    for (const d of cls.absent.filter((x) => x.kindOf === 'ownerMembership')) {
+      await commit(d.path, async (tx) => {
+        const s = await tx.get(db.doc(d.path));
+        const k = classifyOwnerMembership(s.exists ? s.data() : undefined, f.fixtureId);
+        if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
+        if (k === 'absent') { tx.create(db.doc(d.path), d.data); return true; }
+        return false;
+      });
+    }
+    // 3. the ledger: one transaction per row, exactly as wsfContribute records one
+    for (const d of [...cls.absent, ...cls.reanchor].filter((x) => x.kindOf === 'contribution')) {
+      await commit(d.path, async (tx) => {
+        const ref = db.doc(d.path);
+        const totalRef = db.doc(d.totalPath);
+        const s = await tx.get(ref);
+        const mt = await tx.get(totalRef);
+        const k = classifyContribution(s.exists ? s.data() : undefined, d, priorByPath.get(d.path)?.atMs);
+        await testInterleave(db);
+        const at = Timestamp.fromMillis(d.atMs);
+        if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
+        if (k === 'absent') {
+          if (mt.exists && mt.get('demoFixture') !== f.fixtureId) throw new Error(`${d.totalPath} is not this fixture's; refusing to merge into it`);
+          tx.create(ref, { ...d.identity, createdAt: at });
+          // update, never set: the shard was created marked with its goal, so a
+          // missing one aborts instead of being re-created unmarked
+          tx.update(db.doc(d.shardPath), { count: FieldValue.increment(d.identity.count) });
+          if (mt.exists) tx.update(totalRef, { total: FieldValue.increment(d.identity.count), contributionCount: FieldValue.increment(1), updatedAt: at });
+          else tx.create(totalRef, { goalId: d.identity.goalId, userId: d.identity.userId, total: d.identity.count, contributionCount: 1, updatedAt: at, demoFixture: f.fixtureId });
+          // create, never set: an unrelated document at this path aborts the transaction
+          tx.create(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
+          return true;
+        }
+        if (k === 'reanchor') {
+          // timestamps only; counts, shards and totals are untouched. The linked
+          // addition moves only while it is still provably this row's.
+          const aRef = db.doc(d.additionPath);
+          const a = await tx.get(aRef);
+          const ka = classifyAddition(a.exists ? a.data() : undefined, k, d, priorByPath.get(d.path)?.atMs);
+          if (ka === 'foreign') throw new Error(`${d.additionPath} is not this fixture's`);
+          tx.update(ref, { createdAt: at });
+          if (ka === 'reanchor') tx.update(aRef, { at: isoMinute(d.atMs) });
+          else if (ka === 'absent') tx.create(aRef, { amount: d.identity.count, at: isoMinute(d.atMs) });
+          return true;
+        }
+        return false;
+      });
+    }
+    // 3b. an addition missing beside an existing fixture row: create-only. A
+    //     document that appeared there is preserved and FAILS the run now.
+    for (const d of cls.absent.filter((x) => x.kindOf === 'recentAddition')) {
+      await testInterleave(db);
+      await commit(d.additionPath, async (tx) => {
+        const r = db.doc(d.additionPath);
+        if ((await tx.get(r)).exists) throw new Error(`${d.additionPath} is not this fixture's (it appeared while restoring a missing addition)`);
+        tx.create(r, { amount: d.identity.count, at: isoMinute(d.atMs) });
+        return true;
+      });
+    }
+    // 4. a reanchor on a sample group the owner has edited: move only the
+    //    fixture's own bookkeeping field, never his edit
+    if (args.reanchor) {
+      for (const c of f.communities) {
+        const path = `wsfCommunityGroups/${c.groupId}`;
+        await commit(path, async (tx) => {
+          const ref = db.doc(path);
+          const s = await tx.get(ref);
+          if (s.exists && s.get('demoFixture.id') === f.fixtureId && s.get('demoFixture.anchorMs') !== anchorMs) { tx.update(ref, { 'demoFixture.anchorMs': anchorMs }); return true; }
+          return false;
+        });
+      }
+    }
+  } catch (e) {
+    console.log(`APPLY_INCOMPLETE: ${e.message}`);
+    console.log(`PARTIAL_WRITES=${written.length} (committed before the refusal, all fixture-owned; nothing was overwritten or deleted; a re-run after the collision is resolved reconciles them, or --cleanup removes them)`);
+    receipt.written = written;
+    receipt.refused = e.message;
+    writeReceipt();
+    fail(3, 'apply stopped at a collision found after classification; see APPLY_INCOMPLETE');
   }
+  receipt.written = written;
   const after = await ownerFingerprint();
   const consistent = await ledgerCheck();
-  console.log(`APPLIED=${written}`);
+  console.log(`APPLIED=${written.length}`);
   console.log(`OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=${before === after}`);
   writeReceipt();
   process.exit(before === after && consistent ? 0 : 4);

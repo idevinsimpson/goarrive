@@ -91,6 +91,16 @@ const { FieldValue } = createRequire(join(process.cwd(), 'noop.js'))('firebase-a
 let n = 0;
 export default async function (db) {
   n += 1;
+  const action = process.env.HOOK_ACTION || 'contribute';
+  if (action !== 'contribute') {
+    if (n !== 1) return; // each collision is injected once
+    const uid = process.env.HOOK_OWNER;
+    if (action === 'rejoin') await db.doc('wsfMemberships/wsfdemo-sample-movers_' + uid).set({ groupId: 'wsfdemo-sample-movers', userId: uid, role: 'member', membershipStatus: 'active', communityActivityVisibility: 'private' });
+    if (action === 'replaceProfile') await db.doc('wsfMemberProfiles/wsfdemo-m07').set({ displayName: 'Somebody else now' });
+    if (action === 'plantAddition') await db.doc('wsfGoals/wsfdemo-goal-movers-squats/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01').set({ amount: 999, at: 'not the fixture' });
+    if (action === 'plantLaterTotal') await db.doc('wsfGoalMemberTotals/wsfdemo-goal-movers-squats_wsfdemo-m12').set({ goalId: 'wsfdemo-goal-movers-squats', userId: 'wsfdemo-m12', total: 999 });
+    return;
+  }
   const g = 'wsfdemo-goal-movers-squats', uid = process.env.HOOK_OWNER, a = 'owner-hook-' + process.env.HOOK_TAG + '-' + n;
   await db.runTransaction(async (tx) => {
     tx.create(db.doc('wsfContributions/' + g + '_' + uid + '_' + a), { goalId: g, attemptId: a, userId: uid, count: 7, shardIndex: n % 10, unit: 'squats', communityGroupId: 'wsfdemo-sample-movers', crossedTarget: false, createdAt: new Date() });
@@ -178,6 +188,9 @@ const foreignCases = [
   [`wsfMemberships/wsfdemo-sample-movers_${OWNER}`, { groupId: 'wsfdemo-sample-movers', userId: OWNER, role: 'member', membershipStatus: 'active', communityActivityVisibility: 'private' }],
   // an unrelated document at a deterministic recent-addition path
   [`wsfGoals/${'wsfdemo-goal-movers-squats'}/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01`, { amount: 999, at: 'not the fixture' }],
+  // W7's G2 reproducers: a pre-existing shard and a pre-existing synthetic member total
+  ['wsfGoalCounters/wsfdemo-goal-movers-squats/shards/0', { count: 50 }],
+  ['wsfGoalMemberTotals/wsfdemo-goal-movers-squats_wsfdemo-m01', { goalId: 'wsfdemo-goal-movers-squats', userId: 'wsfdemo-m01', total: 999 }],
 ];
 for (const [p, data] of foreignCases) {
   await db.doc(p).set(data);
@@ -188,7 +201,7 @@ for (const [p, data] of foreignCases) {
   assert.equal(await snapshot(), s0, `${p}: nothing may be written`);
   await db.doc(p).delete();
 }
-ok(`a foreign document at any of ${foreignCases.length} kinds of fixture path (group, profile, goal, membership, the owner's sample membership, a recent-addition path) makes apply refuse with FOREIGN named and zero writes, his preference included`);
+ok(`a foreign document at any of ${foreignCases.length} kinds of fixture path (group, profile, goal, membership, the owner's sample membership, a recent-addition path, a counter shard, a synthetic member total) makes apply refuse with FOREIGN named and zero writes: nothing merged into shard 50 or total 999`);
 
 // ---- plan writes nothing ----
 const s0 = await snapshot();
@@ -198,6 +211,22 @@ assert.equal(await snapshot(), s0, 'plan must write nothing');
 const planned = Number(line(plan.out, 'CREATE'));
 assert.ok(planned > 0);
 ok(`plan is read-only and reports CREATE=${planned}`);
+
+// ---- P2: a collision that appears AFTER classification stops the run explicitly ----
+{
+  const planted = 'wsfGoalMemberTotals/wsfdemo-goal-movers-squats_wsfdemo-m12';
+  const p2 = await seed(['--apply', ...base], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'plantLaterTotal' });
+  assert.equal(p2.code, 3, p2.out);
+  assert.match(p2.out, new RegExp(`APPLY_INCOMPLETE: ${planted.replace(/[/]/g, '\\/')} is not this fixture's; refusing to merge into it`));
+  const partial = Number(line(p2.out, 'PARTIAL_WRITES'));
+  assert.ok(partial > 0, 'earlier rows committed before the collision');
+  assert.equal(/^APPLIED=/m.test(p2.out), false, 'a stopped run never reports itself as applied');
+  assert.equal((await db.doc(planted).get()).get('total'), 999, 'nothing merged into the planted total');
+  const again = await seed(['--plan', ...base]);
+  assert.match(again.out, new RegExp(`FOREIGN=1: ${planted.replace(/[/]/g, '\\/')}`));
+  await db.doc(planted).delete();
+  ok(`a member total planted mid-run stops apply at that row: APPLY_INCOMPLETE names it, PARTIAL_WRITES=${partial} are declared (not "0 writes"), nothing merges into it, and the next plan still reports it`);
+}
 
 // ---- apply WITH an owner contribution landing inside every ledger transaction ----
 const a1 = await seed(['--apply', ...base], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_TAG: 'apply' });
@@ -209,7 +238,7 @@ assert.ok(hookRows1.length > 0, 'the interleaved owner contributions happened');
 assert.equal(tA.ledger, 445 + 7 * hookRows1.length);
 assert.equal(tA.shards, tA.ledger);
 assert.equal(tA.memberTotals, tA.ledger);
-ok(`apply with ${hookRows1.length} owner contributions interleaved between its reads and its commits: none lost (ledger ${tA.ledger} = shards ${tA.shards} = member totals ${tA.memberTotals} = 445 seeded + ${7 * hookRows1.length} owner)`);
+ok(`the re-run after that partial apply reconciles it, with ${hookRows1.length} owner contributions interleaved between its reads and its commits: none lost (ledger ${tA.ledger} = shards ${tA.shards} = member totals ${tA.memberTotals} = 445 seeded + ${7 * hookRows1.length} owner)`);
 
 // ---- idempotence ----
 const a2 = await seed(['--apply', ...base]);
@@ -253,6 +282,38 @@ assert.ok(!(await auth.listUsers()).users.some((u) => u.uid.startsWith('wsfdemo-
 const fixtureDocs = (await allDocs()).filter((d) => d.ref.path.includes('wsfdemo-'));
 assert.deepEqual(fixtureDocs.filter((d) => /email|phone|photo|avatar|invite/i.test(JSON.stringify(Object.keys(d.data())))).map((d) => d.ref.path), []);
 ok(`no Auth account for any synthetic member; ${fixtureDocs.length} fixture documents carry no email, phone, photo, avatar or invite field`);
+
+// ---- G2 under an existing goal: a shard that lost its marker, or went missing, is foreign ----
+{
+  const shard = `wsfGoalCounters/${GOAL_A}/shards/3`;
+  const keptShard = (await db.doc(shard).get()).data();
+  await db.doc(shard).set({ count: keptShard.count });
+  const s0 = await snapshot();
+  const r = await seed(['--apply', ...base]);
+  assert.equal(r.code, 3, r.out);
+  assert.match(r.out, new RegExp(`FOREIGN=1: ${shard.replace(/[/]/g, '\\/')}`));
+  assert.equal(await snapshot(), s0, 'nothing written');
+  await db.doc(shard).delete();
+  const r2 = await seed(['--plan', ...base]);
+  assert.match(r2.out, new RegExp(`FOREIGN=1: ${shard.replace(/[/]/g, '\\/')}`), 'a missing shard under a fixture goal cannot be proven either');
+  await db.doc(shard).set(keptShard);
+  assert.equal(line((await seed(['--verify', ...base])).out, 'VERIFY'), 'pass');
+  ok('under an existing fixture goal, a shard without the marker, or missing, is FOREIGN: apply refuses with zero writes');
+}
+
+// ---- P1: restoring a missing addition that meets a foreign document fails NOW ----
+{
+  const addPath = `wsfGoals/${GOAL_A}/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01`;
+  const kept = (await db.doc(addPath).get()).data();
+  await db.doc(addPath).delete();
+  const p1 = await seed(['--apply', ...base], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'plantAddition' });
+  assert.equal(p1.code, 3, p1.out);
+  assert.match(p1.out, new RegExp(`APPLY_INCOMPLETE: ${addPath.replace(/[/]/g, '\\/')} is not this fixture's \\(it appeared while restoring a missing addition\\)`));
+  assert.equal((await db.doc(addPath).get()).get('amount'), 999, 'the foreign document is preserved');
+  await db.doc(addPath).set(kept);
+  assert.equal(line((await seed(['--verify', ...base])).out, 'VERIFY'), 'pass');
+  ok('restoring a missing recent addition that meets a foreign document preserves it and fails the run at once (exit 3, path named), instead of exiting 0');
+}
 
 // ---- review-time changes are kept, never reset ----
 await db.doc(`wsfMemberships/wsfdemo-sample-movers_${OWNER}`).update({ communityNameVisibility: 'private' });
@@ -317,13 +378,37 @@ assert.match(c0.out, /FOREIGN=1: wsfMemberProfiles\/wsfdemo-m07/);
 assert.equal(await snapshot(), s1, 'a refused cleanup deletes nothing');
 await db.doc('wsfMemberProfiles/wsfdemo-m07').set({ displayName: 'Gus Sample', demoFixture: f.fixtureId });
 ok('cleanup with a foreign document at a fixture path refuses and deletes nothing');
+
+// ---- G1: ownership that changes DURING cleanup is re-checked at delete time ----
+{
+  const ownerRow = `wsfMemberships/wsfdemo-sample-movers_${OWNER}`;
+  const g1a = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'rejoin' });
+  assert.equal(g1a.code, 3, g1a.out);
+  assert.match(g1a.out, new RegExp(`CLEANUP_PRESERVED=1: ${ownerRow.replace(/[/]/g, '\\/')} \\(preserved: no longer provably this fixture's\\)`));
+  assert.equal((await db.doc(ownerRow).get()).get('communityActivityVisibility'), 'private', 'his rejoined row and its preference survive');
+  assert.deepEqual((await allDocs()).map((d) => d.ref.path).filter((p) => p.includes('wsfdemo-')), [ownerRow], 'everything else of the fixture is gone');
+  ok('a leave-and-rejoin that rewrites the owner row without the marker DURING cleanup: that row is preserved with his preference, cleanup exits 3 naming it');
+  await db.doc(ownerRow).delete();
+  assert.equal((await seed(['--apply', ...base])).code, 0);
+  const g1b = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'replaceProfile' });
+  assert.equal(g1b.code, 3, g1b.out);
+  assert.match(g1b.out, /CLEANUP_PRESERVED=1: wsfMemberProfiles\/wsfdemo-m07 \(preserved: no longer provably this fixture's\)/);
+  assert.equal((await db.doc('wsfMemberProfiles/wsfdemo-m07').get()).get('displayName'), 'Somebody else now');
+  ok('a synthetic profile replaced DURING cleanup is preserved and named; cleanup exits 3');
+  await db.doc('wsfMemberProfiles/wsfdemo-m07').delete();
+}
+
+// ---- a clean seed, then a clean cleanup ----
+assert.equal((await seed(['--apply', ...base])).code, 0);
+assert.equal(line((await seed(['--verify', ...base])).out, 'VERIFY'), 'pass');
 const c1 = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId]);
 assert.equal(c1.code, 0, c1.out);
+assert.equal(line(c1.out, 'CLEANUP_PRESERVED'), '0');
 assert.equal(line(c1.out, 'OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED'), 'true');
 assert.deepEqual((await allDocs()).map((d) => d.ref.path).filter((p) => p.includes('wsfdemo-')), []);
 assert.ok((await db.doc('wsfCommunityGroups/emu-owner-home').get()).exists);
 assert.equal((await db.doc(`wsfMemberships/emu-owner-home_${OWNER}`).get()).get('communityNameVisibility'), 'private');
 assert.ok((await db.doc(`wsfMemberProfiles/${OWNER}`).get()).exists);
-ok(`cleanup deletes every fixture document (${line(c1.out, 'CLEANUP_DELETED')}), including the owner's own rows on the sample goals, and nothing else`);
+ok(`a clean re-seed then cleanup deletes every fixture document (${line(c1.out, 'CLEANUP_DELETED')}), preserves nothing, and leaves the owner's own data intact`);
 
 console.log(`\nemulator dry run: ${passed} passed`);
