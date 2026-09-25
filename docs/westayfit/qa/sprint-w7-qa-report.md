@@ -3768,3 +3768,117 @@ This was run in a detached worktree, locally only. There was **no dispatch and n
 **Limits:** Chromium web on local emulators, at 390×640 and 390×844; E4 was one page and two synthetic accounts. No device-speed claim, and no native, Safari or assistive-technology measurement.
 
 **Status:** tested on `be21eab4` / `09dd16b2`. Nothing is accepted, integrated or staged.
+
+## 41 · PERF-MOBILE-BASELINE-1 on development `91392f9dbeda7f13208b79ff365a4cff8952c72c` (Director #434 `5839412481`; W7 ACK `5839563451`): **measurement only; no verdict**
+
+- **SHA:** `91392f9d` is the current accepted and integrated head of `claude/wsf-app-shell`, re-fetched at the start of the check. cp2 (`be21eab4`) is delivered, not integrated, so it was not measured.
+- **Environment:**
+  - an emulator-flagged `build:web` of a detached worktree at `91392f9d`, served by `static-host.js` beside the emulators (`demo-wsf-local`: firestore 8080, auth 9099, functions 5001, all warm);
+  - headless Chromium (`/opt/pw-browsers/chromium`), one worker, at 390×844 and 390×640;
+  - spec `apps/westayfit/tests-e2e/sprint-w7-perf-mobile-baseline.spec.ts`, run `--repeat-each=3`: **12 / 12 runs completed**.
+- **Fixture:** one synthetic member of one private community with one running goal (target 5,000 squats). The Champion is a second synthetic account.
+  - **Before measuring**, the member makes one real contribution of 15 so that Progress has a row; without one it shows its empty state. This contribution is FIXTURE, not measured.
+  - After the measured contribution of 20, Home shows 1,882 = 1,847 + 15 + 20, the server's figure.
+- **How each column is measured:**
+  - **Action:** the page's own `pointerdown` timestamp.
+  - **Useful:** the first frame in which the destination's content element is both visible and on top at its own visible centre. This is sampled every animation frame, so it can be at most one frame late. The content elements are:
+    - Home: `wsf-community-goal-hero`;
+    - Community: `wsf-community-index-rows` or `-current`;
+    - Progress: `wsf-activity-rows`;
+    - You: `wsf-you-member` or `-identity`;
+    - MOVE: `wsf-contribute-timer` or `-entry`;
+    - receipt: `wsf-contribute-receipt`;
+    - the 3-community Home: `wsf-home-my-list`.
+  - **Settled:** the latest of useful, the last loading-state hide, and the last response of a callable started after the action. Measurement waits for 1.5 s with no request in flight.
+  - **Serial stages:** the number of reads before useful that each started only after an earlier read had returned.
+  - **Mounts:** new DOM instances of the screen roots.
+  - **Loading:** any of the nine loading or skeleton test IDs painted after the action.
+  - **Blocking:** a loading state was painted, **and** first useful pixels came only after a read started by this switch had returned.
+
+### Warm fixture: raw per transition (3 runs each; median in bold)
+
+Callables are named with counts. "Seen before" means the destination's content had already been on screen in this page.
+
+| Transition | Viewport | Useful ms (3 runs) | Settled ms | Callables started | Serial stages before useful | Mounts added | Loading painted | Replaced known content | Blocking read |
+|---|---|---|---|---|---|---|---|---|---|
+| Pass 1 Home → Community (first visit) | 844 | 104, 108, 110 (**108**) | **108** | `wsfMyCommunities` 1, `wsfListGoals` 1, `wsfGoalRecentAdditions` 1 | 3 | `wsf-community-index` +1 | `wsf-community-index-loading` | no (first visit) | **yes** |
+| | 640 | 103, 120, 102 (**103**) | **103** | same | 3 | same | same | no | **yes** |
+| Pass 1 Community → Progress (first visit) | 844 | 85, 67, 78 (**78**) | **78** | `wsfMyCommunities` 1, `wsfListGoals` 1, `wsfMyContribution` 1 | 3 | `wsf-activity` +1 | `wsf-activity-loading` | no | **yes** |
+| | 640 | 89, 77, 74 (**77**) | **77** | same | 3 | same | same | no | **yes** |
+| Pass 1 Progress → You (first visit) | 844 | 104, 88, 94 (**94**) | **94** | `wsfMyCommunities` 1, `wsfListGoals` 1, `wsfMyContribution` 1 | 3 | `wsf-you` +1 | `wsf-you-loading` | no | **yes** |
+| | 640 | 83, 91, 92 (**91**) | **91** | same | 3 | same | same | no | **yes** |
+| Pass 1 You → Home (seen at sign-in) | 844 | 14, 16, 13 (**14**) | 97, 98, 88 (**97**) | `wsfCommunityMembers` 1, `wsfCommunityActivity` 1, `wsfListGoals` 1, `wsfGoalPulse` 1, `wsfMyContribution` 1 | 0 | none | none | no | no (background revalidation) |
+| | 640 | 12, 11, 18 (**12**) | **93** | same | 0 | none | none | no | no |
+| Pass 2 Home → Community (warm) | 844 | 6, 6, 6 | **6** | none | 0 | none | none | no | no |
+| | 640 | 6, 6, 6 | **6** | none | 0 | none | none | no | no |
+| Pass 2 Community → Progress (warm) | 844 | 6, 7, 6 | **6** | none | 0 | none | none | no | no |
+| | 640 | 5, 5, 8 | **5** | none | 0 | none | none | no | no |
+| Pass 2 Progress → You (warm) | 844 | 6, 7, 5 | **6** | none | 0 | none | none | no | no |
+| | 640 | 7, 6, 6 | **6** | none | 0 | none | none | no | no |
+| Pass 2 You → Home (warm) | 844 | 6, 9, 6 (**6**) | 82, 89, 98 (**89**) | the same 5 as pass 1 | 0 | none | none | no | no (background revalidation) |
+| | 640 | 7, 6, 8 (**7**) | **88** | the same 5 | 0 | none | none | no | no |
+| MOVE open from Home (after an earlier open) | 844 | 115, 100, 109 (**109**) | **109** | `wsfMyCommunities` 1, **`wsfListGoals` 2**, `wsfGoalPulse` 1, `wsfMyContribution` 1 | 3 | `wsf-move-screen` +1, `wsf-contribute-sheet-panel` +1 | `wsf-move-working` | **yes**: the sheet re-mounts and paints "working" every open | **yes** |
+| | 640 | 123, 103, 103 (**103**) | **103** | same | 3 | same | same | **yes** | **yes** |
+| MOVE Close (back to Home) | 844 | 186, 187, 187 (**187**) | 248, 263, 256 (**256**) | `wsfGoalPulse` 2, `wsfCommunityMembers` 1, `wsfCommunityActivity` 1, `wsfListGoals` 1, `wsfMyContribution` 1 | 1 (useful is the exit animation, not a read) | none (Home stays mounted) | none | no | no |
+| | 640 | 186, 186, 186 (**186**) | **251** | same | 1 | none | none | no | no |
+| MOVE open again (before the contribution) | 844 | 122, 96, 100 (**100**) | **100** | as MOVE open | 3 | +1 / +1 | `wsf-move-working` | **yes** | **yes** |
+| | 640 | 103, 109, 103 (**103**) | **103** | as MOVE open | 3 | +1 / +1 | same | **yes** | **yes** |
+| Submit → confirmed receipt (`data-variant="ordinary"`) | 844 | 51, 48, 51 (**51**) | **51** | `wsfContribute` 1 | 1 | none | none (no loading test ID painted) | no | the receipt waits on the write, by design |
+| | 640 | 52, 51, 48 (**51**) | **51** | `wsfContribute` 1 | 1 | none | none | no | same |
+| Receipt "Back to community" → Home | 844 | 32, 33, 38 (**33**) | 106, 116, 132 (**116**) | the same 5 Home reads | 0 | none | none | no | no (background revalidation) |
+| | 640 | 26, 25, 29 (**26**) | **95** | the same 5 | 0 | none | none | no | no |
+
+No non-listen Firestore request was made in any transition. Firestore Listen and Write channels are excluded from every column.
+
+### Cold first entry: a full reload with the session persisted (390×844, 3 fixtures × 2 reloads each)
+
+| Entry | Member of | Final path | Nav → useful ms | Callables (all) | Serial stages before useful | Loading states painted, in order |
+|---|---|---|---|---|---|---|
+| Home `/` | 1 community | `/community/<id>` (the redirect) | 353, 373, 364, 349, 392, 396 | **9**: `wsfMyCommunities` **2**, `wsfListGoals` **2** (same `groupId` + `includeHistory`, concurrent), `wsfGoalPulse` 1, `wsfMyContribution` 1, `wsfListChallenge` 1, `wsfCommunityMembers` 1, `wsfCommunityActivity` 1 | 4–5 | `wsf-home-loading` +~100 → `wsf-home-my-loading` +~190 → `wsf-home-opening-community` +~230 → `wsf-community-loading` +~245: **four successive loading frames** |
+| Home `/` | 3 communities | `/` (the list; no redirect) | 237, 220, 222, 239, 216, 222 | **4**: `wsfMyCommunities` 1, `wsfListGoals` **3** (one per community, concurrent) | 1 (the list paints after `wsfMyCommunities`; the goal reads finish after) | `wsf-home-loading` → `wsf-home-my-loading` |
+| Community tab `/community` | 1 community | `/community` | 265, 271, 273, 244, 253, 276 | **3**: `wsfMyCommunities` 1, `wsfListGoals` 1, `wsfGoalRecentAdditions` 1 | 3 | `wsf-community-index-loading` |
+| Community tab `/community` | 3 communities | `/community` | 256, 270, 262, 243, 227, 251 | **4**: `wsfMyCommunities` 1, `wsfListGoals` **3** (one per community, concurrent); **no** `wsfGoalRecentAdditions` | 2 | `wsf-community-index-loading` |
+
+Cold sequence for Home with 1 community (representative; ms from navigation):
+
+```
+wsfMyCommunities       +204..+229  {}
+wsfListGoals           +253..+277  {groupId, includeHistory:true}
+wsfListGoals           +253..+287  {groupId, includeHistory:true}   <- same parameters, concurrent
+wsfGoalPulse           +293..+317  {goalId}
+wsfMyContribution      +293..+310  {goalId}
+wsfMyCommunities       +302..+330  {}                               <- second read after the redirect
+wsfListChallenge       +331..+346  {groupId}
+wsfCommunityMembers    +371..+398  {groupId}
+wsfCommunityActivity   +371..+408  {groupId, goalId}
+```
+
+**Per-community fan-out, from the 1-community vs 3-community difference:**
+- Home list and the Community tab: **+1 `wsfListGoals` per community**, issued concurrently after the one `wsfMyCommunities`. This adds breadth, not depth.
+- The single-community Home adds the whole community screen's reads (5 more callables in three more serial stages) because it redirects.
+- `wsfGoalRecentAdditions` appears only when there is one community.
+
+### What the numbers say (facts only)
+
+1. **The first visit to Community, Progress and You** mounts the screen, paints its full-screen loading state, and shows content only after **three serial callables**. Every first visit starts with `wsfMyCommunities` and `wsfListGoals` again, even though Home has just read both.
+2. **Warm switches between Community, Progress and You** make 0 callables and no remount, with content in about 6 ms. Nothing is replaced.
+3. **Every return to Home** is instant (6–38 ms) but always starts **5 background callables**. There is no loading state and no remount.
+4. **Every MOVE open:**
+   - re-mounts the sheet and panel;
+   - paints `wsf-move-working` even when the member was there a moment earlier;
+   - issues 5 callables in 3 serial stages, including **`wsfListGoals` twice**.
+
+   MOVE's content waits on those reads.
+5. **MOVE Close** keeps Home mounted. The 186 ms is the sheet's exit before Home is on top, not a read. It then costs 6 callables: Home's 5 plus one `wsfGoalPulse`, and `wsfGoalPulse` is started twice in the transition.
+6. **The confirmed receipt** is one `wsfContribute` (~50 ms locally), with no loading state. The return lands on the mounted Home immediately, which then revalidates with the same 5 reads and shows the server's total.
+7. **Cold single-community Home** is **9 callables with duplicates**: `wsfMyCommunities` ×2, and `wsfListGoals` ×2 with identical parameters. It passes through **four successive loading frames**, 4–5 serial stages, before the goal hero appears.
+
+### CANNOT-MEASURE, and limits
+
+- **Device and network speed: CANNOT-MEASURE.** Every millisecond here comes from local emulators, where one callable round trip is about 20–35 ms. The numbers that transfer are **structural**: counts, serial stages, loading painted, mounts. On a network with round trip *L*, first useful is at least *serial stages* × *L*. Production and function cold starts are not measured; Check 35 measured one local cold start at 2,953 ms, and these runs were warm.
+- **Pixel paint: CANNOT-MEASURE** at compositor level. "Useful" is DOM-visible and on top, sampled every animation frame. It is not a screen-capture timestamp.
+- **Platforms:** Chromium web only. No iOS or Android native, no Safari, no throttled CPU.
+- **Per-goal fan-out: not measured.** Each fixture community has one goal, so how Home's `wsfGoalPulse` / `wsfMyContribution` / `wsfCommunityActivity` scale with more goals is not measured.
+- **Home "first visit" in pass 1** is not a first visit: the member landed on Home at sign-in.
+
+**No product, config or evidence file was touched.** Nothing is accepted, integrated or staged.
