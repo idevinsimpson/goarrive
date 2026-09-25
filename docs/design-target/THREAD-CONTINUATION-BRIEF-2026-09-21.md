@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 22:45Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 23:35Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -21,8 +21,8 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | --- | --- | --- | --- |
 | **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · #482 · cp1 `7dc46cda` | **ACCEPTED** `5837302206` (W7 36C closed F2) → **integrated `91392f9d`** (#482 `5837323466`); Chromium only; cp2 warm state / Settings / panel styling / icon / instructions remain; W9 continues cp2 | **SERVED** via run 49 |
 | **APP-FEEL-PARITY-1 cp2** | W9 · #487 · product `be21eab4` / head `09dd16b2` | **ACCEPTED** `5839590439` (W7 Check 40 PASS) → **integrated `0b460ce3`** (#487 `5839611556`); W7 P1 stale comments ride next touch; Progress skeleton, stale CURRENT, motion, route parity remain; W9 → cp3 | **SERVED** via run 50 (pin #488 `12a4c61d`, W7 Check 42 PASS, Director ACCEPTED `5840250100`, merged `a4b228a5`) |
-| **PERF-MOBILE-1 cp1** (`5840360454`) | W9 · existing session `session_01QRyWY2Yqg9eU7GBq4ATQCN` · base `0b460ce3` · W7 baseline 41B `ced87f1b` | **RELEASED / awaiting ACK** (handoff #489 `5840568948`; W9 was running cp3, so no wake) | W9 product + evidence SHAs → W7 focused check → Director → L0; then Community + side-Settings literal parity (cp3 #489 `e0e3fe3f`, parked) with the privacy error-feedback fix |
-| **PRIVACY-TOGGLE-STAGING-1** (owner bug `5840495639`; ops `5840491600`) | owner as operator · W7 Check 43 (#434 `5840570251`) | setter SHUT on run 50; no Claude identity can do Operation 2 (W3 `5840494855`, L0 `5840571359`); UI hides the save error → W9 cp3 | owner Operation 2 read-back → next run re-measures → Director's rows |
+| **OWNER 3-h SPRINT** (`5840568296`, `5840666502`) | lanes: A W9 · B Progress · C W6 · W4 accelerator · QA W7 / W5 | A **PERF-MOBILE-1** executing on `claude/wsf-w9-perf-mobile-1` (cp3 #489 parked); C **YOU-PARITY-1** #492 `8c4d8210` → Director truth corrections; W4 **COMMUNITY-PRESENTATION-ACCELERATOR-1** ACKED (wake `trig_01XLkxAD3ZJJL3kCJ4PToNjX`); B **no writer**: W8 and W2 wakes failed "out of usage credits" (other model), L0 `create_session` refused by classifier (#365 `5840866823`) | owner `/model` for W8, owner-started session, or Director re-sequence |
+| **PRIVACY-TOGGLE-STAGING-1** (`5840491600`) | owner as operator · harness #491 `6d0e5e83` | setter SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS; W5 QA2 #491 items 1–8 PASS + **F1** (`5841052065`); Director source PASS | Director on F1 → L0 merges #491; owner Operation 2 → `social-privacy` dispatch |
 | **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` → integrated `00d6d44e`; multiple movements, icon parity, native / AT proof, W7 N1 remain; seam direction accepted `5836170255`, no release | **SERVED** via run 49 (pin #486 merged `e20994a7`) |
 | **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `6c1d115e` | Director HOLD `5836331823` → successor `6c1d115e` (`5836628700`), then G2a / G1b successor `2a251083`, carried into #484 `4c1ac1d9` (L0 `5839042928`) | W7 changed rows → Director |
 | **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `4c1ac1d9` on `main` `7e423a48` | seed carried blob-identical; workflow unchanged since `8f8c4530`; run-all green (L0 git on #484); W7 carry confirmed `5839189282` | Director → L0 PLAN → APPLY / VERIFY |
@@ -31,7 +31,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | MOVEMENT-VISION-1 | W10 · #475 · `eda58218` | accepted as isolated R&D core only (`5827675294`) | owner phone trial; no port or staging |
 | MOVEMENT-VISION-NORTHSTAR-1 | Director · Lovable remix `c1b16a13` (frozen `a84e6764` / `8c61cd72`) | NOT READY | owner phone trial |
 
-**W7:** Checks 40, 41 (perf baseline, `91392f9d`), 41B (`0b460ce3`, `ced87f1b`) and 42 (pin #488) delivered. Next: Check 43 (privacy emulator proof), then the PERF cp1 focused check on W9's delivery.
+**W7:** Checks 40, 41 (perf baseline, `91392f9d`), 41B (`0b460ce3`, `ced87f1b`) and 42 (pin #488) delivered. Check 43 delivered (`8e5d5955`). Next: PERF on W9's delivery. **W5** (QA2, sprint only): Progress/You Phase A SHAs first.
 
 **Staging.** Runbook: **`skills/wsf-staging-deploy/SKILL.md` on `main`** (linked from `CLAUDE.md` / `AGENTS.md`). Each stable accepted integrated milestone stages without another owner prompt: pin via a worker → independent check → Director accept → L0 merges the pin → one dispatch → deployment / served-marker / hosted / cleanup receipts.
 
