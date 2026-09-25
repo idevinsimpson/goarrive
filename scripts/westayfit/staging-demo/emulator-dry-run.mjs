@@ -3,16 +3,18 @@
  * The emulator dry run for SOCIAL-STAGING-DEMO-1. Local Firestore + Auth
  * emulators only; it refuses to start without both emulator hosts and a
  * demo-* project. It drives the real seed-social-demo.mjs as a child process
- * through every mode and guard, and checks the results by reading the
- * emulator directly.
+ * through every mode and guard and checks the results by reading the emulator.
  *
  *   FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 \
  *     node <repo>/scripts/westayfit/staging-demo/emulator-dry-run.mjs --project demo-wsf-local
  *   (run from a directory where firebase-admin is installed)
  */
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import http from 'node:http';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,12 +37,18 @@ if (!FS || !AU || !PROJECT.startsWith('demo-')) {
 initializeApp({ projectId: PROJECT });
 const db = getFirestore();
 const auth = getAuth();
+const { lookupUser, AuthLookupError } = await import(SEED);
 let passed = 0;
 const ok = (name) => { passed += 1; console.log(`  ok  ${name}`); };
 
 function seed(args, env = {}) {
-  const r = spawnSync(process.execPath, [SEED, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
-  return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  return new Promise((res) => {
+    const c = spawn(process.execPath, [SEED, ...args], { env: { ...process.env, ...env } });
+    let out = '';
+    c.stdout.on('data', (d) => { out += d; });
+    c.stderr.on('data', (d) => { out += d; });
+    c.on('close', (code) => res({ code, out }));
+  });
 }
 const line = (out, key) => (out.match(new RegExp(`^${key}=(\\S+)`, 'm')) || [])[1];
 async function wipe() {
@@ -60,76 +68,166 @@ async function allDocs() {
   await walk(null);
   return out;
 }
+const snapshot = async () => JSON.stringify((await allDocs()).map((d) => [d.ref.path, d.data()]).sort());
+async function totals(goalId) {
+  const led = await db.collection('wsfContributions').where('goalId', '==', goalId).get();
+  const ledger = led.docs.reduce((a, d) => a + d.get('count'), 0);
+  let shards = 0;
+  for (let i = 0; i < 10; i += 1) { const s = await db.doc(`wsfGoalCounters/${goalId}/shards/${i}`).get(); shards += s.exists ? s.get('count') : 0; }
+  const mts = await db.collection('wsfGoalMemberTotals').where('goalId', '==', goalId).get();
+  const memberTotals = mts.docs.reduce((a, d) => a + (d.get('total') ?? 0), 0);
+  return { ledger, shards, memberTotals, rows: led.docs };
+}
+
+// An owner contribution recorded the way wsfContribute records one: the row,
+// its shard and his member total in one transaction. Written as a module so
+// the seed can await it BETWEEN its own reads and its commit (emulator seam).
+const hookDir = mkdtempSync(join(tmpdir(), 'wsf-demo-hook-'));
+const HOOK = join(hookDir, 'hook.mjs');
+writeFileSync(HOOK, `
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+const { FieldValue } = createRequire(join(process.cwd(), 'noop.js'))('firebase-admin/firestore');
+let n = 0;
+export default async function (db) {
+  n += 1;
+  const g = 'wsfdemo-goal-movers-squats', uid = process.env.HOOK_OWNER, a = 'owner-hook-' + process.env.HOOK_TAG + '-' + n;
+  await db.runTransaction(async (tx) => {
+    tx.create(db.doc('wsfContributions/' + g + '_' + uid + '_' + a), { goalId: g, attemptId: a, userId: uid, count: 7, shardIndex: n % 10, unit: 'squats', communityGroupId: 'wsfdemo-sample-movers', crossedTarget: false, createdAt: new Date() });
+    tx.set(db.doc('wsfGoalCounters/' + g + '/shards/' + (n % 10)), { count: FieldValue.increment(7) }, { merge: true });
+    tx.set(db.doc('wsfGoalMemberTotals/' + g + '_' + uid), { goalId: g, userId: uid, total: FieldValue.increment(7), contributionCount: FieldValue.increment(1) }, { merge: true });
+  });
+}
+`);
 
 await wipe();
 const OWNER = 'emu-owner-0001';
 await auth.createUser({ uid: OWNER, emailVerified: true, displayName: 'Emulator Owner' });
-// the owner's EXISTING data, which the fixture must leave exactly as it is
 await db.doc(`wsfMemberProfiles/${OWNER}`).set({ displayName: 'Emulator Owner', createdAt: new Date(0) });
 await db.doc('wsfCommunityGroups/emu-owner-home').set({ displayName: 'Owner Home', groupType: 'custom', joinPolicy: 'private', joinCode: 'x'.repeat(22), lifecycleStatus: 'active', isSample: false });
 await db.doc(`wsfMemberships/emu-owner-home_${OWNER}`).set({ groupId: 'emu-owner-home', userId: OWNER, role: 'foundingChampion', membershipStatus: 'active', communityNameVisibility: 'private' });
 const base = ['--project', PROJECT, '--owner-uid', OWNER];
+const GOAL_A = 'wsfdemo-goal-movers-squats';
 
-// ---- guards ----
-assert.match(seed(['--plan', '--project', 'westayfit-staging', '--owner-uid', OWNER]).out, /emulator run must use a demo-\* project/);
+// ---- project and argument guards ----
+assert.match((await seed(['--plan', '--project', 'westayfit-staging', '--owner-uid', OWNER])).out, /emulator run must use a demo-\* project/);
 ok('an emulator run naming westayfit-staging is refused');
-assert.match(seed(['--plan', '--project', 'goarrive', '--owner-uid', OWNER], { FIRESTORE_EMULATOR_HOST: '' }).out, /goarrive is not an allowed project/);
+assert.match((await seed(['--plan', '--project', 'goarrive', '--owner-uid', OWNER], { FIRESTORE_EMULATOR_HOST: '' })).out, /goarrive is not an allowed project/);
 ok('a non-emulator run against any project but westayfit-staging is refused (goarrive)');
-assert.match(seed(['--plan', '--project', PROJECT]).out, /--owner-uid is required/);
+assert.match((await seed(['--plan', '--project', PROJECT])).out, /--owner-uid is required/);
 ok('no owner uid: refused, and no name lookup is attempted');
-await auth.createUser({ uid: 'emu-unverified', emailVerified: false });
-await db.doc('wsfMemberProfiles/emu-unverified').set({ displayName: 'Unverified' });
-assert.match(seed(['--plan', '--project', PROJECT, '--owner-uid', 'emu-unverified']).out, /disabled or not email-verified/);
-ok('an unverified owner account is refused');
-assert.match(seed(['--plan', '--project', PROJECT, '--owner-uid', 'emu-no-such']).out, /no Auth record/);
-ok('an owner uid with no Auth record is refused');
-await auth.createUser({ uid: 'wsfdemo-m05', emailVerified: true });
-assert.match(seed(['--plan', ...base]).out, /wsfdemo-m05 is a real Auth account/);
-await auth.deleteUser('wsfdemo-m05');
-ok('a synthetic uid that is a real Auth account is refused');
-await db.doc('wsfCommunityGroups/wsfdemo-sample-movers').set({ displayName: 'somebody else' });
-assert.match(seed(['--plan', ...base]).out, /is not this fixture's; refusing to overwrite/);
-await db.doc('wsfCommunityGroups/wsfdemo-sample-movers').delete();
-ok("a pre-existing group at a fixture path that is not the fixture's is refused");
-assert.match(seed(['--cleanup', ...base]).out, /cleanup requires --confirm-cleanup SOCIAL-STAGING-DEMO-1/);
+assert.match((await seed(['--cleanup', ...base])).out, /cleanup requires --confirm-cleanup SOCIAL-STAGING-DEMO-1/);
 ok('cleanup without the confirmation token is refused');
 
+// ---- Auth: only user-not-found is absence ----
+const stub = (err) => ({ getUser: async () => { throw err; } });
+assert.equal(await lookupUser(stub({ code: 'auth/user-not-found' }), 'x'), null);
+for (const code of ['auth/insufficient-permission', 'auth/internal-error', 'app/network-error']) {
+  await assert.rejects(lookupUser(stub({ code }), 'wsfdemo-m01'), (e) => e instanceof AuthLookupError && e.code === code);
+}
+await assert.rejects(lookupUser(stub(new Error('socket hang up')), 'wsfdemo-m01'), AuthLookupError);
+ok('lookupUser: auth/user-not-found is absence; insufficient-permission, internal-error, network-error and an uncoded error all throw');
+await auth.createUser({ uid: 'emu-unverified', emailVerified: false });
+await db.doc('wsfMemberProfiles/emu-unverified').set({ displayName: 'Unverified' });
+assert.match((await seed(['--plan', '--project', PROJECT, '--owner-uid', 'emu-unverified'])).out, /disabled or not email-verified/);
+ok('an unverified owner account is refused');
+assert.match((await seed(['--plan', '--project', PROJECT, '--owner-uid', 'emu-no-such'])).out, /no Auth record for --owner-uid \(auth\/user-not-found\)/);
+ok('an owner uid with no Auth record is refused');
+await auth.createUser({ uid: 'wsfdemo-m05', emailVerified: true });
+assert.match((await seed(['--plan', ...base])).out, /wsfdemo-m05 is a real Auth account/);
+await auth.deleteUser('wsfdemo-m05');
+ok('a synthetic uid that is a real Auth account is refused');
+// A proxy in front of the Auth emulator answers every SYNTHETIC-uid lookup
+// with a permission error. bcfef524 read that as "absent" and wrote 100
+// documents; the corrected script must abort and write nothing.
+const [ah, ap] = AU.split(':');
+const proxy = http.createServer((rq, rs) => {
+  let body = '';
+  rq.on('data', (d) => { body += d; });
+  rq.on('end', () => {
+    if (rq.url.includes('accounts:lookup') && body.includes('wsfdemo-')) {
+      rs.writeHead(403, { 'content-type': 'application/json' });
+      return rs.end(JSON.stringify({ error: { code: 403, message: 'PERMISSION_DENIED', status: 'PERMISSION_DENIED' } }));
+    }
+    const up = http.request({ host: ah, port: Number(ap), path: rq.url, method: rq.method, headers: rq.headers }, (r) => { rs.writeHead(r.statusCode, r.headers); r.pipe(rs); });
+    up.end(body);
+  });
+});
+await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
+const proxied = { FIREBASE_AUTH_EMULATOR_HOST: `127.0.0.1:${proxy.address().port}` };
+for (const mode of ['--plan', '--apply']) {
+  const s0 = await snapshot();
+  const r = await seed([mode, ...base], proxied);
+  assert.equal(r.code, 3, r.out);
+  assert.match(r.out, /Auth lookup for wsfdemo-m01 failed with \S+; refusing to treat it as absence \[AUTH_ERROR=\S+\]/);
+  assert.equal(await snapshot(), s0, `${mode}: nothing may be written`);
+}
+const deadAuth = await seed(['--apply', ...base], { FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9' });
+assert.equal(deadAuth.code, 3, deadAuth.out);
+assert.match(deadAuth.out, /Auth lookup for emu-owner-0001 failed with \S+; refusing to treat it as absence/);
+proxy.close();
+ok('a permission error on the synthetic-uid lookups aborts plan and apply with AUTH_ERROR named and zero writes; an unreachable Auth endpoint on the owner lookup is reported as a lookup failure, not as a missing account');
+
+// ---- foreign documents at fixture paths fail closed, before any write ----
+const foreignCases = [
+  ['wsfCommunityGroups/wsfdemo-sample-movers', { displayName: 'somebody else' }],
+  ['wsfMemberProfiles/wsfdemo-m03', { displayName: 'A real person' }],
+  ['wsfGoals/wsfdemo-goal-movers-squats', { title: 'someone else’s goal', communityGroupId: 'elsewhere' }],
+  ['wsfMemberships/wsfdemo-sample-walkers_wsfdemo-m04', { groupId: 'wsfdemo-sample-walkers', userId: 'wsfdemo-m04', role: 'member', membershipStatus: 'active' }],
+];
+for (const [p, data] of foreignCases) {
+  await db.doc(p).set(data);
+  const s0 = await snapshot();
+  const r = await seed(['--apply', ...base]);
+  assert.equal(r.code, 3, r.out);
+  assert.match(r.out, new RegExp(`FOREIGN=1: ${p.replace(/[/]/g, '\\/')}`));
+  assert.equal(await snapshot(), s0, `${p}: nothing may be written`);
+  await db.doc(p).delete();
+}
+ok(`a foreign document at any of ${foreignCases.length} kinds of fixture path (group, profile, goal, membership) makes apply refuse with FOREIGN named and zero writes`);
+
 // ---- plan writes nothing ----
-const n0 = (await allDocs()).length;
-const plan = seed(['--plan', ...base]);
+const s0 = await snapshot();
+const plan = await seed(['--plan', ...base]);
 assert.equal(plan.code, 0, plan.out);
-assert.equal((await allDocs()).length, n0, 'plan must write nothing');
+assert.equal(await snapshot(), s0, 'plan must write nothing');
 const planned = Number(line(plan.out, 'CREATE'));
 assert.ok(planned > 0);
 ok(`plan is read-only and reports CREATE=${planned}`);
 
-// ---- apply, then apply again ----
-const a1 = seed(['--apply', ...base]);
+// ---- apply WITH an owner contribution landing inside every ledger transaction ----
+const a1 = await seed(['--apply', ...base], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_TAG: 'apply' });
 assert.equal(a1.code, 0, a1.out);
-assert.equal(line(a1.out, 'APPLIED'), String(planned));
 assert.equal(line(a1.out, 'OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED'), 'true');
-ok(`first apply writes exactly the planned ${planned} documents and leaves the owner's own data unchanged`);
-const a2 = seed(['--apply', ...base]);
+let tA = await totals(GOAL_A);
+const hookRows1 = tA.rows.filter((d) => d.get('userId') === OWNER);
+assert.ok(hookRows1.length > 0, 'the interleaved owner contributions happened');
+assert.equal(tA.ledger, 445 + 7 * hookRows1.length);
+assert.equal(tA.shards, tA.ledger);
+assert.equal(tA.memberTotals, tA.ledger);
+ok(`apply with ${hookRows1.length} owner contributions interleaved between its reads and its commits: none lost (ledger ${tA.ledger} = shards ${tA.shards} = member totals ${tA.memberTotals} = 445 seeded + ${7 * hookRows1.length} owner)`);
+
+// ---- idempotence ----
+const a2 = await seed(['--apply', ...base]);
 assert.equal(a2.code, 0, a2.out);
 assert.equal(line(a2.out, 'APPLIED'), '0');
 assert.equal(line(a2.out, 'CREATE'), '0');
-assert.equal(line(a2.out, 'UPDATE'), '0');
-ok('second apply is a no-op: CREATE=0 UPDATE=0 APPLIED=0 (idempotent)');
-const v1 = seed(['--verify', ...base]);
+assert.equal(line(a2.out, 'REANCHOR'), '0');
+ok('second apply is a no-op: CREATE=0 REANCHOR=0 APPLIED=0');
+const v1 = await seed(['--verify', ...base]);
 assert.equal(line(v1.out, 'VERIFY'), 'pass', v1.out);
 ok('verify passes on the seeded state');
 
-// ---- the state itself, read from the emulator ----
-const vis = (d, k) => (d.get(k) === 'private' ? 'private' : 'visible'); // absent resolves to visible
+// ---- the state itself ----
+const vis = (d, k) => (d.get(k) === 'private' ? 'private' : 'visible');
 for (const c of f.communities) {
   const g = await db.doc(`wsfCommunityGroups/${c.groupId}`).get();
   assert.equal(g.get('isSample'), true);
   assert.match(g.get('displayName'), /^Sample Community: /);
   assert.equal(g.get('joinPolicy'), 'private');
   const ms = await db.collection('wsfMemberships').where('groupId', '==', c.groupId).where('membershipStatus', '==', 'active').get();
-  assert.equal(ms.size, c.members.length + 1, `${c.groupId}: synthetic members plus the owner`);
-  const own = ms.docs.find((d) => d.get('userId') === OWNER);
-  assert.equal(own.get('role'), 'foundingChampion');
+  assert.equal(ms.size, c.members.length + 1);
+  assert.equal(ms.docs.find((d) => d.get('userId') === OWNER).get('role'), 'foundingChampion');
   const syn = ms.docs.filter((d) => d.get('userId') !== OWNER);
   const mix = { named: 0, nameOffActivityOn: 0, activityOff: 0 };
   for (const d of syn) {
@@ -139,57 +237,65 @@ for (const c of f.communities) {
   }
   assert.ok(mix.named > 0 && mix.nameOffActivityOn > 0 && mix.activityOff > 0, JSON.stringify(mix));
   for (const goal of c.goals) {
-    const led = await db.collection('wsfContributions').where('goalId', '==', goal.goalId).get();
-    const ledger = led.docs.reduce((a, d) => a + d.get('count'), 0);
-    let shards = 0;
-    for (let i = 0; i < 10; i += 1) { const s = await db.doc(`wsfGoalCounters/${goal.goalId}/shards/${i}`).get(); shards += s.exists ? s.get('count') : 0; }
-    const mts = await db.collection('wsfGoalMemberTotals').where('goalId', '==', goal.goalId).get();
-    const perMember = mts.docs.reduce((a, d) => a + d.get('total'), 0);
-    const ra = await db.collection(`wsfGoals/${goal.goalId}/recentAdditions`).get();
-    assert.equal(ledger, goal.contributions.reduce((a, x) => a + x.count, 0));
-    assert.equal(shards, ledger);
-    assert.equal(perMember, ledger);
-    assert.equal(ra.size, led.size);
-    assert.ok(led.docs.every((d) => d.get('communityGroupId') === c.groupId && d.get('unit') === goal.unit && d.get('userId') !== OWNER));
-    ok(`${c.groupId}: ${syn.length} synthetic + owner as Champion; mix ${JSON.stringify(mix)}; ${goal.goalId} ledger ${ledger} = shards ${shards} = member totals ${perMember}; ${ra.size} recent additions; no owner contribution invented`);
+    const t = await totals(goal.goalId);
+    const seeded = t.rows.filter((d) => d.get('userId').startsWith('wsfdemo-'));
+    assert.equal(seeded.reduce((a, d) => a + d.get('count'), 0), goal.contributions.reduce((a, x) => a + x.count, 0));
+    assert.equal(t.shards, t.ledger);
+    assert.equal(t.memberTotals, t.ledger);
+    ok(`${c.groupId}: ${syn.length} synthetic + owner as Champion; mix ${JSON.stringify(mix)}; ${goal.goalId} seeded ${seeded.length} rows; ledger ${t.ledger} = shards = member totals`);
   }
 }
-const users = (await auth.listUsers()).users.map((u) => u.uid);
-assert.ok(!users.some((u) => u.startsWith('wsfdemo-')));
-const every = await allDocs();
-const fixtureDocs = every.filter((d) => d.ref.path.includes('wsfdemo-'));
-const bad = fixtureDocs.filter((d) => /email|phone|photo|avatar|invite/i.test(JSON.stringify(Object.keys(d.data()))));
-assert.deepEqual(bad.map((d) => d.ref.path), []);
+assert.ok(!(await auth.listUsers()).users.some((u) => u.uid.startsWith('wsfdemo-')));
+const fixtureDocs = (await allDocs()).filter((d) => d.ref.path.includes('wsfdemo-'));
+assert.deepEqual(fixtureDocs.filter((d) => /email|phone|photo|avatar|invite/i.test(JSON.stringify(Object.keys(d.data())))).map((d) => d.ref.path), []);
 ok(`no Auth account for any synthetic member; ${fixtureDocs.length} fixture documents carry no email, phone, photo, avatar or invite field`);
 
-// ---- the owner reviews: changes a preference, contributes once ----
+// ---- review-time changes are kept, never reset ----
 await db.doc(`wsfMemberships/wsfdemo-sample-movers_${OWNER}`).update({ communityNameVisibility: 'private' });
-const goalA = 'wsfdemo-goal-movers-squats';
-await db.doc(`wsfContributions/${goalA}_${OWNER}_owner-real-1`).set({ goalId: goalA, attemptId: 'owner-real-1', userId: OWNER, count: 10, shardIndex: 3, unit: 'squats', communityGroupId: 'wsfdemo-sample-movers', crossedTarget: false, createdAt: new Date() });
-await db.doc(`wsfGoalCounters/${goalA}/shards/3`).set({ count: FieldValue.increment(10) }, { merge: true });
-const a3 = seed(['--apply', ...base]);
+await db.doc(`wsfGoals/${GOAL_A}`).update({ title: 'Owner renamed this goal during review', target: 2500 });
+const a3 = await seed(['--apply', ...base]);
 assert.equal(a3.code, 0, a3.out);
+assert.match(a3.out, new RegExp(`DRIFT=1 \\[goal:1\\] kept, not reset: wsfGoals\\/${GOAL_A}`));
+assert.equal((await db.doc(`wsfGoals/${GOAL_A}`).get()).get('title'), 'Owner renamed this goal during review');
 assert.equal((await db.doc(`wsfMemberships/wsfdemo-sample-movers_${OWNER}`).get()).get('communityNameVisibility'), 'private');
-assert.match(a3.out, new RegExp(`goal ${goalA}: ledger 455 = shards 455`));
-ok("a re-run keeps the owner's own preference change and counts his real contribution (ledger 455 = shards 455), never clobbering it");
+const v2 = await seed(['--verify', ...base]);
+assert.equal(v2.code, 5);
+assert.equal(line(v2.out, 'VERIFY'), 'drift');
+ok("the owner's review-time goal edit and privacy choice survive a re-run; the goal is reported as DRIFT, and verify says VERIFY=drift rather than pass");
 
-// ---- reanchor keeps totals ----
-const r1 = seed(['--apply', '--reanchor', ...base]);
+// ---- reanchor, again with owner contributions interleaved ----
+const before = (await totals(GOAL_A)).ledger;
+const r1 = await seed(['--apply', '--reanchor', ...base], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_TAG: 'reanchor' });
 assert.equal(r1.code, 0, r1.out);
-assert.ok(Number(line(r1.out, 'APPLIED')) > 0);
-assert.match(r1.out, new RegExp(`goal ${goalA}: ledger 455 = shards 455`));
-assert.equal(line(seed(['--verify', ...base]).out, 'VERIFY'), 'pass');
-ok('--reanchor moves the timestamps to today, totals unchanged, and verify passes afterwards');
+assert.ok(Number(line(r1.out, 'REANCHOR')) > 0);
+tA = await totals(GOAL_A);
+const hookRows2 = tA.rows.filter((d) => d.get('attemptId').startsWith('owner-hook-reanchor-'));
+assert.ok(hookRows2.length > 0);
+assert.equal(tA.ledger, before + 7 * hookRows2.length);
+assert.equal(tA.shards, tA.ledger);
+assert.equal(tA.memberTotals, tA.ledger);
+assert.equal((await db.doc(`wsfGoals/${GOAL_A}`).get()).get('title'), 'Owner renamed this goal during review');
+const v3 = await seed(['--verify', ...base]);
+assert.equal(line(v3.out, 'VERIFY'), 'drift', v3.out);
+assert.match(v3.out, /REANCHOR=0/);
+ok(`--reanchor with ${hookRows2.length} owner contributions interleaved: timestamps move, none lost (ledger ${tA.ledger} = shards = member totals), the owner's goal edit is still kept`);
 
-// ---- cleanup ----
-const c1 = seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId]);
+// ---- cleanup fails closed on a foreign document, then deletes only the fixture ----
+await db.doc('wsfMemberProfiles/wsfdemo-m07').set({ displayName: 'Now somebody else' });
+const s1 = await snapshot();
+const c0 = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId]);
+assert.equal(c0.code, 3, c0.out);
+assert.match(c0.out, /FOREIGN=1: wsfMemberProfiles\/wsfdemo-m07/);
+assert.equal(await snapshot(), s1, 'a refused cleanup deletes nothing');
+await db.doc('wsfMemberProfiles/wsfdemo-m07').set({ displayName: 'Gus Sample', demoFixture: f.fixtureId });
+ok('cleanup with a foreign document at a fixture path refuses and deletes nothing');
+const c1 = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId]);
 assert.equal(c1.code, 0, c1.out);
 assert.equal(line(c1.out, 'OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED'), 'true');
-const left = (await allDocs()).map((d) => d.ref.path).filter((p) => p.includes('wsfdemo-'));
-assert.deepEqual(left, []);
+assert.deepEqual((await allDocs()).map((d) => d.ref.path).filter((p) => p.includes('wsfdemo-')), []);
 assert.ok((await db.doc('wsfCommunityGroups/emu-owner-home').get()).exists);
 assert.equal((await db.doc(`wsfMemberships/emu-owner-home_${OWNER}`).get()).get('communityNameVisibility'), 'private');
 assert.ok((await db.doc(`wsfMemberProfiles/${OWNER}`).get()).exists);
-ok(`cleanup deletes every fixture document (${line(c1.out, 'CLEANUP_DELETED')}), including the owner's own row on the sample goal, and nothing else: his home community, membership and profile remain`);
+ok(`cleanup deletes every fixture document (${line(c1.out, 'CLEANUP_DELETED')}), including the owner's own rows on the sample goals, and nothing else`);
 
 console.log(`\nemulator dry run: ${passed} passed`);

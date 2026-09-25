@@ -71,8 +71,12 @@ node ../scripts/westayfit/staging-demo/seed-social-demo.mjs --apply  --project w
 node ../scripts/westayfit/staging-demo/seed-social-demo.mjs --verify --project westayfit-staging --owner-uid <UID>
 ```
 
-**Post these lines on #396:** `CREATE`, `APPLIED`, `OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=true`,
-each goal's `ledger N = shards N`, and `VERIFY=pass`.
+**Post these lines on #396:** `CREATE`, `FOREIGN=0`, `APPLIED`,
+`OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=true`, each goal's
+`ledger N = shards N = member totals N`, and `VERIFY=pass`.
+
+If `FOREIGN` is not 0 or an `AUTH_ERROR` appears, stop and report it. Do not
+work around it.
 
 **Later: refresh "moved today"** on the retained fixture. Totals do not change.
 
@@ -88,15 +92,38 @@ goals, and nothing else.
 node ../scripts/westayfit/staging-demo/seed-social-demo.mjs --cleanup --confirm-cleanup SOCIAL-STAGING-DEMO-1 --project westayfit-staging --owner-uid <UID>
 ```
 
-## Refusals built in
+## Safety properties
 
-The script refuses in each of these cases:
-- any project other than `westayfit-staging`, and any emulator run not on a `demo-*` project;
-- a missing `--owner-uid`;
-- an owner record that is absent, disabled or not email-verified, or has no profile;
-- a synthetic uid that turns out to be a real Auth account;
-- an existing group at a fixture path that is not this fixture's;
-- cleanup without the confirmation token.
+- **Auth errors fail closed.** Only `auth/user-not-found` proves that an
+  account is absent. Any other Auth error aborts the run before anything is
+  written, and the output names it as `AUTH_ERROR=<code>`. Examples are a
+  permission, transport or quota error. This applies to the owner lookup and to
+  every synthetic-uid lookup.
+- **No counter is ever overwritten.** Each seeded contribution is created the
+  way `wsfContribute` creates one:
+  - one transaction checks the row is absent;
+  - it creates the row;
+  - it **increments** the row's shard and the member's total.
+
+  So anything recorded while the script runs is never lost from the confirmed
+  totals. That includes the owner using the app. `--reanchor` moves timestamps
+  only.
+- **Everything is classified before anything is written or deleted.** Each
+  existing document at a fixture path falls into one of three cases:
+  - **ours, unchanged**;
+  - **ours, drifted:** for example a goal the owner edited while reviewing. It is kept and reported as `DRIFT`, never reset, and verify then reports `VERIFY=drift`;
+  - **foreign:** it has no fixture marker, or a ledger row does not match the fixture. It aborts the run, cleanup included.
+- **Refusals:**
+  - any project other than `westayfit-staging`, and any emulator run not on a `demo-*` project;
+  - a missing `--owner-uid`;
+  - an owner record that is absent, disabled or not email-verified, or has no profile;
+  - a synthetic uid that turns out to be a real Auth account;
+  - cleanup without the confirmation token.
+
+**Output:** `CREATE`, `REANCHOR`, `UNCHANGED`, `DRIFT` and `FOREIGN` count the
+fixture's own documents. The shards, member totals and recent additions are
+created inside the ledger transactions and are not counted separately. After
+every apply, each goal prints `ledger N = shards N = member totals N`.
 
 ## The emulator dry run
 
@@ -108,11 +135,12 @@ FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:909
 
 It needs `firebase-admin` in the working directory. It covers:
 - every refusal;
+- an Auth permission error injected on the synthetic lookups, and an unreachable Auth endpoint. Both must end the run with zero writes;
+- foreign documents at a group, profile, goal and membership path;
 - plan writing nothing;
-- apply and then re-apply, where the second run is a no-op;
-- verify;
-- the member mix, and ledger = shards = member totals;
+- apply with an owner contribution landing inside every one of its ledger transactions, and the same again on `--reanchor`, with none lost;
+- idempotence and verify;
+- the member mix;
 - no synthetic Auth accounts and no contact fields;
-- a review-time preference change and contribution by the owner surviving a re-run;
-- reanchor;
-- cleanup leaving the owner's own data intact.
+- review-time edits kept as drift;
+- cleanup refusing over a foreign document, then removing exactly the fixture.

@@ -2,38 +2,42 @@
 /**
  * SOCIAL-STAGING-DEMO-1: a retained, staging-only, synthetic social review fixture.
  *
- * Director #365 5834082617 section C; L0 #396 5834099352. It seeds two clearly
- * named SAMPLE communities for the owner's EXISTING staging account: twelve
- * synthetic members in one, four of them in a second for switching, a goal in
- * each, and a consistent contribution ledger. The declarative content lives in
- * social-demo.fixture.json beside this file.
+ * Director #365 5834082617 section C; L0 #396 5834099352; corrections per
+ * Director #396 5834407330. It seeds two clearly named SAMPLE communities for
+ * the owner's EXISTING staging account: twelve synthetic members in one, four
+ * of them in a second for switching, a goal in each, and a consistent
+ * contribution ledger. The declarative content is social-demo.fixture.json.
  *
  * MODES (exactly one; plan is the default and writes nothing):
- *   --plan      read-only: resolve the owner, compute every document, report
- *               what apply would create / update / leave unchanged
- *   --apply     converge: write only documents whose content differs
- *   --verify    read-only: re-derive the expected state and compare
+ *   --plan      read-only: verify the owner, classify every fixture path, and
+ *               report what apply would create / update / keep
+ *   --apply     converge; never overwrites anything it did not write itself
+ *   --verify    read-only: presence, ownership, drift and ledger consistency
  *   --cleanup   delete exactly this fixture's documents; requires
  *               --confirm-cleanup SOCIAL-STAGING-DEMO-1
  *
- * REQUIRED: --project <id> and --owner-uid <uid>.
- *   The project must be westayfit-staging, or a demo-* project with
- *   FIRESTORE_EMULATOR_HOST set (the emulator dry run). Anything else refuses.
- *   The owner is verified from his existing Auth record by uid: the record must
- *   exist, be enabled and email-verified, and have a wsfMemberProfiles
- *   document. No display name is ever used to find him, and no email is read,
- *   printed or written by this script.
+ * REQUIRED: --project <id> and --owner-uid <uid>. The project must be
+ * westayfit-staging, or a demo-* project with FIRESTORE_EMULATOR_HOST set.
+ * The owner is verified from his existing Auth record by uid (present,
+ * enabled, email-verified, with a wsfMemberProfiles document). No display name
+ * is used to find him and no email is read, printed or written.
  *
- * OPTIONAL: --reanchor moves the fixture's time anchor to now, so "moved today"
- *   reflects today again on a retained fixture; totals do not change.
- *   --receipt <path> writes a JSON receipt of every path touched.
- *
- * WHAT IT NEVER DOES: create an Auth account, write an email or contact,
- * invite anyone, print a join code, touch a document outside the fixture's own
- * paths, change the owner's profile, his other memberships or his visibility
- * preferences, or contribute on his behalf. Seeded rows are not evidence that
- * the social features work; that needs the served member / non-member /
- * privacy calls, which are blocked while the three social services are SHUT.
+ * SAFETY PROPERTIES (each has a case in emulator-dry-run.mjs):
+ *  - AUTH ERRORS FAIL CLOSED. Only auth/user-not-found proves an account is
+ *    absent. Any other Auth error (permission, transport, quota, ...) aborts
+ *    before any write, naming the error code.
+ *  - NO ABSOLUTE COUNTER WRITES. A seeded contribution is created the way
+ *    wsfContribute creates one: in one transaction that confirms the row is
+ *    absent, creates it, and INCREMENTS its shard and the member's total. A
+ *    contribution anyone records while this runs is therefore never lost from
+ *    the confirmed totals, on apply or on --reanchor, which moves timestamps
+ *    only.
+ *  - FOREIGN DOCUMENTS FAIL CLOSED. Before any write or delete, every existing
+ *    document at a fixture path is classified: ours (unchanged), ours (drifted,
+ *    e.g. a review-time goal edit, which is KEPT and reported, never reset), or
+ *    foreign, which aborts the run.
+ *  - The owner's profile, his other memberships, his membership rows in the
+ *    sample groups once they exist, and his preferences are never written.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -41,13 +45,12 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// firebase-admin is resolved from the WORKING DIRECTORY, not from this file:
-// the operator runs this from an installed functions-westayfit checkout (see
-// README.md), and the repository root has no firebase-admin of its own.
+// firebase-admin is resolved from the WORKING DIRECTORY (an installed
+// functions-westayfit, see README.md); the repository root has none.
 const requireFromCwd = createRequire(join(process.cwd(), 'noop.js'));
 const { initializeApp } = requireFromCwd('firebase-admin/app');
 const { getAuth } = requireFromCwd('firebase-admin/auth');
-const { getFirestore, Timestamp } = requireFromCwd('firebase-admin/firestore');
+const { getFirestore, Timestamp, FieldValue } = requireFromCwd('firebase-admin/firestore');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_PATH = resolve(HERE, 'social-demo.fixture.json');
@@ -55,9 +58,27 @@ const SHARD_COUNT = 10; // GOAL_SHARD_COUNT in functions-westayfit/src/index.ts
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 
-// ---------- pure planning (no I/O; unit-testable) ----------------------------
+// ---------- Auth lookups: only "not found" is absence -----------------------
 
-/** The instant the local day began in a zone (same rule as the e2e social fixture). */
+export class AuthLookupError extends Error {
+  constructor(uid, cause) {
+    super(`Auth lookup for ${uid} failed with ${cause?.code ?? cause?.errorInfo?.code ?? cause?.name ?? 'an unknown error'}; refusing to treat it as absence`);
+    this.code = cause?.code ?? cause?.errorInfo?.code ?? 'unknown';
+  }
+}
+/** The Auth record, or null ONLY for auth/user-not-found. Anything else throws. */
+export async function lookupUser(auth, uid) {
+  try {
+    return await auth.getUser(uid);
+  } catch (e) {
+    const code = e?.code ?? e?.errorInfo?.code;
+    if (code === 'auth/user-not-found') return null;
+    throw new AuthLookupError(uid, e);
+  }
+}
+
+// ---------- pure planning ----------------------------------------------------
+
 export function zonedDayStartMs(timeZone, nowMs) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -69,7 +90,6 @@ export function zonedDayStartMs(timeZone, nowMs) {
   const wall = new Date(nowMs + offset);
   return Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate()) - offset;
 }
-
 const isoMinute = (ms) => new Date(Math.floor(ms / MIN) * MIN).toISOString();
 
 export function validateFixture(f) {
@@ -101,89 +121,95 @@ export function validateFixture(f) {
 }
 
 /**
- * Every document this fixture owns, as { path, data }, for a given owner and
- * anchor. `existing` supplies values that must survive a re-run: the join code
- * each sample group was first given, and whether the owner already has a
- * membership row there (which is then left exactly as it is).
+ * The fixture's documents for an anchor. `entity` documents (profiles, groups,
+ * synthetic memberships, goals) carry a demoFixture marker and are written
+ * whole. `contribution` entries are applied transactionally (see applyLedger).
+ * `ownerMembership` is created only where absent and never rewritten.
  */
-export function planDocuments(f, { ownerUid, anchorMs, existing = {} }) {
-  const docs = [];
-  const put = (path, data, kind) => docs.push({ path, data, kind });
+export function planDocuments(f, { ownerUid, anchorMs, joinCodes = {} }) {
+  const entities = [];
+  const contributions = [];
+  const ownerMemberships = [];
   const ts = (ms) => Timestamp.fromMillis(ms);
   const created = ts(anchorMs - 14 * DAY);
   const dayStart = zonedDayStartMs(f.timezone, anchorMs);
+  const mark = f.fixtureId;
 
   for (const m of f.members) {
-    put(`wsfMemberProfiles/${m.uid}`, { displayName: m.displayName, demoFixture: f.fixtureId, createdAt: created, updatedAt: created }, 'profile');
+    entities.push({ path: `wsfMemberProfiles/${m.uid}`, kind: 'profile', data: { displayName: m.displayName, demoFixture: mark, createdAt: created, updatedAt: created } });
   }
   for (const c of f.communities) {
-    put(`wsfCommunityGroups/${c.groupId}`, {
-      displayName: c.displayName,
-      groupType: c.groupType,
-      joinPolicy: c.joinPolicy,
-      joinCode: existing.joinCodes?.[c.groupId] ?? randomBytes(16).toString('base64url'),
-      createdByUserId: `seed-${f.fixtureId}`,
-      lifecycleStatus: 'active',
-      isSample: true,
-      demoFixture: { id: f.fixtureId, version: f.version, anchorMs },
-      createdAt: created,
-      updatedAt: created,
-    }, 'group');
-    if (!existing.ownerMemberships?.has(c.groupId)) {
-      put(`wsfMemberships/${c.groupId}_${ownerUid}`, {
-        groupId: c.groupId, userId: ownerUid, role: 'foundingChampion', membershipStatus: 'active', createdAt: created, updatedAt: created,
-      }, 'ownerMembership');
-    }
+    entities.push({ path: `wsfCommunityGroups/${c.groupId}`, kind: 'group', data: {
+      displayName: c.displayName, groupType: c.groupType, joinPolicy: c.joinPolicy,
+      joinCode: joinCodes[c.groupId] ?? randomBytes(16).toString('base64url'),
+      createdByUserId: `seed-${mark}`, lifecycleStatus: 'active', isSample: true,
+      demoFixture: { id: mark, version: f.version, anchorMs }, createdAt: created, updatedAt: created,
+    } });
+    ownerMemberships.push({ path: `wsfMemberships/${c.groupId}_${ownerUid}`, data: { groupId: c.groupId, userId: ownerUid, role: 'foundingChampion', membershipStatus: 'active', createdAt: created, updatedAt: created } });
     for (const m of c.members) {
-      const row = { groupId: c.groupId, userId: m.uid, role: 'member', membershipStatus: 'active', createdAt: created, updatedAt: created };
+      const row = { groupId: c.groupId, userId: m.uid, role: 'member', membershipStatus: 'active', demoFixture: mark, createdAt: created, updatedAt: created };
       if (m.name) row.communityNameVisibility = m.name;
       if (m.activity) row.communityActivityVisibility = m.activity;
-      put(`wsfMemberships/${c.groupId}_${m.uid}`, row, 'membership');
+      entities.push({ path: `wsfMemberships/${c.groupId}_${m.uid}`, kind: 'membership', data: row });
     }
     for (const g of c.goals) {
-      put(`wsfGoals/${g.goalId}`, {
-        ownerUid, communityGroupId: c.groupId, title: g.title, target: g.target, unit: g.unit,
-        status: 'active', startsAt: ts(anchorMs - g.startDaysBeforeAnchor * DAY), endsAt: ts(anchorMs + g.endDaysAfterAnchor * DAY),
-        timezone: f.timezone, repeatPolicy: g.repeatPolicy, createdAt: ts(anchorMs - g.startDaysBeforeAnchor * DAY),
-      }, 'goal');
-      const perMember = new Map();
+      entities.push({ path: `wsfGoals/${g.goalId}`, kind: 'goal', data: {
+        ownerUid, communityGroupId: c.groupId, title: g.title, target: g.target, unit: g.unit, status: 'active',
+        startsAt: ts(anchorMs - g.startDaysBeforeAnchor * DAY), endsAt: ts(anchorMs + g.endDaysAfterAnchor * DAY),
+        timezone: f.timezone, repeatPolicy: g.repeatPolicy, demoFixture: mark, createdAt: ts(anchorMs - g.startDaysBeforeAnchor * DAY),
+      } });
       g.contributions.forEach((x, i) => {
-        const attemptId = `${f.fixtureId.toLowerCase()}-${g.goalId}-${String(i + 1).padStart(2, '0')}`;
+        const attemptId = `${mark.toLowerCase()}-${g.goalId}-${String(i + 1).padStart(2, '0')}`;
         let at = anchorMs - x.minutesBeforeAnchor * MIN;
-        // "today" rows stay inside the goal's own local day, whatever hour the anchor falls on
         if (x.minutesBeforeAnchor < 24 * 60 && at < dayStart) at = Math.min(anchorMs, dayStart + MIN * (i + 1));
-        put(`wsfContributions/${g.goalId}_${x.uid}_${attemptId}`, {
-          goalId: g.goalId, attemptId, userId: x.uid, count: x.count, shardIndex: i % SHARD_COUNT,
-          unit: g.unit, communityGroupId: c.groupId, crossedTarget: false, createdAt: ts(at),
-        }, 'contribution');
-        put(`wsfGoals/${g.goalId}/recentAdditions/${attemptId}`, { amount: x.count, at: isoMinute(at) }, 'recentAddition');
-        const t = perMember.get(x.uid) ?? { total: 0, n: 0, last: 0 };
-        perMember.set(x.uid, { total: t.total + x.count, n: t.n + 1, last: Math.max(t.last, at) });
+        contributions.push({
+          path: `wsfContributions/${g.goalId}_${x.uid}_${attemptId}`,
+          shardPath: `wsfGoalCounters/${g.goalId}/shards/${i % SHARD_COUNT}`,
+          totalPath: `wsfGoalMemberTotals/${g.goalId}_${x.uid}`,
+          additionPath: `wsfGoals/${g.goalId}/recentAdditions/${attemptId}`,
+          identity: { goalId: g.goalId, attemptId, userId: x.uid, count: x.count, shardIndex: i % SHARD_COUNT, unit: g.unit, communityGroupId: c.groupId, crossedTarget: false },
+          atMs: at,
+        });
       });
-      for (const [uid, t] of perMember) {
-        put(`wsfGoalMemberTotals/${g.goalId}_${uid}`, { goalId: g.goalId, userId: uid, total: t.total, contributionCount: t.n, updatedAt: ts(t.last) }, 'memberTotal');
-      }
     }
   }
-  return docs;
-}
-
-/** Shard counts from a contribution ledger: [{shardIndex, count}] -> ten totals. */
-export function shardsFromLedger(rows) {
-  const s = Array(SHARD_COUNT).fill(0);
-  for (const r of rows) s[((r.shardIndex % SHARD_COUNT) + SHARD_COUNT) % SHARD_COUNT] += r.count;
-  return s;
+  return { entities, contributions, ownerMemberships };
 }
 
 // ---------- comparison ------------------------------------------------------
 
 function norm(v) {
   if (v instanceof Timestamp) return { __ts: v.toMillis() };
+  if (v instanceof Date) return { __ts: v.getTime() };
   if (Array.isArray(v)) return v.map(norm);
   if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, norm(v[k])]));
   return v;
 }
 const same = (a, b) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+const markerOf = (data, kind) => (kind === 'group' ? data?.demoFixture?.id : data?.demoFixture);
+
+/**
+ * Classify one existing entity document against the fixture.
+ *   absent | unchanged | reanchor (still exactly as last seeded; only the
+ *   anchor moves it) | drift (ours, changed since seeding: KEEP) | foreign
+ */
+export function classifyEntity(actual, wantNow, wantPrior, kind, fixtureId) {
+  if (actual === undefined) return 'absent';
+  if (markerOf(actual, kind) !== fixtureId) return 'foreign';
+  if (same(actual, wantNow)) return 'unchanged';
+  if (wantPrior && same(actual, wantPrior)) return 'reanchor';
+  return 'drift';
+}
+/** Same idea for a ledger row: identity decides ownership; time decides freshness. */
+export function classifyContribution(actual, want, priorAtMs) {
+  if (actual === undefined) return 'absent';
+  const { createdAt, ...rest } = actual;
+  if (!same(rest, want.identity)) return 'foreign';
+  const at = createdAt instanceof Timestamp ? createdAt.toMillis() : createdAt?.getTime?.();
+  if (at === want.atMs) return 'unchanged';
+  if (priorAtMs !== undefined && at === priorAtMs) return 'reanchor';
+  return 'drift';
+}
 
 // ---------- runtime ---------------------------------------------------------
 
@@ -201,10 +227,18 @@ function parseArgs(argv) {
 
 export function guardProject(f, project, emulatorHost) {
   if (!project) return 'refused: --project is required';
-  if (emulatorHost) {
-    return project.startsWith(f.emulatorProjectPrefix) ? null : `refused: an emulator run must use a ${f.emulatorProjectPrefix}* project, not ${project}`;
-  }
+  if (emulatorHost) return project.startsWith(f.emulatorProjectPrefix) ? null : `refused: an emulator run must use a ${f.emulatorProjectPrefix}* project, not ${project}`;
   return f.allowedProjects.includes(project) ? null : `refused: ${project} is not an allowed project (${f.allowedProjects.join(', ')})`;
+}
+
+const fail = (code, msg) => { console.error(`::error::${msg}`); process.exit(code); };
+
+async function testInterleave(db) {
+  // Emulator-only seam used by emulator-dry-run.mjs to land a real contribution
+  // between this script's reads and its commit. Ignored outside the emulator.
+  if (process.env.FIRESTORE_EMULATOR_HOST && process.env.WSF_DEMO_TEST_INTERLEAVE) {
+    await (await import(process.env.WSF_DEMO_TEST_INTERLEAVE)).default(db);
+  }
 }
 
 async function main() {
@@ -213,51 +247,60 @@ async function main() {
   const problems = validateFixture(f);
   if (problems.length) { for (const p of problems) console.error(`::error::${p}`); process.exit(2); }
   const refused = guardProject(f, args.project, process.env.FIRESTORE_EMULATOR_HOST);
-  if (refused) { console.error(`::error::${refused}`); process.exit(2); }
-  if (!args['owner-uid']) { console.error('::error::--owner-uid is required (the owner is verified by his Auth record, never by name)'); process.exit(2); }
-  if (args.mode === 'cleanup' && args['confirm-cleanup'] !== f.fixtureId) {
-    console.error(`::error::cleanup requires --confirm-cleanup ${f.fixtureId}`); process.exit(2);
-  }
+  if (refused) fail(2, refused);
+  if (!args['owner-uid']) fail(2, '--owner-uid is required (the owner is verified by his Auth record, never by name)');
+  if (args.mode === 'cleanup' && args['confirm-cleanup'] !== f.fixtureId) fail(2, `cleanup requires --confirm-cleanup ${f.fixtureId}`);
   initializeApp({ projectId: args.project });
   const db = getFirestore();
   const auth = getAuth();
   const ownerUid = args['owner-uid'];
+  if (ownerUid.startsWith(f.syntheticUidPrefix)) fail(3, 'the owner uid carries the synthetic prefix');
 
-  // ---- the owner, from his existing records ----
-  let owner;
-  try { owner = await auth.getUser(ownerUid); } catch { owner = null; }
-  if (!owner) { console.error('::error::no Auth record for --owner-uid'); process.exit(3); }
-  if (owner.disabled || owner.emailVerified !== true) { console.error('::error::the owner Auth record is disabled or not email-verified'); process.exit(3); }
-  const ownerProfile = await db.doc(`wsfMemberProfiles/${ownerUid}`).get();
-  if (!ownerProfile.exists) { console.error('::error::the owner has no wsfMemberProfiles document'); process.exit(3); }
-  if (ownerUid.startsWith(f.syntheticUidPrefix)) { console.error('::error::the owner uid carries the synthetic prefix'); process.exit(3); }
-
-  // ---- synthetic uids must not be real accounts ----
-  for (const m of f.members) {
-    let real = null;
-    try { real = await auth.getUser(m.uid); } catch { real = null; }
-    if (real) { console.error(`::error::${m.uid} is a real Auth account; refusing to treat it as synthetic`); process.exit(3); }
-  }
-
-  // ---- what already exists ----
-  const groupSnaps = await Promise.all(f.communities.map((c) => db.doc(`wsfCommunityGroups/${c.groupId}`).get()));
-  for (const s of groupSnaps) {
-    if (s.exists && s.get('demoFixture.id') !== f.fixtureId) {
-      console.error(`::error::${s.ref.path} exists and is not this fixture's; refusing to overwrite`); process.exit(3);
+  // ---- Auth: the owner, then the synthetic uids; every non-not-found error aborts ----
+  try {
+    const owner = await lookupUser(auth, ownerUid);
+    if (!owner) fail(3, 'no Auth record for --owner-uid (auth/user-not-found)');
+    if (owner.disabled || owner.emailVerified !== true) fail(3, 'the owner Auth record is disabled or not email-verified');
+    for (const m of f.members) {
+      if (await lookupUser(auth, m.uid)) fail(3, `${m.uid} is a real Auth account; refusing to treat it as synthetic`);
     }
+  } catch (e) {
+    if (e instanceof AuthLookupError) fail(3, `${e.message} [AUTH_ERROR=${e.code}]`);
+    throw e;
   }
-  const priorAnchor = groupSnaps.map((s) => (s.exists ? s.get('demoFixture.anchorMs') : null)).find((v) => Number.isFinite(v));
+  if (!(await db.doc(`wsfMemberProfiles/${ownerUid}`).get()).exists) fail(3, 'the owner has no wsfMemberProfiles document');
+
+  // ---- anchor and plans ----
+  const groupSnaps = await Promise.all(f.communities.map((c) => db.doc(`wsfCommunityGroups/${c.groupId}`).get()));
+  const priorAnchor = groupSnaps.map((s) => (s.exists && s.get('demoFixture.id') === f.fixtureId ? s.get('demoFixture.anchorMs') : null)).find((v) => Number.isFinite(v));
   const anchorMs = args.reanchor || !Number.isFinite(priorAnchor) ? Date.now() : priorAnchor;
   const joinCodes = Object.fromEntries(groupSnaps.filter((s) => s.exists).map((s) => [s.id, s.get('joinCode')]));
-  const ownerMemberships = new Set();
-  for (const c of f.communities) {
-    const s = await db.doc(`wsfMemberships/${c.groupId}_${ownerUid}`).get();
-    if (s.exists) ownerMemberships.add(c.groupId);
-  }
-  const docs = planDocuments(f, { ownerUid, anchorMs, existing: { joinCodes, ownerMemberships } });
+  const now = planDocuments(f, { ownerUid, anchorMs, joinCodes });
+  const prior = Number.isFinite(priorAnchor) && priorAnchor !== anchorMs ? planDocuments(f, { ownerUid, anchorMs: priorAnchor, joinCodes }) : null;
+  const priorByPath = new Map((prior ? [...prior.entities, ...prior.contributions] : []).map((d) => [d.path, d]));
   const goalIds = f.communities.flatMap((c) => c.goals.map((g) => g.goalId));
 
-  // the owner's own data outside the fixture, fingerprinted before any write
+  // ---- classify every fixture path BEFORE any write or delete ----
+  const cls = { absent: [], unchanged: [], reanchor: [], drift: [], foreign: [] };
+  for (const d of now.entities) {
+    const s = await db.doc(d.path).get();
+    const k = classifyEntity(s.exists ? s.data() : undefined, d.data, priorByPath.get(d.path)?.data, d.kind, f.fixtureId);
+    cls[k].push({ ...d, kindOf: d.kind });
+  }
+  for (const d of now.contributions) {
+    const s = await db.doc(d.path).get();
+    const k = classifyContribution(s.exists ? s.data() : undefined, d, priorByPath.get(d.path)?.atMs);
+    cls[k].push({ ...d, kindOf: 'contribution' });
+  }
+  // a foreign owner of the counters: shard or member-total docs that exist under a fixture goal whose goal doc is foreign are covered by the goal; a
+  // member-total row for a synthetic uid that no fixture contribution explains is foreign
+  for (const g of goalIds) {
+    const mts = await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get();
+    for (const d of mts.docs) {
+      const uid = d.get('userId');
+      if (uid?.startsWith(f.syntheticUidPrefix) && !now.contributions.some((c) => c.totalPath === d.ref.path)) cls.foreign.push({ path: d.ref.path, kindOf: 'memberTotal' });
+    }
+  }
   const ownerFingerprint = async () => {
     const mine = await db.collection('wsfMemberships').where('userId', '==', ownerUid).get();
     const outside = mine.docs.filter((d) => !f.communities.some((c) => d.id === `${c.groupId}_${ownerUid}`));
@@ -265,93 +308,130 @@ async function main() {
     return JSON.stringify(norm({ profile: prof.data(), memberships: outside.map((d) => [d.id, d.data()]).sort() }));
   };
   const before = await ownerFingerprint();
+  const kinds = (arr) => Object.entries(arr.reduce((m, d) => ({ ...m, [d.kindOf]: (m[d.kindOf] ?? 0) + 1 }), {})).map(([k, v]) => `${k}:${v}`).join(' ') || 'none';
 
-  const receipt = { fixtureId: f.fixtureId, project: args.project, mode: args.mode, ownerUid, anchor: new Date(anchorMs).toISOString(), paths: {} };
   console.log(`fixture: ${f.fixtureId} v${f.version} · project: ${args.project}${process.env.FIRESTORE_EMULATOR_HOST ? ' (emulator)' : ''} · mode: ${args.mode}`);
-  console.log(`owner: ${ownerUid} (Auth record verified, email-verified, profile present; owner memberships already in the sample groups: ${ownerMemberships.size})`);
-  console.log(`anchor: ${new Date(anchorMs).toISOString()}${args.reanchor ? ' (reanchored)' : priorAnchor ? ' (kept from the existing fixture)' : ' (new)'}`);
+  console.log(`owner: ${ownerUid} (Auth record present, enabled, email-verified; profile present)`);
+  console.log(`anchor: ${new Date(anchorMs).toISOString()}${args.reanchor ? ' (reanchored)' : Number.isFinite(priorAnchor) ? ' (kept)' : ' (new)'}`);
+  console.log(`CREATE=${cls.absent.length} [${kinds(cls.absent)}]`);
+  console.log(`REANCHOR=${cls.reanchor.length} [${kinds(cls.reanchor)}]`);
+  console.log(`UNCHANGED=${cls.unchanged.length}`);
+  console.log(`DRIFT=${cls.drift.length} [${kinds(cls.drift)}]${cls.drift.length ? ' kept, not reset: ' + cls.drift.map((d) => d.path).join(', ') : ''}`);
+  console.log(`FOREIGN=${cls.foreign.length}${cls.foreign.length ? ': ' + cls.foreign.map((d) => d.path).join(', ') : ''}`);
+  const receipt = { fixtureId: f.fixtureId, project: args.project, mode: args.mode, ownerUid, anchor: new Date(anchorMs).toISOString(), classes: Object.fromEntries(Object.entries(cls).map(([k, v]) => [k, v.map((d) => d.path)])) };
+  const writeReceipt = () => { if (args.receipt) writeFileSync(args.receipt, JSON.stringify(receipt, null, 2)); };
+  if (cls.foreign.length) { writeReceipt(); fail(3, `foreign documents at fixture paths; nothing written or deleted`); }
+
+  const ledgerCheck = async () => {
+    let ok = true;
+    for (const g of goalIds) {
+      const led = await db.collection('wsfContributions').where('goalId', '==', g).get();
+      const ledger = led.docs.reduce((a, d) => a + d.get('count'), 0);
+      let shards = 0;
+      for (let i = 0; i < SHARD_COUNT; i += 1) { const s = await db.doc(`wsfGoalCounters/${g}/shards/${i}`).get(); shards += s.exists ? s.get('count') : 0; }
+      const mts = await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get();
+      const totals = mts.docs.reduce((a, d) => a + (d.get('total') ?? 0), 0);
+      console.log(`goal ${g}: ledger ${ledger} = shards ${shards} = member totals ${totals}${ledger === shards && shards === totals ? '' : '  MISMATCH'}`);
+      ok = ok && ledger === shards && shards === totals;
+    }
+    return ok;
+  };
+
+  if (args.mode === 'plan') { console.log('PLAN ONLY: nothing written'); writeReceipt(); return; }
+
+  if (args.mode === 'verify') {
+    const consistent = await ledgerCheck();
+    const missing = cls.absent.length + cls.reanchor.length;
+    const verdict = !consistent ? 'inconsistent' : missing ? 'incomplete' : cls.drift.length ? 'drift' : 'pass';
+    console.log(`VERIFY=${verdict}`);
+    writeReceipt();
+    process.exit(verdict === 'pass' ? 0 : 5);
+  }
 
   if (args.mode === 'cleanup') {
-    const paths = new Set(docs.map((d) => d.path));
-    for (const c of f.communities) paths.add(`wsfMemberships/${c.groupId}_${ownerUid}`);
-    const extra = { ownerRows: [] };
+    const paths = new Set([...now.entities.map((d) => d.path), ...now.ownerMemberships.map((d) => d.path)]);
+    let ownerRows = 0;
     for (const g of goalIds) {
       for (let i = 0; i < SHARD_COUNT; i += 1) paths.add(`wsfGoalCounters/${g}/shards/${i}`);
-      // anything recorded against a sample goal goes with the goal: seeded rows and any the owner added while reviewing
-      const led = await db.collection('wsfContributions').where('goalId', '==', g).get();
-      for (const d of led.docs) { if (!paths.has(d.ref.path)) extra.ownerRows.push(d.ref.path); paths.add(d.ref.path); }
-      const ra = await db.collection(`wsfGoals/${g}/recentAdditions`).get();
-      for (const d of ra.docs) paths.add(d.ref.path);
-      const mt = await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get();
-      for (const d of mt.docs) paths.add(d.ref.path);
+      // everything recorded against a sample goal goes with the goal: seeded rows and any the owner added while reviewing
+      for (const d of (await db.collection('wsfContributions').where('goalId', '==', g).get()).docs) { if (!d.get('userId')?.startsWith(f.syntheticUidPrefix)) ownerRows += 1; paths.add(d.ref.path); }
+      for (const d of (await db.collection(`wsfGoals/${g}/recentAdditions`).get()).docs) paths.add(d.ref.path);
+      for (const d of (await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get()).docs) paths.add(d.ref.path);
     }
     let deleted = 0;
     for (const p of [...paths].sort()) { const r = db.doc(p); if ((await r.get()).exists) { await r.delete(); deleted += 1; } }
     const after = await ownerFingerprint();
-    console.log(`CLEANUP_DELETED=${deleted} (of ${paths.size} fixture paths; rows the owner added on sample goals: ${extra.ownerRows.length})`);
+    console.log(`CLEANUP_DELETED=${deleted} (fixture paths: ${paths.size}; rows the owner recorded on the sample goals: ${ownerRows})`);
     console.log(`OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=${before === after}`);
-    receipt.paths.deleted = [...paths].sort();
-    if (args.receipt) writeFileSync(args.receipt, JSON.stringify(receipt, null, 2));
+    receipt.deleted = [...paths].sort();
+    writeReceipt();
     process.exit(before === after ? 0 : 4);
   }
 
-  // ---- compare desired with actual ----
-  const diff = { create: [], update: [], unchanged: [] };
-  for (const d of docs) {
-    const s = await db.doc(d.path).get();
-    if (!s.exists) diff.create.push(d);
-    else if (same(s.data(), d.data)) diff.unchanged.push(d);
-    else diff.update.push(d);
-  }
-  // shards are reconciled from the WHOLE ledger of each sample goal, so a
-  // contribution the owner makes while reviewing is counted, never clobbered
-  const shardDocs = [];
-  for (const g of goalIds) {
-    const seeded = docs.filter((d) => d.kind === 'contribution' && d.data.goalId === g).map((d) => ({ path: d.path, ...d.data }));
-    const led = await db.collection('wsfContributions').where('goalId', '==', g).get();
-    const byPath = new Map(led.docs.map((x) => [x.ref.path, x.data()]));
-    for (const r of seeded) byPath.set(r.path, r);
-    const s = shardsFromLedger([...byPath.values()]);
-    for (let i = 0; i < SHARD_COUNT; i += 1) {
-      const path = `wsfGoalCounters/${g}/shards/${i}`;
-      const cur = await db.doc(path).get();
-      const want = { count: s[i] };
-      const d = { path, data: want, kind: 'shard' };
-      if (!cur.exists) (s[i] === 0 ? diff.unchanged : diff.create).push(d);
-      else if (same(cur.data(), want)) diff.unchanged.push(d);
-      else diff.update.push(d);
-    }
-    console.log(`goal ${g}: ledger ${[...byPath.values()].reduce((a, r) => a + r.count, 0)} = shards ${s.reduce((a, b) => a + b, 0)}`);
-  }
-  const count = (arr) => Object.entries(arr.reduce((m, d) => ({ ...m, [d.kind]: (m[d.kind] ?? 0) + 1 }), {})).map(([k, v]) => `${k}:${v}`).join(' ') || 'none';
-  console.log(`CREATE=${diff.create.length} [${count(diff.create)}]`);
-  console.log(`UPDATE=${diff.update.length} [${count(diff.update)}]`);
-  console.log(`UNCHANGED=${diff.unchanged.length}`);
-  receipt.paths = { create: diff.create.map((d) => d.path), update: diff.update.map((d) => d.path) };
-
-  if (args.mode === 'verify') {
-    const ok = diff.create.length === 0 && diff.update.length === 0;
-    console.log(`VERIFY=${ok ? 'pass' : 'drift'}`);
-    if (args.receipt) writeFileSync(args.receipt, JSON.stringify(receipt, null, 2));
-    process.exit(ok ? 0 : 5);
-  }
-  if (args.mode === 'plan') {
-    console.log('PLAN ONLY: nothing written (pass --apply to converge)');
-    if (args.receipt) writeFileSync(args.receipt, JSON.stringify(receipt, null, 2));
-    return;
-  }
   // ---- apply ----
-  const writes = [...diff.create, ...diff.update];
-  for (let i = 0; i < writes.length; i += 400) {
-    const batch = db.batch();
-    for (const d of writes.slice(i, i + 400)) batch.set(db.doc(d.path), d.data);
-    await batch.commit();
+  let written = 0;
+  // 1. entities: create absent, move reanchor-only ones; drift is kept
+  const entityWrites = [...cls.absent, ...cls.reanchor].filter((d) => d.kindOf !== 'contribution');
+  for (const d of entityWrites) {
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(db.doc(d.path));
+      const k = classifyEntity(s.exists ? s.data() : undefined, d.data, priorByPath.get(d.path)?.data, d.kind, f.fixtureId);
+      if (k === 'absent') { tx.create(db.doc(d.path), d.data); written += 1; }
+      else if (k === 'reanchor') { tx.set(db.doc(d.path), d.data); written += 1; }
+      else if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
+    });
+  }
+  // 2. the owner's membership rows: created where absent, never rewritten
+  for (const d of now.ownerMemberships) {
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(db.doc(d.path));
+      if (!s.exists) { tx.create(db.doc(d.path), d.data); written += 1; }
+    });
+  }
+  // 3. the ledger: one transaction per row, exactly as wsfContribute records one
+  for (const d of [...cls.absent, ...cls.reanchor].filter((x) => x.kindOf === 'contribution')) {
+    await db.runTransaction(async (tx) => {
+      const ref = db.doc(d.path);
+      const s = await tx.get(ref);
+      const k = classifyContribution(s.exists ? s.data() : undefined, d, priorByPath.get(d.path)?.atMs);
+      await testInterleave(db);
+      const at = Timestamp.fromMillis(d.atMs);
+      if (k === 'absent') {
+        tx.create(ref, { ...d.identity, createdAt: at });
+        tx.set(db.doc(d.shardPath), { count: FieldValue.increment(d.identity.count) }, { merge: true });
+        tx.set(db.doc(d.totalPath), { goalId: d.identity.goalId, userId: d.identity.userId, total: FieldValue.increment(d.identity.count), contributionCount: FieldValue.increment(1), updatedAt: at }, { merge: true });
+        tx.set(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
+        written += 1;
+      } else if (k === 'reanchor') {
+        // timestamps only; counts, shards and totals are untouched
+        tx.update(ref, { createdAt: at });
+        tx.set(db.doc(d.additionPath), { amount: d.identity.count, at: isoMinute(d.atMs) });
+        written += 1;
+      } else if (k === 'foreign') {
+        throw new Error(`${d.path} became foreign during the run`);
+      }
+    });
+  }
+  // 4. a reanchor on a sample group the owner has edited: move only the
+  //    fixture's own bookkeeping field, never his edit
+  if (args.reanchor) {
+    for (const c of f.communities) {
+      await db.runTransaction(async (tx) => {
+        const ref = db.doc(`wsfCommunityGroups/${c.groupId}`);
+        const s = await tx.get(ref);
+        if (s.exists && s.get('demoFixture.id') === f.fixtureId && s.get('demoFixture.anchorMs') !== anchorMs) {
+          tx.update(ref, { 'demoFixture.anchorMs': anchorMs });
+          written += 1;
+        }
+      });
+    }
   }
   const after = await ownerFingerprint();
-  console.log(`APPLIED=${writes.length}`);
+  const consistent = await ledgerCheck();
+  console.log(`APPLIED=${written}`);
   console.log(`OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=${before === after}`);
-  if (args.receipt) writeFileSync(args.receipt, JSON.stringify(receipt, null, 2));
-  process.exit(before === after ? 0 : 4);
+  writeReceipt();
+  process.exit(before === after && consistent ? 0 : 4);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
