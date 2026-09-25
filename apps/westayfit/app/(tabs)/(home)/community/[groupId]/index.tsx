@@ -105,6 +105,14 @@ import {
 } from '../../../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
 import {
+  forgetCommunity,
+  peekGoals,
+  readGoals,
+  readMyCommunities,
+  recallCommunity,
+  rememberCommunity,
+} from '../../../../../src/memberReads';
+import {
   MomentumRow,
   PresenceRow,
   type ActivityRow,
@@ -330,7 +338,20 @@ export default function CommunityPage() {
   const params = useLocalSearchParams<{ groupId: string }>();
   const groupId = params.groupId;
   const { ready, user } = useWsfAuth();
-  const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 2. RE-ENTERING A COMMUNITY THIS ACCOUNT HAS
+    ALREADY OPENED starts from how it last settled (src/memberReads.ts), not
+    from the loading composition: its name, its people count, its goals. The
+    load below still runs in full and replaces it -- a refusal clears it and
+    lands on the refusal -- so the remembered screen is a first frame, never
+    the authority. A different account, or none, recalls nothing.
+  */
+  const [state, setState] = useState<LoadState>(
+    () =>
+      (ready && user && groupId
+        ? recallCommunity<LoadState>(user.uid, groupId)
+        : undefined) ?? { kind: 'loading' },
+  );
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   // W7. The display-link control keeps its OWN state and its own timer. It is
   // a different link to a different audience from the invite link, and a copy
@@ -356,7 +377,13 @@ export default function CommunityPage() {
     entries: ActivityRow[];
     contributorsToday: number | null;
   } | null>(null);
-  const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
+  // The goals this account last read for this community, shown until the
+  // fresh read below replaces them (the same rule as the screen above).
+  const [goalsState, setGoalsState] = useState<GoalsState>(() => {
+    const warm =
+      ready && user && groupId ? peekGoals<ListedGoal>(user.uid, groupId) : undefined;
+    return warm ? { kind: 'loaded', goals: warm.goals } : { kind: 'loading' };
+  });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
   /*
     A GENUINE RETURN TO THIS SCREEN. Bumped by the focus effect below on every
@@ -875,6 +902,7 @@ export default function CommunityPage() {
         });
         if (cancelled) return;
         if (!membershipSnap || !membershipSnap.exists()) {
+          forgetCommunity(user.uid, groupId);
           setState({ kind: 'notMember' });
           return;
         }
@@ -890,6 +918,7 @@ export default function CommunityPage() {
         // but this screen is itself a member-only path and was not closing.
         // Anything that is not an active membership is not a membership here.
         if (membership.membershipStatus !== 'active') {
+          forgetCommunity(user.uid, groupId);
           setState({ kind: 'notMember' });
           return;
         }
@@ -897,6 +926,7 @@ export default function CommunityPage() {
         const groupSnap = await getDoc(doc(db, 'wsfCommunityGroups', groupId));
         if (cancelled) return;
         if (!groupSnap.exists()) {
+          forgetCommunity(user.uid, groupId);
           setState({ kind: 'error', message: 'Community not found.' });
           return;
         }
@@ -912,11 +942,10 @@ export default function CommunityPage() {
         let isSample = group.isSample === true;
         let activeChallenge: ActiveChallenge | null = null;
         try {
-          const myFn = httpsCallable<Record<string, never>, MyCommunitiesResponse>(
-            functions,
-            'wsfMyCommunities'
-          );
-          const myResult = await myFn({});
+          // The same read Home's list makes, shared when it is in flight
+          // (src/memberReads.ts): the list redirecting here asks at the same
+          // moment, and one answer serves both.
+          const myResult = { data: (await readMyCommunities(user.uid)) as unknown as MyCommunitiesResponse };
           if (cancelled) return;
           otherCommunityCount = Math.max(0, myResult.data.items.length - 1);
           const item = myResult.data.items.find((i) => i.groupId === groupId);
@@ -955,7 +984,7 @@ export default function CommunityPage() {
           }
         }
 
-        setState({
+        const settled: LoadState = {
           kind: 'ready',
           group,
           role: membership.role,
@@ -963,17 +992,28 @@ export default function CommunityPage() {
           otherCommunityCount,
           isSample,
           activeChallenge,
-        });
+        };
+        rememberCommunity(user.uid, groupId, settled);
+        setState(settled);
       } catch (e) {
         if (cancelled) return;
         // A1. The server's own sentence is a developer fact, not member copy —
         // it can name a callable, a region or an internal reason. It goes to
         // the console; the screen says what the member can act on.
         console.warn('[wsf] community load failed', e);
-        setState({
-          kind: 'error',
-          message: 'We couldn’t load this community right now. Check your connection and try again.',
-        });
+        // A screen already standing on this account's last settled state
+        // keeps it: a refresh that could not be read is not a reason to take
+        // the community away. Its figures carry their own last-known and
+        // retry treatment (RETURN-CONTINUITY-1). Nothing standing: the error.
+        setState((prev) =>
+          prev.kind === 'ready'
+            ? prev
+            : {
+                kind: 'error',
+                message:
+                  'We couldn’t load this community right now. Check your connection and try again.',
+              },
+        );
       }
     })();
 
@@ -995,20 +1035,21 @@ export default function CommunityPage() {
     if (!ready || !user || !groupId) return;
 
     let cancelled = false;
-    setGoalsState({ kind: 'loading' });
+    // Loading only when there is nothing of this account's for this community
+    // to stand on (a warm re-entry keeps its last goals until this lands).
+    setGoalsState((prev) =>
+      prev.kind === 'loaded' && peekGoals(user.uid, groupId) ? prev : { kind: 'loading' },
+    );
 
     (async () => {
       try {
-        const fn = httpsCallable<
-          { groupId: string; includeHistory: boolean },
-          ListGoalsResponse
-        >(getFirebaseFunctions(), 'wsfListGoals');
         // ONE call and one round trip for both sections. `includeHistory` adds
         // every closed goal of the community regardless of display
         // authorization — the community's own record — and the extra facts a
         // history row needs to state its result. The screen splits active from
-        // closed below; the server does not decide the layout.
-        const result = await fn({ groupId, includeHistory: true });
+        // closed below; the server does not decide the layout. Shared with an
+        // identical read in flight (src/memberReads.ts).
+        const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
@@ -1017,7 +1058,11 @@ export default function CommunityPage() {
         // screen keeps its own fixed copy (rendered by the goals-error hero
         // and the Champion panel, neither of which prints this message).
         console.warn('[wsf] goal list failed', e);
-        setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
+        // Warm goals already on screen stay; their figures fall to the
+        // last-known treatment through the progress reads.
+        setGoalsState((prev) =>
+          prev.kind === 'loaded' ? prev : { kind: 'failed', message: 'Could not load goals.' },
+        );
       }
     })();
 

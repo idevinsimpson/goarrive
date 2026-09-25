@@ -29,6 +29,7 @@ import {
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
 import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../../src/ui/progressFormat';
+import { peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../../src/memberReads';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.
@@ -88,21 +89,58 @@ type Goal = {
 
 type Addition = { amount: number; unit: string; at: string };
 
-/** A membership plus whatever could be read about it. `failed` is its own. */
-type Enriched = Membership & { goals: Goal[] | 'failed' };
+/**
+ * A membership plus whatever could be read about it. `failed` is its own.
+ * `pending` is the warm first frame's honest gap: this account has not read
+ * this community's goals yet in this session, and the row says so rather
+ * than guessing "no goal".
+ */
+type Enriched = Membership & { goals: Goal[] | 'failed' | 'pending' };
 
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
   | { kind: 'ready'; items: Enriched[]; currentId: string | null; momentum: Addition[] };
 
-function activeGoals(goals: Goal[] | 'failed'): Goal[] {
-  return goals === 'failed' ? [] : goals.filter((g) => g.status === 'active');
+function activeGoals(goals: Goal[] | 'failed' | 'pending'): Goal[] {
+  return goals === 'failed' || goals === 'pending' ? [] : goals.filter((g) => g.status === 'active');
+}
+
+/*
+  APP-FEEL-PARITY-1 CHECKPOINT 2. THE FIRST VISIT OPENS ON WHAT IS KNOWN.
+
+  Measured on `91392f9d`: the first visit to this tab after Home showed the
+  whole-page skeleton for about 2.5 s, while re-reading the membership list
+  Home had just read. When this account's list is already in the shared
+  record (src/memberReads.ts), the page opens on it -- the real rows, the
+  current community, the counts -- with each community's goals as far as they
+  were read (the current one usually was, by its own Home) and `pending`
+  where they were not. The fresh reads below run exactly as before and
+  replace all of it. Nothing is fetched ahead; a first visit with nothing
+  read still shows the skeleton.
+*/
+function warmState(uid: string | null): State | null {
+  const mine = peekMyCommunities(uid);
+  if (!mine || !uid) return null;
+  const items = mine.items as unknown as Membership[];
+  if (items.length === 0) return null;
+  const enriched: Enriched[] = items.map((m) => ({
+    ...m,
+    goals: (peekGoals<Goal>(uid, m.groupId)?.goals as Goal[] | undefined) ?? 'pending',
+  }));
+  return {
+    kind: 'ready',
+    items: enriched,
+    currentId: resolveCurrentCommunity(uid, items.map((m) => m.groupId)),
+    momentum: [],
+  };
 }
 
 export default function CommunityIndexScreen() {
   const { ready, user } = useWsfAuth();
-  const [state, setState] = useState<State>({ kind: 'loading' });
+  const [state, setState] = useState<State>(
+    () => (ready && user ? warmState(user.uid) : null) ?? { kind: 'loading' },
+  );
   const [attempt, setAttempt] = useState(0);
   const safeArea = useSafeAreaInsets();
 
@@ -121,17 +159,17 @@ export default function CommunityIndexScreen() {
     if (!ready || !user) return;
     const token = ++liveRef.current;
     const uid = user.uid;
-    setState({ kind: 'loading' });
+    // A retry, or an account with nothing already read, starts from loading;
+    // a warm first frame for THIS account stays up while the fresh reads run.
+    const warm = attempt === 0 ? warmState(uid) : null;
+    setState(warm ?? { kind: 'loading' });
 
     (async () => {
       const fns = getFirebaseFunctions();
       let items: Membership[];
       try {
-        const result = await httpsCallable<Record<string, never>, { items: Membership[] }>(
-          fns,
-          'wsfMyCommunities',
-        )({});
-        items = Array.isArray(result.data?.items) ? result.data.items : [];
+        const result = await readMyCommunities(uid);
+        items = result.items as unknown as Membership[];
       } catch {
         if (liveRef.current === token) setState({ kind: 'error' });
         return;
@@ -146,13 +184,9 @@ export default function CommunityIndexScreen() {
 
       // Bounded and parallel. Serially this is an N+1 chain whose latency
       // grows with membership count; unbounded it is a burst of callables.
-      const listGoals = httpsCallable<
-        { groupId: string; includeHistory: boolean },
-        { goals: Goal[] }
-      >(fns, 'wsfListGoals');
       const settled = await mapWithLimit(items, GOAL_READ_LIMIT, async (m) => {
-        const r = await listGoals({ groupId: m.groupId, includeHistory: true });
-        return Array.isArray(r.data?.goals) ? r.data.goals : [];
+        const r = await readGoals<Goal>(uid, m.groupId);
+        return r.goals;
       });
 
       const enriched: Enriched[] = items.map((m, i) => {
@@ -448,7 +482,11 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
       <View style={styles.currentRule} />
 
       <Text style={styles.eyebrowDark}>WHAT WE&apos;RE DOING</Text>
-      {item.goals === 'failed' ? (
+      {item.goals === 'pending' ? (
+        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-pending">
+          Reading progress…
+        </Text>
+      ) : item.goals === 'failed' ? (
         /*
           THIS COMMUNITY'S READ FAILED, and only this one. Saying so where the
           progress would have been is the honest answer; blanking the screen or
@@ -561,7 +599,13 @@ function OtherRow({
           </Text>
           <Text style={styles.otherMeta}>
             {memberCountLabel(item.memberCount)} ·{' '}
-            {failed ? 'Progress unavailable' : lead ? lead.title : 'No goal running'}
+            {failed
+              ? 'Progress unavailable'
+              : item.goals === 'pending'
+                ? 'Reading progress…'
+                : lead
+                  ? lead.title
+                  : 'No goal running'}
           </Text>
           {lead && typeof lead.sharedTotal === 'number' ? (
             <Text style={styles.otherTotal}>

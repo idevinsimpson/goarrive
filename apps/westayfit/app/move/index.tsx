@@ -1,5 +1,4 @@
 import { router, useNavigation } from 'expo-router';
-import { httpsCallable } from 'firebase/functions';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -7,7 +6,6 @@ import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
 import { resolveCurrentCommunity } from '../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions } from '../../src/firebase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ButtonLink } from '../../src/ui/ButtonLink';
@@ -37,6 +35,7 @@ import {
   kit,
 } from '../../src/ui/kit';
 import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
+import { readGoals, readMyCommunities } from '../../src/memberReads';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -128,11 +127,9 @@ export default function MoveResolver() {
     let cancelled = false;
     (async () => {
       try {
-        const fns = getFirebaseFunctions();
-        const mine = await httpsCallable<Record<string, never>, { items: MyCommunityItem[] }>(
-          fns,
-          'wsfMyCommunities',
-        )({});
+        // Fresh reads, shared with any identical read already in flight
+        // (src/memberReads.ts). MOVE still decides on a fresh answer.
+        const mine = { data: (await readMyCommunities(user.uid)) as unknown as { items: MyCommunityItem[] } };
         if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
         const groupId = resolveCurrentCommunity(user.uid, ids);
@@ -143,24 +140,15 @@ export default function MoveResolver() {
           router.replace('/');
           return;
         }
-        const listed = await httpsCallable<
-          { groupId: string; includeHistory: boolean },
-          ListGoalsResponse
-        >(
-          fns,
-          'wsfListGoals',
-          /*
-            THE TOTALS ARE ONLY IN THE RESPONSE WHEN THIS FLAG IS ON.
-            wsfListGoals returns sharedTotal only under includeHistory, so
-            asking without it and falling back to zero printed "0 of 5,000
-            squats" for a goal that actually stood at 1,847 -- a false
-            statement about every row. This asks for what it is going to
-            show. No new backend behaviour: the flag and the callable are
-            both already there, and the caller is active-member-gated either
-            way. Closed goals arrive with it; actionableGoals drops them, as
-            it always has.
-          */
-        )({ groupId, includeHistory: true });
+        /*
+          THE TOTALS ARE ONLY IN THE RESPONSE WHEN includeHistory IS ON.
+          wsfListGoals returns sharedTotal only under includeHistory, so asking
+          without it and falling back to zero printed "0 of 5,000 squats" for a
+          goal that actually stood at 1,847 -- a false statement about every
+          row. `readGoals` always asks with it (src/memberReads.ts). Closed
+          goals arrive with it; actionableGoals drops them, as it always has.
+        */
+        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId) };
         // `leaving()`: the member pressed Close while this was being read.
         // They are leaving, and the answer must not send them anywhere else.
         if (cancelled || leaving()) return;

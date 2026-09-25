@@ -98,6 +98,14 @@ export function MemberTopBar({
             you are on is the defect this packet exists to remove. */}
         <Pressable
           onPress={onHome}
+          // A link without an href: react-native-web leaves Enter to the
+          // browser, which does nothing here, so it answers Enter itself.
+          {...({
+            onKeyDown: (e: { key?: string; repeat?: boolean; nativeEvent?: { key?: string; repeat?: boolean } }) => {
+              const key = e.key ?? e.nativeEvent?.key;
+              if (key === 'Enter' && !(e.repeat ?? e.nativeEvent?.repeat)) onHome();
+            },
+          } as Record<string, unknown>)}
           style={styles.wordmarkTap}
           accessibilityRole="link"
           accessibilityLabel="We Stay Fit, go Home"

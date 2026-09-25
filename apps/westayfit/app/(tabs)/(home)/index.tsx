@@ -19,6 +19,7 @@ import { wsfTheme } from '../../../src/theme';
 import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
 import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
+import { readMyCommunities } from '../../../src/memberReads';
 
 type MyCommunityItem = {
   groupId: string;
@@ -88,11 +89,9 @@ export default function BrandShell() {
     setMyCommunities({ kind: 'loading' });
     (async () => {
       try {
-        const fn = httpsCallable<Record<string, never>, { items: MyCommunityItem[] }>(
-          getFirebaseFunctions(),
-          'wsfMyCommunities'
-        );
-        const result = await fn({});
+        // Fresh, and shared with the identical read the community this list
+        // redirects to makes at the same moment (src/memberReads.ts).
+        const result = { data: (await readMyCommunities(user.uid)) as unknown as { items: MyCommunityItem[] } };
         if (cancelled) return;
         setMyCommunities({ kind: 'ready', items: result.data.items });
       } catch (e) {
@@ -151,11 +150,7 @@ export default function BrandShell() {
     let cancelled = false;
     (async () => {
       try {
-        const fn = httpsCallable<Record<string, never>, { items: MyCommunityItem[] }>(
-          getFirebaseFunctions(),
-          'wsfMyCommunities'
-        );
-        const result = await fn({});
+        const result = { data: (await readMyCommunities(user.uid)) as unknown as { items: MyCommunityItem[] } };
         if (cancelled) return;
         setMyCommunities({ kind: 'ready', items: result.data.items });
       } catch (e) {
