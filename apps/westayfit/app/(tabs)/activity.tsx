@@ -1,12 +1,19 @@
 import { router } from 'expo-router';
-import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
-import { getFirebaseFunctions } from '../../src/firebase';
+import {
+  SAME_LOAD_MS,
+  peekGoals,
+  peekMyCommunities,
+  peekOwnCredit,
+  readGoals,
+  readMyCommunities,
+  readOwnCredit,
+} from '../../src/memberReads';
 import {
   ACTION_GREEN,
   CREAM,
@@ -99,6 +106,91 @@ type Ready = {
 };
 type State = { kind: 'loading' } | { kind: 'error' } | Ready;
 
+/** How long a revalidation may take before the page says it is checking. */
+const CHECKING_AFTER_MS = 400;
+
+type Owned = { community: Community; goal: Goal; own: { ownCredit?: unknown; unit?: unknown } | null };
+
+/** The member's rows from their goals and own parts. `null`: that read failed. */
+function composeProgress(owned: Array<Owned | null>, partialAlready: boolean): Ready {
+  let partial = partialAlready;
+  const running: Row[] = [];
+  const finished: Row[] = [];
+  for (const item of owned) {
+    if (!item) {
+      // A goal this member cannot read is simply not one of their rows,
+      // but the screen says that something is missing rather than
+      // presenting a short list as the whole truth.
+      partial = true;
+      continue;
+    }
+    const { community, goal, own } = item;
+    const yourPart = typeof own?.ownCredit === 'number' ? own.ownCredit : 0;
+    // Only goals with a real recorded own part.
+    if (yourPart <= 0) continue;
+    const row: Row = {
+      goalId: goal.goalId,
+      title: goal.title,
+      community: community.displayName,
+      unit: (typeof own?.unit === 'string' && own.unit) || goal.unit,
+      yourPart,
+      target: goal.target,
+      sharedTotal: goal.sharedTotal,
+      status: goal.status,
+      endsAt: goal.endsAt,
+      /*
+        THE CURRENT TOTAL DECIDES, NOT THE HISTORICAL STAMP.
+
+        `reachedAt` records that a goal crossed its target once. It is an
+        EVENT, and events do not un-happen — so it survives a correction
+        that takes the shared total back below the target. Reading it as
+        the present state meant a goal corrected down to 380 of 500 still
+        wore REACHED, and still drew the celebratory Living WE, because of
+        something that had been true a week earlier.
+
+        `isReached` over the confirmed total is the same rule Home already
+        applies: `community/[groupId]/index.tsx` prints the reached DATE
+        only when `reachedAt` exists AND the current phase is `reachedOpen`
+        or `closedReached`. This was the one surface trusting the stamp
+        alone.
+
+        An unconfirmed total is not a reached goal. `sharedTotal` is absent
+        when the aggregate read did not answer, and claiming the target was
+        met on a number the product does not have is the same error in a
+        different costume.
+      */
+      reached: typeof goal.sharedTotal === 'number' && isReached(goal.sharedTotal, goal.target),
+    };
+    if (goal.status === 'active') running.push(row);
+    else finished.push(row);
+  }
+  // Most recently ended first, so the newest thing the member finished is
+  // the one they see.
+  finished.sort((a, b) => (b.endsAt ?? '').localeCompare(a.endsAt ?? ''));
+  return { kind: 'ready', running, finished, partial };
+}
+
+/**
+ * The page from this account's record alone, or `null` when the record does
+ * not hold every community's goals and the own part in each goal
+ * (src/memberReads.ts).
+ */
+function progressFromRecord(uid: string): Ready | null {
+  const mine = peekMyCommunities(uid);
+  if (!mine) return null;
+  const owned: Owned[] = [];
+  for (const community of mine.items as unknown as Community[]) {
+    const goals = peekGoals<Goal>(uid, community.groupId)?.goals;
+    if (!goals) return null;
+    for (const goal of goals) {
+      const own = peekOwnCredit(uid, goal.goalId);
+      if (!own) return null;
+      owned.push({ community, goal, own });
+    }
+  }
+  return composeProgress(owned, false);
+}
+
 export default function ActivityScreen() {
   const { ready, user } = useWsfAuth();
   const [state, setState] = useState<State>({ kind: 'loading' });
@@ -112,46 +204,71 @@ export default function ActivityScreen() {
 
   const liveRef = useRef(0);
 
+  /*
+    PERF-MOBILE-1. PROGRESS OPENS ON WHAT THIS ACCOUNT ALREADY KNOWS.
+
+    Measured on `0b460ce3` (W7 Check 41B): the first visit painted the full
+    skeleton behind three serial stages -- communities, then goals, then each
+    own part -- all of which Home had usually read a moment before. Now, when
+    this account's record (src/memberReads.ts) holds every community, every
+    goal and the member's own part in each, the page opens on those rows at
+    once (`progressFromRecord`) and revalidates through the same record, an
+    answer from this load reused. What is on screen stays while it does: if
+    that takes longer than a moment the page says it is checking; if it fails
+    the page keeps what was last read and says so, with a Retry, which reads
+    everything fresh. A fact the record does not hold means the page loads
+    exactly as before; nothing is synthesized.
+  */
+  const [checking, setChecking] = useState(false);
+  const [stale, setStale] = useState(false);
   useEffect(() => {
     if (!ready || !user) return;
     const token = ++liveRef.current;
-    setState({ kind: 'loading' });
+    const uid = user.uid;
+    const reuse = attempt > 0 ? 0 : SAME_LOAD_MS;
+    const recorded = attempt > 0 ? null : progressFromRecord(uid);
+    setState(recorded ?? { kind: 'loading' });
+    setStale(false);
+    setChecking(false);
+    const slow = recorded
+      ? setTimeout(() => {
+          if (liveRef.current === token) setChecking(true);
+        }, CHECKING_AFTER_MS)
+      : null;
+    const settle = () => {
+      if (slow) clearTimeout(slow);
+      if (liveRef.current === token) setChecking(false);
+    };
 
     (async () => {
-      const fns = getFirebaseFunctions();
       let communities: Community[];
       try {
-        const mine = await httpsCallable<Record<string, never>, { items: Community[] }>(
-          fns,
-          'wsfMyCommunities',
-        )({});
-        communities = Array.isArray(mine.data?.items) ? mine.data.items : [];
+        communities = (await readMyCommunities(uid, reuse)).items as unknown as Community[];
       } catch {
-        if (liveRef.current === token) setState({ kind: 'error' });
+        if (liveRef.current !== token) return;
+        settle();
+        if (recorded) setStale(true);
+        else setState({ kind: 'error' });
         return;
       }
 
       if (communities.length === 0) {
         if (liveRef.current === token) {
+          settle();
           setState({ kind: 'ready', running: [], finished: [], partial: false });
         }
         return;
       }
 
-      let partial = false;
-
       // Bounded and parallel. The previous version awaited every community, then
       // every goal, then every own-part read one at a time — an N+1 chain
       // whose latency grew with the member's whole history.
-      const listGoals = httpsCallable<
-        { groupId: string; includeHistory: boolean },
-        { goals: Goal[] }
-      >(fns, 'wsfListGoals');
       const perCommunity = await mapWithLimit(communities, READ_LIMIT, async (c) => {
-        const r = await listGoals({ groupId: c.groupId, includeHistory: true });
-        return { community: c, goals: Array.isArray(r.data?.goals) ? r.data.goals : [] };
+        const r = await readGoals<Goal>(uid, c.groupId, reuse);
+        return { community: c, goals: r.goals ?? [] };
       });
 
+      let partial = false;
       const pairs: Array<{ community: Community; goal: Goal }> = [];
       for (const settled of perCommunity) {
         if (!settled.ok) {
@@ -162,78 +279,20 @@ export default function ActivityScreen() {
         for (const goal of settled.value.goals) pairs.push({ community: settled.value.community, goal });
       }
 
-      const myContribution = httpsCallable<{ goalId: string }, { ownCredit: number; unit: string }>(
-        fns,
-        'wsfMyContribution',
-      );
       const owned = await mapWithLimit(pairs, READ_LIMIT, async ({ community, goal }) => {
-        const own = await myContribution({ goalId: goal.goalId });
-        return { community, goal, own: own.data };
+        const own = await readOwnCredit(uid, goal.goalId, reuse);
+        return { community, goal, own };
       });
 
-      const running: Row[] = [];
-      const finished: Row[] = [];
-      for (const settled of owned) {
-        if (!settled.ok) {
-          // A goal this member cannot read is simply not one of their rows,
-          // but the screen says that something is missing rather than
-          // presenting a short list as the whole truth.
-          partial = true;
-          continue;
-        }
-        const { community, goal, own } = settled.value;
-        const yourPart = typeof own?.ownCredit === 'number' ? own.ownCredit : 0;
-        // Only goals with a real recorded own part.
-        if (yourPart <= 0) continue;
-        const row: Row = {
-          goalId: goal.goalId,
-          title: goal.title,
-          community: community.displayName,
-          unit: own?.unit || goal.unit,
-          yourPart,
-          target: goal.target,
-          sharedTotal: goal.sharedTotal,
-          status: goal.status,
-          endsAt: goal.endsAt,
-          /*
-            THE CURRENT TOTAL DECIDES, NOT THE HISTORICAL STAMP.
-
-            `reachedAt` records that a goal crossed its target once. It is an
-            EVENT, and events do not un-happen — so it survives a correction
-            that takes the shared total back below the target. Reading it as
-            the present state meant a goal corrected down to 380 of 500 still
-            wore REACHED, and still drew the celebratory Living WE, because of
-            something that had been true a week earlier.
-
-            `isReached` over the confirmed total is the same rule Home already
-            applies: `community/[groupId]/index.tsx` prints the reached DATE
-            only when `reachedAt` exists AND the current phase is `reachedOpen`
-            or `closedReached`. This was the one surface trusting the stamp
-            alone.
-
-            An unconfirmed total is not a reached goal. `sharedTotal` is absent
-            when the aggregate read did not answer, and claiming the target was
-            met on a number the product does not have is the same error in a
-            different costume.
-          */
-          reached:
-            typeof goal.sharedTotal === 'number' && isReached(goal.sharedTotal, goal.target),
-        };
-        if (goal.status === 'active') running.push(row);
-        else finished.push(row);
-      }
-
-      // Most recently ended first, so the newest thing the member finished is
-      // the one they see.
-      finished.sort((a, b) => (b.endsAt ?? '').localeCompare(a.endsAt ?? ''));
-
       if (liveRef.current === token) {
-        setState({ kind: 'ready', running, finished, partial });
+        settle();
+        setState(composeProgress(owned.map((o) => (o.ok ? o.value : null)), partial));
       }
     })();
 
     return () => {
       liveRef.current += 1;
+      if (slow) clearTimeout(slow);
     };
   }, [ready, user, attempt]);
 
@@ -267,6 +326,26 @@ export default function ActivityScreen() {
         <Text style={styles.privacy} testID="wsf-activity-subtitle">
           Your recorded contributions, by goal.
         </Text>
+        {checking && state.kind === 'ready' ? (
+          <Text style={styles.note} testID="wsf-activity-checking">
+            Checking for updates…
+          </Text>
+        ) : null}
+        {stale && state.kind === 'ready' ? (
+          <View style={styles.staleRow} testID="wsf-activity-stale">
+            <Text style={[styles.note, styles.staleText]}>
+              Couldn’t check for updates just now. This is what was last read.
+            </Text>
+            <Pressable
+              onPress={retry}
+              accessibilityRole="button"
+              style={styles.staleRetry}
+              testID="wsf-activity-stale-retry"
+            >
+              <Text style={styles.staleRetryText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {!ready || !user ? (
           <Text style={styles.note} testID="wsf-activity-signed-out">
@@ -567,6 +646,10 @@ function Pill({
 }
 
 const styles = StyleSheet.create({
+  staleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  staleText: { flexShrink: 1 },
+  staleRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  staleRetryText: { color: NAVY, fontSize: 14, fontWeight: '700', textDecorationLine: 'underline' },
   scroll: { flex: 1, backgroundColor: CREAM },
   page: { flexGrow: 1, paddingHorizontal: 18, paddingTop: 10 },
   column: { flexGrow: 1, gap: 14 },

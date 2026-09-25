@@ -35,7 +35,7 @@ import {
   kit,
 } from '../../src/ui/kit';
 import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
-import { readGoals, readMyCommunities } from '../../src/memberReads';
+import { SAME_LOAD_MS, peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../src/memberReads';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -83,6 +83,8 @@ type MyCommunityItem = { groupId: string; displayName: string };
 
 type Resolution =
   | { kind: 'working' }
+  /** One open goal, known: the flow for it replaces this sheet at once. */
+  | { kind: 'handoff'; href: string }
   | { kind: 'choose'; groupId: string; community: string | null; goals: ListedGoal[] }
   /**
    * NOTHING OPEN. This used to redirect to the community, which is a truthful
@@ -106,10 +108,51 @@ function actionableGoals(goals: ListedGoal[]): ListedGoal[] {
     );
 }
 
+/**
+ * PERF-MOBILE-1. WHAT THIS ACCOUNT ALREADY KNOWS DECIDES MOVE AT ONCE.
+ *
+ * Measured on `0b460ce3` (W7 Check 41B): every MOVE open painted "Finding
+ * what you are moving toward…" over the member's tab, re-read the member's
+ * communities and the current community's goals -- which the tab beneath had
+ * just read -- and only then decided; the flow it handed to read the same
+ * goals a second time. When this account's own authorized record (src/
+ * memberReads.ts) already holds both answers, the decision is made from them
+ * on the first frame. Anything short of that -- a cold link, no record, no
+ * current community -- goes the way it always did: read, then decide, and a
+ * refusal fails closed.
+ *
+ * What it does not do: decide for a different account (the record is this
+ * uid's alone), or decide past what is recorded. A goal that closed since it
+ * was read is answered by the flow it opens, whose own fresh read says so.
+ */
+function resolveFromRecord(uid: string): Resolution | null {
+  const mine = peekMyCommunities(uid);
+  if (!mine) return null;
+  const groupId = resolveCurrentCommunity(
+    uid,
+    mine.items.map((i) => i.groupId),
+  );
+  if (!groupId) return null;
+  const listed = peekGoals<ListedGoal>(uid, groupId);
+  if (!listed) return null;
+  const community = mine.items.find((i) => i.groupId === groupId)?.displayName ?? null;
+  const open = actionableGoals(listed.goals ?? []);
+  if (open.length === 0) return { kind: 'noGoal', groupId, community };
+  if (open.length === 1) {
+    return {
+      kind: 'handoff',
+      href: `/contribute/${open[0]!.goalId}?groupId=${encodeURIComponent(groupId)}&mode=move`,
+    };
+  }
+  return { kind: 'choose', groupId, community, goals: open };
+}
+
 export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
   const safeArea = useSafeAreaInsets();
-  const [state, setState] = useState<Resolution>({ kind: 'working' });
+  const [state, setState] = useState<Resolution>(() =>
+    wsfAuthEnabled && ready && user ? resolveFromRecord(user.uid) ?? { kind: 'working' } : { kind: 'working' },
+  );
   /*
     APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
     180 ms exit, then the same Close as before (`useSheetExit`: one exit, and
@@ -124,12 +167,21 @@ export default function MoveResolver() {
       router.replace('/');
       return;
     }
+    if (state.kind === 'handoff') {
+      // The sheet stays up across the hand-off (see below).
+      markSheetHandoff();
+      router.replace(state.href as never);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        // Fresh reads, shared with any identical read already in flight
-        // (src/memberReads.ts). MOVE still decides on a fresh answer.
-        const mine = { data: (await readMyCommunities(user.uid)) as unknown as { items: MyCommunityItem[] } };
+        // Shared with any identical read in flight, or made for this account
+        // within this load (src/memberReads.ts). Decided from the record, this
+        // only confirms it; the member is not shown "working" meanwhile.
+        const mine = {
+          data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as { items: MyCommunityItem[] },
+        };
         if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
         const groupId = resolveCurrentCommunity(user.uid, ids);
@@ -148,7 +200,7 @@ export default function MoveResolver() {
           row. `readGoals` always asks with it (src/memberReads.ts). Closed
           goals arrive with it; actionableGoals drops them, as it always has.
         */
-        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId) };
+        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId, SAME_LOAD_MS) };
         // `leaving()`: the member pressed Close while this was being read.
         // They are leaving, and the answer must not send them anywhere else.
         if (cancelled || leaving()) return;
@@ -430,7 +482,7 @@ export default function MoveResolver() {
             label="Go Home"
           />
         </>
-      ) : (
+      ) : state.kind === 'handoff' ? null : (
         <Text style={kit.statusText} testID="wsf-move-working">
           Finding what you are moving toward…
         </Text>

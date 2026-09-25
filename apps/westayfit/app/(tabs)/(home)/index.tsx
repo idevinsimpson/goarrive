@@ -1,6 +1,5 @@
 import { Link, router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -8,7 +7,7 @@ import { useWsfAuth } from '../../../src/auth';
 import { describeCallableError } from '../../../src/callableErrors';
 import { resolveCurrentCommunity } from '../../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
-import { getFirebaseAuth, getFirebaseFunctions } from '../../../src/firebase';
+import { getFirebaseAuth } from '../../../src/firebase';
 import {
   challengeParticipationLabel,
   groupTypeCardLabel,
@@ -19,7 +18,7 @@ import { wsfTheme } from '../../../src/theme';
 import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
 import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
-import { readMyCommunities } from '../../../src/memberReads';
+import { SAME_LOAD_MS, readGoals, readMyCommunities } from '../../../src/memberReads';
 
 type MyCommunityItem = {
   groupId: string;
@@ -57,7 +56,6 @@ type ListedGoal = {
   sharedTotal?: number;
 };
 
-type ListGoalsResponse = { goals: ListedGoal[] };
 
 /**
  * What a community card knows about its current goal. Three states, kept
@@ -89,9 +87,11 @@ export default function BrandShell() {
     setMyCommunities({ kind: 'loading' });
     (async () => {
       try {
-        // Fresh, and shared with the identical read the community this list
-        // redirects to makes at the same moment (src/memberReads.ts).
-        const result = { data: (await readMyCommunities(user.uid)) as unknown as { items: MyCommunityItem[] } };
+        // Shared with the identical read the community this list redirects to
+        // makes (src/memberReads.ts): in flight, or settled within this load.
+        const result = {
+          data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as { items: MyCommunityItem[] },
+        };
         if (cancelled) return;
         setMyCommunities({ kind: 'ready', items: result.data.items });
       } catch (e) {
@@ -175,11 +175,27 @@ export default function BrandShell() {
   // re-read on a return replaces numbers, it never shows loading over them.
   // The mount effect passes through `loading` first, which clears every card,
   // so a figure never carries over from a different account.
+  /*
+    PERF-MOBILE-1. THE SAME READ AS THE COMMUNITY THIS LIST OPENS.
+
+    Measured on `0b460ce3` (W7 Check 41B): a member of one community got two
+    identical `wsfListGoals` on every cold Home, 3 ms apart -- this list's
+    card read and the community screen it redirects to. This read now goes
+    through the account's shared layer, so the two are one. The first read
+    for this list accepts an answer from this load; a member's return, which
+    comes back through `figuresRefreshToken` or a new list, reads fresh.
+  */
+  const cardsReadOnce = useRef<string | null>(null);
   useEffect(() => {
     if (myCommunities.kind !== 'ready') {
       setGoalsByGroup({});
+      if (myCommunities.kind === 'loading' || myCommunities.kind === 'idle') cardsReadOnce.current = null;
       return;
     }
+    const uid = user?.uid;
+    if (!uid) return;
+    const firstForAccount = cardsReadOnce.current !== uid;
+    cardsReadOnce.current = uid;
     let cancelled = false;
     const ids = myCommunities.items.map((item) => item.groupId);
     setGoalsByGroup((prev) =>
@@ -189,11 +205,9 @@ export default function BrandShell() {
       (async () => {
         let next: CardGoalState;
         try {
-          const fn = httpsCallable<{ groupId: string; includeHistory: boolean }, ListGoalsResponse>(
-            getFirebaseFunctions(),
-            'wsfListGoals'
-          );
-          const result = await fn({ groupId, includeHistory: true });
+          const result = {
+            data: await readGoals<ListedGoal>(uid, groupId, firstForAccount ? SAME_LOAD_MS : 0),
+          };
           next = { kind: 'ok', goal: featuredOpenGoal(result.data.goals ?? []) };
         } catch (e) {
           console.warn('[wsf] home goal read failed', e);
@@ -206,7 +220,7 @@ export default function BrandShell() {
     return () => {
       cancelled = true;
     };
-  }, [myCommunities, figuresRefreshToken]);
+  }, [myCommunities, figuresRefreshToken, user?.uid]);
 
   const onJoinCodeSubmit = useCallback(() => {
     const trimmed = joinCodeInput.trim();

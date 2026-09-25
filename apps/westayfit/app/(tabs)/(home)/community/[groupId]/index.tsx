@@ -104,7 +104,13 @@ import {
   kit,
 } from '../../../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
-import { forgetCommunity, readGoals, readMyCommunities } from '../../../../../src/memberReads';
+import {
+  SAME_LOAD_MS,
+  forgetCommunity,
+  readGoals,
+  readMyCommunities,
+  readOwnCredit,
+} from '../../../../../src/memberReads';
 import {
   MomentumRow,
   PresenceRow,
@@ -918,8 +924,13 @@ export default function CommunityPage() {
         try {
           // The same read Home's list makes, shared when it is in flight
           // (src/memberReads.ts): the list redirecting here asks at the same
-          // moment, and one answer serves both.
-          const myResult = { data: (await readMyCommunities(user.uid)) as unknown as MyCommunitiesResponse };
+          // moment, and one answer serves both. PERF-MOBILE-1: by the time
+          // this screen asks, that answer has usually SETTLED (measured on
+          // `0b460ce3`: a second wsfMyCommunities on every cold Home). An
+          // answer read for this account within the same load is this read.
+          const myResult = {
+            data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as MyCommunitiesResponse,
+          };
           if (cancelled) return;
           otherCommunityCount = Math.max(0, myResult.data.items.length - 1);
           const item = myResult.data.items.find((i) => i.groupId === groupId);
@@ -998,8 +1009,6 @@ export default function CommunityPage() {
     if (!ready || !user || !groupId) return;
 
     let cancelled = false;
-    // Loading only when there is nothing of this account's for this community
-    // to stand on (a warm re-entry keeps its last goals until this lands).
     setGoalsState({ kind: 'loading' });
 
     (async () => {
@@ -1010,7 +1019,12 @@ export default function CommunityPage() {
         // history row needs to state its result. The screen splits active from
         // closed below; the server does not decide the layout. Shared with an
         // identical read in flight (src/memberReads.ts).
-        const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
+        // PERF-MOBILE-1: the list that opened this community reads the same
+        // goals at the same moment (measured: two identical wsfListGoals, 3 ms
+        // apart); one answer from this load serves both. A Retry reads fresh.
+        const result = {
+          data: await readGoals<ListedGoal>(user.uid, groupId, goalsReloadToken === 0 ? SAME_LOAD_MS : 0),
+        };
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
@@ -1019,8 +1033,6 @@ export default function CommunityPage() {
         // screen keeps its own fixed copy (rendered by the goals-error hero
         // and the Champion panel, neither of which prints this message).
         console.warn('[wsf] goal list failed', e);
-        // Warm goals already on screen stay; their figures fall to the
-        // last-known treatment through the progress reads.
         setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();
@@ -1053,11 +1065,9 @@ export default function CommunityPage() {
     let cancelled = false;
     (async () => {
       try {
-        const fn = httpsCallable<
-          { groupId: string; includeHistory: boolean },
-          ListGoalsResponse
-        >(getFirebaseFunctions(), 'wsfListGoals');
-        const result = await fn({ groupId, includeHistory: true });
+        // Fresh (a return is not the same load), through the shared layer so
+        // the answer is the account's record for every surface.
+        const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
@@ -1108,14 +1118,14 @@ export default function CommunityPage() {
       (async () => {
         try {
           const pulseFn = httpsCallable<{ goalId: string }, PulseTotals>(functions, 'wsfGoalPulse');
-          const ownFn = httpsCallable<{ goalId: string }, MyContributionResponse>(
-            functions,
-            'wsfMyContribution'
-          );
+          // The member's own part, fresh, through the shared layer: the same
+          // answer then opens Progress, You and MOVE without asking again.
           const [pulseResult, ownResult] = await Promise.all([
             pulseFn({ goalId: goal.goalId }),
             goal.status === 'active'
-              ? ownFn({ goalId: goal.goalId }).catch(() => null)
+              ? readOwnCredit(user.uid, goal.goalId)
+                  .then((data) => ({ data: data as unknown as MyContributionResponse }))
+                  .catch(() => null)
               : Promise.resolve(null),
           ]);
           if (cancelled) return;
