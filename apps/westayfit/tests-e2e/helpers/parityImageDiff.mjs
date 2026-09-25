@@ -2,7 +2,7 @@
 /**
  * PARITY IMAGE DIFF — reference PNG + candidate PNG → evidence, never a verdict.
  *
- *   node apps/westayfit/tests-e2e/helpers/parityImageDiff.mjs \
+ *   node scripts/westayfit/parity-image-diff.mjs \
  *     --reference <ref.png> --candidate <cand.png> --out-dir <dir> --label <name>
  *
  * Writes four files into --out-dir, all named from --label:
