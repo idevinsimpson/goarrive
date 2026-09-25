@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 18:25Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 19:20Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -20,8 +20,8 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
 | **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · #482 · cp1 `7dc46cda` | **ACCEPTED** `5837302206` (W7 36C closed F2) → **integrated `91392f9d`** (#482 `5837323466`); Chromium only; cp2 warm state / Settings / panel styling / icon / instructions remain; W9 continues cp2 | staged with W6 via pin #486 |
-| **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` → integrated `00d6d44e`; multiple movements, icon parity, native / AT proof, W7 N1 remain; seam direction accepted `5836170255`, no release | **pin #486** re-targeting `7949ba0c` → `91392f9d` (W3, L0 `5837325122`; Director source PASS `5837158030` on `7949ba0c`) → W7 Check 39 re-scoped (`5837329164`) → Director → L0 merge → ONE dispatch |
-| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `6c1d115e` | Director HOLD `5836331823` (G1 / G2 / P1 / P2 / M8) → successor delivered `5836628700` (dry run 27/27 per W3) | W7 changed rows → Director |
+| **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` → integrated `00d6d44e`; multiple movements, icon parity, native / AT proof, W7 N1 remain; seam direction accepted `5836170255`, no release | **pin #486 `92a02d50`** → `91392f9d` (W3 `5837894586`; L0 git `5838191536`: one file, prior 49, boundary re-measured, run-all green) → **W7 Check 39 executing** (`5838147782`) → Director → L0 merge → ONE dispatch |
+| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `6c1d115e` | Director HOLD `5836331823` → successor `6c1d115e` (`5836628700`), then G2a / G1b successor `2a251083` pushed after the pin | W7 changed rows → Director |
 | **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `736ebd77` on `main` `7e423a48` | seed carried blob-identical; M8 test +39; workflow unchanged since `8f8c4530`; run-all green (L0 git on #484) | W7 changed rows → Director → L0 PLAN → APPLY / VERIFY |
 | JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
 | OPS-DOC-1 | W3 · #476 | **merged** `273ce3ae` (Director `5835685064`; `c45760e8` carried `-x`; blob `1f7f8132`) | done |
