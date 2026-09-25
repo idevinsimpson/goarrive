@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -43,14 +44,15 @@ const DEVICES = [
 type Device = (typeof DEVICES)[number];
 const MARKS = [0, 150, 400];
 
-async function seed(tag: string): Promise<{ email: string; a: string }> {
+async function seed(tag: string): Promise<{ email: string; a: string; b: string }> {
   const stamp = `${stampId()}${tag}`;
   const email = `wsf-w9-afp2c-${stamp}@example.com`;
   const uid = await seedVerifiedUser(email, PASSWORD);
   await seedProfile(uid, 'Alex Rivera');
   const a = `w9afp2ca-${stamp}`;
   await seedCommunity({ groupId: a, displayName: 'Alpharetta Morning Movers', joinPolicy: 'private', members: [{ uid, role: 'member' }] });
-  await seedCommunity({ groupId: `w9afp2cb-${stamp}`, displayName: 'Roswell Lunch Walkers', joinPolicy: 'private', members: [{ uid, role: 'member' }] });
+  const b = `w9afp2cb-${stamp}`;
+  await seedCommunity({ groupId: b, displayName: 'Roswell Lunch Walkers', joinPolicy: 'private', members: [{ uid, role: 'member' }] });
   await seedActiveGoal({
     goalId: `w9afp2cg-${stamp}`,
     groupId: a,
@@ -61,7 +63,7 @@ async function seed(tag: string): Promise<{ email: string; a: string }> {
     total: 1847,
     endsAt: new Date(Date.now() + 7 * 24 * 60 * 60_000),
   });
-  return { email, a };
+  return { email, a, b };
 }
 
 async function easel(page: Page, device: Device, src: string): Promise<{ stage: FrameLocator; label: string }> {
@@ -89,28 +91,85 @@ async function easel(page: Page, device: Device, src: string): Promise<{ stage: 
   return { stage: page.frameLocator('#wsf-w9afp2-stage'), label };
 }
 
-async function shootSequence(page: Page, device: Device, label: string, name: string, press: () => Promise<void>, settledId: string, stage: FrameLocator): Promise<void> {
+/** What the stage document says about the journey, read inside the iframe. */
+async function readState(stage: FrameLocator, scrollId: string | null) {
+  return stage.locator('body').evaluate((_b, id) => {
+    const vis = (n: Element) => (n as HTMLElement).getClientRects().length > 0;
+    let scroll: number | null = null;
+    if (id) {
+      let el = Array.from(document.querySelectorAll(`[data-testid="${id}"]`)).find(vis) as HTMLElement | undefined | null;
+      while (el) {
+        if (el.scrollHeight > el.clientHeight + 1) {
+          scroll = Math.round(el.scrollTop);
+          break;
+        }
+        el = el.parentElement;
+      }
+    }
+    return {
+      path: location.pathname,
+      moveSheets: document.querySelectorAll('[data-testid="wsf-move-sheet"]').length,
+      communityInstances: document.querySelectorAll('[data-testid="wsf-community"]').length,
+      tabBars: document.querySelectorAll('[data-testid="wsf-member-tab-home"]').length,
+      loadingPainted: Array.from(document.querySelectorAll('[data-testid="wsf-community-loading"]')).filter(vis).length,
+      scroll,
+    };
+  }, scrollId);
+}
+
+async function shootSequence(
+  page: Page,
+  device: Device,
+  label: string,
+  name: string,
+  press: () => Promise<void>,
+  settledId: string,
+  stage: FrameLocator,
+  scrollId: string | null = null,
+): Promise<void> {
   const frameEl = page.getByTestId('wsf-w9afp2-frame');
   await expect(page.getByTestId('wsf-w9afp2-banner')).toHaveText(label);
+  const before = await readState(stage, scrollId);
+  // Every loading screen painted from the press on, not only at the shutters.
+  await stage.locator('body').evaluate(() => {
+    const w = window as unknown as { __afp2seen: string[] };
+    w.__afp2seen = [];
+    new MutationObserver(() => {
+      const el = document.querySelector('[data-testid="wsf-community-loading"]') as HTMLElement | null;
+      if (el && el.getClientRects().length > 0 && !w.__afp2seen.includes('wsf-community-loading')) {
+        w.__afp2seen.push('wsf-community-loading');
+      }
+    }).observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+  const frames: { file: string; mark: number; shutterMs: number; sha256?: string }[] = [];
   const t0 = Date.now();
   await press();
-  const taken: string[] = [];
   for (const mark of MARKS) {
     const wait = t0 + mark - Date.now();
     if (wait > 0) await page.waitForTimeout(wait);
     const at = Date.now() - t0;
+    const file = `${STAGE}-${name}-${String(mark).padStart(3, '0')}ms-${device.key}.png`;
     if (CAPTURE_FRAMES) {
       fs.mkdirSync(OUT, { recursive: true });
-      await frameEl.screenshot({ path: path.join(OUT, `${STAGE}-${name}-${String(mark).padStart(3, '0')}ms-${device.key}.png`) });
+      await frameEl.screenshot({ path: path.join(OUT, file) });
     }
-    taken.push(`${mark}ms→shutter at ${at}ms`);
+    frames.push({ file, mark, shutterMs: at });
   }
   await expect(stage.locator(`[data-testid="${settledId}"]:visible`).first()).toBeVisible({ timeout: 40_000 });
   await page.waitForTimeout(1_200);
+  const settledFile = `${STAGE}-${name}-settled-${device.key}.png`;
+  if (CAPTURE_FRAMES) await frameEl.screenshot({ path: path.join(OUT, settledFile) });
+  frames.push({ file: settledFile, mark: -1, shutterMs: Date.now() - t0 });
+  const after = await readState(stage, scrollId);
+  const loadingSeen = await stage.locator('body').evaluate(() => (window as unknown as { __afp2seen: string[] }).__afp2seen);
+  const receipt = { stage: STAGE, label, device: device.key, journey: name, before, after, loadingSeen, frames };
   if (CAPTURE_FRAMES) {
-    await frameEl.screenshot({ path: path.join(OUT, `${STAGE}-${name}-settled-${device.key}.png`) });
+    for (const f of frames) {
+      f.sha256 = crypto.createHash('sha256').update(fs.readFileSync(path.join(OUT, f.file))).digest('hex');
+    }
+    fs.writeFileSync(path.join(OUT, `${STAGE}-${name}-${device.key}.json`), `${JSON.stringify(receipt, null, 2)}\n`);
   }
-  test.info().annotations.push({ type: 'measure', description: `${name} ${device.key}: ${taken.join(', ')}` });
+  test.info().annotations.push({ type: 'measure', description: JSON.stringify({ name, device: device.key, before, after, loadingSeen }) });
 }
 
 test.describe(`APP-FEEL-PARITY-1 cp2 frames · ${STAGE}`, () => {
@@ -152,6 +211,73 @@ test.describe(`APP-FEEL-PARITY-1 cp2 frames · ${STAGE}`, () => {
         () => stage.locator('[data-testid="wsf-member-tab-community"]:visible').last().click(),
         'wsf-community-index-rows',
         stage,
+      );
+    });
+
+    test(`${device.key}: MOVE with no open goal → “Go to your community”`, async ({ page }) => {
+      test.setTimeout(300_000);
+      const fx = await seed(`n${device.height}`);
+      await signInVia(page, fx.email, PASSWORD);
+      const { stage, label } = await easel(page, device, `/community/${fx.b}`);
+      await expect(stage.locator('[data-testid="wsf-community-name"]:visible')).toHaveText('Roswell Lunch Walkers', { timeout: 60_000 });
+      await page.waitForTimeout(1_000);
+      await stage.locator('[data-testid="wsf-community"]:visible').evaluate((el) => {
+        let n: HTMLElement | null = el as HTMLElement;
+        while (n) {
+          if (n.scrollHeight > n.clientHeight + 1) {
+            n.scrollTop = 80;
+            return;
+          }
+          n = n.parentElement;
+        }
+      });
+      await page.waitForTimeout(400);
+      await stage.locator('[data-testid="wsf-member-tab-move"]:visible').last().click();
+      await expect(stage.locator('[data-testid="wsf-move-no-goal"]:visible')).toBeVisible({ timeout: 40_000 });
+      await page.waitForTimeout(600);
+      await shootSequence(
+        page,
+        device,
+        label,
+        'move-nogoal-community',
+        () => stage.locator('[data-testid="wsf-move-no-goal-community"]:visible').click(),
+        'wsf-community-name',
+        stage,
+        'wsf-community',
+      );
+    });
+
+    test(`${device.key}: MOVE could not read → “Go Home” (labelled injection: the goal read fails)`, async ({ page }) => {
+      test.setTimeout(300_000);
+      const fx = await seed(`g${device.height}`);
+      await signInVia(page, fx.email, PASSWORD);
+      const { stage, label } = await easel(page, device, `/community/${fx.a}`);
+      await expect(stage.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+      await stage.locator('[data-testid="wsf-community"]:visible').evaluate((el) => {
+        let n: HTMLElement | null = el as HTMLElement;
+        while (n) {
+          if (n.scrollHeight > n.clientHeight + 1) {
+            n.scrollTop = 120;
+            return;
+          }
+          n = n.parentElement;
+        }
+      });
+      await page.waitForTimeout(400);
+      await page.route('**/wsfListGoals', (route) => route.abort('failed'));
+      await stage.locator('[data-testid="wsf-member-tab-move"]:visible').last().click();
+      await expect(stage.locator('[data-testid="wsf-move-error-home"]:visible')).toBeVisible({ timeout: 40_000 });
+      await page.unroute('**/wsfListGoals');
+      await page.waitForTimeout(600);
+      await shootSequence(
+        page,
+        device,
+        label,
+        'move-error-home',
+        () => stage.locator('[data-testid="wsf-move-error-home"]:visible').click(),
+        'wsf-community-hero-presence',
+        stage,
+        'wsf-community',
       );
     });
   }

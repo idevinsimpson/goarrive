@@ -1,0 +1,49 @@
+{
+  "stage": "CANDIDATE",
+  "label": "CANDIDATE BUILD be21eab4 / NOT ACCEPTED",
+  "device": "390x844",
+  "journey": "move-nogoal-community",
+  "before": {
+    "path": "/move",
+    "moveSheets": 1,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "after": {
+    "path": "/community/w9afp2cb-muhf8djc-f4aa05n844",
+    "moveSheets": 0,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "loadingSeen": [],
+  "frames": [
+    {
+      "file": "CANDIDATE-move-nogoal-community-000ms-390x844.png",
+      "mark": 0,
+      "shutterMs": 30,
+      "sha256": "26140c2b29f8f67bbffb354860e4b5c4a01b973f44a9e290e5c49adcae045b99"
+    },
+    {
+      "file": "CANDIDATE-move-nogoal-community-150ms-390x844.png",
+      "mark": 150,
+      "shutterMs": 243,
+      "sha256": "620ae4ef7732aea6d326db86ecf6a7290012f435022823625d008426b09cda9a"
+    },
+    {
+      "file": "CANDIDATE-move-nogoal-community-400ms-390x844.png",
+      "mark": 400,
+      "shutterMs": 431,
+      "sha256": "620ae4ef7732aea6d326db86ecf6a7290012f435022823625d008426b09cda9a"
+    },
+    {
+      "file": "CANDIDATE-move-nogoal-community-settled-390x844.png",
+      "mark": -1,
+      "shutterMs": 1913,
+      "sha256": "620ae4ef7732aea6d326db86ecf6a7290012f435022823625d008426b09cda9a"
+    }
+  ]
+}
