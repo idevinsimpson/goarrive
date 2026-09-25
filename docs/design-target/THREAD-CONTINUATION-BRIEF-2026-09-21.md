@@ -11,7 +11,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`502b1e8d`** = `afa26d64` (RETURN-CONTINUITY-1) + FOCUS-RETURN-1 `64b01967` (tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
-| `main` | `38aa8a4c` = `0359f8d1` (pin #479) + skill #480 `b7c7f9a3` (owner auto-stage cadence, `5832907406`) |
+| `main` | `7e423a48` (pin #479; skill #480; startup pointers #481) |
 | staging pin `approvedAppSha` | `502b1e8d` (`expectedPriorFunctions` 49; three social retained) |
 | served staging build | **`502b1e8d`** via run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
 
@@ -30,7 +30,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **W7's queue:** item 2.
 
-**STAGING — DONE for `502b1e8d`:** pin #479 `ae1fb2fa` (W7 Check 34 PASS; Director ACCEPTED `5832085972`) merged as `main` `0359f8d1`; one dispatch, run 48 green end to end (receipts #365 `5832132708`, `5832332554`–`5832336026`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
+**STAGING — served `502b1e8d`** (run 48 green). **Runbook: `skills/wsf-staging-deploy/SKILL.md` on `main`** (owner cadence `5832907406`: stable accepted milestones stage without another prompt; linked from `CLAUDE.md` / `AGENTS.md`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
 
 **RETURN-CONTINUITY-1** (#477 `5826542101`; Home route only): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 Check 27 measured it silent). References: RECOVERY-TRUTH-1 `02cb35c4`; HOME-POLISH-1 `final-stale-390x844` (`872c32fc`).
 
