@@ -212,7 +212,7 @@ test.describe(`APP-FEEL-PARITY-1 checkpoint 1 frames · ${STAGE}`, () => {
     }
 
     // Exit: Close starts the 180 ms travel; each frame holds it.
-    await stage.locator('[data-testid="wsf-contribute-sheet"] [data-testid="wsf-contribute-back"]').first().click();
+    await stage.locator('[data-testid="wsf-contribute-sheet"] [data-testid="wsf-contribute-close"]').first().click();
     for (const t of [0, 90, 170]) {
       const n = await holdAnimationsAt(stage, t);
       expect(n, `exit ${t}ms: the exit animation is running`).toBeGreaterThan(0);

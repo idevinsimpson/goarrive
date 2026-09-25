@@ -88,12 +88,11 @@ import {
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 import { isMoveSheetRoute } from '../../src/ui/moveSheetRoute';
 import {
-  SHEET_OUT_MS,
   ensureSheetMotionCss,
   sheetData,
   takeSheetHandoff,
+  useSheetExit,
   useSheetFocusContainment,
-  type SheetPhase,
 } from '../../src/ui/sheetMotion';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -410,9 +409,8 @@ export default function ContributeToGoal() {
   });
   const reducedMotion = useReducedMotion();
   const safeArea = useSafeAreaInsets();
-  const [sheetPhase, setSheetPhase] = useState<SheetPhase>('in');
+  const { phase: sheetPhase, exit: exitSheet } = useSheetExit(reducedMotion);
   const sheetRef = useRef<View>(null);
-  const sheetClosing = useRef(false);
   const closeSheetRef = useRef<() => void>(() => undefined);
   useSheetFocusContainment(sheetRef, asSheet);
   /*
@@ -1196,17 +1194,7 @@ export default function ContributeToGoal() {
     180 ms exit. One press is one exit: Close, Escape and the scrim pressed
     together still pop once. Reduced motion goes straight there.
   */
-  const closeSheet = () => {
-    if (sheetClosing.current) return;
-    sheetClosing.current = true;
-    const go = () => returnToMemberContext(backHref);
-    if (reducedMotion || typeof document === 'undefined') {
-      go();
-      return;
-    }
-    setSheetPhase('out');
-    setTimeout(go, SHEET_OUT_MS);
-  };
+  const closeSheet = () => exitSheet(() => returnToMemberContext(backHref));
   closeSheetRef.current = closeSheet;
   /*
     THE RECEIPT ON A SHORT PHONE. The mark was sized from WIDTH alone, so on a
@@ -1504,16 +1492,19 @@ export default function ContributeToGoal() {
             </Text>
             {/*
               CLOSE, NOT A DESTINATION. It returns to whatever the sheet is
-              over. The testID is the page flow's Back, which it replaces here:
-              the same control in the same journey, so every spec that walks
-              MOVE → Back keeps walking it.
+              over. Its own testID: `wsf-contribute-back` stays the name of
+              the page flow's Back and of the outcome exits ("Back to
+              community" / "Back to home"), which the receipt still carries
+              inside this sheet. One name for two different controls on one
+              screen made "the exit" ambiguous (measured: a receipt spec
+              reading the first `wsf-contribute-back` got "Close").
             */}
             <Pressable
               onPress={closeSheet}
               accessibilityRole="button"
               accessibilityLabel="Close"
               style={styles.sheetClose}
-              testID="wsf-contribute-back"
+              testID="wsf-contribute-close"
             >
               <Text style={[styles.sheetCloseText, tone === 'dark' ? styles.sheetCloseTextDark : null]}>
                 Close

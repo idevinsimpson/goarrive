@@ -249,7 +249,7 @@ test.describe('APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted ta
     expect(await painted(page, 'wsf-community'), 'Home behind the review step').toBe(true);
 
     // Close (a named control, not a destination) returns to the exact screen.
-    const close = page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-back"]`).first();
+    const close = page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-close"]`).first();
     await expect(close).toHaveAttribute('aria-label', 'Close');
     await close.focus();
     await page.keyboard.press('Enter');
@@ -350,7 +350,7 @@ test.describe('APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted ta
     expect(moved.length, 'the panel travels in rather than appearing').toBeGreaterThan(0);
     expect(entering[entering.length - 1], 'and comes to rest').toMatchObject({ y: 0, o: 1 });
 
-    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-back"]`).first().click();
+    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-close"]`).first().click();
     const leaving = await sample(600);
     measure('exit timeline', leaving);
     expect(leaving.some((s) => s.y > 0.5 || s.o < 0.99), 'the panel travels out').toBe(true);
@@ -400,9 +400,105 @@ test.describe('APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted ta
     await page.keyboard.press('Enter');
     await expect(page.locator(`[data-testid="${SHEET}"]:visible`)).toBeVisible({ timeout: 40_000 });
     expect(await painted(page, 'wsf-community'), 'Home is painted behind').toBe(true);
-    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-back"]`).first().click();
+    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-close"]`).first().click();
     await expect(page.getByTestId(SHEET)).toHaveCount(0, { timeout: 8_000 });
     await expect.poll(() => focusedId(page), { timeout: 8_000 }).toBe(choice);
+  });
+});
+
+/**
+ * THE EXIT WINDOW (Director #482 `5834554381`). The 180 ms exit is a moment in
+ * which the stack can change under the sheet; an exit timer that fires anyway
+ * navigates a second time. Each case ends in a state that is asserted whole:
+ * which tab, which address, and no sheet left behind in any state.
+ */
+async function openYou(page: Page, fx: Fx): Promise<void> {
+  await openHome(page, fx);
+  await page.getByTestId('wsf-member-tab-you').last().click();
+  await expect(page.locator('[data-testid="wsf-you-identity"]:visible')).toBeVisible({ timeout: 40_000 });
+}
+
+async function settled(page: Page): Promise<{ path: string; tab: string | null; sheets: number; moveSheets: number }> {
+  await page.waitForTimeout(900);
+  return {
+    path: new URL(page.url()).pathname,
+    tab: await currentTab(page),
+    sheets: await page.getByTestId(SHEET).count(),
+    moveSheets: await page.getByTestId('wsf-move-sheet').count(),
+  };
+}
+
+test.describe('APP-FEEL-PARITY-1 · the exit window cannot exit twice', () => {
+  test.use({ viewport: PHONE, deviceScaleFactor: 1 });
+
+  test('Close, then the browser’s Back inside the exit: one step back, not two', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('x1', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await openYou(page, fx); // tab history: Home, then You
+    await pressMove(page);
+    await expect(page.locator(`[data-testid="${SHEET}"]:visible`)).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(400);
+    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-close"]`).first().click();
+    await page.evaluate(() => history.back());
+    const end = await settled(page);
+    measure('Close + browser Back', end);
+    expect(end).toEqual({ path: '/you', tab: 'wsf-member-tab-you', sheets: 0, moveSheets: 0 });
+  });
+
+  test('Close while MOVE is still working out the goal: the answer does not open the flow', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('x2', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await openYou(page, fx);
+    // Hold the resolver's goal read, and let it answer inside the exit.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route('**/wsfListGoals', async (route: Route) => {
+      await held;
+      await route.continue();
+    });
+    await page.evaluate(() => {
+      (window as unknown as { __w9SawFlow: boolean }).__w9SawFlow = false;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-testid="wsf-contribute-sheet"], [data-testid="wsf-contribute-move-screen"]')) {
+          (window as unknown as { __w9SawFlow: boolean }).__w9SawFlow = true;
+        }
+      }).observe(document.body, { subtree: true, childList: true });
+    });
+    await pressMove(page);
+    await expect(page.locator('[data-testid="wsf-move-working"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.locator('[data-testid="wsf-move-close"]:visible').first().click();
+    release();
+    const end = await settled(page);
+    const sawFlow = await page.evaluate(() => (window as unknown as { __w9SawFlow: boolean }).__w9SawFlow);
+    measure('Close during resolution', { ...end, sawFlow });
+    expect(sawFlow, 'the flow never opened after the member chose to leave').toBe(false);
+    expect(end).toEqual({ path: '/you', tab: 'wsf-member-tab-you', sheets: 0, moveSheets: 0 });
+  });
+
+  test('pressing MOVE again inside the exit: the tab behind cannot be reached until the sheet is gone; then MOVE opens normally', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('x3', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await openYou(page, fx);
+    await pressMove(page);
+    await expect(page.locator(`[data-testid="${SHEET}"]:visible`)).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(400);
+    const move = await page.getByTestId('wsf-member-tab-move').last().boundingBox();
+    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-close"]`).first().click();
+    // Where MOVE is drawn, inside the exit.
+    await page.mouse.click(move!.x + move!.width / 2, move!.y + move!.height / 2);
+    const end = await settled(page);
+    measure('MOVE pressed inside the exit', end);
+    expect(end).toEqual({ path: '/you', tab: 'wsf-member-tab-you', sheets: 0, moveSheets: 0 });
+
+    // And MOVE itself is fine afterwards: it opens, and Close returns to You.
+    await pressMove(page);
+    await expect(page.locator(`[data-testid="${SHEET}"]:visible`)).toBeVisible({ timeout: 40_000 });
+    await page.locator(`[data-testid="${SHEET}"] [data-testid="wsf-contribute-close"]`).first().click();
+    const again = await settled(page);
+    expect(again).toEqual({ path: '/you', tab: 'wsf-member-tab-you', sheets: 0, moveSheets: 0 });
   });
 });
 

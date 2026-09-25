@@ -1,5 +1,5 @@
 import { useNavigation } from 'expo-router';
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Platform } from 'react-native';
 
 /**
@@ -40,7 +40,7 @@ const CSS = `
 [data-wsf-sheet-panel="in"] { animation: wsf-sheet-in ${SHEET_IN_MS}ms cubic-bezier(.22,1,.36,1); }
 [data-wsf-sheet-panel="out"] { animation: wsf-sheet-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
 [data-wsf-sheet-scrim="in"] { animation: wsf-scrim-in ${SHEET_IN_MS}ms ease-out; }
-[data-wsf-sheet-scrim="out"] { animation: wsf-scrim-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
+[data-wsf-sheet-scrim="out"] { animation: wsf-scrim-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; }
 @media (prefers-reduced-motion: reduce) {
   [data-wsf-sheet-panel], [data-wsf-sheet-scrim] { animation: none !important; }
 }
@@ -71,6 +71,69 @@ export function takeSheetHandoff(): boolean {
   const was = handoff;
   handoff = false;
   return was;
+}
+
+/**
+ * ONE EXIT, AND ONLY WHILE THIS SHEET IS STILL THE SCREEN IN FRONT.
+ *
+ * The 180 ms exit is a window in which the world can move under the sheet,
+ * and an uncancelled timer would then navigate a SECOND time (Director #482
+ * `5834554381`). Each case is closed here, for both sheets:
+ *   · the browser's Back (or anything else) removes the sheet during the
+ *     exit: the screen unmounts and the pending exit is cancelled with it;
+ *   · something is presented OVER the sheet during the exit: it blurs, the
+ *     exit is abandoned and the sheet is usable again underneath;
+ *   · the timer fires but the sheet is no longer in front: it does nothing;
+ *   · a second Close, Escape or scrim press during the exit: ignored.
+ * During the exit the scrim still takes presses (they land on Close, which
+ * is ignored), so the tab behind cannot be operated -- MOVE cannot be
+ * reopened -- until the sheet is really gone and the tab is uninert.
+ *
+ * `leaving()` lets a screen that has work in flight (the resolver's reads)
+ * see that the member has already chosen to leave, so it does not navigate
+ * somewhere else in the meantime.
+ */
+export function useSheetExit(reducedMotion: boolean): {
+  phase: SheetPhase;
+  exit: (go: () => void) => void;
+  leaving: () => boolean;
+} {
+  const navigation = useNavigation();
+  const [phase, setPhase] = useState<SheetPhase>(() => {
+    ensureSheetMotionCss();
+    return 'in';
+  });
+  const closing = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const off = navigation.addListener('blur', () => {
+      if (timer.current === null) return;
+      clearTimeout(timer.current);
+      timer.current = null;
+      closing.current = false;
+      setPhase('rest');
+    });
+    return () => {
+      off();
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+    };
+  }, [navigation]);
+  const exit = (go: () => void) => {
+    if (closing.current) return;
+    closing.current = true;
+    if (reducedMotion || !onWeb()) {
+      go();
+      return;
+    }
+    setPhase('out');
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      if (!navigation.isFocused()) return;
+      go();
+    }, SHEET_OUT_MS);
+  };
+  return { phase, exit, leaving: () => closing.current };
 }
 
 /** The `dataSet` a sheet's panel and scrim carry for their phase. */

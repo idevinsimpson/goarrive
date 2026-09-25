@@ -13,12 +13,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
 import {
-  SHEET_OUT_MS,
-  ensureSheetMotionCss,
   markSheetHandoff,
   sheetData,
+  useSheetExit,
   useSheetFocusContainment,
-  type SheetPhase,
 } from '../../src/ui/sheetMotion';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import {
@@ -112,6 +110,13 @@ export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
   const safeArea = useSafeAreaInsets();
   const [state, setState] = useState<Resolution>({ kind: 'working' });
+  /*
+    APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
+    180 ms exit, then the same Close as before (`useSheetExit`: one exit, and
+    none once something else is in front). Reduced motion goes straight there.
+  */
+  const reducedMotion = useReducedMotion();
+  const { phase, exit, leaving } = useSheetExit(reducedMotion);
 
   useEffect(() => {
     if (!wsfAuthEnabled || !ready) return;
@@ -127,7 +132,7 @@ export default function MoveResolver() {
           fns,
           'wsfMyCommunities',
         )({});
-        if (cancelled) return;
+        if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
         const groupId = resolveCurrentCommunity(user.uid, ids);
         const community = mine.data.items.find((i) => i.groupId === groupId)?.displayName ?? null;
@@ -155,7 +160,9 @@ export default function MoveResolver() {
             it always has.
           */
         )({ groupId, includeHistory: true });
-        if (cancelled) return;
+        // `leaving()`: the member pressed Close while this was being read.
+        // They are leaving, and the answer must not send them anywhere else.
+        if (cancelled || leaving()) return;
         const open = actionableGoals(listed.data.goals ?? []);
         if (open.length === 0) {
           setState({ kind: 'noGoal', groupId, community });
@@ -174,7 +181,7 @@ export default function MoveResolver() {
         }
         setState({ kind: 'choose', groupId, community, goals: open });
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled || leaving()) return;
         setState({
           kind: 'error',
           message: describeCallableError(e, 'Could not work out what to move toward.'),
@@ -204,27 +211,7 @@ export default function MoveResolver() {
     nothing was there -- so Close resolves to the canonical member destination
     instead of being a control that does nothing.
   */
-  /*
-    APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
-    180 ms exit, then the same Close as before. One press is one exit. Reduced
-    motion goes straight there.
-  */
-  const reducedMotion = useReducedMotion();
-  const [phase, setPhase] = useState<SheetPhase>(() => {
-    ensureSheetMotionCss();
-    return 'in';
-  });
-  const closing = useRef(false);
-  const close = () => {
-    if (closing.current) return;
-    closing.current = true;
-    if (reducedMotion || typeof document === 'undefined') {
-      leave();
-      return;
-    }
-    setPhase('out');
-    setTimeout(leave, SHEET_OUT_MS);
-  };
+  const close = () => exit(leave);
   const leave = () => {
     if (router.canGoBack()) {
       router.back();
