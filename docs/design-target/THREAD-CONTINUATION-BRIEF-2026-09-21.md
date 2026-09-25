@@ -4,14 +4,14 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 16:10Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 16:30Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`502b1e8d`** (RECOVERY-PORT-1, RETURN-CONTINUITY-1, FOCUS-RETURN-1 integrated; tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
-| `main` | `7e423a48` (pin #479; staging skill #480; startup pointers #481) |
+| `main` | `273ce3ae` (pin #479; staging skill #480; startup pointers #481; OPS-DOC-1 #476) |
 | staging pin | `approvedAppSha` `502b1e8d`, `expectedPriorFunctions` 49, three social retained |
 | served staging | **`502b1e8d`**, run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0 (social excluded), cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
 
@@ -21,14 +21,14 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | --- | --- | --- | --- |
 | **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | successor `b497ce4c` (L0 git `5834964867`; tsc 0, vitest 875, guard 9/20): **W7 Check 36B** closed D1 / F3 (Director `5835326729`); **F2 open** — scrims tabbable, focus containment must be panel-only, orienting focus after step replacement; evidence `f9ca3d5d` (no product delta; tsc 0, vitest 875) → **Director pixel PASS `5835484423` / `5835521562`**; W9 owes the F2 successor with rendered-DOM proof + README receipt-colour text fix; Lovable discrepancies carried to W9's final MOVE parity checkpoint, not waived | W9 F2 → W7 affected rows → Director pixels → L0 integrate → pin → ONE dispatch (cp1 is its own milestone; `5835326935`) |
 | **MOVEMENT-PILLS-1** (§B) | W6 · **#483** `03cfddba` on `502b1e8d` · `goals/new.tsx`, `MovementPicker.tsx`, `movementSelection.ts` | pushed; L0 git `5834743992` (17 files in reservation; tsc 0, vitest 886, guard 9/20); **Director #456 `5834379218` NOT met**: several-movement submit is enabled and persists only unit `squats + push-ups` + guide `reps`, no movement IDs — **Director source HOLD `5834767021`** (confirms L0's diagnosis): W6 keeps picker + one-movement flow, turns off the multiple-movement submit, and returns the smallest persistent-movement seam (IDs on goal, reload read-back, MOVE choice + guidance, per-contribution identity, legacy compatibility, mixed refusal) for Director review; no backend / W9-file edit; owner's multiple-movement request stays unfinished; wake receipts outstanding (`5834414075`); **Director pixel review `5834931103`** (10 PNGs read from git, blobs + SHA256 verified): pill layout directionally PASS, functional HOLD stands; same successor adds an explicit ≥44px "Something else" action beside the catalog and hint / review wording matching the supported submit; capture only changed states. exporter `2cd3a79a` kept local, not retried (direct-read PNG path accepted instead); W6 idle but self-armed `trig_014SmRgeWRqpzPRzxHR132dz` 16:11Z → no L0 wake (dedupe) | W6 correction → L0 git → W7 focused → exporter → Director → L0 |
-| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | held for correction (#396 `5834407330`); woken → **ACK `5835432480`, executing** (auth fail-closed, per-contribution transactions, ownership / drift); self check-in `trig_01H7cysQpcSJ8fGr52wMLTyT`; SEED-MODE and OPS-DOC-1 after | corrected seed → W7 → Director |
-| **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · PR into `main` adding PLAN (default) / APPLY / VERIFY `social-demo-seed` to the existing workflow, existing WIF identity | released for preparation (#396 `5834598414`) after the seed fix | W7 → Director → L0 PLAN → APPLY / VERIFY |
+| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | corrections **delivered `06bcb288`** (#396 `5835533146`; 3 files, dry run 21/21 per W3); routed to **W7 Check 37** (#434 `5835728833`) | W7 → Director |
+| **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `8f8c4530` on `main` `7e423a48` | L0 git `5835726079` (carried seed blob-identical; workflow +145 / −0; run-all green); W7 Check 37 | W7 → Director → L0 PLAN → APPLY / VERIFY |
 | JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
-| OPS-DOC-1 | W3 · draft #476 (`c081dadc`) | accepted docs, but its text states run 47 as current; **do not merge as is** | smallest docs-only reconciliation (run 47 historical; run 48 / `502b1e8` current; Operation 2 known-denied vs index unmeasured; skill authoritative) after the active corrections → text-delta review → L0 merge; no deploy |
+| OPS-DOC-1 | W3 · #476 | **merged** `273ce3ae` (Director `5835685064`; `c45760e8` carried `-x`; blob `1f7f8132`) | done |
 | MOVEMENT-VISION-1 | W10 · #475 · `eda58218` | accepted as isolated R&D core only (`5827675294`) | owner phone trial; no port or staging |
 | MOVEMENT-VISION-NORTHSTAR-1 | Director · Lovable remix `c1b16a13` (frozen `a84e6764` / `8c61cd72`) | NOT READY | owner phone trial |
 
-**W7:** Check 36B delivered (D1 / F3 closed, F2 open); reruns affected rows on W9's F2 successor. Item 2 deferred.
+**W7:** Check 36B delivered (D1 / F3 closed, F2 open); reruns affected rows on W9's F2 successor first; Check 37 (W3 seed + #484) meanwhile.
 
 **Staging.** Runbook: **`skills/wsf-staging-deploy/SKILL.md` on `main`** (linked from `CLAUDE.md` / `AGENTS.md`). Each stable accepted integrated milestone stages without another owner prompt: pin via a worker → independent check → Director accept → L0 merges the pin → one dispatch → deployment / served-marker / hosted / cleanup receipts.
 
