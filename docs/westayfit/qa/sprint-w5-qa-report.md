@@ -2522,3 +2522,25 @@ The contract's fake page opens elements synchronously, so it cannot express G2 o
 - **The Firestore emulator doesn't enforce composite indexes,** so R2's missing index is an injected INTERNAL, not a real one.
 
 **Status:** reviewed by W5; not accepted, integrated or dispatched. This is not an approval to merge.
+
+### QA2 F1 delta: successor `2cfaa34916c0b7b19ad65b7521d5515ce0be955c` (one commit on `6d0e5e83`) — **PASS**
+
+**Scope.** Exactly two files changed: `social-privacy-postop.mjs` (`classifyTransport` and its comments) and its test. There is no other drift.
+
+**Unit and contract suites.** `social-privacy-postop` passes 9 tests and `workflow-contract` passes 72. My mutation harness passes 19 of 19 required rows. L4 is now CLOSED: a JSON 403 `PERMISSION_DENIED` is classified as `shut`.
+
+**Real harness against a write-counting fake server.** The fake server records every request. Any request that is not an unauthenticated probe of one of the three services would count as a write attempt.
+
+| shape answered by the setter | transport | exit | rows | requests | writes |
+| --- | --- | --- | --- | --- | --- |
+| my R1b JSON 403 `PERMISSION_DENIED` | shut | 3 | 7 BLOCKED | 3 probes | 0 (manifest 0/0) |
+| HTML 403 | shut | 3 | 7 BLOCKED | 3 | 0 |
+| JSON 503 `UNAVAILABLE` | unknown | 3 | 7 BLOCKED | 3 | 0 |
+| 200 `{"result":null}` | unknown | 3 | 7 BLOCKED | 3 | 0 |
+| setter JSON 403, the other two services a 401 `UNAUTHENTICATED` | setter shut | 3 | 7 BLOCKED | 3 | 0 |
+
+**The OPEN path is kept.** On the real Functions emulator, R0 answered all three probes with `HTTP 401, UNAUTHENTICATED`. That is exactly the one shape now classified as open.
+
+**Residual (low, not a condition).** A 401 with a Google-front-end-style JSON body that carries `status: UNAUTHENTICATED` and a numeric `code` would still read as open. An anonymous request to an IAM-protected service is refused with a 403, so this shape was not observed.
+
+**Probe:** `sprint-w5-pr491-emulator/f1-delta-fake-server.mjs`.
