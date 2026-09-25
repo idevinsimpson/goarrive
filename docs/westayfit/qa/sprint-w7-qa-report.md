@@ -3016,3 +3016,42 @@ The routing's list mapped to evidence. Three cases were added to W7's instrument
 - F1 (the watch window re-lands after a blank-space click) is the Director's call.
 
 **Receipt:** Check 30 on exact `8f2cc15e` is a **PASS**, W7 instrument **10 / 10** first run on the head (base 4 / 10). Not merged, not staged.
+
+## 31 · MOVEMENT-VISION-1 fail-closed successor (#475), exact `eda5821893937e89b2635237d42924221e00c3a9`, delta only from the rejected `8642e330` (Director #434 `5827103237`; findings `5825938854`, disposition `5826065652`, source approval `5827103081`; W7 ACK `5827108000`): **PASS on items 1–5; no defect**
+
+R&D QA only. Nothing here says anything about real-person accuracy, bystander reliability, native behaviour, integration or serving. Every input is synthetic landmarks or the lab's scripted scene. W7 accepts, integrates and stages nothing.
+
+### 31.1 · Scope, by git (item 5)
+
+- **Commit:** one, with parent exactly `8642e330`. Ten files, +279 / −28: `src/movement/{session,squatCounter,subjectLock}.ts`, `MovementVisionLab.web.tsx` (a readout line and a counter), W10's e2e spec, the new `tests/movement-fail-closed.test.ts`, two updated vitest files, and `LIMITATIONS.md` / `README.md`.
+- **Surface audit:** the added lines contain **no** `fetch`, XHR, beacon, WebSocket, local, session or IndexedDB storage, Firebase or callable use, URL, `getUserMedia`, frame export, recorder, upload or analytics. The only new imports are the new test's four internal ones.
+- **Unchanged:** the package and lock files (`@mediapipe/tasks-vision` stays `0.10.35`), `app/` routes, rules, functions and `.github`.
+- **Not integrated:** `eda58218` is not an ancestor of development.
+
+### 31.2 · Suites
+
+| run | `8642e330` | `eda58218` |
+|---|---|---|
+| movement vitest (W10) | 66 / 66 | **74 / 74** |
+| **W7 unit instrument** (`docs/westayfit/qa/sprint-w7-mv-fail-closed.test.ts`, run from a worktree's `tests/`) | **3 / 10** | **10 / 10** |
+| **W7 browser instrument** (`sprint-w7-movement-freshness-verify.spec.ts`, the lab's real frame loop with Playwright's fake clock) | **1 / 2** | **2 / 2** |
+
+The successor's 10 / 10 is nine first-run cases plus T3. T3's first run failed on my fixture: after re-acquisition the counter must see the member standing again before it can count. That is the successor's documented re-arm rule. I added seven standing frames and reran T3 once, and it passed on the successor and failed on the rejected head.
+
+### 31.3 · Items
+
+| item | evidence | verdict |
+|---|---|---|
+| **1** overlapping distinct poses never collapse into one trusted subject, at acquisition or while locked | Source: `candidates()` keeps every detection; `crowds()` (IoU > 0.1 or centre within 0.35 h) applies to partial detections too; `follow()` and `recover()` go ambiguous on any crowding candidate. W7 cases: **L1** a partly visible overlapping pose (ankles hidden) while locked → not locked, no subject; **L2** three overlapping poses at acquisition → never locked; **L3** an exact duplicate → read as a crowd both locked and at acquisition, which is the conservative side of the trade-off; **L4** a rep spanning an ambiguity is void and the member is re-trusted only once alone, with the next full rep counted. The rejected head fails L3 and L4; L1 and L2 already refused there (they are not discriminating and are disclosed as such). | **PASS** |
+| **2** any unobserved or unmeasurable mid-cycle sample voids the cycle and needs re-arm | Source: a null depth outside "standing at rest" calls `interrupt()`. W7 cases: **M1** partway down (0.4, between the thresholds), then `[]`, then a full descent and standing → **0**, and the next observed rep counts; **M2** standing at rest survives an unobserved frame, and a full rep then counts (passes on both heads by design); **M3** a NaN timestamp mid-rep is rejected (`outOfOrder`) and voids the rep. The rejected head fails M1 and M3. | **PASS** |
+| **3** non-increasing timestamps and a gap > 250 ms void the cycle, while the documented under-bound case still works | Source: in `session.update`, `t <= lastT` or a non-finite `t` → `outOfOrder` + `interrupt()`; `t − lastT > 250` → `lock.suspend()` + `interrupt()`; `SubjectLock` ignores non-increasing `t`. W7 cases: **T1** a gap of exactly **250 ms counts**, **251 ms is void**; **T2** a backward timestamp voids the rep, later in-order frames re-arm and the next rep counts; **T3** a gap while standing suspends the lock, re-acquisition invents nothing, and after re-arm a full rep counts. The rejected head fails T1, T2 and T3. | **PASS** |
+| **4** the real browser / fake-clock stall fails on the old head and passes on the successor | W7's own case asserts on the **rep count only**, so it runs unchanged on both builds. The lab's `requestAnimationFrame` loop runs under the fake clock and is stepped to "phase: down" in rep 1; then an 11.2 s `fastForward`, then 600 ms of standing frames. **Rejected head: reps = 1**, locked, standing: the unobserved completion counted. **Successor: reps = 0**, lock re-acquiring, phase unknown, "stream interruptions (rep in progress voided): 1". **Control B0** (no stall, ~9 s of scene) counts **3 on both**, so the zero is not a loop that never counts. Both builds are emulator-flagged `build:web`, exit 0. | **PASS** |
+| **5** no privacy, persistence, backend, production or canonical integration surface added | 31.1 | **PASS** |
+
+### 31.4 · Limits carried, not measured
+
+- Real camera and real people, the MediaPipe engine's real overlap behaviour, bystanders, dropout rates, native, Safari and a real device.
+- The successor's disclosed trade-off: one dropped detection at the bottom of a real rep now voids that rep. How often that happens on a real camera is unmeasured.
+- W10's six e2e cases were not re-run. I ran only W7's two browser cases.
+
+**Status:** tested on `eda58218`. R&D QA only; not accepted, not integrated, not served.
