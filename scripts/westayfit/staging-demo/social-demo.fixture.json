@@ -1,0 +1,109 @@
+{
+  "_comment": [
+    "SOCIAL-STAGING-DEMO-1 (Director #365 5834082617 section C). A RETAINED, staging-only review fixture for the owner.",
+    "Everything here is SYNTHETIC. Members exist only as Firestore profiles and memberships: no Auth account, no email,",
+    "no invitation, no contact, no photo. Both communities are marked isSample:true, which the product already badges",
+    "'Sample' and keeps off every public display and pooled aggregate. The owner is resolved at run time from his",
+    "existing Auth record by uid; nothing here names him.",
+    "Seeded rows are not evidence that social works: that needs the served member / non-member / privacy calls,",
+    "which stay blocked while the three social services are SHUT and the index has no READY receipt."
+  ],
+  "fixtureId": "SOCIAL-STAGING-DEMO-1",
+  "version": 1,
+  "allowedProjects": ["westayfit-staging"],
+  "emulatorProjectPrefix": "demo-",
+  "syntheticUidPrefix": "wsfdemo-",
+  "timezone": "America/New_York",
+  "members": [
+    { "uid": "wsfdemo-m01", "displayName": "Ava Sample" },
+    { "uid": "wsfdemo-m02", "displayName": "Ben Sample" },
+    { "uid": "wsfdemo-m03", "displayName": "Cara Sample" },
+    { "uid": "wsfdemo-m04", "displayName": "Dev Sample" },
+    { "uid": "wsfdemo-m05", "displayName": "Eli Sample" },
+    { "uid": "wsfdemo-m06", "displayName": "Fay Sample" },
+    { "uid": "wsfdemo-m07", "displayName": "Gus Sample" },
+    { "uid": "wsfdemo-m08", "displayName": "Hana Sample" },
+    { "uid": "wsfdemo-m09", "displayName": "Ian Sample" },
+    { "uid": "wsfdemo-m10", "displayName": "Jo Sample" },
+    { "uid": "wsfdemo-m11", "displayName": "Kai Sample" },
+    { "uid": "wsfdemo-m12", "displayName": "Lia Sample" }
+  ],
+  "communities": [
+    {
+      "groupId": "wsfdemo-sample-movers",
+      "displayName": "Sample Community: Demo Movers",
+      "groupType": "custom",
+      "joinPolicy": "private",
+      "members": [
+        { "uid": "wsfdemo-m01" },
+        { "uid": "wsfdemo-m02" },
+        { "uid": "wsfdemo-m03", "name": "visible", "activity": "visible" },
+        { "uid": "wsfdemo-m04", "name": "visible", "activity": "visible" },
+        { "uid": "wsfdemo-m05" },
+        { "uid": "wsfdemo-m06" },
+        { "uid": "wsfdemo-m07", "name": "private", "activity": "visible" },
+        { "uid": "wsfdemo-m08", "name": "private", "activity": "visible" },
+        { "uid": "wsfdemo-m09", "name": "private", "activity": "visible" },
+        { "uid": "wsfdemo-m10", "name": "visible", "activity": "private" },
+        { "uid": "wsfdemo-m11", "name": "visible", "activity": "private" },
+        { "uid": "wsfdemo-m12", "name": "private", "activity": "private" }
+      ],
+      "goals": [
+        {
+          "goalId": "wsfdemo-goal-movers-squats",
+          "title": "Sample goal: 2,000 squats together",
+          "target": 2000,
+          "unit": "squats",
+          "repeatPolicy": "multiple",
+          "startDaysBeforeAnchor": 6,
+          "endDaysAfterAnchor": 30,
+          "contributions": [
+            { "uid": "wsfdemo-m01", "count": 40, "minutesBeforeAnchor": 12 },
+            { "uid": "wsfdemo-m02", "count": 25, "minutesBeforeAnchor": 35 },
+            { "uid": "wsfdemo-m07", "count": 30, "minutesBeforeAnchor": 58 },
+            { "uid": "wsfdemo-m03", "count": 50, "minutesBeforeAnchor": 90 },
+            { "uid": "wsfdemo-m10", "count": 20, "minutesBeforeAnchor": 140 },
+            { "uid": "wsfdemo-m08", "count": 15, "minutesBeforeAnchor": 200 },
+            { "uid": "wsfdemo-m04", "count": 60, "minutesBeforeAnchor": 1500 },
+            { "uid": "wsfdemo-m05", "count": 35, "minutesBeforeAnchor": 1620 },
+            { "uid": "wsfdemo-m01", "count": 45, "minutesBeforeAnchor": 2950 },
+            { "uid": "wsfdemo-m06", "count": 30, "minutesBeforeAnchor": 3000 },
+            { "uid": "wsfdemo-m09", "count": 20, "minutesBeforeAnchor": 4400 },
+            { "uid": "wsfdemo-m11", "count": 25, "minutesBeforeAnchor": 5800 },
+            { "uid": "wsfdemo-m12", "count": 10, "minutesBeforeAnchor": 7200 },
+            { "uid": "wsfdemo-m02", "count": 40, "minutesBeforeAnchor": 8000 }
+          ]
+        }
+      ]
+    },
+    {
+      "groupId": "wsfdemo-sample-walkers",
+      "displayName": "Sample Community: Demo Walkers",
+      "groupType": "familyFriends",
+      "joinPolicy": "private",
+      "members": [
+        { "uid": "wsfdemo-m01" },
+        { "uid": "wsfdemo-m04", "name": "visible", "activity": "visible" },
+        { "uid": "wsfdemo-m08", "name": "private", "activity": "visible" },
+        { "uid": "wsfdemo-m11", "name": "visible", "activity": "private" }
+      ],
+      "goals": [
+        {
+          "goalId": "wsfdemo-goal-walkers-pushups",
+          "title": "Sample goal: 500 push-ups",
+          "target": 500,
+          "unit": "push-ups",
+          "repeatPolicy": "multiple",
+          "startDaysBeforeAnchor": 3,
+          "endDaysAfterAnchor": 30,
+          "contributions": [
+            { "uid": "wsfdemo-m04", "count": 20, "minutesBeforeAnchor": 25 },
+            { "uid": "wsfdemo-m08", "count": 15, "minutesBeforeAnchor": 75 },
+            { "uid": "wsfdemo-m01", "count": 30, "minutesBeforeAnchor": 1600 },
+            { "uid": "wsfdemo-m11", "count": 10, "minutesBeforeAnchor": 3100 }
+          ]
+        }
+      ]
+    }
+  ]
+}
