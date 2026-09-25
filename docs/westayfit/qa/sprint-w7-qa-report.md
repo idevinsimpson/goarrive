@@ -3708,3 +3708,27 @@ This was run in a detached worktree, locally only. There was **no dispatch and n
 **Carried, and not cleared by this pin (as the pin states):** the three social services are SHUT; the index has no READY receipt; email is blocked; kiosk use is HELD. Nothing was run against staging.
 
 **Status:** reviewed on `92a02d50`. Not merged and not dispatched. Merging and dispatch belong to L0, after the Director accepts.
+
+## 37C · Seed successor `2a251083` for G2a / G1b (W3; the Check 37B findings on the same routed criteria, Director #434 `5836713029`): **G2a and G1b fixed (fail-before on `6c1d115e`); no regression; #484 not yet carrying it**
+
+**Delta.** `6c1d115e..2a251083` is one commit touching three `staging-demo/` files.
+- **Ledger transaction:** it now `tx.get`s the shard and refuses unless the shard exists **and** carries the marker, before incrementing it.
+- **Cleanup:** each ledger row is deleted **together with its recent-addition**, inside one transaction, only when both are proven.
+  - A fixture row must match its exact seeded identity. Any other row must be the owner's own, at its own path.
+  - An addition must have exactly the keys `amount` and `at`, the row's amount, and a consistent minute.
+  - An addition with no row beside it is preserved.
+
+**#484** is still at `736ebd77`, so it does **not** yet carry `2a251083`, and it was not re-reviewed here.
+
+**Runs.** Local emulators, `METADATA_SERVER_DETECTION=none`, using the same drivers as §37 / §37B. There was no dispatch and no staging access.
+
+| row | `6c1d115e` (§37B) | `2a251083` |
+|---|---|---|
+| **A1 (G2a):** shard 0 replaced **without the marker** (count 50) after preflight, before the ledger transaction (INJECTED) | 50 → 110; exit 4 only after 106 writes | **preserved at 50**; `APPLY_INCOMPLETE … is not this fixture's (missing, unmarked or foreign); refusing to increment it`; `PARTIAL_WRITES=34`; exit 3, **PASS** |
+| **B1 (G1b):** cleanup; a seeded addition replaced by `{amount: 999, at: "someone else"}` after classification | DELETED, exit 0 | **preserved and named**, `CLEANUP_PRESERVED=1`, exit 3, **PASS** |
+| **B2 (G1b):** cleanup; a seeded ledger row replaced by `{goalId: <same>, userId: "someone-else", count: 5}` | DELETED, exit 0 | **the row preserved, and its addition preserved with it** (`CLEANUP_PRESERVED=2`), exit 3, **PASS** |
+| **CL1 (regression watch):** the owner records twice through the **real `wsfContribute`**, then cleanup runs. This checks that the new, stricter addition proof does not strand his rows. The product's addition keys are exactly `["amount","at"]`. | exit 0, 111 deleted, 0 left | exit 0, 111 deleted, `CLEANUP_PRESERVED=0`, **0 `wsfdemo-` documents left**, **PASS** |
+| B3 / B4 (G1), T7 (P1), RP (partial writes then reconcile) | pass | pass (preserved and named; `PARTIAL_WRITES=25`, then re-run `VERIFY=pass` at 445 = 445 = 445) |
+| the regression suites | — | apply rechecks T1–T7: 7/7 (C1 / C2 remain harness-invalid, superseded by B3 / B4); static collisions 6/6; Auth 4/4; real-`wsfContribute` races 6/6; privacy 1/1 |
+
+**Status:** reviewed on `2a251083`. Nothing is accepted or dispatched. A #484 head carrying `2a251083` would need only a blob-identity check plus `run-all`.
