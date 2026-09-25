@@ -2,6 +2,19 @@
 
 These are stated plainly so nobody mistakes the lab for a finished capability.
 
+## Director scope clarification (#475 comment `5825892708`)
+
+The Director asked for these limits to be stated in this delivery. They are the rules the code follows, and where the code falls short, the limitation is written down:
+
+- **Only full observed cycles count.** A rep is counted only when the counter itself observed standing, then down, then standing again (`squatCounter.ts`). A cycle that started before the lock, or in the `unknown` phase, cannot count. Tests: "starting in the down position counts nothing until standing is seen", "reset() … requires standing again".
+- **A partial cycle is invalidated on loss.** Leaving `locked` for any reason calls `interrupt()`. That discards the rep in progress, and the member must be seen standing again (`session.ts`). Tests: "interrupt() mid-rep discards the rep", "lost tracking at the bottom voids that rep …", "while lost, nothing is counted …". The mutation check confirmed these tests go red if `interrupt()` becomes a no-op.
+- **Pose ordering and nearest-candidate association cannot establish identity after full occlusion.**
+  - The lock never uses the engine's pose order.
+  - After a full occlusion or an absence, re-acquisition is still spatial: exactly one person, near the last box, holding still for 400 ms. That is a *heuristic*, not identity.
+  - Whoever meets those conditions is treated as the member, even if it is a different person. Limitation 4 gives the details.
+  - The lab shows "Lost you" during the gap; it cannot tell you who came back.
+- **Synthetic crossings and fake-camera inference do not prove real-person lock or rep accuracy.** They show that the logic behaves as specified on known inputs, and that the real engine runs in a browser. Nothing more.
+
 ## Evidence limits
 1. **It has not been tested on a real person squatting in front of a real camera.** This container has no camera and no human video. All counting evidence is either synthetic landmarks (unit tests and the lab's synthetic scene) or a fake camera feed made from a still photo. The squat threshold (depth 0.6, roughly hips about 60% of the way from standing to knee height) is a reasoned default, not a tuned one.
 2. **No native support.** iOS and Android get the manual count only. See [`DECISION.md`](DECISION.md).
