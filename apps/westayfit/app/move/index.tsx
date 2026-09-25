@@ -201,6 +201,35 @@ export default function MoveResolver() {
     instead of being a control that does nothing.
   */
   const close = () => exit(leave);
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 2. A NAMED WAY OUT LANDS ON THE MEMBER'S
+    MOUNTED TABS; IT DOES NOT BUILD A SECOND SET.
+
+    "Go to your community" and "Go Home" were links. Followed from this sheet
+    -- a screen of the ROOT stack, above the tabs -- a link pushed a whole
+    second tab navigator on top, with its own copy of the community going
+    through the loading screen, while the first copy stayed painted under it
+    and this sheet stayed in the history. Measured on `91392f9d`: two
+    community instances and the loading screen.
+
+    They now leave the way the contribution flow's labelled exits do
+    (contribute/[goalId].tsx, `leaveFor`): the sheet travels out, then the
+    community opens in the member's Home tab (`dismissTo`, which keeps the
+    mounted screen when it is already that community), or the Home tab is
+    selected as it stands.
+  */
+  const navigation = useNavigation();
+  const leaveTo = (href: string) =>
+    exit(() => {
+      if (href === '/') {
+        navigation.dispatch({
+          type: 'POP_TO',
+          payload: { name: '(tabs)', params: { screen: '(home)' } },
+        } as never);
+        return;
+      }
+      router.dismissTo(href as never);
+    });
   const leave = () => {
     if (router.canGoBack()) {
       router.back();
@@ -219,7 +248,6 @@ export default function MoveResolver() {
     contribution opened from one of its goals sits over it, and Escape there is
     not a request to close something the member cannot see.
   */
-  const navigation = useNavigation();
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onKey = (e: KeyboardEvent) => {
@@ -375,8 +403,8 @@ export default function MoveResolver() {
             contributions need an open goal.
           </Text>
         </View>
-        <ButtonLink
-          href={`/community/${state.groupId}`}
+        <ExitLink
+          onGo={() => leaveTo(`/community/${state.groupId}`)}
           style={s.ghost}
           textStyle={s.ghostText}
           testID="wsf-move-no-goal-community"
@@ -394,8 +422,8 @@ export default function MoveResolver() {
           <Text style={s.hiddenProbe} testID="wsf-move-error">
             {state.message}
           </Text>
-          <ButtonLink
-            href="/"
+          <ExitLink
+            onGo={() => leaveTo('/')}
             style={s.cardAction}
             textStyle={s.cardActionText}
             testID="wsf-move-error-home"
@@ -408,6 +436,41 @@ export default function MoveResolver() {
         </Text>
       )}
     </View>,
+  );
+}
+
+/** Looks like `ButtonLink`; leaves through the member's mounted tabs. */
+function ExitLink({
+  onGo,
+  style,
+  textStyle,
+  testID,
+  label,
+}: {
+  onGo: () => void;
+  style: object;
+  textStyle: object;
+  testID: string;
+  label: string;
+}) {
+  return (
+    <Pressable
+      onPress={onGo}
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      style={style}
+      testID={testID}
+      // No href to follow, so it answers Enter itself (react-native-web
+      // leaves Enter on role=link to the browser).
+      {...({
+        onKeyDown: (e: { key?: string; repeat?: boolean; nativeEvent?: { key?: string; repeat?: boolean } }) => {
+          const key = e.key ?? e.nativeEvent?.key;
+          if (key === 'Enter' && !(e.repeat ?? e.nativeEvent?.repeat)) onGo();
+        },
+      } as Record<string, unknown>)}
+    >
+      <Text style={textStyle}>{label}</Text>
+    </Pressable>
   );
 }
 

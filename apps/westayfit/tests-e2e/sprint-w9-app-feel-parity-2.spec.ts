@@ -244,25 +244,62 @@ test.describe('APP-FEEL-PARITY-1 cp2 · warm first render', () => {
     expect(seen.calls.wsfMyCommunities ?? 0, 'the fresh read still runs').toBeGreaterThanOrEqual(1);
   });
 
-  test('a community re-entered from the list opens on how it last settled, then refreshes', async ({ page }) => {
+  test('MOVE with no open goal: “Go to your community” lands on the mounted community -- one instance, no loading, the sheet gone', async ({ page }) => {
     test.setTimeout(240_000);
     const fx = await seed('r');
     await signInVia(page, fx.email, PASSWORD);
-    await openA(page, fx);
-    // To B through the list, then back to A through the list.
-    await page.getByTestId('wsf-member-tab-community').last().click();
-    await page.locator(`[data-testid="wsf-community-index-row-${fx.b}"]:visible`).click();
-    await expect(page.locator('[data-testid="wsf-community-name"]:visible')).toHaveText('Roswell Lunch Walkers', { timeout: 40_000 });
-    await page.getByTestId('wsf-member-tab-community').last().click();
-    await expect(page.locator(`[data-testid="wsf-community-index-row-${fx.a}"]:visible`)).toBeVisible({ timeout: 40_000 });
+    // B has no open goal, so MOVE answers "Nothing is running right now" and
+    // offers the community.
+    await page.goto(`/community/${fx.b}`);
+    await expect(page.locator('[data-testid="wsf-community-name"]:visible')).toHaveText('Roswell Lunch Walkers', { timeout: 60_000 });
+    await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="wsf-community"]'))
+        .find((n) => (n as HTMLElement).getClientRects().length > 0)
+        ?.setAttribute('data-afp2-marker', 'kept'),
+    );
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await expect(page.locator('[data-testid="wsf-move-no-goal"]:visible')).toBeVisible({ timeout: 40_000 });
     const done = await watch(page);
-    await page.locator(`[data-testid="wsf-community-index-row-${fx.a}"]:visible`).click();
-    await expect(page.locator('[data-testid="wsf-community-name"]:visible')).toHaveText('Alpharetta Morning Movers', { timeout: 40_000 });
+    const go = page.locator('[data-testid="wsf-move-no-goal-community"]:visible');
+    await go.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('wsf-move-sheet')).toHaveCount(0, { timeout: 20_000 });
     await page.waitForTimeout(1_500);
     const seen = await done();
-    measure('re-entering A', seen);
-    expect(seen.loading, 'no loading screen on re-entry').toEqual([]);
-    expect(seen.calls.wsfMyCommunities ?? 0, 'it still revalidates').toBeGreaterThanOrEqual(1);
+    const after = {
+      ...seen,
+      instances: await communityInstances(page),
+      sameInstance: await page.locator('[data-afp2-marker="kept"]').count(),
+      tab: await currentTab(page),
+      path: new URL(page.url()).pathname,
+    };
+    measure('MOVE no goal → Go to your community', after);
+    expect(after.loading, 'no loading screen').toEqual([]);
+    expect(after.instances, 'one community instance').toBe(1);
+    expect(after.sameInstance, 'the mounted community').toBe(1);
+    expect(after.tab).toBe('wsf-member-tab-home');
+    expect(after.path).toBe(`/community/${fx.b}`);
+  });
+
+  test('MOVE could not read: “Go Home” selects Home as it stands (labelled injection: the goal read fails)', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('g');
+    await signInVia(page, fx.email, PASSWORD);
+    await openA(page, fx);
+    await page.route('**/wsfListGoals', (route) => route.abort('failed'));
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await expect(page.locator('[data-testid="wsf-move-error-home"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.unroute('**/wsfListGoals');
+    const done = await watch(page);
+    await page.locator('[data-testid="wsf-move-error-home"]:visible').click();
+    await expect(page.getByTestId('wsf-move-sheet')).toHaveCount(0, { timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    const seen = await done();
+    const after = { ...seen, instances: await communityInstances(page), tab: await currentTab(page) };
+    measure('MOVE error → Go Home', after);
+    expect(after.loading).toEqual([]);
+    expect(after.instances).toBe(1);
+    expect(after.tab).toBe('wsf-member-tab-home');
   });
 });
 

@@ -104,14 +104,7 @@ import {
   kit,
 } from '../../../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
-import {
-  forgetCommunity,
-  peekGoals,
-  readGoals,
-  readMyCommunities,
-  recallCommunity,
-  rememberCommunity,
-} from '../../../../../src/memberReads';
+import { forgetCommunity, readGoals, readMyCommunities } from '../../../../../src/memberReads';
 import {
   MomentumRow,
   PresenceRow,
@@ -338,20 +331,7 @@ export default function CommunityPage() {
   const params = useLocalSearchParams<{ groupId: string }>();
   const groupId = params.groupId;
   const { ready, user } = useWsfAuth();
-  /*
-    APP-FEEL-PARITY-1 CHECKPOINT 2. RE-ENTERING A COMMUNITY THIS ACCOUNT HAS
-    ALREADY OPENED starts from how it last settled (src/memberReads.ts), not
-    from the loading composition: its name, its people count, its goals. The
-    load below still runs in full and replaces it -- a refusal clears it and
-    lands on the refusal -- so the remembered screen is a first frame, never
-    the authority. A different account, or none, recalls nothing.
-  */
-  const [state, setState] = useState<LoadState>(
-    () =>
-      (ready && user && groupId
-        ? recallCommunity<LoadState>(user.uid, groupId)
-        : undefined) ?? { kind: 'loading' },
-  );
+  const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   // W7. The display-link control keeps its OWN state and its own timer. It is
   // a different link to a different audience from the invite link, and a copy
@@ -377,18 +357,8 @@ export default function CommunityPage() {
     entries: ActivityRow[];
     contributorsToday: number | null;
   } | null>(null);
-  // The goals this account last read for this community, shown until the
-  // fresh read below replaces them (the same rule as the screen above).
-  const [goalsState, setGoalsState] = useState<GoalsState>(() => {
-    const warm =
-      ready && user && groupId ? peekGoals<ListedGoal>(user.uid, groupId) : undefined;
-    return warm ? { kind: 'loaded', goals: warm.goals } : { kind: 'loading' };
-  });
+  const [goalsState, setGoalsState] = useState<GoalsState>({ kind: 'loading' });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
-  // Only the FIRST read of a warm re-entry may stand on the remembered goals.
-  // Every deliberate reload (a Champion's action, Retry) keeps its accepted
-  // contract: back to loading, and a failure is reported as a failure.
-  const warmGoalsMount = useRef(goalsState.kind === 'loaded');
   /*
     A GENUINE RETURN TO THIS SCREEN. Bumped by the focus effect below on every
     focus except the first (the mount, which every read already covers).
@@ -988,7 +958,7 @@ export default function CommunityPage() {
           }
         }
 
-        const settled: LoadState = {
+        setState({
           kind: 'ready',
           group,
           role: membership.role,
@@ -996,28 +966,17 @@ export default function CommunityPage() {
           otherCommunityCount,
           isSample,
           activeChallenge,
-        };
-        rememberCommunity(user.uid, groupId, settled);
-        setState(settled);
+        });
       } catch (e) {
         if (cancelled) return;
         // A1. The server's own sentence is a developer fact, not member copy —
         // it can name a callable, a region or an internal reason. It goes to
         // the console; the screen says what the member can act on.
         console.warn('[wsf] community load failed', e);
-        // A screen already standing on this account's last settled state
-        // keeps it: a refresh that could not be read is not a reason to take
-        // the community away. Its figures carry their own last-known and
-        // retry treatment (RETURN-CONTINUITY-1). Nothing standing: the error.
-        setState((prev) =>
-          prev.kind === 'ready'
-            ? prev
-            : {
-                kind: 'error',
-                message:
-                  'We couldn’t load this community right now. Check your connection and try again.',
-              },
-        );
+        setState({
+          kind: 'error',
+          message: 'We couldn’t load this community right now. Check your connection and try again.',
+        });
       }
     })();
 
@@ -1041,9 +1000,7 @@ export default function CommunityPage() {
     let cancelled = false;
     // Loading only when there is nothing of this account's for this community
     // to stand on (a warm re-entry keeps its last goals until this lands).
-    const standOnWarm = warmGoalsMount.current && goalsReloadToken === 0;
-    warmGoalsMount.current = false;
-    if (!standOnWarm) setGoalsState({ kind: 'loading' });
+    setGoalsState({ kind: 'loading' });
 
     (async () => {
       try {
@@ -1064,13 +1021,7 @@ export default function CommunityPage() {
         console.warn('[wsf] goal list failed', e);
         // Warm goals already on screen stay; their figures fall to the
         // last-known treatment through the progress reads.
-        if (standOnWarm) {
-          setGoalsState((prev) =>
-            prev.kind === 'loaded' ? prev : { kind: 'failed', message: 'Could not load goals.' },
-          );
-        } else {
-          setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
-        }
+        setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();
 

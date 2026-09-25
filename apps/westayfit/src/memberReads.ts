@@ -19,7 +19,6 @@ import { getFirebaseAuth, getFirebaseFunctions } from './firebase';
  *   · `wsfMyCommunities` -- which communities this account belongs to;
  *   · `wsfListGoals({ groupId, includeHistory: true })` -- one community's
  *     goals with their confirmed totals;
- * plus the last settled Community Home of a community (`recallCommunity`).
  *
  * Two things it does:
  *   · a read already in flight is SHARED, not repeated (the Home list and the
@@ -171,27 +170,14 @@ export function readGoals<G>(uid: string, groupId: string): Promise<ListedGoalsA
   });
 }
 
-// ---- the last settled Community Home ----------------------------------------
-
-const homeKey = (groupId: string) => `communityHome:${groupId}`;
-
-/** Kept when a Community Home settles as a member's ready screen. */
-export function rememberCommunity<T>(uid: string | null, groupId: string, ready: T): void {
-  if (!scope(uid)) return;
-  store.set(homeKey(groupId), { value: ready, at: Date.now() });
-}
-
-export function recallCommunity<T>(uid: string | null, groupId: string): T | undefined {
-  return peek<T>(uid, homeKey(groupId));
-}
+// ---- lost membership -------------------------------------------------------
 
 /**
- * The account is not (or no longer) a member here: nothing about this
- * community stays in the record, so re-entering it shows nothing it knew.
+ * The account is not (or no longer) a member here: the goals it read for
+ * this community and the membership list that still names it are dropped, so
+ * no surface can open on them again.
  */
 export function forgetCommunity(uid: string | null, groupId: string): void {
-  forget(uid, homeKey(groupId));
   forget(uid, goalsKey(groupId));
-  // The membership list that still names it is stale too.
   forget(uid, MINE);
 }
