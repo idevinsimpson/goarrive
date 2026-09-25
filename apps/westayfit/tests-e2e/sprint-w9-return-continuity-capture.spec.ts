@@ -277,12 +277,20 @@ for (const device of DEVICES) {
     test('refresh fails after the return: what the member is told', async ({ page }) => {
       test.setTimeout(240_000);
       const fx = await seed(`r${device.height}`);
+      // Progress reads in flight: the refusal below only applies to reads made
+      // after it, so it waits for a settle already on its way to land first.
+      let inFlight = 0;
+      const isPulse = (r: { url(): string; method(): string }) => r.url().includes('/wsfGoalPulse') && r.method() === 'POST';
+      page.on('request', (r) => { if (isPulse(r)) inFlight += 1; });
+      page.on('requestfinished', (r) => { if (isPulse(r)) inFlight -= 1; });
+      page.on('requestfailed', (r) => { if (isPulse(r)) inFlight -= 1; });
       await signInVia(page, fx.email, PASSWORD);
       const { stage, label } = await easel(page, device, `/community/${fx.groupId}`);
       await recordFromHome(stage, fx);
       await expect(stage.getByTestId('wsf-contribute-receipt')).toBeVisible({ timeout: 40_000 });
       await backToCommunity(stage, fx);
       await settle(stage);
+      await expect.poll(() => inFlight, { timeout: 20_000 }).toBe(0);
       const before = await readHome(stage, fx);
       // LABELLED INJECTION: every progress read is refused from here on.
       await page.route('**/wsfGoalPulse', (route) => route.abort('failed'));

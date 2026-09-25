@@ -1140,7 +1140,9 @@ export default function CommunityPage() {
           setProgress((prev) => {
             const shown = prev[goal.goalId];
             if (shown?.kind !== 'ok') return { ...prev, [goal.goalId]: { kind: 'failed' } };
-            if (shown.issuedAt > issuedAt) return prev;
+            // `>=`: a read issued in the same millisecond as this failure and
+            // already landed is not made stale by it.
+            if (shown.issuedAt >= issuedAt) return prev;
             return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true } };
           });
         }
@@ -1236,7 +1238,7 @@ export default function CommunityPage() {
             if (cancelled) return;
             setProgress((prev) => {
               const shown = prev[goal.goalId];
-              if (shown?.kind !== 'ok' || shown.issuedAt > issuedAt) return prev;
+              if (shown?.kind !== 'ok' || shown.issuedAt >= issuedAt) return prev;
               return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true } };
             });
           }
@@ -2646,16 +2648,33 @@ export default function CommunityPage() {
           when — but a member who came back from contributing is told that
           this is not a fresh reading, here, beside the number, where a short
           phone still shows it. Retry is the existing refresh: the same read,
-          and nothing else. Polite, so a screen reader hears it once it
-          appears without being interrupted.
+          and nothing else.
+
+          WHAT A SCREEN READER HEARS. A live region that arrives already
+          holding its words is often not announced, so the region is here
+          whenever a figure is — empty, and out of the layout (absolute, one
+          pixel, so the healthy hero does not move by the stack's gap) — and
+          the sentence is put INTO it when a read fails. Retry is outside it,
+          so the announcement is the sentence alone. The visible copy of the
+          sentence is hidden from assistive technology, because the region
+          already reads it in the same place.
         */}
+        <View
+          style={styles.visuallyHidden}
+          testID={`wsf-community-goal-stale-status-${goal.goalId}`}
+          {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+        >
+          {p.refreshFailed ? <Text>Couldn’t refresh. This is the last confirmed figure.</Text> : null}
+        </View>
         {p.refreshFailed ? (
           <View
             style={onDark ? styles.heroLastKnown : styles.cardLastKnown}
             testID={`wsf-community-goal-stale-${goal.goalId}`}
-            accessibilityLiveRegion="polite"
           >
-            <Text style={onDark ? styles.heroLastKnownText : styles.cardMeta}>
+            <Text
+              style={onDark ? styles.heroLastKnownText : styles.cardMeta}
+              {...({ 'aria-hidden': true } as Record<string, unknown>)}
+            >
               Couldn’t refresh. This is the last confirmed figure.
             </Text>
             <Pressable
@@ -4735,15 +4754,25 @@ const styles = StyleSheet.create({
     columnGap: 12,
   },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
-  // RETURN-CONTINUITY-1. The failed-refresh line under the figures: one short
-  // sentence at the left and Retry at the right, wrapping on a narrow hero.
+  // RETURN-CONTINUITY-1. The failed-refresh line under the figures: the
+  // sentence, then Retry — beside it when the row has room, under it (with a
+  // gap, so the 44 px control never touches the text) on a phone.
   heroLastKnown: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     flexWrap: 'wrap',
     columnGap: 12,
+    rowGap: 8,
     marginTop: 4,
+  },
+  // Present for assistive technology, absent from the layout: absolute (so a
+  // stack's gap never counts it), one pixel, clipped and transparent.
+  visuallyHidden: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    overflow: 'hidden',
+    opacity: 0,
   },
   heroLastKnownText: { color: CREAM, fontSize: 13, lineHeight: 18, fontWeight: '600', flexShrink: 1 },
   heroLastKnownRetry: { marginTop: 0 },

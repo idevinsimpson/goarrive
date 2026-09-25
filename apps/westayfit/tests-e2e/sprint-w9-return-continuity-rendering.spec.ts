@@ -92,21 +92,52 @@ async function refusePulse(page: Page): Promise<void> {
   await page.route('**/wsfGoalPulse', (route) => route.abort('failed'));
 }
 
+/**
+ * Progress reads in flight. `page.route` only refuses reads made after it is
+ * installed, so a settle read already on its way would land AFTER a refused
+ * Refresh and (correctly) clear the marker: the test waits for quiet first.
+ */
+function trackPulse(page: Page): { inFlight: () => number } {
+  let n = 0;
+  const isPulse = (url: string, method: string) => url.includes('/wsfGoalPulse') && method === 'POST';
+  page.on('request', (r) => {
+    if (isPulse(r.url(), r.method())) n += 1;
+  });
+  const done = (r: { url(): string; method(): string }) => {
+    if (isPulse(r.url(), r.method())) n -= 1;
+  };
+  page.on('requestfinished', done);
+  page.on('requestfailed', done);
+  return { inFlight: () => n };
+}
+
+async function quietPulse(page: Page, pulse: { inFlight: () => number }): Promise<void> {
+  await expect.poll(() => pulse.inFlight(), { timeout: 20_000, message: 'progress reads still in flight' }).toBe(0);
+  await page.waitForTimeout(300);
+  await expect.poll(() => pulse.inFlight(), { timeout: 20_000 }).toBe(0);
+}
+
 test.describe('RETURN-CONTINUITY-1 · a failed refresh after a return is said', () => {
   test.use({ viewport: PHONE, deviceScaleFactor: 2 });
 
   test('Refresh fails: the figure and its stamp stay, the hero says “Last known”, and Retry clears it once a read lands', async ({ page }) => {
     test.setTimeout(240_000);
     const fx = await seed('r', 2);
+    const pulse = trackPulse(page);
     await signInVia(page, fx.email, PASSWORD);
     await returnFromContributing(page, fx);
     await pressBackToCommunity(page, fx);
     const [featured, other] = fx.goalIds as [string, string];
     await expect(shown(page, `wsf-community-goal-total-${featured}`)).toContainText('1,867', { timeout: 20_000 });
-    await page.waitForTimeout(3_500); // past the settle
+    await page.waitForTimeout(3_500); // past the settle's issue
+    await quietPulse(page, pulse);
     const total = await shown(page, `wsf-community-goal-total-${featured}`).innerText();
     const stamp = await shown(page, 'wsf-community-progress-updated').innerText();
-    await expect(shown(page, `wsf-community-goal-stale-${featured}`)).toHaveCount(0);
+    await expect(page.locator(`[data-testid="wsf-community-goal-stale-${featured}"]`)).toHaveCount(0);
+    // The announcement region is already there, and empty, before anything fails.
+    const status = page.locator(`[data-testid="wsf-community-goal-stale-status-${featured}"]`).last();
+    await expect(status).toHaveAttribute('aria-live', 'polite');
+    await expect(status).toHaveText('');
 
     await refusePulse(page);
     await shown(page, 'wsf-community-progress-refresh').click();
@@ -114,7 +145,8 @@ test.describe('RETURN-CONTINUITY-1 · a failed refresh after a return is said', 
     const notice = shown(page, `wsf-community-goal-stale-${featured}`);
     await expect(notice, 'the failed refresh is said').toBeVisible({ timeout: 15_000 });
     await expect(notice).toContainText('Couldn’t refresh. This is the last confirmed figure.');
-    await expect(notice).toHaveAttribute('aria-live', 'polite');
+    // Announced through the region that was waiting for it, without Retry.
+    await expect(status).toHaveText('Couldn’t refresh. This is the last confirmed figure.');
     await expect(shown(page, `wsf-community-goal-last-known-${featured}`)).toHaveText('Last known');
     await expect(page.locator(`[data-testid="wsf-community-goal-period-${featured}"]:visible`)).toHaveCount(0);
     await expect(shown(page, `wsf-community-your-part-${featured}`)).toContainText('Your last-known contribution');
@@ -126,7 +158,9 @@ test.describe('RETURN-CONTINUITY-1 · a failed refresh after a return is said', 
     const retry = shown(page, `wsf-community-goal-stale-retry-${featured}`);
     await expect(retry).toHaveText('Retry');
     await retry.focus();
+    const asked = page.waitForRequest((r) => r.url().includes('/wsfGoalPulse') && r.method() === 'POST');
     await page.keyboard.press('Enter');
+    await asked; // Retry really is a read
     await page.waitForTimeout(1_500);
     await expect(notice).toBeVisible();
     await expect(shown(page, `wsf-community-goal-total-${featured}`)).toHaveText(total);
@@ -139,6 +173,7 @@ test.describe('RETURN-CONTINUITY-1 · a failed refresh after a return is said', 
       timeout: 15_000,
     });
     await expect(page.locator(`[data-testid="wsf-community-goal-stale-${other}"]`)).toHaveCount(0);
+    await expect(status).toHaveText('');
     await expect(shown(page, `wsf-community-goal-period-${featured}`)).toBeVisible();
     await expect(shown(page, `wsf-community-your-part-${featured}`)).toContainText('Your contribution');
     await expect(shown(page, `wsf-community-your-part-${featured}`)).not.toContainText('last-known');
@@ -188,7 +223,11 @@ test.describe('RETURN-CONTINUITY-1 · nothing is said when nothing failed', () =
     await refusePulse(page);
     await page.goto(`/community/${fx.groupId}`);
     await expect(shown(page, `wsf-community-goal-progress-error-${fx.goalIds[0]}`)).toBeVisible({ timeout: 40_000 });
+    // Past the settle, which also fails, over a slot that holds no figure.
+    await page.waitForTimeout(3_500);
+    await expect(shown(page, `wsf-community-goal-progress-error-${fx.goalIds[0]}`)).toBeVisible();
     await expect(page.locator(`[data-testid="wsf-community-goal-stale-${fx.goalIds[0]}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-testid="wsf-community-goal-last-known-${fx.goalIds[0]}"]`)).toHaveCount(0);
     await expect(page.locator(`[data-testid="wsf-community-goal-total-${fx.goalIds[0]}"]`)).toHaveCount(0);
   });
 });
