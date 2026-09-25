@@ -336,4 +336,100 @@ test.describe('APP-FEEL-PARITY-1 cp3 · a tab change fades', () => {
     measure('reduced-motion opacity', reduced.slice(0, 6));
     expect(Math.min(...reduced), 'no fade under reduced motion').toBe(1);
   });
+
+  /*
+    THE TAB IT LEAVES IS GONE AT ONCE. The reference hides the leaving tab
+    outright (styles.css `.tab-stage > section[hidden] { display: none; }`)
+    and fades only the entering one, over the app's own ground. A cross-fade
+    paints both tabs together for the length of the fade: two screens of
+    text on top of each other. Found in this checkpoint's own frame
+    (`CANDIDATE-tab-fade-000ms` at a8d117da), not by review.
+
+    WHAT IS MEASURED, AND WHY NOT "IS IT DISPLAYED". On the web every visited
+    tab stays laid out (react-native-screens is off there); a tab is hidden
+    by the focused tab's opaque ground lying over it. So per frame this reads
+    how much of the leaving tab SHOWS THROUGH: the leaving tab's own painted
+    opacity times what the entering tab's ground lets through (1 minus that
+    ground's composite opacity). Content fading inside an opaque ground lets
+    nothing through; a ground that is itself fading does.
+  */
+  test('the tab it leaves is gone at once: the two tabs are never painted together', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('x');
+    await signInVia(page, fx.email, PASSWORD);
+    await page.goto(`/community/${fx.a}`);
+    await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+    await openCommunityTab(page);
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await expect(page.locator('[data-testid="wsf-community-name"]:visible')).toBeVisible();
+    await page.waitForTimeout(800);
+
+    for (const [to, leaving, entering] of [
+      ['community', 'wsf-community-name', 'wsf-community-index'],
+      ['home', 'wsf-community-index', 'wsf-community-name'],
+    ] as const) {
+      // Sampling starts before the press, so the first frame of the change is in it.
+      const sampler = page.evaluate(
+        async ({ out: leavingId, in: enteringId }) => {
+          const chain = (el: HTMLElement): HTMLElement[] => {
+            const out: HTMLElement[] = [];
+            for (let n: HTMLElement | null = el; n; n = n.parentElement) out.push(n);
+            return out;
+          };
+          const opacity = (nodes: HTMLElement[]): number =>
+            nodes.reduce((o, n) => o * Number(getComputedStyle(n).opacity), 1);
+          const first = (id: string): HTMLElement | null =>
+            Array.from(document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)).find(
+              (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
+            ) ?? null;
+          const opaque = (n: HTMLElement): boolean => {
+            const m = getComputedStyle(n).backgroundColor.match(/rgba?\(([^)]+)\)/);
+            if (!m) return false;
+            const parts = m[1]!.split(',').map((s) => Number(s.trim()));
+            return parts.length === 3 || parts[3] === 1;
+          };
+          const frame = () => {
+            const l = first(leavingId);
+            const e = first(enteringId);
+            const content = e ? opacity(chain(e)) : 0;
+            if (!l || !e) return { out: l ? opacity(chain(l)) : 0, ground: null as number | null, leak: 0, content };
+            const lc = chain(l);
+            const ec = chain(e);
+            const lca = ec.find((n) => lc.includes(n))!;
+            // The entering tab's path below the common ancestor, outermost first.
+            const below = ec.slice(0, ec.indexOf(lca)).reverse();
+            // Until the press takes effect the entering tab is the one UNDER
+            // (the focused tab sits at z 0, the rest at -1): nothing leaks yet.
+            const sceneL = lc[lc.indexOf(lca) - 1]!;
+            const sceneE = below[0]!;
+            const z = (n: HTMLElement) => Number(getComputedStyle(n).zIndex) || 0;
+            const enteringOnTop =
+              z(sceneE) > z(sceneL) ||
+              (z(sceneE) === z(sceneL) && Boolean(sceneL.compareDocumentPosition(sceneE) & Node.DOCUMENT_POSITION_FOLLOWING));
+            if (!enteringOnTop) return { out: opacity(lc), ground: null as number | null, leak: 0, content };
+            const groundAt = below.findIndex(opaque);
+            const ground = groundAt < 0 ? 0 : opacity(below.slice(0, groundAt + 1)) * opacity(chain(lca));
+            const out = opacity(lc);
+            return { out, ground, leak: Math.round(out * (1 - ground) * 100) / 100, content };
+          };
+          const frames: { t: number; out: number; ground: number | null; leak: number; content: number }[] = [];
+          const t0 = performance.now();
+          while (performance.now() - t0 < 600) {
+            frames.push({ t: Math.round(performance.now() - t0), ...frame() });
+            await new Promise((r) => requestAnimationFrame(r));
+          }
+          return frames;
+        },
+        { out: leaving, in: entering },
+      );
+      await page.getByTestId(`wsf-member-tab-${to}`).last().click();
+      const frames = await sampler;
+      const leaks = frames.filter((f) => f.leak > 0.01);
+      measure(`to ${to}: frames where the leaving tab shows through`, leaks.slice(0, 8));
+      measure(`to ${to}: entering content opacity`, frames.map((f) => Math.round(f.content * 100) / 100).slice(0, 16));
+      expect(frames.some((f) => f.content > 0), `to ${to}: the entering tab is painted`).toBe(true);
+      expect(leaks, `to ${to}: the leaving tab never shows through`).toEqual([]);
+      await page.waitForTimeout(400);
+    }
+  });
 });
