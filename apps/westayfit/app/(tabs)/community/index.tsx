@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -142,6 +142,22 @@ export default function CommunityIndexScreen() {
     () => (ready && user ? warmState(user.uid) : null) ?? { kind: 'loading' },
   );
   const [attempt, setAttempt] = useState(0);
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 3. WHICH COMMUNITY IS CURRENT IS RE-ASKED,
+    NOT REMEMBERED BY THIS SCREEN.
+
+    This tab stays mounted, and it used to decide CURRENT once, when it first
+    loaded. A member who then switched community -- from its own rows, from
+    Home's Switch, from a chip -- came back to a tab still naming the old one
+    as CURRENT and offering only it as the other row (measured on `91392f9d`
+    and after it). Now a chip, or any focus of this tab that finds the
+    remembered choice (`resolveCurrentCommunity`) has moved, re-renders the
+    tab around the member's actual choice: at once from what this account
+    already read (src/memberReads.ts), then from the fresh reads.
+  */
+  const [selection, setSelection] = useState(0);
+  const retrying = useRef(false);
+  const [announcement, setAnnouncement] = useState('');
   const safeArea = useSafeAreaInsets();
 
   /*
@@ -161,7 +177,8 @@ export default function CommunityIndexScreen() {
     const uid = user.uid;
     // A retry, or an account with nothing already read, starts from loading;
     // a warm first frame for THIS account stays up while the fresh reads run.
-    const warm = attempt === 0 ? warmState(uid) : null;
+    const warm = retrying.current ? null : warmState(uid);
+    retrying.current = false;
     setState(warm ?? { kind: 'loading' });
 
     (async () => {
@@ -231,7 +248,30 @@ export default function CommunityIndexScreen() {
     return () => {
       liveRef.current += 1;
     };
-  }, [ready, user, attempt]);
+  }, [ready, user, attempt, selection]);
+
+  // Back on this tab: if the member's current community moved while they
+  // were elsewhere, the tab follows it.
+  const currentIdNow = state.kind === 'ready' ? state.currentId : null;
+  const idsNow = state.kind === 'ready' ? state.items.map((i) => i.groupId).join(',') : '';
+  useFocusEffect(
+    useCallback(() => {
+      if (!user || !idsNow) return;
+      const chosen = resolveCurrentCommunity(user.uid, idsNow.split(','));
+      if (chosen && chosen !== currentIdNow) setSelection((n) => n + 1);
+    }, [user, idsNow, currentIdNow]),
+  );
+
+  /** A chip: the member's choice, in place, said out loud. */
+  const select = useCallback(
+    (groupId: string, name: string) => {
+      if (!user || groupId === currentIdNow) return;
+      rememberCurrentCommunity(user.uid, groupId);
+      setAnnouncement(`Now showing ${name}.`);
+      setSelection((n) => n + 1);
+    },
+    [user, currentIdNow],
+  );
 
   /** Choosing or switching: remember it, then open that community's Home. */
   const open = useCallback(
@@ -261,11 +301,19 @@ export default function CommunityIndexScreen() {
       ) : state.kind === 'loading' ? (
         <LoadingBody />
       ) : state.kind === 'error' ? (
-        <FailureBody onRetry={() => setAttempt((n) => n + 1)} />
+        <FailureBody
+          onRetry={() => {
+            retrying.current = true;
+            setAttempt((n) => n + 1);
+          }}
+        />
       ) : state.items.length === 0 ? (
         <EmptyBody />
       ) : (
-        <ReadyBody state={state} onOpen={open} />
+        <>
+          <Chips state={state} onSelect={select} />
+          <ReadyBody state={state} onOpen={open} />
+        </>
       )}
     </View>
   );
@@ -277,6 +325,14 @@ export default function CommunityIndexScreen() {
       testID="wsf-community-index"
     >
       {body}
+      {/* The chip's announcement: polite, and not a visible line of copy. */}
+      <Text
+        style={styles.visuallyHidden}
+        testID="wsf-community-index-announce"
+        {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+      >
+        {announcement}
+      </Text>
     </ScrollView>
   );
 }
@@ -398,6 +454,60 @@ function EmptyBody() {
             <Text style={styles.factBody}>{text}</Text>
           </View>
         ))}
+      </View>
+    </View>
+  );
+}
+
+/* ── your communities ───────────────────────────────────────────────────── */
+
+/**
+ * THE REFERENCE'S SWITCHER (Lovable `a15a610e`, screens/community.tsx): one
+ * chip per community this account belongs to, the current one filled and
+ * checked and pressed; pressing another selects it here, in place. Shown only
+ * when there is somewhere to switch to -- a single chip that does nothing
+ * would teach the member the control lies.
+ *
+ * Join is not drawn: this product has no join-by-code route (a recorded seam),
+ * and Start keeps its existing control below.
+ */
+function Chips({
+  state,
+  onSelect,
+}: {
+  state: Extract<State, { kind: 'ready' }>;
+  onSelect: (groupId: string, name: string) => void;
+}) {
+  if (state.items.length < 2) return null;
+  return (
+    <View style={styles.chipsBlock} testID="wsf-community-index-chips">
+      <Text style={styles.eyebrow} {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}>
+        YOUR COMMUNITIES
+      </Text>
+      <View style={styles.chipsRow}>
+        {state.items.map((item) => {
+          const on = item.groupId === state.currentId;
+          return (
+            <Pressable
+              key={item.groupId}
+              onPress={() => onSelect(item.groupId, item.displayName)}
+              accessibilityRole="button"
+              accessibilityLabel={on ? `${item.displayName}, current` : `Show ${item.displayName}`}
+              accessibilityState={{ selected: on }}
+              {...({ 'aria-pressed': on } as Record<string, unknown>)}
+              style={[styles.switchChip, on ? styles.switchChipOn : null]}
+              testID={`wsf-community-index-chip-${item.groupId}`}
+            >
+              {on ? <Text style={[styles.switchChipText, styles.switchChipTextOn]}>✓ </Text> : null}
+              <Text
+                style={[styles.switchChipText, on ? styles.switchChipTextOn : null]}
+                numberOfLines={1}
+              >
+                {item.displayName}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
     </View>
   );
@@ -829,6 +939,24 @@ const styles = StyleSheet.create({
   primaryText: { color: ON_ACTION, fontSize: 15, fontWeight: '900' },
 
   actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', paddingTop: 2 },
+  chipsBlock: { gap: 8 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  /* The reference's .switch-chip: 44 px tall, 22 px round, 1.5 px rule. */
+  switchChip: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: '#D7DFE7',
+    backgroundColor: '#FFFFFF',
+    maxWidth: '100%',
+  },
+  switchChipOn: { borderColor: NAVY, backgroundColor: NAVY },
+  switchChipText: { color: NAVY, fontSize: 13, fontWeight: '800', flexShrink: 1 },
+  switchChipTextOn: { color: '#FFFFFF' },
+  visuallyHidden: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   pill: {
     borderWidth: 1.5,
     borderColor: '#C9C5BC',

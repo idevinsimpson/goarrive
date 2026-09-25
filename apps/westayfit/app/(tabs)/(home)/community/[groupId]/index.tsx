@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
-import { rememberCurrentCommunity } from '../../../../../src/currentCommunity';
+import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../../../src/currentCommunity';
 import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
 import { describeCallableError } from '../../../../../src/callableErrors';
 import { FormShell } from '../../../../../src/AuthFormPrimitives';
@@ -104,7 +104,12 @@ import {
   kit,
 } from '../../../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
-import { forgetCommunity, readGoals, readMyCommunities } from '../../../../../src/memberReads';
+import {
+  forgetCommunity,
+  peekMyCommunities,
+  readGoals,
+  readMyCommunities,
+} from '../../../../../src/memberReads';
 import {
   MomentumRow,
   PresenceRow,
@@ -488,6 +493,34 @@ export default function CommunityPage() {
   useEffect(() => {
     if (groupId) rememberCurrentCommunity(user?.uid ?? null, groupId);
   }, [groupId, user?.uid]);
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 3. HOME FOLLOWS THE MEMBER'S CHOICE.
+
+    The member can choose a different community without leaving the Community
+    tab (its chips, as the reference does). This screen stays mounted in the
+    Home tab meanwhile, so coming back to Home used to show the community
+    they had just switched away from. On a return, if the remembered choice
+    is a different community this account belongs to (from its own last
+    read), Home opens that one in its own stack -- replacing, so Back does not
+    lead to the old one, and never over the tabs.
+
+    Only a RETURN: the first focus is this screen being opened, which is
+    itself the member's choice and has just been remembered above.
+  */
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) {
+        focusedOnce.current = true;
+        return;
+      }
+      const uid = user?.uid ?? null;
+      const ids = peekMyCommunities(uid)?.items.map((i) => i.groupId);
+      if (!uid || !groupId || !ids || ids.length === 0) return;
+      const chosen = resolveCurrentCommunity(uid, ids);
+      if (chosen && chosen !== groupId) router.replace(`/community/${chosen}` as never);
+    }, [user?.uid, groupId, router]),
+  );
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
@@ -998,8 +1031,6 @@ export default function CommunityPage() {
     if (!ready || !user || !groupId) return;
 
     let cancelled = false;
-    // Loading only when there is nothing of this account's for this community
-    // to stand on (a warm re-entry keeps its last goals until this lands).
     setGoalsState({ kind: 'loading' });
 
     (async () => {
@@ -1019,8 +1050,6 @@ export default function CommunityPage() {
         // screen keeps its own fixed copy (rendered by the goals-error hero
         // and the Champion panel, neither of which prints this message).
         console.warn('[wsf] goal list failed', e);
-        // Warm goals already on screen stay; their figures fall to the
-        // last-known treatment through the progress reads.
         setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();
