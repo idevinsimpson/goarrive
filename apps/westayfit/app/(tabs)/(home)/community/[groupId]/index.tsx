@@ -104,6 +104,7 @@ import {
   kit,
 } from '../../../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
+import { forgetCommunity, readGoals, readMyCommunities } from '../../../../../src/memberReads';
 import {
   MomentumRow,
   PresenceRow,
@@ -875,6 +876,7 @@ export default function CommunityPage() {
         });
         if (cancelled) return;
         if (!membershipSnap || !membershipSnap.exists()) {
+          forgetCommunity(user.uid, groupId);
           setState({ kind: 'notMember' });
           return;
         }
@@ -890,6 +892,7 @@ export default function CommunityPage() {
         // but this screen is itself a member-only path and was not closing.
         // Anything that is not an active membership is not a membership here.
         if (membership.membershipStatus !== 'active') {
+          forgetCommunity(user.uid, groupId);
           setState({ kind: 'notMember' });
           return;
         }
@@ -897,6 +900,7 @@ export default function CommunityPage() {
         const groupSnap = await getDoc(doc(db, 'wsfCommunityGroups', groupId));
         if (cancelled) return;
         if (!groupSnap.exists()) {
+          forgetCommunity(user.uid, groupId);
           setState({ kind: 'error', message: 'Community not found.' });
           return;
         }
@@ -912,11 +916,10 @@ export default function CommunityPage() {
         let isSample = group.isSample === true;
         let activeChallenge: ActiveChallenge | null = null;
         try {
-          const myFn = httpsCallable<Record<string, never>, MyCommunitiesResponse>(
-            functions,
-            'wsfMyCommunities'
-          );
-          const myResult = await myFn({});
+          // The same read Home's list makes, shared when it is in flight
+          // (src/memberReads.ts): the list redirecting here asks at the same
+          // moment, and one answer serves both.
+          const myResult = { data: (await readMyCommunities(user.uid)) as unknown as MyCommunitiesResponse };
           if (cancelled) return;
           otherCommunityCount = Math.max(0, myResult.data.items.length - 1);
           const item = myResult.data.items.find((i) => i.groupId === groupId);
@@ -995,20 +998,19 @@ export default function CommunityPage() {
     if (!ready || !user || !groupId) return;
 
     let cancelled = false;
+    // Loading only when there is nothing of this account's for this community
+    // to stand on (a warm re-entry keeps its last goals until this lands).
     setGoalsState({ kind: 'loading' });
 
     (async () => {
       try {
-        const fn = httpsCallable<
-          { groupId: string; includeHistory: boolean },
-          ListGoalsResponse
-        >(getFirebaseFunctions(), 'wsfListGoals');
         // ONE call and one round trip for both sections. `includeHistory` adds
         // every closed goal of the community regardless of display
         // authorization — the community's own record — and the extra facts a
         // history row needs to state its result. The screen splits active from
-        // closed below; the server does not decide the layout.
-        const result = await fn({ groupId, includeHistory: true });
+        // closed below; the server does not decide the layout. Shared with an
+        // identical read in flight (src/memberReads.ts).
+        const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
@@ -1017,6 +1019,8 @@ export default function CommunityPage() {
         // screen keeps its own fixed copy (rendered by the goals-error hero
         // and the Champion panel, neither of which prints this message).
         console.warn('[wsf] goal list failed', e);
+        // Warm goals already on screen stay; their figures fall to the
+        // last-known treatment through the progress reads.
         setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();

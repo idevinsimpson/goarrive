@@ -1,5 +1,4 @@
 import { router, useNavigation } from 'expo-router';
-import { httpsCallable } from 'firebase/functions';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -7,7 +6,6 @@ import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
 import { resolveCurrentCommunity } from '../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions } from '../../src/firebase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ButtonLink } from '../../src/ui/ButtonLink';
@@ -37,6 +35,7 @@ import {
   kit,
 } from '../../src/ui/kit';
 import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
+import { readGoals, readMyCommunities } from '../../src/memberReads';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -128,11 +127,9 @@ export default function MoveResolver() {
     let cancelled = false;
     (async () => {
       try {
-        const fns = getFirebaseFunctions();
-        const mine = await httpsCallable<Record<string, never>, { items: MyCommunityItem[] }>(
-          fns,
-          'wsfMyCommunities',
-        )({});
+        // Fresh reads, shared with any identical read already in flight
+        // (src/memberReads.ts). MOVE still decides on a fresh answer.
+        const mine = { data: (await readMyCommunities(user.uid)) as unknown as { items: MyCommunityItem[] } };
         if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
         const groupId = resolveCurrentCommunity(user.uid, ids);
@@ -143,24 +140,15 @@ export default function MoveResolver() {
           router.replace('/');
           return;
         }
-        const listed = await httpsCallable<
-          { groupId: string; includeHistory: boolean },
-          ListGoalsResponse
-        >(
-          fns,
-          'wsfListGoals',
-          /*
-            THE TOTALS ARE ONLY IN THE RESPONSE WHEN THIS FLAG IS ON.
-            wsfListGoals returns sharedTotal only under includeHistory, so
-            asking without it and falling back to zero printed "0 of 5,000
-            squats" for a goal that actually stood at 1,847 -- a false
-            statement about every row. This asks for what it is going to
-            show. No new backend behaviour: the flag and the callable are
-            both already there, and the caller is active-member-gated either
-            way. Closed goals arrive with it; actionableGoals drops them, as
-            it always has.
-          */
-        )({ groupId, includeHistory: true });
+        /*
+          THE TOTALS ARE ONLY IN THE RESPONSE WHEN includeHistory IS ON.
+          wsfListGoals returns sharedTotal only under includeHistory, so asking
+          without it and falling back to zero printed "0 of 5,000 squats" for a
+          goal that actually stood at 1,847 -- a false statement about every
+          row. `readGoals` always asks with it (src/memberReads.ts). Closed
+          goals arrive with it; actionableGoals drops them, as it always has.
+        */
+        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId) };
         // `leaving()`: the member pressed Close while this was being read.
         // They are leaving, and the answer must not send them anywhere else.
         if (cancelled || leaving()) return;
@@ -213,6 +201,35 @@ export default function MoveResolver() {
     instead of being a control that does nothing.
   */
   const close = () => exit(leave);
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 2. A NAMED WAY OUT LANDS ON THE MEMBER'S
+    MOUNTED TABS; IT DOES NOT BUILD A SECOND SET.
+
+    "Go to your community" and "Go Home" were links. Followed from this sheet
+    -- a screen of the ROOT stack, above the tabs -- a link pushed a whole
+    second tab navigator on top, with its own copy of the community going
+    through the loading screen, while the first copy stayed painted under it
+    and this sheet stayed in the history. Measured on `91392f9d`: two
+    community instances and the loading screen.
+
+    They now leave the way the contribution flow's labelled exits do
+    (contribute/[goalId].tsx, `leaveFor`): the sheet travels out, then the
+    community opens in the member's Home tab (`dismissTo`, which keeps the
+    mounted screen when it is already that community), or the Home tab is
+    selected as it stands.
+  */
+  const navigation = useNavigation();
+  const leaveTo = (href: string) =>
+    exit(() => {
+      if (href === '/') {
+        navigation.dispatch({
+          type: 'POP_TO',
+          payload: { name: '(tabs)', params: { screen: '(home)' } },
+        } as never);
+        return;
+      }
+      router.dismissTo(href as never);
+    });
   const leave = () => {
     if (router.canGoBack()) {
       router.back();
@@ -231,7 +248,6 @@ export default function MoveResolver() {
     contribution opened from one of its goals sits over it, and Escape there is
     not a request to close something the member cannot see.
   */
-  const navigation = useNavigation();
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onKey = (e: KeyboardEvent) => {
@@ -387,8 +403,8 @@ export default function MoveResolver() {
             contributions need an open goal.
           </Text>
         </View>
-        <ButtonLink
-          href={`/community/${state.groupId}`}
+        <ExitLink
+          onGo={() => leaveTo(`/community/${state.groupId}`)}
           style={s.ghost}
           textStyle={s.ghostText}
           testID="wsf-move-no-goal-community"
@@ -406,8 +422,8 @@ export default function MoveResolver() {
           <Text style={s.hiddenProbe} testID="wsf-move-error">
             {state.message}
           </Text>
-          <ButtonLink
-            href="/"
+          <ExitLink
+            onGo={() => leaveTo('/')}
             style={s.cardAction}
             textStyle={s.cardActionText}
             testID="wsf-move-error-home"
@@ -420,6 +436,41 @@ export default function MoveResolver() {
         </Text>
       )}
     </View>,
+  );
+}
+
+/** Looks like `ButtonLink`; leaves through the member's mounted tabs. */
+function ExitLink({
+  onGo,
+  style,
+  textStyle,
+  testID,
+  label,
+}: {
+  onGo: () => void;
+  style: object;
+  textStyle: object;
+  testID: string;
+  label: string;
+}) {
+  return (
+    <Pressable
+      onPress={onGo}
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      style={style}
+      testID={testID}
+      // No href to follow, so it answers Enter itself (react-native-web
+      // leaves Enter on role=link to the browser).
+      {...({
+        onKeyDown: (e: { key?: string; repeat?: boolean; nativeEvent?: { key?: string; repeat?: boolean } }) => {
+          const key = e.key ?? e.nativeEvent?.key;
+          if (key === 'Enter' && !(e.repeat ?? e.nativeEvent?.repeat)) onGo();
+        },
+      } as Record<string, unknown>)}
+    >
+      <Text style={textStyle}>{label}</Text>
+    </Pressable>
   );
 }
 

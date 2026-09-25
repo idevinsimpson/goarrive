@@ -1,4 +1,4 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useRef, useState } from 'react';
 import { View } from 'react-native';
@@ -143,6 +143,28 @@ function MemberShell() {
     },
   ];
 
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 2. THE WORDMARK SELECTS HOME AS IT STANDS.
+
+    It used to be `router.navigate('/')`, which pushed Home's index route onto
+    the Home stack; the index's own redirect then built a SECOND copy of the
+    member's community through its loading branch. Measured on `91392f9d`:
+    the loading screen, 16 callables and two community instances, with the
+    member's scroll and loaded state left behind in the first. That is the
+    owner's "slow tab change" and "duplicate Home header".
+
+    It now does exactly what the Home tab in the bar does, and what the
+    contribution flow's "Back to home" already does: select the Home tab with
+    its mounted screen, its scroll and its data. From Home it is a no-op, as
+    the top bar has always promised.
+  */
+  const rootNavigation = useNavigation();
+  const goHome = () =>
+    rootNavigation.dispatch({
+      type: 'POP_TO',
+      payload: { name: '(tabs)', params: { screen: '(home)' } },
+    } as never);
+
   return (
     <View ref={shellRef} style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
       {signedIn ? (
@@ -150,7 +172,7 @@ function MemberShell() {
           menu={menu}
           menuOpen={menuOpen}
           onMenuToggle={setMenuOpen}
-          onHome={() => router.navigate('/')}
+          onHome={goHome}
         />
       ) : null}
       <View style={{ flex: 1 }}>
