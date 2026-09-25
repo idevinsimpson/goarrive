@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 19:28Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 19:50Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -13,14 +13,14 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | development `claude/wsf-app-shell` | **`91392f9d`** = `502b1e8d` → `00d6d44e` (W6 MOVEMENT-PILLS-1) → `91392f9d` (W9 cp1); tree `d8c9cf48`; tsc 0, guard 9/20, vitest 891 |
 | `main` | `e20994a7` (Merge #486: pin → `91392f9d`; earlier: OPS-DOC-1 #476, skill #480, pointers #481) |
 | staging pin | `approvedAppSha` `91392f9d`, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED `5838304652` after W7 Check 39 `5838198472`) |
-| served staging | **run 49 `36179721264` DISPATCHED 19:26:49Z** for `91392f9d` (#365 `5838320049`) — receipts pending; last verified served `502b1e8d` via run 48 `36133376723` |
+| served staging | **`91392f9d`**, run 49 `36179721264`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0 (social excluded), cleanup COMPLETE 349 / 349 (#365 `5838524319`–`5838527660`) |
 
 **Active packets.**
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · #482 · cp1 `7dc46cda` | **ACCEPTED** `5837302206` (W7 36C closed F2) → **integrated `91392f9d`** (#482 `5837323466`); Chromium only; cp2 warm state / Settings / panel styling / icon / instructions remain; W9 continues cp2 | staged with W6 via pin #486 |
-| **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` → integrated `00d6d44e`; multiple movements, icon parity, native / AT proof, W7 N1 remain; seam direction accepted `5836170255`, no release | **pin #486 `92a02d50`** → `91392f9d` (W3 `5837894586`; L0 git `5838191536`: one file, prior 49, boundary re-measured, run-all green) → **W7 Check 39 executing** (`5838147782`) → Director → L0 merge → ONE dispatch |
+| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · #482 · cp1 `7dc46cda` | **ACCEPTED** `5837302206` (W7 36C closed F2) → **integrated `91392f9d`** (#482 `5837323466`); Chromium only; cp2 warm state / Settings / panel styling / icon / instructions remain; W9 continues cp2 | **SERVED** via run 49 |
+| **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` → integrated `00d6d44e`; multiple movements, icon parity, native / AT proof, W7 N1 remain; seam direction accepted `5836170255`, no release | **SERVED** via run 49 (pin #486 merged `e20994a7`) |
 | **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `6c1d115e` | Director HOLD `5836331823` → successor `6c1d115e` (`5836628700`), then G2a / G1b successor `2a251083` pushed after the pin | W7 changed rows → Director |
 | **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `736ebd77` on `main` `7e423a48` | seed carried blob-identical; M8 test +39; workflow unchanged since `8f8c4530`; run-all green (L0 git on #484) | W7 changed rows → Director → L0 PLAN → APPLY / VERIFY |
 | JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
@@ -28,11 +28,11 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | MOVEMENT-VISION-1 | W10 · #475 · `eda58218` | accepted as isolated R&D core only (`5827675294`) | owner phone trial; no port or staging |
 | MOVEMENT-VISION-NORTHSTAR-1 | Director · Lovable remix `c1b16a13` (frozen `a84e6764` / `8c61cd72`) | NOT READY | owner phone trial |
 
-**W7:** Check 36B delivered (D1 / F3 closed, F2 open). Order: Check 39 (pin #486, re-scoped to `91392f9d`) → Check 37 changed rows (W3).
+**W7:** Check 36B delivered (D1 / F3 closed, F2 open). Check 39 done; next: Check 37 changed rows (W3 `2a251083`).
 
 **Staging.** Runbook: **`skills/wsf-staging-deploy/SKILL.md` on `main`** (linked from `CLAUDE.md` / `AGENTS.md`). Each stable accepted integrated milestone stages without another owner prompt: pin via a worker → independent check → Director accept → L0 merges the pin → one dispatch → deployment / served-marker / hosted / cleanup receipts.
 
-**Served vs readiness.** Served `502b1e8d`. Social is **not ready**: three social callables SHUT (Operation 2: no capable identity; the deployer is measured unable) and the `wsfContributions` index unmeasured, no READY receipt; social smokes, members deep link and `/move` direct load not run; email blocked; shared kiosk HELD. The sample seed is a separate path through the reviewed `social-demo-seed` mode and does not by itself prove social.
+**Served vs readiness.** Served `91392f9d` (run 49). Node 20 functions runtime decommissions 2026-10-30 (deploy warning; backend, Director's call). Social is **not ready**: three social callables SHUT (Operation 2: no capable identity; the deployer is measured unable) and the `wsfContributions` index unmeasured, no READY receipt; social smokes, members deep link and `/move` direct load not run; email blocked; shared kiosk HELD. The sample seed is a separate path through the reviewed `social-demo-seed` mode and does not by itself prove social.
 
 **Waiting on the owner:** the lab phone test (`5826104270`). EXP1 held; W2 / W4 / W1B / W8 parked; W5 stopped.
 
