@@ -181,30 +181,32 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
         const routeIndex = state.routes.findIndex((r) => r.name === tab.name);
         const route = state.routes[routeIndex];
         const active = state.index === routeIndex;
+        const select = () => {
+          /**
+           * THE NO-OP, STATED ONCE AND EARLY. Pressing the tab you are on
+           * does nothing at all: no navigation, no event emitted, no
+           * pop-to-top. Everything below is skipped, so there is no path
+           * by which a second tap can reach the router.
+           */
+          if (active) return;
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route?.key,
+            canPreventDefault: true,
+          });
+          if (event.defaultPrevented) return;
+          /**
+           * `navigate`, not `push` and not `replace`. Within a tab
+           * navigator `navigate` moves focus to a sibling that is already
+           * mounted; it does not stack an entry of its own.
+           */
+          navigation.navigate(route?.name ?? tab.name);
+        };
         return (
           <Fragment key={tab.key}>
           <Pressable
-            onPress={() => {
-              /**
-               * THE NO-OP, STATED ONCE AND EARLY. Pressing the tab you are on
-               * does nothing at all: no navigation, no event emitted, no
-               * pop-to-top. Everything below is skipped, so there is no path
-               * by which a second tap can reach the router.
-               */
-              if (active) return;
-              const event = navigation.emit({
-                type: 'tabPress',
-                target: route?.key,
-                canPreventDefault: true,
-              });
-              if (event.defaultPrevented) return;
-              /**
-               * `navigate`, not `push` and not `replace`. Within a tab
-               * navigator `navigate` moves focus to a sibling that is already
-               * mounted; it does not stack an entry of its own.
-               */
-              navigation.navigate(route?.name ?? tab.name);
-            }}
+            onPress={select}
+            {...enterSelects(select)}
             style={[styles.tab, narrow ? styles.tabHalf : null]}
             testID={`wsf-member-tab-${tab.key}`}
             accessibilityRole="link"
@@ -252,6 +254,27 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
       })}
     </View>
   );
+}
+
+/**
+ * ENTER SELECTS A TAB, AS IT FOLLOWS A LINK.
+ *
+ * Each destination is a link-roled Pressable with no href, and
+ * react-native-web leaves Enter on a link to the browser -- which has nothing
+ * to follow. Measured on the base: a keyboard member could focus Home,
+ * Community, Progress or You and not open any of them, with Enter or Space
+ * (WCAG 2.1.1). Enter now does what a press does. Space stays a link's no-op,
+ * and the no-op on the current tab is `select`'s own.
+ */
+type KeyLike = { key?: string; repeat?: boolean; nativeEvent?: { key?: string; repeat?: boolean } };
+function enterSelects(select: () => void): Record<string, unknown> {
+  return {
+    onKeyDown: (e: KeyLike) => {
+      const key = e.key ?? e.nativeEvent?.key;
+      const repeat = e.repeat ?? e.nativeEvent?.repeat;
+      if (key === 'Enter' && !repeat) select();
+    },
+  };
 }
 
 /**

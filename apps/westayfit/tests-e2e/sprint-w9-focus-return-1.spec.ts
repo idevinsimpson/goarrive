@@ -445,6 +445,24 @@ test.describe('FOCUS-RETURN-1 · with no opener: the heading, else the current t
     expect(await focusedId(page), 'a tab switch leaves focus where the member put it').toBe('wsf-member-tab-you');
   });
 
+  test('the tab bar answers Enter: a keyboard member reaches every destination, and focus stays on the tab they chose', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('k', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await TAB_CASES[0]!.open(page, fx);
+    for (const [tab, ready] of [
+      ['wsf-member-tab-community', 'wsf-community-index-rows'],
+      ['wsf-member-tab-activity', 'wsf-activity'],
+      ['wsf-member-tab-you', 'wsf-you-identity'],
+      ['wsf-member-tab-home', 'wsf-community-hero-presence'],
+    ] as const) {
+      await pressByKeyboard(page, tab);
+      await expect(page.locator(`[data-testid="${ready}"]:visible`), `Enter on ${tab} opens it`).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => currentTab(page), { timeout: 10_000 }).toBe(tab);
+      expect(await focusedId(page), `focus stays on ${tab}`).toBe(tab);
+    }
+  });
+
   test('Progress’s own “Start moving”: measured, and never body', async ({ page }) => {
     test.setTimeout(240_000);
     // Nothing recorded yet, so Progress shows its own "Start moving". It is a
