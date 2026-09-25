@@ -1,113 +1,40 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { expect, test, type Browser, type Page, type Route } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { CAPTURE_FRAMES } from './helpers/capture';
-import {
-  firestoreWrite,
-  seedActiveGoal,
-  seedCommunity,
-  seedMembership,
-  seedProfile,
-  seedVerifiedUser,
-  signInVia,
-  stampId,
-  tsField,
-} from './helpers/mobile';
 
 /**
- * YOU-PARITY-1 (Director #365 `5840666502`, lane C).
+ * YOU-PARITY-1 — PHASE A (Director #365 `5840666502` lane C; #456 `5840756497`).
  *
- * The You route recomposed to the accepted Lovable reference `642f830b`:
- * identity leads; the current community and role in a navy band; the shared
- * Living WE position beside a SEPARATE exact confirmed own part; "Other goals
- * you helped" with truthful lifecycle; honest no-own / no-eligible / failed
- * states; the account last and quiet.
+ * The accepted Lovable You reference (`642f830b`) as a PURE view,
+ * `src/ui/YouParityView.tsx`, driven here through its gated component fixture
+ * `/design-target/you-parity?state=…`. The route `app/(tabs)/you.tsx` is W9's
+ * during PERF-MOBILE-1 and is NOT touched in Phase A; the real-route tests for
+ * the hook (Phase B) are preserved at `1720c44b` and return with it.
  *
- * The fixture reproduces the reference's own state as closely as canonical data
- * allows: "Alex M." in "Oak Grove Together" (23 members), "500 squats
- * together" at 241 of 500 with 25 of them this member's, and a reached,
- * still-open goal they also helped.
- *
- * EVIDENCE IS OPT-IN (WSF_CAPTURE_FRAMES=1). `WSF_YOU_PARITY_PHASE` names the
- * build being photographed (`before` = base 0b460ce3, `after` = candidate), so
- * one spec photographs both. Frames are captured at device pixel ratio 1,
- * because the reference originals are 390-wide at ratio 1 and an overlay needs
- * the same pixel grid. Nothing accepted is written.
+ * EVIDENCE IS OPT-IN (WSF_CAPTURE_FRAMES=1): fixture frames at device pixel
+ * ratio 1 (the reference originals are 390-wide at ratio 1), and for each a
+ * side-by-side, a 50 % overlay and a difference image against the original,
+ * CROPPED TO THE SAME BODY WINDOW — below the reference's 92 px masthead and
+ * above its 75 px tab bar — because masthead and tab bar are the shell, W9's.
+ * A second, ALIGNED set shifts the view so both community bands start on one
+ * row, which separates the head's height difference from everything below it.
+ * Nothing accepted is written.
  */
 
 const OUT = path.resolve(__dirname, '../../../docs/design-target/review/you-parity-1');
 const LOVABLE = path.join(OUT, 'lovable-642f830b');
-const PHASE = process.env.WSF_YOU_PARITY_PHASE === 'before' ? 'before' : 'after';
-
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
   '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
-async function seedOwnCredit(goalId: string, uid: string, total: number): Promise<void> {
-  await firestoreWrite(`wsfGoalMemberTotals/${goalId}_${uid}`, {
-    goalId: { stringValue: goalId },
-    userId: { stringValue: uid },
-    total: { integerValue: String(total) },
-    contributionCount: { integerValue: '1' },
-    updatedAt: tsField(new Date()),
-  });
-}
-
-type Fx = { email: string; password: string; uid: string; groupId: string };
-
-type Variant = 'normal' | 'noOwn' | 'noEligible';
-
-/** The reference's member and community. `variant` removes what the state lacks. */
-async function seedReference(label: string, variant: Variant): Promise<Fx> {
-  const id = stampId();
-  const email = `wsf-${label}-${id}@example.com`;
-  const password = `Pw-${randomBytes(9).toString('base64url')}`;
-  const uid = await seedVerifiedUser(email, password);
-  await seedProfile(uid, 'Alex M.');
-  const groupId = `${label}g-${id}`;
-  await seedCommunity({
-    groupId,
-    displayName: 'Oak Grove Together',
-    joinPolicy: 'inviteOnly',
-    members: [{ uid, role: 'member' }],
-  });
-  // 22 more active members, so the band reads "23 members" as the reference
-  // does. Memberships only: no account, profile or activity is invented.
-  for (let i = 0; i < 22; i += 1) await seedMembership(groupId, `${label}m${i}-${id}`, 'member');
-
-  if (variant === 'noEligible') return { email, password, uid, groupId };
-
-  const lead = `${label}lead-${id}`;
-  await seedActiveGoal({
-    goalId: lead,
-    groupId,
-    ownerUid: uid,
-    title: '500 squats together',
-    target: 500,
-    unit: 'squats',
-    total: 241,
-    endsAt: new Date(Date.now() + 2 * 24 * 60 * 60_000),
-  });
-  if (variant === 'noOwn') return { email, password, uid, groupId };
-  await seedOwnCredit(lead, uid, 25);
-
-  const other = `${label}other-${id}`;
-  await seedActiveGoal({
-    goalId: other,
-    groupId,
-    ownerUid: uid,
-    title: '150 squats this week',
-    target: 150,
-    unit: 'squats',
-    total: 155,
-    endsAt: new Date(Date.now() + 6 * 24 * 60 * 60_000),
-  });
-  await seedOwnCredit(other, uid, 20);
-  return { email, password, uid, groupId };
-}
+const FIXTURE = (state: string) => `/design-target/you-parity?state=${state}`;
+/** The reference's masthead (prototype strip 30 + top bar 62) and tab bar. */
+const TOP = 92;
+const TAB_BAR = 75;
 
 async function phone(browser: Browser, viewport: { width: number; height: number }, dpr = 2) {
   const context = await browser.newContext({
@@ -122,158 +49,186 @@ async function phone(browser: Browser, viewport: { width: number; height: number
   return { context, page: await context.newPage() };
 }
 
+async function open(page: Page, state: string) {
+  await page.goto(FIXTURE(state));
+  await expect(page.getByTestId('wsf-you-parity-fixture')).toHaveAttribute('data-state', state, { timeout: 30_000 });
+}
+
 async function top(page: Page, testId: string): Promise<number> {
   const box = await page.getByTestId(testId).first().boundingBox();
   expect(box, `${testId} has no box`).not.toBeNull();
   return box!.y;
 }
 
-const M = { width: 390, height: 844 };
+const pressed = (page: Page) => page.getByTestId('wsf-you-parity-fixture').getAttribute('data-pressed');
 
-test.describe('YOU-PARITY-1 · behaviour', () => {
-  test('the member story leads, in the reference order, and the account is last', async ({ browser }) => {
-    test.setTimeout(240_000);
-    const fx = await seedReference('yp1', 'normal');
-    const { context, page } = await phone(browser, M);
-    await signInVia(page, fx.email, fx.password);
-    await page.goto('/you');
-    await expect(page.getByTestId('wsf-you-member')).toBeVisible({ timeout: 40_000 });
+for (const vp of [
+  { width: 390, height: 844 },
+  { width: 390, height: 640 },
+]) {
+  test.describe(`YOU-PARITY-1 · view · ${vp.width}x${vp.height}`, () => {
+    test('the member story leads, in the reference order, with the account last', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'normal');
+      await expect(page.getByTestId('wsf-you-name')).toHaveText('Alex M.');
+      await expect(page.getByTestId('wsf-you-community')).toContainText('Oak Grove Together');
+      await expect(page.getByTestId('wsf-you-community')).toContainText('23 members');
+      await expect(page.getByTestId('wsf-you-lead-status')).toHaveText('OPEN');
+      await expect(page.getByTestId('wsf-you-lead-shared')).toHaveText('241 / 500 confirmed');
+      await expect(page.getByTestId('wsf-you-lead-own')).toContainText('25');
+      await expect(page.getByTestId('wsf-you-others')).toContainText('REACHED · STILL OPEN');
+      const y = {
+        identity: await top(page, 'wsf-you-identity'),
+        community: await top(page, 'wsf-you-community'),
+        lead: await top(page, 'wsf-you-lead'),
+        others: await top(page, 'wsf-you-others'),
+        account: await top(page, 'wsf-you-account'),
+      };
+      expect(y.identity).toBeLessThan(y.community);
+      expect(y.community).toBeLessThan(y.lead);
+      expect(y.lead).toBeLessThan(y.others);
+      expect(y.others).toBeLessThan(y.account);
+      // The identity, the community and the whole lead block are on the first
+      // screen at 390x844, as in the reference; at 640 the lead starts on it.
+      await expect(page.getByTestId('wsf-you-identity')).toBeInViewport({ ratio: 1 });
+      await expect(page.getByTestId('wsf-you-lead')).toBeInViewport();
+      // Settings is a 48 px target; Sign out is reachable by scrolling.
+      const settings = await page.getByTestId('wsf-you-settings').boundingBox();
+      expect(settings!.width).toBeGreaterThanOrEqual(48);
+      expect(settings!.height).toBeGreaterThanOrEqual(48);
+      await page.getByTestId('wsf-you-signout').scrollIntoViewIfNeeded();
+      await expect(page.getByTestId('wsf-you-signout')).toBeInViewport({ ratio: 1 });
+      await page.getByTestId('wsf-you-signout').click();
+      expect(await pressed(page)).toBe('signout');
+      await context.close();
+    });
 
-    await expect(page.getByTestId('wsf-you-name')).toHaveText('Alex M.');
-    await expect(page.getByTestId('wsf-you-settings')).toBeVisible();
-    await expect(page.getByTestId('wsf-you-community')).toContainText('Oak Grove Together');
-    await expect(page.getByTestId('wsf-you-community')).toContainText('Member');
-    await expect(page.getByTestId('wsf-you-community')).toContainText('23 members');
+    test('no own part, a goal open: Start moving is whole on screen and only calls back', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'no-own');
+      const start = page.getByTestId('wsf-you-start-moving');
+      await expect(start).toBeVisible();
+      await start.scrollIntoViewIfNeeded();
+      await expect(start).toBeInViewport({ ratio: 1 });
+      const box = await start.boundingBox();
+      expect(box!.height).toBeGreaterThanOrEqual(54);
+      await start.click();
+      expect(await pressed(page)).toBe('move');
+      await context.close();
+    });
 
-    const lead = page.getByTestId('wsf-you-lead');
-    await expect(lead).toContainText('500 squats together');
-    await expect(page.getByTestId('wsf-you-lead-status')).toHaveText('OPEN');
-    await expect(page.getByTestId('wsf-you-lead-shared')).toHaveText('241 / 500 confirmed');
-    // Your part, in its unit, and nothing joins it to the shared figure.
-    await expect(page.getByTestId('wsf-you-lead-own')).toContainText('25');
-    await expect(page.getByTestId('wsf-you-lead-own')).toContainText('squats');
-    // No claim joins the two: no share of the total, no rank, no streak.
-    // (The reference's own truth line says "No rank, streak, score…", so the
-    // check is on claims, not on those words.)
-    await expect(page.getByTestId('wsf-you-lead-own')).not.toContainText('%');
-    await expect(lead).not.toContainText(/your share|of the total|#\d|\d+[- ]day streak/i);
-    await expect(lead).toContainText('Shared and yours are separate facts.');
+    test('nothing eligible: no Start moving, a way to the community', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'no-eligible');
+      await expect(page.getByTestId('wsf-you-nothing-yet')).toHaveAttribute('data-state', 'no-eligible-goal');
+      await expect(page.getByTestId('wsf-you-start-moving')).toHaveCount(0);
+      await page.getByTestId('wsf-you-open-community').click();
+      expect(await pressed(page)).toBe('community');
+      await context.close();
+    });
 
-    const others = page.getByTestId('wsf-you-others');
-    await expect(others).toContainText('Other goals you helped');
-    await expect(others).toContainText('150 squats this week');
-    await expect(others).toContainText('REACHED · STILL OPEN');
-    await expect(others).toContainText('20 squats');
-    await expect(others).toContainText('155 / 150 squats');
+    test('failure keeps identity and community, guesses nothing, retries by callback', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'failed');
+      await expect(page.getByTestId('wsf-you-failed')).toContainText('Contribution details unavailable');
+      await expect(page.getByTestId('wsf-you-community')).toContainText('Oak Grove Together');
+      await expect(page.getByTestId('wsf-you-lead-own')).toHaveCount(0);
+      await page.getByTestId('wsf-you-retry').click();
+      expect(await pressed(page)).toBe('retry');
+      await context.close();
+    });
 
-    // THE ORDER is the claim: who you are, where you belong, your part, the
-    // other goals, and only then the account.
-    const y = {
-      identity: await top(page, 'wsf-you-identity'),
-      community: await top(page, 'wsf-you-community'),
-      lead: await top(page, 'wsf-you-lead'),
-      others: await top(page, 'wsf-you-others'),
-      account: await top(page, 'wsf-you-account'),
-    };
-    expect(y.identity).toBeLessThan(y.community);
-    expect(y.community).toBeLessThan(y.lead);
-    expect(y.lead).toBeLessThan(y.others);
-    expect(y.others).toBeLessThan(y.account);
-    // No email above the member story.
-    expect(await top(page, 'wsf-you-email')).toBeGreaterThan(y.lead);
-
-    // Sign-out is still reachable, and still works.
-    await page.getByTestId('wsf-you-signout').scrollIntoViewIfNeeded();
-    await expect(page.getByTestId('wsf-you-signout')).toBeInViewport();
-    await context.close();
-  });
-
-  test('no own part, with a goal open: Start moving opens MOVE', async ({ browser }) => {
-    test.setTimeout(240_000);
-    const fx = await seedReference('yp2', 'noOwn');
-    const { context, page } = await phone(browser, M);
-    await signInVia(page, fx.email, fx.password);
-    await page.goto('/you');
-    const card = page.getByTestId('wsf-you-nothing-yet');
-    await expect(card).toContainText('Your first confirmed contribution can start here', { timeout: 40_000 });
-    await expect(page.getByTestId('wsf-you-lead')).toHaveCount(0);
-    await expect(page.getByTestId('wsf-you-community')).toContainText('Oak Grove Together');
-    await page.getByTestId('wsf-you-start-moving').click();
-    await page.waitForURL(/\/move/, { timeout: 20_000 });
-    await context.close();
-  });
-
-  test('no own part and nothing open: no Start moving, a way to the community', async ({ browser }) => {
-    test.setTimeout(240_000);
-    const fx = await seedReference('yp3', 'noEligible');
-    const { context, page } = await phone(browser, M);
-    await signInVia(page, fx.email, fx.password);
-    await page.goto('/you');
-    const card = page.getByTestId('wsf-you-nothing-yet');
-    await expect(card).toContainText('No goal is open for contributions', { timeout: 40_000 });
-    await expect(card).toHaveAttribute('data-state', 'no-eligible-goal');
-    await expect(page.getByTestId('wsf-you-start-moving')).toHaveCount(0);
-    await expect(page.getByTestId('wsf-you-open-community')).toBeVisible();
-    await context.close();
-  });
-
-  test('a failed goal read keeps identity AND community, and guesses nothing', async ({ browser }) => {
-    test.setTimeout(240_000);
-    const fx = await seedReference('yp4', 'normal');
-    const { context, page } = await phone(browser, M);
-    await signInVia(page, fx.email, fx.password);
-    let failed = false;
-    await page.route('**/wsfListGoals**', async (route: Route) => {
-      if (!failed) {
-        failed = true;
-        return route.abort('failed');
+    test('keyboard: every control is reachable by Tab in reading order', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'no-own');
+      const seen: string[] = [];
+      for (let i = 0; i < 12; i += 1) {
+        await page.keyboard.press('Tab');
+        const id = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-testid'));
+        if (id && !seen.includes(id)) seen.push(id);
       }
-      return route.fallback();
+      const order = ['wsf-you-settings', 'wsf-you-start-moving', 'wsf-you-signout'];
+      for (const id of order) expect(seen, `Tab never reached ${id}`).toContain(id);
+      expect(seen.indexOf('wsf-you-settings')).toBeLessThan(seen.indexOf('wsf-you-start-moving'));
+      expect(seen.indexOf('wsf-you-start-moving')).toBeLessThan(seen.indexOf('wsf-you-signout'));
+      await context.close();
     });
-    await page.goto('/you');
-    await expect(page.getByTestId('wsf-you-failed')).toContainText('Contribution details unavailable', {
-      timeout: 40_000,
-    });
-    await expect(page.getByTestId('wsf-you-community')).toContainText('Oak Grove Together');
-    await expect(page.getByTestId('wsf-you-name')).toHaveText('Alex M.');
-    await expect(page.getByTestId('wsf-you-lead-own')).toHaveCount(0);
-    await expect(page.getByTestId('wsf-you-failed')).not.toContainText(/\b0 squats\b/);
-    await page.getByTestId('wsf-you-retry').click();
-    await expect(page.getByTestId('wsf-you-lead')).toBeVisible({ timeout: 40_000 });
-    await context.close();
   });
-});
+}
 
 // ---------------------------------------------------------------------------
 // EVIDENCE: canonical frames at DPR 1, then side-by-side / 50 % overlay /
 // difference against the frozen Lovable originals.
 // ---------------------------------------------------------------------------
 
-type Shot = { state: string; variant: Variant | 'failed'; vp: { width: number; height: number }; lovable: string | null };
+type Shot = { state: string; vp: { width: number; height: number }; lovable: string | null };
 
 const SHOTS: Shot[] = [
-  { state: 'normal', variant: 'normal', vp: { width: 390, height: 844 }, lovable: 'you-normal-390x844.png' },
-  { state: 'normal', variant: 'normal', vp: { width: 390, height: 640 }, lovable: 'you-normal-390x640.png' },
-  { state: 'no-own', variant: 'noOwn', vp: { width: 390, height: 844 }, lovable: 'you-no-own-390x844.png' },
-  { state: 'no-own', variant: 'noOwn', vp: { width: 390, height: 640 }, lovable: 'you-no-own-390x640.png' },
-  { state: 'no-eligible', variant: 'noEligible', vp: { width: 390, height: 844 }, lovable: 'you-no-eligible-390x844.png' },
+  { state: 'normal', vp: { width: 390, height: 844 }, lovable: 'you-normal-390x844.png' },
+  { state: 'normal', vp: { width: 390, height: 640 }, lovable: 'you-normal-390x640.png' },
+  { state: 'no-own', vp: { width: 390, height: 844 }, lovable: 'you-no-own-390x844.png' },
+  { state: 'no-own', vp: { width: 390, height: 640 }, lovable: 'you-no-own-390x640.png' },
+  { state: 'no-eligible', vp: { width: 390, height: 844 }, lovable: 'you-no-eligible-390x844.png' },
   // The reference has no failure frame; this one is canonical-only evidence.
-  { state: 'failed', variant: 'failed', vp: { width: 390, height: 844 }, lovable: null },
+  { state: 'failed', vp: { width: 390, height: 844 }, lovable: null },
 ];
 
 const sha256 = (file: string) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+/**
+ * The first row, at or below `from`, where column x = 5 is the community band's
+ * navy (#0B1F3A within a small tolerance). Both the reference and the view draw
+ * that band full-bleed, so it is a shared landmark: shifting the view so the two
+ * bands start on the same row measures everything below the head without the
+ * head's height difference smeared over the whole frame.
+ */
+async function bandTop(page: Page, file: string, from: number): Promise<number | null> {
+  const src = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`;
+  await page.setContent('<html><body style="margin:0"></body></html>');
+  return page.evaluate(
+    async ([s, f]) => {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = s!;
+      });
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const x = c.getContext('2d')!;
+      x.drawImage(img, 0, 0);
+      const col = x.getImageData(5, 0, 1, img.height).data;
+      for (let y = Number(f); y < img.height; y += 1) {
+        const r = col[y * 4]!;
+        const g = col[y * 4 + 1]!;
+        const b = col[y * 4 + 2]!;
+        if (Math.abs(r - 0x0b) <= 6 && Math.abs(g - 0x1f) <= 6 && Math.abs(b - 0x3a) <= 6) return y;
+      }
+      return null;
+    },
+    [src, String(from)] as const,
+  );
+}
 
 /**
  * Compose in the browser: [reference | canonical] side by side, a 50 % overlay,
  * and an absolute-difference image, plus the share of pixels whose summed
  * channel difference exceeds 48 (a measured figure, not a verdict).
  */
-async function compose(page: Page, lovable: string, canonical: string, base: string) {
+async function compose(
+  page: Page,
+  lovable: string,
+  canonical: string,
+  base: string,
+  crop: { ya: number; yb: number; h: number },
+  prefix = '',
+) {
   const a = `data:image/png;base64,${fs.readFileSync(lovable).toString('base64')}`;
   const b = `data:image/png;base64,${fs.readFileSync(canonical).toString('base64')}`;
   await page.setContent('<html><body style="margin:0"></body></html>');
   const out = await page.evaluate(
-    async ([srcA, srcB]) => {
+    async ([srcA, srcB, cya, cyb, ch]) => {
       const load = (src: string) =>
         new Promise<HTMLImageElement>((resolve, reject) => {
           const img = new Image();
@@ -283,7 +238,9 @@ async function compose(page: Page, lovable: string, canonical: string, base: str
         });
       const [ia, ib] = await Promise.all([load(srcA!), load(srcB!)]);
       const w = Math.max(ia.width, ib.width);
-      const h = Math.max(ia.height, ib.height);
+      const ya = Number(cya);
+      const yb = Number(cyb);
+      const h = Number(ch);
       const canvas = (cw: number, ch: number) => {
         const c = document.createElement('canvas');
         c.width = cw;
@@ -293,16 +250,16 @@ async function compose(page: Page, lovable: string, canonical: string, base: str
       const [side, sx] = canvas(w * 2 + 12, h);
       sx.fillStyle = '#ffffff';
       sx.fillRect(0, 0, side.width, side.height);
-      sx.drawImage(ia, 0, 0);
-      sx.drawImage(ib, w + 12, 0);
+      sx.drawImage(ia, 0, ya, w, h, 0, 0, w, h);
+      sx.drawImage(ib, 0, yb, w, h, w + 12, 0, w, h);
       const [over, ox] = canvas(w, h);
-      ox.drawImage(ia, 0, 0);
+      ox.drawImage(ia, 0, ya, w, h, 0, 0, w, h);
       ox.globalAlpha = 0.5;
-      ox.drawImage(ib, 0, 0);
+      ox.drawImage(ib, 0, yb, w, h, 0, 0, w, h);
       const [diff, dx] = canvas(w, h);
-      dx.drawImage(ia, 0, 0);
+      dx.drawImage(ia, 0, ya, w, h, 0, 0, w, h);
       dx.globalCompositeOperation = 'difference';
-      dx.drawImage(ib, 0, 0);
+      dx.drawImage(ib, 0, yb, w, h, 0, 0, w, h);
       const data = dx.getImageData(0, 0, w, h).data;
       let differing = 0;
       for (let i = 0; i < data.length; i += 4) {
@@ -316,10 +273,10 @@ async function compose(page: Page, lovable: string, canonical: string, base: str
         size: [w, h],
       };
     },
-    [a, b],
+    [a, b, String(crop.ya), String(crop.yb), String(crop.h)] as const,
   );
   const write = (suffix: string, url: string) => {
-    const file = `${base}-${suffix}.png`;
+    const file = `${base}-${prefix}${suffix}.png`;
     fs.writeFileSync(file, Buffer.from(url.split(',')[1]!, 'base64'));
     return file;
   };
@@ -332,54 +289,65 @@ async function compose(page: Page, lovable: string, canonical: string, base: str
 }
 
 test.describe('YOU-PARITY-1 · evidence', () => {
-  test('canonical frames and comparisons against the frozen reference', async ({ browser }) => {
+  test('fixture frames and cropped comparisons against the frozen reference', async ({ browser }) => {
     test.skip(!CAPTURE_FRAMES, 'evidence is written only under WSF_CAPTURE_FRAMES=1');
-    test.setTimeout(600_000);
-    const dir = path.join(OUT, `canonical-${PHASE}`);
+    test.setTimeout(300_000);
+    const dir = path.join(OUT, 'fixture');
     fs.mkdirSync(dir, { recursive: true });
     const manifest: Array<Record<string, unknown>> = [];
-
     for (const shot of SHOTS) {
-      const fx = await seedReference(`ype${shot.state.replace(/-/g, '')}${shot.vp.height}`, shot.variant === 'failed' ? 'normal' : shot.variant);
       const { context, page } = await phone(browser, shot.vp, 1);
-      await signInVia(page, fx.email, fx.password);
-      if (shot.variant === 'failed') {
-        await page.route('**/wsfListGoals**', (route: Route) => route.abort('failed'));
-      }
-      await page.goto('/you');
-      const settled =
-        shot.variant === 'failed'
-          ? 'wsf-you-failed'
-          : shot.variant === 'normal'
-            ? 'wsf-you-member'
-            : 'wsf-you-member';
-      await expect(page.getByTestId(settled)).toBeVisible({ timeout: 40_000 });
+      await open(page, shot.state);
       await page.waitForLoadState('networkidle').catch(() => {});
-      await page.waitForTimeout(600);
-      const file = path.join(dir, `you-${shot.state}-${shot.vp.width}x${shot.vp.height}.png`);
+      await page.waitForTimeout(500);
+      const name = `you-${shot.state}-${shot.vp.width}x${shot.vp.height}`;
+      const file = path.join(dir, `${name}.png`);
       await page.screenshot({ path: file });
+      const crop = { y: TOP, h: shot.vp.height - TOP - TAB_BAR };
       const entry: Record<string, unknown> = {
         state: shot.state,
         viewport: `${shot.vp.width}x${shot.vp.height}`,
-        phase: PHASE,
-        canonical: path.relative(OUT, file),
-        canonicalSha256: sha256(file),
+        fixture: path.relative(OUT, file),
+        fixtureSha256: sha256(file),
         lovable: shot.lovable ? `lovable-642f830b/${shot.lovable}` : null,
         lovableSha256: shot.lovable ? sha256(path.join(LOVABLE, shot.lovable)) : null,
+        crop: { x: 0, y: crop.y, width: shot.vp.width, height: crop.h },
       };
       if (shot.lovable) {
-        const cmp = await compose(page, path.join(LOVABLE, shot.lovable), file, path.join(dir, `cmp-you-${shot.state}-${shot.vp.width}x${shot.vp.height}`));
+        const ref = path.join(LOVABLE, shot.lovable);
+        const cmp = await compose(page, ref, file, path.join(dir, `cmp-${name}`), { ya: crop.y, yb: crop.y, h: crop.h });
         entry.sideBySide = path.relative(OUT, cmp.sideBySide);
         entry.overlay50 = path.relative(OUT, cmp.overlay50);
         entry.difference = path.relative(OUT, cmp.difference);
         entry.differingPixelShare = Number(cmp.differingShare.toFixed(4));
+        // ALIGNED: the same two frames with the view shifted so both community
+        // bands start on one row; measured from that row to the tab bar.
+        const ya = await bandTop(page, ref, TOP);
+        const yb = await bandTop(page, file, TOP);
+        if (ya !== null && yb !== null) {
+          const bottom = shot.vp.height - TAB_BAR;
+          const h = Math.min(bottom - ya, bottom - yb);
+          const al = await compose(page, ref, file, path.join(dir, `cmp-${name}`), { ya, yb, h }, 'aligned-');
+          entry.aligned = {
+            referenceBandTop: ya,
+            viewBandTop: yb,
+            viewShiftPx: ya - yb,
+            window: { referenceY: ya, viewY: yb, height: h },
+            sideBySide: path.relative(OUT, al.sideBySide),
+            overlay50: path.relative(OUT, al.overlay50),
+            difference: path.relative(OUT, al.difference),
+            differingPixelShare: Number(al.differingShare.toFixed(4)),
+          };
+        } else {
+          entry.aligned = { unavailable: 'community band not found in one of the frames' };
+        }
       }
       manifest.push(entry);
       await context.close();
     }
     fs.writeFileSync(
       path.join(dir, 'manifest.json'),
-      `${JSON.stringify({ lovableRef: '642f830baa1153b0d9465dc75690028768083fb7', phase: PHASE, frames: manifest }, null, 2)}\n`,
+      `${JSON.stringify({ lovableRef: '642f830baa1153b0d9465dc75690028768083fb7', source: 'src/ui/YouParityView.tsx via /design-target/you-parity', frames: manifest }, null, 2)}\n`,
     );
   });
 });
