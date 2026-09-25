@@ -163,3 +163,174 @@ test.describe('APP-FEEL-PARITY-1 cp3 · CURRENT after a switch made elsewhere', 
     await expect(page.locator(`[data-testid="wsf-community-index-row-${fx.a}"]:visible`)).toBeVisible();
   });
 });
+
+/*
+ * SETTINGS FROM THE SIDE, and the tab fade. The reference's utility panel
+ * (ui.tsx `Sheet variant="panel"`; styles.css wsf-panel-in/out): from the
+ * right, 240 ms in, 180 out, over a scrim; focus in it and back out of it.
+ */
+async function focusedId(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || el === document.body) return 'body';
+    return el.getAttribute('data-testid') ?? el.tagName.toLowerCase();
+  });
+}
+
+async function panelTimeline(page: Page, ms: number) {
+  return page.evaluate(async (dur) => {
+    const out: { t: number; x: number; o: number }[] = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < dur) {
+      const el = document.querySelector('[data-testid="wsf-settings-panel"]') as HTMLElement | null;
+      if (el) {
+        const cs = getComputedStyle(el);
+        const m = new DOMMatrixReadOnly(cs.transform === 'none' ? undefined : cs.transform);
+        out.push({ t: Math.round(performance.now() - t0), x: Math.round(m.m41 * 10) / 10, o: Number(cs.opacity) });
+      }
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    return out;
+  }, ms);
+}
+
+test.describe('APP-FEEL-PARITY-1 cp3 · Settings from the side', () => {
+  test.use({ viewport: PHONE, deviceScaleFactor: 1 });
+
+  test('from the menu: a panel over the dimmed, mounted tab; focus on Close, contained; Escape returns to the menu button', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('s');
+    await signInVia(page, fx.email, PASSWORD);
+    await page.goto(`/community/${fx.a}`);
+    await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('wsf-member-topbar-menu-button').last().click();
+    await page.getByTestId('wsf-member-topbar-menu-settings').last().click();
+    await expect(page.locator('[data-testid="wsf-settings-panel"]:visible')).toBeVisible({ timeout: 20_000 });
+    const behind = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="wsf-community"]')).some(
+        (n) => (n as HTMLElement).getClientRects().length > 0,
+      ),
+    );
+    measure('Home painted behind the panel', behind);
+    expect(behind, 'the tab stays mounted and painted behind').toBe(true);
+    const box = await page.locator('[data-testid="wsf-settings-panel"]:visible').boundingBox();
+    measure('panel box', box);
+    expect(Math.round(box!.x + box!.width), 'flush with the right edge').toBe(PHONE.width);
+    await expect.poll(() => focusedId(page), { timeout: 5_000 }).toBe('wsf-settings-close');
+    const scrimTab = await page.getByTestId('wsf-settings-scrim').getAttribute('tabindex');
+    expect(scrimTab, 'the scrim is not a Tab stop').toBe('-1');
+    for (let i = 0; i < 8; i += 1) {
+      await page.keyboard.press(i % 2 ? 'Shift+Tab' : 'Tab');
+      const inside = await page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="wsf-settings-panel"]')));
+      expect(inside, `stop ${i} stays in the panel`).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('wsf-settings-panel')).toHaveCount(0, { timeout: 8_000 });
+    await expect.poll(() => focusedId(page), { timeout: 8_000 }).toBe('wsf-member-topbar-menu-button');
+    expect(await page.locator('[data-testid="wsf-member-tab-home"]').count(), 'one tab navigator').toBe(1);
+  });
+
+  test('from You’s row: Close returns focus to that row; Privacy still opens', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('y');
+    await signInVia(page, fx.email, PASSWORD);
+    await page.goto(`/community/${fx.a}`);
+    await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    const row = page.locator('[data-testid="wsf-you-settings"]:visible');
+    await row.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-settings-panel"]:visible')).toBeVisible({ timeout: 20_000 });
+    await page.locator('[data-testid="wsf-settings-close"]:visible').click();
+    await expect(page.getByTestId('wsf-settings-panel')).toHaveCount(0, { timeout: 8_000 });
+    await expect.poll(() => focusedId(page), { timeout: 8_000 }).toBe('wsf-you-settings');
+    expect(await currentTab(page)).toBe('wsf-member-tab-you');
+
+    await row.click();
+    await page.locator('[data-testid="wsf-settings-privacy-row"]:visible').click();
+    await expect(page).toHaveURL(/\/settings\/privacy/, { timeout: 20_000 });
+  });
+
+  test('it travels in from the right and out; reduced motion does neither; a cold link is still the page', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('m');
+    await signInVia(page, fx.email, PASSWORD);
+    await page.goto(`/community/${fx.a}`);
+    await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('wsf-member-tab-you').last().click();
+    await page.locator('[data-testid="wsf-you-settings"]:visible').click();
+    const entry = await panelTimeline(page, 1500);
+    measure('panel entry (first 6)', entry.slice(0, 6));
+    expect(entry.some((s) => s.x > 0.5 || s.o < 0.99), 'it travels in').toBe(true);
+    expect(entry[entry.length - 1]).toMatchObject({ x: 0, o: 1 });
+    await page.locator('[data-testid="wsf-settings-close"]:visible').click();
+    const exitT = await panelTimeline(page, 400);
+    measure('panel exit', exitT);
+    expect(exitT.some((s) => s.x > 0.5 || s.o < 0.99), 'it travels out').toBe(true);
+    await expect(page.getByTestId('wsf-settings-panel')).toHaveCount(0, { timeout: 8_000 });
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.locator('[data-testid="wsf-you-settings"]:visible').click();
+    const reduced = await panelTimeline(page, 800);
+    expect(reduced.length).toBeGreaterThan(0);
+    expect(reduced.filter((s) => s.x > 0.5 || s.o < 0.99), 'no travel under reduced motion').toEqual([]);
+
+    await page.goto('/settings');
+    await expect(page.locator('[data-testid="wsf-settings-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    expect(await page.getByTestId('wsf-settings-panel').count(), 'cold: the page').toBe(0);
+    await expect(page.locator('[data-testid="wsf-settings-back"]:visible')).toBeVisible();
+  });
+});
+
+test.describe('APP-FEEL-PARITY-1 cp3 · a tab change fades', () => {
+  test.use({ viewport: PHONE, deviceScaleFactor: 1 });
+
+  async function sceneOpacity(page: Page, testId: string, ms: number) {
+    return page.evaluate(
+      async ({ id, dur }) => {
+        const out: number[] = [];
+        const t0 = performance.now();
+        while (performance.now() - t0 < dur) {
+          const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+          if (el) {
+            let o = 1;
+            for (let n: HTMLElement | null = el; n; n = n.parentElement) o *= Number(getComputedStyle(n).opacity);
+            out.push(Math.round(o * 100) / 100);
+          }
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+        return out;
+      },
+      { id: testId, dur: ms },
+    );
+  }
+
+  test('the new tab fades in over ~140 ms; reselect does not animate; reduced motion does not fade', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('f');
+    await signInVia(page, fx.email, PASSWORD);
+    await page.goto(`/community/${fx.a}`);
+    await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+    await openCommunityTab(page);
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(800);
+
+    await page.getByTestId('wsf-member-tab-community').last().click();
+    const fade = await sceneOpacity(page, 'wsf-community-index', 600);
+    measure('Community scene opacity from the press', fade.slice(0, 12));
+    expect(Math.min(...fade), 'it fades in').toBeLessThan(0.95);
+    expect(fade[fade.length - 1], 'and settles').toBe(1);
+
+    await page.getByTestId('wsf-member-tab-community').last().click();
+    const reselect = await sceneOpacity(page, 'wsf-community-index', 400);
+    expect(Math.min(...reselect), 'reselect: nothing moves').toBe(1);
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.getByTestId('wsf-member-tab-home').last().click();
+    await page.waitForTimeout(500);
+    await page.getByTestId('wsf-member-tab-community').last().click();
+    const reduced = await sceneOpacity(page, 'wsf-community-index', 400);
+    measure('reduced-motion opacity', reduced.slice(0, 6));
+    expect(Math.min(...reduced), 'no fade under reduced motion').toBe(1);
+  });
+});

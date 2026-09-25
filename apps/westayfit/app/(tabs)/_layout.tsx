@@ -1,12 +1,13 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Easing, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
-import { useTabsFocusReturn } from '../../src/ui/focusReturn';
+import { armTabsFocusReturnTo, useTabsFocusReturn } from '../../src/ui/focusReturn';
+import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { MemberTabBar } from '../../src/ui/MemberTabBar';
 import {
   MemberShellActionsProvider,
@@ -63,6 +64,7 @@ export default function MemberTabsLayout() {
 
 function MemberShell() {
   const router = useRouter();
+  const reducedMotion = useReducedMotion();
   /**
    * NO ACCOUNT, NO CHROME.
    *
@@ -122,7 +124,12 @@ function MemberShell() {
       key: 'settings',
       label: 'Settings',
       href: '/settings',
-      onNavigate: (href) => router.push(href as never),
+      onNavigate: (href) => {
+        // The menu closes as Settings opens, so its item cannot take focus
+        // back; the menu's own button does (src/ui/focusReturn.ts).
+        armTabsFocusReturnTo('wsf-member-topbar-menu-button');
+        router.push(href as never);
+      },
     },
     {
       kind: 'link',
@@ -185,6 +192,24 @@ function MemberShell() {
             // away and back does not throw your page out" true. Named rather
             // than inherited, so a later edit has to argue with a line.
             freezeOnBlur: false,
+            /*
+              APP-FEEL-PARITY-1 CHECKPOINT 3. A TAB CHANGE FADES, QUIETLY.
+              The reference's tab switch is "a quiet fade only (no lift/
+              bounce)": the new tab from 0.35 opacity to full over 140 ms
+              (styles.css MOTION-FEEL-1, --dur-tab). Reselecting the current
+              tab changes nothing, so it does not animate. Reduced motion
+              gets no fade.
+            */
+            animation: reducedMotion ? 'none' : 'fade',
+            transitionSpec: { animation: 'timing', config: { duration: 140, easing: Easing.out(Easing.ease) } },
+            sceneStyleInterpolator: ({ current }) => ({
+              sceneStyle: {
+                opacity: current.progress.interpolate({
+                  inputRange: [-1, 0, 1],
+                  outputRange: [0.35, 1, 0.35],
+                }),
+              },
+            }),
           }}
           tabBar={(props) =>
             signedIn ? <MemberTabBar {...props} onMove={() => router.push('/move')} /> : null
