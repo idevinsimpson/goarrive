@@ -125,7 +125,33 @@ async function easel(page: Page, device: Device, src: string): Promise<{ stage: 
   return { stage: page.frameLocator('#wsf-w9rc-stage'), label };
 }
 
-async function shoot(page: Page, label: string, name: string, device: Device): Promise<void> {
+/**
+ * THE MEMBER TAB BAR IS PART OF EVERY FRAME. Asserted, not assumed (Director
+ * #478 `5827102925` asked after it): the bar is on screen, pinned to the foot
+ * of the device, and its Home tab is what a finger at its centre touches.
+ */
+async function assertTabBar(stage: FrameLocator, tag: string): Promise<void> {
+  const bar = stage.locator('[data-testid="wsf-member-tabs"]:visible');
+  await expect(bar, `${tag}: the member tab bar`).toHaveCount(1);
+  const reading = await bar.evaluate((node) => {
+    const r = node.getBoundingClientRect();
+    const home = node.querySelector('[data-testid="wsf-member-tab-home"]') as HTMLElement | null;
+    const h = home?.getBoundingClientRect();
+    const hit = h ? document.elementFromPoint(h.left + h.width / 2, h.top + h.height / 2) : null;
+    return {
+      top: Math.round(r.top),
+      bottom: Math.round(r.bottom),
+      viewport: window.innerHeight,
+      homeOnTop: Boolean(home && hit && home.contains(hit)),
+    };
+  });
+  expect(reading.bottom, `${tag}: the tab bar ends at the foot of the device`).toBe(reading.viewport);
+  expect(reading.top, `${tag}: the tab bar starts on screen`).toBeLessThan(reading.viewport);
+  expect(reading.homeOnTop, `${tag}: the Home tab is covered at its centre`).toBe(true);
+}
+
+async function shoot(page: Page, stage: FrameLocator, label: string, name: string, device: Device): Promise<void> {
+  await assertTabBar(stage, `${name} ${device.key}`);
   const frameEl = page.getByTestId('wsf-w9rc-frame');
   const box = (await frameEl.boundingBox())!;
   expect(Math.round(box.width), `${name} ${device.key}: frame width`).toBe(device.width);
@@ -246,7 +272,7 @@ for (const device of DEVICES) {
       await stage.locator('body').evaluate(() => {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) if (el.scrollTop > 0) el.scrollTop = 0;
       });
-      await shoot(page, label, 'confirmed-return', device);
+      await shoot(page, stage, label, 'confirmed-return', device);
     });
 
     test('unknown return (request dropped): Home excludes the amount and predicts nothing', async ({ page }) => {
@@ -271,7 +297,7 @@ for (const device of DEVICES) {
       await stage.locator('body').evaluate(() => {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) if (el.scrollTop > 0) el.scrollTop = 0;
       });
-      await shoot(page, label, 'unknown-return-INJECTED-REQUEST-DROPPED', device);
+      await shoot(page, stage, label, 'unknown-return-INJECTED-REQUEST-DROPPED', device);
     });
 
     test('refresh fails after the return: what the member is told', async ({ page }) => {
@@ -310,7 +336,7 @@ for (const device of DEVICES) {
       await stage.locator('body').evaluate(() => {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) if (el.scrollTop > 0) el.scrollTop = 0;
       });
-      await shoot(page, label, 'refresh-failed-INJECTED', device);
+      await shoot(page, stage, label, 'refresh-failed-INJECTED', device);
     });
   });
 }
