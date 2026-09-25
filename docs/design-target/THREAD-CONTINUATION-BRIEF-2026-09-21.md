@@ -10,7 +10,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`6b96ba1b`** = `6f994f5a` + RECOVERY-PORT-1 `86c160ae` (tree = the accepted head; tsc 0, guard 9/20, vitest 875) |
+| development `claude/wsf-app-shell` | **`afa26d64`** = `6b96ba1b` + RETURN-CONTINUITY-1 `9f73aaa6` (tree `e10b141a` = the accepted head; tsc 0, guard 9/20, vitest 875) |
 | `main` | `cd881775` |
 | staging pin `approvedAppSha` | `7ee70e4` (frozen) |
 | served staging build | `7ee70e4` via run 47 `35937603929` (verify failed on the hosted-marker count only; three social services transport-SHUT; Package E 5 / 1) |
@@ -19,15 +19,15 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHAs | last receipt | next consumer · wake |
 | --- | --- | --- | --- |
-| **RECOVERY-PORT-1 — INTEGRATED** | W9 · #474 (merged by containment) · `86c160ae` on reference `02cb35c4` | W7 Check 29 PASS (#434 `5825334802`); Director ACCEPTED (#474 `5825352413`); **L0 merge `6b96ba1b`** (#474 `5825365990`) | not staged; FOCUS-RETURN-1 required before the journey is called staged / usable; Lovable return review: consultation unavailable |
-| **FOCUS-RETURN-1** | W9 · **#477** · `8f2cc15e` on `6b96ba1b` (product `0d5df335`) | W7 Check 30 PASS; **Director CORRECTION REQUIRED** (`5827102747`): blank-space pointerdown must cancel the watch, fail-first | **W9 F1 successor pending** (sequencing #477 `5827120450`); `8f2cc15e` immutable → L0 git → W7 delta → Director |
-| **RETURN-CONTINUITY-1** | W9 · **#478** · `9f73aaa6` (product `ff043515`) on `6b96ba1b` | **Director source + pixels PASS for QA** (`5827675464`; tab-bar defect withdrawn); L0 git (#478 `5827693796`): reservation only, no overlap with #477, tsc 0, vitest 875, guard 9/20 | **W7 Check 32 EXECUTING** (#434 `5827682199`) → Director → L0 |
+| **RECOVERY-PORT-1 — INTEGRATED** | W9 · #474 · `86c160ae` on reference `02cb35c4` | W7 Check 29 PASS; Director ACCEPTED (#474 `5825352413`); **L0 merge `6b96ba1b`** (#474 `5825365990`) | not staged |
+| **FOCUS-RETURN-1** | W9 · **#477** · **`64b01967`** (F1, one commit on immutable `8f2cc15e`) | W7 Check 30 PASS on `8f2cc15e`; Director correction `5827102747` → **F1 SOURCE-APPROVED** (`5828285929`); L0 git (#477 `5828323849`): 2 files, tsc 0, vitest 875, guard 9/20, merges cleanly onto `afa26d64` | **W7 Check 33** (delta) → Director → L0; three named dependencies stay out |
+| **RETURN-CONTINUITY-1 — INTEGRATED** | W9 · #478 · `9f73aaa6` (product `ff043515`) | W7 Check 32 PASS; Director ACCEPTED (#478 `5828285756`); **L0 merge `afa26d64`** (#478 `5828322895`) | not staged; presence/momentum stale, own-row seam, Safari / AT carried |
 | **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
 | **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | `eda58218`: W7 Check 31 PASS (#434 `5827152233`); **Director ACCEPTED AS ISOLATED R&D CORE ONLY** (#475 `5827675294`) | no Expo port, integration or staging; next evidence is the owner's phone trial; no video or personal data stored |
 | **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | frozen `a84e6764` / `8c61cd72`: limited R&D handoff, fake-camera evidence (`5826104270`) | **NOT READY**; no Expo task or port before the owner's phone test |
 | W7 item 2: reference focus diagnosis (Lovable `06198931`) | W7 · #434 `5822117639` | not run (preview host refused by W7's proxy) | last in W7's queue |
 
-**W7's queue:** Check 32 (executing) → F1 delta when delivered → item 2.
+**W7's queue:** Check 33 (F1 delta) → item 2.
 
 **RETURN-CONTINUITY-1** (#477 `5826542101`; Home route only): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 Check 27 measured it silent). References: RECOVERY-TRUTH-1 `02cb35c4`; HOME-POLISH-1 `final-stale-390x844` (`872c32fc`).
 
