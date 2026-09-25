@@ -2921,3 +2921,16 @@ The 24 frames and the README are delivered under `docs/design-target/review/reco
 - The item-2 Lovable focus diagnosis (`5822117639`) was paused for this check. Its capability note is on #434 `5825213661`.
 
 **Status:** tested on `86c160ae`; delivered by W9, pixel-passed and source-accepted by the Director; **not accepted overall, not integrated, not staged**.
+
+## 28D · OPS-DOC-1 wording delta, exact `9691139f0b46c978718536575c84d07b59ddcf7e` on `1d52c854` (L0 queue #434 `5825283492`; Director #396 `5822324385`; W3 delivery #396 `5825201764`): **PASS on both ruled items**
+
+The delta is one commit with parent `1d52c854`. It changes one file, `docs/wsf-staging/OPERATOR-HANDOFF-social-staging.md`, from blob `49b0f2c9` to `88597026`, +13 / −8. Cherry-picking `1d52c854` then `9691139f` onto `main` `cd881775` in a detached worktree is clean and lands blob `88597026` only; the worktree was reset and nothing was pushed. The §28 run-log evidence carries and was not re-read, except for one count in the saved log.
+
+| ruled item | at `9691139f` | verdict |
+|---|---|---|
+| F2: the verifier's count vs the failed-release guard | The bullet now states "Two separate facts". First, `VERIFY=failed (1)` was the verifier's one count, the hosted-marker mismatch; the three SHUT rows were notes and added no verifier failure. Second, **separately**, the workflow later marked the release failed because the functions step's captured outcome was failure (exit 2 on the three invoker-policy updates), "not from the verifier's count". This matches workflow lines 446–448 and 514–518 and the §28.2 log. | **PASS** |
+| F1 + F3: timing and attribution | The timing now reads "within two seconds after the Hosting release", which matches the measured 0.3–1.9 s. The log line keeps `Failed to set the IAM Policy` and adds "its hint names `roles/functions.admin`". The `run.services.setIamPolicy` claim is labelled the repository's "standing, source-backed diagnosis", and "the log does not print that permission name". The saved run-47 logs contain `setIamPolicy` 0 times and `roles/functions.admin` once. | **PASS** |
+
+Nothing else in the document changed. Findings F4 (W3's delivery text) and F5 (a citation carried over from `main`) were not in the ruled scope, and F5's line is untouched.
+
+**Status:** reviewed on `9691139f`. It is not accepted, integrated or staged; L0's main-based draft is L0's.
