@@ -66,6 +66,12 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/interaction-rules.md` | **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol. |
 | `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split based on authentication state. |
 
+### WE STAY FIT staging (not GoArrive)
+
+`.claude/firebase-deploy-setup.md` above is **GoArrive's** deploy path. **WE STAY FIT (`apps/westayfit/`) has its own and only staging path:** read **`skills/wsf-staging-deploy/SKILL.md` on operational `main`** — it is the one canonical runbook (the manual `WSF staging deploy` workflow from `main`, the reviewed pin in `.github/wsf-staging/approved-candidate.json`, OIDC/WIF; no service-account key). From a WSF app-shell checkout that lacks it, read `main`'s current copy (`git show origin/main:skills/wsf-staging-deploy/SKILL.md`); do not reconstruct the procedure and do not use the GoArrive deploy path.
+
+In short, per the owner's cadence rule: an accepted, integrated, stable WSF product milestone proceeds through the existing reviewed pin and independent checks to staging **without another prompt to Devin**; Fable (the WSF lead) is the sole operator; one dispatch, no blind retry; record the deployment, the actual served marker, the hosted checks and cleanup separately, and keep feature readiness (index, callable transport, email, kiosk, production) separate from what is served. Documentation changes alone never repin or redeploy.
+
 ## Recent Context
 Recent development has focused heavily on enhancing the coach and admin experience. Key updates include fixing admin impersonation for lazy-loaded components and implementing prorated earnings caps with yearly admin configuration. The team also built a bulk movement upload feature utilizing AI auto-analysis and enhanced the workout thumbnail grid with dynamic scaling (4:5 aspect ratio). Additionally, sorting logic across all libraries was updated to prioritize the most recently edited items.
 

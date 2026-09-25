@@ -26,6 +26,7 @@ As of 2026-08-26, this repository hosts **two first-party applications** that sh
 
 - **Standing Release Policy — Staging & Production** (2026-08-01) applies to WSF, but WSF has its own release train and its own manifest / receipt discipline documented in `docs/westayfit/RELEASES.md`. A staging deploy of one app does not standing-approve the other. Cross-app bundling into one integration branch is not permitted; combined-staging bundles are per-app.
 - **`/setup` and `/ship` agent commands** operate on `apps/goarrive/` by default. WSF deploys use their own commands (see `docs/westayfit/ARCHITECTURE.md` "Deploy Boundary Summary" table). Do not invoke `/ship` for WSF changes.
+- **WSF staging** follows only `skills/wsf-staging-deploy/SKILL.md` on operational `main` (the manual `WSF staging deploy` workflow, reviewed pin, stable-milestone cadence). Read `main`'s copy if your checkout lacks it; never use the GoArrive deploy path for WSF.
 
 ### SCOPED TO apps/goarrive (WSF explicitly does not follow)
 
