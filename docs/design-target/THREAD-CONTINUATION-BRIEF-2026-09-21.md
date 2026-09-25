@@ -11,9 +11,9 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`502b1e8d`** = `afa26d64` (RETURN-CONTINUITY-1) + FOCUS-RETURN-1 `64b01967` (tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
-| `main` | `cd881775` |
-| staging pin `approvedAppSha` | `7ee70e4` (frozen) |
-| served staging build | `7ee70e4` via run 47 `35937603929` (verify failed on the hosted-marker count only; three social services transport-SHUT; Package E 5 / 1) |
+| `main` | `0359f8d1` = `cd881775` + pin #479 `ae1fb2fa` |
+| staging pin `approvedAppSha` | `502b1e8d` (`expectedPriorFunctions` 49; three social retained) |
+| served staging build | **`502b1e8d`** via run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
 
 **Active packets** (reference / candidate SHA · last consumed receipt · next consumer and wake state; waiting-for-wake is recorded apart from implementation).
 
@@ -29,7 +29,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **W7's queue:** item 2.
 
-**STAGING — OPS-PIN-502B-1 DELIVERED** by W3 as **#479** `ae1fb2fa` (tree `34401b24`, one commit on `main` `cd881775`; ACK #396 `5831848930`, delivery #365 `5831905905`). L0 git (#479 `5832106786`): two files only, pin `502b1e8d` / prior 49 / the three social kept, `verify-deployment` 30 → 32 with none deleted, `run-all` exit 0. Next: Director exact-delta review → L0 merge → one dispatch → receipts. Index + three SHUT transports stay post-deploy blockers.
+**STAGING — DONE for `502b1e8d`:** pin #479 `ae1fb2fa` (W7 Check 34 PASS; Director ACCEPTED `5832085972`) merged as `main` `0359f8d1`; one dispatch, run 48 green end to end (receipts #365 `5832132708`, `5832332554`–`5832336026`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
 
 **RETURN-CONTINUITY-1** (#477 `5826542101`; Home route only): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 Check 27 measured it silent). References: RECOVERY-TRUTH-1 `02cb35c4`; HOME-POLISH-1 `final-stale-390x844` (`872c32fc`).
 
@@ -37,7 +37,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **NORTHSTAR-OVERNIGHT-1 (First Useful Visit) ACCEPTED as the next frozen reference** (`5825523052`): product `a15a610e`, evidence `973e1141`, finalizer `80fc8738`; reuse its states and wording, not its demo mechanics; moves no active packet. Port qualifications `5825762390` (Back / Close labels; zero-own guidance only on an open eligible goal; corrected captions). Candidate next slice: JOIN-VISIBILITY-1, `/join` only; owner undecided.
 
-**Served vs readiness.** Deployed `7ee70e4`; three social callables transport-SHUT; index unverified. Readiness **not met**: Package E fix unmeasured; smokes, deep link, `/move` direct load not run; email blocked; shared kiosk HELD.
+**Served vs readiness.** Served `502b1e8d`; three social callables transport-SHUT; index unverified. Readiness **not met**: social smokes, members deep link, `/move` direct load not run; email blocked; shared kiosk HELD.
 
 **Precise blockers.** (1) Social staging needs a named operator for the index READY receipt and the three invoker updates + read-backs, then a verification run. (2) FOCUS-RETURN-1 before the recovery journey is staged.
 
