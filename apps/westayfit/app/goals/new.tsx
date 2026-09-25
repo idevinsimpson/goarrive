@@ -24,7 +24,7 @@ import {
   wsfUsingEmulators,
 } from '../../src/firebase';
 import { type RepeatPolicy } from '../../src/contributionFlow';
-import { mapMovementSelection, type MovementKey } from '../../src/movementSelection';
+import { isSubmittable, mapMovementSelection, type MovementKey } from '../../src/movementSelection';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { isValidTimeZone } from '../../src/ui/dates';
 import { DateTimeField, type DateTimeFieldHandle } from '../../src/ui/DateTimeField';
@@ -399,9 +399,11 @@ export default function NewGoalPage() {
   const [title, setTitle] = useState('');
   const [target, setTarget] = useState('');
   const [unit, setUnit] = useState('');
-  // MOVEMENT-PILLS-1. Empty means the free-text unit above decides, exactly as
-  // before; the typed draft is kept while pills are chosen and comes back when
-  // they are cleared. See src/movementSelection.ts for what a choice maps to.
+  // MOVEMENT-PILLS-1. Empty means "Something else": the free-text unit decides,
+  // exactly as before. The typed draft is kept while a movement is chosen and
+  // comes back with Something else. One movement at a time: the existing goal
+  // contract persists only one (Director #456 `5834379218`); see
+  // src/movementSelection.ts.
   const [movements, setMovements] = useState<MovementKey[]>([]);
   // The start is "now" on the quarter hour, fixed when the page opens so the
   // line the Champion reads is the instant that is sent. Custom lets them
@@ -481,11 +483,12 @@ export default function NewGoalPage() {
     startsDate != null && endsDate != null && endsDate.getTime() <= startsDate.getTime();
   const targetNumber = wholeNumber(target);
   const selection = mapMovementSelection(movements);
-  // The unit the goal will record: the movements' own when any are chosen
-  // and they can share a total, the typed words otherwise. A mixed choice has
+  // The unit the goal will record: the movement's own when one is chosen, the
+  // typed words under Something else. A choice the contract cannot persist has
   // no unit at all, so nothing downstream can read one.
   const trimmedUnit =
-    selection.kind === 'individual' ? selection.unit : selection.kind === 'mixed' ? '' : unit.trim();
+    selection.kind === 'none' ? unit.trim() : isSubmittable(selection) ? selection.unit : '';
+  const selectionBlocked = selection.kind === 'mixed' || selection.kind === 'several';
   const definition = targetNumber !== null && trimmedUnit ? definitionPhrase(targetNumber, trimmedUnit) : null;
   const communityLabel = communityName ?? FALLBACK_COMMUNITY_NAME;
 
@@ -580,17 +583,17 @@ export default function NewGoalPage() {
 
     const chosen = mapMovementSelection(movements);
     const trimmedUnit =
-      chosen.kind === 'individual' ? chosen.unit : chosen.kind === 'mixed' ? '' : unit.trim();
-    if (chosen.kind === 'mixed') {
-      // Never added together, never submitted: the same sentence the picker
-      // already shows, as the field's own error.
+      chosen.kind === 'none' ? unit.trim() : isSubmittable(chosen) ? chosen.unit : '';
+    if (chosen.kind === 'mixed' || chosen.kind === 'several') {
+      // Nothing the contract cannot persist is ever sent: the same sentence
+      // the picker already shows, as the field's own error.
       errors.unit = chosen.message;
     } else if (!trimmedUnit) {
       errors.unit = "Say what you're counting, like squats or miles.";
     } else if (trimmedUnit.length > 40) {
       errors.unit = 'Keep the unit to 40 characters or fewer.';
     }
-    const activityGuideKey = chosen.kind === 'individual' ? chosen.activityGuideKey : undefined;
+    const activityGuideKey = isSubmittable(chosen) ? chosen.activityGuideKey : undefined;
 
     const start = parseLocalDateTime(startsAt);
     if (!start) {
@@ -912,10 +915,10 @@ export default function NewGoalPage() {
           <FieldError message={fieldErrors.title} testID="wsf-new-goal-title-error" />
         </View>
         {/*
-          MOVEMENT-PILLS-1. One or several supported movements, or none — and
-          then the typed unit beside the target decides, as it always did. A
-          mix that cannot share one total says so here, before any submit, and
-          the submit stays off until it is resolved.
+          MOVEMENT-PILLS-1. One supported movement, or Something else — and
+          then the typed unit beside the target decides, as it always did.
+          Anything the goal contract cannot persist says so here, before any
+          submit, and the submit stays off until it is resolved.
         */}
         <View ref={anchorRefs.unit} style={styles.movements}>
           <MovementPicker
@@ -924,15 +927,24 @@ export default function NewGoalPage() {
               setMovements(next);
               clearFieldError('unit');
             }}
+            mode="single"
+            somethingElse={{
+              selected: movements.length === 0,
+              onPress: () => {
+                setMovements([]);
+                clearFieldError('unit');
+              },
+            }}
+            hint="Pick a movement, or Something else to name your own."
             disabled={submitting}
             label="Movements"
             testID="wsf-new-goal-movements"
           />
-          {selection.kind === 'mixed' ? (
+          {selection.kind === 'mixed' || selection.kind === 'several' ? (
             <Text
               style={kit.errorText}
               accessibilityRole={'alert' as never}
-              testID="wsf-new-goal-movements-mixed"
+              testID="wsf-new-goal-movements-blocked"
             >
               {selection.message}
             </Text>
@@ -979,10 +991,10 @@ export default function NewGoalPage() {
                 testID="wsf-new-goal-unit"
               />
             ) : (
-              // Chosen by the pills above: shown, not typed. Clearing the
-              // pills brings the typed draft back untouched.
+              // Chosen by the pills above: shown, not typed. Something else
+              // brings the typed draft back untouched.
               <Text style={styles.unitChosen} testID="wsf-new-goal-unit-chosen">
-                {trimmedUnit || 'Choose movements counted the same way'}
+                {trimmedUnit || 'Choose one movement'}
               </Text>
             )}
             <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
@@ -1131,7 +1143,7 @@ export default function NewGoalPage() {
           <SummaryRow label="Community" value={communityLabel} />
           <SummaryRow label="Goal" value={title.trim() || 'Not named yet'} />
           <SummaryRow label="Target" value={definition ?? 'Not set yet'} />
-          {selection.kind === 'individual' ? (
+          {isSubmittable(selection) ? (
             <SummaryRow label="Counting" value={selection.countSentence} />
           ) : null}
           <SummaryRow
@@ -1170,14 +1182,14 @@ export default function NewGoalPage() {
             <Pressable
               style={[
                 unresolved ? styles.commitSecondary : styles.primaryAction,
-                (submitting || selection.kind === 'mixed') && kit.primaryButtonDisabled,
+                (submitting || selectionBlocked) && kit.primaryButtonDisabled,
               ]}
               onPress={onSubmit}
-              // A mixed choice has no contract to submit to; the reason is
+              // A choice with no contract to submit to; the reason is
               // already on screen under the pills.
-              disabled={submitting || selection.kind === 'mixed'}
+              disabled={submitting || selectionBlocked}
               accessibilityRole="button"
-              accessibilityState={{ disabled: submitting || selection.kind === 'mixed' }}
+              accessibilityState={{ disabled: submitting || selectionBlocked }}
               testID="wsf-new-goal-submit"
             >
               <Text style={unresolved ? styles.commitSecondaryText : styles.primaryActionText}>

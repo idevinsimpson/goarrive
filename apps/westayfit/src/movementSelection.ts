@@ -16,24 +16,24 @@
  * THE CONTRACT RULE. Nothing here calls anything. It decides which EXISTING
  * callable payload a selection becomes, or that it becomes none:
  *
- *   • one movement            → one `wsfCreateGoal`, the movement's own unit and
- *                               its own counting guide;
- *   • several movements that   → still ONE `wsfCreateGoal`: one goal, one total,
- *     are counted the same way   the unit naming every movement chosen and the
- *                               review saying in words that each one counts
- *                               once toward the same total. One write, so no
- *                               child goal can be left behind by a failure;
- *   • movements counted        → nothing. Repetitions, steps and laps are not the
- *     differently                same thing and are never added together. The
- *                               form says why and does not submit.
+ *   • one movement             → one `wsfCreateGoal`, the movement's own unit and
+ *                                its own counting guide (`activityGuideKey`);
+ *   • several movements        → NOT SUBMITTABLE today. The existing contract has
+ *                                no field that keeps more than one movement: a
+ *                                joined unit, a title or one generic guide key
+ *                                would be a string pretending to be persisted
+ *                                multi-movement support (Director #456
+ *                                `5834379218`). The picker can still hold several
+ *                                for the screen that will support them; the
+ *                                mapping refuses to turn them into a payload.
+ *   • movements counted        → refused as well, and said so first: repetitions,
+ *     differently                steps and laps are never added together.
  *
- * WHAT IS DELIBERATELY NOT HERE. A goal with a separate total per movement AND
- * one combined total (`wsfCreateCombinedGoal`) needs its child goals to exist
- * first. Creating them from this form would be several separate writes with no
- * idempotency key, so a failure part-way could leave some children created and
- * a retry could create them twice. That needs a server contract that creates
- * the children and the combined goal together; it is reported for review, not
- * approximated here.
+ * THE SEAM THIS NEEDS is proposed for review in
+ * docs/design-target/review/movement-pills-1/README.md ("Proposed seam"):
+ * validated movement ids stored on the goal, read back on reload, chosen in
+ * MOVE with that movement's own guide, and recorded per contribution. Nothing
+ * of it is built here.
  */
 
 import { ACTIVITY_GUIDES } from './activityGuides';
@@ -66,17 +66,6 @@ export const MOVEMENTS: readonly Movement[] = [
   { key: 'laps', label: 'Laps', unit: 'laps', one: 'lap', countKind: 'laps' },
 ];
 
-/**
- * The counting guide a goal made of several same-kind movements carries. It
- * is a guide the table already has, phrased for any movement ("Count one rep
- * each time you complete the movement"), so no guide is invented for a mix.
- */
-const SHARED_GUIDE_KEY: Readonly<Record<CountKind, string>> = {
-  repetitions: 'reps',
-  steps: 'steps',
-  laps: 'laps',
-};
-
 /** The server's own limit on a goal's unit (`normalizeGoalUnit`). */
 export const UNIT_MAX_LENGTH = 40;
 
@@ -106,16 +95,20 @@ export type SelectionContract =
   /** Maps onto one `wsfCreateGoal` call. */
   | {
       kind: 'individual';
-      movements: MovementKey[];
+      movements: [MovementKey];
       unit: string;
       activityGuideKey: string;
-      /** True when several movements share the one total. */
-      shared: boolean;
       /** The review's sentence about how the count works. */
       countSentence: string;
     }
   /** Counted differently: no payload, and the sentence that says why. */
-  | { kind: 'mixed'; movements: MovementKey[]; kinds: CountKind[]; message: string };
+  | { kind: 'mixed'; movements: MovementKey[]; kinds: CountKind[]; message: string }
+  /**
+   * Several movements counted the same way: no payload. The existing goal
+   * contract cannot keep them, so nothing is sent until the reviewed seam
+   * exists.
+   */
+  | { kind: 'several'; movements: MovementKey[]; message: string };
 
 function listInWords(words: readonly string[]): string {
   if (words.length <= 1) return words[0] ?? '';
@@ -125,16 +118,6 @@ function listInWords(words: readonly string[]): string {
 
 function capitalize(s: string): string {
   return s ? s[0]!.toUpperCase() + s.slice(1) : s;
-}
-
-/** The unit a same-kind group records: every movement named, within the server's limit. */
-function sharedUnit(movements: readonly Movement[]): string {
-  const named = movements.map((m) => m.unit).join(' + ');
-  if (named.length <= UNIT_MAX_LENGTH) return named;
-  // Not reachable with today's catalog (the longest same-kind group is 27
-  // characters); kept so a longer catalog degrades to an honest unit rather
-  // than one the server refuses.
-  return SHARED_GUIDE_KEY[movements[0]!.countKind];
 }
 
 /**
@@ -151,7 +134,7 @@ export function mapMovementSelection(keys: readonly unknown[]): SelectionContrac
       kind: 'mixed',
       movements: movements.map((m) => m.key),
       kinds,
-      message: `${capitalize(listInWords(movements.map((m) => m.unit)))} are counted differently, so they can’t share one total. Choose movements counted the same way, or start a separate goal for each.`,
+      message: `${capitalize(listInWords(movements.map((m) => m.unit)))} are counted differently, so they can’t share one total. Choose one movement.`,
     };
   }
 
@@ -162,19 +145,20 @@ export function mapMovementSelection(keys: readonly unknown[]): SelectionContrac
       movements: [only.key],
       unit: only.unit,
       activityGuideKey: only.key,
-      shared: false,
       countSentence: `Every ${only.one} counts once.`,
     };
   }
 
   return {
-    kind: 'individual',
+    kind: 'several',
     movements: movements.map((m) => m.key),
-    unit: sharedUnit(movements),
-    activityGuideKey: SHARED_GUIDE_KEY[kinds[0]!],
-    shared: true,
-    countSentence: `Every ${listInWords(movements.map((m) => m.one))} counts once toward the same total.`,
+    message: 'A goal with several movements can’t be started yet. Choose one movement.',
   };
+}
+
+/** Only an `individual` answer may be submitted. */
+export function isSubmittable(c: SelectionContract): c is Extract<SelectionContract, { kind: 'individual' }> {
+  return c.kind === 'individual';
 }
 
 /** Every catalog movement has a real counting guide; asserted by the tests. */

@@ -4,17 +4,28 @@ import { MOVEMENTS, toggleMovement, type MovementKey } from '../movementSelectio
 import { CREAM, kit, NAVY, TEXT_MUTED } from './kit';
 
 /**
- * MOVEMENT PILLS — pick one or several supported movements.
+ * MOVEMENT PILLS — pick a supported movement, or several, or "Something else".
  *
  * Reusable on purpose: `/goals/new` mounts it for a community goal, and the
  * kiosk setup can mount the same component with its own contract. It owns no
  * goal state and calls nothing; it reports the next selection and the screen
  * decides what that selection means (`mapMovementSelection`).
  *
- * ACCESSIBILITY. The group is labelled; each pill is a checkbox with its own
- * checked state, at least 44 px tall. Selection changes the shape as well as
- * the colour — a check mark is drawn inside a selected pill — so it never
- * depends on colour alone.
+ * TWO MODES. `single` (what `/goals/new` uses today) is a radio group: one
+ * choice at a time, because the existing goal contract can persist only one
+ * movement (Director #456 `5834379218`). `multiple` is a checkbox group for a
+ * screen whose contract can keep several; the mapping still refuses to turn
+ * several into a payload until that contract exists.
+ *
+ * "SOMETHING ELSE" is an explicit choice, not the absence of one: it is how a
+ * Champion reaches their own typed words at any time, including after picking
+ * a movement. The screen keeps the typed draft; this component only reports
+ * the press.
+ *
+ * ACCESSIBILITY. The group is labelled; each pill is a radio (single) or a
+ * checkbox (multiple) with aria-checked, at least 44 px tall, and toggles on
+ * Space as well as Enter on web. Selection changes shape as well as colour —
+ * a tick is drawn inside a selected pill.
  *
  * THE LEADING MARK is the Activity pulse the Lovable reference puts beside
  * MOVE, drawn from Views because the app has no icon library and adding one is
@@ -24,6 +35,12 @@ import { CREAM, kit, NAVY, TEXT_MUTED } from './kit';
 export type MovementPickerProps = {
   selected: readonly MovementKey[];
   onChange: (next: MovementKey[]) => void;
+  /** `single` is a radio group; `multiple` a checkbox group. */
+  mode?: 'single' | 'multiple';
+  /** The explicit route to the Champion's own words. Omit to hide it. */
+  somethingElse?: { selected: boolean; onPress: () => void };
+  /** One line under the pills; say only what the screen really supports. */
+  hint?: string;
   disabled?: boolean;
   /** The group's accessible name and visible label. */
   label?: string;
@@ -33,15 +50,21 @@ export type MovementPickerProps = {
 export function MovementPicker({
   selected,
   onChange,
+  mode = 'multiple',
+  somethingElse,
+  hint,
   disabled = false,
   label = 'Movements',
   testID = 'wsf-movement-picker',
 }: MovementPickerProps) {
+  const single = mode === 'single';
+  const choose = (key: MovementKey) =>
+    onChange(single ? [key] : toggleMovement(selected, key));
   return (
     <View
       style={styles.group}
       testID={testID}
-      accessibilityRole={'group' as never}
+      accessibilityRole={(single ? 'radiogroup' : 'group') as never}
       accessibilityLabel={label}
     >
       <View style={styles.heading}>
@@ -49,43 +72,74 @@ export function MovementPicker({
         <Text style={kit.fieldLabel}>{label}</Text>
       </View>
       <View style={styles.pills}>
-        {MOVEMENTS.map((m) => {
-          const on = selected.includes(m.key);
-          return (
-            <Pressable
-              key={m.key}
-              onPress={() => onChange(toggleMovement(selected, m.key))}
-              disabled={disabled}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: on, disabled }}
-              // react-native-web does not turn accessibilityState.checked into
-              // aria-checked, so the raw attribute carries it on web — the same
-              // way OptionRow and the route's duration pills do.
-              {...({
-                'aria-checked': on,
-                // A checkbox toggles on Space (ARIA checkbox pattern).
-                // react-native-web activates a Pressable on Space only for
-                // role="button", so Space is handled here; Enter keeps its
-                // ordinary press. Web-only: native has no key events here.
-                onKeyDown: (e: { key?: string; preventDefault?: () => void }) => {
-                  if (disabled || (e.key !== ' ' && e.key !== 'Spacebar')) return;
-                  e.preventDefault?.();
-                  onChange(toggleMovement(selected, m.key));
-                },
-              } as Record<string, unknown>)}
-              accessibilityLabel={m.label}
-              testID={`${testID}-${m.key}`}
-              dataSet={{ selected: on ? 'true' : 'false' }}
-              style={[kit.pill, styles.pill, on && kit.pillSelected, disabled && styles.disabled]}
-            >
-              {on ? <CheckMark /> : null}
-              <Text style={[kit.pillText, on && kit.pillTextSelected]}>{m.label}</Text>
-            </Pressable>
-          );
-        })}
+        {MOVEMENTS.map((m) => (
+          <Pill
+            key={m.key}
+            label={m.label}
+            on={selected.includes(m.key)}
+            single={single}
+            disabled={disabled}
+            onPress={() => choose(m.key)}
+            testID={`${testID}-${m.key}`}
+          />
+        ))}
+        {somethingElse ? (
+          <Pill
+            label="Something else"
+            on={somethingElse.selected}
+            single={single}
+            disabled={disabled}
+            onPress={somethingElse.onPress}
+            testID={`${testID}-something-else`}
+          />
+        ) : null}
       </View>
-      <Text style={styles.hint}>Pick one, or several counted the same way.</Text>
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
     </View>
+  );
+}
+
+function Pill({
+  label,
+  on,
+  single,
+  disabled,
+  onPress,
+  testID,
+}: {
+  label: string;
+  on: boolean;
+  single: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole={single ? 'radio' : 'checkbox'}
+      accessibilityState={{ checked: on, disabled }}
+      accessibilityLabel={label}
+      testID={testID}
+      dataSet={{ selected: on ? 'true' : 'false' }}
+      // react-native-web does not turn accessibilityState.checked into
+      // aria-checked, and activates a Pressable on Space only for
+      // role="button"; both are carried here for web, as OptionRow and the
+      // route's duration pills do. Native has neither key events nor ARIA.
+      {...({
+        'aria-checked': on,
+        onKeyDown: (e: { key?: string; preventDefault?: () => void }) => {
+          if (disabled || (e.key !== ' ' && e.key !== 'Spacebar')) return;
+          e.preventDefault?.();
+          onPress();
+        },
+      } as Record<string, unknown>)}
+      style={[kit.pill, styles.pill, on && kit.pillSelected, disabled && styles.disabled]}
+    >
+      {on ? <CheckMark /> : null}
+      <Text style={[kit.pillText, on && kit.pillTextSelected]}>{label}</Text>
+    </Pressable>
   );
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ACTIVITY_GUIDES, normalizeActivityKey } from '../src/activityGuides';
 import {
   hasCountingGuide,
+  isSubmittable,
   mapMovementSelection,
   MOVEMENTS,
   normalizeSelection,
@@ -58,36 +59,33 @@ describe('mapMovementSelection', () => {
   });
 
   it('one movement maps onto one wsfCreateGoal with its own unit and guide', () => {
-    expect(mapMovementSelection(['steps'])).toEqual({
+    const c = mapMovementSelection(['steps']);
+    expect(c).toEqual({
       kind: 'individual',
       movements: ['steps'],
       unit: 'steps',
       activityGuideKey: 'steps',
-      shared: false,
       countSentence: 'Every step counts once.',
     });
+    expect(isSubmittable(c)).toBe(true);
   });
 
-  it('several repetition movements map onto ONE goal, said plainly, with a guide that exists', () => {
-    const c = mapMovementSelection(['push-ups', 'squats']);
-    expect(c).toEqual({
-      kind: 'individual',
-      movements: ['squats', 'push-ups'],
-      unit: 'squats + push-ups',
-      activityGuideKey: 'reps',
-      shared: true,
-      countSentence: 'Every squat and push-up counts once toward the same total.',
-    });
-    expect(ACTIVITY_GUIDES.reps).toBeDefined();
-  });
-
-  it('the largest same-kind group still fits the server’s unit limit', () => {
-    const c = mapMovementSelection(['squats', 'push-ups', 'sit-ups']);
-    expect(c.kind).toBe('individual');
-    if (c.kind !== 'individual') return;
-    expect(c.unit).toBe('squats + push-ups + sit-ups');
-    expect(c.unit.length).toBeLessThanOrEqual(UNIT_MAX_LENGTH);
-    expect(c.countSentence).toBe('Every squat, push-up and sit-up counts once toward the same total.');
+  it('several movements counted the same way are NOT submittable: nothing persists them', () => {
+    // Director #456 `5834379218`: a joined unit, a title or one generic guide
+    // key must not masquerade as persisted multi-movement support.
+    for (const keys of [
+      ['push-ups', 'squats'],
+      ['squats', 'push-ups', 'sit-ups'],
+    ]) {
+      const c = mapMovementSelection(keys);
+      expect(c.kind, keys.join('+')).toBe('several');
+      expect(isSubmittable(c)).toBe(false);
+      expect(c).not.toHaveProperty('unit');
+      expect(c).not.toHaveProperty('activityGuideKey');
+      if (c.kind === 'several') {
+        expect(c.message).toBe('A goal with several movements can’t be started yet. Choose one movement.');
+      }
+    }
   });
 
   it('never adds repetitions to steps or laps — it refuses and says why', () => {
@@ -96,8 +94,9 @@ describe('mapMovementSelection', () => {
     if (c.kind !== 'mixed') return;
     expect(c.kinds).toEqual(['repetitions', 'steps']);
     expect(c.message).toBe(
-      'Squats and steps are counted differently, so they can’t share one total. Choose movements counted the same way, or start a separate goal for each.'
+      'Squats and steps are counted differently, so they can’t share one total. Choose one movement.'
     );
+    expect(isSubmittable(c)).toBe(false);
     // No payload field exists on a refusal.
     expect(c).not.toHaveProperty('unit');
     expect(c).not.toHaveProperty('activityGuideKey');
@@ -108,7 +107,7 @@ describe('mapMovementSelection', () => {
       for (const b of MOVEMENTS) {
         if (a.key === b.key) continue;
         const kind = mapMovementSelection([a.key, b.key]).kind;
-        expect(kind, `${a.key}+${b.key}`).toBe(a.countKind === b.countKind ? 'individual' : 'mixed');
+        expect(kind, `${a.key}+${b.key}`).toBe(a.countKind === b.countKind ? 'several' : 'mixed');
       }
     }
   });

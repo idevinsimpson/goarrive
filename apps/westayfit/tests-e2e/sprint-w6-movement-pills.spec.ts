@@ -18,18 +18,20 @@ import {
 /**
  * MOVEMENT-PILLS-1 (Director #365 `5834082617` §B; L0 #456 `5834097050`).
  *
- * `/goals/new` gains accessible pills for one or several SUPPORTED movements.
+ * `/goals/new` gains accessible pills for a SUPPORTED movement, or Something else.
  * What a choice means is decided by `src/movementSelection.ts` and tested there
  * as plain functions; this spec proves the screen obeys it end to end, against
  * the real `wsfCreateGoal` on the local emulator:
  *
  *   • one movement        → one goal, the movement's unit and its own guide;
- *   • several, same kind  → still ONE goal (never child goals), the unit naming
- *                           every movement and the review saying how it counts;
- *   • mixed kinds         → the reason on screen, the submit off, and NO
- *                           request to the callable at all;
- *   • nothing picked      → the typed unit, exactly as before, with no guide
- *                           key sent — and a typed draft survives the pills.
+ *   • a second movement   → REPLACES the first: the existing goal contract can
+ *                           persist only one movement, so the route is a radio
+ *                           group (Director #456 `5834379218`). Several, and
+ *                           mixed kinds, are refused by the mapping itself and
+ *                           tested in tests/movement-selection.test.ts;
+ *   • Something else      → an explicit choice, reachable after a movement is
+ *                           picked, bringing back the typed draft untouched; a
+ *                           typed unit sends no guide key.
  *
  * WRITES ARE OPT-IN (`helpers/capture`): frames and the interaction recording
  * are written only under WSF_CAPTURE_FRAMES=1, into a NEW directory. Nothing
@@ -150,21 +152,31 @@ for (const [cls, viewport] of [
       await openForm(page, fx);
       await fillNameAndTarget(page);
 
-      // Nothing picked: every pill says so, and the typed field is the unit.
+      // Nothing picked means Something else: its radio is on, the typed field
+      // is the unit, and every movement says it is off.
+      await expect(page.getByTestId('wsf-new-goal-movements')).toHaveAttribute('role', 'radiogroup');
+      await expectChecked(page, 'something-else', true);
       for (const key of ['squats', 'push-ups', 'sit-ups', 'steps', 'laps']) await expectChecked(page, key, false);
       await expect(page.getByTestId('wsf-new-goal-unit')).toBeVisible();
+      await expect(page.getByTestId('wsf-new-goal-movements')).toContainText(
+        'Pick a movement, or Something else to name your own.',
+      );
+      await expect(page.getByTestId('wsf-new-goal-movements')).not.toContainText('several');
+      await shoot(page, `AFTER-something-else-default-${cls}`);
 
       await pill(page, 'squats').click();
       await expectChecked(page, 'squats', true);
+      await expectChecked(page, 'something-else', false);
       await expect(page.getByTestId('wsf-new-goal-unit')).toHaveCount(0);
       await expect(page.getByTestId('wsf-new-goal-unit-chosen')).toHaveText('squats');
       await expect(page.getByTestId('wsf-new-goal-definition')).toHaveText('30,000 squats');
       await expect(page.getByTestId('wsf-new-goal-movements-count')).toHaveText('Every squat counts once.');
       await shoot(page, `AFTER-one-movement-${cls}`);
 
+      // The review is unchanged from the delivered checkpoint, so it is
+      // asserted, not re-shot (AFTER-one-movement-review-* stay as delivered).
       await page.getByTestId('wsf-new-goal-summary').scrollIntoViewIfNeeded();
       await expect(page.getByTestId('wsf-new-goal-summary')).toContainText('Every squat counts once.');
-      await shoot(page, `AFTER-one-movement-review-${cls}`);
 
       await submitAndExpectCreated(page);
       expect(sent).toHaveLength(1);
@@ -175,69 +187,27 @@ for (const [cls, viewport] of [
       expect(goals[0]!.activityGuideKey?.stringValue).toBe('squats');
     });
 
-    test('several movements counted the same way make ONE goal, said plainly', async ({ page }) => {
+    test('a second movement replaces the first: one choice, one request, one goal', async ({ page }) => {
       test.setTimeout(150_000);
-      const fx = await seedChampion(`many${cls.slice(4)}`);
+      const fx = await seedChampion(`swap${cls.slice(4)}`);
       const sent = watchCreateGoal(page);
       await openForm(page, fx);
       await fillNameAndTarget(page);
 
-      // Tapped out of catalog order on purpose: the unit is in catalog order.
-      await pill(page, 'push-ups').click();
       await pill(page, 'squats').click();
-      await expectChecked(page, 'squats', true);
+      await pill(page, 'push-ups').click();
       await expectChecked(page, 'push-ups', true);
-      await expect(page.getByTestId('wsf-new-goal-unit-chosen')).toHaveText('squats + push-ups');
-      await expect(page.getByTestId('wsf-new-goal-movements-count')).toHaveText(
-        'Every squat and push-up counts once toward the same total.',
-      );
-      await shoot(page, `AFTER-several-movements-${cls}`);
-
-      await page.getByTestId('wsf-new-goal-summary').scrollIntoViewIfNeeded();
-      await shoot(page, `AFTER-several-movements-review-${cls}`);
+      await expectChecked(page, 'squats', false);
+      await expect(page.getByTestId('wsf-new-goal-unit-chosen')).toHaveText('push-ups');
+      // No "several" state is reachable, so nothing can masquerade as one.
+      await expect(page.getByTestId('wsf-new-goal-movements-blocked')).toHaveCount(0);
 
       await submitAndExpectCreated(page);
       expect(sent).toHaveLength(1);
-      expect(sent[0]).toMatchObject({ unit: 'squats + push-ups', activityGuideKey: 'reps' });
-      // ONE goal. No child goals, nothing combined, nothing left behind.
+      expect(sent[0]).toMatchObject({ unit: 'push-ups', activityGuideKey: 'push-ups' });
       const goals = await goalsIn(fx.groupId);
       expect(goals).toHaveLength(1);
-      expect(goals[0]!.unit?.stringValue).toBe('squats + push-ups');
-    });
-
-    test('movements counted differently are refused on screen and never sent', async ({ page }) => {
-      test.setTimeout(150_000);
-      const fx = await seedChampion(`mix${cls.slice(4)}`);
-      const sent = watchCreateGoal(page);
-      await openForm(page, fx);
-      await fillNameAndTarget(page);
-
-      await pill(page, 'squats').click();
-      await pill(page, 'steps').click();
-      const mixed = page.getByTestId('wsf-new-goal-movements-mixed');
-      await expect(mixed).toHaveText(
-        'Squats and steps are counted differently, so they can’t share one total. Choose movements counted the same way, or start a separate goal for each.',
-      );
-      await expect(page.getByTestId('wsf-new-goal-definition')).toHaveCount(0);
-      await shoot(page, `AFTER-mixed-refused-${cls}`);
-
-      const submit = page.getByTestId('wsf-new-goal-submit');
-      await submit.scrollIntoViewIfNeeded();
-      await expect(submit).toHaveAttribute('aria-disabled', 'true');
-      await submit.click({ force: true });
-      await page.waitForTimeout(800);
-      expect(sent, 'a mixed choice reached the callable').toHaveLength(0);
-      await expect(page.getByTestId('wsf-new-goal-created')).toHaveCount(0);
-      expect(await goalsIn(fx.groupId)).toHaveLength(0);
-
-      // Resolving the mix turns the submit back on, and it creates one goal.
-      await pill(page, 'steps').scrollIntoViewIfNeeded();
-      await pill(page, 'steps').click();
-      await expect(mixed).toHaveCount(0);
-      await expect(submit).not.toHaveAttribute('aria-disabled', 'true');
-      await submitAndExpectCreated(page);
-      expect(sent).toHaveLength(1);
-      expect(sent[0]).toMatchObject({ unit: 'squats', activityGuideKey: 'squats' });
+      expect(goals[0]!.activityGuideKey?.stringValue).toBe('push-ups');
     });
 
     test('a typed unit still works, sends no guide key, and survives the pills', async ({ page }) => {
@@ -251,9 +221,16 @@ for (const [cls, viewport] of [
       await expect(page.getByTestId('wsf-new-goal-definition')).toHaveText('30,000 burpees');
       await pill(page, 'laps').click();
       await expect(page.getByTestId('wsf-new-goal-unit-chosen')).toHaveText('laps');
-      await pill(page, 'laps').click();
-      // The draft is back, untouched.
+      // Something else is reachable AFTER a movement is picked, and it brings
+      // the typed draft back untouched.
+      await pill(page, 'something-else').click();
+      await expectChecked(page, 'something-else', true);
+      await expectChecked(page, 'laps', false);
       await expect(page.getByTestId('wsf-new-goal-unit')).toHaveValue('burpees');
+      await expect(page.getByTestId('wsf-new-goal-definition')).toHaveText('30,000 burpees');
+      await shoot(page, `AFTER-something-else-after-movement-${cls}`);
+      const box = await pill(page, 'something-else').boundingBox();
+      expect(box!.height, 'Something else is at least 44 px tall').toBeGreaterThanOrEqual(44);
 
       await submitAndExpectCreated(page);
       expect(sent).toHaveLength(1);
@@ -266,7 +243,7 @@ for (const [cls, viewport] of [
 test.describe('390x844 · keyboard', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('the pills are checkboxes reached by Tab and toggled by Space', async ({ page }) => {
+  test('the pills are radios reached by Tab and chosen by Space', async ({ page }) => {
     test.setTimeout(120_000);
     const fx = await seedChampion('kbd');
     await openForm(page, fx);
@@ -278,10 +255,18 @@ test.describe('390x844 · keyboard', () => {
       reached = await pill(page, 'squats').evaluate((el) => el === document.activeElement);
     }
     expect(reached, 'Tab never reaches the first movement pill').toBe(true);
-    await expect(pill(page, 'squats')).toHaveAttribute('role', 'checkbox');
+    await expect(pill(page, 'squats')).toHaveAttribute('role', 'radio');
     await page.keyboard.press('Space');
     await expectChecked(page, 'squats', true);
+    // Tab on to Something else, and Space takes the choice back.
+    let other = false;
+    for (let i = 0; i < 10 && !other; i++) {
+      await page.keyboard.press('Tab');
+      other = await pill(page, 'something-else').evaluate((el) => el === document.activeElement);
+    }
+    expect(other, 'Tab never reaches Something else').toBe(true);
     await page.keyboard.press('Space');
+    await expectChecked(page, 'something-else', true);
     await expectChecked(page, 'squats', false);
     await expect(page.getByTestId('wsf-new-goal-movements')).toHaveAttribute('aria-label', 'Movements');
   });
@@ -309,15 +294,17 @@ test.describe('recording', () => {
     const page = await context.newPage();
     await openForm(page, fx);
     await fillNameAndTarget(page);
-    await page.waitForTimeout(400);
-    await pill(page, 'steps').click();
-    await page.waitForTimeout(500);
+    await page.getByTestId('wsf-new-goal-unit').fill('burpees');
+    await page.waitForTimeout(600);
     await pill(page, 'squats').click();
-    await expect(page.getByTestId('wsf-new-goal-movements-mixed')).toBeVisible();
-    await page.waitForTimeout(900);
-    await pill(page, 'steps').click();
+    await page.waitForTimeout(700);
     await pill(page, 'push-ups').click();
-    await expect(page.getByTestId('wsf-new-goal-unit-chosen')).toHaveText('squats + push-ups');
+    await page.waitForTimeout(700);
+    await pill(page, 'something-else').click();
+    await expect(page.getByTestId('wsf-new-goal-unit')).toHaveValue('burpees');
+    await page.waitForTimeout(900);
+    await pill(page, 'squats').click();
+    await expect(page.getByTestId('wsf-new-goal-unit-chosen')).toHaveText('squats');
     await page.waitForTimeout(700);
     await page.getByTestId('wsf-new-goal-summary').scrollIntoViewIfNeeded();
     await page.waitForTimeout(900);
