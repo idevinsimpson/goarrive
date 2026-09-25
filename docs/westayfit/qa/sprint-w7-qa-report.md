@@ -3055,3 +3055,56 @@ The successor's 10 / 10 is nine first-run cases plus T3. T3's first run failed o
 - W10's six e2e cases were not re-run. I ran only W7's two browser cases.
 
 **Status:** tested on `eda58218`. R&D QA only; not accepted, not integrated, not served.
+
+## 32 · RETURN-CONTINUITY-1 (#478), exact head `9f73aaa6f8a57372e3eeeb95765b3562b6060995` (product `ff043515`) on `6b96ba1b` (Director #434 `5827675711`; W7 ACK `5827682199`): **PASS on items 1–7; no defect**
+
+W7 accepts, integrates and stages nothing. This is not a pixel verdict. The run is Chromium only, on the local emulators.
+
+### 32.1 · Scope, by git (item 7)
+
+- Seven commits on exactly `6b96ba1b`. `apps/` is identical from `ff043515` to the head, and the later commits change frames and the producer only.
+- The **one product file** is `app/(tabs)/(home)/community/[groupId]/index.tsx`, plus two new `sprint-w9-return-continuity-*` specs, frames and a README.
+- `src/`, the contribute route, `app/move`, the tabs layout, functions, rules, `.github`, the hosting configs and `package.json` are identical to the base.
+- The route diff adds **no call**. It adds:
+  - a `refreshFailed` flag on a kept `ok` progress entry, set in the two existing `catch` blocks (the ordinary read and the return settle read). It is never set if a read issued later has already landed (`issuedAt >=`).
+  - an always-present, visually hidden `aria-live="polite"` region that receives the sentence when a read fails;
+  - the visible sentence (hidden from assistive technology) and **Retry**, whose `onPress` is the existing `refreshProgress`;
+  - the hero pill "Last known", which replaces the window pill while stale;
+  - the own-row eyebrow "Your last-known contribution".
+
+### 32.2 · W7's instrument (`sprint-w7-return-continuity-verify.spec.ts`), head (5018) vs base (5013)
+
+| case | head | base |
+|---|---|---|
+| **C1** confirmed return: Home's shared total equals the **server's shard sum** (1,867) and the receipt; the own row and the viewer's momentum row ("added 20 squats") carry the 20; no stale line | **PASS** | PASS |
+| **C2** request dropped → Home 1,847 = server (the 20 excluded); then the kept attempt confirmed with the reply lost after the write → Home 1,867 = server, **once** | **PASS** | PASS |
+| **C3** failed Refresh over a confirmed figure: 1,867 and "Confirmed h:mm" unchanged; stale line, "Last known" pill (window pill gone), live region text "Couldn’t refresh. This is the last confirmed figure.", own eyebrow "Your last-known contribution"; Retry's accessible name "Retry: October Squat Challenge progress"; Retry issues **another `wsfGoalPulse` request** (counted), and the state holds while it still fails | **PASS** | FAIL (silent) |
+| **C4** the read comes back → Retry clears the line, the pill (the window returns), the live text and the eyebrow; the figure equals the server's (1,867), no invented credit | **PASS** | — |
+| **C5** every read after the receipt fails, **no press**: the return's own settle read is said. The retained figure stays the last confirmed (**1,847**, the pre-contribution one) and is labelled "Last known"; nothing is added client-side | **PASS** | FAIL (silent) |
+| **C6** 390×640 and 390×844 in the stale state: the member tab bar is present with Home current; Retry is 44 px and reachable, bottom 393 / 484 above the bar's top 564 / 768; overflow 0 | **2 × PASS** | FAIL (no Retry) |
+
+**Head 6 / 6; base 2 / 6.** The base passes only C1 and C2, the unchanged confirmed and unknown returns.
+
+**Head first runs:** C2, C5 and both C6 cases passed on their first run. C1 and C3 / C4 failed their first run on **two instrument errors of mine**. I used the wrong testID for the momentum row (`wsf-community-momentum` instead of `wsf-momentum-row`). I also compared a CSS-uppercased eyebrow case-sensitively; the product showed "YOUR LAST-KNOWN CONTRIBUTION". Both were corrected and those two cases **rerun once, 2 / 2**.
+
+**Base:** the first base run also hung C1 and C3 on my snapshot helper's unbounded read of an element that does not exist on the base. The reads were bounded to 2 s and C1 and C3 rerun on the base: C1 PASS, C3 FAIL on silence, as expected.
+
+### 32.3 · Carried and focused runs on the head (items 5 and 6)
+
+| run | first run |
+|---|---|
+| W9 `sprint-w9-return-continuity-rendering`, incl. "healthy return says nothing" and "first failed read keeps the existing error" | all pass |
+| W8 `sprint-w8-social-privacy`, `sprint-w8-community-freshness`; W7 `community-freshness-verify` (F1–F4), `social-delta-verify` (DOM privacy incl. the zero / null mutation), `home-polish-verify` | **40 / 41** |
+
+The one failure is my Check 27 privacy case, which expected two anonymous feed rows and got one. **It fails identically on the base, first run and rerun.** It is a time-dependent row expectation in my own fixture, not this delta. The privacy guarantees are carried by W8's privacy spec and my DOM-privacy delta spec, both passing on the head.
+
+My Check 27 item-9 "stale seam" case, which measured the old silence, now reads "Last known" / "Couldn’t refresh" on the head. That is the change delivering what Check 27 reported.
+
+### 32.4 · Limits carried
+
+- **Separate seams, disclosed by W9:** presence and momentum come from separate reads and are not labelled last-known by this change.
+- **One of mine:** the "Confirmed h:mm" after a recovery landed in the same minute, so the stamp's advance was not observed.
+- **Not measured:** Safari and a real assistive-technology session. The live-region announcement was read from the DOM, not heard.
+- **Earlier seam, not this delta's:** S1 from Check 30 (a removed member returned to the still-mounted community screen).
+
+**Status:** tested on `9f73aaa6`; delivered by W9; **not accepted, integrated or staged**.
