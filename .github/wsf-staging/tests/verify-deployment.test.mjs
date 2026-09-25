@@ -9,9 +9,11 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const VERIFY = path.resolve('.github/wsf-staging/verify-deployment.mjs');
+const READ_INVENTORY = path.resolve('.github/wsf-staging/read-inventory.mjs');
+const LIVE_APPROVAL = path.resolve('.github/wsf-staging/approved-candidate.json');
 const SHA = '8e1a3ed485a5c0eadbcb23c1f35becad455923c7';
 let passed = 0;
 
@@ -517,7 +519,10 @@ await test("an approved addition that is SHUT is reported, never failed as pre-e
 
 await test('the LIVE approval against a 49-function project passes and reports exactly the three social services as created', async () => {
   // The real script beside the real approval — the resolution the deploy job
-  // uses — against a project that deployed this pin completely.
+  // uses. HISTORICAL SHAPE, KEPT: this is the 46 -> 49 rollout run 47 performed
+  // for 7ee70e4. The verifier still accepts it with the live approval (a project
+  // restored to 46 would be re-populated the same way); the NEXT run's reviewed
+  // shape is 49 -> 49 and has its own case below.
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
   const all49 = [...ALL, ...SOCIAL];
   const { server, base } = await startMock({ functions: all49, services: all49.map((n) => svc(n)) });
@@ -540,15 +545,90 @@ await test('the LIVE approval against a 46-function project FAILS, naming the th
   for (const n of SOCIAL) assert.match(r.err, new RegExp(`${n} absent — the approval authorizes this addition and the deploy did not produce it`));
 });
 
-await test('the live approval file names exactly the three reviewed social additions over the measured 46', async () => {
+await test('the live approval file names exactly the three reviewed social additions over the measured 49', async () => {
   // Read from the repository, not a fixture. Until the f2f901a pin this case
-  // asserted that the live approval carried NO additions; the pin flips it
-  // deliberately, so the tripwire now holds the pin to its reviewed inventory:
-  // exactly these three, in this form, and nothing else.
-  const live = JSON.parse(fs.readFileSync(path.resolve('.github/wsf-staging/approved-candidate.json'), 'utf8'));
+  // asserted that the live approval carried NO additions; that pin flipped it
+  // deliberately. Until the 502b1e8d pin it asserted a prior of 46, the BEFORE
+  // of run 47. Run 47 (35937603929) measured INVENTORY_AFTER=49, so the prior
+  // is now 49: the three social services are DEPLOYED, and they stay listed
+  // because the verifier's expected set is the 46-name base plus this list.
+  // Dropping them while they remain deployed would fail every later deploy as
+  // "present but not expected" (SOCIAL-ROLLOUT-SEQUENCE.md section 6a).
+  const live = JSON.parse(fs.readFileSync(LIVE_APPROVAL, 'utf8'));
   assert.deepEqual(live.candidateAddedFunctions, SOCIAL, 'the live approval must name exactly the three reviewed additions');
-  assert.equal(live.expectedPriorFunctions, 46);
+  assert.equal(live.expectedPriorFunctions, 49);
+  assert.equal(
+    live.expectedPriorFunctions,
+    ALL.length + SOCIAL.length,
+    'the measured prior equals the verifier expected set, so the reviewed next deploy creates nothing'
+  );
   assert.match(live.approvedAppSha, /^[0-9a-f]{40}$/);
+});
+
+/**
+ * THE LIVE PIN, END TO END, ON THE STAGING RUN 47 LEFT BEHIND.
+ *
+ * Two real scripts beside the real approval, in the deploy job's order:
+ * read-inventory.mjs (the pre-deploy gate that compares the live count with
+ * expectedPriorFunctions) and then verify-deployment.mjs, fed the gate's own
+ * output as its BEFORE. The verifier alone cannot tell a stale pin from a
+ * current one, because it never reads expectedPriorFunctions; the gate is
+ * what refused the 46 pin against a live 49, so the gate is part of this case.
+ *
+ * The three social services are modelled as run 47 measured them: DEPLOYED
+ * and SHUT (invoker_iam_check_enabled). The receipt must REPORT that and name
+ * them for the separate transport approval. VERIFY=pass here is an inventory
+ * and transport REPORT, never a claim that the social features work.
+ */
+function inventoryGate(dir, liveNames, approvalPath = LIVE_APPROVAL) {
+  const raw = path.join(dir, 'functions-list.json');
+  fs.writeFileSync(raw, JSON.stringify({ result: liveNames.map((id) => ({ id })) }));
+  const out = path.join(dir, 'before-from-gate.json');
+  const r = spawnSync(process.execPath, [READ_INVENTORY, '0', raw, out, approvalPath], { encoding: 'utf8' });
+  return { code: r.status, out: r.stdout || '', err: r.stderr || '', beforePath: out };
+}
+const ALL49 = [...ALL, ...SOCIAL];
+const SHUT_SOCIAL = ALL49.map((n) => (SOCIAL.includes(n) ? svc(n, { invokerIamDisabled: false }) : svc(n)));
+
+await test('the LIVE pin on a 49-function staging: the gate admits BEFORE 49 and the verifier passes 49 -> 49, creating nothing, losing nothing, and REPORTING the three SHUT', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
+  const gate = inventoryGate(d, ALL49);
+  assert.equal(gate.code, 0, `the pre-deploy gate must admit the measured live 49: ${gate.err}`);
+  assert.match(gate.out, /PREFLIGHT_BEFORE=49/);
+  assert.match(gate.out, /PREFLIGHT_BASELINE_MATCHES_APPROVAL=true/);
+
+  const { server, base } = await startMock({ functions: ALL49, services: SHUT_SOCIAL });
+  const r = await runFrom(VERIFY, base, gate.beforePath, d);
+  server.close();
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /VERIFY=pass/);
+  assert.match(r.out, /INVENTORY_BEFORE=49/);
+  assert.match(r.out, /INVENTORY_AFTER=49/);
+  assert.match(r.out, /EXPECTED_INVENTORY=49/);
+  assert.match(r.out, /CREATED_THIS_DEPLOY=none/);
+  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [], 'the reviewed next deploy creates nothing');
+  assert.deepEqual(r.receipt.inventory.lostThisDeploy, [], 'and loses nothing');
+  assert.doesNotMatch(r.err, /present but not expected|expected but absent|now gone/);
+  for (const n of SOCIAL) {
+    assert.equal(r.receipt.candidateServiceTransports[n], 'invoker_iam_check_enabled', `${n} is reported as measured, SHUT`);
+  }
+  assert.deepEqual(r.receipt.preExistingTransportDrifted, [], 'a SHUT social service is reported, not failed as drift');
+  assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true, 'SHUT is named for the separate transport approval, never declared usable');
+  assert.deepEqual(
+    r.receipt.candidateServiceTransportNeedingApproval.filter((n) => SOCIAL.includes(n)).sort(),
+    [...SOCIAL].sort()
+  );
+});
+
+await test('the LIVE pin REFUSES a staging that is not the measured 49, at the gate, before any deploy', async () => {
+  // Both directions of drift: 46 is staging as it was before run 47 (the
+  // baseline the previous pin expected), and 50 is an unreviewed addition.
+  for (const names of [ALL, [...ALL49, 'wsfunreviewedaddition']]) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
+    const gate = inventoryGate(d, names);
+    assert.equal(gate.code, 1, `a live ${names.length} must not pass a pin reviewed against 49`);
+    assert.match(gate.err, new RegExp(`has ${names.length} WSF functions but this candidate was approved against 49`));
+  }
 });
 
 console.log(`\nverify-deployment: ${passed} passed`);
