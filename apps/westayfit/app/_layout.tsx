@@ -9,6 +9,7 @@ import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
 import { StagingBanner } from '../src/StagingBanner';
 import { wsfTheme } from '../src/theme';
+import { isMoveSheetRoute } from '../src/ui/moveSheetRoute';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
 
 export default function RootLayout() {
@@ -90,6 +91,39 @@ function AppShell() {
               // for reduced motion gets the sheet with none of the travel.
               animation: reduced ? 'none' : 'slide_from_bottom',
             }}
+          />
+          {/*
+            APP-FEEL-PARITY-1. MOVE'S CONTRIBUTION STEPS ARE THE SAME SHEET.
+
+            With one open goal the resolver above replaces itself with that
+            goal's flow, and a chooser row opens it too. That flow used to be
+            an ordinary opaque page, so the moment MOVE found the goal the tab
+            behind went `display: none` and the member was on a new page --
+            the owner's "MOVE feels like a new page" (Director #365
+            `5834082617` §A.1). The sheet was only the resolver's second of
+            working.
+
+            So the flow is presented the way the resolver is -- a transparent
+            modal over the tab, which stays mounted and painted -- exactly
+            when it is MOVE's flow over the member's tabs: move mode, not a
+            kiosk, with the tabs or the MOVE sheet directly beneath. Anything
+            else keeps the page it has always been: "Already moved?" from
+            Home, Goal Setup's receipt, an event screen's hand-off, the kiosk,
+            and a cold or deep link with nothing beneath it. The screen asks
+            the same question (`isMoveSheetRoute`) and draws a sheet or a page
+            to match.
+          */}
+          <Stack.Screen
+            name="contribute/[goalId]"
+            options={({ route, navigation }) =>
+              isMoveSheetRoute(route, navigation.getState())
+                ? {
+                    presentation: 'transparentModal',
+                    contentStyle: { backgroundColor: 'transparent' },
+                    animation: reduced ? 'none' : 'slide_from_bottom',
+                  }
+                : {}
+            }
           />
         </Stack>
       </View>

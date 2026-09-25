@@ -13,6 +13,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
 import {
+  SHEET_OUT_MS,
+  ensureSheetMotionCss,
+  markSheetHandoff,
+  sheetData,
+  useSheetFocusContainment,
+  type SheetPhase,
+} from '../../src/ui/sheetMotion';
+import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import {
   ACTION_GREEN,
   CARD_BORDER,
   CREAM,
@@ -154,6 +163,10 @@ export default function MoveResolver() {
         }
         if (open.length === 1) {
           const g = open[0];
+          // The sheet stays up across the hand-off: the flow it hands to is
+          // the same sheet (app/_layout.tsx), and must not fade the dim in
+          // again from nothing.
+          markSheetHandoff();
           router.replace(
             `/contribute/${g.goalId}?groupId=${encodeURIComponent(groupId)}&mode=move`,
           );
@@ -191,7 +204,28 @@ export default function MoveResolver() {
     nothing was there -- so Close resolves to the canonical member destination
     instead of being a control that does nothing.
   */
+  /*
+    APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
+    180 ms exit, then the same Close as before. One press is one exit. Reduced
+    motion goes straight there.
+  */
+  const reducedMotion = useReducedMotion();
+  const [phase, setPhase] = useState<SheetPhase>(() => {
+    ensureSheetMotionCss();
+    return 'in';
+  });
+  const closing = useRef(false);
   const close = () => {
+    if (closing.current) return;
+    closing.current = true;
+    if (reducedMotion || typeof document === 'undefined') {
+      leave();
+      return;
+    }
+    setPhase('out');
+    setTimeout(leave, SHEET_OUT_MS);
+  };
+  const leave = () => {
     if (router.canGoBack()) {
       router.back();
       return;
@@ -231,6 +265,8 @@ export default function MoveResolver() {
   */
   const sheetRef = useRef<View>(null);
   useSheetFocusReturn(sheetRef);
+  // Focus enters the sheet, and Tab stays in it while it is in front.
+  useSheetFocusContainment(sheetRef);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
@@ -250,8 +286,15 @@ export default function MoveResolver() {
         accessibilityRole="button"
         accessibilityLabel="Close"
         testID="wsf-move-scrim"
+        // Close is the keyboard's way out; the scrim is the pointer's.
+        focusable={false}
+        {...(sheetData('scrim', phase) as object)}
       />
-      <View style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]} testID="wsf-move-sheet">
+      <View
+        style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]}
+        testID="wsf-move-sheet"
+        {...(sheetData('panel', phase) as object)}
+      >
         <View style={s.sheetHead}>
           <View pointerEvents="none" style={s.grabber} />
           <Pressable
