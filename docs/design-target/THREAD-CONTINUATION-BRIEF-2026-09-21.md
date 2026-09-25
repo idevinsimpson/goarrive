@@ -4,13 +4,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 17:10Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 17:40Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`502b1e8d`** (RECOVERY-PORT-1, RETURN-CONTINUITY-1, FOCUS-RETURN-1 integrated; tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
+| development `claude/wsf-app-shell` | **`00d6d44e`** = `502b1e8d` + MOVEMENT-PILLS-1 `eeb5eed0` (tree `1f3c2033`; tsc 0, guard 9/20, vitest 891) |
 | `main` | `273ce3ae` (pin #479; staging skill #480; startup pointers #481; OPS-DOC-1 #476) |
 | staging pin | `approvedAppSha` `502b1e8d`, `expectedPriorFunctions` 49, three social retained |
 | served staging | **`502b1e8d`**, run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0 (social excluded), cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
@@ -20,7 +20,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
 | **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | successor `b497ce4c` (L0 git `5834964867`; tsc 0, vitest 875, guard 9/20): **W7 Check 36B** closed D1 / F3 (Director `5835326729`); **F2 open** — scrims tabbable, focus containment must be panel-only, orienting focus after step replacement; evidence `f9ca3d5d` (no product delta; tsc 0, vitest 875) → **Director pixel PASS `5835484423` / `5835521562`**; W9 session RUNNING on F2 since 16:59Z (no L0 wake: busy; `5836240722`), ACK pending; owes the F2 successor with rendered-DOM proof + README receipt-colour text fix; Lovable discrepancies carried to W9's final MOVE parity checkpoint, not waived | W9 F2 → W7 affected rows → Director pixels → L0 integrate → pin → ONE dispatch (cp1 is its own milestone; `5835326935`) |
-| **MOVEMENT-PILLS-1** (§B) | W6 · **#483** `eeb5eed0` on `502b1e8d` | single-movement subset: shortcut removed, several / mixed refused, explicit Something else; L0 git `5836116882` (tsc 0, vitest 891, guard 9/20, `goal-setup-next/` unchanged); **Director source + pixel PASS `5836096616`**; W7 **Check 38** (#434 `5836118476`); owner's multiple-movement request NOT done — seam **design direction accepted** `5836170255` (4 invariants carried to a future packet naming file ownership); no implementation release; `eeb5eed0` stays immutable for W7 | W7 → Director → L0 integrate → stage |
+| **MOVEMENT-PILLS-1** (§B) | W6 · #483 `eeb5eed0` | **ACCEPTED** `5836712806` (single-choice subset; W7 Check 38 PASS) → **integrated `00d6d44e`** (#483 `5836737965`); multiple movements, icon parity, native / AT proof and W7 N1 remain; seam direction accepted `5836170255`, no release | stage: pin OPS-PIN-00D6D44E (W3, #396 `5836739961`; wake `trig_01BJZM3wt74iPdU5XoRKPUoS`) → W7 → Director → L0 merge → ONE dispatch |
 | **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | `06bcb288` held (Director `5835619402`: ownership gaps) → successor **`9f8b55f6`** (#396 `5835731366`), carried in #484 | W7 changed-behaviour review → Director |
 | **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · **#484** `5765b0ea` on `main` `7e423a48` | L0 git `5835726079` (workflow +145 / −0); `5765b0ea` = seed successor only, run-all green; **W7 37B** (`5836268427`): criteria 4–6 PASS, M8 gap (seed job permissions unpinned), B-P1 owner uid in log / receipt | W7 → Director → L0 PLAN → APPLY / VERIFY |
 | JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
