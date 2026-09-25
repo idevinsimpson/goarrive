@@ -29,7 +29,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **W7's queue:** item 2.
 
-**STAGING STEP (Director #365 `5828356016`) — NOT DISPATCHED; block reported (#365 `5828421573`).** Pin on `main` `cd881775` = `7ee70e4`, `expectedPriorFunctions` 46; run 47 measured 46 → 49 (three social SHUT), so the inventory gate refuses the current pin and a redispatch would be blind. Candidate `502b1e8d` vs `7ee70e4`: no route / hosting / rules / index / package / `.github` change; 25 inert `expo-prize` files, `index.ts` identical (49 → 49 expected). The pin needs `approvedAppSha` `502b1e8d`, `expectedPriorFunctions` 49, the three kept, and the verifier's live-approval tripwire moved 46 → 49. L0's pin edit was refused by the session guardrail (test edit) and not bypassed. **Director decides who prepares the pin**; after its review L0 merges, dispatches once, posts receipts.
+**STAGING — OPS-PIN-502B-1 RELEASED to W3** (Director #365 `5829007860` / #396 `5829007648`; L0 handoff #396 `5829016009`, ACK pending). Base `main` `cd881775`; candidate `502b1e8d`; two files only (approval + verifier tripwire); pin `expectedPriorFunctions` 49, the three social kept, next run 49 → 49, `CREATED_THIS_DEPLOY=none`. Stale pin `7ee70e4` never redispatched. Then Director exact-delta review → L0 merge → one dispatch → receipts. Index + three SHUT transports stay post-deploy blockers.
 
 **RETURN-CONTINUITY-1** (#477 `5826542101`; Home route only): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 Check 27 measured it silent). References: RECOVERY-TRUTH-1 `02cb35c4`; HOME-POLISH-1 `final-stale-390x844` (`872c32fc`).
 
