@@ -6,7 +6,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star and source donor, `5819686459`, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then the preserved history below. Workers read this section, their own packet and the thread deltas.
 
-**Heads (2026-09-25 03:25Z).**
+**Heads (2026-09-25 04:15Z).**
 
 | what | value |
 | --- | --- |
@@ -20,15 +20,15 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | packet | owner · PR · SHAs | last receipt | next consumer · wake |
 | --- | --- | --- | --- |
 | **RECOVERY-PORT-1 — INTEGRATED** | W9 · #474 (merged by containment) · `86c160ae` on reference `02cb35c4` | W7 Check 29 PASS (#434 `5825334802`); Director ACCEPTED (#474 `5825352413`); **L0 merge `6b96ba1b`** (#474 `5825365990`) | not staged; FOCUS-RETURN-1 required before the journey is called staged / usable; Lovable return review: consultation unavailable |
-| **FOCUS-RETURN-1** (focus back to the opener after MOVE Close / Escape, Back or Finish; tab + scroll kept; cold → heading) | W9 · released #474 `5825281943` (Director `5825247950`); base `6f994f5a` (take `6b96ba1b` in by merge commit); new branch + draft PR; reservation `app/(tabs)/**`, `MemberTabBar.tsx`, `memberShell*`, `app/move/**`, one new helper, `sprint-w9-focus-return-*` specs (L0 ownership check: no other active writer) | — | **ACKed** on `claude/wsf-w9-focus-return-1` from `6b96ba1b` (#474 `5825558375`) → W7 → Director → L0 |
+| **FOCUS-RETURN-1** | W9 · **#477** · `8f2cc15e` on `6b96ba1b` (product `0d5df335`) | Director source + pixels PASS for QA (`5826499325`); L0 git (#477 `5826542101`): reservation only, tsc 0, vitest 875, guard 9/20 | **W7 Check 30 EXECUTING** (#434 `5826390838`) → Director → L0; three named dependencies stay out of this SHA |
 | **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
 | **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | head `8642e330`: gated camera lab + MediaPipe `0.10.35` (1.x sends usage metrics — upgrade needs the owner); L0 git: tsc 0, vitest 941, guard 9/20; BROWSER partial (fake camera), no real-body claim | Director's three core cases (`5825938854`) still open → QA if asked; no merge |
 | **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | frozen `a84e6764` / `8c61cd72`: limited R&D handoff, fake-camera evidence (`5826104270`) | **NOT READY**; no Expo task or port before the owner's phone test |
 | W7 item 2: reference focus diagnosis (Lovable `06198931`) | W7 · #434 `5822117639` | not run (preview host refused by W7's proxy) | last in W7's queue |
 
-**W7's queue:** FOCUS-RETURN-1 (when delivered) → item 2.
+**W7's queue:** Check 30 (executing) → item 2.
 
-**Next: RETURN-CONTINUITY-1 — APPROVED, queued for W9** after FOCUS-RETURN-1 (Director `5825324407`) — the Home a member lands on after contributing. References: RECOVERY-TRUTH-1 frames `recovery-confirmed-home-totals-390x844` / `recovery-unknown-home-totals-390x844` and `src/demo/screens/home.tsx` (`02cb35c4`); HOME-POLISH-1 `final-stale-390x844` (`872c32fc`, sha256 `45b8c01e…`). States (390×844 / 390×640): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 measured it silent, #434 `5821115372`). Owner W9, route-only; retained data labelled after a measured refresh failure, Retry through the existing refresh; confirmed / unknown return measured first; same-attempt / server totals and privacy preserved.
+**RETURN-CONTINUITY-1 — RELEASED to W9** (#477 `5826542101`; Home route only; new branch from current development; SENT, not ACKed) — the Home a member lands on after contributing. References: RECOVERY-TRUTH-1 frames `recovery-confirmed-home-totals-390x844` / `recovery-unknown-home-totals-390x844` and `src/demo/screens/home.tsx` (`02cb35c4`); HOME-POLISH-1 `final-stale-390x844` (`872c32fc`, sha256 `45b8c01e…`). States (390×844 / 390×640): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 measured it silent, #434 `5821115372`). Owner W9, route-only; retained data labelled after a measured refresh failure, Retry through the existing refresh; confirmed / unknown return measured first; same-attempt / server totals and privacy preserved.
 
 **Waiting on the owner:** the lab phone test in `5826104270` (squat tallies, second person, step-out; no video). EXP1 held; W2 / W4 / W6 / W1B / W8 parked; W5 stopped.
 
