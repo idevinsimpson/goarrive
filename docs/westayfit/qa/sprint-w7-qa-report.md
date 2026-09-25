@@ -3966,3 +3966,64 @@ These are as in §41:
 - **Per-goal fan-out** is not measured: each fixture community has one goal.
 
 **No product, config or evidence file was touched.** Nothing is accepted, integrated or staged by this check.
+
+## 43 · PRIVACY-TOGGLE emulator proof on served `0b460ce3f2f0766406100fef14d9a444c8cad43a` (L0 #434 `5840570251`; Director bug #365 `5840495639`, rows #396 `5840491600`; W7 ACK `5840643975`): **the swallowed-error defect reproduced (the fail-before for W9's cp3); rows 1–6 PASS; the stored value is authoritative**
+
+- **Build:** the emulator-flagged `build:web` of `0b460ce3` (the Check 41B worktree).
+- **Callables:** the emulators (`demo-wsf-local`) run `functions-westayfit` built from a clean worktree whose tree is `5a3f232e`, identical to `0b460ce3`'s.
+- **Accounts:** synthetic only. **M** makes the changes; **O** is the Champion who reads what others see; **N** is a nonmember. M and O share communities A and B, and A has a running goal with contributions today by M (15) and O (10).
+- **Spec:** `sprint-w7-privacy-toggle-verify.spec.ts`. It was run three times (once, then `--repeat-each=2`); **every row gave the same result in all three runs**.
+- **What this does not cover:** staging transport. The setter is SHUT in run 50; that is CANNOT-MEASURE here and belongs to the operator.
+
+### 1 · Fail-first: a failed save on the Settings privacy screen (Chromium, 390×844 default)
+
+**Source, at `0b460ce3` `app/settings/privacy.tsx`:**
+- the catch at `:112` runs `setError(...)`;
+- `:114` calls `void load()`;
+- `load()` runs `setPhase('loading')` and `setError(null)` (`:68–69`) **synchronously, before its first `await`**.
+
+Both state updates therefore fall in the same tick, and React batches them.
+
+**The instrument** samples every animation frame, recording `wsf-privacy-error` visibility, the loading line, and each switch's `checked`. The measurements:
+
+| Failure of `wsfSetCommunityVisibility` | What the setter answered (captured) | Stored `communityNameVisibility` after | Switch at settle (3 s) | Switch = stored | Error ever painted | Error visible at settle | What the member sees |
+|---|---|---|---|---|---|---|---|
+| (a) refused, INJECTED | `403 PERMISSION_DENIED` | unchanged (absent = visible) | on | **yes** | **no, not one frame** | **no** | the switch never moves; "Loading your communities…" flashes at +36–52 ms |
+| (b) lost before the server, INJECTED abort | `net::ERR_FAILED`; no write | unchanged | on | **yes** | **no** | **no** | the same |
+| (c) landed, reply lost, INJECTED fetch-then-abort | `net::ERR_FAILED`; **the write landed** | `private` | **off** (+95–131 ms, after the re-read) | **yes** | **no** | **no** | the switch turns off after a loading flash, with no word that the save's reply was lost |
+| (d) REAL refusal: M's membership in B removed on the server after the screen read it | `403 PERMISSION_DENIED "Members only."` (real server) | unchanged | **the B block is gone** (re-read) | n/a (row gone) | **no** | **no** | the community silently disappears |
+| **Positive control:** the communities read fails, INJECTED 500 | — | — | — | — | **yes**, at +193–218 ms | **yes**, still shown at 4 s | the instrument sees a persistent error |
+
+**Verdict on item 1: DEFECT REPRODUCED, 4 / 4 modes × 3 runs.** A failed save never paints its error, not even for a frame, so nothing tells the member it did not save.
+- **The contract the spec asserts** is the Director's: an error stays visible once the switch is back on the stored value. It **fails on `0b460ce3` in all four modes**. That is the fail-before for W9's cp3.
+- **The stored value is authoritative:** the switch always equals the stored document, and no optimistic value was ever rendered. In (a) and (b) the switch never moved; in (c) it moved to the server's settled value.
+- **Why this matters for staging:** with the setter transport SHUT, the call fails in the browser and takes this same path. That matches the owner's "switches do not work" report: a tap, a flash of "Loading…", and nothing.
+
+### 2 · Rows 1–6 (the Director's list), through the real screen and callables
+
+| Row | Measured | Result |
+|---|---|---|
+| **1** name OFF persists across a reload | M flips A's name switch. Stored A name `private`; after a reload the switch is off. What O reads: `wsfCommunityMembers(A)` no longer names M; `wsfMyCommunities` member count still 2; no uid in either payload. | **PASS** |
+| **2** activity OFF persists across a reload | Stored A activity `private`; the switch is off after a reload. O's `wsfCommunityActivity(A)` has **no row for M**, `contributorsToday` is still **2**, and there is no uid. The note reads "You are not listed and your activity is not shown here. Your effort still counts toward the total." | **PASS** |
+| **3** name OFF + activity ON settles correctly | Before and after a reload: name off, activity on, equal to the stored values. O's activity feed shows M as an **anonymous row** (not missing), with `contributorsToday` 2. The "Anonymous member" note is shown. **Reverse, name back ON with activity OFF:** O's members list names M again (the current preference applies retroactively), and there is still no activity row. | **PASS** |
+| **4** community A leaves community B unchanged | B's stored fields stay absent (visible) throughout; B's switches stay on after every reload; O's `wsfCommunityMembers(B)` names M. All three set requests carried A's `groupId` only. | **PASS** |
+| **5** a nonmember's set is refused | N (not a member of A): `PERMISSION_DENIED "Members only."`. A signed-out caller: `UNAUTHENTICATED`. No membership row was created for N, and M's stored A values are unchanged. N's `wsfCommunityMembers(A)` is also refused. | **PASS** |
+| **6** the stored preference governs what others see; no identity on public paths | Rows 1–3 show O's view following M's stored values. With no caller, `wsfGoalRecentAdditions` and `wsfGoalPulse` for A's goal carry neither member's name nor M's uid. The public `/display/<goalId>` page, loaded in a signed-out context, shows neither name. | **PASS** |
+
+### 3 · The stored value is authoritative
+
+Across every failure mode and every row, the rendered switch equals the stored document, measured at settle and after each reload. The only change a failure ever rendered was the landed-write case, where the switch took the **server's** value.
+
+### For W9's cp3 (finding only; W7 fixes nothing)
+
+1. **Keep the save error visible** after the re-read, until the member retries or acts again. The fix needs the error to survive `load()`'s `setError(null)`, or the re-read must not clear a save error.
+2. **(c) and (d) need their own words.** When the reply is lost after the write landed, the member sees the switch change to the stored value with no explanation. When a real refusal removes membership, the community silently disappears.
+
+The spec is ready to serve as cp3's pass-after: its U1 contract rows should pass on the fix, with rows 1–6 and the control unchanged.
+
+**Limits:**
+- Chromium web on local emulators, at the default 390×844 viewport.
+- Staging transport, IAM and the index are CANNOT-MEASURE here.
+- Kiosk surfaces were not exercised beyond the public display callables and page.
+
+**Status:** tests and evidence only. Nothing is accepted, integrated or staged.
