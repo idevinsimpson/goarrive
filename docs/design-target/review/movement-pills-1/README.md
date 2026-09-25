@@ -6,7 +6,7 @@ Packet: Director #365 `5834082617` §B, L0 handoff #456 `5834097050`, W6 ACK #45
 | | |
 |---|---|
 | Base | development `claude/wsf-app-shell` @ `502b1e8d0c98c199445c664c696b3f73bb460f14` |
-| Route blob | `cf71b432…` at base → `3285d846…` at `03cfddba` (held) → **`0e24dccac3c68205f563e77e56e79fc55196f4f3`** (successor) |
+| Route blob | `cf71b432…` at base → `3285d846…` at `03cfddba` (held) → **`f30c069de863bbd4154e1dde937f7e122050bf1d`** (successor) |
 | New files (successor) | `src/movementSelection.ts` `273dfb1f…`, `src/ui/MovementPicker.tsx` `f31dc5a6…`, `tests/movement-selection.test.ts` `ece0524b…`, `tests/movement-picker.test.tsx` `2ff0428e…`, `tests-e2e/sprint-w6-movement-pills.spec.ts` `796cbc25…` |
 | Producer | `apps/westayfit/tests-e2e/sprint-w6-movement-pills.spec.ts`, write gate `WSF_CAPTURE_FRAMES=1` |
 | Environment | emulator `demo-wsf-local`; web bundle built at the route blob above with `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1`; Chromium; `deviceScaleFactor` 2 |
@@ -31,6 +31,11 @@ recover the chosen movements. That path is now **off**:
   chosen by Space. It is also the default, which is today's form.
 - **The hint says only what is supported:** "Pick a movement, or Something else to name your own."
   It no longer invites "several".
+- **The picker sits below the goal phrase.** The first successor build placed it above the
+  Target field. The focused regression caught that at 390×640: the accepted producer's claim that
+  the goal phrase is on screen with its fields failed. The phrase's top was at 672 px against a
+  640 px fold, because the picker is 212 px of 44 px targets. Below the phrase, the claim holds
+  again at both classes, and choosing a movement updates the phrase directly above it.
 
 | selection on `/goals/new` | contract |
 |---|---|
@@ -124,15 +129,15 @@ the held path and are removed from this directory; they remain in git at `03cfdd
 | `RECORDING-selection-review-submit-390x844.webm` | typed draft → Squats → Push-ups replaces it → Something else restores the draft → Squats → review → the real created receipt | successor |
 
 ```
-81788c9610cb58fed34d72f380ce15b1f321c9eef5b6be0ff17a69d619777689  AFTER-one-movement-390x640.png
-97f36e12c598bf6333665b27a92d2fa3889cec78a6259a1b06632002cd006c0d  AFTER-one-movement-390x844.png
+b804f1a93837f8654267002e5c3bf6113aa07074ab32f6b35fd78c383b40027a  AFTER-one-movement-390x640.png
+1e8cfb7f6ac6c815657793627f047cf55c7a4d3e0020aaff0487e34145773d28  AFTER-one-movement-390x844.png
 0e27b258e0a62b6d0f1dceca78242a26752c672621bc9d5dcf5c938d3a5c5258  AFTER-one-movement-review-390x640.png
 eaf41b61c0cc47c4f24251d1f574e91bad89d7285b651c7e04edf1b4eb89db19  AFTER-one-movement-review-390x844.png
-ac49978b6936a4ea3f038f77e8526e50ca9554f2baad7ed1e53c609e585f0731  AFTER-something-else-after-movement-390x640.png
-8b36e0c8d21f1242543d11e0d15eefe85cacf19ec9451e9eaafb3f2e58d1bd46  AFTER-something-else-after-movement-390x844.png
-5d848b399b5f1a9c651cd3e5e0c40cebfd8fe460b14b0758982e28528f77a91b  AFTER-something-else-default-390x640.png
-47a6d6c395f493a671903eba014d27f68a07a1e2ec65afb615c411e56925abd7  AFTER-something-else-default-390x844.png
-37acc496a3b32cfb6a83912a9de38e32fa58ec441f5c6d23ce561c78d3135772  RECORDING-selection-review-submit-390x844.webm
+a41e72505c8f68c034772e8ddc2d929e63858ed7371763d2d4033c9bad4f1885  AFTER-something-else-after-movement-390x640.png
+8d5b8b83eacbacb508a2618dd5aa4881a7010108e50633e3e8146b7a4b1bba97  AFTER-something-else-after-movement-390x844.png
+031a16a18d2a6060bd3e7d37c5035c89b2eb4c3d4dad1dcb36dac1ab8895de57  AFTER-something-else-default-390x640.png
+300b2eb9620945dfe521ed349be172f717a68365bde3428556fd2a9beaa05876  AFTER-something-else-default-390x844.png
+2750202ff9d63e4ce7cb7cbcd63dd71fd4f6d435997188c4cd88d0e719244164  RECORDING-selection-review-submit-390x844.webm
 ```
 
 ## Discrepancies from the Lovable reference

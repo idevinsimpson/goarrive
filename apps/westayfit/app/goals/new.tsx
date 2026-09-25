@@ -915,12 +915,75 @@ export default function NewGoalPage() {
           <FieldError message={fieldErrors.title} testID="wsf-new-goal-title-error" />
         </View>
         {/*
+          The number and the unit read as one sentence, so they sit on one
+          line where the words allow it and stack when they do not.
+        */}
+        <View style={styles.pair}>
+          <View style={styles.pairTarget} ref={anchorRefs.target}>
+            <Text style={kit.fieldLabel}>Target</Text>
+            <TextField
+              ref={targetRef}
+              value={target}
+              onChangeText={(v) => {
+                setTarget(v);
+                clearFieldError('target');
+              }}
+              placeholder="e.g. 5000"
+              keyboardType="number-pad"
+              inputMode="numeric"
+              editable={!submitting}
+              testID="wsf-new-goal-target"
+            />
+            <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
+          </View>
+          <View style={styles.pairUnit} ref={anchorRefs.unit}>
+            <Text style={kit.fieldLabel}>What you&apos;re counting</Text>
+            {movements.length === 0 ? (
+              <TextField
+                ref={unitRef}
+                value={unit}
+                onChangeText={(v) => {
+                  setUnit(v);
+                  clearFieldError('unit');
+                }}
+                placeholder="e.g. squats, or pick one below"
+                editable={!submitting}
+                testID="wsf-new-goal-unit"
+              />
+            ) : (
+              // Chosen by the pills above: shown, not typed. Something else
+              // brings the typed draft back untouched.
+              <Text style={styles.unitChosen} testID="wsf-new-goal-unit-chosen">
+                {trimmedUnit || 'Choose one movement'}
+              </Text>
+            )}
+            <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
+          </View>
+        </View>
+        {/*
+          THE SENTENCE THE TWO FIELDS EXIST TO MAKE, at the kit's display tier
+          rather than at field-label weight. It is the thing being made, and
+          it is the only thing on this screen at this size.
+        */}
+        {definition ? (
+          <View style={styles.payoff}>
+            <Text style={[display.md, styles.payoffText]} testID="wsf-new-goal-definition">
+              {definition}
+            </Text>
+          </View>
+        ) : null}
+        {/*
           MOVEMENT-PILLS-1. One supported movement, or Something else — and
           then the typed unit beside the target decides, as it always did.
           Anything the goal contract cannot persist says so here, before any
           submit, and the submit stays off until it is resolved.
+
+          BELOW THE GOAL PHRASE, deliberately. The accepted target's claim is
+          that the phrase is on screen with the fields that make it at 390×640
+          as well as 390×844; three rows of 44 px pills above it pushed it off
+          a 640 px screen. Here, a choice updates the phrase just above it.
         */}
-        <View ref={anchorRefs.unit} style={styles.movements}>
+        <View style={styles.movements} testID="wsf-new-goal-movements-block">
           <MovementPicker
             selected={movements}
             onChange={(next) => {
@@ -954,64 +1017,6 @@ export default function NewGoalPage() {
             </Text>
           ) : null}
         </View>
-        {/*
-          The number and the unit read as one sentence, so they sit on one
-          line where the words allow it and stack when they do not.
-        */}
-        <View style={styles.pair}>
-          <View style={styles.pairTarget} ref={anchorRefs.target}>
-            <Text style={kit.fieldLabel}>Target</Text>
-            <TextField
-              ref={targetRef}
-              value={target}
-              onChangeText={(v) => {
-                setTarget(v);
-                clearFieldError('target');
-              }}
-              placeholder="e.g. 5000"
-              keyboardType="number-pad"
-              inputMode="numeric"
-              editable={!submitting}
-              testID="wsf-new-goal-target"
-            />
-            <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
-          </View>
-          <View style={styles.pairUnit}>
-            <Text style={kit.fieldLabel}>What you&apos;re counting</Text>
-            {movements.length === 0 ? (
-              <TextField
-                ref={unitRef}
-                value={unit}
-                onChangeText={(v) => {
-                  setUnit(v);
-                  clearFieldError('unit');
-                }}
-                placeholder="e.g. squats, or pick a movement"
-                editable={!submitting}
-                testID="wsf-new-goal-unit"
-              />
-            ) : (
-              // Chosen by the pills above: shown, not typed. Something else
-              // brings the typed draft back untouched.
-              <Text style={styles.unitChosen} testID="wsf-new-goal-unit-chosen">
-                {trimmedUnit || 'Choose one movement'}
-              </Text>
-            )}
-            <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
-          </View>
-        </View>
-        {/*
-          THE SENTENCE THE TWO FIELDS EXIST TO MAKE, at the kit's display tier
-          rather than at field-label weight. It is the thing being made, and
-          it is the only thing on this screen at this size.
-        */}
-        {definition ? (
-          <View style={styles.payoff}>
-            <Text style={[display.md, styles.payoffText]} testID="wsf-new-goal-definition">
-              {definition}
-            </Text>
-          </View>
-        ) : null}
       </Step>
 
       <Step n="2" title="When">
