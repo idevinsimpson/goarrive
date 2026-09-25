@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { groupTypeCardLabel, memberCountLabel, roleCardLabel } from '../labels';
 import {
@@ -60,15 +60,40 @@ export type YouParityViewProps = {
 
 const n = (v: number) => v.toLocaleString('en-US');
 
+/**
+ * The reference's `@media (max-height: 700px)` block: a short phone tightens
+ * the head, the band and the state cards. Same breakpoint, same values.
+ */
+export const YOU_COMPACT_MAX_HEIGHT = 700;
+
+/**
+ * True on a phone no taller than the reference's breakpoint. It waits for
+ * hydration, the rule the display, kiosk and station follow (#418): the static
+ * export renders with no window, and React does not repair attributes on
+ * hydration, so the first client render must match the export's full rhythm.
+ * A missing measurement never selects the compact layout.
+ */
+export function useYouCompact(): boolean {
+  const { height } = useWindowDimensions();
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+  return hydrated && height > 0 && height <= YOU_COMPACT_MAX_HEIGHT;
+}
+
 export function YouParityView({ state, email, signingOut, actions }: YouParityViewProps) {
+  const compact = useYouCompact();
   const account = <Account email={email} signingOut={signingOut} onSignOut={actions.onSignOut} />;
+  const card = [s.stateCard, compact && s.stateCardCompact];
+  const cardTitle = [s.stateTitle, compact && s.stateTitleCompact];
   return (
-    <View style={s.screen} testID="wsf-you">
-      <ScrollView contentContainerStyle={s.body}>
+    <View style={s.screen} testID="wsf-you" {...({ dataSet: { compact: compact ? 'true' : 'false' } } as Record<string, unknown>)}>
+      <ScrollView contentContainerStyle={[s.body, compact && s.bodyCompact]}>
         {state.kind === 'loading' ? (
           <>
-            <YouHead profile={null} onSettings={null} resolved={false} />
-            <View style={s.bandSkeleton} testID="wsf-you-loading">
+            <YouHead profile={null} onSettings={null} resolved={false} compact={compact} />
+            <View style={[s.bandSkeleton, compact && s.bandCompact]} testID="wsf-you-loading">
               <View style={[s.skelOnNavy, { width: '46%', height: 11 }]} />
               <View style={[s.skelOnNavy, { width: '70%', height: 24 }]} />
               <View style={[s.skelOnNavy, { width: '100%', height: 34, marginTop: 10 }]} />
@@ -83,10 +108,10 @@ export function YouParityView({ state, email, signingOut, actions }: YouParityVi
 
         {state.kind === 'signedOut' ? (
           <>
-            <YouHead profile={null} onSettings={null} resolved={false} />
-            <View style={s.stateCard} testID="wsf-you-signed-out">
+            <YouHead profile={null} onSettings={null} resolved={false} compact={compact} />
+            <View style={card} testID="wsf-you-signed-out">
               <Text style={s.eyebrow}>YOUR PART</Text>
-              <Text style={s.stateTitle}>Sign in to see your part and your communities</Text>
+              <Text style={cardTitle}>Sign in to see your part and your communities</Text>
               <Text style={s.stateBody}>
                 What you record is yours. It is counted into your community’s shared total and is
                 never shown beside anybody else’s.
@@ -98,10 +123,10 @@ export function YouParityView({ state, email, signingOut, actions }: YouParityVi
 
         {state.kind === 'noCommunity' ? (
           <>
-            <YouHead profile={state.profile} onSettings={actions.onSettings} />
-            <View style={s.stateCard} testID="wsf-you-no-community">
+            <YouHead profile={state.profile} onSettings={actions.onSettings} compact={compact} />
+            <View style={card} testID="wsf-you-no-community">
               <Text style={s.eyebrow}>YOUR COMMUNITY</Text>
-              <Text style={s.stateTitle}>Find your people</Text>
+              <Text style={cardTitle}>Find your people</Text>
               <Text style={s.stateBody}>
                 You’re not in a community yet. Your part is counted inside a community’s goals —
                 join one with a code, or start your own.
@@ -114,10 +139,10 @@ export function YouParityView({ state, email, signingOut, actions }: YouParityVi
 
         {state.kind === 'pickCommunity' ? (
           <>
-            <YouHead profile={state.profile} onSettings={actions.onSettings} />
-            <View style={s.stateCard} testID="wsf-you-pick-community">
+            <YouHead profile={state.profile} onSettings={actions.onSettings} compact={compact} />
+            <View style={card} testID="wsf-you-pick-community">
               <Text style={s.eyebrow}>YOUR COMMUNITY</Text>
-              <Text style={s.stateTitle}>Which community?</Text>
+              <Text style={cardTitle}>Which community?</Text>
               <Text style={s.stateBody}>
                 {`You are in ${state.count} communities. Open one and it becomes the one this ` +
                   'page speaks for.'}
@@ -130,11 +155,11 @@ export function YouParityView({ state, email, signingOut, actions }: YouParityVi
 
         {state.kind === 'failed' ? (
           <>
-            <YouHead profile={state.profile} onSettings={actions.onSettings} />
-            {state.community ? <Belonging community={state.community} /> : null}
-            <View style={s.stateCard} testID="wsf-you-failed" accessibilityRole={'alert' as never}>
+            <YouHead profile={state.profile} onSettings={actions.onSettings} compact={compact} />
+            {state.community ? <Belonging community={state.community} compact={compact} /> : null}
+            <View style={card} testID="wsf-you-failed" accessibilityRole={'alert' as never}>
               <Text style={s.eyebrow}>YOUR PART</Text>
-              <Text style={s.stateTitle}>Contribution details unavailable</Text>
+              <Text style={cardTitle}>Contribution details unavailable</Text>
               <Text style={s.stateBody}>
                 {state.community
                   ? 'Your identity and community are still here. We won’t guess an amount or show it as zero.'
@@ -149,7 +174,9 @@ export function YouParityView({ state, email, signingOut, actions }: YouParityVi
           </>
         ) : null}
 
-        {state.kind === 'member' ? <Member state={state} actions={actions} account={account} /> : null}
+        {state.kind === 'member' ? (
+          <Member state={state} actions={actions} account={account} compact={compact} />
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -159,18 +186,22 @@ function Member({
   state,
   actions,
   account,
+  compact,
 }: {
   state: Extract<YouState, { kind: 'member' }>;
   actions: YouParityActions;
   account: ReactNode;
+  compact: boolean;
 }) {
   const { lead, others } = leadAndOthers(state.open, state.finished);
   const block = partBlock(state);
+  const card = [s.stateCard, compact && s.stateCardCompact];
+  const cardTitle = [s.stateTitle, compact && s.stateTitleCompact];
   return (
     <>
-      <YouHead profile={state.profile} onSettings={actions.onSettings} />
+      <YouHead profile={state.profile} onSettings={actions.onSettings} compact={compact} />
       <View testID="wsf-you-member">
-        <Belonging community={state.community} />
+        <Belonging community={state.community} compact={compact} />
         {state.partial ? (
           <Text style={s.partial} testID="wsf-you-partial">
             Some goals could not be loaded, so this list may be short.
@@ -178,9 +209,9 @@ function Member({
         ) : null}
         {block === 'lead' && lead ? <Lead row={lead} /> : null}
         {block === 'startMoving' ? (
-          <View style={s.stateCard} testID="wsf-you-nothing-yet">
+          <View style={card} testID="wsf-you-nothing-yet">
             <Text style={s.eyebrow}>YOUR PART</Text>
-            <Text style={s.stateTitle}>Your first confirmed contribution can start here</Text>
+            <Text style={cardTitle}>Your first confirmed contribution can start here</Text>
             <Text style={s.stateBody}>
               No confirmed contribution is shown for you yet. Pending or unknown attempts never count
               here.
@@ -190,12 +221,12 @@ function Member({
         ) : null}
         {block === 'noEligible' ? (
           <View
-            style={s.stateCard}
+            style={card}
             testID="wsf-you-nothing-yet"
             {...({ dataSet: { state: 'no-eligible-goal' } } as Record<string, unknown>)}
           >
             <Text style={s.eyebrow}>YOUR PART</Text>
-            <Text style={s.stateTitle}>No goal is open for contributions</Text>
+            <Text style={cardTitle}>No goal is open for contributions</Text>
             <Text style={s.stateBody}>
               {state.finished.length > 0
                 ? 'This community has no goal accepting contributions right now. What you added before is below.'
@@ -220,9 +251,12 @@ export function YouHead({
   profile,
   onSettings,
   resolved = true,
+  compact = false,
 }: {
   profile: YouProfile | null;
   onSettings: (() => void) | null;
+  /** The reference's short-phone block: 9 px under the head instead of 14. */
+  compact?: boolean;
   /**
    * False while loading and when signed out. `wsf-you-identity` is the shell
    * tests' "this screen has resolved for a signed-in member" handle and
@@ -234,7 +268,7 @@ export function YouHead({
   const name = profile?.displayName ?? null;
   const initials = initialsOf(name);
   return (
-    <View style={s.head} testID={resolved ? 'wsf-you-identity' : undefined}>
+    <View style={[s.head, compact && s.headCompact]} testID={resolved ? 'wsf-you-identity' : undefined}>
       <View style={s.avatar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {initials ? <Text style={s.avatarText}>{initials}</Text> : <PersonGlyph />}
       </View>
@@ -264,10 +298,10 @@ export function YouHead({
 }
 
 /** Your current community, full-bleed navy: name, kind, then role and size. */
-function Belonging({ community }: { community: YouCommunity }) {
+function Belonging({ community, compact }: { community: YouCommunity; compact: boolean }) {
   const kind = groupTypeCardLabel(community.groupType ?? null);
   return (
-    <View style={s.band} testID="wsf-you-community">
+    <View style={[s.band, compact && s.bandCompact]} testID="wsf-you-community">
       <View>
         <Text style={s.eyebrowLight}>YOUR CURRENT COMMUNITY</Text>
         <Text style={s.bandName}>{community.displayName}</Text>
@@ -341,10 +375,15 @@ function Lead({ row }: { row: YouGoal }) {
           ) : null}
           <View style={s.sharedText}>
             <Text style={s.sharedSmall}>SHARED POSITION</Text>
-            <Text style={s.sharedNumberLine} testID="wsf-you-lead-shared">
-              <Text style={s.sharedNumber}>{n(row.sharedTotal)}</Text>
-              <Text style={s.sharedOf}>{sharedLine(row).slice(n(row.sharedTotal).length)}</Text>
-            </Text>
+            <View
+              style={s.sharedNumberLine}
+              testID="wsf-you-lead-shared"
+              accessible
+              accessibilityLabel={sharedLine(row)}
+            >
+              <Text style={s.sharedNumber}>{`${n(row.sharedTotal)} `}</Text>
+              <Text style={s.sharedOf}>{sharedLine(row).slice(n(row.sharedTotal).length + 1)}</Text>
+            </View>
             {usable ? (
               <>
                 <View style={s.track}>
@@ -469,7 +508,7 @@ function PrimaryAction({
       accessibilityLabel={label}
     >
       <Text style={s.primaryText}>{label}</Text>
-      {arrow ? <Text style={s.primaryArrow} accessibilityElementsHidden>→</Text> : null}
+      {arrow ? <ArrowGlyph size={20} /> : null}
     </Pressable>
   );
 }
@@ -496,12 +535,53 @@ function SecondaryAction({
       accessibilityLabel={label}
     >
       <Text style={s.secondaryText}>{label}</Text>
-      {arrow ? <Text style={s.secondaryArrow} accessibilityElementsHidden>→</Text> : null}
+      {arrow ? <ArrowGlyph size={17} /> : null}
     </Pressable>
   );
 }
 
-/** The Settings gear, drawn from Views: four crossed bars, a hub, a hole. */
+/**
+ * lucide `arrow-right` (the reference's action arrow) drawn from Views on its
+ * own 24-unit grid: the shaft 5→19 on y 12 and the two strokes of the head,
+ * stroke width 2, round caps. The app ships no SVG library.
+ */
+function ArrowGlyph({ size }: { size: number }) {
+  const k = size / 24;
+  const stroke = 2 * k;
+  const bar = (x1: number, y1: number, x2: number, y2: number) => {
+    const len = Math.hypot(x2 - x1, y2 - y1) * k + stroke;
+    const cx = ((x1 + x2) / 2) * k;
+    const cy = ((y1 + y2) / 2) * k;
+    const deg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+    return {
+      position: 'absolute' as const,
+      left: cx - len / 2,
+      top: cy - stroke / 2,
+      width: len,
+      height: stroke,
+      borderRadius: stroke / 2,
+      backgroundColor: NAVY,
+      transform: [{ rotate: `${deg}deg` }],
+    };
+  };
+  return (
+    <View
+      style={{ width: size, height: size }}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <View style={bar(5, 12, 19, 12)} />
+      <View style={bar(12, 5, 19, 12)} />
+      <View style={bar(19, 12, 12, 19)} />
+    </View>
+  );
+}
+
+/**
+ * The Settings gear, drawn from Views as an outline like lucide `settings`:
+ * four crossed bars make eight teeth, a ring covers their middle, and a small
+ * ring sits at the centre.
+ */
 function GearGlyph() {
   return (
     <View style={s.gear} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -551,12 +631,16 @@ const s = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG,
   },
+  bodyCompact: { paddingTop: 8 },
 
-  eyebrow: { color: EYEBROW_GREEN, fontSize: 11, fontWeight: '800', letterSpacing: 1.32 },
-  eyebrowLight: { color: CONFIRMED, fontSize: 11, fontWeight: '800', letterSpacing: 1.32 },
-  muted: { color: MUTED_FG, fontSize: 12 },
-  h1: { color: NAVY, fontSize: 27, lineHeight: 31, fontWeight: '400', marginVertical: 2 },
-  h2: { color: NAVY, fontSize: 21, lineHeight: 23, fontWeight: '400', marginTop: 3 },
+  // Line heights are the reference's literal ones: its own where styles.css
+  // sets one, otherwise the 1.5 every element inherits from the Tailwind
+  // preflight. React Native's default ("normal") is shorter.
+  eyebrow: { color: EYEBROW_GREEN, fontSize: 11, lineHeight: 16.5, fontWeight: '800', letterSpacing: 1.32 },
+  eyebrowLight: { color: CONFIRMED, fontSize: 11, lineHeight: 16.5, fontWeight: '800', letterSpacing: 1.32 },
+  muted: { color: MUTED_FG, fontSize: 12, lineHeight: 18 },
+  h1: { color: NAVY, fontSize: 27, lineHeight: 40.5, fontWeight: '400', marginVertical: 2 },
+  h2: { color: NAVY, fontSize: 21, lineHeight: 23.1, fontWeight: '400', marginTop: 3 },
 
   head: {
     flexDirection: 'row',
@@ -567,6 +651,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
   },
+  headCompact: { paddingBottom: 9 },
   avatar: {
     width: 36,
     height: 36,
@@ -584,13 +669,21 @@ const s = StyleSheet.create({
     paddingVertical: 3,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
+    gap: 1,
   },
-  settingsText: { color: NAVY, fontSize: 10, fontWeight: '800' },
+  settingsText: { color: NAVY, fontSize: 10, lineHeight: 15, fontWeight: '800' },
   gear: { width: 21, height: 21, alignItems: 'center', justifyContent: 'center' },
   gearTooth: { position: 'absolute', width: 4, height: 19, borderRadius: 1, backgroundColor: NAVY },
-  gearHub: { position: 'absolute', width: 14, height: 14, borderRadius: 7, backgroundColor: NAVY },
-  gearHole: { position: 'absolute', width: 6, height: 6, borderRadius: 3, backgroundColor: BG },
+  gearHub: {
+    position: 'absolute',
+    width: 15,
+    height: 15,
+    borderRadius: 7.5,
+    borderWidth: 1.75,
+    borderColor: NAVY,
+    backgroundColor: BG,
+  },
+  gearHole: { position: 'absolute', width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.75, borderColor: NAVY },
   person: { width: 22, height: 22, alignItems: 'center', justifyContent: 'flex-end' },
   personHead: { width: 9, height: 9, borderRadius: 5, backgroundColor: SURFACE, marginBottom: 2 },
   personBody: { width: 16, height: 8, borderTopLeftRadius: 8, borderTopRightRadius: 8, backgroundColor: SURFACE },
@@ -603,14 +696,15 @@ const s = StyleSheet.create({
     gap: 14,
     backgroundColor: NAVY,
   },
-  bandName: { color: SURFACE, fontSize: 25, lineHeight: 27, fontWeight: '400', marginTop: 3, marginBottom: 2 },
-  bandSub: { color: BAND_SUB, fontSize: 12 },
+  bandCompact: { marginTop: 8, paddingVertical: 13, gap: 9 },
+  bandName: { color: SURFACE, fontSize: 25, lineHeight: 26.25, fontWeight: '400', marginTop: 3, marginBottom: 2 },
+  bandSub: { color: BAND_SUB, fontSize: 12, lineHeight: 18 },
   bandFacts: { flexDirection: 'row', gap: 14 },
   bandFact: { paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.18)' },
-  bandDt: { color: BAND_DT, fontSize: 10, fontWeight: '800' },
-  bandDd: { color: SURFACE, fontSize: 14, fontWeight: '800', marginTop: 2 },
+  bandDt: { color: BAND_DT, fontSize: 10, lineHeight: 15, fontWeight: '800' },
+  bandDd: { color: SURFACE, fontSize: 14, lineHeight: 21, fontWeight: '800', marginTop: 2 },
 
-  partial: { color: MUTED_FG, fontSize: 12.5, lineHeight: 17, fontWeight: '700', marginTop: 12 },
+  partial: { color: MUTED_FG, fontSize: 12.5, lineHeight: 18.75, fontWeight: '700', marginTop: 12 },
 
   lead: { paddingTop: 18, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: BORDER },
   leadHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
@@ -627,10 +721,13 @@ const s = StyleSheet.create({
     gap: 10,
   },
   sharedText: { flex: 1, minWidth: 0 },
-  sharedSmall: { color: SHARED_SMALL, fontSize: 9, fontWeight: '800' },
-  sharedNumberLine: { marginTop: 2 },
-  sharedNumber: { color: SURFACE, fontSize: 24, lineHeight: 26, fontWeight: '700' },
-  sharedOf: { color: SHARED_SOFT, fontSize: 13, fontWeight: '700' },
+  sharedSmall: { color: SHARED_SMALL, fontSize: 9, lineHeight: 13.5, fontWeight: '800' },
+  // `.goal-number`: a baseline-aligned row with a 4 px gap. The figure's
+  // trailing space keeps the phrase readable as one; it hangs at the end of
+  // its line, so the gap is the margin.
+  sharedNumberLine: { flexDirection: 'row', alignItems: 'baseline' },
+  sharedNumber: { color: SURFACE, fontSize: 24, lineHeight: 24, fontWeight: '700', marginRight: 4 },
+  sharedOf: { flexShrink: 1, color: SHARED_SOFT, fontSize: 13, lineHeight: 19.5, fontWeight: '700' },
   track: {
     height: 8,
     marginTop: 8,
@@ -639,9 +736,16 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.18)',
   },
   trackFill: { height: '100%', borderRadius: 10, backgroundColor: CONFIRMED },
-  meta: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4, marginTop: 5 },
-  metaStrong: { color: CONFIRMED, fontSize: 9, fontWeight: '700' },
-  metaSoft: { color: SHARED_SOFT, fontSize: 9 },
+  meta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    columnGap: 14,
+    rowGap: 2,
+    marginTop: 5,
+  },
+  metaStrong: { color: CONFIRMED, fontSize: 9, lineHeight: 13.5, fontWeight: '700' },
+  metaSoft: { color: SHARED_SOFT, fontSize: 9, lineHeight: 13.5 },
   own: {
     flex: 0.65,
     minWidth: 104,
@@ -653,10 +757,10 @@ const s = StyleSheet.create({
     borderLeftColor: CONFIRMED,
     backgroundColor: SURFACE,
   },
-  ownSmall: { color: MUTED_FG, fontSize: 9, lineHeight: 11, fontWeight: '800' },
-  ownNumber: { color: NAVY, fontSize: 34, lineHeight: 32, fontWeight: '700', marginTop: 6 },
-  ownUnit: { color: UNIT_GREEN, fontSize: 12, lineHeight: 15, fontWeight: '800', marginTop: 3 },
-  truth: { color: MUTED_FG, fontSize: 10, marginTop: 9 },
+  ownSmall: { color: MUTED_FG, fontSize: 9, lineHeight: 11.25, fontWeight: '800' },
+  ownNumber: { color: NAVY, fontSize: 34, lineHeight: 32.3, fontWeight: '700', marginTop: 6 },
+  ownUnit: { color: UNIT_GREEN, fontSize: 12, lineHeight: 18, fontWeight: '800', marginTop: 3 },
+  truth: { color: MUTED_FG, fontSize: 10, lineHeight: 15, marginTop: 9 },
 
   pill: {
     paddingHorizontal: 9,
@@ -665,26 +769,28 @@ const s = StyleSheet.create({
     backgroundColor: PILL_BG,
     alignSelf: 'flex-start',
   },
-  pillText: { color: PILL_TEXT, fontSize: 10, fontWeight: '800' },
+  pillText: { color: PILL_TEXT, fontSize: 10, lineHeight: 15, fontWeight: '800' },
   pillClosedReached: { backgroundColor: NAVY },
   pillTextClosedReached: { color: CONFIRMED },
   pillClosedUnfinished: { backgroundColor: MUTED_BG },
   pillTextClosedUnfinished: { color: MUTED_FG },
 
   others: { paddingTop: 17 },
-  h2Others: { color: NAVY, fontSize: 19, lineHeight: 22, fontWeight: '400', marginTop: 2, marginBottom: 6 },
+  h2Others: { color: NAVY, fontSize: 19, lineHeight: 28.5, fontWeight: '400', marginTop: 2, marginBottom: 6 },
   row: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: BORDER },
   rowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   rowHeadText: { flex: 1, minWidth: 0 },
-  rowTitle: { color: NAVY, fontSize: 14, fontWeight: '700' },
-  rowSub: { color: MUTED_FG, fontSize: 11, marginTop: 2 },
+  rowTitle: { color: NAVY, fontSize: 14, lineHeight: 21, fontWeight: '700' },
+  rowSub: { color: MUTED_FG, fontSize: 11, lineHeight: 16.5, marginTop: 2 },
   rowFacts: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  rowDt: { color: MUTED_FG, fontSize: 9, fontWeight: '800' },
-  rowDd: { color: NAVY, fontSize: 12, fontWeight: '800', marginTop: 2 },
+  rowDt: { color: MUTED_FG, fontSize: 9, lineHeight: 13.5, fontWeight: '800' },
+  rowDd: { color: NAVY, fontSize: 12, lineHeight: 18, fontWeight: '800', marginTop: 2 },
 
   stateCard: { marginTop: 16, padding: 20, borderRadius: 8, backgroundColor: MUTED_BG },
-  stateTitle: { color: NAVY, fontSize: 22, lineHeight: 25, fontWeight: '400', marginTop: 4, marginBottom: 7 },
-  stateBody: { color: MUTED_FG, fontSize: 13, lineHeight: 19 },
+  stateCardCompact: { marginTop: 10, paddingVertical: 15, paddingHorizontal: 20 },
+  stateTitle: { color: NAVY, fontSize: 22, lineHeight: 24.64, fontWeight: '400', marginTop: 4, marginBottom: 7 },
+  stateTitleCompact: { fontSize: 20, lineHeight: 22.4 },
+  stateBody: { color: MUTED_FG, fontSize: 13, lineHeight: 18.85 },
   flowActions: { flexDirection: 'row', gap: 8, marginTop: 16 },
   inRow: { flex: 1, marginTop: 0 },
 
@@ -700,7 +806,6 @@ const s = StyleSheet.create({
     ...elevation.action,
   },
   primaryText: { color: NAVY, fontSize: 16, fontWeight: '800' },
-  primaryArrow: { color: NAVY, fontSize: 18, fontWeight: '800' },
   secondary: {
     minHeight: 48,
     paddingHorizontal: 14,
@@ -715,7 +820,6 @@ const s = StyleSheet.create({
   },
   secondaryBlock: { alignSelf: 'flex-start', marginTop: 10 },
   secondaryText: { color: NAVY, fontSize: 14, fontWeight: '800' },
-  secondaryArrow: { color: NAVY, fontSize: 15, fontWeight: '800' },
 
   account: {
     marginTop: 24,
@@ -730,8 +834,8 @@ const s = StyleSheet.create({
     gap: 12,
   },
   accountText: { flex: 1, minWidth: 0 },
-  accountLabel: { color: MUTED_FG, fontSize: 12 },
-  accountEmail: { color: NAVY, fontSize: 14, fontWeight: '800', marginTop: 2 },
+  accountLabel: { color: MUTED_FG, fontSize: 12, lineHeight: 18 },
+  accountEmail: { color: NAVY, fontSize: 14, lineHeight: 21, fontWeight: '800', marginTop: 2 },
   signOut: {
     minHeight: 44,
     paddingHorizontal: 14,

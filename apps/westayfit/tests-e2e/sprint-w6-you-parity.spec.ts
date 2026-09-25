@@ -32,8 +32,11 @@ const IPHONE_UA =
   '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
 const FIXTURE = (state: string) => `/design-target/you-parity?state=${state}`;
-/** The reference's masthead (prototype strip 30 + top bar 62) and tab bar. */
-const TOP = 92;
+/**
+ * The reference's masthead (prototype strip 30 + top bar 62, or 56 at the
+ * reference's max-height 700 px breakpoint) and tab bar.
+ */
+const topFor = (height: number) => (height <= 700 ? 86 : 92);
 const TAB_BAR = 75;
 
 async function phone(browser: Browser, viewport: { width: number; height: number }, dpr = 2) {
@@ -88,6 +91,15 @@ for (const vp of [
       expect(y.community).toBeLessThan(y.lead);
       expect(y.lead).toBeLessThan(y.others);
       expect(y.others).toBeLessThan(y.account);
+      // The reference's short-phone block (max-height 700px): the band sits
+      // 8 px under the head instead of 14, and 13 px of band padding, not 18.
+      const compact = vp.height <= 700;
+      await expect(page.getByTestId('wsf-you')).toHaveAttribute('data-compact', String(compact));
+      const head = (await page.getByTestId('wsf-you-identity').boundingBox())!;
+      const band = (await page.getByTestId('wsf-you-community').boundingBox())!;
+      expect(Math.round(band.y - (head.y + head.height))).toBe(compact ? 8 : 14);
+      const eyebrow = (await page.getByTestId('wsf-you-community').getByText('YOUR CURRENT COMMUNITY').boundingBox())!;
+      expect(Math.round(eyebrow.y - band.y)).toBe(compact ? 13 : 18);
       // The identity, the community and the whole lead block are on the first
       // screen at 390x844, as in the reference; at 640 the lead starts on it.
       await expect(page.getByTestId('wsf-you-identity')).toBeInViewport({ ratio: 1 });
@@ -303,6 +315,7 @@ test.describe('YOU-PARITY-1 · evidence', () => {
       const name = `you-${shot.state}-${shot.vp.width}x${shot.vp.height}`;
       const file = path.join(dir, `${name}.png`);
       await page.screenshot({ path: file });
+      const TOP = topFor(shot.vp.height);
       const crop = { y: TOP, h: shot.vp.height - TOP - TAB_BAR };
       const entry: Record<string, unknown> = {
         state: shot.state,

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { NAVY } from '../../src/ui/kit';
-import { YouParityView } from '../../src/ui/YouParityView';
+import { YouParityView, useYouCompact } from '../../src/ui/YouParityView';
 import type { YouGoal, YouState } from '../../src/youParity';
 
 /**
@@ -19,8 +19,10 @@ import type { YouGoal, YouState } from '../../src/youParity';
  *
  * THIS IS NOT THE ROUTE. The route stays W9's during PERF-MOBILE-1; the hook is
  * Phase B. Nothing here reads Firebase. The top band is exactly as tall as the
- * reference's prototype strip plus its top bar (30 + 62 = 92 px) and says what
- * this page is, so the comparison crops both frames to the same body window.
+ * reference's prototype strip plus its top bar (30 + 62 = 92 px; 30 + 56 = 86 px
+ * on a phone no taller than 700 px, where the reference's top bar shortens)
+ * and says what this page is, so the comparison crops both frames to the same
+ * body window.
  *
  * Behind the same gate as every other design-target route: it renders only when
  * the build carries EXPO_PUBLIC_WSF_USE_EMULATORS, which staging and
@@ -33,8 +35,9 @@ function previewAllowed(): boolean {
   return v === '1' || v === 'true';
 }
 
-/** The reference's masthead height: prototype strip 30 + top bar 62. */
+/** The reference's masthead height: prototype strip 30 + top bar 62 (56 when short). */
 export const REFERENCE_MASTHEAD = 92;
+export const REFERENCE_MASTHEAD_COMPACT = 86;
 
 const PROFILE = { displayName: 'Alex M.', memberSince: 'September 2026' };
 const COMMUNITY = { displayName: 'Oak Grove Together', role: 'member', memberCount: 23 };
@@ -98,6 +101,7 @@ const STATES: Record<string, YouState> = {
 export default function YouParityFixture() {
   const params = useLocalSearchParams<{ state?: string }>();
   const [pressed, setPressed] = useState<string | null>(null);
+  const compact = useYouCompact();
   if (!previewAllowed()) {
     return (
       <View style={styles.refused} testID="wsf-you-parity-refused">
@@ -109,7 +113,7 @@ export default function YouParityFixture() {
   const press = (name: string) => () => setPressed(name);
   return (
     <View style={styles.page} testID="wsf-you-parity-fixture" dataSet={{ state: key, pressed: pressed ?? '' }}>
-      <View style={styles.band}>
+      <View style={[styles.band, { height: compact ? REFERENCE_MASTHEAD_COMPACT : REFERENCE_MASTHEAD }]}>
         <Text style={styles.bandText}>YOU-PARITY-1 · COMPONENT FIXTURE · NOT THE ROUTE</Text>
         <Text style={styles.bandSub}>{`state=${key}${pressed ? ` · pressed ${pressed}` : ''}`}</Text>
       </View>
@@ -135,7 +139,6 @@ export default function YouParityFixture() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#FBFAF4' },
   band: {
-    height: REFERENCE_MASTHEAD,
     backgroundColor: '#FFF4D6',
     borderBottomWidth: 1,
     borderBottomColor: '#E8D9A8',
