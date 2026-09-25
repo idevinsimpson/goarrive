@@ -28,6 +28,77 @@ When Devin explicitly says "deploy staging now", do not stop at a status report 
 
 A separate feature-readiness item (for example a Firestore index still building) may limit whether a feature is fully usable, but it is not a reason to forget how to dispatch the staging workflow when the owner explicitly asks for the deploy. Report the limitation honestly.
 
+
+
+## Automatic stable-change cadence — OWNER RULE
+
+**Owner decision (September 25, 2026): after every stable WE STAY FIT change, Claude/Fable should deploy that stable milestone to staging automatically. Do not wait for Devin to ask again.**
+
+A change is **stable enough to stage** only when all of these are true:
+
+1. The product/behavior change has the Director's acceptance for the changed dependencies.
+2. L0 has integrated the accepted change into `claude/wsf-app-shell` and has the exact development SHA.
+3. The exact staging candidate/pin has been reviewed for its real protected-path delta and current live function-inventory assumptions.
+4. Any required independent release check on the pin/candidate is green.
+5. No newer fully accepted integrated successor has superseded it before the pin is finalized.
+6. No other WSF staging deploy is currently in progress.
+
+This cadence is **event-driven**, not commit-driven. Do **not** deploy every raw commit. In particular, do not auto-stage:
+- unaccepted work;
+- test-only or documentation-only changes;
+- Lovable/reference-only changes;
+- isolated R&D/prototypes that are explicitly unexported/unreachable;
+- a candidate whose pin/inventory contract has not been updated and reviewed;
+- a blind retry of a failed run.
+
+Once those conditions are met, L0 should perform the next staging release without another owner prompt:
+
+1. Read the latest accepted integrated development SHA.
+2. Re-read the **actual last measured staging inventory** from the most recent deployment receipt. Never reuse an older BEFORE count just because it appears in prose.
+3. Prepare the smallest reviewed pin/update needed for the exact candidate.
+4. Run the existing independent focused pin/release check.
+5. Merge the reviewed operational pin to `main`.
+6. Dispatch **one** `WSF staging deploy` from `main`.
+7. Capture the run id and watch through completion.
+8. Post the deployment, served-marker, hosted-verification, and cleanup receipts.
+9. Record any feature-readiness limitations separately from whether the build itself is served.
+
+If a newer accepted milestone lands **before** the pin merge, prefer the newer exact reviewed head rather than staging a knowingly stale milestone. If a deploy is already running, let it finish; serialize the next stable milestone behind it.
+
+A green staging deploy does not make separately blocked functionality usable. Index readiness, callable transport, email delivery, kiosk authorization, privacy/legal, or production release remain their own gates.
+
+## Proven successful example — run 48
+
+Run 48 is the concrete known-good example of this skill succeeding end to end:
+
+- operational `main`: `0359f8d1a3f5c9a0e6469bf1864902f4b63cca19`
+- approved app: `502b1e8d0c98c199445c664c696b3f73bb460f14`
+- workflow run: `36133376723`
+- live inventory: `49 -> 49`
+- `CREATED_THIS_DEPLOY=none`
+- `VERIFY=pass`
+- hosted marker matched `502b1e8`
+- hosted verification: `24/24`, `FAILURES=0`
+- cleanup: `COMPLETE`
+
+The successful operational sequence was:
+
+1. W3 prepared a **two-file** pin correction for the exact integrated candidate and current measured inventory.
+2. W7 independently verified the pin/gate.
+3. Director accepted the exact pin.
+4. L0 merged the pin to `main`.
+5. L0 dispatched exactly one workflow run from `main` with:
+   - `mode=deploy`
+   - `app_sha=502b1e8d0c98c199445c664c696b3f73bb460f14`
+6. The workflow's read-only preflight verified the live inventory before mutation.
+7. Functions + Hosting deployed.
+8. The deployment verifier passed.
+9. Hosted verification passed 24/24.
+10. Synthetic cleanup completed.
+
+Run 48 also demonstrates an important distinction: the app can be successfully served while some feature capabilities remain unavailable. The three social callables still reported SHUT and the required social index still lacked a READY receipt. That is a **feature-readiness** limitation, not a reason to forget or skip the staging deploy.
+
+
 ## Exact command sequence
 
 From a checkout with GitHub CLI authenticated for `idevinsimpson/goarrive`:
