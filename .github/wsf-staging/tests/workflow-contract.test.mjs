@@ -103,7 +103,7 @@ test('the browser jobs run the candidate-local Playwright binary', () => {
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -178,6 +178,8 @@ const WIRING = [
   ['deploy', 'Verify the deployed state', '.github/wsf-staging/verify-deployment.mjs'],
   ['player-journey', 'Run the browser/player journey', '.github/wsf-staging/hosted-player-journey.mjs'],
   ['player-journey', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
+  ['social-privacy', 'Run the per-community privacy verification', '.github/wsf-staging/social-privacy-postop.mjs'],
+  ['social-privacy', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
 ];
 for (const [job, step, script] of WIRING) {
   test(`${path.basename(script)}: every required WSF_* variable is supplied by its step`, () => {
@@ -218,7 +220,7 @@ test('the config job documents both consumers of the staging env artifact', () =
 });
 
 test('nothing in the browser jobs prints the SDK config or the env artifact', () => {
-  for (const name of ['hosted-verify', 'player-journey']) {
+  for (const name of ['hosted-verify', 'player-journey', 'social-privacy']) {
     const j = jobs[name].split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     assert.equal(/\b(cat|echo|printenv|env)\b[^\n]*(wsf-staging\.env|WSF_SDK_CONFIG_FILE|WSF_STAGING_API_KEY|EXPO_PUBLIC)/.test(j), false, name);
   }
@@ -321,7 +323,7 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery'];
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery'];
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -380,6 +382,7 @@ test('player mode reaches only gate, config and the player journey', () => {
     deploy: false,
     'hosted-verify': false,
     'player-journey': true,
+    'social-privacy': false,
     'cleanup-recovery': false,
   });
 });
@@ -418,8 +421,78 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     deploy: true,
     'hosted-verify': true,
     'player-journey': false,
+    'social-privacy': false,
     'cleanup-recovery': false,
   });
+});
+
+// ---- the social-privacy mode (PRIVACY-POSTOP-VERIFY-1) -------------------
+// A verification against staging as it stands: seven callable-level rows with
+// synthetic members. It must never build, deploy, open a browser, check out a
+// candidate or run the 24-row suite, and it must always clean up after itself.
+test('social-privacy mode reaches only gate, config and the privacy verification', () => {
+  assert.deepEqual(reachedJobs('social-privacy'), {
+    gate: true,
+    config: true,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'social-privacy': true,
+    'cleanup-recovery': false,
+  });
+});
+
+test('the privacy job builds, deploys and browses nothing, and checks out no candidate', () => {
+  const body = jobCode('social-privacy');
+  const forbidden = [
+    [/firebase deploy/, 'a functions/hosting deploy'],
+    [/hosting:channel:deploy/, 'a hosting channel deploy'],
+    [/--only functions/, 'a functions deployment target'],
+    [/hosted-package-e-smoke\.mjs/, 'the 24-row authorization suite'],
+    [/hosted-player-journey\.mjs/, 'the browser/player journey'],
+    [/verify-deployment\.mjs/, 'deployment verification'],
+    [/read-inventory\.mjs/, 'the pre-deploy inventory read'],
+    [/expo export/, 'a web bundle build'],
+    [/playwright/i, 'a browser'],
+    [/needs\.gate\.outputs\.app_sha/, 'a checkout of the candidate'],
+    [/gcloud|setIamPolicy|invoker-iam|invokerIamDisabled|indexes/, 'a transport, IAM or index change'],
+  ];
+  for (const [re, what] of forbidden) {
+    assert.equal(re.test(body), false, `social-privacy mode must not perform ${what}`);
+  }
+  assert.match(body, /node ops\/\.github\/wsf-staging\/social-privacy-postop\.mjs/, 'the job must run the reviewed harness from the operational checkout');
+  const needs = /^ {4}needs: (.*)$/m.exec(jobs['social-privacy'])[1];
+  assert.equal(needs.replace(/[[\]\s]/g, ''), 'gate,config', 'it depends only on the shared gate/config boundary');
+});
+
+test('the privacy job takes exactly contents: read and id-token: write', () => {
+  const block = /^ {4}permissions:\n((?: {6}[^\n]*\n)+)/m.exec(jobs['social-privacy']);
+  assert.notEqual(block, null, 'no permissions block');
+  assert.deepEqual(block[1].trim().split('\n').map((l) => l.trim()).sort(), ['contents: read', 'id-token: write']);
+});
+
+test('the privacy job always cleans up, scans before uploading, and gates on both', () => {
+  for (const name of ['Re-authenticate before cleanup', 'Remove synthetic fixtures', 'Scan evidence before upload', 'Require the privacy verification and the scan to have passed']) {
+    assert.match(stepBlock('social-privacy', name), /if: always\(\)/, `${name}: must run after a failed or blocked verification too`);
+  }
+  const body = jobs['social-privacy'];
+  let previous = -1;
+  for (const marker of ['id: privacy', 'Remove synthetic fixtures', 'id: scan-privacy-evidence', 'name: wsf-privacy-evidence', 'Require the privacy verification']) {
+    const at = body.indexOf(marker);
+    assert.notEqual(at, -1, `missing ${marker}`);
+    assert.ok(at > previous, `out of order: ${marker}`);
+    previous = at;
+  }
+  const upload = /if: \$\{\{([^}]*)\}\}\n\s+with:\n\s+name: wsf-privacy-evidence/.exec(text);
+  assert.notEqual(upload, null, 'the privacy evidence upload was not found');
+  assert.match(upload[1], /steps\.scan-privacy-evidence\.outcome == 'success'/);
+  const gate = stepBlock('social-privacy', 'Require the privacy verification and the scan to have passed');
+  for (const id of ['privacy', 'scan-privacy-evidence']) {
+    assert.match(gate, new RegExp(`steps\\.${id}\\.outcome[^\n]*=[^\n]*["']success["']`), `the gate must require ${id}`);
+  }
+  assert.match(stepBlock('social-privacy', 'Run the per-community privacy verification'), /^\s+WSF_PRIVACY_TARGET: staging$/m,
+    'the workflow runs the staging target and nothing else');
 });
 
 test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () => {
@@ -436,6 +509,7 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     deploy: false,
     'hosted-verify': false,
     'player-journey': false,
+    'social-privacy': false,
     'cleanup-recovery': false,
   });
 });
@@ -455,8 +529,8 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   */
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight'],
-    'exactly these four modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy'],
+    'exactly these five modes exist'
   );
 });
 
@@ -571,6 +645,7 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     deploy: false,
     'hosted-verify': false,
     'player-journey': false,
+    'social-privacy': false,
     'cleanup-recovery': true,
   });
 });
