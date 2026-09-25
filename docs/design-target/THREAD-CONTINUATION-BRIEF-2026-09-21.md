@@ -6,7 +6,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star and source donor, `5819686459`, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then the preserved history below. Workers read this section, their own packet and the thread deltas.
 
-**Heads (2026-09-25 03:15Z).**
+**Heads (2026-09-25 03:25Z).**
 
 | what | value |
 | --- | --- |
@@ -23,14 +23,14 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **FOCUS-RETURN-1** (focus back to the opener after MOVE Close / Escape, Back or Finish; tab + scroll kept; cold → heading) | W9 · released #474 `5825281943` (Director `5825247950`); base `6f994f5a` (take `6b96ba1b` in by merge commit); new branch + draft PR; reservation `app/(tabs)/**`, `MemberTabBar.tsx`, `memberShell*`, `app/move/**`, one new helper, `sprint-w9-focus-return-*` specs (L0 ownership check: no other active writer) | — | **ACKed** on `claude/wsf-w9-focus-return-1` from `6b96ba1b` (#474 `5825558375`) → W7 → Director → L0 |
 | **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
 | **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | head `8642e330`: gated camera lab + MediaPipe `0.10.35` (1.x sends usage metrics — upgrade needs the owner); L0 git: tsc 0, vitest 941, guard 9/20; BROWSER partial (fake camera), no real-body claim | Director's three core cases (`5825938854`) still open → QA if asked; no merge |
-| **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | Build running | evidence, then STOP for review; **no canonical port from the lab**; cases shared with #475 via L0 / Director |
+| **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | frozen `a84e6764` / `8c61cd72`: limited R&D handoff, fake-camera evidence (`5826104270`) | **NOT READY**; no Expo task or port before the owner's phone test |
 | W7 item 2: reference focus diagnosis (Lovable `06198931`) | W7 · #434 `5822117639` | not run (preview host refused by W7's proxy) | last in W7's queue |
 
 **W7's queue:** FOCUS-RETURN-1 (when delivered) → item 2.
 
 **Next: RETURN-CONTINUITY-1 — APPROVED, queued for W9** after FOCUS-RETURN-1 (Director `5825324407`) — the Home a member lands on after contributing. References: RECOVERY-TRUTH-1 frames `recovery-confirmed-home-totals-390x844` / `recovery-unknown-home-totals-390x844` and `src/demo/screens/home.tsx` (`02cb35c4`); HOME-POLISH-1 `final-stale-390x844` (`872c32fc`, sha256 `45b8c01e…`). States (390×844 / 390×640): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 measured it silent, #434 `5821115372`). Owner W9, route-only; retained data labelled after a measured refresh failure, Retry through the existing refresh; confirmed / unknown return measured first; same-attempt / server totals and privacy preserved.
 
-**Waiting on the owner:** nothing. EXP1 held; W2 / W4 / W6 / W1B / W8 parked; W5 stopped.
+**Waiting on the owner:** the lab phone test in `5826104270` (squat tallies, second person, step-out; no video). EXP1 held; W2 / W4 / W6 / W1B / W8 parked; W5 stopped.
 
 **Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **NORTHSTAR-OVERNIGHT-1 (First Useful Visit) ACCEPTED as the next frozen reference** (`5825523052`): product `a15a610e`, evidence `973e1141`, finalizer `80fc8738`; reuse its states and wording, not its demo mechanics; moves no active packet. Port qualifications `5825762390` (Back / Close labels; zero-own guidance only on an open eligible goal; corrected captions). Candidate next slice: JOIN-VISIBILITY-1, `/join` only; owner undecided.
 
@@ -42,7 +42,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Lovable collaboration (owner; Director `5821448740`, `5822393806`).** L0 coordinates; the Director accepts; **active build owner: DIRECTOR — NORTHSTAR-OVERNIGHT-1** (`5825324407`, owner direction Sep 24 21:44 ET): from `06198931`, one broad source / journey audit plus bounded normal-Build batches tonight (no Max, top-up, paid Plan, publish, service or backend change); L0 and workers read only while it is active. Two reference tracks: the evolving Lovable candidate may improve, but each canonical packet keeps its frozen reference until the Director assigns a reviewed successor (no silent retarget). **Capability (`5825103797`):** L0 reads the project through the `Lovable` MCP connector — source access only; Free Chat and canonical → Lovable critique UNPROVEN. **Return review (`5822393806`):** per delivered candidate, one bundle (canonical + frozen reference SHAs, matched states, frames, source, approved differences); a read-only critique only over a verified Free Chat route, else "consultation unavailable" and QA continues; ≤ three findings, Director dispositions; no build just for review. RECOVERY-PORT-1: consultation unavailable. MOTION-HANDOFF-CLOSEOUT-1 (`06198931`): evidence only (register row M). **Handoff:** one START-HERE contract per reference delivery (`docs/design-target/lovable-handoff/JOURNEY-CONTRACT-TEMPLATE.json`); a port's ACK maps REUSE / NATIVE ADAPTATION / DEMO ONLY.
 
-**Where the rest lives.** "Journey parity register" and "Sprint roster — Round 1" below; everything else is preserved history.
+**Elsewhere:** the parity register and roster below.
 
 ## Source of truth
 Use these in this order:
