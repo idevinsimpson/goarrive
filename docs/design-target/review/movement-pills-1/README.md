@@ -6,7 +6,7 @@ Packet: Director #365 `5834082617` §B, L0 handoff #456 `5834097050`, W6 ACK #45
 | | |
 |---|---|
 | Base | development `claude/wsf-app-shell` @ `502b1e8d0c98c199445c664c696b3f73bb460f14` |
-| Route blob | `cf71b432…` at base → `3285d846…` at `03cfddba` (held) → **`f30c069de863bbd4154e1dde937f7e122050bf1d`** (successor) |
+| Route blob | `cf71b432…` at base → `3285d846…` at `03cfddba` (held) → **`7b344a5a63efec407f537bc066bb8795827da232`** (successor) |
 | New files (successor) | `src/movementSelection.ts` `273dfb1f…`, `src/ui/MovementPicker.tsx` `f31dc5a6…`, `tests/movement-selection.test.ts` `ece0524b…`, `tests/movement-picker.test.tsx` `2ff0428e…`, `tests-e2e/sprint-w6-movement-pills.spec.ts` `796cbc25…` |
 | Producer | `apps/westayfit/tests-e2e/sprint-w6-movement-pills.spec.ts`, write gate `WSF_CAPTURE_FRAMES=1` |
 | Environment | emulator `demo-wsf-local`; web bundle built at the route blob above with `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1`; Chromium; `deviceScaleFactor` 2 |
@@ -135,9 +135,9 @@ b804f1a93837f8654267002e5c3bf6113aa07074ab32f6b35fd78c383b40027a  AFTER-one-move
 eaf41b61c0cc47c4f24251d1f574e91bad89d7285b651c7e04edf1b4eb89db19  AFTER-one-movement-review-390x844.png
 a41e72505c8f68c034772e8ddc2d929e63858ed7371763d2d4033c9bad4f1885  AFTER-something-else-after-movement-390x640.png
 8d5b8b83eacbacb508a2618dd5aa4881a7010108e50633e3e8146b7a4b1bba97  AFTER-something-else-after-movement-390x844.png
-031a16a18d2a6060bd3e7d37c5035c89b2eb4c3d4dad1dcb36dac1ab8895de57  AFTER-something-else-default-390x640.png
-300b2eb9620945dfe521ed349be172f717a68365bde3428556fd2a9beaa05876  AFTER-something-else-default-390x844.png
-2750202ff9d63e4ce7cb7cbcd63dd71fd4f6d435997188c4cd88d0e719244164  RECORDING-selection-review-submit-390x844.webm
+715b15b8547751bef635195d002d4853e89133274c089d194f0cdbe1731ea7a6  AFTER-something-else-default-390x640.png
+79cd36a9f3b9655fcb13c2786c61d402c7bcdddc5300103d7c22bba3840079e1  AFTER-something-else-default-390x844.png
+ad2c377521c4b5ea6cb385192d1e5ec7cd006a382ea1a9e9fb6cea08fc5626cc  RECORDING-selection-review-submit-390x844.webm
 ```
 
 ## Discrepancies from the Lovable reference

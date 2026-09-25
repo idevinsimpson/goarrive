@@ -946,7 +946,7 @@ export default function NewGoalPage() {
                   setUnit(v);
                   clearFieldError('unit');
                 }}
-                placeholder="e.g. squats, or pick one below"
+                placeholder="e.g. squats"
                 editable={!submitting}
                 testID="wsf-new-goal-unit"
               />
