@@ -1042,4 +1042,198 @@ test('the preflight never reads a secret payload or prints a token', () => {
   assert.match(src, /process\.exit\(0\)/, 'the preflight can exit nonzero');
 });
 
+
+// ── the staging hosting config's rewrites ─────────────────────────────────
+//
+// WHY THESE LIVE HERE rather than in a suite of their own: run-all.mjs carries
+// a hardcoded list of suites, and a new file that is not added to it is a test
+// that never runs. That file is not reserved to this packet, so the cases go
+// where they are already executed.
+//
+// WHAT THEY PIN. `firebase.westayfit.staging.json` is an OPERATIONAL file: the
+// workflow copies it into the candidate checkout (`cp ../ops/… .`) and both the
+// hosting and functions deploys use it. The app's `firebase.westayfit.json` is
+// the production site's config and the staging deploy never reads it — so a
+// rewrite added there does nothing for staging, and the two files' own comment
+// ("Keep the two in sync") is enforced by nothing but a person. These cases are
+// that enforcement for the community routes.
+
+const STAGING_HOSTING = JSON.parse(
+  fs.readFileSync('firebase.westayfit.staging.json', 'utf8')
+);
+const stagingRewrites = STAGING_HOSTING.hosting.rewrites;
+
+/**
+ * Firebase Hosting glob matching, enough of it to decide these cases:
+ * `*` matches within ONE path segment, `**` matches across segments, and the
+ * FIRST matching rewrite wins. Written out rather than imported so the rule the
+ * assertions rely on is visible at the point of use.
+ */
+function firstMatch(rewrites, urlPath) {
+  for (const r of rewrites) {
+    const rx = new RegExp(
+      '^' +
+        r.source
+          .split(/(\*\*|\*)/)
+          .map((part) =>
+            part === '**' ? '.*' : part === '*' ? '[^/]*' : part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          )
+          .join('') +
+        '$'
+    );
+    if (rx.test(urlPath)) return r;
+  }
+  return null;
+}
+
+await test('the members route has its own rewrite, and it wins over the catch-all', () => {
+  const hit = firstMatch(stagingRewrites, '/community/abc123/members');
+  assert.ok(hit, '/community/{id}/members matches no rewrite at all');
+  assert.equal(hit.source, '/community/*/members');
+  assert.equal(hit.destination, '/community/__dynamic/members.html');
+  // Order, stated as order and not merely as presence: a members rule placed
+  // after the catch-all would never be reached.
+  const members = stagingRewrites.findIndex((r) => r.source === '/community/*/members');
+  const catchAll = stagingRewrites.findIndex((r) => r.source === '/community/**');
+  assert.ok(members >= 0 && catchAll >= 0);
+  assert.ok(members < catchAll, 'the members rule must precede /community/**');
+});
+
+await test('THE DEFECT: without that rule the same URL resolves to the community home', () => {
+  // The rewrite list exactly as it stood on main 340e141, so the case proves
+  // what was wrong rather than only what is now right. A members request did
+  // NOT 404 — it silently served the community home document.
+  const before = stagingRewrites.filter((r) => r.source !== '/community/*/members');
+  const hit = firstMatch(before, '/community/abc123/members');
+  assert.equal(hit.source, '/community/**');
+  assert.equal(hit.destination, '/community/__dynamic.html');
+});
+
+await test('the challenge rule is unchanged and still precedes the catch-all', () => {
+  const hit = firstMatch(stagingRewrites, '/community/abc123/challenge');
+  assert.equal(hit.source, '/community/*/challenge');
+  assert.equal(hit.destination, '/community/__dynamic/challenge.html');
+  const challenge = stagingRewrites.findIndex((r) => r.source === '/community/*/challenge');
+  const catchAll = stagingRewrites.findIndex((r) => r.source === '/community/**');
+  assert.ok(challenge < catchAll, 'the challenge rule must precede /community/**');
+});
+
+await test('the community home itself still resolves to the catch-all', () => {
+  // The members rule must not capture the community page: `*` is one segment.
+  const hit = firstMatch(stagingRewrites, '/community/abc123');
+  assert.equal(hit.source, '/community/**');
+  assert.equal(hit.destination, '/community/__dynamic.html');
+});
+
+await test('no rewrite was removed and the site and codebase are untouched', () => {
+  for (const source of ['/community/*/challenge', '/community/**', '/join/**', '/contribute/**',
+    '/display/**', '/kiosk/**', '/station/**', '/event/**', '/queue/**', '/combined/**']) {
+    assert.ok(stagingRewrites.some((r) => r.source === source), `${source} was removed`);
+  }
+  assert.equal(STAGING_HOSTING.hosting.site, 'westayfit-staging');
+  assert.equal(STAGING_HOSTING.functions.length, 1);
+  assert.equal(STAGING_HOSTING.functions[0].codebase, 'westayfit');
+});
+
+await test('the /move dynamic route has its rewrite', () => {
+  // This case REPLACES a temporary one that asserted the absence of this rule.
+  // A test whose success requires the defect is a test that has to be deleted
+  // the moment the defect is fixed, so it is gone rather than inverted in place.
+  const hit = firstMatch(stagingRewrites, '/move/some-goal');
+  assert.ok(hit, '/move/{goalId} matches no rewrite');
+  assert.equal(hit.source, '/move/**');
+  assert.equal(hit.destination, '/move/__dynamic.html');
+});
+
+await test('THE DEFECT: the main 340e141 list matched /move/{goalId} with nothing at all', () => {
+  // The rewrite list exactly as it stood on main 340e141 — no /move rule and no
+  // catch-all that could stand in for one. Unlike the members case, which was
+  // quietly served the wrong document, this one had no match at all, so a
+  // direct load or refresh fell through to Hosting's 404.
+  //
+  // SOURCE-DERIVED, NOT OBSERVED: no request was made to the staging site from
+  // here. This asserts what the config does, which is the only thing a config
+  // test can assert.
+  const before = stagingRewrites.filter((r) => r.source !== '/move/**' && r.source !== '/community/*/members');
+  assert.equal(firstMatch(before, '/move/some-goal'), null);
+});
+
+await test('bare /move is not what this rule is for, and static content decides it', () => {
+  // apps/westayfit/app/move/index.tsx exports a static document, and Firebase
+  // Hosting applies a rewrite only when no static file matches the request. So
+  // /move is served by that document whether or not this pattern would also
+  // match it — which is why the app's own config has carried the identical
+  // `/move/**` rule all along. Pinned as a statement about the rule's shape:
+  // it is the dynamic child route that needs the rewrite.
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal').destination, '/move/__dynamic.html');
+  assert.equal(firstMatch(stagingRewrites, '/move/some-goal/deeper').destination, '/move/__dynamic.html');
+});
+
+await test('the two-tree hosting check runs, and runs BEFORE any credential exists', () => {
+  // This REPLACES a case that pinned the asymmetry — that the app config
+  // carries no rewrites on this branch, so no test here could cross-check the
+  // two hosting configs. That was a description of the gap, not a fix. The fix
+  // is check-hosting-routes.mjs, which runs in the one job where both
+  // checkouts and the built artifact exist together.
+  //
+  // WHERE it runs is the load-bearing part. The step must sit after the
+  // artifact is confirmed (so dist/ exists) and before the auth step (so the
+  // check cannot be reached by anything holding a credential). A check that
+  // drifted below authentication would still pass its own tests while
+  // silently becoming privileged.
+  assert.ok(fs.existsSync('.github/wsf-staging/check-hosting-routes.mjs'),
+    'the helper the workflow invokes does not exist');
+
+  const deployJob = text.slice(text.indexOf('\n  deploy:'), text.indexOf('\n  hosted-verify:'));
+  assert.ok(deployJob.length > 0, 'the deploy job could not be isolated');
+
+  const confirm = deployJob.indexOf('Confirm the artifact belongs to the approved commit');
+  const check = deployJob.indexOf('check-hosting-routes.mjs');
+  const auth = deployJob.indexOf('Authenticate to Google Cloud');
+  assert.ok(confirm >= 0 && check >= 0 && auth >= 0, 'a required deploy step is missing');
+  assert.ok(confirm < check, 'the hosting check runs before the artifact is confirmed');
+  assert.ok(check < auth, 'the hosting check runs after a credential is obtained');
+
+  // It reads two checkouts and nothing else: no token, no project, no network.
+  const step = deployJob.slice(deployJob.lastIndexOf('- name:', check), auth);
+  assert.match(step, /node ops\/\.github\/wsf-staging\/check-hosting-routes\.mjs app ops/);
+  assert.equal(/WSF_GOOGLE_ACCESS_TOKEN|google-github-actions\/auth|gcloud |firebase /.test(step), false,
+    'the hosting check step reaches for a credential or a cloud CLI');
+});
+
+await test('the helper itself makes no network or cloud call', () => {
+  const helper = fs.readFileSync('.github/wsf-staging/check-hosting-routes.mjs', 'utf8');
+  for (const forbidden of ['fetch(', 'https://', 'child_process', 'gcloud', 'firebase-tools']) {
+    assert.equal(helper.includes(forbidden), false, `the helper references ${forbidden}`);
+  }
+});
+
+await test('the hosting check step is LIVE: nothing gates, skips or swallows it', () => {
+  // Pinning WHERE the step sits proves nothing if it can be disarmed in
+  // place. Each of these leaves the order case green while the check does
+  // nothing: the step commented out, `if: ${{ false }}`, `continue-on-error:
+  // true`, `|| true` appended, or the command turned into an `echo`. So the
+  // step is read as YAML lines and must be exactly a name and one command.
+  const lines = text.split('\n');
+  const deployStart = lines.findIndex((l) => /^  deploy:\s*$/.test(l));
+  const deployEnd = lines.findIndex((l, i) => i > deployStart && /^  [A-Za-z0-9_-]+:\s*$/.test(l));
+  assert.ok(deployStart >= 0 && deployEnd > deployStart, 'the deploy job could not be isolated');
+  const job = lines.slice(deployStart, deployEnd);
+
+  // The job itself must not tolerate a failed step either.
+  const stepsAt = job.findIndex((l) => /^    steps:\s*$/.test(l));
+  assert.ok(stepsAt > 0, 'the deploy job has no steps block');
+  assert.equal(job.slice(0, stepsAt).some((l) => /^    continue-on-error:/.test(l)), false,
+    'the deploy job is continue-on-error, so a failed hosting check would not stop it');
+
+  const nameAt = job.findIndex((l) => /^      - name: Check the operational hosting config routes this candidate\s*$/.test(l));
+  assert.ok(nameAt > stepsAt, 'the hosting check step is missing or commented out');
+  const nextStep = job.findIndex((l, i) => i > nameAt && /^      - /.test(l));
+  const body = job.slice(nameAt + 1, nextStep < 0 ? job.length : nextStep)
+    .filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+
+  assert.deepEqual(body, ['        run: node ops/.github/wsf-staging/check-hosting-routes.mjs app ops'],
+    'the hosting check step carries more than its one command (an if:, continue-on-error, shell, env or a changed run line)');
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);

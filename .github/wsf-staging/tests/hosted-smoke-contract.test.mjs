@@ -91,8 +91,8 @@ test('every Champion arrival on Community Home opens the Manage sheet before tou
     );
   });
   assert.ok(arrivals >= 4, `expected every Champion arrival to be covered, saw ${arrivals}`);
-  assert.match(SMOKE, /getByTestId\('wsf-community-manage'\)/);
-  assert.match(SMOKE, /getByTestId\('wsf-community-manage-panel'\)/);
+  assert.match(SMOKE, /await visible\(page\.getByTestId\(MANAGE_PANEL\), timeout\);/);
+  assert.match(SMOKE, /const MANAGE_PANEL = 'wsf-community-manage-panel';/);
 });
 
 test('the approved public goal-pulse shape is pinned as a whole key set, not as a denylist', () => {
@@ -141,9 +141,15 @@ test('the member-facing copy matches the approved UI', () => {
   ]) assert.ok(SMOKE.includes(kept), `missing: ${kept}`);
 });
 
-test('the Champion-only boundary covers the surface that now carries the controls', () => {
+test('the Champion-only boundary covers the way INTO the sheet, proven by the member\u2019s own interaction', () => {
   assert.match(SMOKE, /getByTestId\(`wsf-goal-display-auth-\$\{goalId\}`\)\.count\(\)\) === 0/);
-  assert.match(SMOKE, /getByTestId\('wsf-community-manage'\)\.count\(\)\) === 0/);
+  // Run 47's lesson, the other way round: counting the removed control at
+  // zero would pass for everyone. Every member site goes through the helper
+  // that opens the menu the member has and proves Manage community is not in
+  // it (or, on the legacy surface, that the Champion-only control is not
+  // drawn). The bare count on the old control must not come back.
+  assert.equal(SMOKE.split('await assertMemberHasNoManage(member').length - 1, 3, 'all three member boundary sites go through assertMemberHasNoManage');
+  assert.equal(/getByTestId\('wsf-community-manage'\)/.test(SMOKE), false, 'the removed wsf-community-manage control is not waited for or counted directly anywhere');
 });
 
 /**
@@ -246,7 +252,7 @@ test('W8 seeds a link-joinable community and proves WHICH link the QR encodes, w
   const seed = w478.indexOf("seedFixture('w478'");
   for (const kept of [
     "assert((await member.getByTestId('wsf-community-qr-section').count()) === 0, 'A member can see the Champion join QR section');",
-    "assert((await member.getByTestId('wsf-community-manage').count()) === 0, 'A member has the Manage surface');",
+    "await assertMemberHasNoManage(member, { who: 'A member' });",
   ]) {
     assert.ok(w478.includes(kept), `member assertion lost: ${kept}`);
     assert.ok(w478.indexOf(kept) > seed, 'the member assertions must run against the inviteOnly fixture');
@@ -960,6 +966,169 @@ test('the green-run row count is pinned, and every row name is distinct', () => 
   assert.ok(rows.includes('station callable transport'), 'the station transport row is not among the green rows');
   assert.match(SMOKE, /console\.log\(`RESULTS=\$\{results\.length\}`\);/);
   assert.match(SMOKE, /A fully green run emits 24 rows/, 'the script must pin the same count the harness does');
+});
+
+
+/**
+ * THE MANAGE SURFACE HELPERS, RUN — not just read. The smoke cannot run here
+ * (no browser, no staging), but the three helpers between the marker comments
+ * depend on nothing but a Playwright-shaped `page`, `assert`, `visible` and
+ * `setTimeout`, so their source is lifted out of the file and executed against
+ * a small fake page that models the two real surfaces:
+ *
+ *   7ee70e4  wsf-member-topbar + wsf-member-topbar-menu-button; the button
+ *            toggles wsf-member-topbar-menu; the menu carries the
+ *            wsf-member-topbar-menu-manage-community row for a Champion only;
+ *            choosing the row closes the menu and opens the panel.
+ *   c8f38e3  wsf-community-wordmark; wsf-community-manage for a Champion only;
+ *            clicking it opens the panel.
+ *
+ * This is MOCKED evidence of the helpers' logic. It is not browser evidence of
+ * the product and not hosted evidence; those come from the deployed run.
+ */
+const HELPERS_START = '// --- manage surface helpers (contract-tested from source, see hosted-smoke-contract.test.mjs) ---';
+const HELPERS_END = '// --- end manage surface helpers ---';
+function helperSource() {
+  const start = SMOKE.indexOf(HELPERS_START);
+  const end = SMOKE.indexOf(HELPERS_END);
+  assert.ok(start !== -1 && end > start, 'the manage surface helpers are not delimited in the smoke');
+  return SMOKE.slice(start + HELPERS_START.length, end);
+}
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+function loadHelpers() {
+  const src = helperSource() + '\nreturn { MANAGE_SURFACES, MANAGE_PANEL, manageSurface, openManage, assertMemberHasNoManage };';
+  const assertLike = (condition, message) => { if (!condition) throw new Error(message); };
+  const visible = (locator, timeout) => locator.waitFor({ state: 'visible', timeout });
+  return new AsyncFunction('assert', 'visible', src)(assertLike, visible);
+}
+/** A page whose DOM is a set of testIDs, with the two surfaces' click transitions. */
+function fakePage({ present = [], champion = false, wrongMenuOffersManage = false }) {
+  const dom = new Set(present);
+  const clicks = [];
+  const S = { marker: 'wsf-member-topbar', button: 'wsf-member-topbar-menu-button', menu: 'wsf-member-topbar-menu', item: 'wsf-member-topbar-menu-manage-community' };
+  const L = { marker: 'wsf-community-wordmark', control: 'wsf-community-manage' };
+  const PANEL = 'wsf-community-manage-panel';
+  const click = (id) => {
+    clicks.push(id);
+    if (id === S.button) {
+      if (dom.has(S.menu)) { dom.delete(S.menu); dom.delete(S.item); }
+      else { dom.add(S.menu); if (champion || wrongMenuOffersManage) dom.add(S.item); }
+    } else if (id === S.item) {
+      dom.delete(S.menu); dom.delete(S.item); dom.add(PANEL);
+    } else if (id === L.control) {
+      dom.add(PANEL);
+    }
+  };
+  const page = {
+    getByTestId: (id) => ({
+      count: async () => (dom.has(id) ? 1 : 0),
+      click: async () => { if (!dom.has(id)) throw new Error(`click: ${id} is not on the page`); click(id); },
+      waitFor: async ({ state, timeout = 50 }) => {
+        const want = state === 'visible';
+        const deadline = Date.now() + Math.min(timeout, 300);
+        for (;;) {
+          if (dom.has(id) === want) return;
+          if (Date.now() >= deadline) throw new Error(`Timeout waiting for ${id} to be ${state}`);
+          await new Promise((r) => setTimeout(r, 10));
+        }
+      },
+    }),
+    dom, clicks,
+  };
+  return page;
+}
+const SHELL = ['wsf-member-topbar', 'wsf-member-topbar-menu-button', 'wsf-community-goal-link-g1'];
+const LEGACY = ['wsf-community-wordmark', 'wsf-community-goal-link-g1'];
+const FAST = { timeout: 200 };
+async function rejects(promise, pattern) {
+  let error = null;
+  try { await promise; } catch (e) { error = e; }
+  assert.ok(error, `expected a rejection matching ${pattern}`);
+  assert.match(String(error.message), pattern);
+  return error;
+}
+const atest = async (n, f) => { await f(); passed += 1; console.log(`  ok  ${n}`); };
+
+await atest('the helpers name exactly the two real surfaces and the one panel', async () => {
+  const h = await loadHelpers();
+  assert.deepEqual(h.MANAGE_SURFACES, {
+    shell: { marker: 'wsf-member-topbar', menuButton: 'wsf-member-topbar-menu-button', menu: 'wsf-member-topbar-menu', manageItem: 'wsf-member-topbar-menu-manage-community' },
+    legacy: { marker: 'wsf-community-wordmark', manageControl: 'wsf-community-manage' },
+  });
+  assert.equal(h.MANAGE_PANEL, 'wsf-community-manage-panel');
+});
+
+await atest('7ee70e4 Champion: menu button, then the Manage community row, then the panel — in that order', async () => {
+  const h = await loadHelpers();
+  const page = fakePage({ present: SHELL, champion: true });
+  await h.openManage(page, FAST);
+  assert.deepEqual(page.clicks, ['wsf-member-topbar-menu-button', 'wsf-member-topbar-menu-manage-community']);
+  assert.ok(page.dom.has('wsf-community-manage-panel'), 'the panel did not open');
+  assert.ok(!page.dom.has('wsf-member-topbar-menu'), 'choosing the row leaves the menu open');
+});
+
+await atest('c8f38e3 Champion: the legacy control alone opens the panel', async () => {
+  const h = await loadHelpers();
+  const page = fakePage({ present: [...LEGACY, 'wsf-community-manage'], champion: true });
+  await h.openManage(page, FAST);
+  assert.deepEqual(page.clicks, ['wsf-community-manage']);
+  assert.ok(page.dom.has('wsf-community-manage-panel'));
+});
+
+await atest('NEITHER surface is a FAIL, for a Champion and for a member alike — never a skip, never a pass', async () => {
+  const h = await loadHelpers();
+  await rejects(h.openManage(fakePage({ present: ['wsf-community-goal-link-g1'], champion: true }), FAST), /Neither Manage surface is on the page/);
+  await rejects(h.assertMemberHasNoManage(fakePage({ present: ['wsf-community-goal-link-g1'] }), FAST), /Neither Manage surface is on the page/);
+  // Code only: the prose above the helpers says "never a skip" on purpose.
+  const code = helperSource().replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.equal(/return null|skip|'PASS'/i.test(code), false, 'the helpers have no skip or self-pass path');
+});
+
+await atest('BOTH markers at once is a FAIL: the harness does not guess', async () => {
+  const h = await loadHelpers();
+  await rejects(h.openManage(fakePage({ present: [...SHELL, 'wsf-community-wordmark'], champion: true }), FAST), /Both Manage surfaces/);
+});
+
+await atest('7ee70e4: a Champion whose row never appears fails AT THE ROW, by name (missing trigger)', async () => {
+  const h = await loadHelpers();
+  const page = fakePage({ present: SHELL, champion: false });
+  await rejects(h.openManage(page, FAST), /wsf-member-topbar-menu-manage-community/);
+  assert.deepEqual(page.clicks, ['wsf-member-topbar-menu-button'], 'nothing else was clicked');
+});
+
+await atest('c8f38e3: a Champion without the legacy control fails at that control, by name', async () => {
+  const h = await loadHelpers();
+  await rejects(h.openManage(fakePage({ present: LEGACY, champion: true }), FAST), /wsf-community-manage/);
+});
+
+await atest('7ee70e4 member: the menu is really opened, Manage community is really absent, and the menu is closed again', async () => {
+  const h = await loadHelpers();
+  const page = fakePage({ present: SHELL, champion: false });
+  await h.assertMemberHasNoManage(page, { ...FAST, holdMs: 30 });
+  assert.deepEqual(page.clicks, ['wsf-member-topbar-menu-button', 'wsf-member-topbar-menu-button']);
+  assert.ok(!page.dom.has('wsf-member-topbar-menu'), 'the menu was left open');
+  assert.ok(!page.dom.has('wsf-community-manage-panel'));
+});
+
+await atest('7ee70e4 member wrongly offered Manage community: the negative FAILS with the boundary named', async () => {
+  const h = await loadHelpers();
+  const page = fakePage({ present: SHELL, wrongMenuOffersManage: true });
+  await rejects(h.assertMemberHasNoManage(page, { ...FAST, holdMs: 30 }), /unexpectedly has the Champion Manage surface \(Manage community is in the menu\)/);
+});
+
+await atest('c8f38e3 member: no control drawn passes; the control drawn FAILS with the boundary named', async () => {
+  const h = await loadHelpers();
+  const clean = fakePage({ present: LEGACY });
+  await h.assertMemberHasNoManage(clean, FAST);
+  assert.deepEqual(clean.clicks, []);
+  await rejects(h.assertMemberHasNoManage(fakePage({ present: [...LEGACY, 'wsf-community-manage'] }), FAST), /the legacy Manage control is drawn/);
+});
+
+await atest('the helpers are the only place the removed control is named, and every Champion opening ends at the panel', async () => {
+  const src = helperSource();
+  assert.equal(src.split("'wsf-community-manage'").length - 1, 1, 'the legacy control is named once, in MANAGE_SURFACES');
+  assert.equal(SMOKE.split("'wsf-community-manage'").length - 1, 1, 'and nowhere else in the smoke');
+  assert.match(src, /await visible\(page\.getByTestId\(MANAGE_PANEL\), timeout\);\n\}/);
 });
 
 console.log(`\nhosted-smoke-contract: ${passed} passed`);
