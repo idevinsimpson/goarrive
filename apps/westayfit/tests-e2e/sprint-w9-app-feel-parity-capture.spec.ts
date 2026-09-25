@@ -211,12 +211,37 @@ test.describe(`APP-FEEL-PARITY-1 checkpoint 1 frames · ${STAGE}`, () => {
       await shoot(page, device, label, `timeline-entry-${String(t).padStart(3, '0')}ms`, 0);
     }
 
-    // Exit: Close starts the 180 ms travel; each frame holds it.
+    // Exit: Close starts the 180 ms travel, and the sheet navigates when its
+    // own 180 ms timer fires -- in real time, which a screenshot outlasts.
+    // INSTRUMENTATION, labelled: inside the stage, timers of exactly 180 ms
+    // are held (not run) while the exit is photographed, then released, and
+    // the exit is asserted to complete. Nothing else is delayed.
+    await stage.locator('body').evaluate(() => {
+      const w = window as unknown as { __w9Held: (() => void)[]; __w9Orig: typeof setTimeout };
+      w.__w9Held = [];
+      w.__w9Orig = window.setTimeout;
+      (window as unknown as { setTimeout: unknown }).setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+        if (ms === 180) {
+          w.__w9Held.push(fn);
+          return -1;
+        }
+        return w.__w9Orig(fn, ms, ...(rest as []));
+      }) as unknown;
+    });
     await stage.locator('[data-testid="wsf-contribute-sheet"] [data-testid="wsf-contribute-close"]').first().click();
     for (const t of [0, 90, 170]) {
       const n = await holdAnimationsAt(stage, t);
       expect(n, `exit ${t}ms: the exit animation is running`).toBeGreaterThan(0);
       await shoot(page, device, label, `timeline-exit-${String(t).padStart(3, '0')}ms`, 0);
     }
+    const held = await stage.locator('body').evaluate(() => {
+      const w = window as unknown as { __w9Held: (() => void)[]; __w9Orig: typeof setTimeout };
+      (window as unknown as { setTimeout: unknown }).setTimeout = w.__w9Orig;
+      const n = w.__w9Held.length;
+      w.__w9Held.splice(0).forEach((fn) => fn());
+      return n;
+    });
+    expect(held, 'exactly one exit was pending').toBe(1);
+    await expect(stage.locator('[data-testid="wsf-contribute-sheet"]')).toHaveCount(0, { timeout: 8_000 });
   });
 });
