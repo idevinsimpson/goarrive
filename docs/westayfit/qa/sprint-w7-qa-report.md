@@ -3392,3 +3392,56 @@ Masthead Home's remount, Settings, and the MOVE icon and instructions are unchan
 - Fixture fixes and reruns are disclosed above.
 
 **Status:** tested on `766ee085`. Nothing is accepted, integrated or staged. D1 is for W9. If W9 pushes a correction, I will carry forward the unchanged rows and rerun only S1 exits, R1–R3 and the focus rows.
+
+## 36B · APP-FEEL-PARITY-1 cp1 successor, exact `b497ce4c746b6f17548b6f353d165bb54d719193` (Director #434 `5834819175`; W7 ACK `5834964411`): **D1 and F3 fixed (fail-before / pass-after on W7's own instrument); F2 unchanged; the focused rows PASS**
+
+**Delta.**
+- `766ee085..a2a598d2` touches exactly one file: W9's capture spec `sprint-w9-app-feel-parity-capture.spec.ts`, +222. It changes no product file, so §36's product rows carry forward through it.
+- `a2a598d2..b497ce4c` changes three product files: `contribute/[goalId].tsx`, `move/index.tsx` and `sheetMotion.ts`. It also changes W9's two specs.
+  - A new `useSheetExit` puts both sheets behind one exit. The timer is cleared on blur and on unmount, and a late timer does nothing unless the sheet is still focused.
+  - The resolver checks `leaving()` after each read.
+  - Close gets its own testID, `wsf-contribute-close`. `wsf-contribute-back` stays the page Back and the outcome exits.
+  - The scrim keeps pointer events during the exit.
+
+**Build.** A detached worktree, emulator-flagged, with the bundle stamped `b497ce4c`. It was served on 5015 beside `766ee085` (5014) and the same emulators.
+
+**Instrument changes.** W7's spec now finds Close with `wsf-contribute-close`, falling back to `wsf-contribute-back` on `766ee085`. The race cases now **assert**:
+- R1 / R1z: exactly one path change, and the member stays on their tab;
+- R2: no `/contribute` path after Close, and the member ends on `/you`.
+
+**Fail-before / pass-after (W7's own instrument, the same file on both builds):**
+
+| case | `766ee085` | `b497ce4c` |
+|---|---|---|
+| R1, from You: Close, then Back at +40 ms | **FAIL** "more than one exit": `/you` +108, then **`/activity` +242** | PASS: `/you` +106, one exit, You still current |
+| R1, from Home | **FAIL**: `/community/<id>` +130, then **`/activity` +263** | PASS: `/community/<id>` +121, one exit |
+| R1z, the resolver's no-goal sheet, from You | **FAIL**: `/you` +111, then **`/activity` +244** | PASS: `/you` +108 |
+| R2, Close while the one-goal read is held, released at +0 | **FAIL** "the goal sheet opened after Close": `/contribute/…` +117, then `/you` +239 | PASS: `/you` +244 only, 0 callables after Close |
+| R2, released at +90 | **FAIL**: `/contribute/…` +207, then `/you` +238 | PASS: `/you` +242 only |
+
+That is 5/5 failing before and 5/5 passing after. On `766ee085` each failure is the assertion itself, not a fixture error.
+
+**Focused rows rerun on the head (7/7):**
+- **S1, all four tabs:**
+  - The sheet sits over the same `inert` instance (0 remounts), with 1 painted scrim.
+  - Close gives **one** exit at +225–238 ms to the exact tab.
+  - Scroll is kept: Home 166 → 166.
+  - Focus returns to MOVE, and `inert` is cleared.
+- **S1k:** Enter opens the sheet; Escape gives one exit at +195 ms; focus returns to MOVE.
+- **S2:** the chooser opens the goal sheet over itself, with 1 painted of 2 scrims. Close returns to the chooser and focus goes to the chosen row. The chooser's Close then returns to Home.
+- **S3:** every step renders inside the sheet: timer, count, review, confirmed receipt, pending after an INJECTED drop, and unknown after an INJECTED lost reply.
+- **S5s, 390×640:** Close, "I'm done" and the timer are each reachable. Scroll 300 → 300.
+- **S5r, reduced motion:** no travel; Close exits in +70 ms.
+- **R3:**
+  - MOVE pressed at +60 ms: one exit, and the press lands on the scrim, as the delta intends.
+  - MOVE pressed at +220 ms: it reopens cleanly, and the old exit does not close the new sheet.
+
+**Unchanged — F2 (§36).** Focus still enters on the scrim. The contribution scrim is a `DIV tabindex="0"` with no role or name; the chooser scrim is a `BUTTON` named "Close". The scrim is a Tab stop outside the panel (4 of 20 stops on the goal sheet, 3 of 12 on the chooser), on all four tabs, with the pointer and the keyboard. Nothing behind the sheet is reachable. This delta does not touch it.
+
+**Carried from §36, not rerun:** preservation (S4 and the event and kiosk specs), the 390×844 motion observations and the community loading composition. None of those files' relevant paths changed except the exits already rerun.
+
+**Not independent of W9, stated plainly:** W9's own 11/11 was not rerun or counted. The results above come from W7's instrument only.
+
+**Limits:** as §36.4. Chromium web only; no native motion, Safari keyboard or Android hardware back.
+
+**Status:** tested on `b497ce4c`. Nothing is accepted, integrated or staged.

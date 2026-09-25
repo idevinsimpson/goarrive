@@ -430,6 +430,21 @@ async function trace(run: Run, since: number, ms: number) {
   };
 }
 
+
+/**
+ * The sheet's Close. From `b497ce4c` it has its own testID
+ * (`wsf-contribute-close`); on `766ee085` it carried the page Back's
+ * (`wsf-contribute-back`). The page flow and the outcome exits keep
+ * `wsf-contribute-back` on both.
+ */
+async function sheetClose(page: Page) {
+  const own = page.locator('[data-testid="wsf-contribute-close"]:visible');
+  return (await own.count()) ? own.first() : shown(page, 'wsf-contribute-back');
+}
+async function sheetCloseId(page: Page): Promise<string> {
+  return (await page.locator('[data-testid="wsf-contribute-close"]:visible').count()) ? 'wsf-contribute-close' : 'wsf-contribute-back';
+}
+
 async function openOneGoalSheet(run: Run) {
   const t = Date.now();
   await shown(run.page, 'wsf-member-tab-move').click();
@@ -474,7 +489,7 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
       });
       expect(probe.panel, 'no sheet panel').not.toBeNull();
       const t2 = Date.now();
-      await shown(page, 'wsf-contribute-back').click();
+      await (await sheetClose(page)).click();
       const tr = await trace(run, t2, 1_500);
       measure(`S1 ${tab} Close`, {
         ...tr,
@@ -526,7 +541,7 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     const s = await summarise(run, t, 'wsf-contribute-sheet-panel');
     measure('S2 goal sheet over chooser', { panelOnTopMs: s.contentOnTopMs, frames: s.frames, path: path(page), probe: await sheetProbe(page, ORIGIN.home), sweep: await tabSweep(page, 12, 2) });
     t = Date.now();
-    await shown(page, 'wsf-contribute-back').click();
+    await (await sheetClose(page)).click();
     const tr = await trace(run, t, 1_500);
     measure('S2 Close goal sheet', { ...tr, focusAfter: await focused(page), chooserShown: await page.locator('[data-testid="wsf-move-choose"]:visible').count() });
     if (tr.sheetShown) {
@@ -583,7 +598,7 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     await page.waitForTimeout(800);
     const again = await page.locator('[data-testid="wsf-contribute-entry"]:visible').count();
     if (!again) {
-      await shown(page, 'wsf-contribute-back').click();
+      await (await sheetClose(page)).click();
       await page.waitForTimeout(1_200);
       await openOneGoalSheet(run);
       await shown(page, 'wsf-contribute-skip-timer').click();
@@ -661,7 +676,8 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
       const scrollBefore = await scrollOf(page, ORIGIN.home);
       const t = await openOneGoalSheet(run);
       const s = await summarise(run, t, 'wsf-contribute-sheet-panel');
-      const reach = await page.evaluate(() => {
+      const closeId = await sheetCloseId(page);
+      const reach = await page.evaluate((closeId) => {
         const r = (id: string) => {
           const el = Array.from(document.querySelectorAll(`[data-testid="${id}"]`)).find((e) => e.getBoundingClientRect().height > 0);
           if (!el) return 'absent';
@@ -670,11 +686,11 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
           const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
           return `${Math.round(b.top)}-${Math.round(b.bottom)} ${el.contains(hit) ? 'reachable' : 'COVERED'}`;
         };
-        return { close: r('wsf-contribute-back'), done: r('wsf-contribute-done'), timer: r('wsf-contribute-timer-start') };
-      });
+        return { close: r(closeId), done: r('wsf-contribute-done'), timer: r('wsf-contribute-timer-start') };
+      }, closeId);
       const probe = await sheetProbe(page, ORIGIN.home);
       const t2 = Date.now();
-      await shown(page, 'wsf-contribute-back').click();
+      await (await sheetClose(page)).click();
       const tr = await trace(run, t2, 1_500);
       measure(`${v.name}`, { panelOnTopMs: s.contentOnTopMs, frames: s.frames, probe, reach, close: tr, scrollBefore, scrollAfter: await scrollOf(page, ORIGIN.home), focusAfter: await focused(page) });
       await run.ctx.close();
@@ -693,11 +709,14 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
       const inst0 = await run.inst();
       await openOneGoalSheet(run);
       const t = Date.now();
-      await shown(page, 'wsf-contribute-back').click();
+      await (await sheetClose(page)).click();
       await page.waitForTimeout(40);
       await page.goBack({ waitUntil: 'commit' }).catch(() => null);
       const tr = await trace(run, t, 1_800);
       measure(`R1 from ${from}: Close, Back at +40ms`, { ...tr, originRemounted: (await run.inst())[ORIGIN[from]] - inst0[ORIGIN[from]] });
+      // One exit: exactly one path change, and the member is still on the tab they were on.
+      expect(tr.paths, 'more than one exit').toHaveLength(1);
+      expect(tr.currentTab).toBe(`wsf-member-tab-${from}`);
       await run.ctx.close();
     });
   }
@@ -717,7 +736,10 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     await shown(page, 'wsf-move-close').click();
     await page.waitForTimeout(40);
     await page.goBack({ waitUntil: 'commit' }).catch(() => null);
-    measure('R1z resolver: Close, Back at +40ms (from You)', await trace(run, t, 1_800));
+    const tr = await trace(run, t, 1_800);
+    measure('R1z resolver: Close, Back at +40ms (from You)', tr);
+    expect(tr.paths, 'more than one exit').toHaveLength(1);
+    expect(tr.currentTab).toBe('wsf-member-tab-you');
     await run.ctx.close();
   });
 
@@ -747,6 +769,9 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
       release();
       const tr = await trace(run, t, 2_500);
       measure(`R2 Close, resolution released at +${releaseAt}ms`, { ...tr, focusAfter: await focused(page) });
+      // Close means leave: the late answer must not open the goal first.
+      expect(tr.paths.filter((x) => x.includes('/contribute/')), 'the goal sheet opened after Close').toHaveLength(0);
+      expect(tr.finalPath).toBe('/you');
       await run.ctx.close();
     });
   }
@@ -761,7 +786,7 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     const move = await shown(page, 'wsf-member-tab-move').boundingBox();
     await openOneGoalSheet(run);
     const t = Date.now();
-    await shown(page, 'wsf-contribute-back').click();
+    await (await sheetClose(page)).click();
     await page.waitForTimeout(60);
     await page.mouse.click(move!.x + move!.width / 2, move!.y + move!.height / 2);
     const tr = await trace(run, t, 2_500);
@@ -770,7 +795,7 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     if (!tr.sheetShown) {
       await openOneGoalSheet(run);
       const t2 = Date.now();
-      await shown(page, 'wsf-contribute-back').click();
+      await (await sheetClose(page)).click();
       await page.waitForTimeout(220);
       await page.mouse.click(move!.x + move!.width / 2, move!.y + move!.height / 2);
       measure('R3 Close, MOVE pressed at +220ms', await trace(run, t2, 2_500));
