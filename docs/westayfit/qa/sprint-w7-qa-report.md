@@ -3899,3 +3899,70 @@ The Check 39 method, re-run in full on a detached worktree at `12a4c61d`. Nothin
 **Not established:** anything served, transport or hosted, since nothing ran against staging. The social services remain SHUT, the index has no READY receipt, and the email and kiosk holds are unchanged, all as the pin's own notes state.
 
 **Status:** nothing is accepted, merged or dispatched.
+
+## 41B · PERF-MOBILE-BASELINE-1B on integrated cp2, exact `0b460ce3f2f0766406100fef14d9a444c8cad43a` (Director #434 `5840249958`; W7 ACK `5840251469`): **measurement only; no verdict**
+
+- **Same instrument:** `sprint-w7-perf-mobile-baseline.spec.ts` is unchanged since `dd7828b9` (blob `245a3357`), with the same fixture, the same aggregation and the same 12 runs (`--repeat-each=3`). **12 / 12 completed.**
+- **Build:** an emulator-flagged `build:web` of a detached worktree at `0b460ce3`, served on its own port beside the same warm emulators (`demo-wsf-local`), in headless Chromium with one worker.
+- **Method and column definitions:** as in §41.
+- **Fixture:** as in §41. Home after the receipt reads 1,882 again, which is the server's figure.
+
+### Warm fixture on `0b460ce3`, with the delta from `91392f9d` (§41)
+
+The columns are: useful ms (3 runs, with the median); settled median; callables started; serial stages before useful; mounts added; loading painted; blocking read.
+
+| Transition | Viewport | Useful ms (median; was) | Settled (was) | Callables | Stages (was) | Mounts | Loading | Blocking (was) |
+|---|---|---|---|---|---|---|---|---|
+| **Pass 1 Home → Community (first visit)** | 844 | 25, 25, 26 (**25**; was 108) | **130** (was 108) | `wsfMyCommunities` 1, `wsfListGoals` 1, `wsfGoalRecentAdditions` 1: **unchanged** | **0** (was 3) | index +1 | **none** (was `wsf-community-index-loading`) | **no** (was yes) |
+| | 640 | 23, 26, 42 (**26**; was 103) | **125** (was 103) | unchanged | **0** (was 3) | index +1 | **none** | **no** (was yes) |
+| Pass 1 Community → Progress | 844 / 640 | **72** / **83** (was 78 / 77) | same | `wsfMyCommunities`, `wsfListGoals`, `wsfMyContribution`: unchanged | 3 (3) | activity +1 | `wsf-activity-loading` | yes (yes) |
+| Pass 1 Progress → You | 844 / 640 | **89** / **92** (was 94 / 91) | same | unchanged | 3 (3) | you +1 | `wsf-you-loading` | yes (yes) |
+| Pass 1 You → Home | 844 / 640 | **13** / **13** (was 14 / 12) | 94 / 93 (97 / 93) | the same 5 background | 0 (0) | none | none | no (no) |
+| Pass 2 warm Community / Progress / You | both | 6–7 (was 5–6) | same | **0** | 0 | none | none | no |
+| Pass 2 You → Home | 844 / 640 | **6** / **6** (was 6 / 7) | 87 / 87 (89 / 88) | the same 5 background | 0 | none | none | no |
+| MOVE open | 844 / 640 | **101** / **111** (was 109 / 103) | same | `wsfMyCommunities` 1, **`wsfListGoals` 2**, `wsfGoalPulse` 1, `wsfMyContribution` 1: **unchanged** | 3 (3) | sheet + panel re-mount | `wsf-move-working`, replacing known content | yes (yes) |
+| MOVE Close | 844 / 640 | **186** / **187** (was 187 / 186) | 256 / 260 (256 / 251) | 6: unchanged | 1 (1) | none | none | no |
+| MOVE open again | 844 / 640 | **106** / **106** (was 100 / 103) | same | unchanged | 3 (3) | re-mount | `wsf-move-working` | yes (yes) |
+| Submit → confirmed receipt | 844 / 640 | **57** / **52** (was 51 / 51) | same | `wsfContribute` 1 | 1 (1) | none | none | waits on the write |
+| Receipt "Back to community" → Home | 844 / 640 | **27** / **35** (was 33 / 26) | 106 / 114 (116 / 95) | the same 5 background | 0 (0) | none | none | no |
+
+### Cold first entry on `0b460ce3` (390×844; 3 fixtures × 2 reloads each)
+
+| Entry | Member of | Nav → useful ms (was) | Callables (was) | Stages | Loading states, in order |
+|---|---|---|---|---|---|
+| Home `/` → redirect to `/community/<id>` | 1 | 354, 326, 423, 333, 350, 408 (353–396) | **9** (9): `wsfMyCommunities` **2**, `wsfListGoals` **2** (same `groupId` + `includeHistory`, started 3 ms apart), `wsfGoalPulse`, `wsfMyContribution`, `wsfListChallenge`, `wsfCommunityMembers`, `wsfCommunityActivity` | 4–5 | the same **four**: `wsf-home-loading` → `wsf-home-my-loading` → `wsf-home-opening-community` → `wsf-community-loading` |
+| Home `/` (list) | 3 | 226, 225, 234, 230, 228, 248 (216–239) | 4 (4): `wsfMyCommunities` 1, `wsfListGoals` 3 | 1 | `wsf-home-loading` → `wsf-home-my-loading` |
+| Community tab | 1 | 277, 268, 281, 262, 255, 255 (244–276) | 3 (3) | 3 | `wsf-community-index-loading` |
+| Community tab | 3 | 257, 253, 263, 238, 288, 245 (227–270) | 4 (4): `wsfListGoals` 3 | 2 | `wsf-community-index-loading` |
+
+**Per-community fan-out is unchanged:** +1 concurrent `wsfListGoals` per community, on both Home and the Community tab.
+
+### Delta `91392f9d → 0b460ce3` (facts only)
+
+1. **One transition changed: the Community tab's first visit after Home.**
+   - First useful pixels: **108 → 25 ms** at 844, and **103 → 26 ms** at 640. Serial stages before content: **3 → 0**.
+   - The **skeleton is no longer painted**, and the switch is **no longer blocking**. It opens on rows the app already holds.
+   - It still starts **the same three callables in the same serial chain** as a background revalidation. That is why "settled" is later (**108 → 130 / 103 → 125**): it is now measured to the end of that revalidation.
+2. **Callable counts are unchanged in every transition and every cold entry.** The duplicates measured in §41 are still on the wire:
+   - cold single-community Home: `wsfMyCommunities` ×2 and `wsfListGoals` ×2 with identical parameters, started 3 ms apart;
+   - every MOVE open: `wsfListGoals` ×2.
+
+   The cp2 read layer's in-flight sharing does not remove these at the network boundary in these journeys.
+3. **Unchanged within run-to-run noise (about ±15 ms locally):**
+   - Progress and You still block on first visit, with a skeleton and 3 serial stages.
+   - Every Home return still starts 5 background callables, and the Close transition 6.
+   - MOVE still re-mounts, paints "working" and blocks on 3 stages.
+   - The receipt still costs one `wsfContribute`.
+   - The four-frame cold Home cascade is unchanged.
+4. **No transition regressed:** no new callable, no new loading state and no new mount anywhere.
+
+### CANNOT-MEASURE, and limits
+
+These are as in §41:
+- **Device and network speed** is CANNOT-MEASURE, because these are local-emulator milliseconds. The counts, stages, skeletons and mounts are what transfer.
+- **Compositor paint** is not measured.
+- **Native iOS / Android, Safari and throttled CPU** are not measured.
+- **Function cold starts** are not measured.
+- **Per-goal fan-out** is not measured: each fixture community has one goal.
+
+**No product, config or evidence file was touched.** Nothing is accepted, integrated or staged by this check.
