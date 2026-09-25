@@ -190,6 +190,35 @@ test.describe(`APP-FEEL-PARITY-1 checkpoint 1 frames · ${STAGE}`, () => {
     });
   }
 
+  for (const device of DEVICES) {
+    test(`${device.key}: F2 focus states, by keyboard (CANDIDATE only)`, async ({ page }) => {
+      test.skip(!CANDIDATE, 'the base build has no sheet focus to show');
+      test.setTimeout(300_000);
+      const fx = await seed(`f${device.height}`);
+      await signInVia(page, fx.email, PASSWORD);
+      const { stage, label } = await easel(page, device, `/community/${fx.groupId}`);
+      await expect(stage.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
+      const move = stage.locator('[data-testid="wsf-member-tab-move"]:visible').first();
+      await move.focus();
+      await page.keyboard.press('Enter');
+      await expect(stage.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+      const where = () =>
+        stage.locator('body').evaluate(() => {
+          const el = document.activeElement as HTMLElement | null;
+          return el?.getAttribute('data-testid') ?? el?.tagName.toLowerCase() ?? 'none';
+        });
+      await expect.poll(where, { timeout: 5_000 }).toBe('wsf-contribute-close');
+      await shoot(page, device, label, 'f2-focus-on-open', 600);
+
+      const skip = stage.locator('[data-testid="wsf-contribute-skip-timer"]:visible').first();
+      await skip.focus();
+      await page.keyboard.press('Enter');
+      await expect(stage.locator('[data-testid="wsf-contribute-entry"]:visible')).toBeVisible({ timeout: 20_000 });
+      await expect.poll(where, { timeout: 5_000, message: 'the new step’s heading holds focus' }).toBe('h1');
+      await shoot(page, device, label, 'f2-focus-after-step', 600);
+    });
+  }
+
   test('390x844: entry and exit timeline, paused at fixed times (CANDIDATE only)', async ({ page }) => {
     test.skip(!CANDIDATE, 'the base build has no sheet motion to record');
     test.setTimeout(300_000);

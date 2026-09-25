@@ -254,6 +254,10 @@ export function useSheetFocusContainment(
         ).find((h) => h.getClientRects().length > 0);
         if (heading) {
           if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+          // A heading holding focus to orient is not a control, and the
+          // reference draws no ring on it (styles.css `.flow-step h3
+          // { outline: none }`); controls keep their focus rings.
+          heading.style.outline = 'none';
           heading.focus({ preventScroll: true });
           return;
         }
