@@ -3,13 +3,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } fr
 
 import { groupTypeCardLabel, memberCountLabel, roleCardLabel } from '../labels';
 import {
+  hasInstrument,
   initialsOf,
   leadAndOthers,
   partBlock,
   sharedCell,
   sharedLine,
   statusOf,
-  whenLabel,
   type YouCommunity,
   type YouGoal,
   type YouProfile,
@@ -327,7 +327,7 @@ function Pill({ status, testID }: { status: YouStatus; testID?: string }) {
       style={[
         s.pill,
         status.tone === 'closedReached' && s.pillClosedReached,
-        status.tone === 'closedUnfinished' && s.pillClosedUnfinished,
+        status.tone === 'muted' && s.pillMuted,
       ]}
       testID={testID}
     >
@@ -335,7 +335,7 @@ function Pill({ status, testID }: { status: YouStatus; testID?: string }) {
         style={[
           s.pillText,
           status.tone === 'closedReached' && s.pillTextClosedReached,
-          status.tone === 'closedUnfinished' && s.pillTextClosedUnfinished,
+          status.tone === 'muted' && s.pillTextMuted,
         ]}
       >
         {status.label}
@@ -347,12 +347,16 @@ function Pill({ status, testID }: { status: YouStatus; testID?: string }) {
 /**
  * YOUR PART IN LIVING WE: the shared position and your exact confirmed part,
  * side by side and never joined. No ratio between them, no rank, no streak.
+ * When the shared position is not known it says so: no number, no Living WE,
+ * no track — and your own part, which is known, still shows.
  */
 function Lead({ row }: { row: YouGoal }) {
-  const usable = row.target > 0;
-  const ratio = usable ? fillRatio(row.sharedTotal, row.target) : 0;
-  const remaining = Math.max(0, row.target - row.sharedTotal);
-  const reached = usable && row.sharedTotal >= row.target;
+  const total = row.shared.kind === 'known' ? row.shared.total : null;
+  const instrument = hasInstrument(row) && total !== null;
+  const ratio = instrument ? fillRatio(total, row.target) : 0;
+  const remaining = instrument ? Math.max(0, row.target - total) : 0;
+  const reached = instrument && total >= row.target;
+  const line = sharedLine(row);
   return (
     <View style={s.lead} testID="wsf-you-lead">
       <View style={s.leadHeading}>
@@ -364,34 +368,41 @@ function Lead({ row }: { row: YouGoal }) {
       </View>
       <View style={s.leadBody}>
         <View style={s.shared}>
-          {usable ? (
+          {instrument ? (
             <LivingWeProgress
-              completed={row.sharedTotal}
+              completed={total}
               target={row.target}
               unit={row.unit}
               width={76}
               surface="dark"
+              testID="wsf-you-lead-we"
             />
           ) : null}
           <View style={s.sharedText}>
             <Text style={s.sharedSmall}>SHARED POSITION</Text>
-            <View
-              style={s.sharedNumberLine}
-              testID="wsf-you-lead-shared"
-              accessible
-              accessibilityLabel={sharedLine(row)}
-            >
-              <Text style={s.sharedNumber}>{`${n(row.sharedTotal)} `}</Text>
-              <Text style={s.sharedOf}>{sharedLine(row).slice(n(row.sharedTotal).length + 1)}</Text>
-            </View>
-            {usable ? (
+            {line !== null && total !== null ? (
+              <View
+                style={s.sharedNumberLine}
+                testID="wsf-you-lead-shared"
+                accessible
+                accessibilityLabel={line}
+              >
+                <Text style={s.sharedNumber}>{`${n(total)} `}</Text>
+                <Text style={s.sharedOf}>{line.slice(n(total).length + 1)}</Text>
+              </View>
+            ) : (
+              <Text style={s.sharedUnknown} testID="wsf-you-lead-shared-unknown">
+                Not available right now
+              </Text>
+            )}
+            {instrument ? (
               <>
-                <View style={s.track}>
+                <View style={s.track} testID="wsf-you-lead-track">
                   <View style={[s.trackFill, { width: `${ratio * 100}%` }]} />
                 </View>
                 <View style={s.meta}>
                   <Text style={s.metaStrong}>
-                    {reached ? 'Goal reached' : `${percentLabel(row.sharedTotal, row.target)} complete`}
+                    {reached ? 'Goal reached' : `${percentLabel(total, row.target)} complete`}
                   </Text>
                   <Text style={s.metaSoft}>{reached ? 'Still open' : `${n(remaining)} ${row.unit} to go`}</Text>
                 </View>
@@ -430,7 +441,7 @@ function OtherGoals({ rows, communityName }: { rows: YouGoal[]; communityName: s
               <Text style={s.rowTitle} numberOfLines={2}>
                 {r.title}
               </Text>
-              <Text style={s.rowSub}>{[communityName, whenLabel(r)].filter(Boolean).join(' · ')}</Text>
+              <Text style={s.rowSub}>{[communityName, r.periodLabel].filter(Boolean).join(' · ')}</Text>
             </View>
             <Pill status={statusOf(r)} />
           </View>
@@ -727,6 +738,7 @@ const s = StyleSheet.create({
   // its line, so the gap is the margin.
   sharedNumberLine: { flexDirection: 'row', alignItems: 'baseline' },
   sharedNumber: { color: SURFACE, fontSize: 24, lineHeight: 24, fontWeight: '700', marginRight: 4 },
+  sharedUnknown: { color: SHARED_SOFT, fontSize: 13, lineHeight: 19.5, fontWeight: '700', marginTop: 2 },
   sharedOf: { flexShrink: 1, color: SHARED_SOFT, fontSize: 13, lineHeight: 19.5, fontWeight: '700' },
   track: {
     height: 8,
@@ -772,8 +784,8 @@ const s = StyleSheet.create({
   pillText: { color: PILL_TEXT, fontSize: 10, lineHeight: 15, fontWeight: '800' },
   pillClosedReached: { backgroundColor: NAVY },
   pillTextClosedReached: { color: CONFIRMED },
-  pillClosedUnfinished: { backgroundColor: MUTED_BG },
-  pillTextClosedUnfinished: { color: MUTED_FG },
+  pillMuted: { backgroundColor: MUTED_BG },
+  pillTextMuted: { color: MUTED_FG },
 
   others: { paddingTop: 17 },
   h2Others: { color: NAVY, fontSize: 19, lineHeight: 28.5, fontWeight: '400', marginTop: 2, marginBottom: 6 },

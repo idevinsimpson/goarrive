@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // under test; the view is.
 vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
 
+import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
 import { YouParityView, type YouParityActions } from '../src/ui/YouParityView';
 import type { YouGoal, YouState } from '../src/youParity';
 
@@ -37,8 +38,8 @@ const before = (a: string, b: string) =>
 
 const PROFILE = { displayName: 'Alex M.', memberSince: 'September 2026' };
 const COMMUNITY = { displayName: 'Oak Grove Together', role: 'member', memberCount: 23 };
-const LEAD: YouGoal = { goalId: 'lead', title: '500 squats together', unit: 'squats', target: 500, yourPart: 25, sharedTotal: 241, open: true };
-const OTHER: YouGoal = { goalId: 'other', title: '150 squats this week', unit: 'squats', target: 150, yourPart: 20, sharedTotal: 155, open: true };
+const LEAD: YouGoal = { goalId: 'lead', title: '500 squats together', unit: 'squats', target: 500, yourPart: 25, shared: knownShared(241), open: true, periodLabel: 'Ends Sep 27' };
+const OTHER: YouGoal = { goalId: 'other', title: '150 squats this week', unit: 'squats', target: 150, yourPart: 20, shared: knownShared(155), open: true, periodLabel: 'This week' };
 
 function render(state: YouState) {
   const actions: YouParityActions = {
@@ -96,7 +97,7 @@ describe('YouParityView', () => {
   });
 
   it('lists other goals with their lifecycle, your part and the shared figure', () => {
-    render(member({ finished: [{ ...OTHER, goalId: 'done', title: 'Old', open: false, sharedTotal: 360, target: 500 }] }));
+    render(member({ finished: [{ ...OTHER, goalId: 'done', title: 'Old', open: false, shared: knownShared(360), target: 500 }] }));
     const others = text('wsf-you-others');
     expect(others).toContain('Other goals you helped');
     expect(others).toContain('150 squats this week');
@@ -156,6 +157,40 @@ describe('YouParityView', () => {
     render({ kind: 'pickCommunity', profile: PROFILE, count: 2 });
     expect(text('wsf-you-pick-community')).toContain('You are in 2 communities');
     expect(byId('wsf-you-no-community')).toBeNull();
+  });
+
+  it('an open lead whose shared total is unknown: OPEN, no number, no Living WE, your part still shown', () => {
+    render(member({ open: [{ ...LEAD, shared: UNKNOWN_SHARED }] }));
+    expect(text('wsf-you-lead-status')).toBe('OPEN');
+    expect(byId('wsf-you-lead-shared')).toBeNull();
+    expect(text('wsf-you-lead-shared-unknown')).toBe('Not available right now');
+    expect(byId('wsf-you-lead-we')).toBeNull();
+    expect(byId('wsf-you-lead-track')).toBeNull();
+    expect(text('wsf-you-lead')).not.toMatch(/\b0\b|complete|to go|reached/i);
+    expect(text('wsf-you-lead-own')).toBe('25 squats');
+  });
+
+  it('a known lead draws the Living WE and the track', () => {
+    render(member());
+    expect(byId('wsf-you-lead-we')).not.toBeNull();
+    expect(byId('wsf-you-lead-track')).not.toBeNull();
+  });
+
+  it('a closed goal whose shared total is unknown says CLOSED and Unknown, never reached or unfinished', () => {
+    render(member({ finished: [{ ...OTHER, goalId: 'x', title: 'Old', open: false, shared: UNKNOWN_SHARED, periodLabel: 'Ended Jul 31' }] }));
+    const row = text('wsf-you-row-x');
+    expect(row).toContain('CLOSED');
+    expect(row).toContain('Unknown');
+    expect(row).not.toMatch(/REACHED|UNFINISHED/);
+    expect(row).not.toMatch(/\b0 squats/);
+  });
+
+  it('shows the period label exactly as given, never re-derived from a date', () => {
+    render(member());
+    expect(text('wsf-you-row-other')).toContain('Oak Grove Together · This week');
+    render(member({ open: [LEAD, { ...OTHER, periodLabel: null }] }));
+    expect(text('wsf-you-row-other')).toContain('Oak Grove Together');
+    expect(text('wsf-you-row-other')).not.toContain('Oak Grove Together ·');
   });
 
   it('admits a partial list', () => {

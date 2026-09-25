@@ -2,6 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import { NAVY } from '../../src/ui/kit';
 import { YouParityView, useYouCompact } from '../../src/ui/YouParityView';
 import type { YouGoal, YouState } from '../../src/youParity';
@@ -15,7 +16,12 @@ import type { YouGoal, YouState } from '../../src/youParity';
  * still-open goal they also helped), so its frames can be laid over the
  * reference's originals pixel for pixel.
  *
- * `?state=` picks the state: normal | no-own | no-eligible | failed.
+ * `?state=` picks the state: normal | no-own | no-eligible | failed |
+ * unknown-shared (an open lead and a finished goal whose shared totals did not
+ * answer — the reference has no such frame; it is canonical truth only).
+ *
+ * Period labels are given as the route adapter will give them: already
+ * formatted in the goal's own timezone. The view shows them verbatim.
  *
  * THIS IS NOT THE ROUTE. The route stays W9's during PERF-MOBILE-1; the hook is
  * Phase B. Nothing here reads Firebase. The top band is exactly as tall as the
@@ -42,18 +48,15 @@ export const REFERENCE_MASTHEAD_COMPACT = 86;
 const PROFILE = { displayName: 'Alex M.', memberSince: 'September 2026' };
 const COMMUNITY = { displayName: 'Oak Grove Together', role: 'member', memberCount: 23 };
 
-const DAY = 24 * 60 * 60_000;
-const FIXED_NOW = Date.UTC(2026, 8, 25, 16, 0, 0);
-
 const LEAD: YouGoal = {
   goalId: 'fixture-lead',
   title: '500 squats together',
   unit: 'squats',
   target: 500,
   yourPart: 25,
-  sharedTotal: 241,
+  shared: knownShared(241),
   open: true,
-  endsAt: new Date(FIXED_NOW + 2 * DAY).toISOString(),
+  periodLabel: 'Ends Sep 27',
 };
 
 const OTHER: YouGoal = {
@@ -62,9 +65,9 @@ const OTHER: YouGoal = {
   unit: 'squats',
   target: 150,
   yourPart: 20,
-  sharedTotal: 155,
+  shared: knownShared(155),
   open: true,
-  endsAt: new Date(FIXED_NOW + 6 * DAY).toISOString(),
+  periodLabel: 'Ends Oct 1',
 };
 
 const STATES: Record<string, YouState> = {
@@ -96,6 +99,26 @@ const STATES: Record<string, YouState> = {
     eligible: false,
   },
   failed: { kind: 'failed', profile: PROFILE, community: COMMUNITY },
+  'unknown-shared': {
+    kind: 'member',
+    profile: PROFILE,
+    community: COMMUNITY,
+    open: [{ ...LEAD, shared: UNKNOWN_SHARED }],
+    finished: [
+      {
+        goalId: 'fixture-closed-unknown',
+        title: '800 squats in July',
+        unit: 'squats',
+        target: 800,
+        yourPart: 40,
+        shared: UNKNOWN_SHARED,
+        open: false,
+        periodLabel: 'Ended Jul 31',
+      },
+    ],
+    partial: false,
+    eligible: true,
+  },
 };
 
 export default function YouParityFixture() {

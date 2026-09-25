@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
 import {
   initialsOf,
   leadAndOthers,
@@ -7,7 +8,6 @@ import {
   sharedCell,
   sharedLine,
   statusOf,
-  whenLabel,
   type YouGoal,
   type YouState,
 } from '../src/youParity';
@@ -20,21 +20,26 @@ const goal = (over: Partial<YouGoal>): YouGoal => ({
   unit: 'squats',
   target: 500,
   yourPart: 25,
-  sharedTotal: 241,
+  shared: knownShared(241),
   open: true,
+  periodLabel: null,
   ...over,
 });
 
 describe('statusOf — the reference four lifecycle pills', () => {
   it('open, below target', () => expect(statusOf(goal({}))).toEqual({ label: 'OPEN', tone: 'open' }));
   it('open, at or past target', () =>
-    expect(statusOf(goal({ sharedTotal: 500 }))).toEqual({ label: 'REACHED · STILL OPEN', tone: 'open' }));
+    expect(statusOf(goal({ shared: knownShared(500) }))).toEqual({ label: 'REACHED · STILL OPEN', tone: 'open' }));
   it('closed and reached', () =>
-    expect(statusOf(goal({ open: false, sharedTotal: 520 }))).toEqual({ label: 'CLOSED · REACHED', tone: 'closedReached' }));
+    expect(statusOf(goal({ open: false, shared: knownShared(520) }))).toEqual({ label: 'CLOSED · REACHED', tone: 'closedReached' }));
   it('closed and unfinished', () =>
-    expect(statusOf(goal({ open: false, sharedTotal: 360 }))).toEqual({ label: 'CLOSED · UNFINISHED', tone: 'closedUnfinished' }));
+    expect(statusOf(goal({ open: false, shared: knownShared(360) }))).toEqual({ label: 'CLOSED · UNFINISHED', tone: 'muted' }));
   it('no usable target never claims reached', () =>
-    expect(statusOf(goal({ target: 0, sharedTotal: 10 })).label).toBe('OPEN'));
+    expect(statusOf(goal({ target: 0, shared: knownShared(10) })).label).toBe('OPEN'));
+  it('open with the shared total unknown is still OPEN, never REACHED', () =>
+    expect(statusOf(goal({ shared: UNKNOWN_SHARED }))).toEqual({ label: 'OPEN', tone: 'open' }));
+  it('closed with the shared total unknown claims neither reached nor unfinished', () =>
+    expect(statusOf(goal({ open: false, shared: UNKNOWN_SHARED }))).toEqual({ label: 'CLOSED', tone: 'muted' }));
 });
 
 describe('initialsOf', () => {
@@ -44,18 +49,6 @@ describe('initialsOf', () => {
   it('no name, no invented initials', () => {
     expect(initialsOf(null)).toBeNull();
     expect(initialsOf('   ')).toBeNull();
-  });
-});
-
-describe('whenLabel', () => {
-  it('open goals end, finished goals ended', () => {
-    const iso = new Date(2026, 9, 2, 12).toISOString();
-    expect(whenLabel({ open: true, endsAt: iso })).toBe('Ends Oct 2');
-    expect(whenLabel({ open: false, endsAt: iso })).toBe('Ended Oct 2');
-  });
-  it('an unreadable window says nothing', () => {
-    expect(whenLabel({ open: true })).toBeNull();
-    expect(whenLabel({ open: true, endsAt: 'not a date' })).toBeNull();
   });
 });
 
@@ -92,9 +85,16 @@ describe('partBlock — Start moving only when it is true', () => {
 
 describe('shared figures keep their unit and never become a ratio', () => {
   it('lead line', () => expect(sharedLine(goal({}))).toBe('241 / 500 confirmed'));
-  it('row cell', () => expect(sharedCell(goal({ sharedTotal: 155, target: 150 }))).toBe('155 / 150 squats'));
+  it('row cell', () => expect(sharedCell(goal({ shared: knownShared(155), target: 150 }))).toBe('155 / 150 squats'));
   it('no target: the total alone, in its unit', () => {
     expect(sharedLine(goal({ target: 0 }))).toBe('241 squats confirmed');
     expect(sharedCell(goal({ target: 0 }))).toBe('241 squats');
+  });
+});
+
+describe('an unknown shared position is never a number', () => {
+  it('the lead line is absent and the row cell says Unknown — never 0', () => {
+    expect(sharedLine(goal({ shared: UNKNOWN_SHARED }))).toBeNull();
+    expect(sharedCell(goal({ shared: UNKNOWN_SHARED }))).toBe('Unknown');
   });
 });

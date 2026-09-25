@@ -5,8 +5,17 @@
  *
  * Nothing here reads Firebase, routes, or stores anything. The route resolves
  * canonical facts; these functions only decide how to present them, so they
- * are tested directly (tests/you-parity.test.ts).
+ * are tested directly (tests/you-parity.test.ts). The shared-position and
+ * lifecycle rules are src/goalTruth.ts, which Progress uses too.
  */
+
+import {
+  hasInstrument,
+  sharedCell as goalSharedCell,
+  statusOf as goalStatusOf,
+  type LifecycleStatus,
+  type SharedPosition,
+} from './goalTruth';
 
 export type YouProfile = {
   displayName: string | null;
@@ -30,11 +39,15 @@ export type YouGoal = {
   target: number;
   /** Exactly what this member put in. Never summed with another unit. */
   yourPart: number;
-  /** Where the community stands. A different number, labelled as one. */
-  sharedTotal: number;
+  /** Where the community stands: a different number, or not known at all. */
+  shared: SharedPosition;
   /** status === 'active' on the goal. */
   open: boolean;
-  endsAt?: string;
+  /**
+   * The goal's window as the route formats it in the goal's own timezone
+   * ("Ends Oct 1", "This week"), shown verbatim; null when there is none.
+   */
+  periodLabel: string | null;
 };
 
 export type YouState =
@@ -58,20 +71,11 @@ export type YouState =
       eligible: boolean;
     };
 
-export type YouStatusTone = 'open' | 'closedReached' | 'closedUnfinished';
-export type YouStatus = { label: string; tone: YouStatusTone };
+export type YouStatus = LifecycleStatus;
 
-/**
- * The reference's lifecycle pill (`baseView` → `statusLabel`), derived only
- * from the goal's own status and its two figures. Upper-cased as the
- * reference's CSS renders it.
- */
-export function statusOf(goal: Pick<YouGoal, 'open' | 'target' | 'sharedTotal'>): YouStatus {
-  const reached = goal.target > 0 && goal.sharedTotal >= goal.target;
-  if (goal.open) return { label: reached ? 'REACHED · STILL OPEN' : 'OPEN', tone: 'open' };
-  return reached
-    ? { label: 'CLOSED · REACHED', tone: 'closedReached' }
-    : { label: 'CLOSED · UNFINISHED', tone: 'closedUnfinished' };
+/** The reference's lifecycle pill; see goalTruth.statusOf. */
+export function statusOf(goal: Pick<YouGoal, 'open' | 'target' | 'shared'>): YouStatus {
+  return goalStatusOf(goal);
 }
 
 /** Up to two initials from the member's own display name; none when unknown. */
@@ -83,15 +87,6 @@ export function initialsOf(name: string | null | undefined): string | null {
     .map((p) => Array.from(p)[0] ?? '')
     .join('');
   return letters ? letters.toUpperCase() : null;
-}
-
-/** "Ends Oct 2" / "Ended Sep 14", or null when the window cannot be read. */
-export function whenLabel(goal: Pick<YouGoal, 'open' | 'endsAt'>): string | null {
-  if (!goal.endsAt) return null;
-  const d = new Date(goal.endsAt);
-  if (Number.isNaN(d.getTime())) return null;
-  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  return goal.open ? `Ends ${day}` : `Ended ${day}`;
 }
 
 /**
@@ -115,16 +110,22 @@ export function partBlock(state: Extract<YouState, { kind: 'member' }>): YouPart
 
 const n = (v: number) => v.toLocaleString('en-US');
 
-/** "241 / 500 confirmed", or the total alone when there is no usable target. */
-export function sharedLine(goal: Pick<YouGoal, 'sharedTotal' | 'target' | 'unit'>): string {
+/**
+ * The lead's shared line: "241 / 500 confirmed", the total alone when there is
+ * no usable target, or null when the position is not known — the view then
+ * says it is unavailable instead of drawing a number.
+ */
+export function sharedLine(goal: Pick<YouGoal, 'shared' | 'target' | 'unit'>): string | null {
+  if (goal.shared.kind === 'unknown') return null;
   return goal.target > 0
-    ? `${n(goal.sharedTotal)} / ${n(goal.target)} confirmed`
-    : `${n(goal.sharedTotal)} ${goal.unit} confirmed`;
+    ? `${n(goal.shared.total)} / ${n(goal.target)} confirmed`
+    : `${n(goal.shared.total)} ${goal.unit} confirmed`;
 }
 
-/** The "Shared" cell of an other-goal row. */
-export function sharedCell(goal: Pick<YouGoal, 'sharedTotal' | 'target' | 'unit'>): string {
-  return goal.target > 0
-    ? `${n(goal.sharedTotal)} / ${n(goal.target)} ${goal.unit}`
-    : `${n(goal.sharedTotal)} ${goal.unit}`;
+/** The "Shared" cell of an other-goal row; see goalTruth.sharedCell. */
+export function sharedCell(goal: Pick<YouGoal, 'shared' | 'target' | 'unit' | 'open'>): string {
+  return goalSharedCell(goal);
 }
+
+/** The lead draws its Living WE and track only on a confirmed total and a positive target. */
+export { hasInstrument };

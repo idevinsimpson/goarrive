@@ -150,6 +150,23 @@ for (const vp of [
       await context.close();
     });
 
+    test('unknown shared totals: OPEN and CLOSED only, no number, no Living WE, own part kept', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'unknown-shared');
+      await expect(page.getByTestId('wsf-you-lead-status')).toHaveText('OPEN');
+      await expect(page.getByTestId('wsf-you-lead-shared-unknown')).toHaveText('Not available right now');
+      await expect(page.getByTestId('wsf-you-lead-shared')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-you-lead-we')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-you-lead-own')).toContainText('25');
+      const row = page.getByTestId('wsf-you-row-fixture-closed-unknown');
+      await expect(row).toContainText('CLOSED');
+      await expect(row).toContainText('Unknown');
+      await expect(row).toContainText('Oak Grove Together · Ended Jul 31');
+      await expect(row).not.toContainText('REACHED');
+      await expect(row).not.toContainText('UNFINISHED');
+      await context.close();
+    });
+
     test('keyboard: every control is reachable by Tab in reading order', async ({ browser }) => {
       const { context, page } = await phone(browser, vp);
       await open(page, 'no-own');
@@ -183,6 +200,9 @@ const SHOTS: Shot[] = [
   { state: 'no-eligible', vp: { width: 390, height: 844 }, lovable: 'you-no-eligible-390x844.png' },
   // The reference has no failure frame; this one is canonical-only evidence.
   { state: 'failed', vp: { width: 390, height: 844 }, lovable: null },
+  // Nor an unknown shared total (Director #492 5841012915): canonical-only.
+  { state: 'unknown-shared', vp: { width: 390, height: 844 }, lovable: null },
+  { state: 'unknown-shared', vp: { width: 390, height: 640 }, lovable: null },
 ];
 
 const sha256 = (file: string) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
