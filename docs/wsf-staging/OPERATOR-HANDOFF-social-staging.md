@@ -32,18 +32,23 @@ These are three different things and are reported separately.
 - **Capability: partial.** Inventory went from 46 to 49 functions. The three
   social services now **exist** and were measured **transport-SHUT** on run 47
   (`invoker_iam_check_enabled`). The deploy step's own log shows `Failed to set
-  the IAM Policy` for each of them, because the deploy identity lacks
-  `run.services.setIamPolicy`. The single `wsfContributions` composite index
+  the IAM Policy` for each of them, and its hint names `roles/functions.admin`.
+  That the deploy identity lacks `run.services.setIamPolicy` is the
+  repository's standing, source-backed diagnosis; the log does not print that
+  permission name. The single `wsfContributions` composite index
   has **no READY receipt, so its state is unverified**. `wsfCommunityActivity`
   fails `FAILED_PRECONDITION` until that index is READY.
 - **Post-deploy feature readiness: not met.** The social features are **not**
   usable and are not claimed usable.
-  - Run 47 concluded FAILURE. In the `deploy` job, "Verify the deployed state"
-    failed with `VERIFY=failed (1)`. That one failure was the hosted-marker
-    mismatch, read one second after the Hosting release. The three SHUT
-    services added **no** failure, because the verifier only reports their
-    transport and does not assert it. The next step then marked the release a
-    failed release.
+  - Run 47 concluded FAILURE. Two separate facts in the `deploy` job:
+    - "Verify the deployed state" failed with `VERIFY=failed (1)`. The
+      verifier's one count was the early hosted-marker mismatch, read within
+      two seconds after the Hosting release. The three SHUT transport rows
+      were reported notes and added **no** verifier failure.
+    - **Separately**, the workflow later marked the release failed because the
+      functions deploy step's captured outcome was failure: that step exited 2
+      on the three invoker-policy updates. The failed-release marking did not
+      come from the verifier's count of the marker mismatch.
   - In the `hosted-verify` job, the Package E hosted authorization checks
     were 5 PASS / 1 FAIL, and the fixtures were removed. The root cause of
     the FAIL was that the smoke waited for `wsf-community-manage`, which
