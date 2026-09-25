@@ -19,10 +19,11 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHAs | last receipt | next consumer · wake |
 | --- | --- | --- | --- |
-| **RECOVERY-PORT-1 — INTEGRATED** | W9 · #474 · `86c160ae` on reference `02cb35c4` | W7 Check 29 PASS; Director ACCEPTED (#474 `5825352413`); **L0 merge `6b96ba1b`** (#474 `5825365990`) | not staged |
-| **FOCUS-RETURN-1 — INTEGRATED** | W9 · #477 · `64b01967` (F1 on `8f2cc15e`) | W7 Checks 30 + 33 PASS; Director ACCEPTED (#477 `5828355844`); **L0 merge `502b1e8d`** (#477 `5828418850`) | not staged; cold exits, Progress Start moving, MOVE focus entry, Safari / AT, stale-screen seam carried |
-| **RETURN-CONTINUITY-1 — INTEGRATED** | W9 · #478 · `9f73aaa6` (product `ff043515`) | W7 Check 32 PASS; Director ACCEPTED (#478 `5828285756`); **L0 merge `afa26d64`** (#478 `5828322895`) | not staged; presence/momentum stale, own-row seam, Safari / AT carried |
-| **JOIN-VISIBILITY-1** (Director #477 `5832790261`) | W9 · base `502b1e8d` · `app/join/[joinCode].tsx` only + `sprint-w9-join-visibility-1*` + `review/join-visibility-1/**`; frozen `a15a610e` / `973e1141` | L0 handoff #477 `5832875032`; **W9 idle, not ACKed**; owner wake requested (#365) | W9 ACK → draft PR → Director → W7 → L0 |
+| **Integrated + served** | W9: RECOVERY-PORT-1 `86c160ae`, RETURN-CONTINUITY-1 `9f73aaa6`, FOCUS-RETURN-1 `64b01967` | W7 Checks 29 / 32 / 30+33; Director ACCEPTED | in `502b1e8d`; carried seams per #477 / #478 receipts |
+| **APP-FEEL-PARITY-1** (Director `5834082617` §A; owner parity) | W9 · base `502b1e8d` · shell + community route; checkpoints: loading / one-goal MOVE → warm state → chips / side Settings → icon + instructions | handoff #477 `5834095137`; **not ACKed** (idle) | owner wake → W9 → Director → W7 → L0 → stage |
+| **MOVEMENT-PILLS-1** (§B) | W6 · base `502b1e8d` · `app/goals/new.tsx` + new picker component | handoff #456 `5834097050`; **not ACKed** (idle) | owner wake → W6 → Director → W7 → L0 |
+| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · seed fixture prep + operator path; no execution by W3 | handoff #396 `5834099352`; **not ACKed** (idle) | owner wake → W3; operator for index + Operation 2 |
+| JOIN-VISIBILITY-1 | W9 · deferred behind APP-FEEL-PARITY-1 (#477 `5832790261`) | never started | after §A |
 | **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
 | **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | `eda58218`: W7 Check 31 PASS (#434 `5827152233`); **Director ACCEPTED AS ISOLATED R&D CORE ONLY** (#475 `5827675294`) | no Expo port, integration or staging; next evidence is the owner's phone trial; no video or personal data stored |
 | **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab, `5825892609`) | Director · unpublished remix `c1b16a13-34ff-4878-b798-750cc63aa595` (fork `fdad20f9`) | frozen `a84e6764` / `8c61cd72`: limited R&D handoff, fake-camera evidence (`5826104270`) | **NOT READY**; no Expo task or port before the owner's phone test |
@@ -31,8 +32,6 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 **W7's queue:** item 2.
 
 **STAGING — served `502b1e8d`** (run 48 green). **Runbook: `skills/wsf-staging-deploy/SKILL.md` on `main`** (owner cadence `5832907406`: stable accepted milestones stage without another prompt; linked from `CLAUDE.md` / `AGENTS.md`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
-
-**RETURN-CONTINUITY-1** (#477 `5826542101`; Home route only): confirmed return matches the receipt; unknown return excludes the amount; a failed refresh is labelled last-known with Retry (W7 Check 27 measured it silent). References: RECOVERY-TRUTH-1 `02cb35c4`; HOME-POLISH-1 `final-stale-390x844` (`872c32fc`).
 
 **Waiting on the owner:** the lab phone test in `5826104270` (squat tallies, second person, step-out; no video). EXP1 held; W2 / W4 / W6 / W1B / W8 parked; W5 stopped.
 
