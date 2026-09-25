@@ -2840,3 +2840,84 @@ Supported, for the record: the Package E root cause (line 49–51). At `cc30f1d3
 Comment ids `5805097411`, `5805440687`, `5805596087`, `5798443901`, `5799068153` and `5819944052` are cited as the Director and L0 cite them; I re-read the run logs and sources they point at, not each comment body. Run 47's evidence artifact was not downloaded (log-level review, as the packet asks). No statement about staging's present state is made here: everything above is what run 47 recorded on 2026-09-24T00:15–00:27Z.
 
 **Status:** reviewed on `1d52c854` (blob `49b0f2c9`); verdict delivered to the Director. Not accepted by W7, not integrated, not staged; L0's main-based draft is L0's.
+
+## 29 · RECOVERY-PORT-1 (#474), exact head `86c160aee2c8edb6deb6800edf1d3d2f26e39cc0` on exact development `6f994f5a` (Director #434 `5824351707`; exact-head amendment `5824906768`; disposition #474 `5824349240`, successor source-accepted `5824904901`): **PASS on routed items 1–7 and on the five successor items; no defect. The focus-to-`body` shell limitation is measured on every exit and stays open, recorded separately.**
+
+W7 accepts, integrates and stages nothing. This is not a pixel verdict; the Director's visual PASS stands separately. Chromium only, local emulators (`demo-wsf-local`), every run serial, first run recorded.
+
+### 29.1 · Scope, by git (item 1; successor items 1 and 4)
+
+| fact | measured |
+|---|---|
+| lineage | seven first-parent commits on exactly `6f994f5a`: `d7d2ee70` (producer + 12 MIGRATED frames), `507b5898`, `bd4400e3`, `d029097e` (the four-commit port lineage to the port's product SHA), `4aa46baa` (12 CANDIDATE frames), `6504b86f` (README provenance), `86c160ae` (the correction) |
+| product | only `apps/westayfit/app/contribute/[goalId].tsx`: blob `367352d1` → `261360ca` (`d029097e` = `6504b86f`) → `d888f4fb` |
+| outside the reservation | only `tests-e2e/ui-contribute.spec.ts`, exactly two lines: `:302` `'Back to community'` → `'Back'`, `:445` `'Back to home'` → `'Back'` |
+| untouched | `apps/westayfit/src` (incl. `pendingContribution.ts`, `contributionFlow.ts`, `moveSession.ts`, `ui/memberShell*`, kit, theme), `app/(tabs)`, `app/move`, `.github`, `functions-westayfit`, `firestore.rules`, both hosting configs, `package.json`: `git diff --quiet` true |
+| data surface | the route's hook calls (36) and callable references (6) are the same count on base and head; no added or removed `httpsCallable` / `fetch` / storage / Firestore call in the diff. The receipt's new "Shared total · ‹goal title›" label reads `context.goalTitle`, which the base already held from the verified context and rendered in the anchor; it is inside the shared-only branch |
+| successor delta `6504b86f..86c160ae` | 3 files, +67 / −8: the chrome control's text and `accessibilityLabel` become the literal "Back"; `onPress` and the Enter handler still call `returnToMemberContext(backHref)`; `backHref`, `backLabel` and every `ReturnButton` (`leaveFor`) unchanged |
+
+### 29.2 · Environment
+
+Base and head each built in its own detached worktree (`build:web`, emulator-flagged, exit 0; `/health` stamps `6f994f5a` and `86c160ae`), served beside the emulator stack by a static host that applies the hosting rewrites (head on 5013, base on 5014). The functions, rules and emulator config are identical to the running stack's (`git diff --quiet 07df4d0f 86c160ae` over them). No reruns anywhere below.
+
+### 29.3 · W7's instrument (`sprint-w7-recovery-port-verify.spec.ts`), head vs base, first runs
+
+| case | head `86c160ae` | base `6f994f5a` |
+|---|---|---|
+| **T1** unknown after a lost reply names no own / shared figure, nobody else and no identifier, offers no discard; the server already holds the write once; same-attempt Confirm (by Enter) → `alreadyRecorded`, the server still holds **one** contribution document, shards **1,867** (= 1,847 + 20), member total **20**; the receipt's shared line, own tile, addition and percent equal the server's figures; own and shared never share a figure; nothing left to replay | **PASS** | PASS |
+| **T2** a request that never reached the server → Confirm records it once, `ordinary`, document id `{goal}_{uid}_{sameAttempt}`, shards 1,867, "+20" | **PASS** | PASS |
+| **T3** own-only (membership removed before the replay): no community name, shared figure, percent, status, standing or record-more; own tile 20; one document; **Enter on "Back to home"** leaves the route (to `/`), never to the lost community | **PASS** | **FAIL** — Enter ignored, still on `/contribute/…` |
+| **T4** genuine refusal (once-policy goal already contributed): `alreadyContributed`, no document written, shards unmoved at 1,847, member total unchanged, no replay row kept, no figure invented | **PASS** | PASS |
+| **T5** the kept attempt is keyed by account and goal: another account's row on this device (injected, labelled) is neither shown nor sent; this account's attempt on goal 1 is not shown or sent on goal 2 in the same community; both rows survive untouched | **PASS** | PASS |
+| **T6** openers by keyboard: MOVE from the Community page → the route's own Back (**pressed**) reads "Back" and returns to that page with **one** Community screen; MOVE from You → unknown → **"Back to community" by Enter** → one Community screen; back in through a **different** launcher (the hero's "Already moved?") → the **same attempt** restored, **0 sends**; Confirm by Enter → receipt → "Back to community" by Enter → one screen; server: one document, 1,867 | **PASS** | **FAIL** — the route's own Back reads "Back to community" |
+| **T7** layout 390×844, 390×640, 320×568: sideways overflow 0 on unknown and receipt; the one action, the labelled exit and record-more reachable by `elementFromPoint` at their centres, inside the width, ≥ 44 px; the badge, percent and status carry meaning in words; the shared count never breaks inside itself | **3 × PASS** | 3 × PASS |
+
+**Head 9 / 9, base 7 / 9.** The base failures are exactly the two discriminating cases: Enter on a labelled exit, and the route's own Back naming a place. Truth cases pass on both builds by design: they guard truth that the port must not have moved, and it did not.
+
+Layout readings worth the Director's eye: at **320×568** the receipt's "Back to community" is not in the first viewport (record-more stacks above it) and is reached by scrolling; at 390×640 the pair sits side by side at 154 px each and both are in the first viewport; the unknown screen's Confirm is in the first viewport at all three sizes.
+
+### 29.4 · Keyboard exits and openers (item 4; successor items 2, 3 and 5)
+
+| journey | label | lands | Community screens | focus after |
+|---|---|---|---|---|
+| MOVE from Community → own Back, pressed | "Back" (text and accessible name) | `/community/<id>` | 1 | `body` |
+| MOVE from You → unknown → labelled exit, Enter | "Back to community" | `/community/<id>` | 1 | `body` |
+| receipt → labelled exit, Enter | "Back to community" | `/community/<id>` | 1 | `body` |
+| own-only → labelled exit, Enter | "Back to home" | `/` | — | `body` |
+| (W9's spec, run here) hero → own Back, Enter; MOVE from You → own Back, Enter | "Back" | `/community/<id>`; **`/you`** | — | `body` |
+| (W9's spec, run here) cold with `groupId` → own Back; cold without → own Back | "Back" | replaces to `/community/<id>`, no history entry; replaces to Home, which resolves `/community/<id>`, no history entry | — | — |
+
+**Focus lands on `body` after every exit**, including from the MOVE launcher. This is measured and recorded as the separate shell limitation (Director `5824349240`; W9's required shell / accessibility successor). It is not fixed here and not waived: a keyboard or screen-reader member loses their place.
+
+### 29.5 · Carried and focused runs (successor item 4; item 7)
+
+| run | build | first run |
+|---|---|---|
+| W9 `sprint-w9-recovery-port-rendering` (6 tests, incl. the Back-from-You and cold cases) | head | **6 / 6** |
+| `ui-contribute` (the two pinned lines) | head | **7 / 7** |
+| `ui-contribute` **from the head's checkout** against the base build | base | **5 / 7**: the two failures are exactly `:302` (Received "Back to community") and `:445` (Received "Back to home"). The pins are non-vacuous. |
+| `ui-combined-goal` | head / base | **5 / 5 and 5 / 5** |
+
+Item 7: the reported `ui-combined-goal.spec.ts:745` failure (`not.toContainText('24')`) did not reproduce on either build today (2026-09-25). The assertion depends on "24" appearing in the event's own dates, as W9 disclosed. The spec and the combined / event screens are byte-identical base → head, and the two builds gave the same result, so the failure is equivalent across them and not this PR's. Not repaired. The rest of W9's 35-file regression (184 / 184 first run on `86c160ae`; 182 / 183 on `d029097e` with only that failure) is **carried**: its dependencies are unchanged and I did not re-run it.
+
+### 29.6 · Truth, privacy and transitions (items 2 and 3), from source and the runs above
+
+- **Unknown:** one action; no own or shared figure, no anchor, no discard, no "nothing was counted", no claim about the shared total (source and T1). Confirm is a write of the same attempt (T1, T2) and counts once (T1: one document, shards +20 once).
+- **Receipt:** every figure is from the `wsfContribute` receipt, and T1 / T2 equal the server's own documents. Own (the addition tile and "Your total on this goal") and shared (the navy panel) are separate elements with separate figures.
+- **Own-only:** no panel, standing, community, percent or record-more (T3, source).
+- **Refusal:** the server's own reason, with nothing written (T4).
+- **Legacy pre-uid orphan:** retired to the orphan key, not adopted, not sent, not rendered. This is carried from W9's capture spec and was not re-run. `retireLegacyPending` and `pendingContribution.ts` are unchanged.
+- **Privacy:** no other member's name or any identifier on the unknown, receipt or own-only screens (T1, T3). The route adds no call, so the member-name and activity privacy the feed enforces is untouched. W8's privacy suites are carried.
+- **Account and goal transitions:** keyed isolation holds (T5). Context, account and goal cancellation live in unchanged code (`pendingContribution.ts`, the route's effects outside every hunk).
+
+### 29.7 · Frames and provenance (item 6)
+
+The 24 frames and the README are delivered under `docs/design-target/review/recovery-port-1/`, and the Director opened them. The producer asserts each frame's served build from `/health` (MIGRATED = `6f994f5a`, CANDIDATE ≠ base). The README records the reference provenance limitation: 7 of 8 source rows and all six frame digests match, and the demo test file has nine cases against the manifest's eight. None of the 24 frames shows the chrome control, so the successor needs no recapture. I did not re-hash the frames. Safari and a real assistive-technology session are **CANNOT-MEASURE** here.
+
+### 29.8 · Notes (not defects)
+
+- The route-wide primary button text moves from 17 / 900 to 16 / 800 (the entry and move steps included). This is disclosed in the delivery as Home's accepted action; it is a pixel matter.
+- At 320×568 the receipt's way back needs a scroll (29.3).
+- The item-2 Lovable focus diagnosis (`5822117639`) was paused for this check. Its capability note is on #434 `5825213661`.
+
+**Status:** tested on `86c160ae`; delivered by W9, pixel-passed and source-accepted by the Director; **not accepted overall, not integrated, not staged**.
