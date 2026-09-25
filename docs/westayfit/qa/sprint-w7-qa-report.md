@@ -3143,3 +3143,26 @@ Everything else is carried from Check 30, since dependencies are unchanged: W9's
 - S1, the removed-member stale screen.
 
 **Status:** tested on `64b01967`; not accepted, integrated or staged. No reruns in this check.
+
+## 34 · OPS-PIN-502B-1 (#479), exact head `ae1fb2fa4304af88f1ce6f486247e4217ce7c035` on main `cd881775` (Director #434 `5832031524`; W7 ACK `5832038903`): **PASS on items 1–6; no defect**
+
+Documentation- and test-level review only. No deploy, no dispatch, no merge, no cloud call, no source mutation. Everything ran in a detached worktree of the exact SHA; every temporary pin edit was restored and the worktree left clean (`git diff --quiet`).
+
+| item | evidence | verdict |
+|---|---|---|
+| **1** head, base, tree and scope | parent exactly `cd881775`; tree `34401b246cd1baa16895589d9e5d5f171977537c`; **two files**: `approved-candidate.json` `275d6fdb` → `932a57cb`, `tests/verify-deployment.test.mjs` `a309d4f7` → `0d30925b`; +98 / −15 | **PASS** |
+| **2** candidate, prior, additions | `approvedAppSha` `502b1e8d0c98c199445c664c696b3f73bb460f14`; `expectedPriorFunctions` **49**; `candidateAddedFunctions` unchanged, exactly `wsfsetcommunityvisibility`, `wsfcommunitymembers`, `wsfcommunityactivity`. `resolve-candidate.mjs` on the pin prints `CANDIDATE=502b1e8d…`. The boundary `7ee70e4..502b1e8d`: **15** first-parent commits; `.github`, hosting / rules / indexes, both `package.json`, `app.json` and `functions-westayfit/src/index.ts` identical; functions gain only the 25 expo-prize files, and nothing outside `src/expo-prize/` imports them. The 7ee70e4 label and notes are kept verbatim under `_previous…7ee70e4` keys | **PASS** |
+| **3** next-run truth | the suite's new end-to-end case runs the real `read-inventory.mjs` gate then the real `verify-deployment.mjs` on a mocked 49-function staging with the three social services SHUT. Result: `VERIFY=pass`, `INVENTORY_BEFORE=49`, `INVENTORY_AFTER=49`, `EXPECTED_INVENTORY=49`, `CREATED_THIS_DEPLOY=none`, created / lost empty, no unexpected; the three reported `invoker_iam_check_enabled` and named for separate transport approval, **not declared usable** | **PASS** |
+| **4** the real gate admits 49 and refuses 46 and 50 | W7 drove the real `read-inventory.mjs` directly with live-count shapes. **New pin:** 46 → exit 1 "has 46 WSF functions but this candidate was approved against 49"; **49 → exit 0, `PREFLIGHT_BEFORE=49`**; 50 → exit 1 "…has 50…approved against 49". **Main's pin (fail-first):** 46 → exit 0; **49 → exit 1 "has 49 WSF functions but this candidate was approved against 46"** (the refusal L0 reported); 50 → exit 1 | **PASS** |
+| **5** historical coverage intact | the suite's kept cases pass: the 46 → 49 addition shape with the live approval, the 46-project negative case naming the three missing additions, and the earlier addition / negative / malformed-approval cases | **PASS** |
+| **6** W3's evidence reproduces | **suite 32 passed** (exit 0); **`run-all.mjs`: all suites passed** (exit 0). **Fail-first** with main's approval restored: exit 1 at the tripwire (actual 46, expected 49). The suite stops at its first failure, so the gate refusal was proven separately in item 4. **Mutations**, each restored after: prior 48 → exit 1 (strict-equal on the prior); `candidateAddedFunctions` removed → exit 1 "present but not expected: wsfcommunityactivity, wsfcommunitymembers, wsfsetcommunityvisibility"; one addition dropped → exit 1 "present but not expected: wsfcommunityactivity" | **PASS** |
+
+**Carried, not cleared by this pin (as the pin itself states):**
+- the three social services are transport-SHUT until Operation 2 and its read-back;
+- the `wsfContributions` index has no READY receipt;
+- email delivery and the kiosk hold are unchanged;
+- there is no production change.
+
+**Not measured:** a real staging run. The gate and verifier ran against local list files and a mocked API, which is the suite's own method.
+
+**Status:** reviewed on `ae1fb2fa`. Not merged, not dispatched; L0 is the sole merge and dispatch owner.
