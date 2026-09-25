@@ -1049,6 +1049,45 @@ test('the seed job takes exactly contents:read and id-token:write', () => {
   assert.deepEqual(granted, ['contents:read', 'id-token:write']);
 });
 
+/**
+ * The seed job's permissions, EXACTLY. The first version of this check
+ * collected `key: read|write` lines and could be satisfied by shapes it did
+ * not see (W7 Check 37, M8: a permission-broadening mutant survived). This
+ * one reads the literal block and admits exactly two lines, and it proves
+ * itself against the broadening shapes before it judges the real job.
+ */
+function seedPermissionsExact(jobText) {
+  const lines = jobText.split('\n');
+  const keys = lines.filter((l) => /^ {4}permissions:/.test(l));
+  if (keys.length !== 1 || keys[0] !== '    permissions:') return false;
+  const start = lines.indexOf('    permissions:');
+  const block = [];
+  for (let i = start + 1; i < lines.length && /^ {6}\S/.test(lines[i]); i += 1) block.push(lines[i]);
+  return JSON.stringify(block) === JSON.stringify(['      contents: read', '      id-token: write'])
+    && lines[start + 1 + block.length]?.startsWith('    steps:') === true;
+}
+
+test('M8: the seed job holds exactly contents:read and id-token:write, and every broadening shape is refused', () => {
+  const real = jobs['social-demo-seed'];
+  assert.equal(seedPermissionsExact(real), true, 'the real seed job must pass');
+  const perms = '    permissions:\n      contents: read\n      id-token: write\n';
+  assert.ok(real.includes(perms), 'the permissions block is where this check expects it');
+  const mutants = {
+    'contents: write': real.replace(perms, '    permissions:\n      contents: write\n      id-token: write\n'),
+    'an added pull-requests: write': real.replace(perms, perms + '      pull-requests: write\n'),
+    'an added actions: read': real.replace(perms, '    permissions:\n      actions: read\n      contents: read\n      id-token: write\n'),
+    'write-all': real.replace(perms, '    permissions: write-all\n'),
+    'read-all plus id-token': real.replace(perms, '    permissions: read-all\n'),
+    'id-token dropped': real.replace(perms, '    permissions:\n      contents: read\n'),
+    'a second permissions key': real.replace(perms, perms + '    permissions:\n      contents: write\n'),
+    'a flow-style map': real.replace(perms, '    permissions: { contents: write, id-token: write }\n'),
+  };
+  for (const [what, text] of Object.entries(mutants)) {
+    assert.notEqual(text, real, `mutant "${what}" did not apply`);
+    assert.equal(seedPermissionsExact(text), false, `permission-broadening mutant survived: ${what}`);
+  }
+});
+
 test('the seed job runs operational code from the running commit and installs only from the reviewed lockfile, scripts off', () => {
   const body = jobCode('social-demo-seed');
   assert.match(body, /ref: \$\{\{ github\.sha \}\}/, 'the operational checkout is pinned to the running commit');
