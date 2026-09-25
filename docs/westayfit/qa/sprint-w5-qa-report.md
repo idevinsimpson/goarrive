@@ -2474,3 +2474,51 @@ The contract's fake page opens elements synchronously, so it cannot express G2 o
 **Evidence** (all under `docs/westayfit/qa/`):
 - `sprint-w5-package-e-manage-verify.mjs`, run as `ROOT=. REV=<tree|sha> BASE=<main> node …`. It reported 32/32 required rows on `f6532601` and on `dc639571`.
 - `sprint-w5-package-e-manage-browser-{extract.mjs,probe.spec.ts.txt,results.json}`. The probe used a synthetic emulator-only password.
+
+## QA2: PR #491, social-privacy mode, exact head `6d0e5e83caa1be575bead85482650a10a9e0d004`
+
+**Released by:** Director #395 `5840747149` / `5840912664`. **ACK:** #395 `5840965813`.
+
+**What the PR is:** one commit on `a4b228a5`, which is current `main`. It changes seven files, all under `.github/`.
+
+### Verdict by item
+
+| # | item | verdict | evidence |
+| --- | --- | --- | --- |
+| 1 | the mode reaches gate, config and privacy only | **PASS** | Parsed from the workflow YAML: for `social-privacy`, the reachable jobs are exactly `gate`, `config` and `social-privacy`. Every checkout uses the workflow's own commit (`ref: github.sha`); there is no candidate ref. Mutants M12 (build reachable) and M13 (candidate checkout) are both caught. |
+| 2 | a SHUT setter blocks before any fixture write | **PASS on the measured shape, with finding F1** | Emulator run R1: the setter answers an HTML 403. All 7 rows are BLOCKED and the run exits 3. The manifest lists 0 users and 0 docs, and before/after totals are unchanged. Mutants M1–M3 are caught. F1 is below. |
+| 3 | seven-row status and verdict fail closed; only 7/7 is READY | **PASS** | L1 and L2; mutants M4–M6. On the emulator, R0 gave 7/7 and exit 0. R2 and R1 gave blocked and exit 3. R1b, R3 and R4 gave fail and exit 1. |
+| 4 | the harness itself makes no IAM, index or service change | **PASS** | Source read, plus M8 caught. The harness's only calls are callable HTTP requests and Firestore/Auth REST calls. |
+| 5 | run-tag ownership, cleanup manifest, and the scan/upload gate | **PASS; actual deletion is CANNOT-MEASURE** | The `e5p-` prefix is owned in `run-tag.mjs` and cross-checked in `cleanup-synthetic`. The manifest is written before the first write and was complete on the emulator: every real document and all 3 users are listed, with nothing left out. Cleanup, the scan and the final gate all run with `if: always()`, and the upload is gated on the scan (M10, M11, M14 caught). `cleanup-synthetic.mjs` is staging-only, so its deletion of an `e5p` manifest was not run. Reading its rules, the manifest's shape is acceptable to it. |
+| 6 | workflow permissions no broader than needed | **PASS** | The job has `contents: read` and `id-token: write` only (M9 caught). Top-level permissions are `{}`. The job uses the same auth pattern as the other privileged jobs. |
+| 7 | a missing index's `INTERNAL` counts as BLOCKED | **PASS** | Emulator run R2 (INTERNAL injected by a proxy): rows 3 and 6 are BLOCKED and every other row passes. The verdict is blocked, exit 3, `READY=false`. Mutant M7 is caught. |
+| 8 | re-derive a transport-SHUT fail-first and a product mutant | **PASS** | SHUT: R1 on the real emulator, plus M1–M3. Real product mutants, on the candidate `0b460ce3` functions: R3 (the members list ignores a private name) fails row 3, exit 1. R4 (the setter also writes the other community) fails row 4, exit 1. |
+
+### Findings
+
+- **F1 (moderate; smallest fix is one line).** The setter probe is unauthenticated, so the real handler can only answer `UNAUTHENTICATED`. Yet `classifyTransport` counts **any** JSON body carrying `error.status` as "open": a 403 `PERMISSION_DENIED`, a 503 `UNAVAILABLE`, even `{"result":null}`.
+  - Emulator run R1b gave the setter a Google-front-end-style JSON 403. The harness read it as open.
+  - It then wrote 3 users and 17 documents, and reported all 7 rows **FAIL** (exit 1) instead of BLOCKED (exit 3).
+  - `READY` stays false and the manifest was complete, so this is contained, but it breaks item 2's intent: nothing written while the setter is SHUT.
+  - **Fix:** count the probe as open only when it returns HTTP 401 with `error.status === 'UNAUTHENTICATED'` and no numeric `error.code`.
+  - Whether Cloud Run's invoker refusal can ever take this JSON shape was not measured. The known shape is HTML.
+- **G1 (low).** For an authorised viewer, an error other than INTERNAL from the members or activity read (for example `PERMISSION_DENIED` to the champion) makes the affected rows BLOCKED instead of FAIL. The verdict still fails closed, but the result is misclassified.
+- **G2 / G3 (low).** No focused test catches two changes: dropping row 5's anonymous-setter check, or loosening row 6's people-moved-today check.
+- **G4 (low).** The contract's "no candidate checkout" check only matches the `needs.gate.outputs.app_sha` spelling. A second checkout of any other ref is not caught.
+- **Observation.** Row 6 does not re-check that a private name is absent (row 3 does), so the R3 mutant fails row 3 only.
+
+### Measured
+
+- **Focused suites at the head:** `social-privacy-postop` 8, `workflow-contract` 72, `cleanup-synthetic` 42, all exit 0.
+- **`sprint-w5-pr491-verify.mjs`:** 19 of 19 required rows. Gaps L4 and G1–G4 are recorded as open.
+- **Emulator runs R0–R4:** real Auth, Firestore and Functions emulators with project `demo-wsf-local`, running the functions of the pinned candidate `0b460ce3`. The PR head carries no function source.
+  - The harness file run is exactly the PR head's.
+  - R0, R3 and R4 started from empty emulator state. R1, R1b and R2 ran on state left by earlier runs, with before/after deltas measured.
+  - Receipts, logs and the fault proxy are in `docs/westayfit/qa/sprint-w5-pr491-emulator/`.
+
+### Limits
+
+- **No staging access.** The real SHUT response shape, real index behaviour and real cleanup deletion were not measured.
+- **The Firestore emulator doesn't enforce composite indexes,** so R2's missing index is an injected INTERNAL, not a real one.
+
+**Status:** reviewed by W5; not accepted, integrated or dispatched. This is not an approval to merge.
