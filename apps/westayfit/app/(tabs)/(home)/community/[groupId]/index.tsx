@@ -385,6 +385,10 @@ export default function CommunityPage() {
     return warm ? { kind: 'loaded', goals: warm.goals } : { kind: 'loading' };
   });
   const [goalsReloadToken, setGoalsReloadToken] = useState(0);
+  // Only the FIRST read of a warm re-entry may stand on the remembered goals.
+  // Every deliberate reload (a Champion's action, Retry) keeps its accepted
+  // contract: back to loading, and a failure is reported as a failure.
+  const warmGoalsMount = useRef(goalsState.kind === 'loaded');
   /*
     A GENUINE RETURN TO THIS SCREEN. Bumped by the focus effect below on every
     focus except the first (the mount, which every read already covers).
@@ -1037,9 +1041,9 @@ export default function CommunityPage() {
     let cancelled = false;
     // Loading only when there is nothing of this account's for this community
     // to stand on (a warm re-entry keeps its last goals until this lands).
-    setGoalsState((prev) =>
-      prev.kind === 'loaded' && peekGoals(user.uid, groupId) ? prev : { kind: 'loading' },
-    );
+    const standOnWarm = warmGoalsMount.current && goalsReloadToken === 0;
+    warmGoalsMount.current = false;
+    if (!standOnWarm) setGoalsState({ kind: 'loading' });
 
     (async () => {
       try {
@@ -1060,9 +1064,13 @@ export default function CommunityPage() {
         console.warn('[wsf] goal list failed', e);
         // Warm goals already on screen stay; their figures fall to the
         // last-known treatment through the progress reads.
-        setGoalsState((prev) =>
-          prev.kind === 'loaded' ? prev : { kind: 'failed', message: 'Could not load goals.' },
-        );
+        if (standOnWarm) {
+          setGoalsState((prev) =>
+            prev.kind === 'loaded' ? prev : { kind: 'failed', message: 'Could not load goals.' },
+          );
+        } else {
+          setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
+        }
       }
     })();
 
