@@ -24,6 +24,7 @@ import {
   wsfUsingEmulators,
 } from '../../src/firebase';
 import { type RepeatPolicy } from '../../src/contributionFlow';
+import { isSubmittable, mapMovementSelection, type MovementKey } from '../../src/movementSelection';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { isValidTimeZone } from '../../src/ui/dates';
 import { DateTimeField, type DateTimeFieldHandle } from '../../src/ui/DateTimeField';
@@ -44,6 +45,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from '../../src/ui/kit';
+import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
@@ -397,6 +399,12 @@ export default function NewGoalPage() {
   const [title, setTitle] = useState('');
   const [target, setTarget] = useState('');
   const [unit, setUnit] = useState('');
+  // MOVEMENT-PILLS-1. Empty means "Something else": the free-text unit decides,
+  // exactly as before. The typed draft is kept while a movement is chosen and
+  // comes back with Something else. One movement at a time: the existing goal
+  // contract persists only one (Director #456 `5834379218`); see
+  // src/movementSelection.ts.
+  const [movements, setMovements] = useState<MovementKey[]>([]);
   // The start is "now" on the quarter hour, fixed when the page opens so the
   // line the Champion reads is the instant that is sent. Custom lets them
   // choose both ends; a preset derives the end from the start.
@@ -474,7 +482,13 @@ export default function NewGoalPage() {
   const windowInvalid =
     startsDate != null && endsDate != null && endsDate.getTime() <= startsDate.getTime();
   const targetNumber = wholeNumber(target);
-  const trimmedUnit = unit.trim();
+  const selection = mapMovementSelection(movements);
+  // The unit the goal will record: the movement's own when one is chosen, the
+  // typed words under Something else. A choice the contract cannot persist has
+  // no unit at all, so nothing downstream can read one.
+  const trimmedUnit =
+    selection.kind === 'none' ? unit.trim() : isSubmittable(selection) ? selection.unit : '';
+  const selectionBlocked = selection.kind === 'mixed' || selection.kind === 'several';
   const definition = targetNumber !== null && trimmedUnit ? definitionPhrase(targetNumber, trimmedUnit) : null;
   const communityLabel = communityName ?? FALLBACK_COMMUNITY_NAME;
 
@@ -567,12 +581,19 @@ export default function NewGoalPage() {
       errors.target = 'Keep the target at 100,000,000 or less.';
     }
 
-    const trimmedUnit = unit.trim();
-    if (!trimmedUnit) {
+    const chosen = mapMovementSelection(movements);
+    const trimmedUnit =
+      chosen.kind === 'none' ? unit.trim() : isSubmittable(chosen) ? chosen.unit : '';
+    if (chosen.kind === 'mixed' || chosen.kind === 'several') {
+      // Nothing the contract cannot persist is ever sent: the same sentence
+      // the picker already shows, as the field's own error.
+      errors.unit = chosen.message;
+    } else if (!trimmedUnit) {
       errors.unit = "Say what you're counting, like squats or miles.";
     } else if (trimmedUnit.length > 40) {
       errors.unit = 'Keep the unit to 40 characters or fewer.';
     }
+    const activityGuideKey = isSubmittable(chosen) ? chosen.activityGuideKey : undefined;
 
     const start = parseLocalDateTime(startsAt);
     if (!start) {
@@ -613,6 +634,7 @@ export default function NewGoalPage() {
           endsAt: string;
           timezone: string;
           repeatPolicy: RepeatPolicy;
+          activityGuideKey?: string;
         },
         { goalId: string }
       >(getFirebaseFunctions(), 'wsfCreateGoal');
@@ -625,6 +647,9 @@ export default function NewGoalPage() {
         endsAt: end.toISOString(),
         timezone: trimmedTz,
         repeatPolicy,
+        // Only when a movement was chosen: a typed unit sends no key, so its
+        // goal is byte-identical to one created before this field was used.
+        ...(activityGuideKey ? { activityGuideKey } : {}),
       });
       setCreated({
         goalId: result.data.goalId,
@@ -647,6 +672,7 @@ export default function NewGoalPage() {
     title,
     target,
     unit,
+    movements,
     startsAt,
     endsAt,
     duration,
@@ -912,17 +938,25 @@ export default function NewGoalPage() {
           </View>
           <View style={styles.pairUnit} ref={anchorRefs.unit}>
             <Text style={kit.fieldLabel}>What you&apos;re counting</Text>
-            <TextField
-              ref={unitRef}
-              value={unit}
-              onChangeText={(v) => {
-                setUnit(v);
-                clearFieldError('unit');
-              }}
-              placeholder="e.g. squats"
-              editable={!submitting}
-              testID="wsf-new-goal-unit"
-            />
+            {movements.length === 0 ? (
+              <TextField
+                ref={unitRef}
+                value={unit}
+                onChangeText={(v) => {
+                  setUnit(v);
+                  clearFieldError('unit');
+                }}
+                placeholder="e.g. squats"
+                editable={!submitting}
+                testID="wsf-new-goal-unit"
+              />
+            ) : (
+              // Chosen by the pills above: shown, not typed. Something else
+              // brings the typed draft back untouched.
+              <Text style={styles.unitChosen} testID="wsf-new-goal-unit-chosen">
+                {trimmedUnit || 'Choose one movement'}
+              </Text>
+            )}
             <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
           </View>
         </View>
@@ -938,6 +972,51 @@ export default function NewGoalPage() {
             </Text>
           </View>
         ) : null}
+        {/*
+          MOVEMENT-PILLS-1. One supported movement, or Something else — and
+          then the typed unit beside the target decides, as it always did.
+          Anything the goal contract cannot persist says so here, before any
+          submit, and the submit stays off until it is resolved.
+
+          BELOW THE GOAL PHRASE, deliberately. The accepted target's claim is
+          that the phrase is on screen with the fields that make it at 390×640
+          as well as 390×844; three rows of 44 px pills above it pushed it off
+          a 640 px screen. Here, a choice updates the phrase just above it.
+        */}
+        <View style={styles.movements} testID="wsf-new-goal-movements-block">
+          <MovementPicker
+            selected={movements}
+            onChange={(next) => {
+              setMovements(next);
+              clearFieldError('unit');
+            }}
+            mode="single"
+            somethingElse={{
+              selected: movements.length === 0,
+              onPress: () => {
+                setMovements([]);
+                clearFieldError('unit');
+              },
+            }}
+            hint="Pick a movement, or Something else to name your own."
+            disabled={submitting}
+            label="Movements"
+            testID="wsf-new-goal-movements"
+          />
+          {selection.kind === 'mixed' || selection.kind === 'several' ? (
+            <Text
+              style={kit.errorText}
+              accessibilityRole={'alert' as never}
+              testID="wsf-new-goal-movements-blocked"
+            >
+              {selection.message}
+            </Text>
+          ) : selection.kind === 'individual' ? (
+            <Text style={kit.caption} testID="wsf-new-goal-movements-count">
+              {selection.countSentence}
+            </Text>
+          ) : null}
+        </View>
       </Step>
 
       <Step n="2" title="When">
@@ -1069,6 +1148,9 @@ export default function NewGoalPage() {
           <SummaryRow label="Community" value={communityLabel} />
           <SummaryRow label="Goal" value={title.trim() || 'Not named yet'} />
           <SummaryRow label="Target" value={definition ?? 'Not set yet'} />
+          {isSubmittable(selection) ? (
+            <SummaryRow label="Counting" value={selection.countSentence} />
+          ) : null}
           <SummaryRow
             label="Starts"
             value={startsDate ? describeMoment(startsDate, now) : 'Choose a start'}
@@ -1105,11 +1187,14 @@ export default function NewGoalPage() {
             <Pressable
               style={[
                 unresolved ? styles.commitSecondary : styles.primaryAction,
-                submitting && kit.primaryButtonDisabled,
+                (submitting || selectionBlocked) && kit.primaryButtonDisabled,
               ]}
               onPress={onSubmit}
-              disabled={submitting}
+              // A choice with no contract to submit to; the reason is
+              // already on screen under the pills.
+              disabled={submitting || selectionBlocked}
               accessibilityRole="button"
+              accessibilityState={{ disabled: submitting || selectionBlocked }}
               testID="wsf-new-goal-submit"
             >
               <Text style={unresolved ? styles.commitSecondaryText : styles.primaryActionText}>
@@ -1419,6 +1504,15 @@ const styles = StyleSheet.create({
   pair: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   pairTarget: { flexGrow: 1, flexBasis: 120, minWidth: 110, gap: 2 },
   pairUnit: { flexGrow: 2, flexBasis: 150, minWidth: 140, gap: 2 },
+  movements: { gap: 6 },
+  unitChosen: {
+    color: NAVY,
+    fontSize: 16,
+    fontWeight: '700',
+    minHeight: 48,
+    textAlignVertical: 'center',
+    paddingVertical: 12,
+  },
 
   // The goal as one phrase — the payoff of the first section, not a caption.
   payoff: {
