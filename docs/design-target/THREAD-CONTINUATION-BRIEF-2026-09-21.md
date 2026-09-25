@@ -6,12 +6,12 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star and source donor, `5819686459`, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then the preserved history below. Workers read this section, their own packet and the thread deltas.
 
-**Heads (2026-09-25 01:55Z, after integration).**
+**Heads (2026-09-25 02:15Z).**
 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`6b96ba1b`** = `6f994f5a` + RECOVERY-PORT-1 `86c160ae` (tree = the accepted head; tsc 0, guard 9/20, vitest 875) |
-| operational `main` | `cd881775` |
+| `main` | `cd881775` |
 | staging pin `approvedAppSha` | `7ee70e4` (frozen) |
 | served staging build | `7ee70e4` via run 47 `35937603929` (verify failed on the hosted-marker count only; three social services transport-SHUT; Package E 5 / 1) |
 
@@ -29,7 +29,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Next parity slice: RETURN-CONTINUITY-1 — APPROVED as W9's next packet** (Director `5825324407`; a queued authorization, not a second active W9 assignment; L0 sends it after FOCUS-RETURN-1 is delivered and W9 has capacity) — the Home a member lands on after contributing. References: RECOVERY-TRUTH-1 frames `recovery-confirmed-home-totals-390x844` / `recovery-unknown-home-totals-390x844` and `src/demo/screens/home.tsx` (`02cb35c4`); HOME-POLISH-1 `final-stale-390x844` (`872c32fc`, sha256 `45b8c01e…`). States at 390×844 / 390×640: confirmed return agrees with the receipt; unknown return excludes the unconfirmed amount; a failed refresh after return is labelled last-known with Retry. Canonical difference: W7 Check 27 item 9 measured a failed refresh as silent (#434 `5821115372`). Owner W9, route-only; retained data labelled after a measured refresh failure, Retry through the existing refresh; confirmed / unknown return measured first; same-attempt / server totals and privacy preserved.
 
-**Waiting on the owner:** approve the NORTHSTAR-OVERNIGHT-1 plan in the signed-in Lovable app (plan `7fb3fe2d`, `awaiting_input`; `5825383238`). Canonical work does not wait.
+**Waiting on the owner:** nothing (Lovable hold cleared, `5825523052`). NORTHSTAR-OVERNIGHT-1 delivered `bcbba3c9`: visual direction passes, not accepted; no port contract before the Director's handoff.
 
 **Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc` (closed); RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b` / `5420802a` (served test file governs over the stale manifest row, `5822960670`). Journeys 1–4 not released.
 
