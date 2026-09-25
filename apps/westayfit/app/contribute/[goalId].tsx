@@ -604,6 +604,7 @@ export default function ContributeToGoal() {
     setStep(initialStep);
     setContext({ kind: 'none' });
     setState(recorded?.state ?? { kind: 'loading' });
+    setPulseAt(null);
     setTimerBase(0);
     setTimerStartedAt(null);
     setTimerRunning(false);
@@ -755,7 +756,10 @@ export default function ContributeToGoal() {
   // an attempt is in flight, unknown, refused or confirmed, the screen shows
   // that attempt's own truth and a cached poll must not overwrite it.
   const beforeWrite = !pending && !refusal && !lastResult;
-  const shouldPoll = beforeWrite && (state.kind === 'ready' || state.kind === 'closed');
+  // The poll starts once this screen's own fresh read has landed (`pulseAt`),
+  // exactly as before PERF-MOBILE-1: opening on the account's record must not
+  // send a second identical pulse alongside the fresh one (measured).
+  const shouldPoll = beforeWrite && pulseAt !== null && (state.kind === 'ready' || state.kind === 'closed');
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready || !user || !goalId) return;
