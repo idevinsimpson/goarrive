@@ -1229,17 +1229,23 @@ export default function ContributeToGoal() {
           of this control (`showBack` is false there), so neither branch is
           reachable in kiosk mode and the confinement, deadline and
           unresolved-attempt behaviour are untouched.
+
+          IT SAYS "Back", NOT WHERE. Warm, it returns to whatever opened this
+          screen, and that need not be the community: MOVE opened from You
+          returns to You (measured). Only the outcome exits, which really do go
+          to the community or Home (`leaveFor`), name a place (Director #474
+          `5824349240`).
         */
         <Pressable
           style={styles.chromeLink}
           testID="wsf-contribute-back"
           accessibilityRole="link"
-          accessibilityLabel={backLabel}
+          accessibilityLabel="Back"
           onPress={() => returnToMemberContext(backHref)}
           {...enterActivates(() => returnToMemberContext(backHref))}
         >
           <Text style={[styles.chromeLinkText, tone === 'dark' ? styles.chromeLinkTextDark : null]}>
-            {backLabel}
+            Back
           </Text>
         </Pressable>
       ) : null}

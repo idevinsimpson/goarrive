@@ -33,8 +33,13 @@ import {
  * The exits (ruling §3) are MEASURED, not built: where a labelled exit and the
  * route's own Back land, which tab is current, the community's scroll, and
  * where keyboard focus is afterwards. Those readings are printed as MEASURE
- * lines and attached as annotations; only the attempt surviving a round trip
- * is asserted, because that is the contract.
+ * lines and attached as annotations. Asserted, because they are the contract:
+ *   · the attempt survives a round trip;
+ *   · the route's own Back says "Back", on screen and to assistive
+ *     technology, because it returns to whatever opened the screen: from You
+ *     it returns to You. Opened cold it still lands on its fallback, and
+ *     replaces. Only the outcome exits, which really do go to the community
+ *     or Home, name the place (Director #474 `5824349240`).
  *
  * Everything seeded here is SYNTHETIC.
  */
@@ -266,8 +271,10 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
     await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
 
     // The route's own Back (Close / back to the actual opener), by keyboard.
+    // It names no place: it goes wherever the member came from.
     const chromeBack = page.getByTestId('wsf-contribute-back');
-    await expect(chromeBack).toHaveText('Back to community');
+    await expect(chromeBack).toHaveText('Back');
+    await expect(chromeBack).toHaveAccessibleName('Back');
     await chromeBack.focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/community/${fx.groupId}`), { timeout: 20_000 });
@@ -345,15 +352,21 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
     await page.keyboard.press('Enter');
     await page.waitForURL(/\/contribute\//, { timeout: 40_000 });
     await expect(page.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
-    // Read the label once the community is verified (the label follows the context).
+    // Read the label once the community is verified: the context that used to
+    // make it say "Back to community" while it returned to You.
     await expect(page.locator('[data-testid="wsf-contribute-community"]:visible')).toBeVisible({ timeout: 40_000 });
     const ownBack = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
+    await expect(ownBack, 'the route\'s own Back names no place').toHaveText('Back');
+    await expect(ownBack).toHaveAccessibleName('Back');
     measure('MOVE centre (from You) → contribute', {
       path: new URL(page.url()).pathname,
       ownBackLabel: await ownBack.innerText(),
     });
     await ownBack.focus();
     await page.keyboard.press('Enter');
+    await expect
+      .poll(() => new URL(page.url()).pathname, { timeout: 20_000, message: 'Back returns to the opener' })
+      .toBe('/you');
     await page.waitForTimeout(1_500);
     measure('MOVE centre (from You) → the route\'s own Back', {
       path: new URL(page.url()).pathname,
@@ -361,5 +374,45 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
       youTabCurrent: await page.getByTestId('wsf-member-tab-you').last().getAttribute('data-current').catch(() => null),
       moveLauncherFocused: (await focusReading(page)).includes('wsf-member-tab-move'),
     });
+  });
+
+  test('the route\'s own Back, opened cold: it says "Back" and still lands on its fallback, replacing', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('c');
+    await signInVia(page, fx.email, PASSWORD);
+
+    // Cold with the community in the address: nothing beneath, so the fallback
+    // replaces this screen with the verified community.
+    await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}`);
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('wsf-contribute-community')).toBeVisible({ timeout: 40_000 });
+    const back = page.getByTestId('wsf-contribute-back');
+    await expect(back).toHaveText('Back');
+    await expect(back).toHaveAccessibleName('Back');
+    let before = await page.evaluate(() => window.history.length);
+    await back.focus();
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(() => new URL(page.url()).pathname, { timeout: 40_000, message: 'the verified community' })
+      .toBe(`/community/${fx.groupId}`);
+    await expect(page.locator('[data-testid="wsf-community"]:visible').first()).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(800);
+    expect(await page.evaluate(() => window.history.length), 'the cold screen was left in the history').toBe(before);
+
+    // Cold with no community named: nothing verifies, the fallback is Home,
+    // and Home resolves this member's only community.
+    await page.goto(`/contribute/${fx.goalId}`);
+    await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(1_500);
+    await expect(page.getByTestId('wsf-contribute-community')).toHaveCount(0);
+    await expect(back).toHaveText('Back');
+    await expect(back).toHaveAccessibleName('Back');
+    before = await page.evaluate(() => window.history.length);
+    await back.click();
+    await expect
+      .poll(() => new URL(page.url()).pathname, { timeout: 40_000, message: 'Home resolved the community' })
+      .toBe(`/community/${fx.groupId}`);
+    await page.waitForTimeout(800);
+    expect(await page.evaluate(() => window.history.length), 'the cold screen was left in the history').toBe(before);
   });
 });
