@@ -4027,3 +4027,94 @@ The spec is ready to serve as cp3's pass-after: its U1 contract rows should pass
 - Kiosk surfaces were not exercised beyond the public display callables and page.
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
+
+## 44 · You + Progress route-hook baseline on served `0b460ce3f2f0766406100fef14d9a444c8cad43a` (Director #434 `5841055703`; W7 ACK `5841061367`): **FAIL-BEFORE 19 / 19 fail; PRESERVE 44 / 44 pass; stable ×3**
+
+- **Build:** the emulator-flagged `build:web` of `0b460ce3` (the Check 41B worktree), beside the emulators (`demo-wsf-local`, functions tree `5a3f232e`).
+- **Setup:** synthetic accounts, Chromium at 390×844. Each route is **cold-loaded** so no other tab's scene is in the text.
+- **Spec:** `sprint-w7-route-hook-baseline.spec.ts`, run three times (once, then `--repeat-each=2`) **with identical row outcomes, and no failure other than a labelled FAIL-BEFORE row**.
+- **For Phase B:** the same spec re-runs unchanged as the tiny adapter check.
+
+**How the rows are defined:**
+- **[FAIL-BEFORE]** rows are facts of the accepted hierarchy: Lovable You `642f830b…/src/demo/screens/you.tsx` and Progress `09b8a73c…/src/demo/screens/progress.tsx`, both read at those exact refs, plus the Director's Phase B rules (#456 `5841023890`, `5841056153`). They fail now and must pass after the hook.
+- **[PRESERVE]** rows are canonical truths the current routes already keep.
+- **Route-level only:** rows use visible text, order on screen and route behaviour. **No W6 or W8 component name or testID is assumed.**
+- **Rows marked INJECTED** force a read with `page.route`.
+
+**The populated fixture:** member M in one community, with 2 members.
+
+| Goal | Unit | Target | Shared | M's own | State |
+|---|---|---|---|---|---|
+| A | squats | 500 | 180 | 35 | open, ends in 3 days |
+| B | minutes | 120 | 130 | 12 | open and reached, ends in 6 days |
+| Z | steps | — | — | 0 | open |
+| R | squats | 200 | 230 | 20 | closed, reached |
+| U | squats | 400 | 150 | 18 | closed, unfinished |
+
+Own totals by unit: **73 squats and 12 minutes.** A blended sum would be 85.
+
+### 44A · You (`app/(tabs)/you.tsx`)
+
+| Row | Kind | At `0b460ce3` |
+|---|---|---|
+| Y-F1 the community band reads "Your current community" | FAIL-BEFORE | **fails**: the band shows the name and "2 members" only |
+| Y-F2 the lead reads "Your part in Living WE", "Shared position", "Your exact confirmed part" | FAIL-BEFORE | **fails**: "YOUR PART 35 squats / The community is at 180 of 500." |
+| Y-F3 "Other goals you helped", with a Yours / Shared split | FAIL-BEFORE | **fails**: "ALSO OPEN" / "FINISHED" sections |
+| Y-F4 lifecycle on other goals: REACHED · STILL OPEN, CLOSED · REACHED, CLOSED · UNFINISHED | FAIL-BEFORE | **fails**: B shows "130 of 120" with no status; R "Reached"; U no status |
+| Y-F5 no email or account hierarchy above the member story | FAIL-BEFORE | **fails**: "SIGNED IN AS {email} / Sign out" sit in the header above the community |
+| **Y-F6 an unknown shared total is never rendered as 0 (INJECTED: `sharedTotal` stripped)** | FAIL-BEFORE | **fails: "The community is at 0 of 500." and "THE COMMUNITY 0 of 120"** (`you.tsx:273` maps unknown to 0). **The current baseline gap.** |
+| Y-F7 an unknown shared total is stated as Unknown | FAIL-BEFORE | **fails** |
+| Y-F8 zero own, eligible: "Your first confirmed contribution can start here" + Start moving | FAIL-BEFORE | **fails**: "You haven’t recorded anything yet…", with no action |
+| Y-F9 zero own, no goal open: "No goal is open for contributions" + Open community | FAIL-BEFORE | **fails**: the same sentence as Y-F8 |
+| Y-F10 the goals read fails (INJECTED): the community stays on screen | FAIL-BEFORE | **fails**: the failure state drops the community |
+| Y-P1 the member's name leads · Y-P2 community + "2 members" | PRESERVE | pass |
+| Y-P3 the lead is the soonest-ending open goal with own credit (A above B) | PRESERVE | pass |
+| Y-P4 own > 0 only (Z absent) · Y-P5 exact own parts with units · Y-P6 no cross-unit sum | PRESERVE | pass |
+| Y-P7 finished goals stay · Y-P8 no rank / streak / score / inferred-impact pattern | PRESERVE | pass |
+| Y-P9, Y-P17, Y-P21 Sign out reachable (populated, zero-own, failure) · Y-P10 Settings exists and opens | PRESERVE | pass |
+| Y-P11 own parts exact while shared is unknown | PRESERVE | pass |
+| **Y-P12–13 several communities, none remembered:** no community is spoken for (not the first item), and a way to choose is offered | PRESERVE | pass ("Which community? … Choose a community") |
+| Y-P14 a remembered community (after opening it) is the current one | PRESERVE | pass |
+| Y-P15 no goal open: no Start moving · Y-P16 no invented "0 minutes" | PRESERVE | pass |
+| Y-P18–20 on failure: identity survives, Retry offered, no amount guessed as 0 | PRESERVE | pass |
+
+### 44B · Progress (`app/(tabs)/activity.tsx`)
+
+| Row | Kind | At `0b460ce3` |
+|---|---|---|
+| P-F1 own totals lead, per unit: "73 … squats", "12 … minutes", "recorded" | FAIL-BEFORE | **fails**: "4 goals you have added to · 2 running · 2 finished" |
+| P-F2 the privacy clarification sits in the hero, above the goal list | FAIL-BEFORE | **fails**: it is at the foot |
+| P-F3 "Goals you helped", with a Yours / Shared split | FAIL-BEFORE | **fails**: "WHAT YOU'RE PART OF NOW" / "WHAT YOU'VE BEEN PART OF" |
+| P-F4 every lifecycle stated: OPEN, REACHED · STILL OPEN, CLOSED · REACHED, CLOSED · UNFINISHED | FAIL-BEFORE | **fails**: B "130 of 120 minutes · 100%" with no status; U a percent only |
+| P-F5 the member is named in the private hero | FAIL-BEFORE | **fails**: no name on the route |
+| P-F6 an unknown shared total is stated as Unknown (INJECTED) | FAIL-BEFORE | **fails**: the shared line is simply absent |
+| P-F7 the partial state offers Retry (INJECTED: B's own-part read fails) | FAIL-BEFORE | **fails**: a partial note with no action |
+| **P-F8 zero own, no goal open: "No goal is open for contributions" + Open community** | FAIL-BEFORE | **fails** |
+| **P-F9 zero own, no goal open: Start moving is not offered** | FAIL-BEFORE | **fails: Start moving is offered when nothing is open** |
+| P-P1 title + subtitle · P-P2 no blended units (85 never shown) · P-P3 own > 0 only | PRESERVE | pass |
+| P-P4 finished history stays · P-P6 the clarification said once · P-P7 no rank / streak / score | PRESERVE | pass |
+| P-P5 no fabricated receipts: no "+35"-style rows, no relative times | PRESERVE | pass |
+| P-P9–11 unknown shared (INJECTED): never "0 of target" / "0%", nothing claimed reached, own parts exact | PRESERVE | pass |
+| P-P12–13 partial is stated; the omitted goal is neither shown nor counted | PRESERVE | pass |
+| P-P14–15 failure (INJECTED `wsfMyCommunities`): stated with Retry; no 0 and no empty-state claim | PRESERVE | pass |
+| P-P16 zero own, eligible: "Your first contribution will appear here" + Start moving · P-P17 no invented amount | PRESERVE | pass |
+| **P-P18–21 no client-readable private dated receipt source** | PRESERVE | pass (see below) |
+
+**P-P18–21, the private dated receipt source:**
+- **Non-vacuous:** the member has 4 real `wsfContributions` rows, counted by an owner-side query.
+- **With the member's own ID token:**
+  - a client list of `wsfContributions` gets 403;
+  - a client query of their own rows gets 403 (`PERMISSION_DENIED`, "false for 'list'");
+  - a read of their own `wsfGoalMemberTotals` gets 403.
+- **`wsfMyContribution`** returns only `ownCredit`, `repeatPolicy` and `unit`, with no dated field.
+
+So Phase B must map receipts to **unavailable** and must never fill them from public recent additions.
+
+**Carried, not re-run:** Progress's first-visit skeleton and blocking read, from Check 41B (`ced87f1b`): the skeleton is painted and blocks on 3 serial reads (72 / 83 ms locally). Performance is PERF-MOBILE-1's.
+
+**Limits:**
+- Chromium web on emulators, at 390×844 only.
+- **Text-level rows cannot prove visual parity.** They prove the route states the accepted facts in the accepted order; pixels are the Director's.
+- The FAIL-BEFORE rows have not yet been seen to pass, because no hooked build exists yet. Each one is literal copy from, or order in, the frozen Lovable source, so it is satisfiable by construction. The Phase B run is where they are first shown passing.
+
+**Status:** tests and evidence only. Nothing is accepted, integrated or staged.
