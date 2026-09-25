@@ -4137,3 +4137,86 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 - **T2** is recorded for the refusal fail-closed rule. Whether a mounted Progress drops a refused community's rows depends on PERF's refresh policy, so it is measured, not asserted.
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
+
+## 45 · Community + Settings route baseline on served `0b460ce3f2f0766406100fef14d9a444c8cad43a` (Director #434 `5841197717`; W7 ACK `5841205352`): **FAIL-BEFORE 15 / 15 fail; PRESERVE 13 / 13 pass; ×3 identical; one Director PRESERVE row measured failing and relabelled**
+
+- **Build:** the emulator-flagged `build:web` of `0b460ce3`, beside the emulators (`demo-wsf-local`), with synthetic accounts.
+- **Viewport:** 390×844, plus the one 390×640 row.
+- **Spec:** `sprint-w7-community-settings-baseline.spec.ts`, run `--repeat-each=3` with **identical row outcomes, and no failure other than a labelled FAIL-BEFORE row.**
+- **For Phase B:** the same spec re-runs unchanged as the behaviour pass-after for COMMUNITY-SETTINGS-PARITY-1.
+
+**How the rows are defined:**
+- **[FAIL-BEFORE]** rows come from frozen Lovable `d4f60624`, read at that exact ref:
+  - `src/demo/screens/community.tsx`: banner, facts, chips, This period, history, roster;
+  - `src/demo/ui.tsx` `Sheet` and `overlays.tsx` `PrivacySheet`: `role=dialog` / `aria-modal`, Close as the first focus, Escape and scrim closing, the Tab trap;
+  - the Director's panel contract (#489 `5841078939`).
+- **[PRESERVE]** rows are canonical truths.
+- **Route-level only:** no W9 or W4 component or testID is assumed. The privacy controls are found by their community heading, so the rows drive today's `/settings` → `/settings/privacy` pages and the future panel alike.
+- **Carried, not re-run:** Check 43's accepted privacy rows (`8e5d5955`) and its swallowed-save-error fail-before.
+
+**The fixture:**
+- **Memberships:**
+  - M is a member of C1 (current) and C2;
+  - O is C1's Champion;
+  - Q is in C1 **with her name private**;
+  - C3 exists without M, and M's C4 membership is `removed`.
+- **C1's goals:**
+
+  | Goal | Unit | Shared / target | State |
+  |---|---|---|---|
+  | G1 | squats | 180 / 500 | open |
+  | G2 | minutes | 130 / 120 | reached-open |
+  | R | squats | 230 / 200 | closed, reached |
+  | U | squats | 150 / 400 | closed, unfinished |
+
+### 45A · Community tab (`app/(tabs)/community/index.tsx`)
+
+| Row | Kind | At `0b460ce3` (every run) |
+|---|---|---|
+| C-F1 the identity banner leads: the community name above the switcher and any page title | FAIL-BEFORE | **fails**: the page title "Community" leads, then a CURRENT panel |
+| C-F2 facts in order: Members / Your role / Goals | FAIL-BEFORE | **fails**: "3 members" meta only |
+| C-F3 chips for both joined communities, plus Join and Start | FAIL-BEFORE | **fails**: rows and "Switch" / "Start a community"; no Join chip |
+| C-F4 "This period" with the current goal | FAIL-BEFORE | **fails**: "WHAT WE'RE DOING" |
+| C-F5 "Goal history" / "What we’ve done together" with the closed goals | FAIL-BEFORE | **fails**: no history on the tab |
+| C-F6 the roster ("3 people") after the history | FAIL-BEFORE | **fails** |
+| C-F7 the first 390×844 screen holds the banner, facts and This period | FAIL-BEFORE | **fails** |
+| C-F8 at 390×640, This period and the current goal are in the first viewport | FAIL-BEFORE | **fails** |
+| **C-F9 an unknown total (INJECTED: every source removed) draws no Living WE** | FAIL-BEFORE (**the Director listed it PRESERVE**; see below) | **fails: a Living WE labelled "0 of 500 squats, 0% filled"** beside the correctly worded "Target 500 squats" |
+| C-P1 no invented place, descriptor or sample copy | PRESERVE | pass |
+| C-P2 the switch offers real memberships only: C1 and C2; never C3 or the removed C4 | PRESERVE | pass |
+| C-P3 the name-private member is never named on the tab · C-P4 no rank, streak or score | PRESERVE | pass |
+| C-P5 closed-reached and closed-unfinished stay distinct. Measured on Community Home, because the tab has no history today; after the hook, on the tab. R reads "230 of 200 squats · Reached", U "150 of 400 squats · Closed at 37.5%" | PRESERVE | pass |
+| C-P6 the roster (`/community/<id>/members`) names O and M, never Q | PRESERVE | pass |
+| C-P7 a warm entry from Home to the Community tab paints no full loading frame (per-frame watch) | PRESERVE | pass |
+| C-P8 the signed-out public display names nobody | PRESERVE | pass |
+| C-P9 communities read fails (INJECTED): no count, role or goals guessed; Try again offered | PRESERVE | pass |
+| C-P10 goals read fails (INJECTED): no "no goal" claim and no goal count guessed ("Progress could not be loaded just now") | PRESERVE | pass |
+
+**The C-F9 finding, a latent gap:**
+- `community/index.tsx:505-506` renders `<LivingWeProgress completed={lead.sharedTotal ?? 0} …>` with no check that the total is known. Its own comment says "beside a real shared total". The text beside it already handles unknown correctly.
+- **Latent:** the shared read layer calls `wsfListGoals` with `includeHistory: true`, whose successful answer always carries a number. So only a response without `sharedTotal` exposes it, which is INJECTED here.
+- **Relabelled:** the Director's row "Living WE only with confirmed shared total + positive target" does **not** hold on the base, so it cannot be a PRESERVE row. It is FAIL-BEFORE (C-F9): the hook, or the view it feeds, must not draw the instrument without a known total.
+- **Same class as Check 44's Y-F6** (You prints an unknown shared total as 0).
+
+### 45B · Settings (today `/settings` → `/settings/privacy`)
+
+| Row | Kind | At `0b460ce3` |
+|---|---|---|
+| S-F1 Settings opens as a dialog over the still-mounted You | FAIL-BEFORE | **fails**: it navigates to `/settings`, a page; no dialog |
+| S-F2 the panel is titled Settings and holds both communities' controls (≥ 4 switches) | FAIL-BEFORE | **fails**: the controls are one more page away ("Privacy") |
+| S-F3 focus enters on Close | FAIL-BEFORE | **fails** |
+| S-F4 Escape closes and focus returns to the Settings trigger | FAIL-BEFORE | **fails** |
+| S-F5 a scrim press closes and focus returns | FAIL-BEFORE | **fails** |
+| S-F6 Tab stays inside the panel (25 presses) | FAIL-BEFORE | **fails** |
+| (carried) the swallowed save error | FAIL-BEFORE | Check 43 (accepted `8e5d5955`) |
+| S-P1 name OFF in C1, through whatever surface exists, is stored `private`, and the switch shows the stored value after reopening | PRESERVE | pass |
+| S-P2 C2 is untouched: stored and shown | PRESERVE | pass |
+| S-P3 another member (O's `wsfCommunityMembers`) no longer sees M named in C1 | PRESERVE | pass |
+| (carried) no optimistic value; anonymous but counted; activity off keeps the aggregates; no identity on public surfaces; the nonmember refusal | PRESERVE | Check 43 rows 1–6, accepted |
+
+**Limits:**
+- Text, order and focus are not pixels. The panel's 180 ms exit, reduced motion and the full-frame transition evidence are Phase B's.
+- Chromium and emulators only.
+- The FAIL-BEFORE rows cannot be seen passing until a hooked build exists. They are literal Lovable copy, order and dialog behaviour, so they can pass by construction.
+
+**Status:** tests and evidence only. Nothing is accepted, integrated or staged.
