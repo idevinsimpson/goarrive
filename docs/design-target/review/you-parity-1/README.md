@@ -13,11 +13,11 @@ Packet sources:
 | | |
 |---|---|
 | Base | `claude/wsf-app-shell` @ `0b460ce3f2f0766406100fef14d9a444c8cad43a` |
-| Product SHA | **`92123f26c7f89ea5921935df603e0c5d43d3fa5a`** (supersedes `8c4d8210`, see below) |
-| Component | **`apps/westayfit/src/ui/YouParityView.tsx`**, blob `e543b1c4` |
-| Pure rules | `apps/westayfit/src/youParity.ts`, blob `f64a51fd` |
-| Fixture | `apps/westayfit/app/design-target/you-parity.tsx`, blob `5ad5afc1`. Emulator builds only; `?state=normal\|no-own\|no-eligible\|failed` |
-| Tests | `tests/you-parity.test.ts` `000a974a` (19) · `tests/you-parity-view.test.tsx` `144614af` (10) · `tests-e2e/sprint-w6-you-parity.spec.ts` `66f80b54` |
+| Product SHA | **`66e56c4daeff7e50de427234384f18fef6558157`**. It supersedes `92123f26` (the Director's truth corrections) and `8c4d8210` (the compact block); see below |
+| Component | **`apps/westayfit/src/ui/YouParityView.tsx`**, blob `38e91cda` |
+| Pure rules | `apps/westayfit/src/youParity.ts`, blob `dd18c8c6`; the shared goal-truth module `apps/westayfit/src/goalTruth.ts`, blob `13f868f9` (Progress uses it too) |
+| Fixture | `apps/westayfit/app/design-target/you-parity.tsx`, blob `c066da64`. Emulator builds only; `?state=normal\|no-own\|no-eligible\|failed\|unknown-shared` |
+| Tests | `tests/goal-truth.test.ts` `d1ec5360` (4) · `tests/you-parity.test.ts` `f7956b01` (20) · `tests/you-parity-view.test.tsx` `f2cd6913` (14) · `tests-e2e/sprint-w6-you-parity.spec.ts` `500f6f14` (12) |
 | Route | `app/(tabs)/you.tsx` = base blob `22716995` — **protected-path delta: no** |
 | Reference | Lovable `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1` @ `642f830baa1153b0d9465dc75690028768083fb7`: `src/demo/screens/you.tsx`, `src/styles.css` |
 | Environment | emulator `demo-wsf-local`. Web bundle built from the product tree with `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1`. Chromium, iPhone UA, `en-US`, `America/New_York`. Frames at device pixel ratio 1, because the originals are 390 wide at ratio 1 |
@@ -56,13 +56,41 @@ The truth cases:
 
 Settings only calls back. The side panel belongs to W9.
 
-## Focused tests on `92123f26`
+## The truth correction: `92123f26` → `66e56c4d` (Director #492 `5841012915`)
+
+- **The shared position is known or it is not.** `YouGoal.sharedTotal: number` is now
+  `shared: SharedPosition` from `src/goalTruth.ts`, which is `{kind:'known', total}` or
+  `{kind:'unknown'}`. When it is unknown:
+  - it never renders 0;
+  - there is no Living WE and no track;
+  - the lead says "Not available right now" in place of a number, and the exact own part still
+    shows;
+  - an open goal says `OPEN`, and a closed one says only `CLOSED` with `Unknown` in its Shared
+    cell. Neither is claimed reached or unfinished.
+- **No date is interpreted in the view.** `endsAt` is now `periodLabel: string | null`, which the
+  Phase B adapter formats in the goal's own timezone. The view shows it verbatim, and the
+  device-local `whenLabel()` is gone.
+- **Fail-before.** At `8c4d8210` and `92123f26` the model could not represent an unknown total at
+  all; the route's old fallback-to-0 was the only way to feed it. The new tests cannot be expressed
+  against that type.
+- **Mutants on `goalTruth`**, each caught:
+
+  | mutant | result |
+  |---|---|
+  | closed and unknown claims UNFINISHED | 2 fail |
+  | unknown rendered as `0 squats` | 2 fail |
+  | an instrument without a known total | 1 fail |
+
+  The last one survived the view tests alone, because the view also guards. `tests/goal-truth.test.ts`
+  was added to catch it directly.
+
+## Focused tests on `66e56c4d`
 
 | check | first run | rerun |
 |---|---|---|
-| `tests/you-parity.test.ts` + `tests/you-parity-view.test.tsx` | 29 / 29 | 29 / 29 |
-| full vitest (`apps/westayfit`) | 920 / 920 (891 at base + 29) | — |
-| `sprint-w6-you-parity.spec.ts`, ungated | 10 passed, 1 skipped (evidence), **0 bytes written** | 10 / 10 |
+| `goal-truth` + `you-parity` + `you-parity-view` | 38 / 38 | 38 / 38 |
+| full vitest (`apps/westayfit`) | 929 / 929 (891 at base + 38) | — |
+| `sprint-w6-you-parity.spec.ts`, ungated | 12 passed, 1 skipped (evidence), **0 bytes written** | — |
 | same spec, `WSF_CAPTURE_FRAMES=1 -g evidence` | 1 passed; writes only `fixture/` | — |
 | `npm run ts:check` | exit 0 | — |
 | `check-evidence-intact` | frozen 9 / accepted 20 intact | — |
@@ -74,6 +102,8 @@ The e2e runs at 390×844 and 390×640. Per class it checks five things:
   only calls back.
 - **No goal eligible:** no Start moving, and Open community works.
 - **Failure:** identity and community are kept, and Retry calls back.
+- **Unknown shared totals:** the lead shows `OPEN` with no number and no Living WE, and the own
+  part is kept; the closed row says `CLOSED` and `Unknown`, and shows its period label verbatim.
 - **Keyboard:** Tab order runs Settings, then Start moving, then Sign out.
 
 ### Fail-first and mutants
@@ -141,7 +171,10 @@ b48fd978bb2de7de24387726339c4ceca9f62b46dd06b86f1ff5f563c20dd7d5  you-no-own-390
 The reference has no failure frame and no 390×640 no-eligible frame. `you-failed-390x844.png` is
 canonical-only.
 
-### `fixture/` — `YouParityView` at `92123f26`, through the component fixture
+### `fixture/` — `YouParityView` at `66e56c4d`, through the component fixture
+
+The six frames that also existed at `92123f26` are **byte-identical** to it, carried by hash (the
+correction changes nothing a known total draws). The two `unknown-shared` frames are new.
 
 The fixture is the reference's own state:
 - member Alex M., since September 2026;
@@ -159,7 +192,11 @@ d27217095b654b43ef4b8020dcbf144ce36646c2fee2efc98d5abcc70754ee6e  you-no-own-390
 9ad3835367fe41e197db17c7d78890a3471e241546fbe951f09912fc45b18235  you-no-own-390x640.png
 c4dc7c2384da3d1bf8951d0712d1caf870c8abe1a3e230d495ea6c4c634f1e21  you-no-eligible-390x844.png
 c1bcc99477a51dc828656054a0f5da31a216729b2905e74f67a3ba0c91cd43d4  you-failed-390x844.png
+a2264bee2cc6df6089e231984b9a00c5c583ff66f0407b2b346ea1005ece0ec0  you-unknown-shared-390x844.png
+ee97ebcb5ec3c3a6617f3b5ad8160af9d2cb6cc8538150059d1682624213ae16  you-unknown-shared-390x640.png
 ```
+
+`unknown-shared` is canonical-only; the reference has no such state.
 
 Each frame with an original has two comparison sets. Both are listed with measurements in
 `fixture/manifest.json`.
@@ -227,13 +264,15 @@ the concurrency correction.
 
 ## Next
 
-- **Consumer:** W5 (QA2), with Phase A component QA on `92123f26` per `5840942863`. Then the
+- **Consumer:** W5 (QA2), with Phase A component QA on `66e56c4d` per `5840942863`. Then the
   Director's Phase A pixels.
 - **Phase B**, when W9 posts the immutable PERF product SHA:
   1. Branch from exactly that SHA.
   2. Add a small hook in `app/(tabs)/you.tsx` that maps its resolved state into `YouParityView`.
      `1720c44b` shows the mapping; its two additive facts are `failed{profile, community}` at the
-     goals catch, and `eligible`.
+     goals catch, and `eligible`. The adapter also owns two rules the view no longer applies:
+     - an absent `sharedTotal` maps to `UNKNOWN_SHARED`, never 0;
+     - `periodLabel` is formatted from `endsAt` in the goal's stored timezone.
   3. Do not rewrite PERF's read or cache effect.
   4. Add a focused integration test and real route frames.
 

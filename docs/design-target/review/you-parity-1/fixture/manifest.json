@@ -175,6 +175,34 @@
         "width": 390,
         "height": 677
       }
+    },
+    {
+      "state": "unknown-shared",
+      "viewport": "390x844",
+      "fixture": "fixture/you-unknown-shared-390x844.png",
+      "fixtureSha256": "a2264bee2cc6df6089e231984b9a00c5c583ff66f0407b2b346ea1005ece0ec0",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      }
+    },
+    {
+      "state": "unknown-shared",
+      "viewport": "390x640",
+      "fixture": "fixture/you-unknown-shared-390x640.png",
+      "fixtureSha256": "ee97ebcb5ec3c3a6617f3b5ad8160af9d2cb6cc8538150059d1682624213ae16",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
     }
   ]
 }
