@@ -169,21 +169,33 @@ function focusables(root: HTMLElement): HTMLElement[] {
  * from MOVE's chooser sits over the chooser, and while it does the chooser's
  * listener stands aside.
  */
-export function useSheetFocusContainment(container: RefObject<unknown>, enabled = true): void {
+export function useSheetFocusContainment(
+  panel: RefObject<unknown>,
+  enabled = true,
+  stage: string | null = null,
+): void {
   const navigation = useNavigation();
+  const panelEl = () => (panel.current as HTMLElement | null) ?? null;
+  /*
+    F2 (W7 Check 36; Director #482 `5835326729`). Everything here answers to
+    the dialog PANEL, never to the sheet's outer root: the root also holds the
+    scrim, and handing the root in made the scrim the first "focusable"
+    descendant -- measured: focus entered on the scrim, and the scrim was a
+    Tab stop outside the panel. The panel's first control is its visible,
+    named Close.
+  */
   useEffect(() => {
     if (!onWeb() || !enabled) return;
-    const root = () => (container.current as HTMLElement | null) ?? null;
     let raf = requestAnimationFrame(() => {
       raf = requestAnimationFrame(() => {
-        const el = root();
+        const el = panelEl();
         if (!el || el.contains(document.activeElement)) return;
         focusables(el)[0]?.focus({ preventScroll: true });
       });
     });
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || !navigation.isFocused()) return;
-      const el = root();
+      const el = panelEl();
       if (!el) return;
       const nodes = focusables(el);
       if (nodes.length === 0) return;
@@ -206,8 +218,61 @@ export function useSheetFocusContainment(container: RefObject<unknown>, enabled 
       cancelAnimationFrame(raf);
       document.removeEventListener('keydown', onKey);
     };
-  }, [container, navigation, enabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel, navigation, enabled]);
+
+  /*
+    A STEP THAT REPLACES THE ONE THE MEMBER WAS ON. The flow swaps its steps
+    in place (count → review → pending / unknown → receipt), and the control
+    the member pressed goes with the step it was on, so the browser drops
+    focus onto BODY -- measured on every step change. When that happens, and
+    only then, focus goes to the new step's level-1 heading (made focusable
+    for the purpose), else to the panel's first control. Focus the member
+    has placed on a live control in the panel is never moved.
+  */
+  const firstStage = useRef(true);
+  useEffect(() => {
+    if (!onWeb() || !enabled || stage === null) return;
+    if (firstStage.current) {
+      firstStage.current = false;
+      return;
+    }
+    let raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => {
+        const el = panelEl();
+        if (!el || !navigation.isFocused()) return;
+        const active = document.activeElement as HTMLElement | null;
+        const lost =
+          !active ||
+          active === document.body ||
+          !active.isConnected ||
+          !el.contains(active) ||
+          active.getClientRects().length === 0;
+        if (!lost) return;
+        const heading = Array.from(
+          el.querySelectorAll<HTMLElement>('[role="heading"][aria-level="1"], h1'),
+        ).find((h) => h.getClientRects().length > 0);
+        if (heading) {
+          if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+          heading.focus({ preventScroll: true });
+          return;
+        }
+        focusables(el)[0]?.focus({ preventScroll: true });
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, enabled, navigation]);
 }
+
+/**
+ * The props that keep a scrim a pointer target and nothing else. On the web
+ * react-native-web's `Pressable` renders `tabindex="0"` unless it is given a
+ * `tabIndex` (`focusable={false}` does not reach it -- measured, F2), so the
+ * scrim is told -1 outright and hidden from assistive technology: Close is
+ * the named, reachable way out.
+ */
+export const SCRIM_PROPS = { tabIndex: -1, 'aria-hidden': true } as Record<string, unknown>;
 
 /** Sets or clears `inert` on a web element; nothing elsewhere. */
 export function setInert(el: HTMLElement | null, on: boolean): void {

@@ -91,6 +91,7 @@ import {
   ensureSheetMotionCss,
   sheetData,
   takeSheetHandoff,
+  SCRIM_PROPS,
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
@@ -411,8 +412,9 @@ export default function ContributeToGoal() {
   const safeArea = useSafeAreaInsets();
   const { phase: sheetPhase, exit: exitSheet } = useSheetExit(reducedMotion);
   const sheetRef = useRef<View>(null);
+  // The dialog panel itself: focus enters, stays and re-orients here (F2).
+  const sheetPanelRef = useRef<View>(null);
   const closeSheetRef = useRef<() => void>(() => undefined);
-  useSheetFocusContainment(sheetRef, asSheet);
   /*
     ESCAPE IS CLOSE, while this sheet is the screen in front: the same path as
     the Close control and the scrim.
@@ -1243,6 +1245,9 @@ export default function ContributeToGoal() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [renderedPhase]);
+  // In MOVE's sheet: focus enters the panel on Close, Tab stays in the panel,
+  // and a step that replaces the member's step re-orients focus inside it.
+  useSheetFocusContainment(sheetPanelRef, asSheet, asSheet ? renderedPhase : null);
 
   const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light') =>
     // In the sheet, its own header carries the title and Close: a wordmark and
@@ -1466,12 +1471,12 @@ export default function ContributeToGoal() {
         <Pressable
           style={[styles.sheetScrim, overMoveSheet ? styles.sheetScrimClear : null]}
           onPress={closeSheet}
-          focusable={false}
-          accessible={false}
+          {...SCRIM_PROPS}
           testID="wsf-contribute-scrim"
           {...(sheetData('scrim', sheetPhase === 'out' ? 'out' : sheetHandoff ? 'rest' : 'in') as object)}
         />
         <View
+          ref={sheetPanelRef}
           style={[
             styles.sheetPanel,
             tone === 'dark' ? styles.sheetPanelDark : null,

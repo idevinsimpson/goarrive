@@ -502,6 +502,163 @@ test.describe('APP-FEEL-PARITY-1 · the exit window cannot exit twice', () => {
   });
 });
 
+/**
+ * F2 (W7 Check 36, Director #482 `5835326729`). Focus belongs to the TOPMOST
+ * dialog panel: it enters there (on its visible named Close), Tab and
+ * Shift+Tab stay inside that panel, the scrim is never a stop, and when a
+ * step replaces the one the member was on, focus is given an orienting place
+ * in the panel rather than falling to BODY. Read off the rendered DOM.
+ */
+async function stops(page: Page, panelId: string, n: number, shift: boolean): Promise<string[]> {
+  const out: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    await page.keyboard.press(shift ? 'Shift+Tab' : 'Tab');
+    out.push(
+      await page.evaluate((id) => {
+        const el = document.activeElement as HTMLElement | null;
+        if (!el || el === document.body) return 'OUT:body';
+        const label = el.getAttribute('data-testid') ?? el.tagName.toLowerCase();
+        const topmost = Array.from(document.querySelectorAll(`[data-testid="${id}"]`)).pop();
+        return topmost?.contains(el) ? label : `OUT:${label}`;
+      }, panelId),
+    );
+  }
+  return out;
+}
+
+async function focusedWhere(page: Page, panelId: string): Promise<string> {
+  return page.evaluate((id) => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || el === document.body) return 'OUT:body';
+    const label = el.getAttribute('data-testid') ?? el.getAttribute('role') ?? el.tagName.toLowerCase();
+    const topmost = Array.from(document.querySelectorAll(`[data-testid="${id}"]`)).pop();
+    return topmost?.contains(el) ? label : `OUT:${label}`;
+  }, panelId);
+}
+
+async function scrimStops(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="wsf-contribute-scrim"], [data-testid="wsf-move-scrim"]'))
+      .filter((n) => (n as HTMLElement).tabIndex >= 0)
+      .map((n) => `${n.getAttribute('data-testid')} tabindex=${(n as HTMLElement).tabIndex}`),
+  );
+}
+
+const PANEL = 'wsf-contribute-sheet-panel';
+
+test.describe('APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel', () => {
+  test.use({ viewport: PHONE, deviceScaleFactor: 1 });
+
+  test('the goal sheet: focus enters on Close, Tab and Shift+Tab stay in the panel, the scrim is no stop', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('f1', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await openHome(page, fx);
+    await pressMove(page);
+    await expect(page.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    await expect.poll(() => focusedWhere(page, PANEL), { timeout: 5_000, message: 'focus enters on Close' }).toBe('wsf-contribute-close');
+    expect(await scrimStops(page), 'no scrim is tabbable').toEqual([]);
+    const fwd = await stops(page, PANEL, 20, false);
+    const back = await stops(page, PANEL, 20, true);
+    measure('goal sheet · Tab / Shift+Tab stops', { fwd, back });
+    expect(fwd.filter((x) => x.startsWith('OUT:')), 'Tab stays in the panel').toEqual([]);
+    expect(back.filter((x) => x.startsWith('OUT:')), 'Shift+Tab stays in the panel').toEqual([]);
+  });
+
+  test('the chooser, then a goal over it: each is contained while it is topmost; Close returns to the choice', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('f2', 2);
+    await signInVia(page, fx.email, PASSWORD);
+    await openHome(page, fx);
+    await pressMove(page);
+    await expect(page.locator('[data-testid="wsf-move-choose"]:visible')).toBeVisible({ timeout: 40_000 });
+    await expect.poll(() => focusedWhere(page, 'wsf-move-sheet'), { timeout: 5_000, message: 'focus enters the chooser on Close' }).toBe('wsf-move-close');
+    expect(await scrimStops(page)).toEqual([]);
+    const chooser = [...(await stops(page, 'wsf-move-sheet', 12, false)), ...(await stops(page, 'wsf-move-sheet', 12, true))];
+    measure('chooser · stops', chooser);
+    expect(chooser.filter((x) => x.startsWith('OUT:'))).toEqual([]);
+
+    const choice = `wsf-move-choose-${fx.goalIds[0]}`;
+    await page.locator(`[data-testid="${choice}"]:visible`).first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator(`[data-testid="${PANEL}"]:visible`)).toBeVisible({ timeout: 40_000 });
+    await expect.poll(() => focusedWhere(page, PANEL), { timeout: 5_000 }).toBe('wsf-contribute-close');
+    expect(await scrimStops(page)).toEqual([]);
+    const nested = [...(await stops(page, PANEL, 16, false)), ...(await stops(page, PANEL, 16, true))];
+    measure('goal over chooser · stops', nested);
+    expect(nested.filter((x) => x.startsWith('OUT:')), 'never into the chooser beneath').toEqual([]);
+
+    await page.locator(`[data-testid="${PANEL}"] [data-testid="wsf-contribute-close"]`).first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId(SHEET)).toHaveCount(0, { timeout: 8_000 });
+    await expect.poll(() => focusedId(page), { timeout: 8_000 }).toBe(choice);
+  });
+
+  test('a step that replaces the one the member was on keeps focus in the panel; a control the member is using keeps it', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('f3', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await openHome(page, fx);
+    await pressMove(page);
+    await expect(page.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+
+    const skip = page.locator(`[data-testid="${PANEL}"] [data-testid="wsf-contribute-skip-timer"]`);
+    await skip.focus();
+    await page.keyboard.press('Enter');
+    const entry = page.locator('[data-testid="wsf-contribute-entry"]:visible').first();
+    await expect(entry).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    const atCount = await focusedWhere(page, PANEL);
+    measure('count step · focus', atCount);
+    expect(atCount.startsWith('OUT:'), 'the count step keeps focus in the panel').toBe(false);
+
+    // The member puts focus in the field and types: nothing takes it away.
+    await entry.focus();
+    await page.keyboard.type('12');
+    await page.waitForTimeout(600);
+    expect(await focusedWhere(page, PANEL)).toBe('wsf-contribute-entry');
+
+    await page.locator('[data-testid="wsf-contribute-review"]:visible').first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-contribute-review-screen"]:visible')).toBeVisible();
+    await page.waitForTimeout(400);
+    const atReview = await focusedWhere(page, PANEL);
+    measure('review step · focus', atReview);
+    expect(atReview.startsWith('OUT:')).toBe(false);
+
+    await page.locator('[data-testid="wsf-contribute-submit"]:visible').first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-contribute-receipt"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(600);
+    const atReceipt = await focusedWhere(page, PANEL);
+    measure('receipt · focus', atReceipt);
+    expect(atReceipt.startsWith('OUT:'), 'the receipt keeps focus in the panel, not BODY').toBe(false);
+  });
+
+  test('pending and unknown keep focus in the panel (labelled injection: the reply is dropped)', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('f4', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await openHome(page, fx);
+    // The write lands on the server; its reply never reaches the page.
+    await page.route('**/wsfContribute', async (route: Route) => {
+      await route.fetch();
+      await route.abort('failed');
+    });
+    await pressMove(page);
+    await page.locator(`[data-testid="${PANEL}"] [data-testid="wsf-contribute-skip-timer"]`).click();
+    await page.locator('[data-testid="wsf-contribute-entry"]:visible').first().fill('7');
+    await page.locator('[data-testid="wsf-contribute-review"]:visible').first().click();
+    await page.locator('[data-testid="wsf-contribute-submit"]:visible').first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-contribute-pending"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(600);
+    const atPending = await focusedWhere(page, PANEL);
+    measure('pending / unknown · focus', atPending);
+    expect(atPending.startsWith('OUT:'), 'focus stays in the panel, not BODY').toBe(false);
+  });
+});
+
 test.describe('APP-FEEL-PARITY-1 · Community Home loading is the final composition', () => {
   for (const vp of [PHONE, SHORT]) {
     test(`${vp.width}x${vp.height}: no second masthead while the community resolves`, async ({ page }) => {

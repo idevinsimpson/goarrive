@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
 import {
+  SCRIM_PROPS,
   markSheetHandoff,
   sheetData,
   useSheetExit,
@@ -252,8 +253,10 @@ export default function MoveResolver() {
   */
   const sheetRef = useRef<View>(null);
   useSheetFocusReturn(sheetRef);
-  // Focus enters the sheet, and Tab stays in it while it is in front.
-  useSheetFocusContainment(sheetRef);
+  // Focus enters the PANEL on Close, and Tab stays in the panel while it is
+  // in front (F2: the outer root also holds the scrim).
+  const panelRef = useRef<View>(null);
+  useSheetFocusContainment(panelRef);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
@@ -270,14 +273,14 @@ export default function MoveResolver() {
       <Pressable
         style={s.scrim}
         onPress={close}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
         testID="wsf-move-scrim"
-        // Close is the keyboard's way out; the scrim is the pointer's.
-        focusable={false}
+        // Close is the keyboard's and the screen reader's way out; the scrim
+        // is the pointer's only (F2: it was a Tab stop named "Close").
+        {...SCRIM_PROPS}
         {...(sheetData('scrim', phase) as object)}
       />
       <View
+        ref={panelRef}
         style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]}
         testID="wsf-move-sheet"
         {...(sheetData('panel', phase) as object)}
