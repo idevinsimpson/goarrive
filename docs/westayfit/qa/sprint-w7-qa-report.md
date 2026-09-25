@@ -3307,3 +3307,88 @@ These are baseline observations recorded for W9's APP-FEEL-PARITY-1 and the Dire
 **Next:** when W9 posts an APP-FEEL-PARITY-1 successor, verify only the affected behaviour (35.1–35.5) on that exact SHA with this instrument.
 
 **Status:** measured on `502b1e8d`. This is not a verdict, and nothing is accepted, integrated or staged. No product source, screenshot baseline, deploy or cloud call was touched.
+
+## 36 · APP-FEEL-PARITY-1 checkpoint 1 (#482), exact `766ee0858a6189f5b26f17ac4ea6efa9d674c15e` on `502b1e8d` (Director #434 `5834554003`; W7 ACK `5834558949`): **one measured defect (D1: double exit), one measured accessibility finding (F2: focus lands on the scrim); everything else routed PASSES**
+
+This is a pushed checkpoint, not a delivery. The candidate is one commit on `502b1e8d`: 8 files changed, the app only, with no functions change. It was built emulator-flagged in a detached worktree, with the bundle stamped `766ee085`. It was served on 5014 beside Check 35's emulators and base build (5010, `502b1e8d`).
+
+The instrument is `apps/westayfit/tests-e2e/sprint-w7-app-feel-cp1-verify.spec.ts`. It reuses Check 35's harness (mount, on-top, frames and request counting) and adds:
+- a sheet probe: the tab behind, painted scrims, the panel, focus and `inert`;
+- a 20-stop Tab/Shift+Tab sweep;
+- a 1.5–2.5 s path/on-top trace after every exit.
+
+**Runs on the head:**
+- Run 1: 12 passed, 2 failed. The failures were fixture waits, not product results:
+  - S4 waited without limit for a Back label, but the kiosk page has "Finish" instead;
+  - S3's context close hung on an injected in-flight route.
+- Both were fixed (bounded reads, and unroute before close). The tab sweep was also corrected to use the sheet **in front**: in run 1 it measured the chooser beneath the goal sheet.
+- S1–S4 were rerun, 4/4.
+- The race cases R1–R3 were run twice, 6/6 both times, with the same outcome.
+
+**Proof able to fail:** on the base, S1 and R1 fail at "no sheet panel" (element not found).
+
+**Preserved behaviour on both builds:** existing event and kiosk specs (`event-return`, `ui-event-activity-choice`, `sprint-w1b-kiosk-confinement`, `ui-kiosk`, `sprint-w1b-kiosk-idle-finish`) pass **27/27 on the base and 27/27 on the head**. W9's `sprint-w9-app-feel-parity-1` passes 8/8 on the head.
+
+### 36.1 Routed rows
+
+| row | measured on `766ee085` (Check 35 baseline in brackets) | result |
+|---|---|---|
+| one-goal MOVE → the flow is a sheet, from all four tabs | Path `/contribute/…&mode=move` with `role="dialog"`, `aria-label` "Start moving" and the title in the sheet header beside **Close**. The origin tab stays **shown, the same instance (0 remounts), and `inert`**; the tab bar is also inert. [Base: a full page, with the tab bar and masthead absent.] | PASS |
+| visible, same mounted background | Painted behind one scrim (alpha 0.42). The panel is 776 px tall at 844 (92 % max) and 589 px at 640, so only the masthead band of the tab stays visible. That is a presentation choice; it is not graded here. | PASS (observed) |
+| single scrim | One goal: 1 painted scrim. Goal sheet over the chooser: 2 scrims, **1 painted** (the goal sheet's is clear). | PASS |
+| zero keyboard access behind | Every Tab/Shift+Tab stop was either in the panel or on the sheet's own scrim (F2). None was ever in the tab, tab bar or masthead, because `inert` is present. | PASS |
+| exact scroll | Home 166 → 166 (844) and 300 → 300 (640). The other tabs were unscrollable in this fixture (0 → 0). | PASS |
+| exit | One path change per Close, at +221–253 ms (the 180 ms exit), to the exact origin tab, with 0 remounts and `inert` cleared. Escape does the same (+195 ms). Reduced motion: +42 ms. | PASS, except under D1 |
+| focus return | After Close or Escape, focus is on `wsf-member-tab-move` (the opener). Closing the goal sheet over the chooser returns focus to the chosen chooser row. | PASS |
+| focus entry | Focus lands on the **scrim**, not in the panel (F2). | FINDING |
+| chooser → goal sheet | Chooser at 342 px; the goal sheet opens over it. Close returns to the chooser (`/move`), and the chooser's Close returns to Home. | PASS |
+| steps inside the sheet | Every step renders **inside the panel**: timer (running 0:01), count, review, **confirmed receipt** (title "Contribution receipt"), **pending** after an INJECTED dropped request ("Your attempt … Don't record it again. Confirm this contribution") and **unknown** after an INJECTED reply lost on re-check. After submit, focus is on `BODY`, outside the panel while the tab is inert. That is recorded, not graded. | PASS |
+| preserved as pages | "Already moved?" (`mode=record`), a cold direct `mode=move` link and a cold `mode=move&kiosk=1` link are all the **page**: no sheet, with the wordmark, and "Back" or kiosk "Finish". The event and kiosk specs pass 27/27 on both builds. **Limit:** a kiosk-flagged flow opened *over the member's tabs* cannot be reached from the member UI, so only the cold link was driven. | PASS |
+| 390×640 | Panel 51–640. Close (60–104), "I'm done" (528–582) and "Start timer" (453–501) are each reachable at their own centre. | PASS |
+| reduced motion | No travel: frames jump from rest to rest, opacity 1 throughout. Close exits in 42 ms. | PASS |
+| motion (Chromium web) | Panel entry is translateY 28 px + opacity over about 240 ms, and the scrim fades. On a one-goal hand-off the panel **grows mid-entry**: its top jumps from about 650 to 73 when the goal's content replaces the loading card, so the travel is visible only in the first 3–6 frames. That is recorded, not graded. | OBSERVED |
+| community loading (the FormShell frame) | Cold load: "YOUR COMMUNITY · Loading your community…" in the community's own composition, with **no FormShell wordmark and no heading**. [Base: FormShell "Your community / Loading…" with its own wordmark.] The frame still appears about 90 ms **before** the tab bar and masthead mount (102 against 193 ms; base 118 against 234). | PASS (composition); ordering unchanged |
+
+### 36.2 The source-risk races (measured)
+
+| case | trace (ms after the Close press) | result |
+|---|---|---|
+| **R1** one-goal sheet from **You**: Close, then browser Back at +40 | +106 / +118: `/you` (Back popped the sheet); **+235 / +251: `/activity`** | **D1 — two exits.** The delayed `router.back()` fires after the sheet is already gone and pops the **tab history**, moving the member to the previous tab (Progress). Reproduced 2/2. |
+| **R1** from **Home** | +107 / +104: `/community/<id>`; **+241 / +244: `/activity`** | **D1**, 2/2 |
+| **R1z** the resolver's no-goal sheet, from You | +98 / +107: `/you`; **+228 / +243: `/activity`** | **D1** on the resolver's `close()` too, 2/2 |
+| **R2** Close on the resolver while its one-goal read is held (INJECTED), released at +0 | +108 / +92: `/contribute/…` (**the goal sheet appears after Close**, and its callables fire); +240 / +227: `/you` | One net exit, with the right destination and focus. But the resolver still hands off after Close, so the goal sheet flashes for about 130 ms and makes 3 callables. **F3**, recorded. |
+| **R2** released at +90 | +197 / +189: `/contribute/…`; +233 / +256: `/you` | as above; the flash lasts about 40–65 ms |
+| **R3** Close, then MOVE pressed at +60 | +224 / +225: `/you` only | One exit, and the MOVE press is **not delivered** (the tab is still inert or covered). No delayed navigation hits a newer screen. |
+| **R3** Close, then MOVE at +220 | `/you` → +278 `/move` → +335 `/contribute/…` | Reopens cleanly, and the old timer does **not** close the new sheet. |
+
+**D1 (defect, measured):**
+- **What:** after Close, the navigation is delayed 180 ms (`setTimeout(go / leave, SHEET_OUT_MS)`) and is not cancelled when the screen goes away. If the sheet is dismissed in that window by another path (browser or Android back), the delayed `router.back()` runs anyway. Because `router.canGoBack()` is true within the tabs, it pops the member's **tab history**: a second exit that lands on a different tab.
+- **Where:** both the contribution sheet (`closeSheet`) and the resolver (`close` → `leave`).
+- **Evidence:** reproduced 6 times out of 6 across three journeys, never on the first exit alone.
+- **What it is not:** in S1, a Close alone is always one exit.
+
+**F2 (measured):**
+- **What:** the sheet's first focusable is its **scrim**.
+  - The contribution scrim renders as a `DIV` with `tabindex="0"` and no role or name, even though it has `focusable={false}` and `accessible={false}`.
+  - The chooser scrim is a `BUTTON`, `tabindex="0"`, `role=button`, named "Close".
+- **Effect:**
+  - Focus entry (`useSheetFocusContainment`: first focusable in the sheet root) lands on the scrim, not in the panel. This happened for pointer and keyboard opens, on all four tabs and on the chooser.
+  - The scrim is a Tab stop outside the panel (4 of 20 stops).
+  - Focus stays contained within the sheet, and nothing behind it is reachable.
+- **Reference:** Lovable's `Sheet` focuses the first control inside the dialog, and its scrim is not focusable.
+
+**F3 (recorded):** Close does not cancel a one-goal resolution already in flight. The goal sheet mounts, fetches, then leaves, as measured in R2.
+
+### 36.3 Not failures of cp1, by the routing
+
+Masthead Home's remount, Settings, and the MOVE icon and instructions are unchanged from Check 35 (§35.4, §35.5, §35.1). They stay open for checkpoints 2–4.
+
+### 36.4 Limits
+
+- Chromium web only, headless, on loopback emulators with synthetic data. **This does not show iOS or Android native stack motion or Safari keyboard behaviour.** Native keeps the stack's `slide_from_bottom`, which was not exercised.
+- Frames are `requestAnimationFrame` samples.
+- The pictures and transition frames for the Director's visual review come from W9's and L0's exporter. My clips are kept in the session scratchpad only.
+- The races were driven with Playwright's `goBack` and a real `mouse.click`. Hardware back on Android was not driven.
+- Fixture fixes and reruns are disclosed above.
+
+**Status:** tested on `766ee085`. Nothing is accepted, integrated or staged. D1 is for W9. If W9 pushes a correction, I will carry forward the unchanged rows and rerun only S1 exits, R1–R3 and the focus rows.
