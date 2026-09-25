@@ -25,12 +25,26 @@ const test = (n, f) => { f(); passed += 1; console.log(`  ok  ${n}`); };
 
 // A small YAML reader is deliberate: no dependency, and these checks are
 // structural enough to do on the parsed-enough shape below.
+/*
+  THE JOB-ID PATTERN MUST ADMIT EVERY LEGAL ID, not just the ones this file
+  happens to use.
+
+  It was `/^  ([a-z][a-z0-9-]*):\s*$/`. GitHub accepts an id starting with a
+  letter or `_` and containing letters, digits, `-` and `_`, and a job header
+  may carry a trailing comment. So `Rollout:`, `_rollout:`, `rollout_helper:`
+  and `rollout-helper:  # temporary helper` are all legal jobs that this
+  pattern skipped — and a job the parser never sees is a job the "every job is
+  gated" invariant silently exempts. Widening it is a no-op on this workflow
+  (the same nine jobs, none ungated) and closes that hole.
+*/
+const JOB_ID = /^ {2}([A-Za-z_][A-Za-z0-9_-]*):(\s|$)/;
+
 function jobBlocks() {
   const jobs = {};
   const lines = text.split('\n');
   let current = null;
   for (let i = 0; i < lines.length; i += 1) {
-    const m = /^  ([a-z][a-z0-9-]*):\s*$/.exec(lines[i]);
+    const m = JOB_ID.exec(lines[i]);
     if (m && /^jobs:/m.test(text.slice(0, text.indexOf(lines[i])))) {
       current = m[1];
       jobs[current] = [];
@@ -321,7 +335,18 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery'];
+  /*
+    THE ORDER IS DERIVED FROM THE WORKFLOW, NOT HARDCODED.
+
+    It used to be a literal list of seven job names. A job added to the YAML was
+    therefore INVISIBLE to this matrix — `assert.deepEqual(reached, {…seven…})`
+    kept passing while the new job ran, and an independent review demonstrated
+    it: an ungated job running `gcloud secrets versions add` against the very
+    secret under investigation passed all 58 assertions. Deriving the list means
+    a new job appears here, and every mode's expectation must then account for
+    it before this file goes green again.
+  */
+  const order = Object.keys(jobs);
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -381,6 +406,8 @@ test('player mode reaches only gate, config and the player journey', () => {
     'hosted-verify': false,
     'player-journey': true,
     'cleanup-recovery': false,
+    'mail-preflight': false,
+    'mail-binding': false,
   });
 });
 
@@ -419,6 +446,8 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     'hosted-verify': true,
     'player-journey': false,
     'cleanup-recovery': false,
+    'mail-preflight': false,
+    'mail-binding': false,
   });
 });
 
@@ -437,6 +466,28 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     'hosted-verify': false,
     'player-journey': false,
     'cleanup-recovery': false,
+    'mail-preflight': true,
+    'mail-binding': false,
+  });
+});
+
+test('mail-binding mode reaches NOTHING that builds, deploys or verifies', () => {
+  /*
+    The same statement of safety the preflight gets, in the same form. A
+    read-only report that can reach `deploy` is not a read-only report, and
+    the only thing standing between the two is this matrix.
+  */
+  const reached = reachedJobs('mail-binding');
+  assert.deepEqual(reached, {
+    gate: false,
+    config: false,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'cleanup-recovery': false,
+    'mail-preflight': false,
+    'mail-binding': true,
   });
 });
 
@@ -455,8 +506,8 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   */
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight'],
-    'exactly these four modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'mail-binding'],
+    'exactly these five modes exist'
   );
 });
 
@@ -572,6 +623,8 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     'hosted-verify': false,
     'player-journey': false,
     'cleanup-recovery': true,
+    'mail-preflight': false,
+    'mail-binding': false,
   });
 });
 
@@ -699,6 +752,149 @@ test('the modes are gated by equality, so a fourth mode cannot silently start bu
   }
 });
 
+/*
+  EVERY JOB CARRIES AN `if:` — THE INVARIANT NEITHER THE MATRIX NOR THE
+  STRUCTURAL TEST WAS ACTUALLY ASSERTING.
+
+  An independent review demonstrated the hole rather than describing it. The
+  structural test counts the jobs that NAME a mode, so it catches a second job
+  gated on `mail-binding`. The reach matrix walked a hardcoded list, so it could
+  not see a new job at all. Neither notices a job with NO `if:` key — and
+  GitHub runs an ungated job in EVERY mode, `mail-binding` included. A job
+  running `gcloud secrets versions add` against the secret under investigation
+  passed all 58 assertions.
+
+  The obvious deploy shapes tripped OTHER rules incidentally: the same job
+  written with `npx` was caught by the global npx ban, not by anything about
+  reachability. A privileged step that is not `npx` slipped through entirely.
+  So the invariant is asserted directly here, and the probes below prove the
+  assertion bites rather than merely existing.
+*/
+function jobsOf(src) {
+  const at = src.indexOf('\njobs:');
+  assert.notEqual(at, -1, 'the workflow declares no jobs block');
+  const out = {};
+  let current = null;
+  for (const line of src.slice(at).split('\n')) {
+    // The same widened pattern as jobBlocks. Two parsers disagreeing about
+    // what a job is would put the invariant and the matrix out of step, which
+    // is the shape of the hole this closes.
+    const m = JOB_ID.exec(line);
+    if (m) {
+      current = m[1];
+      out[current] = [];
+      continue;
+    }
+    if (current) out[current].push(line);
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n')]));
+}
+
+const ungatedJobs = (src) =>
+  Object.entries(jobsOf(src))
+    .filter(([, body]) => !/^ {4}if: /m.test(body))
+    .map(([name]) => name);
+
+const negatedGates = (src) =>
+  Object.entries(jobsOf(src))
+    .filter(([, body]) => {
+      const m = /^ {4}if: (.*)$/m.exec(body);
+      return m ? /inputs\.mode !=/.test(m[1]) : false;
+    })
+    .map(([name]) => name);
+
+// A job appended at end of file lands inside the jobs block, which is the last
+// section of this workflow. The privileged step is a FIXTURE STRING and is
+// never executed by anything: these tests only parse text.
+const withExtraJob = (body) => `${text}\n  rollout-helper:\n    runs-on: ubuntu-latest\n${body}`;
+const BENIGN_UNGATED = withExtraJob('    steps:\n      - run: echo hello\n');
+const PRIVILEGED_UNGATED = withExtraJob(
+  '    steps:\n      - run: gcloud secrets versions add WSF_EMAIL_API_KEY --data-file=- --project westayfit-staging\n'
+);
+
+test('POSITIVE CONTROL: every job in this workflow is gated, and none by negation', () => {
+  // The parser must agree with the one the reach matrix uses, or a green
+  // result here would say nothing about the jobs that actually run.
+  assert.deepEqual(Object.keys(jobsOf(text)), Object.keys(jobs),
+    'the probe parser and the matrix disagree about which jobs exist');
+  // Exact, not a lower bound: widening the id pattern must not start matching
+  // something that is not a job, and a genuinely new job must be noticed here
+  // rather than slide in under a `>=`.
+  assert.equal(Object.keys(jobs).length, 9,
+    `expected the workflow's nine jobs, parsed ${Object.keys(jobs).join(', ')}`);
+  assert.deepEqual(ungatedJobs(text), [],
+    'a job carries no if:, so it runs in EVERY mode including the read-only ones');
+  assert.deepEqual(negatedGates(text), [],
+    'a job gates by negation, which admits every future mode');
+});
+
+test('AN UNGATED JOB IS REJECTED, even when its step is harmless', () => {
+  // The mutation that survived the whole suite before this assertion existed.
+  assert.deepEqual(ungatedJobs(BENIGN_UNGATED), ['rollout-helper']);
+});
+
+test('AN UNGATED JOB RUNNING A PRIVILEGED NON-npx STEP IS REJECTED', () => {
+  /*
+    The one that matters. `gcloud secrets versions add` writes a new version of
+    the very secret this mode exists to read, and it is not `npx`, so the
+    global ban that incidentally caught the `firebase deploy` shape does
+    nothing here.
+  */
+  assert.deepEqual(ungatedJobs(PRIVILEGED_UNGATED), ['rollout-helper']);
+  assert.equal(/npx/.test(PRIVILEGED_UNGATED.slice(text.length)), false,
+    'the probe must not be caught by the npx ban — that would prove the wrong thing');
+});
+
+/*
+  R1 — EVERY LEGAL JOB ID, NOT JUST THE CONVENTIONAL ONES.
+
+  An independent review found that the invariant above was only as wide as the
+  pattern that feeds it: an ungated job whose id the parser did not recognise
+  was not caught, it was never seen. The four ids below are all legal GitHub
+  job ids that the old `[a-z][a-z0-9-]*` with `\s*$` rejected — a capital, a
+  leading underscore, an internal underscore, and a trailing comment on the
+  header line. Each probe carries the privileged step, so a miss is not
+  cosmetic: it is an ungated job that writes a new version of the secret this
+  mode exists to read.
+*/
+const LEGAL_ID_PROBES = [
+  ['Rollout:', 'Rollout', 'a capital first letter'],
+  ['rollout-helper:  # temporary helper', 'rollout-helper', 'a trailing comment on the header'],
+  ['_rollout:', '_rollout', 'a leading underscore'],
+  ['rollout_helper:', 'rollout_helper', 'an internal underscore'],
+];
+
+test('R1: an ungated job is caught under EVERY legal job id', () => {
+  for (const [header, id, why] of LEGAL_ID_PROBES) {
+    const mutant =
+      `${text}\n  ${header}\n    runs-on: ubuntu-latest\n` +
+      '    steps:\n      - run: gcloud secrets versions add WSF_EMAIL_API_KEY --data-file=- --project westayfit-staging\n';
+    assert.ok(Object.keys(jobsOf(mutant)).includes(id),
+      `${why}: the parser did not see job ${id} at all, so no invariant could apply to it`);
+    assert.deepEqual(ungatedJobs(mutant), [id],
+      `${why}: an ungated job named ${id} was not rejected`);
+  }
+});
+
+test('R1: widening the id pattern is a no-op on the real workflow', () => {
+  // The fix must close a hole without inventing jobs. Stated separately from
+  // the positive control because this is the half that could regress quietly.
+  assert.deepEqual(ungatedJobs(text), []);
+  assert.deepEqual(Object.keys(jobsOf(text)), [
+    'gate', 'config', 'build', 'deploy', 'hosted-verify',
+    'player-journey', 'cleanup-recovery', 'mail-preflight', 'mail-binding',
+  ]);
+});
+
+test('a job gated by NEGATION is rejected, whichever job it is', () => {
+  const negated = withExtraJob(
+    "    if: ${{ inputs.mode != 'player-journey' }}\n    steps:\n      - run: echo hello\n"
+  );
+  assert.deepEqual(negatedGates(negated), ['rollout-helper']);
+  // It is gated, so the ungated check alone would have passed it.
+  assert.deepEqual(ungatedJobs(negated), []);
+});
+
 test('the failure reprint is diagnostic only and can never become a gate', () => {
   // Runs 37, 38 and 39 were each diagnosed from which capture was MISSING and
   // how long the step ran, because the assertion message sat in a step the log
@@ -769,6 +965,57 @@ test('the mail preflight can report, and cannot deploy', () => {
     assert.equal(forbidden.test(job), false,
       `the preflight job matches ${forbidden}, so it is not read-only`);
   }
+});
+
+test('only the binding job runs in mail-binding mode, and it cannot deploy', () => {
+  const wf = fs.readFileSync(path.join(WORKFLOW_DIR, 'wsf-staging-deploy.yml'), 'utf8');
+
+  assert.match(wf, /^\s+- mail-binding$/m, 'the mail-binding mode is not offered');
+
+  const at = wf.indexOf('\n  mail-binding:');
+  assert.notEqual(at, -1, 'the mail-binding job is gone');
+  const job = wf.slice(at);
+
+  assert.match(job, /if: \$\{\{ inputs\.mode == 'mail-binding' \}\}/,
+    'the binding job does not gate on its own mode');
+
+  const namesIt = wf.split(/\n  (?=[a-z][a-z0-9-]*:\n)/).filter(
+    (j) => /inputs\.mode == 'mail-binding'/.test(j)
+  );
+  assert.equal(namesIt.length, 1,
+    `${namesIt.length} jobs run in mail-binding mode; only the binding job may`);
+
+  for (const forbidden of [
+    /firebase\s+deploy/,
+    /hosting:channel:deploy/,
+    /gcloud\s+secrets\s+(create|versions\s+add|versions\s+access)/,
+    /add-iam-policy-binding/,
+  ]) {
+    assert.equal(forbidden.test(job), false,
+      `the binding job matches ${forbidden}, so it is not read-only`);
+  }
+});
+
+test('the binding reporter never reads a secret payload, and never bare-describes', () => {
+  const src = fs.readFileSync(
+    path.join(WORKFLOW_DIR, '..', 'wsf-staging', 'report-mail-binding.mjs'),
+    'utf8'
+  );
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // The call that returns the key itself. It must not appear at all.
+  assert.equal(/versions['"\s,\]]*access/.test(code), false,
+    'the binding reporter reads a secret payload');
+
+  /*
+    AND EVERY describe MUST CARRY A PROJECTION. A bare `--format=json` prints
+    the function's whole environment, which is how an unrelated variable ends
+    up in a public run log — the reporter would still be "read-only" and would
+    still have leaked.
+  */
+  assert.equal(/--format=json'/.test(code), false,
+    'a describe runs without a field projection');
+  assert.match(code, /--format=json\(/, 'no projected describe found at all');
 });
 
 test('the preflight never reads a secret payload or prints a token', () => {

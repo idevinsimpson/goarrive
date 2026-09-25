@@ -75,6 +75,15 @@ on:
           # job names this one.
           - mail-preflight
 
+          # `mail-binding` READS which secret version the two deployed mail
+          # functions actually serve. It is the fact a delivered message
+          # cannot establish: mail arriving proves the key an instance held
+          # was accepted, not which version supplied it. Same structure as
+          # the preflight — it cannot deploy, because every job gates on an
+          # explicit equality list of the modes it runs in and only the
+          # binding job names this one.
+          - mail-binding
+
       # WHY A RECOVERY MODE EXISTS.
       # Run 35495928362 created synthetic users and documents on staging and
       # then refused to delete them: the player journey minted `e5j-…` run tags
@@ -1095,3 +1104,36 @@ jobs:
           # logs, and the domain is the half that has to match a verified one.
           WSF_EMAIL_FROM: ${{ vars.WSF_EMAIL_FROM }}
         run: node .github/wsf-staging/mail-preflight.mjs "$STAGING_PROJECT"
+
+  mail-binding:
+    if: ${{ inputs.mode == 'mail-binding' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      # NO WSF_EMAIL_FROM HERE. The preflight needs the sender; this job does
+      # not read it, and an environment variable a step cannot use is one more
+      # value in a public run log for no reason.
+      - name: Report which secret version the mail functions serve
+        run: |
+          node .github/wsf-staging/report-mail-binding.mjs \
+            "$STAGING_PROJECT" us-central1 WSF_EMAIL_API_KEY \
+            wsfSendVerificationEmail wsfSendPasswordResetEmail
