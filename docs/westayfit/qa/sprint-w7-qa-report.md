@@ -2992,3 +2992,27 @@ Chromium only. Safari is CANNOT-MEASURE; so are its tap-without-focus behaviour 
 - Settings, `/goals/new`, `/start-community` and `/join` keep the browser default.
 
 **Status:** tested on `8f2cc15e`; delivered by W9; **not accepted, not integrated, not staged**.
+
+### 30.7 · Addendum for the Director's routing `5826499443` (posted 04:04Z, before my delivery at 04:10Z)
+
+The routing's list mapped to evidence. Three cases were added to W7's instrument for the items that had only W9's coverage. They are first runs, head `8f2cc15e` (5015) vs base (5013):
+
+| routed item | evidence | head | base |
+|---|---|---|---|
+| base leaves `body`; the head restores the opener after MOVE Close / Escape and contribution Back / Finish | W9 focused 16 / 16 vs 1 / 16; W7 R1, R2, R4, R5 | PASS | fails on `body` |
+| selected goal → contribution → Back returns to that goal, then Close returns to MOVE | W9 focused case 6 (carried) | PASS | FAIL |
+| scroll and mounted tab exact; active-tab reselect a no-op | W7 R2 (60 → 60); **R10** (Home tab pressed by pointer and by Enter while active: path, scroll 60, history length 3 unchanged, focus stays on the tab); `shell-successor-verify` (same mounted instance) | PASS | R10 PASS (preserved) |
+| a rebuilt or removed opener falls back to the landed `h1`, then the current tab; never `body` | W9 focused cases 10–13 (carried): the launcher taken away → `h1`; cold → `h1`; a Home with no heading → the current tab | PASS | FAIL |
+| the latest pointer or focus intent wins | **R8**: launcher keyboard-focused, then MOVE **clicked** → Back → focus on **MOVE** | PASS | FAIL (`body`) |
+| a new covering flow cancels a pending restore | **R9**: Back, then MOVE clicked at once. While the second flow covers the tabs, 12 samples over 3 s show focus is never pulled into the hidden tabs (all `body`). Its Back then lands on MOVE. The covered-window half does **not** discriminate (the base reads `body` too); only the landing half does | PASS | FAIL (landing) |
+| Enter selects Home / Community / Progress / You and focus stays on the tab | W9 focused case 15 (carried) | PASS | FAIL |
+| off-web, kiosk and plain load inert | R6 (plain load stays `body`); source (`onWeb()` guards, `loadedAtFlow` excludes `?kiosk`, the kiosk has no shell); W9's kiosk specs inside its 309 / 0 / 10 regression (carried) | PASS | — |
+
+**Carried open, not waived:**
+- cold `/event` and `/queue` exits (need the `app/_layout.tsx` dependency);
+- Progress's "Start moving" ignores Enter and replaces the navigator;
+- MOVE's focus entry and containment (R9 shows focus sits on `body` while a flow covers the tabs);
+- Safari and a real assistive-technology session are unmeasured;
+- F1 (the watch window re-lands after a blank-space click) is the Director's call.
+
+**Receipt:** Check 30 on exact `8f2cc15e` is a **PASS**, W7 instrument **10 / 10** first run on the head (base 4 / 10). Not merged, not staged.

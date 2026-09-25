@@ -282,4 +282,64 @@ test.describe('W7 Check 30 · FOCUS-RETURN-1', () => {
     const oneSecond = await focusedId(page);
     measure('R7 blank click after landing', { landed, justAfter, oneSecond, spot });
   });
+  test('R8 latest intent wins: a keyboard-focused launcher, then MOVE pressed with the pointer -> Back lands on MOVE', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('r8');
+    await signInVia(page, fx.email, PASSWORD);
+    await toCommunity(page, fx);
+    await page.locator(`[data-testid="${launcherOf(fx)}"]:visible`).first().focus();
+    await page.waitForTimeout(300);
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await page.waitForURL(/\/contribute\//, { timeout: 40_000 });
+    await expect(page.locator('[data-testid="wsf-contribute-back"]:visible').first()).toBeVisible({ timeout: 40_000 });
+    await page.locator('[data-testid="wsf-contribute-back"]:visible').first().click();
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 20_000 }).toBe(`/community/${fx.groupId}`);
+    await expectFocus(page, 'wsf-member-tab-move', 'the latest press (MOVE), not the earlier keyboard focus, gets focus back');
+  });
+
+  test('R9 a new cover cancels a pending restore: re-opened at once, focus is never pulled into the hidden tabs', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('r9');
+    await signInVia(page, fx.email, PASSWORD);
+    await toCommunity(page, fx);
+    await page.locator(`[data-testid="${launcherOf(fx)}"]:visible`).first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.locator('[data-testid="wsf-contribute-back"]:visible').first().focus();
+    await page.keyboard.press('Enter');
+    // At once, before any restore can settle, a second flow covers the tabs.
+    await page.getByTestId('wsf-member-tab-move').last().click();
+    await page.waitForURL(/\/contribute\//, { timeout: 40_000 });
+    await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible, [data-testid="wsf-contribute-move-screen"]:visible').first()).toBeVisible({ timeout: 40_000 });
+    const samples: string[] = [];
+    for (let i = 0; i < 12; i += 1) { samples.push(await focusedId(page)); await page.waitForTimeout(250); }
+    measure('R9 focus while the second flow covers', samples);
+    expect(samples.filter((f) => f.includes('wsf-community-goal-record') || f.startsWith('wsf-member-tab')), 'a restore pulled focus into the covered tabs').toEqual([]);
+    await page.locator('[data-testid="wsf-contribute-back"]:visible').first().click();
+    await expectFocus(page, 'wsf-member-tab-move', 'the second flow’s opener gets focus back');
+  });
+
+  test('R10 active-tab reselect stays a no-op, by pointer and by Enter', async ({ page }) => {
+    test.setTimeout(150_000);
+    await page.setViewportSize({ width: 390, height: 640 });
+    const fx = await seed('r10');
+    await signInVia(page, fx.email, PASSWORD);
+    await toCommunity(page, fx);
+    await page.locator(`[data-testid="${launcherOf(fx)}"]:visible`).first().scrollIntoViewIfNeeded();
+    await page.mouse.wheel(0, 60);
+    await page.waitForTimeout(600);
+    const before = { path: new URL(page.url()).pathname, scroll: await scrollOf(page, launcherOf(fx)), hist: await page.evaluate(() => history.length) };
+    const home = page.getByTestId('wsf-member-tab-home').last();
+    await home.click();
+    await page.waitForTimeout(800);
+    await home.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    const after = { path: new URL(page.url()).pathname, scroll: await scrollOf(page, launcherOf(fx)), hist: await page.evaluate(() => history.length), focus: await focusedId(page) };
+    measure('R10 reselect', { before, after });
+    expect(after.path).toBe(before.path);
+    expect(after.scroll).toBe(before.scroll);
+    expect(after.hist).toBe(before.hist);
+    expect(after.focus).toBe('wsf-member-tab-home');
+  });
 });
