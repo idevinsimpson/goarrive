@@ -306,6 +306,15 @@ type GoalProgress =
        * from a read issued after it.
        */
       issuedAt: number;
+      /**
+       * A LATER READ FAILED, AND THIS FIGURE WAS KEPT. The figure is still the
+       * last one the server confirmed, at `at`, so it stays on screen; what
+       * changes is that the page says so and offers Retry, instead of letting
+       * a failed refresh pass for a successful one (W7 Check 27 item 9: the
+       * number and its "Confirmed h:mm" simply stood, with no word). The next
+       * read that lands clears it.
+       */
+      refreshFailed?: boolean;
     }
   | { kind: 'failed' };
 
@@ -1125,10 +1134,17 @@ export default function CommunityPage() {
           });
         } catch {
           if (cancelled) return;
-          // A failed re-read does not take down figures already on screen.
-          setProgress((prev) =>
-            prev[goal.goalId]?.kind === 'ok' ? prev : { ...prev, [goal.goalId]: { kind: 'failed' } }
-          );
+          // A failed re-read does not take down figures already on screen; it
+          // marks them as the last confirmed ones (unless a read issued after
+          // this one has already landed, which is fresher than this failure).
+          setProgress((prev) => {
+            const shown = prev[goal.goalId];
+            if (shown?.kind !== 'ok') return { ...prev, [goal.goalId]: { kind: 'failed' } };
+            // `>=`: a read issued in the same millisecond as this failure and
+            // already landed is not made stale by it.
+            if (shown.issuedAt >= issuedAt) return prev;
+            return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true } };
+          });
         }
       })();
     }
@@ -1217,7 +1233,14 @@ export default function CommunityPage() {
               };
             });
           } catch {
-            // The figures on screen stand.
+            // The figures on screen stand, and say that they are the last
+            // confirmed ones. It never writes `loading` or `failed`.
+            if (cancelled) return;
+            setProgress((prev) => {
+              const shown = prev[goal.goalId];
+              if (shown?.kind !== 'ok' || shown.issuedAt >= issuedAt) return prev;
+              return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true } };
+            });
           }
         })();
       }
@@ -2617,6 +2640,54 @@ export default function CommunityPage() {
             {reachedOn}
           </Text>
         ) : null}
+        {/*
+          RETURN-CONTINUITY-1. A REFRESH THAT FAILED IS SAID, NOT HIDDEN.
+
+          The figures above are kept — they are the last ones the server
+          confirmed, and the "Confirmed h:mm" under the actions still says
+          when — but a member who came back from contributing is told that
+          this is not a fresh reading, here, beside the number, where a short
+          phone still shows it. Retry is the existing refresh: the same read,
+          and nothing else.
+
+          WHAT A SCREEN READER HEARS. A live region that arrives already
+          holding its words is often not announced, so the region is here
+          whenever a figure is — empty, and out of the layout (absolute, one
+          pixel, so the healthy hero does not move by the stack's gap) — and
+          the sentence is put INTO it when a read fails. Retry is outside it,
+          so the announcement is the sentence alone. The visible copy of the
+          sentence is hidden from assistive technology, because the region
+          already reads it in the same place.
+        */}
+        <View
+          style={styles.visuallyHidden}
+          testID={`wsf-community-goal-stale-status-${goal.goalId}`}
+          {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+        >
+          {p.refreshFailed ? <Text>Couldn’t refresh. This is the last confirmed figure.</Text> : null}
+        </View>
+        {p.refreshFailed ? (
+          <View
+            style={onDark ? styles.heroLastKnown : styles.cardLastKnown}
+            testID={`wsf-community-goal-stale-${goal.goalId}`}
+          >
+            <Text
+              style={onDark ? styles.heroLastKnownText : styles.cardMeta}
+              {...({ 'aria-hidden': true } as Record<string, unknown>)}
+            >
+              Couldn’t refresh. This is the last confirmed figure.
+            </Text>
+            <Pressable
+              onPress={refreshProgress}
+              accessibilityRole="button"
+              style={onDark ? [styles.heroOutlineButton, styles.heroLastKnownRetry] : styles.secondaryButton}
+              testID={`wsf-community-goal-stale-retry-${goal.goalId}`}
+              accessibilityLabel={`Retry: ${goal.title} progress`}
+            >
+              <Text style={onDark ? styles.heroOutlineButtonText : styles.secondaryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
     );
   };
@@ -3772,9 +3843,21 @@ export default function CommunityPage() {
                         </Text>
                       </View>
                     )}
-                    <Text style={styles.heroStatePill} testID={`wsf-community-goal-period-${featured.goalId}`}>
-                      {windowLabel}
-                    </Text>
+                    {/*
+                      RETURN-CONTINUITY-1. When the last read failed, the pill
+                      says what the figure below is: the last one confirmed,
+                      not a live one. The window comes back with the next read
+                      that lands.
+                    */}
+                    {p.kind === 'ok' && p.refreshFailed ? (
+                      <Text style={styles.heroStatePill} testID={`wsf-community-goal-last-known-${featured.goalId}`}>
+                        Last known
+                      </Text>
+                    ) : (
+                      <Text style={styles.heroStatePill} testID={`wsf-community-goal-period-${featured.goalId}`}>
+                        {windowLabel}
+                      </Text>
+                    )}
                   </View>
                   <Text
                     style={[styles.heroTitle, heroTitleType]}
@@ -3915,7 +3998,10 @@ export default function CommunityPage() {
                       <TabGlyph name="activity" color={ACTION_GREEN_DEEP} />
                     </View>
                     <View style={styles.contributionText}>
-                      <Text style={styles.contributionEyebrow}>Your contribution</Text>
+                      <Text style={styles.contributionEyebrow}>
+                        {/* The same read as the figure above: last known when it is. */}
+                        {p.refreshFailed ? 'Your last-known contribution' : 'Your contribution'}
+                      </Text>
                       {/*
                         SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE. On a
                         `once` goal already contributed to, the statement above
@@ -4668,6 +4754,29 @@ const styles = StyleSheet.create({
     columnGap: 12,
   },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
+  // RETURN-CONTINUITY-1. The failed-refresh line under the figures: the
+  // sentence, then Retry — beside it when the row has room, under it (with a
+  // gap, so the 44 px control never touches the text) on a phone.
+  heroLastKnown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: 12,
+    rowGap: 8,
+    marginTop: 4,
+  },
+  // Present for assistive technology, absent from the layout: absolute (so a
+  // stack's gap never counts it), one pixel, clipped and transparent.
+  visuallyHidden: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    overflow: 'hidden',
+    opacity: 0,
+  },
+  heroLastKnownText: { color: CREAM, fontSize: 13, lineHeight: 18, fontWeight: '600', flexShrink: 1 },
+  heroLastKnownRetry: { marginTop: 0 },
+  cardLastKnown: { gap: 2, marginTop: 4 },
   freshnessRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
   freshnessUtilityRow: {
     flexDirection: 'row',
