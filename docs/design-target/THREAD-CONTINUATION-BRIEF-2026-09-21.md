@@ -11,7 +11,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`502b1e8d`** = `afa26d64` (RETURN-CONTINUITY-1) + FOCUS-RETURN-1 `64b01967` (tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
-| `main` | `0359f8d1` = `cd881775` + pin #479 `ae1fb2fa` |
+| `main` | `38aa8a4c` = `0359f8d1` (pin #479) + skill #480 `b7c7f9a3` (owner auto-stage cadence, `5832907406`) |
 | staging pin `approvedAppSha` | `502b1e8d` (`expectedPriorFunctions` 49; three social retained) |
 | served staging build | **`502b1e8d`** via run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
 
