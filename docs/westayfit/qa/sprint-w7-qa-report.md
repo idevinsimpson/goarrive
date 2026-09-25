@@ -3445,3 +3445,110 @@ That is 5/5 failing before and 5/5 passing after. On `766ee085` each failure is 
 **Limits:** as §36.4. Chromium web only; no native motion, Safari keyboard or Android hardware back.
 
 **Status:** tested on `b497ce4c`. Nothing is accepted, integrated or staged.
+
+## 37 · Independent ops review: SOCIAL-STAGING-DEMO-1 seed (A) and the SOCIAL-DEMO-SEED-MODE workflow (B) (L0 #434 `5835728833`, Director retarget `5835796517`; W7 ACK `5835806524`)
+
+**Scope.** Local emulators and local runs only. There was no dispatch, no staging access and no cloud call. Firestore and Auth ran on 8080 and 9099 under the projects `demo-w7-seed` (isolated) and `demo-wsf-local` (for the real `wsfContribute` callable on the functions emulator, port 5001). `firebase-admin` 12.7.0 was loaded from an installed `functions-westayfit`.
+
+**Disclosure:** `firebase-admin` attempted its GCE metadata lookup, which the environment's proxy answered 403. That is project detection, not a request to any Google API or project.
+
+**Targets, verified by git:**
+
+- **A (candidate):** `9f8b55f602a46a08a5877fabacf1ff4e8f86a969`.
+  - Chain: `bcfef524` → `06bcb288` → `c45760e8` → `9f8b55f6`. `c45760e8` is docs only: one file, `OPERATOR-HANDOFF-social-staging.md`.
+  - The four `staging-demo/` blobs are identical at #484's head `5765b0ea` (`seed-social-demo.mjs` `603f608a`, fixture `cb7c6a71`, dry run `dbbadcf9`, README `9288648c`).
+  - Fail-before baselines: `bcfef524` for Auth and counters; `06bcb288` for the owner-membership and recent-addition correction and the transactional rechecks.
+- **B:** `8f8c4530e42c66faa9b0b70834198a82cda6c69c` on `main` `7e423a48`.
+  - The workflow diff is **+145 / −0**.
+  - `8f8c4530..5765b0ea` touches only the three `staging-demo/` files, so B is unchanged in the successor.
+
+**W7's instrument.** The files are in the session scratchpad and are **not committed**, because my file reservation does not cover them; they are described here.
+- `driver.mjs` has suites `auth`, `race`, `recheck`, `static` and `privacy`. Every case prints one `RESULT` line with the expected result, the observed result and PASS or FAIL, and nothing aborts early.
+- `inject.mjs` is preloaded with `node --import` into the **seed** process. Every use is labelled INJECTED in the output:
+  - `INJ_TX`: before the seed's first transactional read of a path, a concurrent writer writes a document outside the transaction;
+  - `INJ_DEL`: the same, before the seed's first delete of a path;
+  - `INJ_OWNER_RACE`: after each transaction body, with its reads done and before commit, and before direct counter writes or batch commits, the **owner records 7 through the real `wsfContribute` callable**. It does so only once the goal and the owner's membership exist; `RACE_BURST` repeats it.
+- An Auth fault proxy in front of the Auth emulator answers one uid's `accounts:lookup` with 403, 500 or 429, or resets the connection.
+
+W3's own emulator dry run passes 21/21 on `06bcb288` and 22/22 on the candidate. That is W3's evidence, reproduced but not counted here.
+
+### 37.A Seed candidate `9f8b55f6`: **Auth, concurrency, seam, apply-path ownership, drift and privacy PASS. Two preservation gaps reproduced (G1 cleanup race, G2 counter/total ownership); both also exist on `06bcb288`, so neither is a regression.**
+
+| # | case | `bcfef524` | `06bcb288` | `9f8b55f6` |
+|---|---|---|---|---|
+| AU1 | owner lookup gets 403 PERMISSION_DENIED | exits 3, but **says "no Auth record"** (the error read as absence) | exit 3, `AUTH_ERROR=auth/insufficient-permission`, 0 writes | same, **PASS** |
+| AU2 | synthetic `wsfdemo-m07` lookup gets 500 | **exit 0, 100 documents written** | exit 3, `auth/internal-error`, 0 writes | **PASS** |
+| AU3 | synthetic `wsfdemo-m12` lookup gets 429 | **exit 0, 100 written** | exit 3, 0 writes | **PASS** |
+| AU4 | synthetic `wsfdemo-m03` lookup: connection reset | **exit 0, 100 written** | exit 3, `app/network-error`, 0 writes | **PASS** |
+| RC1 | the owner records twice through **real `wsfContribute`**, then the seed applies again | 459 = 459 = 459 | — | 459 = 459 = 459, **PASS** |
+| RC2 | `--reanchor` with owner calls interleaved inside its transactions (INJECTED, 3) | 1 landed; consistent | — | 3 landed; 480 = 480 = 480, **PASS** |
+| RC3 | a first apply with owner calls interleaved during the ledger phase (INJECTED, 3) | 0 landed | — | 3 landed; 466 = 466 = 466, **PASS** |
+| RC4 | re-creating a missing row while the owner records once | consistent | — | 487 = 487 = 487, **PASS** |
+| RC5 | re-creating a missing row while the owner records **10 times** (INJECTED burst) | **ledger 543, shards 536: 7 lost** (the absolute shard write) | — | 557 = 557 = 557, **PASS** |
+| T1 | a foreign goal appears after classification, before its create | refused, preserved | refused, preserved | refused ("became foreign during the run"), preserved, **PASS** |
+| T2 | the owner's sample membership appears **without the marker** before its create (a real join) | — | **exit 0, 100 written** | refused, his row preserved, **PASS** |
+| T3 | a foreign ledger row appears before its transactional create | — | refused, preserved | refused, preserved, **PASS** |
+| T4 | a foreign recent-addition appears at the linked path during the row transaction | — | **exit 0; the foreign addition overwritten (amount 999 → 40)** | `ALREADY_EXISTS`; the row is **not** created (the transaction stays atomic); preserved, **PASS** |
+| T5 | `--reanchor`: the owner edits the goal after classification | — | kept | kept (drift during the run), **PASS** |
+| T6 | `--reanchor`: the linked addition is replaced during the row transaction | — | **exit 0; overwritten (999 → 40)** | refused, preserved, **PASS** |
+| T7 | re-creating a missing addition: a foreign document appears at that path | — | the foreign document deleted (no injection fired; pre-case) | **preserved, but exit 0 and not reported (P1)** |
+| S3 | the owner's sample membership exists without the marker, then apply runs | — | **exit 0, 99 written** | exit 3, `FOREIGN=1`, 0 writes, **PASS** |
+| S4 | a foreign document at an addition path, its row absent, then apply runs | — | **exit 0; overwritten** | exit 3, 0 writes, **PASS** |
+| S5 | cleanup: the owner's sample membership without the marker | — | **exit 0; his row DELETED** | exit 3, 0 deleted, **PASS** |
+| S6 | cleanup: an addition collision beside an existing row | — | **exit 0; DELETED** | exit 3, 0 deleted, **PASS** |
+| **C1** | cleanup: the owner's sample membership is rewritten **without the marker after classification** (he left and rejoined) | — | **DELETED** | **DELETED, exit 0: G1** |
+| **C2** | cleanup: a foreign document takes a synthetic profile path after classification | — | **DELETED** | **DELETED, exit 0: G1** |
+| **S1** | apply: a foreign counter shard already exists under a fixture goal (goal absent) | — | 50 → 110, exit 4 after 100 writes | **50 → 110, exit 4 after 100 writes: G2** |
+| **S2** | apply: a foreign member total already exists at a fixture member-total path | — | 999 → 1084, exit 4 after 100 writes | **999 → 1084, exit 4 after 100 writes: G2** |
+| P1 | fields and accounts | — | — | 100 fixture documents, 0 with email / phone / photo / avatar / invite / contact keys; 0 synthetic Auth accounts; `OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=true`, **PASS** |
+
+**Seam `WSF_DEMO_TEST_INTERLEAVE`: inert without the emulator.**
+- The only use is `seed-social-demo.mjs:264`, `if (process.env.FIRESTORE_EMULATOR_HOST && process.env.WSF_DEMO_TEST_INTERLEAVE)`.
+- With `FIRESTORE_EMULATOR_HOST` set, `guardProject` refuses anything but a `demo-*` project, so the seam can never be active against staging.
+- Neither variable appears anywhere under `.github/` at `8f8c4530` (`git grep`).
+- This row is **static**: a run without the emulator host would reach Google, and that was not done.
+
+**G1 — preservation gap: cleanup has no recheck at delete time.**
+- *What:* cleanup classifies everything, then deletes each path with a plain `get()` and `delete()`. There is no transaction and no marker check at delete time (`seed-social-demo.mjs:403`).
+- *Effect:* a document that becomes foreign between classification and deletion is deleted.
+- *Narrow reproducer (C1):*
+  1. Seed the fixture.
+  2. Start `--cleanup --confirm-cleanup SOCIAL-STAGING-DEMO-1`.
+  3. Before its first delete, the owner's row `wsfMemberships/wsfdemo-sample-movers_<owner>` is rewritten **without** `demoFixture`, as a leave-and-rejoin by the product would.
+  4. Result: that row is deleted, and the run exits 0.
+- *The same happens* for a synthetic profile path (C2).
+- *Contrast:* apply rechecks inside every transaction (T1–T6 pass).
+- *Scope:* narrow. It needs a concurrent write during the cleanup window. It is pre-existing: `06bcb288` behaves the same.
+
+**G2 — preservation gap: counter shards and member totals at fixture paths are not ownership-classified.**
+- *What:* classification covers entities, owner memberships, ledger rows and additions.
+  - Shard documents `wsfGoalCounters/<fixture goal>/shards/*` are never classified.
+  - A member total at a path the fixture's contributions explain is accepted as the fixture's.
+- *Effect:*
+  - apply increments into a pre-existing foreign document instead of failing closed;
+  - it writes 100 documents;
+  - only the post-hoc ledger check notices, with `MISMATCH` and exit 4;
+  - cleanup would later delete those documents.
+- *Reproducer:* create `wsfGoalCounters/wsfdemo-goal-movers-squats/shards/0 {count: 50}` with the fixture absent, then run `--apply`. The result is `count 110`, exit 4, and 100 writes. S2 is the same with `wsfGoalMemberTotals/wsfdemo-goal-movers-squats_wsfdemo-m01 {total: 999}`.
+- *Scope:* these paths are under `wsfdemo-` ids that the product never generates, so the likely source is a partial earlier fixture state. It is pre-existing: `06bcb288` behaves the same.
+
+**Precision findings:**
+- **P1 (T7).** When re-creating a missing addition, a foreign document at that path is preserved, but the run exits 0 and does not report it. The *next* plan classifies it as foreign.
+- **P2.** A refusal in the middle of a run (T1–T4, T6) leaves the writes already committed (26–35 documents). That is by design: the ledger stays consistent per transaction, and a re-plan reports the collision. But "0 writes" holds only for collisions found at classification time.
+
+### 37.B Workflow `8f8c4530`: **PASS on criteria 4–6; one test-coverage gap (M8)**
+
+| criterion | evidence | result |
+|---|---|---|
+| **4** exclusions | Every one of the 9 jobs gates on an explicit mode equality: `gate`/`config`: deploy or player-journey; `build`/`deploy`: deploy; `hosted-verify`: `always() && gate success && deploy`; `player-journey`; `cleanup-recovery`; `mail-preflight`; `social-demo-seed`. Under `social-demo-seed` only the new job runs. The workflow diff is +145 / −0, so no existing job's gate or step changed. | PASS |
+| **5** hostile input | `demo_*` reach the job only through `env:`. `social-demo-inputs.mjs` validates them **before** `npm ci` and the auth step. `demo_action` must be exactly plan, apply or verify. The uid must match `^[A-Za-z0-9_-]{1,128}$` and must not use the `wsfdemo-` prefix. A digest is 64-hex for apply only and refused on any other action. The seed flag written to the output comes from a fixed table. | PASS |
+| **6** guards | `permissions: contents: read, id-token: write`; the existing `environment: wsf-staging`, WIF provider and deploy SA. Checkout is `ref: github.sha` with `persist-credentials: false`. `npm ci --ignore-scripts` runs from the reviewed lockfile. Apply re-plans, then `social-demo-plan-digest.mjs` must equal the reviewed digest; after that come apply and verify. The upload is gated on the scan outcome, and a final step requires both the scan and the seed step. | PASS |
+| **digest and replay, end to end** (emulator, candidate seed and this helper) | Same state re-planned: `PLAN_DIGEST_MATCHES_REVIEWED_PLAN=true`, exit 0. Same receipt, other operational commit: refused, exit 1. **Replay after apply** (the state changed): refused, exit 1. A plan with a foreign document: the seed exits 3, and the helper issues **no digest**, exit 1. | PASS |
+| **W3's suite** | `run-all.mjs` on `8f8c4530`: all suites passed, social-demo-seed 9/9. | PASS |
+| **W7 mutants on W3's suite** | **12 of 13 caught, each by the intended assertion.** M1 the seed gate becomes `always()` (`workflow-contract:376`); M2 deploy names the seed mode (`:1005`, "deploy must not name the seed mode"); M3 the uid interpolated into shell (`:1066`, "an input appears outside an env mapping"); M4 a cleanup action (`social-demo-seed:27`); M5 the digest ignores the commit (`:68`); M6 a digest issued for a foreign plan (`:104`); M7 no `--ignore-scripts` (`workflow-contract:106`); M9 checkout not `github.sha` (`:1052`); M10 an ungated upload (`:45`); M11 apply without the digest check (`:1083`); M12 the uid pattern admits `$(id)` (`social-demo-seed:33`); M13 validation after auth (`:1073`). **Survived: M8, the seed job granted `contents: write`.** The workflow as written is correct; the suite does not pin the job's permissions. After restore, `run-all` exits 0 and the worktree is clean. | test gap |
+
+**Precision findings (B):**
+- **B-P1.** The validator deliberately prints `SOCIAL_DEMO_OWNER_UID=validated`, but the seed then prints `owner: <uid>` to the job log, and the uploaded plan receipt carries `ownerUid`. A uid is not an email. If the intent was to keep the uid out of logs, the seed step undoes it.
+- **B-P2.** The digest binds the fixture, the project, the owner, the operational commit and **the fixture paths by class**, not document content. A change of content inside the same class, such as further edits to a drifted goal, does not change the digest. The seed's own drift handling keeps those edits.
+
+**Status:** reviewed only. Nothing is accepted, merged or dispatched. There was no staging access and no cloud call. G1 and G2 go to W3 and the Director for disposition. The M8 test gap and P1 / B-P1 / B-P2 are precision items.
