@@ -103,7 +103,7 @@ node ../scripts/westayfit/staging-demo/seed-social-demo.mjs --cleanup --confirm-
   way `wsfContribute` creates one:
   - one transaction checks the row is absent;
   - it creates the row;
-  - it **increments** the row's shard and the member's total.
+  - it **increments** the row's shard and the member's total. The shard is re-read in that same transaction and must still carry the fixture marker. A shard replaced since classification, unmarked or missing, stops the run at that row before any of its writes, with `APPLY_INCOMPLETE` naming it.
 
   So anything recorded while the script runs is never lost from the confirmed
   totals. That includes the owner using the app. `--reanchor` moves timestamps
@@ -118,7 +118,7 @@ node ../scripts/westayfit/staging-demo/seed-social-demo.mjs --cleanup --confirm-
   - **The owner's membership in each sample group** is created once with the fixture marker. After that it is never written again, because his privacy choices there are his, and the product's own writes merge, so the marker survives them. Cleanup deletes such a row only when it carries the marker. A row there without the marker is foreign.
   - **A recent-addition document** belongs to the fixture only beside its own fixture contribution row, with the same amount. It is created only where absent, and moved on a reanchor only while that link holds. Any other document at that path is foreign.
   - **Counters.** A sample goal is created in one transaction together with its ten counter shards, each carrying the marker, and the product's increments keep it. A shard at a sample goal's path is foreign in three cases: it exists before its goal, it has lost the marker, or it is missing under an existing goal. A synthetic member's total is created with the marker and incremented only while the marker is there. Nothing unmarked is ever merged into.
-- **Cleanup re-checks at delete time.** Each document is re-read inside its own delete transaction, together with its sample goal where it has one. It is deleted only if it is still provably the fixture's. Anything whose ownership changed during the run is preserved and named under `CLEANUP_PRESERVED`, and cleanup exits 3. Examples are a leave-and-rejoin that rewrote the owner's row, or a replaced profile.
+- **Cleanup re-checks at delete time.** Each document is re-read inside its own delete transaction, together with its sample goal where it has one. It is deleted only if it is still provably the fixture's. Anything whose ownership changed during the run is preserved and named under `CLEANUP_PRESERVED`, and cleanup exits 3. Examples are a leave-and-rejoin that rewrote the owner's row, or a replaced profile. A ledger row and its recent addition are proven together in one transaction, from their content rather than their location. A fixture row must still carry its exact seeded identity. Any other row on a sample goal must be the owner's own, at its own path. An addition is deleted only with the row it is linked to: the same attempt id and amount, and a minute consistent with that row. A replaced row, a replaced addition, or an addition with no row beside it is preserved and named.
 - **A collision found after classification** stops apply at that row. The run prints `APPLY_INCOMPLETE` naming the path, plus `PARTIAL_WRITES=<n>` for the rows already committed, which are all fixture-owned, and exits 3. Nothing is overwritten or deleted. Once the collision is resolved, a re-run reconciles those rows, or cleanup removes them. "Zero writes" is claimed only for collisions found at classification.
 - **Refusals:**
   - any project other than `westayfit-staging`, and any emulator run not on a `demo-*` project;
@@ -150,4 +150,6 @@ It needs `firebase-admin` in the working directory. It covers:
 - the member mix;
 - no synthetic Auth accounts and no contact fields;
 - review-time edits kept as drift;
+- a counter shard replaced inside a ledger transaction, refused before that row's writes;
+- a recent addition, and a ledger row, each replaced during cleanup and preserved;
 - cleanup refusing over a foreign document, then removing exactly the fixture.

@@ -423,15 +423,38 @@ async function main() {
     const groupMarked = (data) => data?.demoFixture?.id === mark;
     const plan = [];
     let ownerRows = 0;
+    // A ledger row and its recent addition are proven together, from what they
+    // ARE at delete time, never from where they sit: a fixture row must still
+    // carry its exact seeded identity, any other row must be the owner's own at
+    // its own path, and an addition goes only with the row it is linked to
+    // (same attempt id, same amount, its minute consistent with that row).
+    const wantRow = new Map(now.contributions.map((d) => [d.path, d]));
+    const msOf = (t) => (t instanceof Timestamp ? t.toMillis() : t?.getTime?.());
+    const ISO_MINUTE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/;
+    const rowProven = (g, path, x) => (wantRow.has(path)
+      ? classifyContribution(x, wantRow.get(path)) !== 'foreign'
+      : x?.goalId === g && x?.userId === ownerUid && path === `wsfContributions/${g}_${ownerUid}_${x?.attemptId}`);
+    const additionLinked = (path, a, x) => {
+      if (!a || Object.keys(a).sort().join() !== 'amount,at' || a.amount !== x.count || !ISO_MINUTE.test(a.at)) return false;
+      // the fixture writes both from one instant; the product stamps the row at
+      // commit, a moment after the minute it wrote on the addition
+      return wantRow.has(path) ? a.at === isoMinute(msOf(x.createdAt)) : Date.parse(a.at) <= msOf(x.createdAt);
+    };
     for (const g of goalIds) {
       const goalRef = db.doc(`wsfGoals/${g}`);
       // rows attached to a sample goal go with it, while the goal is still ours
       const attached = (path, rowOk) => plan.push({ path, goalRef, ok: rowOk });
+      const linked = new Set();
       for (const d of (await db.collection('wsfContributions').where('goalId', '==', g).get()).docs) {
         if (!d.get('userId')?.startsWith(f.syntheticUidPrefix)) ownerRows += 1;
-        attached(d.ref.path, (x) => x?.goalId === g);
+        const additionPath = `wsfGoals/${g}/recentAdditions/${d.get('attemptId')}`;
+        linked.add(additionPath);
+        plan.push({ path: d.ref.path, goalRef, g, additionPath });
       }
-      for (const d of (await db.collection(`wsfGoals/${g}/recentAdditions`).get()).docs) attached(d.ref.path, (x) => typeof x?.amount === 'number');
+      // an addition with no ledger row beside it cannot be proven: preserved
+      for (const d of (await db.collection(`wsfGoals/${g}/recentAdditions`).get()).docs) {
+        if (!linked.has(d.ref.path)) plan.push({ path: null, goalRef, g, additionPath: d.ref.path });
+      }
       for (const d of (await db.collection('wsfGoalMemberTotals').where('goalId', '==', g).get()).docs) {
         attached(d.ref.path, (x) => x?.goalId === g && (!String(x?.userId).startsWith(f.syntheticUidPrefix) || marked(x)));
       }
@@ -445,7 +468,35 @@ async function main() {
     await testInterleave(db);
     let deleted = 0;
     const preserved = [];
-    for (const item of plan) {
+    for (const item of plan.filter((x) => x.additionPath)) {
+      const outcomes = await db.runTransaction(async (tx) => {
+        const rowRef = item.path ? db.doc(item.path) : null;
+        const addRef = db.doc(item.additionPath);
+        const row = rowRef ? await tx.get(rowRef) : null;
+        const add = await tx.get(addRef);
+        const goal = await tx.get(item.goalRef);
+        const out = [];
+        if (!(goal.exists && marked(goal.data()))) {
+          for (const s of [row, add]) if (s?.exists) out.push([s.ref.path, 'preserved: its sample goal is no longer this fixture\'s']);
+          return out;
+        }
+        const proven = !!row?.exists && rowProven(item.g, item.path, row.data());
+        if (row?.exists) {
+          if (proven) { tx.delete(rowRef); out.push([item.path, 'deleted']); } else out.push([item.path, 'preserved: no longer provably this fixture\'s']);
+        }
+        if (add.exists) {
+          if (!proven) out.push([item.additionPath, 'preserved: its ledger row is not provably this fixture\'s']);
+          else if (!additionLinked(item.path, add.data(), row.data())) out.push([item.additionPath, 'preserved: not the recent addition linked to this fixture\'s row']);
+          else { tx.delete(addRef); out.push([item.additionPath, 'deleted']); }
+        }
+        return out;
+      });
+      for (const [path, outcome] of outcomes) {
+        if (outcome === 'deleted') deleted += 1;
+        else preserved.push(`${path} (${outcome})`);
+      }
+    }
+    for (const item of plan.filter((x) => !x.additionPath)) {
       const outcome = await db.runTransaction(async (tx) => {
         const ref = db.doc(item.path);
         const snap = await tx.get(ref);
@@ -460,7 +511,7 @@ async function main() {
       else if (outcome !== 'absent') preserved.push(`${item.path} (${outcome})`);
     }
     const after = await ownerFingerprint();
-    console.log(`CLEANUP_DELETED=${deleted} (fixture paths: ${plan.length}; rows the owner recorded on the sample goals: ${ownerRows})`);
+    console.log(`CLEANUP_DELETED=${deleted} (fixture paths: ${plan.reduce((n, x) => n + (x.path ? 1 : 0) + (x.additionPath ? 1 : 0), 0)}; rows the owner recorded on the sample goals: ${ownerRows})`);
     console.log(`CLEANUP_PRESERVED=${preserved.length}${preserved.length ? ': ' + preserved.join(', ') : ''}`);
     console.log(`OWNER_DATA_OUTSIDE_FIXTURE_UNCHANGED=${before === after}`);
     receipt.deleted = deleted;
@@ -522,9 +573,13 @@ async function main() {
         if (k === 'foreign') throw new Error(`${d.path} became foreign during the run`);
         if (k === 'absent') {
           if (mt.exists && mt.get('demoFixture') !== f.fixtureId) throw new Error(`${d.totalPath} is not this fixture's; refusing to merge into it`);
+          // the shard is re-proven HERE, in the transaction that increments it:
+          // the pre-write classification cannot see a replacement made since,
+          // and a change after this read makes the transaction retry and re-read
+          const sh = await tx.get(db.doc(d.shardPath));
+          if (!sh.exists || sh.get('demoFixture') !== f.fixtureId) throw new Error(`${d.shardPath} is not this fixture's (missing, unmarked or foreign); refusing to increment it`);
           tx.create(ref, { ...d.identity, createdAt: at });
-          // update, never set: the shard was created marked with its goal, so a
-          // missing one aborts instead of being re-created unmarked
+          // update, never set: an increment of the shard just proven marked
           tx.update(db.doc(d.shardPath), { count: FieldValue.increment(d.identity.count) });
           if (mt.exists) tx.update(totalRef, { total: FieldValue.increment(d.identity.count), contributionCount: FieldValue.increment(1), updatedAt: at });
           else tx.create(totalRef, { goalId: d.identity.goalId, userId: d.identity.userId, total: d.identity.count, contributionCount: 1, updatedAt: at, demoFixture: f.fixtureId });
