@@ -3648,3 +3648,46 @@ Harness note: my C1 / C2 rows used a delete hook that never fires on `6c1d115e`,
 **#484 `736ebd77`:** `run-all` passes all suites. The workflow is unchanged from `8f8c4530`; B's criteria 4–6 carry forward.
 
 **Status:** reviewed only. Nothing is accepted and nothing is dispatched. G2a and G1b are for W3 and the Director.
+
+## 36C · APP-FEEL-PARITY-1 cp1 F2 successor, head `7dc46cda757165855fb90ab6b9f9125dc06d8f94`, product `fe155375` (W9 #482 `5836824865`; Director `5835326729` / `5835521562`; W7 ACK `5837128756`): **F2 fixed (fail-before on `b497ce4c`, pass-after on `fe155375`); affected rows 12/12; no defect**
+
+**Lineage.** `f9ca3d5d` → `4c55be43` → `fe155375` → `7dc46cda`.
+- `fe155375..7dc46cda` changes only frames and `README.md`. I checked this by git, so `fe155375` is the product under test.
+- The product delta against `f9ca3d5d` is `sheetMotion.ts`, `contribute/[goalId].tsx` and `move/index.tsx`.
+- The build is emulator-flagged and stamped `fe155375`, served on 5018. `b497ce4c` on 5015 is the fail-before.
+
+**Instrument.** W7's spec now carries **hard F2 assertions** (soft-expect, so every row is reported):
+- on open, focus is inside the panel;
+- a 20-stop Tab / Shift+Tab sweep finds 0 stops outside the sheet in front;
+- focus stays inside the panel after each step replacement;
+- focus the member placed is kept.
+
+The same file ran on both builds, covering S1, S1k, S2, S3, S5s, S5r, R1, R1z, R2 and R3.
+
+| row | `b497ce4c` (fail-before) | `fe155375` |
+|---|---|---|
+| focus entry, one-goal sheet (4 tabs, and via keyboard Enter) | on the scrim, `DIV tabindex=0` with no role or name | on **`wsf-contribute-close`** (`BUTTON`, named), inside the panel, **PASS** |
+| Tab / Shift+Tab containment, one-goal sheet | 4 of 20 stops on `!wsf-contribute-scrim` | 0 outside; the stops are timer, done, skip and Close, **PASS** |
+| chooser containment | 3 of 12 stops on `!wsf-move-scrim` | 0 outside; the stops are the two choices and Close, **PASS** |
+| goal sheet opened **over** the chooser | entry on the scrim; stops outside | entry on Close; 0 outside the **topmost** panel, never the chooser beneath, **PASS** |
+| step replacement: done, count | `body` | the new step's `h1` (`wsf-contribute-entry-screen`), **PASS** |
+| typing in the count field (member-placed focus) | kept | **kept** on `wsf-contribute-entry`, **PASS** |
+| review | `body` | `h1` `wsf-contribute-review-screen`, **PASS** |
+| confirmed receipt | `body` | `h1` `wsf-contribute-result-headline`, **PASS** |
+| pending (INJECTED drop), and unknown after an INJECTED lost reply | `body` | `h1` `wsf-contribute-pending`, **PASS** |
+| return | focus to MOVE; chooser return to the choice | the same: Close gives focus to `wsf-member-tab-move`, and the goal sheet over the chooser returns focus to the chosen row, **PASS** |
+| exits: S1 on all 4 tabs, Escape, 390×640, reduced motion | one exit | one exit at +227–241 ms; Escape, one exit; reduced motion exits in +42–70 ms; scroll 166 → 166 and 300 → 300; 0 remounts, **PASS** |
+| R1 / R1z (Close, then Back at +40 ms), R2 (Close during resolution), R3 (reopen at +60 / +220 ms) | pass | pass: one exit each (`/you` +92–105 ms; community +95 ms); no late hand-off; a reopen at +220 ms is clean, **PASS** |
+
+**Counts.**
+- `fe155375`: **12 / 12**.
+- `b497ce4c`: 4 of 12 fail. S1, S1k and S2 fail only on the F2 assertions (scrim entry and stops outside). S3 fails on the step-focus assertions (`body`).
+- The 8 exit, race, short-screen and reduced-motion rows pass on both builds. That is expected: F2 changes focus only.
+
+**Limit.** For the chooser I measured containment (all stops inside) but did not sample its entry element separately before the sweep. W9 reports entry on `wsf-move-close`.
+
+**Carried, not rerun:** visual acceptance (Director `5835521562`), D1 / F3 (§36B), preservation and the event / kiosk specs (§36), and the steps rendering inside the sheet (re-observed in S3).
+
+**Limits:** Chromium web only. No Safari keyboard behaviour, no native focus, no assistive-technology session.
+
+**Status:** tested on `fe155375`. Nothing is accepted, integrated or staged.

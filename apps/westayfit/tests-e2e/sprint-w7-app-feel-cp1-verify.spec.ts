@@ -488,6 +488,9 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
         callables: entry.callables,
       });
       expect(probe.panel, 'no sheet panel').not.toBeNull();
+      // F2 (Check 36C): focus enters inside the panel, and no Tab stop is outside it.
+      expect.soft(probe.focusInPanel, `F2 ${tab}: focus entered on ${probe.focusDetail}`).toBe(true);
+      expect.soft(sweep.outsideStops, `F2 ${tab}: Tab stops outside the panel ${JSON.stringify(sweep.stops)}`).toBe(0);
       const t2 = Date.now();
       await (await sheetClose(page)).click();
       const tr = await trace(run, t2, 1_500);
@@ -519,6 +522,8 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     await page.keyboard.press('Escape');
     const tr = await trace(run, t2, 1_500);
     measure('S1k keyboard', { openMs: (await summarise(run, t, 'wsf-contribute-sheet-panel')).contentOnTopMs, probe, escape: tr, focusAfter: await focused(page) });
+    expect.soft(probe.focusInPanel, `F2 keyboard: focus entered on ${probe.focusDetail}`).toBe(true);
+    expect.soft(tr.paths, 'Escape is one exit').toHaveLength(1);
     await run.ctx.close();
   });
 
@@ -533,13 +538,20 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     await expect(shown(page, 'wsf-move-choose')).toBeVisible({ timeout: 40_000 });
     await page.waitForTimeout(700);
     const chooser = await summarise(run, t, 'wsf-move-sheet');
-    measure('S2 chooser', { frames: chooser.frames, probe: await sheetProbe(page, ORIGIN.home), focus: await focused(page), sweep: await tabSweep(page, 10, 2) });
+    const chooserSweep = await tabSweep(page, 10, 2);
+    const chooserFocus = await focused(page);
+    measure('S2 chooser', { frames: chooser.frames, probe: await sheetProbe(page, ORIGIN.home), focusBeforeSweep: chooserFocus, sweep: chooserSweep });
+    expect.soft(chooserSweep.outsideStops, `F2 chooser: stops outside ${JSON.stringify(chooserSweep.stops)}`).toBe(0);
     t = Date.now();
     await shown(page, `wsf-move-choose-${fx.goalIds[1]}`).click();
     await expect(shown(page, 'wsf-contribute-sheet-panel')).toBeVisible({ timeout: 40_000 });
     await page.waitForTimeout(700);
     const s = await summarise(run, t, 'wsf-contribute-sheet-panel');
-    measure('S2 goal sheet over chooser', { panelOnTopMs: s.contentOnTopMs, frames: s.frames, path: path(page), probe: await sheetProbe(page, ORIGIN.home), sweep: await tabSweep(page, 12, 2) });
+    const overProbe = await sheetProbe(page, ORIGIN.home);
+    const overSweep = await tabSweep(page, 12, 2);
+    measure('S2 goal sheet over chooser', { panelOnTopMs: s.contentOnTopMs, frames: s.frames, path: path(page), probe: overProbe, sweep: overSweep });
+    expect.soft(overProbe.focusInPanel, `F2 over chooser: focus entered on ${overProbe.focusDetail}`).toBe(true);
+    expect.soft(overSweep.outsideStops, `F2 over chooser: stops outside ${JSON.stringify(overSweep.stops)}`).toBe(0);
     t = Date.now();
     await (await sheetClose(page)).click();
     const tr = await trace(run, t, 1_500);
@@ -576,21 +588,37 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
       }, id);
     const title = () => page.locator('[data-testid="wsf-contribute-sheet-title"]:visible').first().innerText({ timeout: 2_000 }).catch(() => null);
     const rows: Record<string, unknown> = {};
+    const focusWhere = () =>
+      page.evaluate(() => {
+        const a = document.activeElement;
+        const panel = Array.from(document.querySelectorAll('[data-testid="wsf-contribute-sheet-panel"]')).find((e) => e.getBoundingClientRect().height > 0);
+        const id = (a?.closest('[data-testid]') as HTMLElement | null)?.getAttribute('data-testid') ?? a?.tagName ?? 'none';
+        return `${a?.tagName.toLowerCase()}${a?.getAttribute('role') ? '[' + a.getAttribute('role') + ']' : ''} ${id} ${panel && a && panel.contains(a) ? 'IN panel' : 'OUTSIDE panel'}`;
+      });
+    const stepFocus: Record<string, string> = {};
     await openOneGoalSheet(run);
+    stepFocus.open = await focusWhere();
     rows.move = { timer: await inPanel('wsf-contribute-timer'), title: await title() };
     await shown(page, 'wsf-contribute-timer-start').click();
     await page.waitForTimeout(1_300);
     rows.timerRunning = { clock: await shown(page, 'wsf-contribute-timer-clock').innerText(), where: await inPanel('wsf-contribute-timer-clock') };
     await shown(page, 'wsf-contribute-done').click();
     await expect(shown(page, 'wsf-contribute-entry')).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    stepFocus.afterDone = await focusWhere();
     rows.count = { where: await inPanel('wsf-contribute-entry'), title: await title() };
     await shown(page, 'wsf-contribute-entry').fill('20');
+    await page.waitForTimeout(800);
+    stepFocus.whileTyping = await focusWhere();
     await shown(page, 'wsf-contribute-review').click();
     await expect(shown(page, 'wsf-contribute-submit')).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    stepFocus.afterReview = await focusWhere();
     rows.review = { where: await inPanel('wsf-contribute-submit'), title: await title() };
     await shown(page, 'wsf-contribute-submit').click();
     await expect(shown(page, 'wsf-contribute-receipt')).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(600);
+    stepFocus.afterSubmit = await focusWhere();
     rows.confirmed = { where: await inPanel('wsf-contribute-receipt'), title: await title(), variant: await shown(page, 'wsf-contribute-receipt').getAttribute('data-variant'), probe: await sheetProbe(page, ORIGIN.home) };
 
     // Pending: the request is dropped (INJECTED).
@@ -610,12 +638,14 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
     await shown(page, 'wsf-contribute-submit').click();
     await expect(shown(page, 'wsf-contribute-pending')).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(600);
+    stepFocus.afterPending = await focusWhere();
     rows.pendingDropped = { where: await inPanel('wsf-contribute-pending'), title: await title(), text: (await shown(page, 'wsf-contribute-pending').innerText()).replace(/\s+/g, ' ').slice(0, 160) };
 
     // Unknown: the kept attempt is re-checked with its reply lost after the write (INJECTED).
     c.mode = 'landButDrop';
     await shown(page, 'wsf-contribute-reconcile').click();
     await page.waitForTimeout(2_500);
+    stepFocus.afterReconcileLost = await focusWhere();
     rows.afterReconcileLost = {
       pending: await inPanel('wsf-contribute-pending'),
       receipt: await inPanel('wsf-contribute-receipt'),
@@ -624,6 +654,9 @@ test.describe(`W7 Check 36 · APP-FEEL-PARITY-1 cp1 (${LABEL})`, () => {
       text: (await page.locator('[data-testid="wsf-contribute-sheet-panel"]:visible').first().innerText({ timeout: 2_000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 300),
     };
     measure('S3 steps', rows);
+    measure('S3 focus after each step replacement', stepFocus);
+    for (const [k, v] of Object.entries(stepFocus)) expect.soft(v, `F2 step focus ${k}`).toContain('IN panel');
+    expect.soft(stepFocus.whileTyping, 'member-placed focus kept').toContain('wsf-contribute-entry');
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await run.ctx.close();
   });
