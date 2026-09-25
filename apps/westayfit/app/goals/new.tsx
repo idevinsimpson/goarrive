@@ -24,6 +24,7 @@ import {
   wsfUsingEmulators,
 } from '../../src/firebase';
 import { type RepeatPolicy } from '../../src/contributionFlow';
+import { mapMovementSelection, type MovementKey } from '../../src/movementSelection';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { isValidTimeZone } from '../../src/ui/dates';
 import { DateTimeField, type DateTimeFieldHandle } from '../../src/ui/DateTimeField';
@@ -44,6 +45,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from '../../src/ui/kit';
+import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
@@ -397,6 +399,10 @@ export default function NewGoalPage() {
   const [title, setTitle] = useState('');
   const [target, setTarget] = useState('');
   const [unit, setUnit] = useState('');
+  // MOVEMENT-PILLS-1. Empty means the free-text unit above decides, exactly as
+  // before; the typed draft is kept while pills are chosen and comes back when
+  // they are cleared. See src/movementSelection.ts for what a choice maps to.
+  const [movements, setMovements] = useState<MovementKey[]>([]);
   // The start is "now" on the quarter hour, fixed when the page opens so the
   // line the Champion reads is the instant that is sent. Custom lets them
   // choose both ends; a preset derives the end from the start.
@@ -474,7 +480,12 @@ export default function NewGoalPage() {
   const windowInvalid =
     startsDate != null && endsDate != null && endsDate.getTime() <= startsDate.getTime();
   const targetNumber = wholeNumber(target);
-  const trimmedUnit = unit.trim();
+  const selection = mapMovementSelection(movements);
+  // The unit the goal will record: the movements' own when any are chosen
+  // and they can share a total, the typed words otherwise. A mixed choice has
+  // no unit at all, so nothing downstream can read one.
+  const trimmedUnit =
+    selection.kind === 'individual' ? selection.unit : selection.kind === 'mixed' ? '' : unit.trim();
   const definition = targetNumber !== null && trimmedUnit ? definitionPhrase(targetNumber, trimmedUnit) : null;
   const communityLabel = communityName ?? FALLBACK_COMMUNITY_NAME;
 
@@ -567,12 +578,19 @@ export default function NewGoalPage() {
       errors.target = 'Keep the target at 100,000,000 or less.';
     }
 
-    const trimmedUnit = unit.trim();
-    if (!trimmedUnit) {
+    const chosen = mapMovementSelection(movements);
+    const trimmedUnit =
+      chosen.kind === 'individual' ? chosen.unit : chosen.kind === 'mixed' ? '' : unit.trim();
+    if (chosen.kind === 'mixed') {
+      // Never added together, never submitted: the same sentence the picker
+      // already shows, as the field's own error.
+      errors.unit = chosen.message;
+    } else if (!trimmedUnit) {
       errors.unit = "Say what you're counting, like squats or miles.";
     } else if (trimmedUnit.length > 40) {
       errors.unit = 'Keep the unit to 40 characters or fewer.';
     }
+    const activityGuideKey = chosen.kind === 'individual' ? chosen.activityGuideKey : undefined;
 
     const start = parseLocalDateTime(startsAt);
     if (!start) {
@@ -613,6 +631,7 @@ export default function NewGoalPage() {
           endsAt: string;
           timezone: string;
           repeatPolicy: RepeatPolicy;
+          activityGuideKey?: string;
         },
         { goalId: string }
       >(getFirebaseFunctions(), 'wsfCreateGoal');
@@ -625,6 +644,9 @@ export default function NewGoalPage() {
         endsAt: end.toISOString(),
         timezone: trimmedTz,
         repeatPolicy,
+        // Only when a movement was chosen: a typed unit sends no key, so its
+        // goal is byte-identical to one created before this field was used.
+        ...(activityGuideKey ? { activityGuideKey } : {}),
       });
       setCreated({
         goalId: result.data.goalId,
@@ -647,6 +669,7 @@ export default function NewGoalPage() {
     title,
     target,
     unit,
+    movements,
     startsAt,
     endsAt,
     duration,
@@ -889,6 +912,37 @@ export default function NewGoalPage() {
           <FieldError message={fieldErrors.title} testID="wsf-new-goal-title-error" />
         </View>
         {/*
+          MOVEMENT-PILLS-1. One or several supported movements, or none — and
+          then the typed unit beside the target decides, as it always did. A
+          mix that cannot share one total says so here, before any submit, and
+          the submit stays off until it is resolved.
+        */}
+        <View ref={anchorRefs.unit} style={styles.movements}>
+          <MovementPicker
+            selected={movements}
+            onChange={(next) => {
+              setMovements(next);
+              clearFieldError('unit');
+            }}
+            disabled={submitting}
+            label="Movements"
+            testID="wsf-new-goal-movements"
+          />
+          {selection.kind === 'mixed' ? (
+            <Text
+              style={kit.errorText}
+              accessibilityRole={'alert' as never}
+              testID="wsf-new-goal-movements-mixed"
+            >
+              {selection.message}
+            </Text>
+          ) : selection.kind === 'individual' ? (
+            <Text style={kit.caption} testID="wsf-new-goal-movements-count">
+              {selection.countSentence}
+            </Text>
+          ) : null}
+        </View>
+        {/*
           The number and the unit read as one sentence, so they sit on one
           line where the words allow it and stack when they do not.
         */}
@@ -910,19 +964,27 @@ export default function NewGoalPage() {
             />
             <FieldError message={fieldErrors.target} testID="wsf-new-goal-target-error" />
           </View>
-          <View style={styles.pairUnit} ref={anchorRefs.unit}>
+          <View style={styles.pairUnit}>
             <Text style={kit.fieldLabel}>What you&apos;re counting</Text>
-            <TextField
-              ref={unitRef}
-              value={unit}
-              onChangeText={(v) => {
-                setUnit(v);
-                clearFieldError('unit');
-              }}
-              placeholder="e.g. squats"
-              editable={!submitting}
-              testID="wsf-new-goal-unit"
-            />
+            {movements.length === 0 ? (
+              <TextField
+                ref={unitRef}
+                value={unit}
+                onChangeText={(v) => {
+                  setUnit(v);
+                  clearFieldError('unit');
+                }}
+                placeholder="e.g. squats, or pick a movement"
+                editable={!submitting}
+                testID="wsf-new-goal-unit"
+              />
+            ) : (
+              // Chosen by the pills above: shown, not typed. Clearing the
+              // pills brings the typed draft back untouched.
+              <Text style={styles.unitChosen} testID="wsf-new-goal-unit-chosen">
+                {trimmedUnit || 'Choose movements counted the same way'}
+              </Text>
+            )}
             <FieldError message={fieldErrors.unit} testID="wsf-new-goal-unit-error" />
           </View>
         </View>
@@ -1069,6 +1131,9 @@ export default function NewGoalPage() {
           <SummaryRow label="Community" value={communityLabel} />
           <SummaryRow label="Goal" value={title.trim() || 'Not named yet'} />
           <SummaryRow label="Target" value={definition ?? 'Not set yet'} />
+          {selection.kind === 'individual' ? (
+            <SummaryRow label="Counting" value={selection.countSentence} />
+          ) : null}
           <SummaryRow
             label="Starts"
             value={startsDate ? describeMoment(startsDate, now) : 'Choose a start'}
@@ -1105,11 +1170,14 @@ export default function NewGoalPage() {
             <Pressable
               style={[
                 unresolved ? styles.commitSecondary : styles.primaryAction,
-                submitting && kit.primaryButtonDisabled,
+                (submitting || selection.kind === 'mixed') && kit.primaryButtonDisabled,
               ]}
               onPress={onSubmit}
-              disabled={submitting}
+              // A mixed choice has no contract to submit to; the reason is
+              // already on screen under the pills.
+              disabled={submitting || selection.kind === 'mixed'}
               accessibilityRole="button"
+              accessibilityState={{ disabled: submitting || selection.kind === 'mixed' }}
               testID="wsf-new-goal-submit"
             >
               <Text style={unresolved ? styles.commitSecondaryText : styles.primaryActionText}>
@@ -1419,6 +1487,15 @@ const styles = StyleSheet.create({
   pair: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   pairTarget: { flexGrow: 1, flexBasis: 120, minWidth: 110, gap: 2 },
   pairUnit: { flexGrow: 2, flexBasis: 150, minWidth: 140, gap: 2 },
+  movements: { gap: 6 },
+  unitChosen: {
+    color: NAVY,
+    fontSize: 16,
+    fontWeight: '700',
+    minHeight: 48,
+    textAlignVertical: 'center',
+    paddingVertical: 12,
+  },
 
   // The goal as one phrase — the payoff of the first section, not a caption.
   payoff: {
