@@ -36,7 +36,11 @@ const SEEDED_TOTAL = 1847;
 
 type Fx = { email: string; uid: string; groupId: string; goalIds: string[] };
 
-async function seed(tag: string, goals: number, opts: { secondCommunity?: boolean } = {}): Promise<Fx> {
+async function seed(
+  tag: string,
+  goals: number,
+  opts: { secondCommunity?: boolean; role?: 'member' | 'foundingChampion' } = {},
+): Promise<Fx> {
   const stamp = `${stampId()}${tag}`;
   const email = `wsf-w9-fr-${stamp}@example.com`;
   const uid = await seedVerifiedUser(email, PASSWORD);
@@ -46,7 +50,7 @@ async function seed(tag: string, goals: number, opts: { secondCommunity?: boolea
     groupId,
     displayName: 'Alpharetta Morning Movers',
     joinPolicy: 'private',
-    members: [{ uid, role: 'member' }],
+    members: [{ uid, role: opts.role ?? 'member' }],
   });
   if (opts.secondCommunity) {
     await seedCommunity({
@@ -196,6 +200,8 @@ type TabCase = {
   name: string;
   tab: string;
   root: string;
+  /** Whether this tab is long enough at 390x844 to hold a planted scroll. */
+  scrolls: boolean;
   open: (page: Page, fx: Fx) => Promise<void>;
 };
 
@@ -204,6 +210,7 @@ const TAB_CASES: TabCase[] = [
     name: 'Home',
     tab: 'wsf-member-tab-home',
     root: 'wsf-community',
+    scrolls: true,
     open: async (page, fx) => {
       await page.goto(`/community/${fx.groupId}`);
       await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 40_000 });
@@ -213,6 +220,7 @@ const TAB_CASES: TabCase[] = [
     name: 'Community',
     tab: 'wsf-member-tab-community',
     root: 'wsf-community-index',
+    scrolls: false,
     open: async (page, fx) => {
       await TAB_CASES[0]!.open(page, fx);
       await page.getByTestId('wsf-member-tab-community').last().click();
@@ -223,6 +231,7 @@ const TAB_CASES: TabCase[] = [
     name: 'You',
     tab: 'wsf-member-tab-you',
     root: 'wsf-you',
+    scrolls: false,
     open: async (page, fx) => {
       await TAB_CASES[0]!.open(page, fx);
       await page.getByTestId('wsf-member-tab-you').last().click();
@@ -242,6 +251,8 @@ test.describe('FOCUS-RETURN-1 · focus goes back to the opener', () => {
       await signInVia(page, fx.email, PASSWORD);
       await c.open(page, fx);
       const planted = await plantScroll(page, c.root, 160);
+      measure(`${c.name} · planted scroll`, planted);
+      if (c.scrolls) expect(planted ?? 0, `${c.name}: the planted scroll is not vacuous`).toBeGreaterThan(40);
 
       // Close, by keyboard.
       await openMoveSheet(page);
@@ -253,8 +264,11 @@ test.describe('FOCUS-RETURN-1 · focus goes back to the opener', () => {
       expect(await currentTab(page), `${c.name} is still the current tab`).toBe(c.tab);
       expect(await scrollAbove(page, c.root), `${c.name} kept its scroll`).toBe(planted);
 
-      // Escape.
+      // Escape, pressed from inside the sheet: focus has to leave MOVE for
+      // the return to mean anything.
       await openMoveSheet(page);
+      await page.locator('[data-testid="wsf-move-close"]:visible').first().focus();
+      expect(await focusedId(page), 'focus is inside the sheet before Escape').toBe('wsf-move-close');
       await page.keyboard.press('Escape');
       await expectSheetClosed(page, 'Escape');
       await page.waitForTimeout(300);
@@ -273,8 +287,11 @@ test.describe('FOCUS-RETURN-1 · focus goes back to the opener', () => {
     const launcherId = `wsf-community-goal-record-${fx.goalIds[0]}`;
     const launcher = page.locator(`[data-testid="${launcherId}"]:visible`).first();
     await expect(launcher).toBeVisible({ timeout: 40_000 });
+    await plantScroll(page, 'wsf-community', 60);
     await launcher.focus();
     const before = await scrollAbove(page, 'wsf-community');
+    measure('hero launcher · scroll at the press', before);
+    expect(before ?? 0, 'Home is scrolled when the launcher is pressed').toBeGreaterThan(0);
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible')).toBeVisible({ timeout: 40_000 });
 
@@ -388,6 +405,55 @@ test.describe('FOCUS-RETURN-1 · focus goes back to the opener', () => {
 
 test.describe('FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body', () => {
   test.use({ viewport: PHONE, deviceScaleFactor: 2 });
+
+  test('a contribution opened from Goal Setup: “Back to home” focuses the community’s heading, not body', async ({ page }) => {
+    test.setTimeout(240_000);
+    // Goal Setup covered the tabs, and the contribution opened from its
+    // receipt is what closes onto them. Goal Setup's opener went with it.
+    const fx = await seed('a', 0, { role: 'foundingChampion' });
+    await signInVia(page, fx.email, PASSWORD);
+    await page.goto(`/community/${fx.groupId}`);
+    await pressByKeyboard(page, 'wsf-community-start-goal');
+    await expect(page.locator('[data-testid="wsf-new-goal-form"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.locator('[data-testid="wsf-new-goal-title"]:visible').first().fill('Squats together this week');
+    await page.locator('[data-testid="wsf-new-goal-target"]:visible').first().fill('500');
+    await page.locator('[data-testid="wsf-new-goal-unit"]:visible').first().fill('squats');
+    await page.locator('[data-testid="wsf-new-goal-submit"]:visible').first().click();
+    await expect(page.locator('[data-testid="wsf-new-goal-created"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.locator('[data-testid="wsf-new-goal-goto-contribute"]:visible').first().click();
+    await recordTwenty(page);
+
+    const exit = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
+    await expect(exit).toHaveText('Back to home', { timeout: 30_000 });
+    await pressByKeyboard(page, 'wsf-contribute-back');
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 40_000 }).toBe(`/community/${fx.groupId}`);
+    await page.waitForTimeout(300);
+    measure('Goal Setup · contribution · Back to home', { focus: await focusedId(page), tab: await currentTab(page) });
+    await expectFocus(page, 'wsf-community-name', 'the landed heading takes focus');
+  });
+
+  test('a restored control that is then taken away: focus moves on to the heading, not body', async ({ page }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('r', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await TAB_CASES[0]!.open(page, fx);
+    const launcherId = `wsf-community-goal-record-${fx.goalIds[0]}`;
+    await pressByKeyboard(page, launcherId);
+    await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    await pressByKeyboard(page, 'wsf-contribute-back');
+    await expectFocus(page, launcherId, 'Back returns focus to the launcher');
+    // LABELLED INJECTION: the community drops the control a moment after the
+    // return, as a refresh that finds the goal closed would.
+    await page.evaluate((id) => {
+      const el = Array.from(document.querySelectorAll(`[data-testid="${id}"]`)).find(
+        (e) => (e as HTMLElement).getClientRects().length > 0,
+      );
+      el?.remove();
+    }, launcherId);
+    await page.waitForTimeout(300);
+    measure('launcher taken away after the return', { focus: await focusedId(page) });
+    await expectFocus(page, 'wsf-community-name', 'focus moves on to the heading');
+  });
 
   test('cold arrivals: Back from a contribution opened directly, and Close on MOVE opened directly, focus the community’s heading', async ({ page }) => {
     test.setTimeout(240_000);

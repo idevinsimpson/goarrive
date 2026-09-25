@@ -88,13 +88,16 @@ function followAttention(root: () => HTMLElement | null): { trail: Trail; stop: 
 
 function openerFrom(root: HTMLElement | null, trail: Trail): Opener {
   const active = document.activeElement as HTMLElement | null;
-  let node: HTMLElement | null = null;
-  if (root && active && active !== document.body && root.contains(active)) node = active;
-  else {
-    const f = trail.focus;
-    const p = trail.pointer;
-    node = (f && p ? (p.at > f.at ? p.el : f.el) : (f?.el ?? p?.el)) ?? null;
+  const candidates: Array<{ el: HTMLElement; at: number }> = [];
+  if (root && active && active !== document.body && root.contains(active)) {
+    candidates.push({ el: active, at: trail.focus?.el === active ? trail.focus.at : 0 });
+  } else if (trail.focus) {
+    candidates.push(trail.focus);
   }
+  // A press that did not move focus (a tap in Safari) is still the member's
+  // latest act, and beats a control that was merely left focused earlier.
+  if (trail.pointer) candidates.push(trail.pointer);
+  const node = candidates.sort((a, b) => b.at - a.at)[0]?.el ?? null;
   return { node, testId: node?.getAttribute('data-testid') ?? null };
 }
 
@@ -136,11 +139,19 @@ function target(root: HTMLElement, opener: Opener | null, fallbacks: Fallback[],
   return null;
 }
 
+/** How long to wait for somewhere to put focus, and to watch it once put. */
+const SEEK_MS = 5_000;
+const WATCH_MS = 3_000;
+/** How many times a landing that is then taken away is made again. */
+const MAX_RELANDS = 3;
+
 /**
  * Put focus back once the closing flow has actually left: while its own
  * control is still shown, focus is "elsewhere" and this waits. It keeps
- * watching for a moment after it lands, because a screen that rebuilds the
- * opener would otherwise drop focus back onto `body` a frame later.
+ * watching after it lands, because a screen that refreshes on return (the
+ * community re-reads its goals) can rebuild or drop the control a moment
+ * later; when that takes focus away again, the search starts over, with the
+ * same waits, so the opener found again, the heading, or the tab.
  */
 export function returnFocusSoon(
   root: () => HTMLElement | null,
@@ -148,8 +159,9 @@ export function returnFocusSoon(
   fallbacks: Fallback[],
 ): () => void {
   if (!onWeb()) return () => {};
-  const started = performance.now();
+  let since = performance.now();
   let landedAt: number | null = null;
+  let relands = 0;
   let stopped = false;
   const tick = () => {
     if (stopped) return;
@@ -159,15 +171,21 @@ export function returnFocusSoon(
       const where = focusIsLost(r);
       if (where === 'member' && landedAt === null) return; // the member got there first
       if (where === 'lost') {
-        const el = target(r, opener, fallbacks, now - started);
+        if (landedAt !== null) {
+          if (relands >= MAX_RELANDS) return;
+          relands += 1;
+          landedAt = null;
+          since = now;
+        }
+        const el = target(r, opener, fallbacks, now - since);
         if (el) {
           el.focus({ preventScroll: true });
-          if (document.activeElement === el && landedAt === null) landedAt = now;
+          if (document.activeElement === el) landedAt = now;
         }
       }
     }
-    const budget = landedAt === null ? 5_000 : landedAt + 1_000 - started;
-    if (now - started < budget) requestAnimationFrame(tick);
+    const until = landedAt === null ? since + SEEK_MS : landedAt + WATCH_MS;
+    if (now < until) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
   return () => {
@@ -232,13 +250,30 @@ export function useTabsFocusReturn(container: RefObject<unknown>): void {
       const top = s?.routes?.[s.index ?? 0]?.name;
       return Boolean(top && FLOW_ROUTES.has(top));
     };
+    /*
+      WHAT LAST COVERED THE TABS, and not only what first did: a contribution
+      can be opened from another flow (Goal Setup's receipt), and it is the
+      contribution that closes onto the tabs. Its opener went with the flow
+      beneath it, so the landed screen's heading takes focus.
+    */
+    let lastCovering: string | null = null;
+    const offState = navigation.addListener('state', () => {
+      if (navigation.isFocused()) return;
+      const s = navigation.getState();
+      lastCovering = s?.routes?.[s.index ?? 0]?.name ?? null;
+    });
     const offBlur = navigation.addListener('blur', () => {
+      // Whatever was still being restored is behind the new flow now.
+      cancel();
+      lastCovering = null;
       armed = coveringFlow() ? openerFrom(root(), attention.trail) : null;
     });
     const offFocus = navigation.addListener('focus', () => {
-      if (!armed) return;
-      const opener = armed;
+      const opener =
+        armed ?? (lastCovering && FLOW_ROUTES.has(lastCovering) ? { node: null, testId: null } : null);
       armed = null;
+      lastCovering = null;
+      if (!opener) return;
       cancel();
       cancel = returnFocusSoon(root, opener, TAB_FALLBACKS);
     });
@@ -256,6 +291,7 @@ export function useTabsFocusReturn(container: RefObject<unknown>): void {
 
     return () => {
       cancel();
+      offState();
       offBlur();
       offFocus();
       attention.stop();
@@ -277,6 +313,7 @@ export function useSheetFocusReturn(container: RefObject<unknown>): void {
     let opener: Opener | null = null;
     let cancel: () => void = () => {};
     const offBlur = navigation.addListener('blur', () => {
+      cancel();
       opener = openerFrom(root(), attention.trail);
     });
     const offFocus = navigation.addListener('focus', () => {
