@@ -16,6 +16,7 @@ const suites = [
   'verify-deployment.test.mjs',
   'check-hosting-routes.test.mjs',
   'mail-preflight-domain.test.mjs',
+  'social-privacy-postop.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

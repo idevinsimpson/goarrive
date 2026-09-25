@@ -74,6 +74,13 @@ on:
           # added here runs nothing until a job names it. Only the preflight
           # job names this one.
           - mail-preflight
+          # `social-privacy` verifies the per-community privacy switches
+          # against staging as it stands, at the callable boundary, with
+          # synthetic members. No build, no deploy, no browser, no 24-row
+          # suite. It probes the three social services' transport first and
+          # writes NOTHING while wsfSetCommunityVisibility is SHUT, so it is
+          # safe to run before and after the operator's Operation 2.
+          - social-privacy
 
       # WHY A RECOVERY MODE EXISTS.
       # Run 35495928362 created synthetic users and documents on staging and
@@ -119,7 +126,7 @@ jobs:
     # drag a gate (or the privileged config job behind it) along with it.
     # An explicit list, never a negation: a mode added later has to be named
     # here to get a credential.
-    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' }}
+    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -151,7 +158,7 @@ jobs:
     # Same list as the gate. A skipped `needs` already skips this job, but
     # stating the condition means the reachability of every privileged job can
     # be read off its own `if:` rather than inferred through the graph.
-    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' }}
+    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: wsf-staging
@@ -883,6 +890,118 @@ jobs:
           [ "${{ steps.journey.outcome }}" = "success" ] \
             || { echo "::error::the browser/player journey did not pass"; exit 1; }
           [ "${{ steps.scan-player-evidence.outcome }}" = "success" ] \
+            || { echo "::error::the evidence scan rejected this run's evidence"; exit 1; }
+
+  # ------------------------------------------------------- social-privacy ----
+  # PRIVACY-POSTOP-VERIFY-1 (Director #396 5840669584): the seven per-community
+  # privacy rows, against staging as it stands. It needs the staging Web App's
+  # public SDK config (for synthetic sign-in), so it follows `config`; the gate
+  # runs only because `config` depends on it. It checks out NO candidate code
+  # and opens no browser: every row is a callable or REST read, driven by the
+  # reviewed harness in this directory.
+  #
+  # WHAT IT PROVES AND WHEN. It first probes the three social services with
+  # an unauthenticated call. While wsfSetCommunityVisibility is SHUT every row
+  # is BLOCKED, nothing is written and the job fails with that reason. After
+  # the operator's Operation 2 read-back, the same dispatch runs the seven
+  # rows; a missing composite index BLOCKS only the rows that read activity.
+  # Only a full pass prints SOCIAL_PRIVACY_READY=true.
+  social-privacy:
+    needs: [gate, config]
+    if: ${{ inputs.mode == 'social-privacy' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # For google-auth-library only (token minting), exactly as the other
+      # privileged jobs obtain it; lifecycle scripts never run here.
+      - name: Install pinned deployment tooling
+        run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-staging-env
+          path: cfg
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Run the per-community privacy verification
+        id: privacy
+        env:
+          WSF_PRIVACY_TARGET: staging
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-privacy-evidence
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-privacy-evidence/cleanup-manifest.json
+        run: |
+          set -euo pipefail
+          set -a; . cfg/wsf-staging.env; set +a
+          export WSF_SDK_CONFIG_FILE="$RUNNER_TEMP/wsf-sdk/wsf-sdk-config.json"
+          node ops/.github/wsf-staging/write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/social-privacy-postop.mjs
+
+      - name: Re-authenticate before cleanup
+        if: always()
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Remove synthetic fixtures
+        if: always()
+        env:
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-privacy-evidence/cleanup-manifest.json
+          WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-privacy-evidence/cleanup-receipt.json
+        run: |
+          set -euo pipefail
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      - name: Scan evidence before upload
+        id: scan-privacy-evidence
+        if: always()
+        run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-privacy-evidence"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-privacy-evidence.outcome == 'success' }}
+        with:
+          name: wsf-privacy-evidence
+          path: wsf-privacy-evidence
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Require the privacy verification and the scan to have passed
+        if: always()
+        run: |
+          set -euo pipefail
+          [ "${{ steps.privacy.outcome }}" = "success" ] \
+            || { echo "::error::the privacy verification did not pass (see SOCIAL_PRIVACY_VERDICT and the BLOCKED/FAIL rows above)"; exit 1; }
+          [ "${{ steps.scan-privacy-evidence.outcome }}" = "success" ] \
             || { echo "::error::the evidence scan rejected this run's evidence"; exit 1; }
 
   # ----------------------------------------------------- cleanup-recovery ----

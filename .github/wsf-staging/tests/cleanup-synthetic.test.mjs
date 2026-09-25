@@ -759,6 +759,7 @@ await test('EVERY harness’s real generated run tag is one the cleaner accepts'
   const harnesses = [
     ['hosted-package-e-smoke.mjs', 'e5h-'],
     ['hosted-player-journey.mjs', 'e5j-'],
+    ['social-privacy-postop.mjs', 'e5p-'],
   ];
   for (const [file, expectedPrefix] of harnesses) {
     const src = fs.readFileSync(path.resolve('.github/wsf-staging', file), 'utf8');
@@ -776,7 +777,7 @@ await test('EVERY harness’s real generated run tag is one the cleaner accepts'
 
 await test('the owned-prefix list names every harness, so adding one cannot be a silent regex edit', async () => {
   const { OWNED_RUN_TAG_PREFIXES } = await import('../run-tag.mjs');
-  assert.deepEqual(Object.keys(OWNED_RUN_TAG_PREFIXES).sort(), ['e5h-', 'e5j-']);
+  assert.deepEqual(Object.keys(OWNED_RUN_TAG_PREFIXES).sort(), ['e5h-', 'e5j-', 'e5p-']);
   for (const [prefix, owner] of Object.entries(OWNED_RUN_TAG_PREFIXES)) {
     assert.ok(/\.mjs/.test(owner), `${prefix} does not name the harness that mints it`);
     assert.ok(
