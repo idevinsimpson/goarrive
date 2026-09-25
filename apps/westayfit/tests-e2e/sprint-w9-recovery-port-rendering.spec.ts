@@ -355,9 +355,13 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
     // Read the label once the community is verified: the context that used to
     // make it say "Back to community" while it returned to You.
     await expect(page.locator('[data-testid="wsf-contribute-community"]:visible')).toBeVisible({ timeout: 40_000 });
-    const ownBack = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
-    await expect(ownBack, 'the route\'s own Back names no place').toHaveText('Back');
-    await expect(ownBack).toHaveAccessibleName('Back');
+    // APP-FEEL-PARITY-1: from a tab, MOVE's flow is a sheet over that tab, and
+    // its own way back is the sheet's Close -- still naming no place, still
+    // returning to the actual opener. (The page flow's Back, opened cold or
+    // from "Already moved?", is asserted "Back" above and below.)
+    const ownBack = page.locator('[data-testid="wsf-contribute-close"]:visible').first();
+    await expect(ownBack, 'the flow\'s own way back names no place').toHaveText('Close');
+    await expect(ownBack).toHaveAccessibleName('Close');
     measure('MOVE centre (from You) → contribute', {
       path: new URL(page.url()).pathname,
       ownBackLabel: await ownBack.innerText(),

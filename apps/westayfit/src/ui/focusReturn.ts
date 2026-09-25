@@ -2,6 +2,8 @@ import { useNavigation } from 'expo-router';
 import { useEffect, type RefObject } from 'react';
 import { Platform } from 'react-native';
 
+import { setInert } from './sheetMotion';
+
 /**
  * FOCUS GOES BACK TO WHERE THE MEMBER WAS.
  *
@@ -280,8 +282,19 @@ export function useTabsFocusReturn(container: RefObject<unknown>): void {
       cancel();
       lastCovering = null;
       armed = coveringFlow() ? openerFrom(root(), attention.trail) : null;
+      /*
+        APP-FEEL-PARITY-1. THE TAB BEHIND A SHEET IS SHOWN, NOT USABLE. Both
+        flows are presented over the mounted tab, which stays painted behind
+        the scrim. The scrim already stops a pointer; `inert` stops the
+        keyboard and assistive technology too, as the reference's shell does
+        (`bg.setAttribute("inert", "")`). The opener is noted first: making
+        the tree inert drops focus out of it.
+      */
+      if (armed) setInert(root(), true);
     });
     const offFocus = navigation.addListener('focus', () => {
+      // Usable again before anything tries to put focus back into it.
+      setInert(root(), false);
       const opener =
         armed ?? (lastCovering && FLOW_ROUTES.has(lastCovering) ? { node: null, testId: null } : null);
       armed = null;
@@ -308,6 +321,7 @@ export function useTabsFocusReturn(container: RefObject<unknown>): void {
       offBlur();
       offFocus();
       attention.stop();
+      setInert(root(), false);
     };
   }, [container, navigation]);
 }
@@ -328,8 +342,12 @@ export function useSheetFocusReturn(container: RefObject<unknown>): void {
     const offBlur = navigation.addListener('blur', () => {
       cancel();
       opener = openerFrom(root(), attention.trail);
+      // The chosen goal's flow is a sheet over this one: this one is shown
+      // behind it and not usable, like the tab behind both.
+      setInert(root(), true);
     });
     const offFocus = navigation.addListener('focus', () => {
+      setInert(root(), false);
       if (!opener) return;
       const o = opener;
       opener = null;
@@ -341,6 +359,7 @@ export function useSheetFocusReturn(container: RefObject<unknown>): void {
       offBlur();
       offFocus();
       attention.stop();
+      setInert(root(), false);
     };
   }, [container, navigation]);
 }

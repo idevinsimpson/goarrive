@@ -1789,13 +1789,53 @@ export default function CommunityPage() {
     return <AuthFlagOffPanel title="Your community" testID="wsf-community-disabled" />;
   }
 
+  /*
+    APP-FEEL-PARITY-1. LOADING IS THE PAGE IT WILL BECOME, NOT ANOTHER PAGE.
+
+    This branch used to mount `FormShell` -- the identity funnel's own
+    composition, with its own wordmark and a "Your community" heading -- under
+    the member shell's persistent top bar. For the second or so this screen
+    waits on its reads, the member saw two mastheads and a stand-in heading,
+    then the whole page swapped for a different one: the owner's "duplicate
+    Home header" frame (Director #365 `5834082617` §A.2).
+
+    It is now the ready composition's own geometry -- the same scroll, column
+    and identity block, and the hero's navy shape -- with nothing in it that
+    has not been read yet: no name, no count, no total, and no heading until
+    there is a name to be one. The one sentence is a polite status, so a
+    screen reader hears that something is on its way without a fake title.
+  */
   if (state.kind === 'loading' || !ready) {
     return (
-      <FormShell heading="Your community" testID="wsf-community-loading">
-        <View {...({ 'data-state': 'loading' } as Record<string, unknown>)}>
-          <Text style={kit.statusText}>Loading…</Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.container}
+        testID="wsf-community-loading"
+        {...({ 'data-state': 'loading' } as Record<string, unknown>)}
+      >
+        <View style={styles.inner}>
+          <View style={styles.identity}>
+            <Text style={styles.identityEyebrow}>Your community</Text>
+            <View
+              style={styles.loadingName}
+              {...({ 'aria-hidden': true } as Record<string, unknown>)}
+            />
+            <View
+              style={styles.loadingPresence}
+              {...({ 'aria-hidden': true } as Record<string, unknown>)}
+            />
+          </View>
+          <View style={[styles.hero, styles.loadingHero]}>
+            <Text
+              style={styles.loadingStatus}
+              testID="wsf-community-loading-status"
+              {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+            >
+              Loading your community…
+            </Text>
+          </View>
         </View>
-      </FormShell>
+      </ScrollView>
     );
   }
 
@@ -4456,6 +4496,12 @@ const styles = StyleSheet.create({
   // page had; four sections at 18 spent most of what the shorter hero freed.
   inner: { maxWidth: 640, width: '100%', gap: 14 },
   identity: { gap: 2 },
+  // The loading composition's placeholders: the name's line and the presence
+  // band's height, in the ground's own quiet tone.
+  loadingName: { height: 30, width: '62%', borderRadius: 8, backgroundColor: '#ECE8E0', marginTop: 4 },
+  loadingPresence: { height: 16, width: '40%', borderRadius: 8, backgroundColor: '#F1EEE7', marginTop: 8 },
+  loadingHero: { minHeight: 260, alignItems: 'center', justifyContent: 'center' },
+  loadingStatus: { color: 'rgba(247,245,240,0.72)', fontSize: 14, fontWeight: '600' },
   // HOME-POLISH-1. 10 -> 11, the reference's eyebrow size.
   identityEyebrow: {
     color: ACTION_GREEN_DEEP,

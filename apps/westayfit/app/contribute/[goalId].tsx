@@ -86,6 +86,17 @@ import {
   shellAppliesTo,
 } from '../../src/ui/MemberTabBar';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
+import { isMoveSheetRoute } from '../../src/ui/moveSheetRoute';
+import {
+  ensureSheetMotionCss,
+  sheetData,
+  takeSheetHandoff,
+  SCRIM_PROPS,
+  useSheetExit,
+  useSheetFocusContainment,
+} from '../../src/ui/sheetMotion';
+import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
 // surfaces without a manual refresh. Matches GOAL_PULSE_CACHE_TTL_MS in
@@ -360,6 +371,64 @@ export default function ContributeToGoal() {
   // clear and reserving space for one would leave a band of nothing at the
   // bottom of a screen that has no bar.
   const shellBarShown = Boolean(user) && shellAppliesTo(pathname, { kiosk: params.kiosk });
+  /*
+    APP-FEEL-PARITY-1. MOVE'S FLOW IS A SHEET OVER THE MEMBER'S TAB.
+
+    The root stack presents this route as a transparent modal exactly when
+    `isMoveSheetRoute` holds (move mode, not a kiosk, the member's tabs or the
+    MOVE sheet directly beneath), and this screen asks the same question so
+    it draws what the stack presents: a scrim over the tab, which stays
+    mounted, painted and inert, and a bounded panel with one named Close.
+    Every step runs inside it -- the timer, the count, the review, pending,
+    unknown and the receipt -- because a member who pressed MOVE is still on
+    their tab until they leave it. Anything else is the page it always was.
+
+    Asked once, when the flow opens: nothing beneath a route is removed while
+    it is open, and a flow that changed presentation mid-journey would be a
+    worse surprise than either.
+  */
+  const rootNavigation = useNavigation();
+  const [asSheet] = useState<boolean>(() => {
+    const st = rootNavigation.getState() as
+      | { index?: number; routes: { key: string; name: string; params?: object }[] }
+      | undefined;
+    const me = st?.routes?.[st.index ?? 0];
+    return Boolean(me) && isMoveSheetRoute(me!, st);
+  });
+  // Over MOVE's chooser, which already dims the tab: one dim, not two.
+  const [overMoveSheet] = useState<boolean>(() => {
+    if (!asSheet) return false;
+    const st = rootNavigation.getState() as { index?: number; routes: { name: string }[] } | undefined;
+    return st?.routes?.[(st.index ?? 0) - 1]?.name === 'move/index';
+  });
+  // Installed before the first paint of the sheet, so its entry is animated
+  // from the first frame rather than from whenever an effect ran.
+  const [sheetHandoff] = useState<boolean>(() => {
+    if (!asSheet) return false;
+    ensureSheetMotionCss();
+    return takeSheetHandoff();
+  });
+  const reducedMotion = useReducedMotion();
+  const safeArea = useSafeAreaInsets();
+  const { phase: sheetPhase, exit: exitSheet } = useSheetExit(reducedMotion);
+  const sheetRef = useRef<View>(null);
+  // The dialog panel itself: focus enters, stays and re-orients here (F2).
+  const sheetPanelRef = useRef<View>(null);
+  const closeSheetRef = useRef<() => void>(() => undefined);
+  /*
+    ESCAPE IS CLOSE, while this sheet is the screen in front: the same path as
+    the Close control and the scrim.
+  */
+  useEffect(() => {
+    if (!asSheet || typeof document === 'undefined') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || !rootNavigation.isFocused()) return;
+      e.preventDefault();
+      closeSheetRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [asSheet, rootNavigation]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
@@ -1121,6 +1190,15 @@ export default function ContributeToGoal() {
   const backHref = context.kind === 'verified' ? `/community/${context.groupId}` : '/';
   const backLabel = context.kind === 'verified' ? 'Back to community' : 'Back to home';
   /*
+    CLOSE TRAVELS OUT, THEN GOES BACK. It returns exactly where the Back of
+    the page flow does (`returnToMemberContext`: the tab the member pressed
+    MOVE on, with its scroll, or the MOVE chooser), after the reference's
+    180 ms exit. One press is one exit: Close, Escape and the scrim pressed
+    together still pop once. Reduced motion goes straight there.
+  */
+  const closeSheet = () => exitSheet(() => returnToMemberContext(backHref));
+  closeSheetRef.current = closeSheet;
+  /*
     THE RECEIPT ON A SHORT PHONE. The mark was sized from WIDTH alone, so on a
     390x640 the celebration filled the viewport and pushed "Record more" and
     "Back to community" below the fold -- the member is congratulated and then
@@ -1167,8 +1245,14 @@ export default function ContributeToGoal() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [renderedPhase]);
+  // In MOVE's sheet: focus enters the panel on Close, Tab stays in the panel,
+  // and a step that replaces the member's step re-orients focus inside it.
+  useSheetFocusContainment(sheetPanelRef, asSheet, asSheet ? renderedPhase : null);
 
-  const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light') => (
+  const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light') =>
+    // In the sheet, its own header carries the title and Close: a wordmark and
+    // a Back inside it would be a second masthead over the member's own tab.
+    asSheet ? null : (
     <View style={styles.chrome}>
       <WsfWordmark
         variant={tone === 'dark' ? 'white' : 'navy'}
@@ -1344,11 +1428,21 @@ export default function ContributeToGoal() {
     it has no Close in its header -- the ways out stay the route's own labelled
     exits (Director ruling `5821650392` §3, recorded as a difference on #474).
   */
-  const renderSheetHead = (title: string) => (
-    <View style={styles.sheetHead}>
-      <Text style={styles.sheetTitle}>{title}</Text>
-    </View>
-  );
+  /*
+    In MOVE's sheet the step's title moves up into the sheet's own header,
+    beside Close, as the reference draws it: one surface, one header. The
+    branch below names its title while it builds its children, and `screen()`
+    reads it when it wraps them -- both in the same render, in that order.
+  */
+  let sheetTitle = params.mode === 'move' ? 'Start moving' : 'Already moved';
+  const renderSheetHead = (title: string) => {
+    sheetTitle = title;
+    return asSheet ? null : (
+      <View style={styles.sheetHead}>
+        <Text style={styles.sheetTitle}>{title}</Text>
+      </View>
+    );
+  };
 
   const renderTestNote = () =>
     wsfUsingEmulators ? (
@@ -1364,7 +1458,80 @@ export default function ContributeToGoal() {
    * celebration inside a card is a card, and the approved target has the
    * moment owning the screen.
    */
-  const screen = (children: React.ReactNode, testID?: string, tone: 'light' | 'dark' = 'light') => (
+  const screen = (children: React.ReactNode, testID?: string, tone: 'light' | 'dark' = 'light') =>
+    asSheet ? (
+      /*
+        THE SHEET. The scrim is the whole viewport, which is what keeps the
+        tab behind from being touched as well as what dims it; pressing it is
+        Close. It is not a stop in the keyboard order -- Close is. The panel
+        is bounded, so the member's tab stays identifiable above it, and it
+        takes the step's tone: the confirmed receipt is navy here too.
+      */
+      <View ref={sheetRef} style={styles.sheetRoot} testID="wsf-contribute-sheet">
+        <Pressable
+          style={[styles.sheetScrim, overMoveSheet ? styles.sheetScrimClear : null]}
+          onPress={closeSheet}
+          {...SCRIM_PROPS}
+          testID="wsf-contribute-scrim"
+          {...(sheetData('scrim', sheetPhase === 'out' ? 'out' : sheetHandoff ? 'rest' : 'in') as object)}
+        />
+        <View
+          ref={sheetPanelRef}
+          style={[
+            styles.sheetPanel,
+            tone === 'dark' ? styles.sheetPanelDark : null,
+            { paddingBottom: safeArea.bottom + 8 },
+          ]}
+          testID="wsf-contribute-sheet-panel"
+          {...({ role: 'dialog', 'aria-modal': true, 'aria-label': sheetTitle } as Record<string, unknown>)}
+          {...(sheetData('panel', sheetPhase) as object)}
+        >
+          <View style={[styles.sheetBar, tone === 'dark' ? styles.sheetBarDark : null]}>
+            <View pointerEvents="none" style={styles.sheetGrabber} />
+            <Text
+              style={[styles.sheetBarTitle, tone === 'dark' ? styles.sheetBarTitleDark : null]}
+              testID="wsf-contribute-sheet-title"
+              numberOfLines={1}
+            >
+              {sheetTitle}
+            </Text>
+            {/*
+              CLOSE, NOT A DESTINATION. It returns to whatever the sheet is
+              over. Its own testID: `wsf-contribute-back` stays the name of
+              the page flow's Back and of the outcome exits ("Back to
+              community" / "Back to home"), which the receipt still carries
+              inside this sheet. One name for two different controls on one
+              screen made "the exit" ambiguous (measured: a receipt spec
+              reading the first `wsf-contribute-back` got "Close").
+            */}
+            <Pressable
+              onPress={closeSheet}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              style={styles.sheetClose}
+              testID="wsf-contribute-close"
+            >
+              <Text style={[styles.sheetCloseText, tone === 'dark' ? styles.sheetCloseTextDark : null]}>
+                Close
+              </Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.sheetScroll}
+            contentContainerStyle={[
+              styles.container,
+              styles.sheetContainer,
+              tone === 'dark' ? styles.containerDark : null,
+            ]}
+            keyboardShouldPersistTaps="handled"
+            testID={testID}
+          >
+            <View style={styles.inner}>{children}</View>
+          </ScrollView>
+        </View>
+      </View>
+    ) : (
     /*
       The wrapper paints the band below the scroll view in the screen's own
       tone, so the raised action sits on the page's ground exactly as it did
@@ -2398,6 +2565,65 @@ const styles = StyleSheet.create({
   kioskNotice: { color: NAVY, fontSize: 17, lineHeight: 24, fontWeight: '700' },
   kioskError: { color: '#8A1C1C', fontSize: 15, lineHeight: 21, fontWeight: '700' },
   kioskCountdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
+
+  // ---- MOVE's sheet (APP-FEEL-PARITY-1) ----------------------------------
+  /* The route's own ground is transparent (set on the root stack), so the
+     panel sits at the bottom with the member's tab above it. */
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  /* The same scrim as the MOVE resolver's sheet, so the hand-off between the
+     two is one continuous dim rather than two. */
+  sheetScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,31,53,0.42)' },
+  sheetScrimClear: { backgroundColor: 'transparent' },
+  sheetPanel: {
+    /* Tall enough for the count and its keypad on a 390x640, bounded so the
+       tab behind stays identifiable. */
+    maxHeight: '92%',
+    backgroundColor: CREAM,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    borderColor: '#E3E7E1',
+    overflow: 'hidden',
+    ...elevation.hero,
+  },
+  sheetPanelDark: { backgroundColor: NAVY, borderColor: NAVY },
+  sheetBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 52,
+    paddingLeft: 20,
+    paddingRight: 10,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E6E2DA',
+  },
+  sheetBarDark: { borderBottomColor: 'rgba(247,245,240,0.14)' },
+  sheetGrabber: {
+    position: 'absolute',
+    top: 6,
+    left: '50%',
+    marginLeft: -22,
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#E6E2DA',
+  },
+  sheetBarTitle: { flex: 1, color: NAVY, fontSize: 18, lineHeight: 24, fontWeight: '800' },
+  sheetBarTitleDark: { color: CREAM },
+  /* 44x44 at least, the label centred in it: the target is the control. */
+  sheetClose: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetCloseText: { color: NAVY, fontSize: 15, fontWeight: '800' },
+  sheetCloseTextDark: { color: CREAM },
+  /* Grows to its content and no further; scrolls inside the panel beyond it. */
+  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+  sheetContainer: { backgroundColor: 'transparent', paddingTop: 14, paddingBottom: 20 },
 
   screen: { flex: 1, backgroundColor: CREAM },
   screenDark: { backgroundColor: NAVY },

@@ -312,7 +312,9 @@ test.describe('FOCUS-RETURN-1 · focus goes back to the opener', () => {
     await pressByKeyboard(page, 'wsf-member-tab-move');
     await expect(page.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
 
-    await pressByKeyboard(page, 'wsf-contribute-back');
+    // APP-FEEL-PARITY-1: MOVE's flow is a sheet over the tab, and its way back
+    // is the sheet's Close (the same return to the opener as the page's Back).
+    await pressByKeyboard(page, 'wsf-contribute-close');
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 20_000 }).toBe('/you');
     await page.waitForTimeout(300);
     measure('MOVE from You · Back', { focus: await focusedId(page), tab: await currentTab(page) });
@@ -330,7 +332,9 @@ test.describe('FOCUS-RETURN-1 · focus goes back to the opener', () => {
     await pressByKeyboard(page, choiceId);
     await expect(page.locator('[data-testid="wsf-contribute-move-screen"]:visible')).toBeVisible({ timeout: 40_000 });
 
-    await pressByKeyboard(page, 'wsf-contribute-back');
+    // APP-FEEL-PARITY-1: the chosen goal's flow is a sheet over the chooser;
+    // its Close returns to the chooser.
+    await pressByKeyboard(page, 'wsf-contribute-close');
     await expect(page.locator('[data-testid="wsf-move-choose"]:visible')).toBeVisible({ timeout: 20_000 });
     await page.waitForTimeout(300);
     measure('sheet choice · Back', { focus: await focusedId(page) });

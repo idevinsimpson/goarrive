@@ -13,6 +13,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
 import {
+  SCRIM_PROPS,
+  markSheetHandoff,
+  sheetData,
+  useSheetExit,
+  useSheetFocusContainment,
+} from '../../src/ui/sheetMotion';
+import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import {
   ACTION_GREEN,
   CARD_BORDER,
   CREAM,
@@ -103,6 +111,13 @@ export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
   const safeArea = useSafeAreaInsets();
   const [state, setState] = useState<Resolution>({ kind: 'working' });
+  /*
+    APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
+    180 ms exit, then the same Close as before (`useSheetExit`: one exit, and
+    none once something else is in front). Reduced motion goes straight there.
+  */
+  const reducedMotion = useReducedMotion();
+  const { phase, exit, leaving } = useSheetExit(reducedMotion);
 
   useEffect(() => {
     if (!wsfAuthEnabled || !ready) return;
@@ -118,7 +133,7 @@ export default function MoveResolver() {
           fns,
           'wsfMyCommunities',
         )({});
-        if (cancelled) return;
+        if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
         const groupId = resolveCurrentCommunity(user.uid, ids);
         const community = mine.data.items.find((i) => i.groupId === groupId)?.displayName ?? null;
@@ -146,7 +161,9 @@ export default function MoveResolver() {
             it always has.
           */
         )({ groupId, includeHistory: true });
-        if (cancelled) return;
+        // `leaving()`: the member pressed Close while this was being read.
+        // They are leaving, and the answer must not send them anywhere else.
+        if (cancelled || leaving()) return;
         const open = actionableGoals(listed.data.goals ?? []);
         if (open.length === 0) {
           setState({ kind: 'noGoal', groupId, community });
@@ -154,6 +171,10 @@ export default function MoveResolver() {
         }
         if (open.length === 1) {
           const g = open[0];
+          // The sheet stays up across the hand-off: the flow it hands to is
+          // the same sheet (app/_layout.tsx), and must not fade the dim in
+          // again from nothing.
+          markSheetHandoff();
           router.replace(
             `/contribute/${g.goalId}?groupId=${encodeURIComponent(groupId)}&mode=move`,
           );
@@ -161,7 +182,7 @@ export default function MoveResolver() {
         }
         setState({ kind: 'choose', groupId, community, goals: open });
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled || leaving()) return;
         setState({
           kind: 'error',
           message: describeCallableError(e, 'Could not work out what to move toward.'),
@@ -191,7 +212,8 @@ export default function MoveResolver() {
     nothing was there -- so Close resolves to the canonical member destination
     instead of being a control that does nothing.
   */
-  const close = () => {
+  const close = () => exit(leave);
+  const leave = () => {
     if (router.canGoBack()) {
       router.back();
       return;
@@ -231,6 +253,10 @@ export default function MoveResolver() {
   */
   const sheetRef = useRef<View>(null);
   useSheetFocusReturn(sheetRef);
+  // Focus enters the PANEL on Close, and Tab stays in the panel while it is
+  // in front (F2: the outer root also holds the scrim).
+  const panelRef = useRef<View>(null);
+  useSheetFocusContainment(panelRef);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
@@ -247,11 +273,18 @@ export default function MoveResolver() {
       <Pressable
         style={s.scrim}
         onPress={close}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
         testID="wsf-move-scrim"
+        // Close is the keyboard's and the screen reader's way out; the scrim
+        // is the pointer's only (F2: it was a Tab stop named "Close").
+        {...SCRIM_PROPS}
+        {...(sheetData('scrim', phase) as object)}
       />
-      <View style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]} testID="wsf-move-sheet">
+      <View
+        ref={panelRef}
+        style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]}
+        testID="wsf-move-sheet"
+        {...(sheetData('panel', phase) as object)}
+      >
         <View style={s.sheetHead}>
           <View pointerEvents="none" style={s.grabber} />
           <Pressable
