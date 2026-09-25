@@ -432,6 +432,33 @@ test.describe('FOCUS-RETURN-1 · with no opener: the heading, else the current t
     await expectFocus(page, 'wsf-community-name', 'the landed heading takes focus');
   });
 
+  test('a click on blank space after the return is the member’s: focus stays where they put it', async ({ page }) => {
+    test.setTimeout(240_000);
+    // W7 Check 30 F1 (Director #477 `5827102747`): the watch used to read the
+    // member's click as "focus lost" and put the launcher back ~9 ms later.
+    const fx = await seed('k', 1);
+    await signInVia(page, fx.email, PASSWORD);
+    await TAB_CASES[0]!.open(page, fx);
+    const launcherId = `wsf-community-goal-record-${fx.goalIds[0]}`;
+    await pressByKeyboard(page, launcherId);
+    await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    await pressByKeyboard(page, 'wsf-contribute-back');
+    await expectFocus(page, launcherId, 'Back returns focus to the launcher');
+    // Inside the 3 s watch: a click on blank page space, left of the hero.
+    const hero = await page.locator('[data-testid="wsf-community-goal-hero"]:visible').first().boundingBox();
+    expect(hero, 'the hero has a box').not.toBeNull();
+    const at = { x: 4, y: Math.round(hero!.y + hero!.height / 2) };
+    const blank = await page.evaluate(({ x, y }) => {
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      return !el?.closest('a[href], button, input, select, textarea, [tabindex]');
+    }, at);
+    expect(blank, 'the click point is blank, not a control').toBe(true);
+    await page.mouse.click(at.x, at.y);
+    await page.waitForTimeout(1_500);
+    measure('blank-space click after the return', { focus: await focusedId(page) });
+    expect(await focusedId(page), 'the member’s click is not overridden').toBe('body');
+  });
+
   test('a restored control that is then taken away: focus moves on to the heading, not body', async ({ page }) => {
     test.setTimeout(240_000);
     const fx = await seed('r', 1);

@@ -163,16 +163,30 @@ export function returnFocusSoon(
   let landedAt: number | null = null;
   let relands = 0;
   let stopped = false;
+  /*
+    A PRESS IS THE MEMBER'S OWN ACT, AND ENDS THE WATCH (Director #477
+    `5827102747`, W7 Check 30 F1). A click on blank space puts focus on
+    `body` on purpose; before this, the watch read that as "focus was lost"
+    and put the opener back about 9 ms later, overriding the member. Any
+    press — on blank space or on a control — now stops the search and the
+    watch for good. What is still watched is what the member did not do: a
+    screen that rebuilds or drops the control while nobody touched anything.
+  */
+  const finish = () => {
+    stopped = true;
+    document.removeEventListener('pointerdown', finish, true);
+  };
+  document.addEventListener('pointerdown', finish, true);
   const tick = () => {
     if (stopped) return;
     const now = performance.now();
     const r = root();
     if (r) {
       const where = focusIsLost(r);
-      if (where === 'member' && landedAt === null) return; // the member got there first
+      if (where === 'member' && landedAt === null) return finish(); // the member got there first
       if (where === 'lost') {
         if (landedAt !== null) {
-          if (relands >= MAX_RELANDS) return;
+          if (relands >= MAX_RELANDS) return finish();
           relands += 1;
           landedAt = null;
           since = now;
@@ -186,11 +200,10 @@ export function returnFocusSoon(
     }
     const until = landedAt === null ? since + SEEK_MS : landedAt + WATCH_MS;
     if (now < until) requestAnimationFrame(tick);
+    else finish();
   };
   requestAnimationFrame(tick);
-  return () => {
-    stopped = true;
-  };
+  return finish;
 }
 
 /** The tabs' fallbacks: the landed screen's heading, then the current tab. */
