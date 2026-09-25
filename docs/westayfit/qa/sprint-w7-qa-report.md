@@ -3595,3 +3595,56 @@ W3's own emulator dry run passes 21/21 on `06bcb288` and 22/22 on the candidate.
 **Limits:** Chromium web only, at 390×844 and 390×640. No Safari, no real device and no assistive-technology session. The multi / mixed state is reachable only by injection on this build, and is labelled as such.
 
 **Status:** tested on `eeb5eed0`. Nothing is accepted, integrated or staged.
+
+## 37B · Seed successor `6c1d115e9d857e657b1ecc8545cde4c919d38b98` and #484 head `736ebd77435a0b479ceae7e23968237c2395d58c` (Director #434 `5836713029`; W7 ACK `5836717858`): **G1 (ownership), G2 (pre-existing counters), P1 and the partial-write reconciliation fixed. The Director's two source-derived risks REPRODUCE as measured failures (G2a, G1b). A correction: my Check 37 M8 finding was a mis-targeted mutant.**
+
+**Targets, verified by git:**
+- `9f8b55f6..6c1d115e` is one commit touching 3 `staging-demo/` files.
+- #484's `5765b0ea..736ebd77` is `3f9b7b17`, the same seed change, plus `736ebd77`, which is `workflow-contract.test.mjs` +39 only.
+- All four `staging-demo/` blobs are identical between `6c1d115e` and `736ebd77`.
+- The runs were local emulators only, with `METADATA_SERVER_DETECTION=none`. There was no dispatch, no staging access and no cloud call.
+
+### 37B.0 Correction I own: M8 was mis-targeted
+
+- In §37.B, the mutant "seed job granted `contents: write`" replaced the **first** occurrence of an anchor that appears **three** times in `wsf-staging-deploy.yml`. The first occurrence is in the **`cleanup-recovery`** job (line 953), not `social-demo-seed`.
+- **Re-run correctly targeted**, inside the `social-demo-seed` job only: W3's suite **catches it on both `8f8c4530` and `736ebd77`** (run-all exit 1, "Expected values to be strictly deep-equal"). That comes from the pre-existing test "the seed job takes exactly contents:read and id-token:write".
+- **So B was 13 of 13 caught on `8f8c4530`, and the "M8 survived" test gap did not exist.** W3's new M8 test (`736ebd77`) is sound but was not needed. Every other mutant's anchor occurs exactly once; I re-counted.
+- What my mis-targeted mutant *did* show is that `cleanup-recovery`'s permissions are not pinned by the suite. That job predates this delta and is outside Check 37's scope. It is recorded here for completeness, not as a finding against #484.
+
+### 37B.1 Results on `6c1d115e` (fail-before on `9f8b55f6`, same drivers)
+
+| row | `9f8b55f6` | `6c1d115e` |
+|---|---|---|
+| **B3 (G1)** cleanup: the owner's sample membership rewritten **without the marker** after classification (INJECTED) | **DELETED**, exit 0 | **preserved**, `CLEANUP_PRESERVED=1`, exit 3, **PASS** |
+| **B4 (G1)** cleanup: a synthetic profile path taken by a foreign document after classification | **DELETED**, exit 0 | **preserved**, exit 3, **PASS** |
+| **S1 (G2)** a foreign shard exists before apply, with the goal absent | 50 → 110, exit 4 after 100 writes | `FOREIGN=1`, exit 3, **0 writes**, **PASS** |
+| **S2 (G2)** a foreign member total at a fixture path | 999 → 1084, exit 4 after 100 writes | `FOREIGN=1`, exit 3, **0 writes**, **PASS** |
+| **T7 (P1)** restoring a missing addition, and a foreign document appears there | preserved, exit 0, **not reported** | preserved, `APPLY_INCOMPLETE … is not this fixture's`, exit 3, **PASS** |
+| **RP** partial writes, then reconcile: a foreign goal appears mid-apply; after it is removed the run is repeated | first run exit 1 with no partial-write account | first run exit 3, **`PARTIAL_WRITES=25`**; re-run exit 0 (`CREATE=27`, `UNCHANGED=25`); `VERIFY=pass`; 445 = 445 = 445, **PASS** |
+| **A1 — Director risk (a):** apply, shard 0 replaced **without the marker (count 50)** after preflight and before the ledger transaction that increments it (INJECTED at that transaction's first read) | 50 → 110, exit 4 | **50 → 110; exit 4, only from the post-hoc `MISMATCH`, after 106 writes: G2a, REPRODUCED** |
+| **B1 — Director risk (b):** cleanup, a seeded recent-addition replaced by `{amount: 999, at: "someone else"}` after classification, its goal still marked | DELETED, exit 0 | **DELETED; exit 0; `CLEANUP_PRESERVED=0`: G1b, REPRODUCED** |
+| **B2 — Director risk (b):** cleanup, a seeded ledger row replaced by `{goalId: <same goal>, userId: "someone-else", count: 5}` after classification | DELETED, exit 0 | **DELETED; exit 0: G1b, REPRODUCED** |
+
+**G2a (measured).**
+- *What:* the ledger transaction reads the row and the member total, but it only `tx.update`s the shard (`increment`). The shard is never read or marker-checked inside that transaction.
+- *Effect:* a shard replaced without the marker between preflight and that transaction is incremented instead of refused. The only signal is the ledger check at the end.
+- *Reproducer:* `--apply`; before the first ledger transaction's read of `wsfContributions/wsfdemo-goal-movers-squats_wsfdemo-m01_social-staging-demo-1-wsfdemo-goal-movers-squats-01`, set `wsfGoalCounters/wsfdemo-goal-movers-squats/shards/0` to `{count: 50}`.
+
+**G1b (measured).**
+- *What:* cleanup's attached-row predicates are `x.goalId === g` for ledger rows and `typeof x.amount === 'number'` for additions.
+- *Effect:* a foreign replacement at a deterministic seeded path passes the check and is deleted while its goal is still marked. The run exits 0 and reports nothing.
+- *Reproducers:* seed the fixture, then run `--cleanup`. Before the delete transaction's read of the seeded addition `…/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01` (B1), or of the seeded row above (B2), set the foreign document.
+- *Contrast:* the owner membership and profile paths (B3, B4) are now preserved.
+
+**Carried from Check 37 and re-run on `6c1d115e`:**
+- Auth 4/4.
+- Real-`wsfContribute` races 6/6: every burst counted, and the product's merges keep the shard marker.
+- Apply-path rechecks T1–T7: 7/7.
+- Static S3–S6: 4/4.
+- Privacy: 106 fixture documents with no contact keys, 0 synthetic Auth accounts, owner data unchanged.
+
+Harness note: my C1 / C2 rows used a delete hook that never fires on `6c1d115e`, because cleanup now deletes inside transactions. They are superseded by B3 / B4.
+
+**#484 `736ebd77`:** `run-all` passes all suites. The workflow is unchanged from `8f8c4530`; B's criteria 4–6 carry forward.
+
+**Status:** reviewed only. Nothing is accepted and nothing is dispatched. G2a and G1b are for W3 and the Director.
