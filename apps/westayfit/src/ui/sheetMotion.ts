@@ -29,6 +29,8 @@ import { Platform } from 'react-native';
 
 export const SHEET_IN_MS = 240;
 export const SHEET_OUT_MS = 180;
+/** The reference's tab change (styles.css --dur-tab). See `TabSceneFade`. */
+export const TAB_FADE_MS = 140;
 
 const onWeb = (): boolean => Platform.OS === 'web' && typeof document !== 'undefined';
 
@@ -45,8 +47,12 @@ const CSS = `
 [data-wsf-side-panel="in"] { animation: wsf-side-in ${SHEET_IN_MS}ms cubic-bezier(.22,1,.36,1); }
 [data-wsf-side-panel="out"] { animation: wsf-side-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
 [data-wsf-sheet-scrim="out"] { animation: wsf-scrim-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; }
+@keyframes wsf-tab-in-a { from { opacity: .35; } to { opacity: 1; } }
+@keyframes wsf-tab-in-b { from { opacity: .35; } to { opacity: 1; } }
+[data-wsf-tab-scene="a"] { animation: wsf-tab-in-a ${TAB_FADE_MS}ms ease-out; }
+[data-wsf-tab-scene="b"] { animation: wsf-tab-in-b ${TAB_FADE_MS}ms ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  [data-wsf-sheet-panel], [data-wsf-sheet-scrim], [data-wsf-side-panel] { animation: none !important; }
+  [data-wsf-sheet-panel], [data-wsf-sheet-scrim], [data-wsf-side-panel], [data-wsf-tab-scene] { animation: none !important; }
 }
 `;
 
