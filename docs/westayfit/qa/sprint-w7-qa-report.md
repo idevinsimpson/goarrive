@@ -3882,3 +3882,20 @@ wsfCommunityActivity   +371..+408  {groupId, goalId}
 - **Home "first visit" in pass 1** is not a first visit: the member landed on Home at sign-in.
 
 **No product, config or evidence file was touched.** Nothing is accepted, integrated or staged.
+
+## 42 · Staging pin #488, exact head `12a4c61d924aff587fac478a0cb4408050a8a4a9` → `0b460ce3` (L0 #434 `5839864203`, renumbered `5839889244`; W7 ACK `5839979676`): **PASS on items 1–6; no defect**
+
+The Check 39 method, re-run in full on a detached worktree at `12a4c61d`. Nothing is carried except the method. Local only: no dispatch and no staging access.
+
+| # | Item | Measured | Result |
+|---|---|---|---|
+| **1** | Head, base, scope | One commit, `12a4c61d`, whose parent is `main` `e20994a7`. `main` is its ancestor and is still `e20994a7`. **Exactly one file**, `.github/wsf-staging/approved-candidate.json`, +7 / −4, blob `8528f144` → `f35f919c`. **Keys:** `approvedAppSha`, `packageLabel`, `_expectedPriorFunctionsNote` and `_fullCandidateNote` changed; three `_previous…91392f9d` keys added; every other key byte-identical, including `expectedPriorFunctions` 49, `candidateAddedFunctions`, the `502b1e8d` / `7ee70e4` history and `_twelveTransportNote`. | **PASS** |
+| **2** | `resolve-candidate` (the real script: the approval path as its argument, `WSF_REQUESTED_SHA` in the environment) | **Head:** empty input, `0b460ce3` and the full SHA resolve to `0b460ce3f2f0766406100fef14d9a444c8cad43a` (exit 0). `91392f9d`, `00d6d44e`, `502b1e8d` and `09dd16b2` are refused (exit 1, "syntactically valid but is NOT the approved candidate"). **Control, `main`'s pin:** empty input resolves to `91392f9d`, and `0b460ce3` is refused. The change is what admits the candidate. | **PASS** |
+| **3** | The real `read-inventory` gate | 49 names give `PREFLIGHT_BEFORE=49`, exit 0. 46 and 50 are refused ("… approved against 49", exit 1). Identical on `main`'s pin, since the prior is unchanged. | **PASS** |
+| **4** | The verifier's expected set | `BASE_EXPECTED` parsed from `verify-deployment.mjs` (46) plus `candidateAddedFunctions` (3) = **49 unique**, equal to W7's 46 + 3 reference list. | **PASS** |
+| **5** | Boundary over `91392f9d..0b460ce3` | `91392f9d` is an ancestor and the first parent. **One first-parent commit**, `0b460ce3`, whose second parent is `09dd16b2`, #487's reviewed head. Its tree `054f6166` **equals W7's local `merge-tree` of `91392f9d` + `09dd16b2`**. 4 W9 commits (`299d1c3f`, `7c5a5962`, `be21eab4`, `09dd16b2`), 5 in all; 91 files, +1970 / −72. The paths changed are:<br>• 5 route files, all **modified, none added, removed or renamed**;<br>• `src/memberReads.ts` (added) and `src/ui/MemberTopBar.tsx`;<br>• 2 e2e specs;<br>• 82 review files under `docs/design-target/review/app-feel-parity-2/`.<br>**Nothing else**, so the protected-path diff is empty. `functions-westayfit` is tree `5a3f232e` at both SHAs and `src/index.ts` exports 49. Each `_previous…91392f9d` note is **main's former value verbatim** behind a "HISTORICAL, …" prefix. The new notes' counts, commits and file lists match git. Run 49 (`36179721264`), cited by the notes, exists: WSF staging deploy, on `main` `e20994a7`, conclusion success (run metadata read; its job-log inventory lines were not re-read). | **PASS** |
+| **6** | Tests | `node .github/wsf-staging/tests/run-all.mjs`: **exit 0, all suites passed**. `verify-deployment.test.mjs` is byte-identical to `main` (blob `0d30925b`). | **PASS** |
+
+**Not established:** anything served, transport or hosted, since nothing ran against staging. The social services remain SHUT, the index has no READY receipt, and the email and kiosk holds are unchanged, all as the pin's own notes state.
+
+**Status:** nothing is accepted, merged or dispatched.
