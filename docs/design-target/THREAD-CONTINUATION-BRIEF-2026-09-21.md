@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 15:10Z** (Director audit `5834612359`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 15:20Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -19,8 +19,8 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | pushed; L0 git `5834596012` (8 files incl. new `moveSheetRoute.ts`, `sheetMotion.ts`; tsc 0, vitest 875, guard 9/20); **W7 Check 36 ACKed, executing** (#434 `5834558949`); regression / frames / timeline / discrepancies pending — not delivered, accepted or staged | W9 → exporter → Director → W7 → L0 → stage |
-| **MOVEMENT-PILLS-1** (§B) | W6 · `claude/wsf-w6-movement-pills-1` · `goals/new.tsx`, `MovementPicker.tsx`, `movementSelection.ts` | ACKed, executing (#456 `5834258147`); must meet Director #456 `5834379218`: persisted movement IDs and correct MOVE guidance — shared units alone do not qualify | W6 → L0 git → Director → W7 → L0 |
+| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | pushed; L0 git `5834596012` (8 files incl. new `moveSheetRoute.ts`, `sheetMotion.ts`; tsc 0, vitest 875, guard 9/20); **W7 Check 36 ACKed, executing** (#434 `5834558949`); `a2a598d2` adds the gated frame producer only (test file; product = cp1); regression / frames / timeline / discrepancies pending — not delivered, accepted or staged | W9 → exporter → Director → W7 → L0 → stage |
+| **MOVEMENT-PILLS-1** (§B) | W6 · **#483** `03cfddba` on `502b1e8d` · `goals/new.tsx`, `MovementPicker.tsx`, `movementSelection.ts` | pushed; L0 git `5834743992` (17 files in reservation; tsc 0, vitest 886, guard 9/20); **Director #456 `5834379218` NOT met**: several-movement submit is enabled and persists only unit `squats + push-ups` + guide `reps`, no movement IDs — returned to W6 for (a) proof or (b) submit off + seam proposal; wake receipts outstanding (`5834414075`); not routed to W7 | W6 → L0 git → Director → W7 → L0 |
 | **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | held for correction (#396 `5834407330`) | corrected seed → W7 → Director |
 | **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · PR into `main` adding PLAN (default) / APPLY / VERIFY `social-demo-seed` to the existing workflow, existing WIF identity | released for preparation (#396 `5834598414`) after the seed fix | W7 → Director → L0 PLAN → APPLY / VERIFY |
 | JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
