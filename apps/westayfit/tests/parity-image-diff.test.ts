@@ -1,4 +1,4 @@
-// scripts/westayfit/parity-image-diff.mjs is evidence tooling, not product:
+// tests-e2e/helpers/parityImageDiff.mjs is evidence tooling, not product:
 // it turns a reference PNG and a candidate PNG into a side-by-side, a 50%
 // overlay, an absolute difference and a manifest of DESCRIPTIVE metrics. It is
 // tested the way it runs — the real script in a child process — against
@@ -13,7 +13,7 @@ import zlib from 'node:zlib';
 
 import { describe, expect, it } from 'vitest';
 
-const SCRIPT = path.resolve(__dirname, '../../../scripts/westayfit/parity-image-diff.mjs');
+const SCRIPT = path.resolve(__dirname, '../tests-e2e/helpers/parityImageDiff.mjs');
 
 type Rgba = { width: number; height: number; data: Uint8Array };
 

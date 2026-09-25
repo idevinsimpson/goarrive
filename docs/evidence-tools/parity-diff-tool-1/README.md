@@ -1,6 +1,6 @@
 # PARITY-DIFF-TOOL-1: control receipt
 
-`scripts/westayfit/parity-image-diff.mjs` turns a reference PNG and a candidate PNG into:
+`apps/westayfit/tests-e2e/helpers/parityImageDiff.mjs` turns a reference PNG and a candidate PNG into:
 - a side-by-side image;
 - a 50% overlay;
 - an absolute-difference image;
@@ -9,7 +9,7 @@
 It has no threshold, no score and no pass/fail. It also has no dependency: PNG is decoded and encoded with Node's built-in `zlib`.
 
 ```bash
-node scripts/westayfit/parity-image-diff.mjs \
+node apps/westayfit/tests-e2e/helpers/parityImageDiff.mjs \
   --reference <ref.png> --candidate <cand.png> --out-dir <dir> --label <name>
 ```
 
@@ -26,7 +26,7 @@ node scripts/westayfit/parity-image-diff.mjs \
 The committed outputs came from:
 
 ```bash
-node scripts/westayfit/parity-image-diff.mjs \
+node apps/westayfit/tests-e2e/helpers/parityImageDiff.mjs \
   --reference docs/evidence-tools/parity-diff-tool-1/control-reference.png \
   --candidate docs/evidence-tools/parity-diff-tool-1/control-candidate.png \
   --out-dir docs/evidence-tools/parity-diff-tool-1 --label control
