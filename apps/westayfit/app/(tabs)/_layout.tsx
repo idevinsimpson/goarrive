@@ -1,11 +1,12 @@
 import { Tabs, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
+import { useTabsFocusReturn } from '../../src/ui/focusReturn';
 import { MemberTabBar } from '../../src/ui/MemberTabBar';
 import {
   MemberShellActionsProvider,
@@ -84,6 +85,15 @@ function MemberShell() {
   */
   const routeActions = useMemberShellActions();
   const [signingOut, setSigningOut] = useState(false);
+  /*
+    FOCUS COMES BACK TO THE CONTROL THAT OPENED MOVE OR THE CONTRIBUTION FLOW.
+    Both are presented over this shell and both leave the document when they
+    close, which drops keyboard focus onto `body`. The shell is the one place
+    that sees them cover it and uncover it, so it is the one place that puts
+    focus back (src/ui/focusReturn.ts).
+  */
+  const shellRef = useRef<View>(null);
+  useTabsFocusReturn(shellRef);
 
   /**
    * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
@@ -134,7 +144,7 @@ function MemberShell() {
   ];
 
   return (
-    <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
+    <View ref={shellRef} style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
       {signedIn ? (
         <MemberTopBar
           menu={menu}

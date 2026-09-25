@@ -1,7 +1,7 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
-import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
@@ -11,6 +11,7 @@ import { getFirebaseFunctions } from '../../src/firebase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ButtonLink } from '../../src/ui/ButtonLink';
+import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
 import {
   ACTION_GREEN,
   CARD_BORDER,
@@ -195,8 +196,41 @@ export default function MoveResolver() {
       router.back();
       return;
     }
+    // Nothing beneath to give focus back to: the member tabs that mount in
+    // this sheet's place focus their heading instead of leaving it on `body`.
+    armTabsFocusReturn();
     router.replace('/');
   };
+
+  /*
+    ESCAPE IS CLOSE. A sheet a keyboard member cannot dismiss from the keyboard
+    is a trap with a mouse-shaped exit. Escape takes the same path as the Close
+    button and the scrim, and only while this sheet is the screen in front: a
+    contribution opened from one of its goals sits over it, and Escape there is
+    not a request to close something the member cannot see.
+  */
+  const navigation = useNavigation();
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || !navigation.isFocused()) return;
+      e.preventDefault();
+      close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // `close` reads nothing from render: it is the router, every time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation]);
+
+  /*
+    A goal chosen here opens the contribution flow over the sheet, and its Back
+    returns to the sheet: focus goes back to that goal's "Move" rather than to
+    `body` (src/ui/focusReturn.ts). Closing the sheet then returns focus to
+    whatever opened MOVE, which the tab shell handles.
+  */
+  const sheetRef = useRef<View>(null);
+  useSheetFocusReturn(sheetRef);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
@@ -209,7 +243,7 @@ export default function MoveResolver() {
     of, and the empty lower field that reservation left behind.
   */
   const sheet = (children: ReactNode) => (
-    <View style={s.sheetRoot} testID="wsf-move-screen">
+    <View ref={sheetRef} style={s.sheetRoot} testID="wsf-move-screen">
       <Pressable
         style={s.scrim}
         onPress={close}
