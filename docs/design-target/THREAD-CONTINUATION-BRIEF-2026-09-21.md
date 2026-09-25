@@ -4,52 +4,48 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star and source donor, `5819686459`, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then the preserved history below. Workers read this section, their own packet and the thread deltas.
+**Stamp: 2026-09-25 15:10Z** (Director audit `5834612359`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
-**Heads (2026-09-25 04:15Z).**
+**Heads.**
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`502b1e8d`** = `afa26d64` (RETURN-CONTINUITY-1) + FOCUS-RETURN-1 `64b01967` (tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
-| `main` | `7e423a48` (pin #479; skill #480; startup pointers #481) |
-| staging pin `approvedAppSha` | `502b1e8d` (`expectedPriorFunctions` 49; three social retained) |
-| served staging build | **`502b1e8d`** via run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
+| development `claude/wsf-app-shell` | **`502b1e8d`** (RECOVERY-PORT-1, RETURN-CONTINUITY-1, FOCUS-RETURN-1 integrated; tree `8453ecb8`; tsc 0, guard 9/20, vitest 875) |
+| `main` | `7e423a48` (pin #479; staging skill #480; startup pointers #481) |
+| staging pin | `approvedAppSha` `502b1e8d`, `expectedPriorFunctions` 49, three social retained |
+| served staging | **`502b1e8d`**, run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0 (social excluded), cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
 
-**Active packets** (reference / candidate SHA · last consumed receipt · next consumer and wake state; waiting-for-wake is recorded apart from implementation).
+**Active packets.**
 
-| packet | owner · PR · SHAs | last receipt | next consumer · wake |
+| packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **Integrated + served** | W9: RECOVERY-PORT-1 `86c160ae`, RETURN-CONTINUITY-1 `9f73aaa6`, FOCUS-RETURN-1 `64b01967` | W7 Checks 29 / 32 / 30+33; Director ACCEPTED | in `502b1e8d`; carried seams per #477 / #478 receipts |
-| **APP-FEEL-PARITY-1** (Director `5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` (8 files; + new `moveSheetRoute.ts`, `sheetMotion.ts`) | L0 git (#482 `5834596012`): tsc 0, vitest 875, guard 9/20, no W6 overlap; frames / timeline / discrepancies pending | W9 completes cp1 → exporter → Director → W7 (#434 `5834554003`) → L0 |
-| **MOVEMENT-PILLS-1** (§B) | W6 · `claude/wsf-w6-movement-pills-1`; `goals/new.tsx` + `MovementPicker.tsx` + `movementSelection.ts` | ACKed, executing (#456 `5834258147`); multi-movement must meet Director #456 `5834379218` (persisted movement IDs, correct MOVE guidance) — not accepted on shared units | W6 checkpoint → L0 git → Director → W7 → L0 |
-| **SOCIAL-STAGING-DEMO-1** (§C) + **SEED-MODE** (`5834565485` §2) | W3 · `bcfef524` held for correction (`5834407330`); then a PLAN / APPLY / VERIFY `social-demo-seed` mode PR into `main` (existing WIF identity) | handoff #396 `5834598414` | W3 → W7 → Director → L0 PLAN → APPLY / VERIFY; index + Operation 2 unresolved |
-| JOIN-VISIBILITY-1 | W9 · deferred behind APP-FEEL-PARITY-1 (#477 `5832790261`) | never started | after §A |
-| **OPS-DOC-1** | W3 · `1d52c854` + `9691139f` (blob `88597026`) | W7 §28 + §28D PASS; Director ACCEPTED `5825956941` | **draft PR #476 into `main`** (`c081dadc`, from `cd881775`, run-all passes) — waits on the owner; no deploy |
-| **MOVEMENT-VISION-1** (dev-only camera squat POC; `5825748052`) | **W10** `session_019zky5Gcon8KrfuPxLPVD8n` · **#475** · base `6b96ba1b` · new files only | `eda58218`: W7 Check 31 PASS (#434 `5827152233`); **Director ACCEPTED AS ISOLATED R&D CORE ONLY** (#475 `5827675294`) | no Expo port, integration or staging; next evidence is the owner's phone trial; no video or personal data stored |
-| **MOVEMENT-VISION-NORTHSTAR-1** (Lovable lab) | Director · remix `c1b16a13` | frozen `a84e6764` / `8c61cd72` | **NOT READY**; no port before the owner's phone test |
+| **APP-FEEL-PARITY-1** (`5834082617` §A) | W9 · **#482** · cp1 `766ee085` on `502b1e8d` | pushed; L0 git `5834596012` (8 files incl. new `moveSheetRoute.ts`, `sheetMotion.ts`; tsc 0, vitest 875, guard 9/20); **W7 Check 36 ACKed, executing** (#434 `5834558949`); regression / frames / timeline / discrepancies pending — not delivered, accepted or staged | W9 → exporter → Director → W7 → L0 → stage |
+| **MOVEMENT-PILLS-1** (§B) | W6 · `claude/wsf-w6-movement-pills-1` · `goals/new.tsx`, `MovementPicker.tsx`, `movementSelection.ts` | ACKed, executing (#456 `5834258147`); must meet Director #456 `5834379218`: persisted movement IDs and correct MOVE guidance — shared units alone do not qualify | W6 → L0 git → Director → W7 → L0 |
+| **SOCIAL-STAGING-DEMO-1** (§C) | W3 · `claude/wsf-sprint-email-staging` · `bcfef524` | held for correction (#396 `5834407330`) | corrected seed → W7 → Director |
+| **SOCIAL-DEMO-SEED-MODE** (`5834565485` §2) | W3 · PR into `main` adding PLAN (default) / APPLY / VERIFY `social-demo-seed` to the existing workflow, existing WIF identity | released for preparation (#396 `5834598414`) after the seed fix | W7 → Director → L0 PLAN → APPLY / VERIFY |
+| JOIN-VISIBILITY-1 | W9 · `/join` only (#477 `5832790261`) | **deferred behind APP-FEEL-PARITY-1**; never started | after §A |
+| OPS-DOC-1 | W3 · draft #476 (`c081dadc`) | accepted docs, but its text states run 47 as current; **do not merge as is** | smallest docs-only reconciliation (run 47 historical; run 48 / `502b1e8` current; Operation 2 known-denied vs index unmeasured; skill authoritative) after the active corrections → text-delta review → L0 merge; no deploy |
+| MOVEMENT-VISION-1 | W10 · #475 · `eda58218` | accepted as isolated R&D core only (`5827675294`) | owner phone trial; no port or staging |
+| MOVEMENT-VISION-NORTHSTAR-1 | Director · Lovable remix `c1b16a13` (frozen `a84e6764` / `8c61cd72`) | NOT READY | owner phone trial |
 
-**W7's queue:** Check 35 delivered (`76030bd0`); next, the parity successors. Item 2 (reference focus diagnosis, #434 `5822117639`) not run, still deferred.
+**W7:** Check 35 delivered (`76030bd0`); Check 36 executing on #482. Item 2 (reference focus diagnosis) not run, deferred.
 
-**STAGING — served `502b1e8d`** (run 48 green). **Runbook: `skills/wsf-staging-deploy/SKILL.md` on `main`** (owner cadence `5832907406`: stable accepted milestones stage without another prompt; linked from `CLAUDE.md` / `AGENTS.md`). Next staging dependencies are operator-owned: Operation 2 for the three SHUT services, the index READY receipt, then the social smokes.
+**Staging.** Runbook: **`skills/wsf-staging-deploy/SKILL.md` on `main`** (linked from `CLAUDE.md` / `AGENTS.md`). Each stable accepted integrated milestone stages without another owner prompt: pin via a worker → independent check → Director accept → L0 merges the pin → one dispatch → deployment / served-marker / hosted / cleanup receipts.
+
+**Served vs readiness.** Served `502b1e8d`. Social is **not ready**: three social callables SHUT (Operation 2: no capable identity; the deployer is measured unable) and the `wsfContributions` index unmeasured, no READY receipt; social smokes, members deep link and `/move` direct load not run; email blocked; shared kiosk HELD. The sample seed is a separate path through the reviewed `social-demo-seed` mode and does not by itself prove social.
 
 **Waiting on the owner:** the lab phone test (`5826104270`). EXP1 held; W2 / W4 / W1B / W8 parked; W5 stopped.
 
-**Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **NORTHSTAR-OVERNIGHT-1 (First Useful Visit) ACCEPTED as the next frozen reference** (`5825523052`): product `a15a610e`, evidence `973e1141`, finalizer `80fc8738`; reuse its states and wording, not its demo mechanics; moves no active packet. Port qualifications `5825762390` (Back / Close labels; zero-own guidance only on an open eligible goal; corrected captions). Candidate next slice: JOIN-VISIBILITY-1, `/join` only; owner undecided.
+**Frozen references.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`: NORTHSTAR-OVERNIGHT-1 product `a15a610e` / evidence `973e1141` (accepted `5825523052`; port qualifications `5825762390`); HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **Lovable active build owner: NONE** — the Sep 24–25 window ended and its authorized batches are consumed; further paid Lovable work only under newer owner authority. L0 and workers read Lovable only.
 
-**Served vs readiness.** Served `502b1e8d`; three social callables transport-SHUT; index unverified. Readiness **not met**: social smokes, members deep link, `/move` direct load not run; email blocked; shared kiosk HELD.
-
-**Precise blockers.** Social staging: index READY receipt and the three invoker updates + read-backs (no capable identity found); the seed awaits the reviewed `social-demo-seed` mode.
-
-**Operating rules.** One writer per file; only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA; SENT ≠ ACK ≠ executing; no new or replacement worker; no deploy / IAM / secrets / force-push by L0; real comment ids only; models change only by the owner. **Worker wake (owner, `5834363586`; audit `5834410975`):** handoff comment on the worker's own current PR; if no ACK and the session is idle, **one** deduplicated one-shot `create_trigger` bound to that worker's session (released in-lane task only; never busy, never interrupt); closed only on ACK. **Not yet proven.** Merged / closed PRs drop subscriptions; workers arrange their own subscriptions + check-ins.
-
-**Lovable collaboration (owner; Director `5821448740`, `5822393806`).** L0 coordinates; the Director accepts; **active build owner: DIRECTOR — NORTHSTAR-OVERNIGHT-1** (`5825324407`, owner direction Sep 24 21:44 ET): from `06198931`, one broad source / journey audit plus bounded normal-Build batches tonight (no Max, top-up, paid Plan, publish, service or backend change); L0 and workers read only while it is active. Two reference tracks: the evolving Lovable candidate may improve, but each canonical packet keeps its frozen reference until the Director assigns a reviewed successor (no silent retarget). **Capability (`5825103797`):** L0 reads the project through the `Lovable` MCP connector — source access only; Free Chat and canonical → Lovable critique UNPROVEN. **Return review (`5822393806`):** per delivered candidate, one bundle (canonical + frozen reference SHAs, matched states, frames, source, approved differences); a read-only critique only over a verified Free Chat route, else "consultation unavailable" and QA continues; ≤ three findings, Director dispositions; no build just for review. RECOVERY-PORT-1: consultation unavailable. MOTION-HANDOFF-CLOSEOUT-1 (`06198931`): evidence only (register row M). **Handoff:** one START-HERE contract per reference delivery (`docs/design-target/lovable-handoff/JOURNEY-CONTRACT-TEMPLATE.json`); a port's ACK maps REUSE / NATIVE ADAPTATION / DEMO ONLY.
+**Operating rules.** One writer per file. Only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA. SENT ≠ ACK ≠ executing. No new or replacement worker. **L0 alone performs reviewed WSF staging dispatches via the established workflow and skill; no production, no direct credential workaround, no IAM / WIF expansion; no secrets, no force-push.** Real comment ids only; models change only by the owner. **Worker wake** (owner `5834363586`; accepted `5834565485` §1): handoff comment on the worker's current PR; if a released in-lane task has no ACK and the existing worker is idle, **one** deduplicated one-shot `create_trigger` bound to that session; never for a busy worker, never interrupt; closed only on ACK. **Not yet proven.** Merged / closed PRs drop subscriptions; workers arrange their own.
 
 **Elsewhere:** the parity register and roster below.
 
 ## Source of truth
 Use these in this order:
-1. WE STAY FIT Strategic Master v3.
-2. Devin's newest explicit decisions.
+1. Devin's newest explicit decisions (as listed under Precedence above).
+2. WE STAY FIT Strategic Master v3.
 3. PR #365 latest comments and files on branch `claude/wsf-app-shell`.
 4. This handoff only as a navigation aid; newer GitHub evidence wins.
 
