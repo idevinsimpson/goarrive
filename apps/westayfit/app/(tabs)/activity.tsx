@@ -193,7 +193,11 @@ function progressFromRecord(uid: string): Ready | null {
 
 export default function ActivityScreen() {
   const { ready, user } = useWsfAuth();
-  const [state, setState] = useState<State>({ kind: 'loading' });
+  // The first frame already stands on the account's record when it can: a
+  // loading state painted for one frame and then replaced is still a flash.
+  const [state, setState] = useState<State>(
+    () => (ready && user ? progressFromRecord(user.uid) : null) ?? { kind: 'loading' },
+  );
   const [attempt, setAttempt] = useState(0);
   const safeArea = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);

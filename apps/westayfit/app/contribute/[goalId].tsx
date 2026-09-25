@@ -685,6 +685,10 @@ export default function ContributeToGoal() {
           e instanceof FirebaseError &&
           (e.code === 'functions/not-found' || e.code === 'functions/invalid-argument')
         ) {
+          // Not this account's to see (or not a goal): whatever its record
+          // holds for the community it came through goes, so nothing opens on
+          // it again from memory (PERF-MOBILE-1, src/memberReads.ts).
+          if (groupIdHint) forgetCommunity(user.uid, groupIdHint);
           setState({ kind: 'notFound' });
           return;
         }
@@ -708,7 +712,7 @@ export default function ContributeToGoal() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId]);
+  }, [ready, user, goalId, groupIdHint]);
 
   // Optional labels, verified server-side before they are shown together.
   // Independent of the goal load: a failure here only means the generic

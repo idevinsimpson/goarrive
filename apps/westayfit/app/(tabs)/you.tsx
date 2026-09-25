@@ -239,7 +239,11 @@ function youFromRecord(uid: string): Screen | null {
 
 export default function You() {
   const { ready, user } = useWsfAuth();
-  const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+  // The first frame already stands on the account's record when it can: a
+  // loading state painted for one frame and then replaced is still a flash.
+  const [screen, setScreen] = useState<Screen>(
+    () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
+  );
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
