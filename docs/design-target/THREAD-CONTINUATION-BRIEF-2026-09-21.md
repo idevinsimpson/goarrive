@@ -4,16 +4,16 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-25 19:20Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-25 19:28Z** (Director audit `5834612359`; CURRENT `eb6534ae` accepted as docs cleanup `5834702908`). **Precedence:** newer explicit owner decisions first (latest: stable-milestone staging cadence `5832907406`; owner parity correction `5834082617`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`91392f9d`** = `502b1e8d` → `00d6d44e` (W6 MOVEMENT-PILLS-1) → `91392f9d` (W9 cp1); tree `d8c9cf48`; tsc 0, guard 9/20, vitest 891 |
-| `main` | `273ce3ae` (pin #479; staging skill #480; startup pointers #481; OPS-DOC-1 #476) |
-| staging pin | `approvedAppSha` `502b1e8d`, `expectedPriorFunctions` 49, three social retained |
-| served staging | **`502b1e8d`**, run 48 `36133376723`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0 (social excluded), cleanup COMPLETE (#365 `5832332554`–`5832336026`) |
+| `main` | `e20994a7` (Merge #486: pin → `91392f9d`; earlier: OPS-DOC-1 #476, skill #480, pointers #481) |
+| staging pin | `approvedAppSha` `91392f9d`, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED `5838304652` after W7 Check 39 `5838198472`) |
+| served staging | **run 49 `36179721264` DISPATCHED 19:26:49Z** for `91392f9d` (#365 `5838320049`) — receipts pending; last verified served `502b1e8d` via run 48 `36133376723` |
 
 **Active packets.**
 
