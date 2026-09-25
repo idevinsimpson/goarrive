@@ -3108,3 +3108,38 @@ My Check 27 item-9 "stale seam" case, which measured the old silence, now reads 
 - **Earlier seam, not this delta's:** S1 from Check 30 (a removed member returned to the still-mounted community screen).
 
 **Status:** tested on `9f73aaa6`; delivered by W9; **not accepted, integrated or staged**.
+
+## 33 · FOCUS-RETURN-1 F1 successor (#477), exact `64b019676d12bb76e716a558860211a1d0afe307`, delta only from the reviewed `8f2cc15e` (Director #434 `5828286084`; W7 ACK `5828292045`): **PASS on items 1–5; F1 closed; no defect**
+
+**Scope, by git.** One commit on `8f2cc15e`, touching 2 files (+45 / −5):
+- `src/ui/focusReturn.ts`: `returnFocusSoon` adds a capture `pointerdown` listener on `document` that calls `finish()`. `finish()` sets `stopped` and removes that same listener. The "member got there first" branch, the re-land cap, the watch's expiry and the returned cancel all go through `finish()`.
+- W9's focused spec gains one case.
+
+**W7's delta instrument** is the Check 33 block of `sprint-w7-focus-return-verify.spec.ts`. The successor is served at 5019 and the reviewed head `8f2cc15e` at 5015 as the fail-first reference.
+
+| case | successor | reviewed `8f2cc15e` |
+|---|---|---|
+| **S1** (item 1): after landing, a pointer press on blank space → focus `body` at 0, 0.1, 1 and 3.5 s | **PASS** | **FAIL**: focus re-landed on the launcher by 0.1 s, the F1 reproduction |
+| **S2** (item 2): after landing, a press on a real control (progress Refresh, which re-reads and re-renders the hero) → focus stays on that control for 4 s, never back to the launcher | **PASS** | PASS (it did not snap back there either; a preservation case) |
+| **S3** (item 3): no press; the landed launcher is removed from the DOM (labelled injection) → the watch re-lands on the fallback heading `wsf-community-name`, never `body` | **PASS** | PASS (preserved) |
+| **S4** (item 4): `document` `pointerdown` listeners across three exits. Baseline 2, which is the two `followAttention` listeners of the mounted hooks. Each **watch: 3**; after **expiry: 2**; after a **press: 2**; the third watch is 3, so nothing stacks | **PASS** | trivially PASS (it adds no listener) |
+
+**Item 5, prior paths, on the successor:** Check 30's R1–R10 and W9's focused spec (now 17) ran **27 / 27 on the first run**:
+- R2: scroll 60 → 60;
+- R7: after a blank click, focus is `body` at once and at 1 s. Under `8f2cc15e` it was re-landed on the launcher at +9 ms;
+- R10: the active-tab reselect remains a no-op.
+
+Everything else is carried from Check 30, since dependencies are unchanged: W9's 56-file regression, the shell and exit specs, the frames and the Director's pixel pass.
+
+**Notes, not defects:**
+- The listener is added when the restore starts, not when it lands. A press during the seek window, before any landing, also ends it. That is also the member's act, and the "member got there first" rule already covered focus-driven cases.
+- Keyboard-only intent after landing is unchanged: moving focus with Tab to a control is "member" focus, which the watch never overrides.
+
+**Carried open, not waived:**
+- cold `/event` and `/queue` exits;
+- Progress's "Start moving" (Enter, and the navigator replace);
+- MOVE focus entry and containment;
+- Safari and a real assistive-technology session;
+- S1, the removed-member stale screen.
+
+**Status:** tested on `64b01967`; not accepted, integrated or staged. No reruns in this check.

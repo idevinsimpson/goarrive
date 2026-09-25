@@ -343,3 +343,122 @@ test.describe('W7 Check 30 · FOCUS-RETURN-1', () => {
     expect(after.focus).toBe('wsf-member-tab-home');
   });
 });
+
+test.describe('W7 Check 33 · the F1 successor (a member press ends the watch)', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  /** Back from the hero launcher by keyboard; wait for focus to land on the launcher. */
+  async function landOnLauncher(page: Page, fx: Fx): Promise<void> {
+    await toCommunity(page, fx);
+    await page.locator(`[data-testid="${launcherOf(fx)}"]:visible`).first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+    await page.locator('[data-testid="wsf-contribute-back"]:visible').first().focus();
+    await page.keyboard.press('Enter');
+    await expectFocus(page, launcherOf(fx), 'focus landed on the launcher');
+  }
+
+  async function blankSpot(page: Page) {
+    return page.evaluate(() => {
+      for (let y = 120; y < window.innerHeight - 120; y += 8) {
+        for (const x of [6, 12, window.innerWidth - 8]) {
+          const el = document.elementFromPoint(x, y) as HTMLElement | null;
+          if (el && !el.closest('a,button,input,[role="button"],[role="link"],[tabindex]')) return { x, y };
+        }
+      }
+      return null;
+    });
+  }
+
+  test('S1 a blank-space press after landing: focus stays where the member put it (body), no re-land', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('s1');
+    await signInVia(page, fx.email, PASSWORD);
+    await landOnLauncher(page, fx);
+    const spot = await blankSpot(page);
+    expect(spot).not.toBeNull();
+    await page.mouse.click(spot!.x, spot!.y);
+    const at = [await focusedId(page)];
+    for (const ms of [100, 1_000, 3_500]) { await page.waitForTimeout(ms === 100 ? 100 : ms - (ms === 1_000 ? 100 : 1_000)); at.push(await focusedId(page)); }
+    measure('S1 focus after a blank press (0, 0.1 s, 1 s, 3.5 s)', at);
+    expect(at, 'the watch re-landed focus after the member’s own press').toEqual(['body', 'body', 'body', 'body']);
+  });
+
+  test('S2 a press on a real control after landing: no snap-back to the launcher', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('s2');
+    await signInVia(page, fx.email, PASSWORD);
+    await landOnLauncher(page, fx);
+    // The progress Refresh control: pressing it re-reads and re-renders the hero.
+    const refresh = page.locator('[data-testid="wsf-community-progress-refresh"]:visible').first();
+    await refresh.click();
+    const at: string[] = [];
+    for (let i = 0; i < 8; i += 1) { at.push(await focusedId(page)); await page.waitForTimeout(500); }
+    measure('S2 focus over 4 s after pressing Refresh', at);
+    expect(at.filter((f) => f === launcherOf(fx)), 'focus snapped back to the launcher after the member pressed a control').toEqual([]);
+  });
+
+  test('S3 no press: a DOM-driven removal of the landed opener still re-lands (heading fallback), never body', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await seed('s3');
+    await signInVia(page, fx.email, PASSWORD);
+    await landOnLauncher(page, fx);
+    // LABELLED INJECTION: the screen drops the focused launcher with nobody touching anything.
+    await page.evaluate((id) => {
+      const el = Array.from(document.querySelectorAll(`[data-testid="${id}"]`)).find((e) => (e as HTMLElement).getClientRects().length > 0) as HTMLElement | undefined;
+      el?.remove();
+    }, launcherOf(fx));
+    await page.waitForTimeout(2_500);
+    const f = await focusedId(page);
+    measure('S3 focus after the landed launcher was removed', f);
+    expect(f, 'no re-land after a DOM-driven removal').not.toBe('body');
+    expect(f).toBe('wsf-community-name');
+  });
+
+  test('S4 the watch’s pointerdown listener is removed on press, on expiry and on repeated exits (no stacking)', async ({ page }) => {
+    test.setTimeout(240_000);
+    await page.addInitScript(() => {
+      const live = new Set<unknown>();
+      (window as unknown as { __pd: Set<unknown> }).__pd = live;
+      const add = EventTarget.prototype.addEventListener;
+      const rem = EventTarget.prototype.removeEventListener;
+      EventTarget.prototype.addEventListener = function (type: string, fn: unknown, opts?: unknown) {
+        if (this === document && type === 'pointerdown') live.add(fn);
+        return add.call(this, type, fn as EventListener, opts as boolean);
+      };
+      EventTarget.prototype.removeEventListener = function (type: string, fn: unknown, opts?: unknown) {
+        if (this === document && type === 'pointerdown') live.delete(fn);
+        return rem.call(this, type, fn as EventListener, opts as boolean);
+      };
+    });
+    const fx = await seed('s4');
+    await signInVia(page, fx.email, PASSWORD);
+    await toCommunity(page, fx);
+    const count = () => page.evaluate(() => (window as unknown as { __pd: Set<unknown> }).__pd.size);
+    const baseline = await count();
+    const readings: Record<string, number> = { baseline };
+    for (let i = 1; i <= 3; i += 1) {
+      await page.locator(`[data-testid="${launcherOf(fx)}"]:visible`).first().focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('[data-testid="wsf-contribute-entry-screen"]:visible')).toBeVisible({ timeout: 40_000 });
+      await page.locator('[data-testid="wsf-contribute-back"]:visible').first().focus();
+      await page.keyboard.press('Enter');
+      await expectFocus(page, launcherOf(fx), `exit ${i} landed`);
+      readings[`during watch ${i}`] = await count();
+      if (i === 2) {
+        const spot = await blankSpot(page);
+        await page.mouse.click(spot!.x, spot!.y); // ended by a press
+        await page.waitForTimeout(300);
+        readings['after press 2'] = await count();
+      } else {
+        await page.waitForTimeout(3_800); // ended by expiry
+        readings[`after expiry ${i}`] = await count();
+      }
+    }
+    measure('S4 document pointerdown listeners', readings);
+    expect(readings['after expiry 1']).toBe(baseline);
+    expect(readings['after press 2']).toBe(baseline);
+    expect(readings['after expiry 3']).toBe(baseline);
+    expect(readings['during watch 3'], 'listeners stacked across exits').toBeLessThanOrEqual(baseline + 1);
+  });
+});
