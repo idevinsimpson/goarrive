@@ -98,12 +98,18 @@ export default async function (db) {
     if (action === 'rejoin') await db.doc('wsfMemberships/wsfdemo-sample-movers_' + uid).set({ groupId: 'wsfdemo-sample-movers', userId: uid, role: 'member', membershipStatus: 'active', communityActivityVisibility: 'private' });
     if (action === 'replaceProfile') await db.doc('wsfMemberProfiles/wsfdemo-m07').set({ displayName: 'Somebody else now' });
     if (action === 'plantAddition') await db.doc('wsfGoals/wsfdemo-goal-movers-squats/recentAdditions/social-staging-demo-1-wsfdemo-goal-movers-squats-01').set({ amount: 999, at: 'not the fixture' });
+    if (action === 'replaceShard') await db.doc('wsfGoalCounters/wsfdemo-goal-movers-squats/shards/0').set({ count: 50 });
+    if (action === 'replaceAddition') await db.doc(process.env.HOOK_PATH).set({ amount: 999, at: 'someone else' });
+    if (action === 'replaceLedgerRow') await db.doc(process.env.HOOK_PATH).set({ goalId: 'wsfdemo-goal-movers-squats', userId: 'someone-else', count: 5 });
     if (action === 'plantLaterTotal') await db.doc('wsfGoalMemberTotals/wsfdemo-goal-movers-squats_wsfdemo-m12').set({ goalId: 'wsfdemo-goal-movers-squats', userId: 'wsfdemo-m12', total: 999 });
     return;
   }
   const g = 'wsfdemo-goal-movers-squats', uid = process.env.HOOK_OWNER, a = 'owner-hook-' + process.env.HOOK_TAG + '-' + n;
+  // like the product: the addition carries the minute of 'now', the row is stamped at commit
+  const at = new Date(Math.floor(Date.now() / 60000) * 60000).toISOString();
   await db.runTransaction(async (tx) => {
-    tx.create(db.doc('wsfContributions/' + g + '_' + uid + '_' + a), { goalId: g, attemptId: a, userId: uid, count: 7, shardIndex: n % 10, unit: 'squats', communityGroupId: 'wsfdemo-sample-movers', crossedTarget: false, createdAt: new Date() });
+    tx.create(db.doc('wsfContributions/' + g + '_' + uid + '_' + a), { goalId: g, attemptId: a, userId: uid, count: 7, shardIndex: n % 10, unit: 'squats', communityGroupId: 'wsfdemo-sample-movers', crossedTarget: false, createdAt: FieldValue.serverTimestamp() });
+    tx.create(db.doc('wsfGoals/' + g + '/recentAdditions/' + a), { amount: 7, at });
     tx.set(db.doc('wsfGoalCounters/' + g + '/shards/' + (n % 10)), { count: FieldValue.increment(7) }, { merge: true });
     tx.set(db.doc('wsfGoalMemberTotals/' + g + '_' + uid), { goalId: g, userId: uid, total: FieldValue.increment(7), contributionCount: FieldValue.increment(1) }, { merge: true });
   });
@@ -211,6 +217,22 @@ assert.equal(await snapshot(), s0, 'plan must write nothing');
 const planned = Number(line(plan.out, 'CREATE'));
 assert.ok(planned > 0);
 ok(`plan is read-only and reports CREATE=${planned}`);
+
+// ---- G2a: a shard replaced after preflight is re-proven inside the ledger transaction ----
+const goalAFixture = f.communities.flatMap((c) => c.goals).find((g) => g.goalId === GOAL_A);
+const ROW_A01 = `wsfContributions/${GOAL_A}_${goalAFixture.contributions[0].uid}_social-staging-demo-1-${GOAL_A}-01`;
+const ADD_A01 = `wsfGoals/${GOAL_A}/recentAdditions/social-staging-demo-1-${GOAL_A}-01`;
+{
+  const shard = `wsfGoalCounters/${GOAL_A}/shards/0`;
+  const r = await seed(['--apply', ...base], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'replaceShard' });
+  assert.equal(r.code, 3, r.out);
+  assert.match(r.out, new RegExp(`APPLY_INCOMPLETE: ${shard.replace(/[/]/g, '\\/')} is not this fixture's \\(missing, unmarked or foreign\\); refusing to increment it`));
+  assert.deepEqual((await db.doc(shard).get()).data(), { count: 50 }, 'the replacement shard is not incremented');
+  assert.equal((await db.doc(ROW_A01).get()).exists, false, "that row's ledger write did not happen");
+  assert.equal((await db.doc(ADD_A01).get()).exists, false, "nor its addition");
+  await db.doc(shard).set({ count: 0, demoFixture: f.fixtureId });
+  ok(`G2a: a shard replaced without the marker inside the first ledger transaction is refused before that row's writes (APPLY_INCOMPLETE names it, exit 3), and stays { count: 50 }`);
+}
 
 // ---- P2: a collision that appears AFTER classification stops the run explicitly ----
 {
@@ -396,6 +418,27 @@ ok('cleanup with a foreign document at a fixture path refuses and deletes nothin
   assert.equal((await db.doc('wsfMemberProfiles/wsfdemo-m07').get()).get('displayName'), 'Somebody else now');
   ok('a synthetic profile replaced DURING cleanup is preserved and named; cleanup exits 3');
   await db.doc('wsfMemberProfiles/wsfdemo-m07').delete();
+}
+
+// ---- G1b: an attached ledger row or recent addition replaced DURING cleanup is preserved ----
+{
+  assert.equal((await seed(['--apply', ...base])).code, 0);
+  const cA = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'replaceAddition', HOOK_PATH: ADD_A01 });
+  assert.equal(cA.code, 3, cA.out);
+  assert.match(cA.out, new RegExp(`CLEANUP_PRESERVED=1: ${ADD_A01.replace(/[/]/g, '\\/')} \\(preserved: not the recent addition linked to this fixture's row\\)`));
+  assert.deepEqual((await db.doc(ADD_A01).get()).data(), { amount: 999, at: 'someone else' });
+  assert.deepEqual((await allDocs()).map((d) => d.ref.path).filter((p) => p.includes('wsfdemo-')), [ADD_A01], 'everything else of the fixture is gone');
+  await db.doc(ADD_A01).delete();
+  ok('G1b: a recent addition replaced by { amount: 999, at: "someone else" } DURING cleanup is preserved and named; cleanup exits 3');
+  assert.equal((await seed(['--apply', ...base])).code, 0);
+  const cB = await seed(['--cleanup', ...base, '--confirm-cleanup', f.fixtureId], { WSF_DEMO_TEST_INTERLEAVE: HOOK, HOOK_OWNER: OWNER, HOOK_ACTION: 'replaceLedgerRow', HOOK_PATH: ROW_A01 });
+  assert.equal(cB.code, 3, cB.out);
+  assert.match(cB.out, new RegExp(`CLEANUP_PRESERVED=2: ${ROW_A01.replace(/[/]/g, '\\/')} \\(preserved: no longer provably this fixture's\\), ${ADD_A01.replace(/[/]/g, '\\/')} \\(preserved: its ledger row is not provably this fixture's\\)`));
+  assert.deepEqual((await db.doc(ROW_A01).get()).data(), { goalId: GOAL_A, userId: 'someone-else', count: 5 });
+  assert.deepEqual((await allDocs()).map((d) => d.ref.path).filter((p) => p.includes('wsfdemo-')).sort(), [ROW_A01, ADD_A01].sort());
+  await db.doc(ROW_A01).delete();
+  await db.doc(ADD_A01).delete();
+  ok('G1b: a ledger row replaced by { same goal, userId: someone-else, count: 5 } DURING cleanup is preserved and named, with the addition it can no longer vouch for; cleanup exits 3');
 }
 
 // ---- a clean seed, then a clean cleanup ----
