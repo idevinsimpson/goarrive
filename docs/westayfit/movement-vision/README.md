@@ -127,7 +127,8 @@ All files are new. The only edits to existing files are the dependency lines in 
 | `apps/westayfit/tests/movement-squat-counter.test.ts` | 18 cases |
 | `apps/westayfit/tests/movement-subject-lock.test.ts` | 25 cases |
 | `apps/westayfit/tests/movement-privacy.test.ts` | 23 cases |
-| `apps/westayfit/tests-e2e/sprint-w10-movement-vision.spec.ts` | 5 browser cases |
+| `apps/westayfit/tests/movement-fail-closed.test.ts` | 8 cases: the Director's three constructed cases (#475 `5825938854`) |
+| `apps/westayfit/tests-e2e/sprint-w10-movement-vision.spec.ts` | 6 browser cases |
 | `docs/westayfit/movement-vision/*` | This README, `DECISION.md`, `LIMITATIONS.md` |
 
 **Dependency:** `@mediapipe/tasks-vision` at exact version `0.10.35`. It is Apache-2.0, has no transitive dependencies, and is not a paid or vendor SDK. It needs no API key.
@@ -146,7 +147,8 @@ These claims are separate. Each one says exactly what was and was not shown.
 | **SERVED** | **No.** |
 
 **TEST VERIFIED.**
-- 66 vitest cases in `tests/movement-*.test.ts` pass, and the app's whole suite passes: 941 of 941. `tsc --noEmit` is clean.
+- 74 vitest cases in `tests/movement-*.test.ts` pass, and the app's whole suite passes: 949 of 949. `tsc --noEmit` is clean.
+- **Fail-closed review fixes** (#475 `5825938854`): the 8 regressions in `movement-fail-closed.test.ts` all failed on the previous head `8642e33` before the core was changed. Two older tests had required a rep to *survive* a one-frame dropout; they now assert the opposite.
 - A mutation check broke the logic 8 ways, and each mutation turned tests red:
   - no hysteresis;
   - no debounce;
@@ -157,7 +159,8 @@ These claims are separate. Each one says exactly what was and was not shown.
   - no hold-still requirement;
   - `unknown` allowed to go down.
 
-**BROWSER VERIFIED (partly).** In headless Chromium on 2026-09-25, all 5 cases in the e2e spec passed. That covers:
+**BROWSER VERIFIED (partly).** In headless Chromium on 2026-09-25, all 6 cases in the e2e spec passed. That covers:
+- **Freshness bound, end to end:** with Playwright's fake clock the lab's frame loop was paused at the bottom of a rep and resumed 11.2 s later with the member standing. The rep was voided, the member was re-acquired, and the count stayed 0. With the bound disabled, the same test counted a phantom rep (expected 0, received 1).
 - **Synthetic scene:** the lock, 3 counted reps, the half rep not counted, a pause while the walker crossed, re-acquisition, and a count of 5 rather than 8 with a second exerciser.
 - **Camera refused:** the manual count worked.
 - **Fake camera through the real MediaPipe engine**, with a feed built from a real photo of a standing person:

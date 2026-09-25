@@ -7,7 +7,7 @@ These are stated plainly so nobody mistakes the lab for a finished capability.
 The Director asked for these limits to be stated in this delivery. They are the rules the code follows, and where the code falls short, the limitation is written down:
 
 - **Only full observed cycles count.** A rep is counted only when the counter itself observed standing, then down, then standing again (`squatCounter.ts`). A cycle that started before the lock, or in the `unknown` phase, cannot count. Tests: "starting in the down position counts nothing until standing is seen", "reset() … requires standing again".
-- **A partial cycle is invalidated on loss.** Leaving `locked` for any reason calls `interrupt()`. That discards the rep in progress, and the member must be seen standing again (`session.ts`). Tests: "interrupt() mid-rep discards the rep", "lost tracking at the bottom voids that rep …", "while lost, nothing is counted …". The mutation check confirmed these tests go red if `interrupt()` becomes a no-op.
+- **A partial cycle is invalidated on loss, on any unobserved frame, and across a stream gap.** Leaving `locked` for any reason calls `interrupt()`. So does a single frame with no trusted pose during a partial cycle, and so does a frame gap over 250 ms or an out-of-order frame (`movement-fail-closed.test.ts`). That discards the rep in progress, and the member must be seen standing again (`session.ts`). Tests: "interrupt() mid-rep discards the rep", "lost tracking at the bottom voids that rep …", "while lost, nothing is counted …". The mutation check confirmed these tests go red if `interrupt()` becomes a no-op.
 - **Pose ordering and nearest-candidate association cannot establish identity after full occlusion.**
   - The lock never uses the engine's pose order.
   - After a full occlusion or an absence, re-acquisition is still spatial: exactly one person, near the last box, holding still for 400 ms. That is a *heuristic*, not identity.
@@ -23,15 +23,19 @@ The Director asked for these limits to be stated in this delivery. They are the 
 ## Subject lock: what it cannot guarantee
 4. **No identity.** The lock follows a *position and size*, not a person. If the member leaves and someone else steps into the same spot at a similar apparent size within 4 s, while still enough to pass the 400 ms hold, that person is re-acquired as "the member". If two people swap places while overlapping, the lock goes `lost` (ambiguous). When exactly one person is left afterwards and holds still near the last position, they are re-acquired, whoever they are.
 5. **It can only reason about people the engine detects.** MediaPipe lite missed a half-size person at the frame edge in testing. An undetected passerby cannot add reps, but an undetected person overlapping the member cannot trigger the ambiguity pause either. Instead they corrupt the member's own landmarks, and the counter sees whatever the engine reports.
-6. **Engine duplicates are merged.** Two detections with box IoU ≥ 0.7 are treated as one person reported twice. Two real people almost perfectly overlapping, one directly behind the other at a similar size, would be merged too.
+6. **Detections are never merged.** Every detection is treated as a distinct person, and overlapping detections read as a crowd, which pauses counting. If an engine ever reports one body twice, counting pauses rather than trusting it. Before #475 review `5825938854` detections with IoU ≥ 0.7 were merged; that allowed two distinct overlapping people to become one trusted subject.
 7. **A person standing close beside the member pauses counting** for as long as they stay. This is by design ("refuse rather than guess"), and it means two people cannot squat shoulder to shoulder in one frame.
 8. **Acquisition needs the member standing, whole body in frame, centred, and still for 0.6 s.** Someone who starts mid-squat, or whose feet are cropped, is not locked. The UI says why.
 
 ## Counter: what it cannot guarantee
-9. **It needs about 10 fps or more.** Down and standing each need 100 ms of consecutive samples, so at very low frame rates fast reps can be missed. Emulated-GPU browsers ran at about 1 fps; use `?delegate=cpu` there.
+9. **It needs about 10 fps or more, and at least 5 fps to count at all.**
+   - Down and standing each need 100 ms of consecutive samples, so at low frame rates fast reps can be missed.
+   - Frames more than 250 ms apart (`maxFrameGapMs`) count as an interrupted stream: the rep in progress is voided and the member is re-acquired. Below about 4 fps, nothing is ever counted.
+   - A frame whose timestamp is not after the previous one is rejected and voids the rep in progress.
+   - Emulated-GPU browsers ran at about 1 fps; use `?delegate=cpu` there.
 10. **Front-facing squats only have been reasoned about.** The shin-length signal also works in theory from the side, but has not been tested at other camera heights, at extreme angles, or with the phone on the floor looking up.
 11. **Depth, not form.** It counts hip travel. It does not judge knee valgus, heel lift, back angle or anything else about form.
-12. **A rep interrupted by lost tracking is discarded, never completed.** The member might feel a rep they did was not counted. That is the intended trade: a missed rep is better than an invented one.
+12. **A rep that is not fully observed is discarded, never completed.** This covers lost tracking, a single frame with no trusted pose partway through the rep, and a stream gap. On a real camera, one dropped detection at the bottom of a squat voids that rep, so the member might feel a rep they did was not counted. That is the intended trade: a missed rep is better than an invented one. Real-device dropout rates are not measured.
 13. **Occluded or cropped legs pause counting.** Legs cropped by the frame edge, or hidden behind furniture, give no measurable leg, so there is no depth and no count. BlazePose extrapolates off-frame joints; those are treated as not visible.
 14. **Half reps are informational and noisy.** The "half reps seen" figure counts any excursion past depth 0.3 that did not reach 0.6, so jittery landmarks can inflate it. It never changes the count.
 

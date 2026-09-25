@@ -53,6 +53,7 @@ export function MovementVisionLab() {
   const [snap, setSnap] = useState<SessionSnapshot>(session.snapshot);
   const [fps, setFps] = useState(0);
   const [people, setPeople] = useState(0);
+  const [streamGaps, setStreamGaps] = useState(0);
   const [debug, setDebug] = useState(true);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -81,6 +82,8 @@ export function MovementVisionLab() {
     (s: SessionSnapshot, poses: Pose[]) => {
       setSnap(s);
       setPeople(poses.length);
+      // A gap or out-of-order frame voided whatever was in progress; show it.
+      if (s.frameIssue) setStreamGaps((n) => n + 1);
       if (s.event === 'rep') setFlash('+1');
       else if (s.event === 'partial') setFlash('Half rep, not counted');
       const canvas = canvasRef.current;
@@ -107,6 +110,7 @@ export function MovementVisionLab() {
   const startCamera = useCallback(async () => {
     stopCamera();
     session.reset();
+    setStreamGaps(0);
     setSnap(session.snapshot);
     setMessage(null);
     setStatus('starting');
@@ -173,6 +177,7 @@ export function MovementVisionLab() {
   const startSynthetic = useCallback(() => {
     stopCamera();
     session.reset();
+    setStreamGaps(0);
     setSnap(session.snapshot);
     setMessage(null);
     setEngine('synthetic scene (scripted landmarks, no camera)');
@@ -209,6 +214,7 @@ export function MovementVisionLab() {
   const reset = useCallback(() => {
     const wasManual = session.snapshot.mode === 'manual';
     session.reset();
+    setStreamGaps(0);
     setSnap(wasManual ? session.useManual() : session.snapshot);
     setFlash(null);
   }, [session]);
@@ -333,6 +339,7 @@ export function MovementVisionLab() {
               `lock: ${snap.lockState}${snap.lockReason ? ` (${snap.lockReason})` : ''}   progress: ${Math.round(snap.progress * 100)}%`,
               `phase: ${snap.phase}   depth: ${snap.depth === null ? 'n/a' : snap.depth.toFixed(2)}   counting: ${snap.counting}`,
               `half reps seen (not counted): ${snap.partials}`,
+              `stream interruptions (rep in progress voided): ${streamGaps}${snap.frameIssue ? ` — now: ${snap.frameIssue}` : ''}`,
             ].join('\n')}
           </Text>
         )}

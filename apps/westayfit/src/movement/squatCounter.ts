@@ -22,8 +22,11 @@
  * - HALF REPS DO NOT COUNT: a descent that never reaches `downDepth` never
  *   enters `down`, so returning to standing has nothing to count. It is
  *   reported as a `partial` event for feedback, and adds nothing.
- * - UNKNOWN IS A REAL PHASE: at start, after `interrupt()` (lost tracking) and
- *   after `reset()`, the machine must SEE the member standing before it can
+ * - UNOBSERVED MEANS VOID: a null sample (no trusted pose this frame) during
+ *   any partial cycle — down, or partway down — interrupts exactly as lost
+ *   tracking does. Only a completion the counter actually watched can count.
+ * - UNKNOWN IS A REAL PHASE: at start, after `interrupt()` (lost tracking, an
+ *   unobserved frame mid-cycle) and after `reset()`, the machine must SEE the member standing before it can
  *   count again. A rep that was in progress when tracking was lost is
  *   discarded, never completed on the member's return.
  */
@@ -109,8 +112,13 @@ export class SquatCounter {
 
   private step({ timestampMs: t, depth }: SquatSample): SquatEvent {
     if (depth === null || !Number.isFinite(depth)) {
-      // Nothing trustworthy this frame: a dwell cannot be confirmed across it.
-      this.pending = null;
+      // Nothing trustworthy this frame. A dwell cannot be confirmed across it,
+      // and a cycle in progress was not fully observed, so it is void: the
+      // same interrupt/re-arm rule as lost tracking. Only a member standing
+      // at rest survives an unobserved frame.
+      const atRest = this.phase === 'standing' && this.excursion <= this.cfg.upDepth;
+      if (atRest) this.pending = null;
+      else this.interrupt();
       return null;
     }
     const zone: Zone =

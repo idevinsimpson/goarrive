@@ -139,7 +139,9 @@ describe('SquatCounter — the rep state machine', () => {
     const c = new SquatCounter({ dwellMs: 100 });
     // Standing, then alternating [deep, null] — never two consecutive deep samples.
     run(c, 3000, (t) => (t < 500 ? 0 : Math.floor(t / 33) % 2 ? null : 1));
-    expect(c.currentPhase).toBe('standing');
+    // Never reaches down; and since #475 review case 2, the null during the
+    // partial descent also voids it (phase unknown until standing is re-seen).
+    expect(c.currentPhase).not.toBe('down');
     expect(c.count).toBe(0);
   });
 

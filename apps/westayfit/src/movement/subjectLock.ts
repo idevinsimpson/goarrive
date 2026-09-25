@@ -76,8 +76,6 @@ export interface SubjectLockConfig {
    * the spot never holds still long enough to be taken for the member.
    */
   holdStillGate: number;
-  /** Two detections overlapping this much are one person reported twice. */
-  duplicateIoU: number;
   /** A locked subject missing this long is `lost`. Shorter gaps are dropouts. */
   lostAfterMs: number;
   /** From `lost`, the gate is wider (they may have shifted) … */
@@ -107,7 +105,6 @@ export const DEFAULT_LOCK_CONFIG: SubjectLockConfig = {
   ambiguityGate: 0.35,
   ambiguityIoU: 0.1,
   holdStillGate: 0.15,
-  duplicateIoU: 0.7,
   lostAfterMs: 300,
   reacquireGate: 0.6,
   reacquireScaleMin: 0.6,
@@ -157,6 +154,7 @@ export class SubjectLock {
   private reason: LockReason | null = 'noOne';
   private track: Track | null = null;
   private hold: Hold | null = null;
+  private lastT = -Infinity;
 
   constructor(config: Partial<SubjectLockConfig> = {}) {
     this.cfg = { ...DEFAULT_LOCK_CONFIG, ...config };
@@ -171,10 +169,43 @@ export class SubjectLock {
     this.reason = 'noOne';
     this.track = null;
     this.hold = null;
+    this.lastT = -Infinity;
+  }
+
+  /**
+   * The frame stream was interrupted (a gap longer than the caller's bound: a
+   * suspended tab, a stalled camera). Nobody was observed in between, so a
+   * locked member becomes `lost` and must be re-acquired, and any hold in
+   * progress starts over. The track itself is kept, so the usual
+   * re-acquisition and forget rules apply.
+   */
+  suspend(): void {
+    this.hold = null;
+    if (this.state === 'locked' || this.state === 'lost') {
+      this.state = 'lost';
+      this.reason = 'missing';
+    } else {
+      this.state = 'searching';
+      this.reason = 'noOne';
+    }
   }
 
   update(frame: PoseFrame): LockOutput {
     const t = frame.timestampMs;
+    // FRESHNESS: timestamps must strictly increase. A stale, repeated or
+    // out-of-order frame is ignored entirely and yields no subject.
+    if (!Number.isFinite(t) || t <= this.lastT) {
+      return {
+        state: this.state,
+        reason: this.reason,
+        subject: null,
+        subjectBox: this.track?.box ?? this.hold?.box ?? null,
+        standingRatio: this.track?.standingRatio ?? null,
+        candidates: [],
+        progress: 0,
+      };
+    }
+    this.lastT = t;
     const aspect = frame.aspect && frame.aspect > 0 ? frame.aspect : 1;
     const cands = this.candidates(frame.poses);
     let subject: Pose | null = null;
@@ -210,14 +241,12 @@ export class SubjectLock {
         ratio: squatRatio(pose, this.cfg.minVisibility),
       });
     }
-    // One person reported twice: keep the more complete detection.
-    all.sort((a, b) => Number(b.fullBody) - Number(a.fullBody) || b.box.h - a.box.h);
-    const kept: Candidate[] = [];
-    for (const c of all) {
-      if (kept.some((k) => boxIoU(k.box, c.box) >= this.cfg.duplicateIoU)) continue;
-      kept.push(c);
-    }
-    return kept;
+    // NO DEDUPLICATION. Every detection is treated as a distinct person. High
+    // overlap alone cannot prove two detections are one body, so overlapping
+    // detections are left in place and read as a crowd (ambiguity) by
+    // crowds(). If an engine is ever shown to emit duplicates, the fix is an
+    // engine-specific discriminator in its adapter, not a merge here.
+    return all;
   }
 
   private distance(a: Box, b: Box, aspect: number): number {

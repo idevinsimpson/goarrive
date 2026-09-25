@@ -115,6 +115,48 @@ test.describe('synthetic scene (no camera)', () => {
   });
 });
 
+test.describe('freshness bound at the browser boundary', () => {
+  /**
+   * The Director's review case 3 (#475 5825938854), end to end: the lab's
+   * frame loop is driven by requestAnimationFrame, so a hidden tab or a
+   * stalled loop shows up as one frame arriving long after the last. With
+   * Playwright's fake clock the loop is paused mid-rep and resumed 11.2 s
+   * later, in the scene's standing window. The rep in progress must be
+   * voided and the member re-acquired, with no count for the unobserved
+   * completion.
+   */
+  test('a frame loop suspended at the bottom of a rep does not complete that rep on resume', async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+    await page.goto(ROUTE);
+    await page.getByTestId('mv-privacy').waitFor();
+    await page.clock.pauseAt(new Date('2026-01-01T01:00:00Z'));
+    await page.getByTestId('mv-start-synthetic').click();
+
+    // Step the loop until the counter reports the member at the bottom of rep 1.
+    let atBottom = false;
+    for (let i = 0; i < 200 && !atBottom; i += 1) {
+      await page.clock.runFor(50);
+      atBottom = (await readout(page)).includes('phase: down');
+    }
+    expect(atBottom).toBe(true);
+    expect(await reps(page)).toBe(0);
+
+    // The loop stalls; one frame arrives 11.2 s later, the member now standing.
+    await page.clock.fastForward(11_200);
+    await page.clock.runFor(200);
+    expect(await reps(page)).toBe(0);
+    const after = await readout(page);
+    expect(after).toMatch(/stream interruptions \(rep in progress voided\): [1-9]/);
+    expect(after).not.toContain('phase: down');
+
+    // Standing on: re-acquired, still no count for the unobserved completion.
+    await page.clock.runFor(1_200);
+    expect(await readout(page)).toContain('lock: locked');
+    expect(await reps(page)).toBe(0);
+  });
+});
+
 test.describe('camera refused', () => {
   test('refusal leads to the manual count, which works', async ({ browser }) => {
     const ctx = await browser.newContext({ permissions: [] });

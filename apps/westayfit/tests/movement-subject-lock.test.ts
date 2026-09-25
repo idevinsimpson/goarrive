@@ -124,14 +124,17 @@ describe('MovementSession — counting only the locked member', () => {
     expect(snaps.some((x) => x.event === 'partial')).toBe(true);
   });
 
-  it('holds through a one-frame dropout mid-rep without losing the rep', () => {
+  it('a one-frame dropout mid-rep keeps the lock but voids that rep (unobserved = not countable)', () => {
+    // Changed on the Director's review (#475 5825938854 case 2): this test
+    // used to require the rep to SURVIVE a dropout. A cycle the counter did
+    // not fully observe is now void; the next fully observed rep counts.
     const { s, t } = lockedSession();
-    play(s, t, t + 3000, (ms) => {
-      if (Math.abs(ms - (t + 1000)) < 20) return []; // one frame with nobody
-      return [syntheticPose({ ...MEMBER, depth: squatDepth(ms, t + 200, 1600, 1) })];
+    play(s, t, t + 5000, (ms) => {
+      if (Math.abs(ms - (t + 1000)) < 20) return []; // one frame with nobody, at the bottom
+      return [syntheticPose({ ...MEMBER, depth: squatDepth(ms, t + 200, 1600, 1) + squatDepth(ms, t + 2600, 1600, 1) })];
     });
     expect(s.snapshot.lockState).toBe('locked');
-    expect(s.snapshot.reps).toBe(1);
+    expect(s.snapshot.reps).toBe(1); // the second rep only
   });
 
   it('lost tracking at the bottom voids that rep, then re-acquires and counts the next', () => {
