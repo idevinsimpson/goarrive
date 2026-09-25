@@ -6,7 +6,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Precedence.** Newer explicit owner decisions first (latest: Lovable is the living UI/UX North Star and source donor, `5819686459`, `5819944052` §5), then Strategic Master v3 and the accepted contracts, then the preserved history below. Workers read this section, their own packet and the thread deltas.
 
-**Heads (2026-09-25 02:40Z).**
+**Heads (2026-09-25 02:50Z).**
 
 | what | value |
 | --- | --- |
@@ -31,7 +31,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Waiting on the owner:** nothing. EXP1 held; W2 / W4 / W6 / W1B / W8 parked; W5 stopped.
 
-**Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **NORTHSTAR-OVERNIGHT-1 (First Useful Visit) ACCEPTED as the next frozen reference** (`5825523052`): product `a15a610e`, evidence `973e1141`, finalizer `80fc8738`; reuse invitation states, visibility note, zero-own Home, receipt, unknown-attempt wording, focus destinations; demo tools, storage, ledger, routing, CSS, timers are DEMO ONLY; moves no active packet.
+**Frozen reference and evidence.** Lovable project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`. HOME-POLISH-1 `544a385e` / `872c32fc`; RECOVERY-TRUTH-1 `02cb35c4` / `97faee8b`. **NORTHSTAR-OVERNIGHT-1 (First Useful Visit) ACCEPTED as the next frozen reference** (`5825523052`): product `a15a610e`, evidence `973e1141`, finalizer `80fc8738`; reuse its states and wording, not its demo mechanics; moves no active packet. Port qualifications `5825762390` (Back / Close labels; zero-own guidance only on an open eligible goal; corrected captions). Candidate next slice: JOIN-VISIBILITY-1, `/join` only; owner undecided.
 
 **Served build vs feature readiness (distinct).** Deployed `7ee70e4`. Three social callables transport-SHUT; `wsfContributions` index unverified. Readiness **not met**: Package E FAIL on run 47 (fixed on `main`, unmeasured); smokes, members deep link, `/move/<goalId>` direct load not run; email blocked; shared kiosk HELD.
 
