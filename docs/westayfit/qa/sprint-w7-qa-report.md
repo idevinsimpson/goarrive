@@ -4118,3 +4118,22 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 - The FAIL-BEFORE rows have not yet been seen to pass, because no hooked build exists yet. Each one is literal copy from, or order in, the frozen Lovable source, so it is satisfiable by construction. The Phase B run is where they are first shown passing.
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
+
+## 44P · PERF-MOBILE-1 truth rows, prepared on base `0b460ce3` before W9's delivery (Director #489 `5840930960`, `5841004020`, `5841108313`): **not a verdict; the base behaviour PERF must change or keep**
+
+- **Why this exists:** W9's PERF branch was not yet pushed. The timing and callable table stays Check 41B's unchanged harness. This spec, `sprint-w7-perf-mobile-verify.spec.ts`, proves what a member read cache must **not** do.
+- **How it was run:** Chromium at 390×844 on the emulators, twice, with identical results. Every failure is a labelled row, with no harness failure.
+
+| Row | What | At `0b460ce3` |
+|---|---|---|
+| **T1** account isolation (PRESERVE) | A warms Progress and You and signs out in the page; B signs in **in the same document** (marker-proved); every frame of B's session is watched for A's goal, community and name | **pass**: nothing of A in any frame; B sees its own 7 squats; A's 35 never appears |
+| **T2** refusal (measure only) | M's membership is removed on the server; M returns to Home, then Progress | Home shows the goal as **"Last known"**; the mounted Progress **still lists the goal and 9 squats** (it reads only on mount) |
+| **T3** after a confirmed contribution (FAIL-BEFORE) | Progress and You are both mounted (35 shown); M contributes 20 through MOVE over Progress, and the receipt is `ordinary`; the server's own total is **55** | **fails: Progress still shows 35 and You still shows 35.** Neither mounted route refreshes the member's own part after a confirmed contribution. |
+| **T3b** the race (FAIL-BEFORE) | You's first own-credit read is issued and its **real** server answer (35) held (INJECTED delay); M contributes 20 (server 55); the held answer is then delivered | **fails: You shows 35**, the older answer wins. Progress, mounted only after the receipt, shows 55. |
+
+**For PERF:**
+- **T1 must stay green.**
+- **T3 and T3b** are the route-level form of the Director's "a confirmed contribution refreshes only the affected own-part key" and its version guard. After PERF, both routes must show the server's 55.
+- **T2** is recorded for the refusal fail-closed rule. Whether a mounted Progress drops a refused community's rows depends on PERF's refresh policy, so it is measured, not asserted.
+
+**Status:** tests and evidence only. Nothing is accepted, integrated or staged.
