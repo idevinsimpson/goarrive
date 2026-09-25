@@ -3166,3 +3166,144 @@ Documentation- and test-level review only. No deploy, no dispatch, no merge, no 
 **Not measured:** a real staging run. The gate and verifier ran against local list files and a mocked API, which is the suite's own method.
 
 **Status:** reviewed on `ae1fb2fa`. Not merged, not dispatched; L0 is the sole merge and dispatch owner.
+
+## 35 · BASELINE PARITY, served/integrated `502b1e8d0c98c199445c664c696b3f73bb460f14` against Lovable managed `8c73dd7f5c68d818bf1ebc0a17377fb3eadb25d1` (Director #434 `5834104466`; owner packet #365 `5834082617`, W7 section; W7 ACK `5834118558`): **observations and measurements, no verdict**
+
+This is independent QA of the baseline, not a creative verdict and not an acceptance. Every figure comes from one synthetic emulator stack (project `demo-wsf-local`) serving an emulator-flagged build of detached `502b1e8d`. The bundle carries the `502b1e8d` stamp and the worktree is clean. Timings are wall-clock ms from the `pointerdown` in one headless Chromium on the loopback. They are **not a speed claim**. The instrument is `apps/westayfit/tests-e2e/sprint-w7-baseline-parity-verify.spec.ts` (P1–P6). Its assertions only confirm that the harness reached the state it measured. The behaviour below comes from its `MEASURE` lines.
+
+**How it measures.** An init script logs `pointerdown` and Enter/Space. On every mutation and every animation frame it records:
+- each watched screen's mount (a new DOM instance counts as a new mount);
+- when each screen is shown or hidden;
+- the watched screen actually **on top** at the viewport centre, via `elementFromPoint`. Inactive tab scenes stay laid out under the active one, so "shown" alone is not what the member sees;
+- 30 frames of `getBoundingClientRect` and cumulative opacity for each surface that appears.
+
+The runner counts callables (port 5001) and Firestore requests (port 8080). Clips were recorded for every case, and stills for the transient frames (P6). P6 used labelled **INJECTED** 1.5 s delays for the stills only, and no timing was taken from it. Run 2 of 12 cases passed, and P6 passed separately. Run 1 (11 cases) agreed except for the two points listed under "run differences".
+
+### 35.1 One-goal MOVE: resolver → full-page contribution (P1, P1s at 390×640, P1r with reduced motion)
+
+| from | first feedback | contribution on top | callables | Firestore | Back returns to | origin remounted |
+|---|---|---|---|---|---|---|
+| Home (community) | 10 ms, `/move` sheet | 121 ms | 5 (`wsfMyCommunities` 1, `wsfListGoals` 2, `wsfGoalPulse` 1, `wsfMyContribution` 1) | 2 | Home, same instance, 7 ms; then **5 refresh callables** | 0 |
+| Community | 8 ms | 158 ms | 5 | 2 | Community, 6 ms; 0 callables | 0 |
+| Progress | 6 ms | 123 ms | 5 | 2 | Progress, 5 ms; 0 callables | 0 |
+| You | 6 ms | 141 ms | 5 | 2 | You, 5 ms; 0 callables | 0 |
+| Home at 390×640 | 13 ms | 152 ms | 5 | 2 | Home, 7 ms; 5 callables | 0 |
+| Home, reduced motion | 11 ms | 139 ms | 5 | 2 | Home, 7 ms; 5 callables | 0 |
+
+Observed sequence (all six runs):
+1. On MOVE, the transparent-modal `/move` sheet appears as a short "working" sheet at the bottom: "Close" and "Finding what you are moving toward…" (still `still-move-working.png`). It covers the tab bar, and the page behind is dimmed. The sheet appears in place: its top is 744 px at 844 and 540 px at 640 from the first sampled frame, with opacity 1. There is **no slide or fade**.
+2. At about +72 to +87 ms the resolver does `router.replace` to `/contribute/<goal>?groupId=…&mode=move`. For about 40–70 ms **no watched screen is on top**: this is the contribution route's own unlabelled "Loading goal…" state.
+3. The **full-page** contribution screen follows, with a cut rather than a transition. Its card starts 40 px higher for the first 2–4 frames (214 → 254 at 844; 185 → 225 at 640), which is a **layout shift**, not motion.
+4. On the contribution page, the **tab bar and the masthead are absent**. The exit is "Back". Focus sits on `BODY`.
+5. The heading is the page's "Ready when you are." with an optional timer and "I'm done — enter my squats" (still `still-contribute-move.png`). There is no "Start moving" sheet title in view.
+
+Reduced motion and 390×640 made no difference: there is no motion to reduce.
+
+**Lovable `8c73dd7f` for comparison** (source read through the connector; the prototype was not run):
+- MOVE is `open("move")` into the **same** in-page sheet (`MoveFlow` in `Sheet`). The tab bar and masthead stay mounted behind a scrim, and there is no route change.
+- The button is an `Activity` icon plus "MOVE" (`shell.tsx`). The baseline button is the text "MOVE" only (`MemberTabBar.tsx`).
+- The sheet has explicit motion: `wsf-sheet-in` translateY(28px) + opacity over `--dur-sheet-in` 240 ms; exit 180 ms (`EXIT_MS`); scrim fade; `wsf-step-fwd/back` 18 px over 200 ms between steps; press feedback `scale(.97)`/`.94` over 90 ms. Under reduced motion these are all set to `animation: none`.
+- The `Sheet` focuses its first control or `[data-autofocus]` and contains Tab. On close, focus returns to the trigger and scroll is restored.
+
+### 35.2 Zero- and two-goal MOVE (P2, from Home)
+
+- **Zero goals:**
+  - The no-goal sheet is on top at +13 ms and filled at +77 ms, after 2 callables (`wsfMyCommunities`, `wsfListGoals`) and 0 Firestore requests.
+  - The sheet **jumps** in size, from top 744 to 430, with no animation. It covers the tab bar, and the scrim covers the masthead.
+  - Text: "Nothing is running right now … Go to your community".
+  - **Focus stays on the MOVE button**, behind the sheet.
+  - Close returns to the community in 5 ms, with 3 refresh callables. Focus is still on the MOVE button.
+- **Two goals:**
+  - The choose sheet appears at +75 ms after 2 callables (744 → 342, a jump). Text: "What are you moving toward? 2 goals are open here…", and each goal has its own "Move".
+  - Focus stays on the MOVE button.
+  - Choosing the second goal shows the full-page contribution on top at +68 ms, after 3 callables and 2 Firestore requests.
+
+Lovable's `MoveFlow` keeps these choices inside the one sheet. This check did not read `move.tsx` again, so the details of Lovable's zero- and multi-goal copy are not asserted here.
+
+### 35.3 Community loading: the FormShell "Your community" frame (P3, P3s, P3r, P3b)
+
+**Cold document load of `/community/<id>`** (3 runs):
+
+| measure | 844 | 640 | reduced motion |
+|---|---|---|---|
+| loading frame appears | +125 ms | +131 ms | +126 ms |
+| loading frame visible for | 242 ms | 272 ms | 364 ms |
+| content appears | +367 ms | +403 ms | +490 ms |
+| callables | 7 | 7 | 7 |
+| Firestore requests | 6 | 6 | 6 |
+
+The 7 callables are `wsfListGoals`, `wsfGoalPulse`, `wsfMyContribution`, `wsfMyCommunities`, `wsfListChallenge`, `wsfCommunityMembers` and `wsfCommunityActivity`. In run 1 at 390×844, the **loading FormShell appeared about 90 ms before the tab bar and masthead mounted** (+146 ms, against +236 ms for the chrome). For those frames the member sees a bare auth-style shell.
+
+The frame itself (still `still-community-loading-masthead-home.png`) is the navy FormShell field with the wordmark and a large **"Your community"** heading, then "Loading…" on cream. It is then replaced by the community hero, whose eyebrow is also "Your community" and whose layout differs. That is the header flash.
+
+**Soft (in-app) entries:**
+
+| entry | FormShell on top | visible for | community on top | callables | new community instance |
+|---|---|---|---|---|---|
+| Home list → community | +27 ms | 193 ms | +220 ms | 7 | yes |
+| Community tab row "Switch" → other community | +22 ms | 110 ms | +132 ms | 5 | yes (+1) |
+| masthead Home (35.4) | +53 to +82 ms | about 135–190 ms | +193 to +215 ms | 9 | yes (+1) |
+| Home after Settings Back (35.5) | +61 to +97 ms | about 150 ms | +209 to +255 ms | 9 | yes (+1) |
+
+The Home list case involved two memberships, where Home shows the list. The "Switch" row lands on the **Home** tab, not the Community tab.
+
+With a single community, the Community tab's "CURRENT" panel has **no control that opens the community**. The measured openers are 0; the panel is information only.
+
+Lovable keeps all four tab sections mounted (`<section hidden>`), and its shell has no loading frame between tabs. Community switching there is a chip on the Community screen (`switch-chip`); this check does not assert its timing.
+
+### 35.4 Warm tab returns, masthead Home, active reselect (P4, 390×844)
+
+- **Warm return You → Home:** the community is on top at +12 ms, as the same instance with no loading frame. Scroll was **kept at 166 px**, which is this fixture's maximum. The return issues **5 refresh callables**.
+- **Progress:** the first visit shows `wsf-activity-loading` for about 80–100 ms, with 3 callables. The warm return is +6 ms, with 0 callables, 0 remounts and no loading frame.
+- **You:** the first visit shows its loading state for about 115 ms, with 3 callables.
+- **Active reselect:** Progress and Home were each a **true no-op**: no navigation, no event, no callables, no Firestore requests, no remount and scroll kept (166 → 166). The idle control, 1.5 s on Home with no tap, also issued 0 callables.
+- **Masthead Home, from You or from Home itself:** the wordmark does `router.navigate('/')`. Home's index flashes "Opening your community…" (`wsf-home-opening-community`), then the **community loading FormShell**, then a **new community instance**. Scroll was **reset to 0**. It cost **9 callables** (`wsfMyCommunities` and `wsfListGoals` twice each) and 3–4 Firestore requests. The community was on top at +215 ms from You. Tapping the masthead while already on Home rebuilt the screen in the same way.
+
+**Lovable comparison:**
+- Tabs use `goTab`. Reselect is a no-op (`if (cur === t) return cur`), and scroll is saved and restored per tab.
+- Each tab section fades in with `wsf-tab-in` (opacity .35 → 1, 140 ms), which reduced motion turns off.
+- Lovable's masthead wordmark is an `<img>`, **not a Home control**. The baseline's masthead Home has no counterpart there.
+
+### 35.5 Settings presentation (P5, P5s, P5r; from You and from the menu)
+
+- **Opening Settings:** `router.push('/settings')`, a root stack route. From You or from the menu (opened on Home), Settings is on top in 8–15 ms with 0 callables. It is a **full page**: the tab bar and the masthead are absent, and there is no motion (top 0 on every frame, opacity 1). The chrome is a bare "‹" back link, then "SETTINGS / Your preferences / Privacy" (still `still-settings.png`). Focus sits on `BODY`.
+- **Back:** "‹" does `router.replace('/you')`. That **rebuilds the tab navigator**: a new tab bar (instance 2, then 3), a new masthead, and **You remounted with its loading state** for about 95–125 ms, with 3 callables and 2 Firestore requests.
+- **After Back:**
+  - Opened from the menu **on Home**, Back lands on **You**, not Home.
+  - Going Home afterwards shows the community loading FormShell and a **new community instance**, with 9 callables.
+  - The same happened at 390×640 and with reduced motion.
+
+**Lovable comparison:** there is no Settings route. "Privacy" is a **panel** from the menu (`Sheet variant="panel"`), with `wsf-panel-in` translateX(32px) + opacity over 240 ms and exit 180 ms. The tabs stay mounted behind a scrim, and focus returns to the trigger on close.
+
+### 35.6 What this does and does not establish
+
+These are baseline observations recorded for W9's APP-FEEL-PARITY-1 and the Director. They are not graded against a verdict.
+
+**Observations that match the packet's concerns:**
+- **O1:** MOVE with one goal goes from sheet to full page. That is a route change, the chrome disappears, there is a cut and a 40 px layout shift, and there is no motion.
+- **O2:** the FormShell "Your community" frame appears on every fresh community mount: cold load, Home list, Switch, masthead Home and Home after Settings Back. On a cold load it shows about 90 ms before the chrome.
+- **O3:** masthead Home is **not** a warm return. It remounts the community, shows the loading frame, resets scroll and makes 9 calls.
+- **O4:** Settings Back rebuilds the tab navigator, which loses the kept tab state (You reloads, and Home reloads on the next visit).
+- **O5:** the MOVE sheets, Settings and the contribution page have no enter or exit motion. Lovable specifies it.
+- **O6:** focus is not moved into the MOVE sheet or the contribution page (MOVE button or `BODY`).
+
+**Consistent with the packet's rules:**
+- warm tab returns keep the instance, keep the scroll and show no skeleton;
+- active reselect is a true no-op;
+- Back from the contribution page returns to the exact origin tab instance.
+
+**Run differences, disclosed:**
+- In run 1, the session's **first** MOVE took 2,953 ms to contribution content, against 121 ms in run 2. Run 1 was the first callable use after the emulator started, so this is attributed to function cold start. It is **not** a product timing.
+- In run 1, "reselect Home" showed 2 callables. Run 2 added a 3 s settle after arriving Home and an idle control, and showed 0 for both. The run 1 calls were the tail of the preceding return's refresh.
+
+**Limitations:**
+- Chromium only, headless, loopback emulators, synthetic fixtures. No Safari, no real device, no network shaping, no assistive-technology session.
+- Keyboard-initiated MOVE was not driven in this check (it was covered in Checks 30 and 33).
+- "On top" is sampled at the viewport centre only.
+- Frames are `requestAnimationFrame` samples, not compositor frames.
+- The Lovable figures are **source reads** at `8c73dd7f` (`shell.tsx`, `ui.tsx`, `overlays.tsx`, `styles.css`), not a run. The preview host is blocked by this environment's proxy.
+- Clips (`.webm`) and stills are kept in the session scratchpad, not committed. That follows the rule never to commit artifacts.
+
+**Next:** when W9 posts an APP-FEEL-PARITY-1 successor, verify only the affected behaviour (35.1–35.5) on that exact SHA with this instrument.
+
+**Status:** measured on `502b1e8d`. This is not a verdict, and nothing is accepted, integrated or staged. No product source, screenshot baseline, deploy or cloud call was touched.
