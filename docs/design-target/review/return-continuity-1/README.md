@@ -45,14 +45,17 @@ prediction, and nothing is added twice.
 | Unknown, write landed and reply lost | "1,867 of 5,000 squats"; "You’ve added 20 squats to this goal." The server's figures, shown once. |
 | Refresh failed | The figure, "Confirmed h:mm", own row and momentum are unchanged, and **nothing tells the member the refresh did not happen**. |
 
-## The change (CANDIDATE, product `da7e30bb`)
+## The change (CANDIDATE, product `ff043515`)
 
 Only the failed refresh changes. When a re-read fails while a confirmed figure is shown, and no read issued after it has
 already landed:
 - The figure, its percentage and what is left stay. The existing **"Confirmed h:mm"** stays exactly as it was.
 - The hero's pill says **"Last known"** in place of the window line.
-- A polite live line beside the figure says **"Couldn’t refresh. This is the last confirmed figure."**, with
-  **Retry**. Retry is the existing `refreshProgress`.
+- A line beside the figure says **"Couldn’t refresh. This is the last confirmed figure."**, with **Retry**. Retry is
+  the existing `refreshProgress`.
+- **Screen readers:** a polite live region sits beside the figure whenever one is shown. It is empty, and absolute so
+  it takes no layout. The sentence is put into it when a read fails, so it is announced; Retry is not inside it.
+  The visible copy of the sentence is `aria-hidden`, so it is not read twice.
 - The own row's label reads **"Your last-known contribution"**, because it comes from the same read.
 - Another open goal's card says the same.
 
