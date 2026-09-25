@@ -457,7 +457,10 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await page.getByTestId(`wsf-community-goal-link-${fx.goalId}`).last().click();
     await expect(page.getByTestId('wsf-contribute-move-screen').last()).toBeVisible({ timeout: 40_000 });
     const arrow = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
-    await expect(arrow).toHaveText('Back to community');
+    // Since RECOVERY-PORT-1's accepted correction (Check 29, integrated 6b96ba1b) the
+    // route's own chrome control says "Back": it returns to the actual opener.
+    await expect(page.locator('[data-testid="wsf-contribute-community"]:visible')).toBeVisible({ timeout: 40_000 });
+    await expect(arrow).toHaveText('Back');
     await arrow.click();
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe(`/community/${fx.groupId}`);
     await page.waitForTimeout(1_000);
@@ -499,7 +502,9 @@ test.describe('W9 contribution exits, independent instruments', () => {
     await signInVia(page, fx.email, fx.password);
     await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}&mode=move`);
     const arrow = page.locator('[data-testid="wsf-contribute-back"]:visible').first();
-    await expect(arrow).toHaveText('Back to community', { timeout: 40_000 });
+    // The verified context is the readiness signal; the control itself now says "Back" (Check 29).
+    await expect(page.locator('[data-testid="wsf-contribute-community"]:visible')).toBeVisible({ timeout: 40_000 });
+    await expect(arrow).toHaveText('Back');
     const len0 = await page.evaluate(() => history.length);
     await clearHistoryOps(page);
     await arrow.click();

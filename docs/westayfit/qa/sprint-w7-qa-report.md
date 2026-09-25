@@ -2934,3 +2934,61 @@ The delta is one commit with parent `1d52c854`. It changes one file, `docs/wsf-s
 Nothing else in the document changed. Findings F4 (W3's delivery text) and F5 (a citation carried over from `main`) were not in the ruled scope, and F5's line is untouched.
 
 **Status:** reviewed on `9691139f`. It is not accepted, integrated or staged; L0's main-based draft is L0's.
+
+## 30 · FOCUS-RETURN-1 (#477), exact head `8f2cc15e89075086282777142ff946e7052acbef` (product `0d5df335`) on development `6b96ba1b` (L0 queue #434 `5825283492` item 2; W9 delivery #477 `5826296788`; W7 ACK `5826390838`): **PASS — no defect in the delivered behaviour; one precision finding on the watch window (F1); one pre-existing seam recorded (S1); a correction to my own Check 29 T3 scope**
+
+W7 accepts, integrates and stages nothing. This is not a pixel verdict; the eight frames are the Director's. I started this check on the delivered head under L0's queued routing, before any separate SHA routing, and said so in the ACK.
+
+### 30.1 · Scope, by git
+
+| fact | measured |
+|---|---|
+| lineage | five commits on exactly `6b96ba1b`: `b76b8410`, `12ae965c` (Enter selects a tab), `77dfdf1c` (producer), `0d5df335` (review findings = product SHA), `8f2cc15e` (8 frames + README); `apps/` identical `0d5df335` → head |
+| product | new `src/ui/focusReturn.ts`, `app/(tabs)/_layout.tsx` (a ref on the shell `View` + the hook), `app/move/index.tsx` (Escape = the same `close()`, only while the sheet is the focused screen; the sheet hook; `armTabsFocusReturn` on the replace-to-Home close), `src/ui/MemberTabBar.tsx` (the unchanged `onPress` body lifted into `select`, which Enter also calls; the active-tab no-op still returns first) |
+| untouched | `app/contribute/**`, `pendingContribution.ts`, `contributionFlow.ts`, `moveSession.ts`, kit, `app/_layout.tsx`, `.github`, functions, rules, both hosting configs, `package.json`: `git diff --quiet` true |
+| base build | development `6b96ba1b` has the same tree as `86c160ae` (`git diff --quiet`), so the Check 29 head build (5013) is the base here. Its `/health` stamp reads `86c160ae`; disclosed |
+
+### 30.2 · W7's instrument (`sprint-w7-focus-return-verify.spec.ts`), head vs base, first runs
+
+| case | head `8f2cc15e` (5015) | base (5013) |
+|---|---|---|
+| **R1** pointer path: launcher and Back both **clicked** → focus on that launcher | **PASS** | FAIL (`body`) |
+| **R2** 390×640, community scrolled to **60**, keyboard open, Back → focus on the launcher, scroll **60 → 60** (the case refuses to run if nothing scrolls) | **PASS** | FAIL (`body`) |
+| **R3** no steal: the member moves focus to the You tab at once after Back; 3.5 s later it is still there | **PASS** | PASS (nothing acts on the base) |
+| **R4** **real** own-only (membership removed on the server, not an injected reply) → "Back to home" (Enter) → focus on a named, visible control (the launcher), never `body` | **PASS** | FAIL (`body`) |
+| **R5** unknown → "Back to community" (Enter) → focus on the launcher, one Community screen; Enter on the restored launcher brings back the **same attempt**, 0 sends | **PASS** | FAIL (`body`) |
+| **R6** a plain load of Community leaves focus on `body` | **PASS** | PASS |
+| **R7** (measured) a pointer click on blank page space within the helper's watch after landing | see F1 | focus stays `body` |
+
+**Head 7 / 7; base 3 / 7.** The base passes only the cases that assert nothing moves (R3, R6) and the measurement (R7).
+
+### 30.3 · Carried and focused runs
+
+| run | build | first run |
+|---|---|---|
+| W9 `sprint-w9-focus-return-1` (16) | head | **16 / 16** |
+| the same file | base | **1 / 16**: every focus case fails on `body`; the one pass is the plain-load / tab-switch case that asserts nothing moves |
+| W7 `shell-successor-verify` (MOVE a focus sheet over the **mounted** tab: same instance, no remount, one top bar, Close, reduced motion), `contribute-exits-verify` (X1–X7h), `recovery-port-verify` (Check 29 T1–T7) | head | **34 / 37**. X7f is the standing CANNOT-MEASURE (the instance does not survive the in-app sign-out). **X3 and X3c** failed on **my own stale pins**, which still expected the chrome control to say "Back to community". The accepted, integrated Check 29 correction made it "Back". The pins were corrected and **those two cases rerun (2 / 2)**. |
+
+Check 29's T6 readings now show where focus lands: MOVE from Community → own Back → `wsf-member-tab-move`; MOVE from You → unknown → "Back to community" → `wsf-member-tab-move`; re-entry through the hero → receipt → "Back to community" → that launcher. The destinations, the single Community screen, the kept attempt and the server's single count are unchanged from Check 29.
+
+W9's 56-file regression (309 / 0 / 10) is **carried**, including the kiosk specs, `ui-a11y` and `ui-a11y-fixes`. The kiosk path has no shell, and `loadedAtFlow` excludes `?kiosk`.
+
+### 30.4 · Findings
+
+- **F1 — the watch window overrides a pointer blur (precision, not blocking).** For 3 s after it lands (`WATCH_MS`), the helper re-lands focus whenever focus is "lost", up to three times. A member's own click on blank page space counts as lost. Measured on the head: `mousedown on DIV`, then `focusout` from the launcher at +1 ms, then `focusin` on the launcher again at **+9 ms**. The member's deliberate blur is undone. No scroll moves, because focus uses `preventScroll`, and nothing is activated. The re-land guard was built for a launcher the screen rebuilds, but it cannot tell that case from the member's own click. Smallest fix: treat a `pointerdown` outside any focusable during the watch as the member acting and stop watching, as `followAttention` already records pointer presses. This is a finding for the Director's call and not a defect of the delivered cases.
+- **S1 — pre-existing seam, not this PR's.** After the real own-only receipt opened from the community, "Back to home" (`dismissTo('/')`) returns a member whom the server has just removed to the **still-mounted** screen of that community. It shows the figures it held before the contribution (1,847 while the server holds 1,867) and still offers "Start moving" / "Already moved?". A reload or a fresh load of the same URL shows "Not a member · You are not a member of this community", so no new data is read. It is the same on the base (R4's path reading is identical there). FOCUS-RETURN-1 only adds focus on the launcher there. It is recorded for the owner of the Home stack.
+
+### 30.5 · Correction to my Check 29 record
+
+Check 29's T3 asserted that the own-only "Back to home" "never [goes] to the lost community". That held for the flow T3 drove, a **cold** arrival at `/contribute`, which landed on `/`. It does not hold when the flow was opened from the community page (S1, above). The Check 29 verdict on the delivered route is unchanged: the route's exit calls `dismissTo('/')` exactly as the base did. The narrower claim stands corrected here.
+
+### 30.6 · Limitations
+
+Chromium only. Safari is CANNOT-MEASURE; so are its tap-without-focus behaviour and a real assistive-technology session. The limitations W9 disclosed are not re-measured and carry:
+- a cold `/event` or `/queue` flow still leaves focus on `body`, pending an `app/_layout.tsx` dependency;
+- Progress's own "Start moving" ignores Enter and replaces the navigator;
+- focus is not moved into the MOVE sheet when it opens;
+- Settings, `/goals/new`, `/start-community` and `/join` keep the browser default.
+
+**Status:** tested on `8f2cc15e`; delivered by W9; **not accepted, not integrated, not staged**.
