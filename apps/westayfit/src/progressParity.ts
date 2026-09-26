@@ -83,6 +83,12 @@ export type ProgressState =
       canStart: boolean;
       /** `null` = no source can supply dated receipts (today, always). */
       receipts: ProgressReceipt[] | null;
+      /**
+       * The member belongs to no community. Nothing can be open for them, and
+       * "your community has no goal" would be false, so the no-open-goal card
+       * says where their part will be counted instead.
+       */
+      noCommunity?: boolean;
     };
 
 export type ProgressTone = LifecycleTone;

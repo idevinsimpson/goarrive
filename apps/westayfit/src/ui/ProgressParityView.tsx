@@ -228,9 +228,11 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
             <Text style={s.cardEyebrow}>YOUR CONTRIBUTIONS</Text>
             <Text style={s.cardTitle}>No goal is open for contributions</Text>
             <Text style={s.cardBody}>
-              {state.partial
-                ? 'None of the goals that loaded has a contribution recorded for you, and your community has no goal accepting contributions right now.'
-                : 'Nothing is recorded for you yet, and your community has no goal accepting contributions right now.'}
+              {state.noCommunity
+                ? 'Nothing is recorded for you yet. Your part is counted inside a community’s goals — join one, or start your own.'
+                : state.partial
+                  ? 'None of the goals that loaded has a contribution recorded for you, and your community has no goal accepting contributions right now.'
+                  : 'Nothing is recorded for you yet, and your community has no goal accepting contributions right now.'}
             </Text>
             <View style={s.flowActions}>
               <SecondaryAction
