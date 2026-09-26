@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+/**
+ * COMMITTED SKILL / AGENT-CONTROL FILES CARRY NO PROVIDER CREDENTIAL.
+ *
+ * A Browser Use Cloud key was once committed to skills/browser-use-e2e/SKILL.md
+ * in this public repository. This suite runs the existing, redacting
+ * scan-evidence.mjs over the committed agent-instruction trees (skills/,
+ * .claude/) and the root agent files, so a literal credential there fails the
+ * run by path, line and rule, never by value. The canaries below are
+ * synthetic; no real key is, or may ever be, copied into this file.
+ *
+ * Removing a key from source does not revoke it. Revocation and replacement
+ * are the account owner's, at the provider.
+ */
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const SCANNER = path.resolve('.github/wsf-staging/scan-evidence.mjs');
+let passed = 0;
+async function test(name, fn) {
+  await fn();
+  passed += 1;
+  console.log(`  ok  ${name}`);
+}
+const scan = (dir) => spawnSync(process.execPath, [SCANNER, dir], { encoding: 'utf8' });
+function tmpWith(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-committed-secrets-'));
+  for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
+  return dir;
+}
+
+// Synthetic: the shape of a Browser Use key, spelled so it cannot be one.
+const CANARY = ['bu', 'SYNTHETICcanaryNotARealKey0123456789ab'].join('_');
+
+for (const tree of ['skills', '.claude']) {
+  await test(`${tree}/ carries no credential-shaped literal`, () => {
+    const r = scan(path.resolve(tree));
+    assert.equal(r.status, 0, `${tree}/ failed the committed-secret scan:\n${r.stderr}`);
+    assert.match(r.stdout, /EVIDENCE_SCAN=clean/);
+  });
+}
+
+await test('the root agent instruction files carry no credential-shaped literal', () => {
+  const dir = tmpWith({ 'AGENTS.md': fs.readFileSync('AGENTS.md', 'utf8'), 'CLAUDE.md': fs.readFileSync('CLAUDE.md', 'utf8') });
+  try {
+    const r = scan(dir);
+    assert.equal(r.status, 0, r.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+await test('a literal Browser Use key is refused by path, line and rule — never echoed', () => {
+  const dir = tmpWith({ 'SKILL.md': `# x\n\nclient = AsyncBrowserUse(api_key="${CANARY}")\n` });
+  try {
+    const r = scan(dir);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /file=SKILL\.md,line=3::credential-shaped content matched rule browser-use-api-key \(value withheld\)/);
+    assert.equal((r.stdout + r.stderr).includes(CANARY), false, 'the scanner printed the value');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+await test('the environment-variable reference and placeholders are allowed', () => {
+  const dir = tmpWith({
+    'SKILL.md': [
+      'Read the key from the `BROWSER_USE_API_KEY` environment variable.',
+      'client = AsyncBrowserUse(api_key=os.environ["BROWSER_USE_API_KEY"])',
+      'export BROWSER_USE_API_KEY="<your Browser Use Cloud key>"',
+      'a bu_ prefix alone, or bu_short, is not a key',
+    ].join('\n'),
+  });
+  try {
+    const r = scan(dir);
+    assert.equal(r.status, 0, r.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+console.log(`\ncommitted-secrets: ${passed} passed`);
