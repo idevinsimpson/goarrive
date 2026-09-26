@@ -75,3 +75,8 @@ receipts to make them look current.
 **Post-commit redeploy**
 
 After committing and pushing the fixes above, one more rebuild + channel redeploy is performed so `/health` displays the SHA of the actual PR HEAD (not the SHA that was HEAD at the time of the first post-fix rebuild).
+
+
+## Current receipt system (2026-09-26)
+
+Later WSF staging releases use the dedicated control plane and per-run receipts rather than relying on this file as the sole ledger. A current release claim must identify the approved candidate, operational-main workflow source, deployment run, served marker, inventory/config effects, hosted verification/cleanup, and rollback anchor. Member-visible milestones additionally use the changed-journey manifest/owner-test-card discipline when applicable.
