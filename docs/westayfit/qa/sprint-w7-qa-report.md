@@ -5178,3 +5178,54 @@ A flake filter in my runner then hid real catches. The final mutant results come
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; the scratch ledgers were removed.
 
 **Status:** **one concrete finding (F1) at `5933fdae`; items 1, 2, 4 and 5 PASS, and 88 / 90 independent probes PASS**, the two misses being F1. W7 created no state branch, migrated no trigger, merged nothing and accepted nothing.
+
+### 62a · Check 62 focused deltas (Director #434 `5848570925` and `5848574309`), exact `5933fdae`: **both reproduce, so they are findings F2 and F3**
+
+Both deltas were posted at 18:03–18:04Z, before my Check 62 delivery (18:08Z). I read them after posting, and probed them on the same worktree at the exact SHA with scratch ledgers.
+
+**F2: a stale CURRENT is not actionable.**
+- **Fixture:**
+  1. bootstrap (head h1);
+  2. the snapshot's CURRENT comment 777 exists and carries marker h1;
+  3. a `register-worker` event advances the ledger to h2 and creates no transition.
+- **Result:**
+
+  | Case | `program-view` | `reconcile` |
+  |---|---|---|
+  | marker h1, ledger h2 (stale) | `CURRENT_SURFACE=ok`, `ACTIONABLE=off`, `MONITOR=on` | `CURRENT_SURFACE=ok`, `RECONCILE findings=0` |
+  | marker h2 (fresh control) | the same | the same |
+
+  The two cases are indistinguishable.
+- **Cause:** `reconcile.mjs:117–128` `surfaceStatus` returns `{ ok: true, detail: 'behind the ledger head; re-render and edit in place' }`. Because `ok` is true, no finding is emitted, and the views print only `ok`, so the detail never reaches any output.
+- **The exception cases still fail closed:** a foreign head gives `CURRENT_SURFACE=exception`, `ACTIONABLE=on`.
+- **Consequence:** a crash between the ledger push and the comment edit leaves the authoritative first-read surface stale indefinitely, and nothing directs a repair.
+- **Smallest correction:**
+  - a closed actionable state, for example `CURRENT_SURFACE=stale` with a `current-surface-stale` finding (`wins=ledger`), directing a re-render and an in-place edit of the recorded comment;
+  - it turns `ACTIONABLE=on`;
+  - `exception` stays reserved for missing, unmarked or foreign-head cases.
+
+**F3: more than one NEXT is accepted and hidden.**
+- **Fixture:** bootstrap, then `queue ONE → W3` (`kind=work`), then `queue TWO → W3` (`kind=work`).
+- **Result:**
+  - `APPENDED`, and `check` says `CONTROL_STATE=valid`, with W3's queue `["ONE","TWO"]`;
+  - a third work packet, THREE, is also `APPENDED`;
+  - `worker-view` prints only `NEXT=ONE`: TWO and THREE are held as queued work but represented as one NEXT;
+  - a `kind=reference` packet also appends, which is acceptable as non-driving.
+- **Cause:**
+  - `check.mjs:19–30` bounds worker-owned packets to one;
+  - but the queue invariant only checks that each entry exists, is QUEUED, is the owner's and is not duplicated;
+  - `derive.mjs` `workerBuckets` takes the first work packet as NEXT.
+- **The Check 62 probe P6 already had this shape:** it queued ALPHA, BETA and GAMMA for W3 and passed on "one NEXT shown". That assertion checked the *view*, not the ops v1.2 limit, and I did not flag it. It is a miss in my Check 62 reading, disclosed here.
+- **Smallest correction:**
+  - an invariant that a worker's queue holds at most one `kind=work` packet (reference packets exempt), so `append` refuses the second;
+  - a bootstrap import with more than one queued work packet per worker is refused the same way;
+  - add a test.
+
+**The three findings together, at `5933fdae`:**
+- **F1:** a QUEUED packet cannot be blocked, although the contract allows it.
+- **F2:** a stale CURRENT marker reads `ok` / `ACTIONABLE=off`.
+- **F3:** more than one queued work packet per worker is accepted, and only one is shown.
+
+Everything else in Check 62 stands.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run, and no artifacts.
