@@ -3,7 +3,8 @@ import { Fragment } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { isKioskFlag } from '../kioskSession';
-import { ACTION_GREEN, CARD_BORDER, CREAM, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
+import { ACTION_GREEN, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
+import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE } from './memberShellMetrics';
 import { TabGlyph } from './TabGlyph';
 
 /**
@@ -298,30 +299,39 @@ export const MEMBER_TAB_BAR_BODY = 6 + 48 + 10;
 export const MEMBER_TAB_MOVE_OVERHANG = 24;
 
 const styles = StyleSheet.create({
+  /* The frozen reference's bar (Lovable `d4f60624`, measured): 75 tall with
+     its rule, on the page's warm white; each glyph centred 33 under the rule
+     and each label's cap top 50 under it (Director #506 `5845751705`). */
   bar: {
     position: 'relative',
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: CARD_BORDER,
-    backgroundColor: CREAM,
+    borderTopColor: MEMBER_SHELL_RULE,
+    backgroundColor: MEMBER_SHELL_GROUND,
     paddingTop: 6,
     paddingHorizontal: 4,
+    // The reference's soft lift: the page darkens ~9 levels over the 14 px
+    // above the rule.
+    shadowColor: '#0B1F35',
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: -4 },
   },
   barWrapped: { flexWrap: 'wrap' },
-  tab: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: 6, minHeight: 48, justifyContent: 'center' },
+  tab: { flex: 1, alignItems: 'center', gap: 2, paddingTop: 14, paddingBottom: 4, minHeight: 48, justifyContent: 'center' },
   // Two rows of two. `flexBasis` rather than `width` so the row still
   // distributes the leftover pixel instead of overflowing by it.
   tabHalf: { flexBasis: '50%', flexGrow: 0, flexShrink: 0 },
   glyphWrap: {
-    width: 46,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
   glyphWrapActive: { backgroundColor: PROGRESS_GREEN },
-  label: { fontSize: 12, lineHeight: 16, color: TEXT_MUTED, fontWeight: '600' },
+  label: { fontSize: 11, lineHeight: 14, color: TEXT_MUTED, fontWeight: '600' },
   labelActive: { color: NAVY, fontWeight: '700' },
   move: {
     // Raised ABOVE the bar's top edge, which is what makes it read as the
@@ -336,7 +346,7 @@ const styles = StyleSheet.create({
     // The ring is the bar's own ground, so the control reads as sitting in
     // front of the bar rather than punched through it.
     borderWidth: 5,
-    borderColor: CREAM,
+    borderColor: MEMBER_SHELL_GROUND,
     ...elevation.action,
   },
   moveText: { color: ON_ACTION, fontSize: 11, lineHeight: 14, fontWeight: '900', letterSpacing: 0.5 },

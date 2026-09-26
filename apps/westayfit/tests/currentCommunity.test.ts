@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 
-import { forgetCurrentCommunity, rememberCurrentCommunity, resolveCurrentCommunity } from '../src/currentCommunity';
+import { currentFirst, forgetCurrentCommunity, rememberCurrentCommunity, resolveCurrentCommunity } from '../src/currentCommunity';
 
 describe('which community Home opens', () => {
   beforeEach(() => window.localStorage.clear());
@@ -43,5 +43,21 @@ describe('which community Home opens', () => {
   it('ignores an empty id rather than storing one', () => {
     rememberCurrentCommunity('u1', '');
     expect(resolveCurrentCommunity('u1', ['g1', 'g2'])).toBeNull();
+  });
+});
+
+describe('currentFirst', () => {
+  const items = [{ groupId: 'a' }, { groupId: 'b' }, { groupId: 'c' }];
+  it('puts the current community first and keeps the rest in their order', () => {
+    expect(currentFirst(items, 'c').map((i) => i.groupId)).toEqual(['c', 'a', 'b']);
+    expect(currentFirst(items, 'b').map((i) => i.groupId)).toEqual(['b', 'a', 'c']);
+  });
+  it('leaves the order alone when the current one is already first, unknown or absent', () => {
+    for (const id of ['a', 'zz', null, undefined]) expect(currentFirst(items, id).map((i) => i.groupId)).toEqual(['a', 'b', 'c']);
+  });
+  it('never mutates the source', () => {
+    const src = [...items];
+    currentFirst(src, 'c');
+    expect(src).toEqual(items);
   });
 });

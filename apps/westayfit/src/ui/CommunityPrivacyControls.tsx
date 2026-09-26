@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../auth';
 import { getFirebaseFunctions } from '../firebase';
-import { forgetCommunity, readMyCommunities } from '../memberReads';
+import { currentFirst, resolveCurrentCommunity } from '../currentCommunity';
+import { forgetCommunity, peekMemberProfile, readMyCommunities } from '../memberReads';
 import { isChampionRole } from './CommunityPresence';
 import { CommunityPrivacyPanelView } from './CommunityPrivacyPanelView';
 import type { PrivacyCommunity, PrivacySaveErrorKind, Visibility } from './communityParityTypes';
@@ -225,9 +226,16 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
     [uid, load],
   );
 
-  const communities: PrivacyCommunity[] = rows.map((r) => ({
+  // The current community first, as on the Community tab (Director #506
+  // `5845751705`); the rest in the order they were read.
+  const current = uid ? resolveCurrentCommunity(uid, rows.map((r) => r.groupId)) : null;
+  // The member's own formatted name, only if it is ALREADY loaded (You reads
+  // it): no read is added for a hint, and nothing is invented without it.
+  const shownName = peekMemberProfile(uid)?.displayName?.trim() || null;
+  const communities: PrivacyCommunity[] = currentFirst(rows, current).map((r) => ({
     groupId: r.groupId,
     displayName: r.displayName,
+    shownName,
     isChampion: isChampionRole(r.role),
     stored: { name: r.nameVisibility, activity: r.activityVisibility },
     saving: saving[r.groupId] ?? null,

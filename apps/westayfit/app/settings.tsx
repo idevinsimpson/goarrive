@@ -7,7 +7,6 @@ import { useWsfAuth } from '../src/auth';
 import { CommunityPrivacyControls } from '../src/ui/CommunityPrivacyControls';
 import {
   CREAM,
-  HAIRLINE,
   NAVY,
 } from '../src/ui/kit';
 import { isOverMemberTabs } from '../src/ui/moveSheetRoute';
@@ -111,11 +110,20 @@ export default function SettingsScreen() {
             style={st.panelClose}
             testID="wsf-settings-close"
           >
-            <Text style={st.panelCloseText}>Close</Text>
+            {/* × CLOSE, as the frozen reference draws it: a drawn cross (no
+                icon package, no font glyph) and the word, uppercased by style
+                so its text -- and the button's name -- stays "Close". */}
+            <View style={st.panelCloseRow}>
+              <View style={st.closeCross} aria-hidden>
+                <View style={[st.closeStroke, st.closeStrokeA]} />
+                <View style={[st.closeStroke, st.closeStrokeB]} />
+              </View>
+              <Text style={st.panelCloseText}>Close</Text>
+            </View>
           </Pressable>
         </View>
         {/* W4's privacy panel scrolls itself (Director #497 `5841956174`). */}
-        <View style={st.panelFill} testID="wsf-settings-screen">
+        <View style={[st.panelFill, st.panelBody]} testID="wsf-settings-screen">
           {children}
         </View>
       </View>
@@ -156,6 +164,9 @@ export default function SettingsScreen() {
 
 /** The reference overlay's padding around its panel. */
 const PANEL_INSET = 12;
+/** The reference panel's header rule, and its CLOSE green (measured). */
+const PANEL_RULE = '#D7DFE7';
+const CLOSE_GREEN = '#086E22';
 
 const st = StyleSheet.create({
   // ---- the side panel (APP-FEEL-PARITY-1 checkpoint 3) ----
@@ -178,19 +189,49 @@ const st = StyleSheet.create({
     shadowRadius: 30,
     shadowOffset: { width: 0, height: 20 },
   },
+  /* The frozen reference's panel header, measured on its originals: the rule
+     82 px under the panel's top edge, the 22 px title (regular, line-height
+     1.5) with its cap top 47 px down, × CLOSE top-right. The reference's
+     "SAMPLE MEMBER · DESIGN PROTOTYPE" kicker is prototype labelling and is
+     left out; its space is kept, so every row below lands where the
+     reference's does (Director #506 `5845751705`). */
   panelHead: {
-    minHeight: 64,
+    minHeight: 82,
     paddingLeft: 18,
-    paddingRight: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingRight: 18,
+    paddingTop: 39,
+    paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: HAIRLINE,
+    borderBottomColor: PANEL_RULE,
   },
-  panelTitle: { color: NAVY, fontSize: 22, lineHeight: 28, fontWeight: '800' },
-  panelClose: { minHeight: 46, minWidth: 64, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
-  panelCloseText: { color: NAVY, fontSize: 14, fontWeight: '800' },
+  panelTitle: { color: NAVY, fontSize: 22, lineHeight: 33, fontWeight: '400' },
+  /* A ≥44 px target whose glyphs sit where the reference's do: 20 px under
+     the panel's top edge, the word ending 24 px from its right. */
+  panelClose: {
+    position: 'absolute',
+    top: 20,
+    right: 10,
+    minHeight: 44,
+    minWidth: 64,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  panelCloseRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  closeCross: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  closeStroke: { position: 'absolute', width: 15, height: 2, borderRadius: 1, backgroundColor: NAVY },
+  closeStrokeA: { transform: [{ rotate: '45deg' }] },
+  closeStrokeB: { transform: [{ rotate: '-45deg' }] },
+  panelCloseText: {
+    color: CLOSE_GREEN,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  /** The reference's first row starts 19 px under the rule. */
+  panelBody: { paddingTop: 4 },
   panelFill: { flex: 1 },
   pageChrome: { paddingHorizontal: 20, paddingTop: 14, gap: 12 },
   pageTitle: { color: NAVY, fontSize: 22, lineHeight: 28, fontWeight: '800' },

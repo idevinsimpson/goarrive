@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../../src/auth';
 import { mapWithLimit } from '../../../src/concurrency';
-import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { currentFirst, rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
 import { getFirebaseFunctions } from '../../../src/firebase';
 import { memberCountLabel } from '../../../src/labels';
 import { formatPeriod, formatSinceShort } from '../../../src/ui/dates';
@@ -788,7 +788,7 @@ function toParityProps(state: Extract<State, { kind: 'ready' }>, callbacks: Pari
     role: typeof current.role === 'string' ? current.role : null,
     communities: {
       state: 'loaded',
-      value: state.items.map((i) => ({ groupId: i.groupId, displayName: i.displayName })),
+      value: currentFirst(state.items, current.groupId).map((i) => ({ groupId: i.groupId, displayName: i.displayName })),
     },
     goals:
       goals === 'pending'

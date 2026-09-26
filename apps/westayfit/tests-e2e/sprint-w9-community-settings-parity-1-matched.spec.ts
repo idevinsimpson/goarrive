@@ -151,10 +151,11 @@ async function fixture(tag: string, role: 'member' | 'foundingChampion') {
   await group(harbor, 'Harbor Lunch Crew', others[1]!);
   await membership(harbor, others[1]!, 'foundingChampion', 'visible', 'visible');
   await membership(harbor, alex, 'member', 'visible', 'private');
+  // Whole months in the goals' own timezone (America/New_York), not the runner's.
   const [weekStart, weekEnd] = thisWeek();
   await goal(`w9match-500-${s}`, oak, oakChamp, '500 squats together', 500, 241, weekStart, weekEnd, true);
-  await goal(`w9match-apr-${s}`, oak, oakChamp, '1,000 squats in April', 1000, 1084, new Date(2026, 3, 1), new Date(2026, 3, 30, 23, 59), false);
-  await goal(`w9match-mar-${s}`, oak, oakChamp, '800 squats in March', 800, 612, new Date(2026, 2, 1), new Date(2026, 2, 31, 23, 59), false);
+  await goal(`w9match-apr-${s}`, oak, oakChamp, '1,000 squats in April', 1000, 1084, new Date(Date.UTC(2026, 3, 1, 4)), new Date(Date.UTC(2026, 4, 1, 3, 59)), false);
+  await goal(`w9match-mar-${s}`, oak, oakChamp, '800 squats in March', 800, 612, new Date(Date.UTC(2026, 2, 1, 5)), new Date(Date.UTC(2026, 3, 1, 3, 59)), false);
   return { alex, email, password, oak };
 }
 
@@ -339,6 +340,12 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison',
         goals: await page.locator('[data-testid="wsf-parity-fact-goals"]:visible').textContent(),
       };
 
+      const chipOrder = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid^="wsf-parity-chip-"]'))
+          .filter((n) => (n as HTMLElement).getClientRects().length > 0)
+          .map((n) => n.getAttribute('data-testid')!.replace('wsf-parity-chip-', '')),
+      );
+
       await page.locator('[data-testid="wsf-member-tab-you"]:visible').last().click();
       await expect(page.locator('[data-testid="wsf-you-settings"]:visible')).toBeVisible({ timeout: 40_000 });
       await page.waitForTimeout(600);
@@ -348,6 +355,23 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison',
       const settingsFile = path.join(OUT, `CANDIDATE-FIXTURE-settings-${shot.key}.png`);
       await page.screenshot({ path: settingsFile });
       const panel = await page.locator('[data-testid="wsf-settings-panel"]:visible').boundingBox();
+      const sectionOrder = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[role="switch"][data-testid^="wsf-privacy-panel-name-"]')).map((n) =>
+          n.getAttribute('data-testid')!.replace('wsf-privacy-panel-name-', ''),
+        ),
+      );
+      // The name row's hint: the nearest "Members see …" text above Harbor's name switch.
+      const harborHint = await page.evaluate((id) => {
+        let n: Element | null = document.querySelector(`[role="switch"][data-testid="wsf-privacy-panel-name-${id}"]`);
+        while (n && n.parentElement) {
+          n = n.parentElement;
+          const hit = Array.from(n.querySelectorAll('*')).find(
+            (c) => c.children.length === 0 && /^Members see/.test(c.textContent ?? ''),
+          );
+          if (hit) return hit.textContent!.trim();
+        }
+        return null;
+      }, fx.oak.replace('oak', 'harbor'));
       const switches = await page.evaluate(() =>
         Array.from(document.querySelectorAll('[role="switch"][data-testid^="wsf-privacy-panel-"]')).map(
           (n) => `${n.getAttribute('data-testid')}=${n.getAttribute('aria-checked')}`,
@@ -387,6 +411,9 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison',
         crop: 'none — full viewport frames on both sides',
         memberRole: shot.role,
         facts,
+        chipOrder,
+        settingsSectionOrder: sectionOrder,
+        harborNameHint: harborHint,
         settingsSwitches: switches,
         community: {
           lovable: path.relative(OUT, path.join(LOVABLE, shot.community)),
@@ -419,6 +446,12 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison',
       );
       expect(facts.members).toBe('Members23');
       expect(facts.goals).toBe('Goals3');
+      // Director #506 `5845751705`: the member-facing role, the current
+      // community first in both lists, the shown name only as already loaded.
+      expect(facts.role).toBe(shot.role === 'member' ? 'Your roleMember' : 'Your roleChampion');
+      expect(chipOrder[0], 'the current community is the first chip').toBe(fx.oak);
+      expect(sectionOrder[0], 'and the first Settings section').toBe(fx.oak);
+      expect(harborHint).toBe('Members see “Alex M.”');
     });
   }
 });
