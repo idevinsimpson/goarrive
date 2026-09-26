@@ -9,6 +9,8 @@
  *                           VERIFYING ─proof-fail→ CHANGES_REQUESTED (a successor deliver follows)
  *   INTEGRATED|VERIFYING ─stage→ STAGED
  *   any non-terminal ─block→ BLOCKED ─unblock→ (the phase before the block)
+ *     A QUEUED packet that is blocked leaves its owner's driving queue (so it is
+ *     never presented as NEXT); its position is remembered and unblock restores it.
  *   any non-terminal ─withdraw→ WITHDRAWN
  *
  * A packet is terminal only at the phase its completion contract names
@@ -55,7 +57,7 @@ function live(p, type) {
 function newPacket({ owner, kind = 'work', completion, label = null, subjectPaths = ['*'] }, origin) {
   return {
     owner, kind, completion: clone(completion), label, origin,
-    phase: 'QUEUED', phaseBeforeBlock: null, inbox: null, pr: null, reviewers: [],
+    phase: 'QUEUED', phaseBeforeBlock: null, queueIndexBeforeBlock: null, inbox: null, pr: null, reviewers: [],
     artifact: { subjectSha: null, prHeadSha: null, evidenceSha: null, mergeSha: null },
     proof: null, staged: null,
     subjectPaths, blockedBy: [], importRefs: [],
@@ -72,7 +74,7 @@ function importPacket(s, id, x, source) {
   const p = newPacket(x, 'bootstrap');
   const phase = x.phase === 'BLOCKED' ? x.phaseBeforeBlock : x.phase;
   if (x.phase === 'BLOCKED') {
-    if (!x.phaseBeforeBlock || !x.blockedBy || ['BLOCKED', 'QUEUED', 'WITHDRAWN'].includes(x.phaseBeforeBlock)) illegal(`bootstrap: packet ${id}: a blocked packet needs blockedBy and the non-terminal phase it interrupted`);
+    if (!x.phaseBeforeBlock || !x.blockedBy || ['BLOCKED', 'WITHDRAWN'].includes(x.phaseBeforeBlock)) illegal(`bootstrap: packet ${id}: a blocked packet needs blockedBy and the non-terminal phase it interrupted`);
   } else if (x.phaseBeforeBlock || x.blockedBy) illegal(`bootstrap: packet ${id}: only a BLOCKED packet carries blockedBy/phaseBeforeBlock`);
   if (x.phase !== 'QUEUED' && x.refs.length === 0) illegal(`bootstrap: packet ${id}: an imported ${x.phase} packet needs the GitHub refs that support its current phase`);
   if (AFTER_DELIVERY.includes(phase) && (!x.pr || !x.artifact?.subjectSha)) illegal(`bootstrap: packet ${id}: ${phase} needs its pr and artifact.subjectSha`);
@@ -246,19 +248,32 @@ export function applyEvent(state, e) {
       if (p.phase === 'BLOCKED') illegal('block: the packet is already blocked');
       for (const b of e.blockedBy) if (b.packet && !s.packets[b.packet]) illegal(`block: blocking packet ${b.packet} does not exist`);
       p.phaseBeforeBlock = p.phase;
+      if (p.phase === 'QUEUED') {
+        // Out of the driving queue while blocked, so it is never presented as NEXT.
+        p.queueIndexBeforeBlock = s.queue[p.owner].indexOf(e.packet);
+        s.queue[p.owner] = s.queue[p.owner].filter((x) => x !== e.packet);
+      }
       p.phase = 'BLOCKED';
       p.blockedBy = clone(e.blockedBy);
       break;
     case 'unblock':
       from(p, ['BLOCKED'], 'unblock');
       p.phase = p.phaseBeforeBlock;
+      if (p.phase === 'QUEUED') {
+        // Back to its original relative position (the end, for an import); the
+        // one-NEXT invariant refuses the event if that makes a second NEXT.
+        const q = s.queue[p.owner];
+        q.splice(Math.min(p.queueIndexBeforeBlock ?? q.length, q.length), 0, e.packet);
+      }
       p.phaseBeforeBlock = null;
+      p.queueIndexBeforeBlock = null;
       p.blockedBy = [];
       break;
     case 'withdraw':
       live(p, 'withdraw');
       if (p.phase === 'QUEUED') s.queue[p.owner] = s.queue[p.owner].filter((x) => x !== e.packet);
       p.phase = 'WITHDRAWN';
+      p.queueIndexBeforeBlock = null;
       break;
     case 'reconcile-head':
       live(p, 'reconcile-head');

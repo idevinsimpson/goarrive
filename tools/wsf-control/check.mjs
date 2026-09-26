@@ -28,6 +28,9 @@ export function invariants(s) {
       else if (p.owner !== w) problems.push(`${w}'s queue names ${id}, which belongs to ${p.owner}`);
     }
     if (new Set(s.queue[w] || []).size !== (s.queue[w] || []).length) problems.push(`${w}'s queue names a packet twice`);
+    // Ops v1.2: one driving NEXT. Reference packets are exempt; they never drive the loop.
+    const queuedWork = (s.queue[w] || []).filter((id) => s.packets[id]?.kind === 'work');
+    if (queuedWork.length > 1) problems.push(`${w} has ${queuedWork.length} queued work packets (${queuedWork.join(', ')}); at most one NEXT`);
   }
   for (const [id, p] of Object.entries(s.packets)) {
     if (!s.workers[p.owner]) problems.push(`${id}: owner ${p.owner} is not a registered worker`);

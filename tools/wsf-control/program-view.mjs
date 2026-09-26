@@ -21,11 +21,12 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkDir } from './check.mjs';
 import { byId, neededTransitions } from './derive.mjs';
-import { SnapshotError, formatFinding, reconcile } from './reconcile.mjs';
+import { SnapshotError, formatFinding, reconcile, surfaceLabel } from './reconcile.mjs';
 import { ledgerHeads } from './reduce.mjs';
+import { renderHashes } from './render-current.mjs';
 
 /** The view's lines. `snapshot` is optional; `heads` is every head the ledger has had. */
-export function programView(s, snapshot = null, { heads } = {}) {
+export function programView(s, snapshot = null, { heads, renders } = {}) {
   const out = [];
   const cp = s.criticalPath ? s.packets[s.criticalPath] : null;
   out.push(`CRITICAL_PATH=${cp ? `${s.criticalPath} phase=${cp.phase} owner=${cp.owner}${cp.pr ? ` pr=#${cp.pr}` : ''}` : 'none'}`);
@@ -38,13 +39,13 @@ export function programView(s, snapshot = null, { heads } = {}) {
   }
   for (const p of packets.filter((x) => ['INTEGRATED', 'VERIFYING'].includes(x.phase) && x.completion.terminal === 'STAGED')) out.push(`INTEGRATED_NOT_STAGED ${p.id} merge=${p.artifact.mergeSha}`);
   for (const n of needed.filter((x) => x.event === 'unblock')) out.push(`BLOCKERS_CLEARED ${n.packet}`);
-  const findings = snapshot ? reconcile(s, snapshot, { heads }) : [];
+  const findings = snapshot ? reconcile(s, snapshot, { heads, renders }) : [];
   for (const x of findings.filter((y) => ['watch-on-without-work', 'work-without-watch', 'trigger-for-unknown-worker'].includes(y.kind))) {
     out.push(`WATCH_INCONSISTENT ${x.worker} ${x.kind}`);
   }
   for (const x of findings) out.push(formatFinding(x));
   if (!snapshot) out.push('SNAPSHOT=none (external blockers not evaluated; run conclusions unknown; GitHub facts not reconciled)');
-  out.push(`CURRENT_SURFACE=${!snapshot ? 'unchecked' : findings.some((x) => x.kind === 'control-surface-exception') ? 'exception' : 'ok'}`);
+  out.push(`CURRENT_SURFACE=${!snapshot ? 'unchecked' : surfaceLabel(findings)}`);
   out.push(`ACTIONABLE=${needed.length > 0 || findings.length > 0 ? 'on' : 'off'}`);
   out.push('MONITOR=on');
   return out;
@@ -59,8 +60,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (flag) {
     try { snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { console.log('PROGRAM_VIEW=refused (the snapshot is missing or is not JSON)'); process.exit(2); }
   }
-  const heads = ledgerHeads(fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8'));
-  try { console.log(programView(checked.state, snap, { heads }).join('\n')); } catch (e) {
+  const eventsText = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8');
+  try { console.log(programView(checked.state, snap, { heads: ledgerHeads(eventsText), renders: renderHashes(eventsText) }).join('\n')); } catch (e) {
     if (!(e instanceof SnapshotError)) throw e;
     console.error(`::error::${e.message}`);
     console.log('PROGRAM_VIEW=refused (the snapshot is malformed)');

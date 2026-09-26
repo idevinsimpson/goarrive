@@ -40,14 +40,19 @@ export const boot = (over = {}) => ({
   ...over,
 });
 
-/** The standard program: W3 holds ALPHA (staged product) then BETA (verified tooling); W7 has a reference. */
+/**
+ * The standard program: W3's one queued work packet is ALPHA (staged product); W7 has a reference.
+ * BETA (verified tooling) is W3's next packet, queued only once ALPHA has left the queue: a worker
+ * never has more than one queued work packet.
+ */
 export const BASE = [
   boot(),
   { type: 'queue', packet: 'ALPHA', owner: 'W3', completion: STAGED_HOSTED, subjectPaths: ['apps/wsf'], label: 'first packet' },
-  { type: 'queue', packet: 'BETA', owner: 'W3', completion: VERIFIED_ACTIVATION },
   { type: 'queue', packet: 'REF-1', owner: 'W7', kind: 'reference', completion: SOURCE_ONLY },
   { type: 'set-critical-path', packet: 'ALPHA' },
 ];
+
+export const QUEUE_BETA = { type: 'queue', packet: 'BETA', owner: 'W3', completion: VERIFIED_ACTIVATION };
 
 let nextComment = 1000;
 /** Append one event as Fable with the next synthetic comment as its source, at the current head. */

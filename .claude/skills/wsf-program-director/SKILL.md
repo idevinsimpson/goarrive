@@ -27,6 +27,7 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
    - A `wins=github` finding is a fact to record, resting on the object that proves it (a PR, a commit or a run).
    - A `wins=ledger` finding is a decision for Fable or L0. It needs an authority comment and is never inferred from GitHub.
    - A `wins=exception` finding (`CURRENT_SURFACE=exception`) stops every edit to the control surface. Report it, and never create a replacement comment silently.
+   - `CURRENT_SURFACE=stale` (`current-surface-stale`) is the recoverable crash window: the ledger moved on but CURRENT was not edited. It is actionable: render from the present ledger and edit the existing comment in place (step 7).
 5. **Make one decision at a time.** Take one transition from `program-view` (Fable/L0), with its typed `source`:
    - Decisions (queue, release, finding, accept, block, unblock, withdraw, critical path) rest on a comment.
    - `integrate` rests on the merge and carries the acceptance comment.
@@ -36,7 +37,7 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
    - `APPEND=noop` means the event already landed, for example after an uncertain push. Carry on from the head it prints.
    - `APPEND=refused` means nothing was written. Re-fetch, re-validate and reconcile again.
    - Never edit `events.jsonl`, `state.json` or `CURRENT.md` by hand.
-7. **Render CURRENT.** Run `node tools/wsf-control/render-current.mjs <dir> --out <dir>/CURRENT.md` and commit the three files together. Then edit, in place, exactly the comment at `surfaces.current.commentId`, and only after reconcile reported `CURRENT_SURFACE=ok`.
+7. **Render CURRENT.** Run `node tools/wsf-control/render-current.mjs <dir> --out <dir>/CURRENT.md` and commit the three files together. Then edit, in place, exactly the comment at `surfaces.current.commentId`, and only after reconcile reported `CURRENT_SURFACE=ok` or `stale`. Never on `exception`, and never by creating a new comment.
 8. **Hand off once.** Post one handoff to the owner's canonical inbox (the `inbox` in `worker-view`), naming the packet and the ledger head. A release outside that inbox is refused.
 9. **Dedupe wakes, and derive WATCH.**
    - A wake whose event is already recorded is a no-op.

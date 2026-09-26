@@ -16,6 +16,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkDir } from './check.mjs';
 import { byId, fmtRef, workerBuckets, workerWatch } from './derive.mjs';
+import { ledgerLines, reduce, sha256 } from './reduce.mjs';
 
 export const MARKER = /^<!-- wsf-control ledgerHead=([0-9a-f]{64}) events=(\d+) /;
 const s8 = (x) => (x ? x.slice(0, 8) : '—');
@@ -66,6 +67,21 @@ export function renderCurrent(s) {
   }
   L.push('');
   return `${L.join('\n')}`;
+}
+
+/**
+ * head → sha256 of the CURRENT rendering at that head, for every head the
+ * ledger has had: reconcile checks a stale CURRENT comment's body against the
+ * rendering its own marker names.
+ */
+export function renderHashes(eventsText) {
+  const lines = ledgerLines(eventsText);
+  const out = {};
+  for (let i = 1; i <= lines.length; i += 1) {
+    const s = reduce(`${lines.slice(0, i).join('\n')}\n`);
+    out[s.ledgerHead] = sha256(renderCurrent(s));
+  }
+  return out;
 }
 
 /** Compare a CURRENT.md text with a state: current, stale (rendered from another head) or hand-edited. */

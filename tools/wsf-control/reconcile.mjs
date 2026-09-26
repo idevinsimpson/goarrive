@@ -22,10 +22,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RE, isTerminal, screen } from './schema.mjs';
+import { RE, isTerminal, screen, sha256 } from './schema.mjs';
 import { invariants, checkDir } from './check.mjs';
 import { byId, workerWatch } from './derive.mjs';
 import { ledgerHeads } from './reduce.mjs';
+import { renderCurrent, renderHashes } from './render-current.mjs';
 
 export class SnapshotError extends Error {}
 
@@ -79,9 +80,12 @@ export function validateSnapshot(snap) {
   }
   if (snap.currentSurface !== undefined) {
     const c = snap.currentSurface;
-    if (!keysAre(c, ['commentId', 'exists', 'markerHead']) || !posInt(c.commentId) || typeof c.exists !== 'boolean' ||
-      !(c.markerHead === null || (typeof c.markerHead === 'string' && RE.hash.test(c.markerHead)))) {
-      p.push('snapshot.currentSurface must be exactly { commentId, exists: boolean, markerHead: <64-hex> | null }');
+    const keys = isObj(c) ? Object.keys(c) : [];
+    if (!isObj(c) || !['commentId', 'exists', 'markerHead'].every((k) => keys.includes(k)) || keys.some((k) => !['commentId', 'exists', 'markerHead', 'bodySha256'].includes(k)) ||
+      !posInt(c.commentId) || typeof c.exists !== 'boolean' ||
+      !(c.markerHead === null || (typeof c.markerHead === 'string' && RE.hash.test(c.markerHead))) ||
+      (c.bodySha256 !== undefined && !(typeof c.bodySha256 === 'string' && RE.hash.test(c.bodySha256)))) {
+      p.push('snapshot.currentSurface must be exactly { commentId, exists: boolean, markerHead: <64-hex> | null, bodySha256?: <64-hex> }');
     }
   }
   for (const [k, field] of [['pin', 'approvedAppSha'], ['staging', 'servedSha']]) {
@@ -111,19 +115,39 @@ export function inSubject(file, subjectPaths) {
 
 /**
  * The CURRENT comment the ledger points at, checked before anyone edits it.
- * It must be in the snapshot, be the recorded comment, still exist, and carry
- * a control marker for a head this ledger has had. Anything else fails closed.
+ * Three closed outcomes:
+ *   ok        the recorded comment exists and carries this head's marker (and,
+ *             when the snapshot gives its body hash, this head's rendering);
+ *   stale     it carries an EARLIER head of this ledger: the recoverable
+ *             crash window (ledger pushed, CURRENT not yet edited). Actionable:
+ *             render from the present ledger and edit that comment in place;
+ *   exception missing, unreported, another comment, unmarked, a head this
+ *             ledger never had, or a body that is not its marker's rendering
+ *             (hand-edited, or unverifiable). Fails closed: no edit, no
+ *             replacement comment.
+ * `heads` is every head the ledger has had; `renders` maps a head to the
+ * sha256 of its CURRENT rendering (by default only the present head's).
  */
-export function surfaceStatus(state, snap, heads = [state.ledgerHead]) {
+export function surfaceStatus(state, snap, opts = {}) {
+  const { heads = [state.ledgerHead], renders = { [state.ledgerHead]: sha256(renderCurrent(state)) } } = Array.isArray(opts) ? { heads: opts } : opts;
+  const exception = (detail) => ({ ok: false, status: 'exception', detail });
   const want = state.surfaces?.current;
-  if (!want) return { ok: false, detail: 'the ledger records no CURRENT surface' };
+  if (!want) return exception('the ledger records no CURRENT surface');
   const c = snap.currentSurface;
-  if (!c) return { ok: false, detail: 'the snapshot does not report the CURRENT comment; it is not edited unchecked' };
-  if (c.commentId !== want.commentId) return { ok: false, detail: `the snapshot checked comment ${c.commentId}, but the ledger's CURRENT is comment ${want.commentId}` };
-  if (!c.exists) return { ok: false, detail: `CURRENT comment ${want.commentId} is missing; it is not re-created without a set-surfaces decision` };
-  if (c.markerHead === null) return { ok: false, detail: `CURRENT comment ${want.commentId} carries no control marker` };
-  if (!heads.includes(c.markerHead)) return { ok: false, detail: `CURRENT comment ${want.commentId} carries a marker for ${c.markerHead.slice(0, 12)}, which is not a head of this ledger` };
-  return { ok: true, detail: c.markerHead === state.ledgerHead ? 'current' : 'behind the ledger head; re-render and edit in place' };
+  if (!c) return exception('the snapshot does not report the CURRENT comment; it is not edited unchecked');
+  if (c.commentId !== want.commentId) return exception(`the snapshot checked comment ${c.commentId}, but the ledger's CURRENT is comment ${want.commentId}`);
+  if (!c.exists) return exception(`CURRENT comment ${want.commentId} is missing; it is not re-created without a set-surfaces decision`);
+  if (c.markerHead === null) return exception(`CURRENT comment ${want.commentId} carries no control marker`);
+  if (!heads.includes(c.markerHead)) return exception(`CURRENT comment ${want.commentId} carries a marker for ${c.markerHead.slice(0, 12)}, which is not a head of this ledger`);
+  if (c.bodySha256 !== undefined) {
+    const expected = renders[c.markerHead];
+    if (!expected) return exception(`CURRENT comment ${want.commentId}'s body cannot be checked against the rendering of ${c.markerHead.slice(0, 12)}`);
+    if (expected !== c.bodySha256) return exception(`CURRENT comment ${want.commentId} is not the rendering of the head its marker names (hand-edited)`);
+  }
+  if (c.markerHead !== state.ledgerHead) {
+    return { ok: false, status: 'stale', detail: `CURRENT comment ${want.commentId} was rendered from ${c.markerHead.slice(0, 12)}; the ledger head is ${state.ledgerHead.slice(0, 12)}. Render from the present ledger and edit that comment in place; create no new comment` };
+  }
+  return { ok: true, status: 'ok', detail: 'current' };
 }
 
 const f = (kind, wins, fields) => ({ kind, wins, ...fields });
@@ -134,7 +158,7 @@ const AFTER_MERGE = ['INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'];
  * mutates neither. `heads` is every head the ledger has had (for the CURRENT
  * marker check); by default only the current one.
  */
-export function reconcile(state, snap, { heads } = {}) {
+export function reconcile(state, snap, { heads, renders } = {}) {
   const problems = validateSnapshot(snap);
   if (problems.length) throw new SnapshotError(problems.join('; '));
   const out = [];
@@ -207,8 +231,11 @@ export function reconcile(state, snap, { heads } = {}) {
   }
 
   if (state.surfaces?.current) {
-    const sfc = surfaceStatus(state, snap, heads ?? [state.ledgerHead]);
-    if (!sfc.ok) out.push(f('control-surface-exception', 'exception', { detail: sfc.detail }));
+    const sfc = surfaceStatus(state, snap, { ...(heads ? { heads } : {}), ...(renders ? { renders } : {}) });
+    if (sfc.status === 'exception') out.push(f('control-surface-exception', 'exception', { detail: sfc.detail }));
+    if (sfc.status === 'stale') {
+      out.push(f('current-surface-stale', 'ledger', { detail: sfc.detail, suggest: { action: 'render-current-and-edit-in-place', commentId: state.surfaces.current.commentId, head: state.ledgerHead } }));
+    }
   }
 
   if (snap.pin && state.staging && snap.pin.approvedAppSha !== state.staging.servedSha) {
@@ -233,6 +260,10 @@ export function reconcile(state, snap, { heads } = {}) {
   return out;
 }
 
+/** The closed CURRENT_SURFACE value for a set of findings: exception over stale over ok. */
+export const surfaceLabel = (findings) => (findings.some((x) => x.kind === 'control-surface-exception') ? 'exception'
+  : findings.some((x) => x.kind === 'current-surface-stale') ? 'stale' : 'ok');
+
 export function formatFinding(x) {
   const where = [x.packet && `packet=${x.packet}`, x.worker && `worker=${x.worker}`, x.pr && `pr=#${x.pr}`, x.run && `run=${x.run}`, x.inbox && `inbox=#${x.inbox}`, x.commentId && `comment=${x.commentId}`].filter(Boolean).join(' ');
   const suggest = x.suggest ? ` suggest=${JSON.stringify(x.suggest)}` : '';
@@ -247,15 +278,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   let snap;
   try { snap = JSON.parse(fs.readFileSync(snapFile, 'utf8')); } catch { console.log('RECONCILE=refused (the snapshot is missing or is not JSON)'); process.exit(2); }
   let findings;
-  const heads = ledgerHeads(fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8'));
-  try { findings = reconcile(checked.state, snap, { heads }); } catch (e) {
+  const eventsText = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8');
+  try { findings = reconcile(checked.state, snap, { heads: ledgerHeads(eventsText), renders: renderHashes(eventsText) }); } catch (e) {
     if (!(e instanceof SnapshotError)) throw e;
     console.error(`::error::${e.message}`);
     console.log('RECONCILE=refused (the snapshot is malformed)');
     process.exit(2);
   }
   for (const x of findings) console.log(formatFinding(x));
-  const surface = findings.some((x) => x.kind === 'control-surface-exception') ? 'exception' : 'ok';
-  console.log(`CURRENT_SURFACE=${surface}`);
+  console.log(`CURRENT_SURFACE=${surfaceLabel(findings)}`);
   console.log(`RECONCILE findings=${findings.length} head=${checked.state.ledgerHead}`);
 }

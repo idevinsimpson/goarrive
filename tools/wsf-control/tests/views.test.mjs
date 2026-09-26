@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  A, B, C, D, E, BASE, CURRENT_COMMENT, GENESIS, SOURCE_ONLY, VERIFIED_ACTIVATION,
+  A, B, C, D, E, BASE, CURRENT_COMMENT, GENESIS, QUEUE_BETA, SOURCE_ONLY, VERIFIED_ACTIVATION,
   add, boot, build, chain, comment, done, freeze, pull, refused, run, test,
 } from './helpers.mjs';
 import { appendEvent, appendToDir } from '../append.mjs';
@@ -32,7 +32,7 @@ const EXT = [{ external: 'OWNER-DEVICE', condition: 'device check', owner: 'Owne
 
 /** Run 54: activation tooling accepted and integrated, its hosted activation proof begun (and, in the snapshot, failed). */
 function run54() {
-  let r = chain(base(), { type: 'withdraw', packet: 'ALPHA' }, { type: 'release', packet: 'BETA', inbox: 396 }, { type: 'deliver', packet: 'BETA', pr: 516, subjectSha: B });
+  let r = chain(base(), { type: 'withdraw', packet: 'ALPHA' }, QUEUE_BETA, { type: 'release', packet: 'BETA', inbox: 396 }, { type: 'deliver', packet: 'BETA', pr: 516, subjectSha: B });
   r = raw(r, { type: 'accept', actor: 'Fable', source: comment(5847649445), packet: 'BETA', subjectSha: B });
   r = raw(r, { type: 'integrate', actor: 'L0', source: pull(516), packet: 'BETA', mergeSha: C, acceptance: 5847649445 });
   return r;
@@ -66,7 +66,7 @@ test('WATCH stays on while delivered work awaits review, and goes off on accepta
 // ---- worker-view ----
 test('worker-view prints one ACTIVE NOW, the packets awaiting review, NEXT, WATCH and the typed authority refs', () => {
   let r = add(delivered(), { type: 'review', packet: 'ALPHA', reviewers: ['Fable', 'W7'] });
-  r = add(r, { type: 'release', packet: 'BETA', inbox: 396 });
+  r = chain(r, QUEUE_BETA, { type: 'release', packet: 'BETA', inbox: 396 });
   const v = workerView(r.state, 'W3');
   const ref = (x) => `comment:${x.id}`;
   const beta = r.state.packets.BETA.authority;
@@ -92,6 +92,7 @@ test('a queued reference packet is never NEXT and asks for no release', () => {
 test('program-view lists the critical path and the transitions waiting on Fable/L0', () => {
   let r = delivered();
   r = raw(r, { type: 'accept', actor: 'Fable', source: comment(70), packet: 'ALPHA', subjectSha: A });
+  r = add(r, QUEUE_BETA);
   let v = programView(r.state);
   assert.equal(v[0], 'CRITICAL_PATH=ALPHA phase=ACCEPTED owner=W3 pr=#520');
   assert.ok(v.includes('NEEDS_TRANSITION ALPHA event=integrate by=L0 :: accepted but not integrated'));
@@ -115,7 +116,7 @@ test('an external blocker clears only when the supplied snapshot says so', () =>
   assert.equal(cleared(programView(s, snap(s, { externalConditions: { 'OWNER-DEVICE': true } }))), true);
 });
 test('a packet blocker clears on the blocking packet\'s phase', () => {
-  let r = chain(released(), { type: 'deliver', packet: 'ALPHA', pr: 520, subjectSha: A }, { type: 'release', packet: 'BETA', inbox: 396 }, { type: 'block', packet: 'BETA', blockedBy: [{ packet: 'ALPHA', until: 'INTEGRATED' }] });
+  let r = chain(released(), { type: 'deliver', packet: 'ALPHA', pr: 520, subjectSha: A }, QUEUE_BETA, { type: 'release', packet: 'BETA', inbox: 396 }, { type: 'block', packet: 'BETA', blockedBy: [{ packet: 'ALPHA', until: 'INTEGRATED' }] });
   assert.ok(!programView(r.state).includes('BLOCKERS_CLEARED BETA'));
   r = raw(r, { type: 'accept', actor: 'Fable', source: comment(71), packet: 'ALPHA', subjectSha: A });
   assert.ok(!programView(r.state).includes('BLOCKERS_CLEARED BETA'));
@@ -131,7 +132,7 @@ test('program-view flags inconsistent WATCH from the snapshot\'s check-in state'
 
 // ---- never a sleeping system (5848248754) ----
 test('everything blocked and every WATCH off: ACTIONABLE=off but MONITOR=on; a snapshot that clears the dependency asks for the unblock and reactivates W3', () => {
-  const r = chain(base(), { type: 'withdraw', packet: 'BETA' }, { type: 'release', packet: 'ALPHA', inbox: 396 }, { type: 'block', packet: 'ALPHA', blockedBy: EXT });
+  const r = chain(base(), { type: 'release', packet: 'ALPHA', inbox: 396 }, { type: 'block', packet: 'ALPHA', blockedBy: EXT });
   const s = r.state;
   assert.deepEqual([workerWatch(s, 'W3'), workerWatch(s, 'W7')], [false, false]);
   const quiet = programView(s, snap(s, { externalConditions: { 'OWNER-DEVICE': false }, triggers: { W3: { enabled: false }, W7: { enabled: false } } }));
@@ -229,7 +230,7 @@ test('reconcile: inbox handoffs with no packet, outside the canonical inbox, or 
   const out = reconcile(st, snap(st, { inboxHandoffs: [
     { inbox: 396, commentId: recorded, packet: 'ALPHA' },
     { inbox: 396, commentId: 11, packet: 'GHOST' },
-    { inbox: 400, commentId: 12, packet: 'BETA' },
+    { inbox: 400, commentId: 12, packet: 'ALPHA' },
     { inbox: 396, commentId: 13, packet: 'ALPHA' },
   ] }));
   assert.deepEqual(out.map((x) => `${x.kind}:${x.commentId}`), ['handoff-without-packet:11', 'handoff-outside-canonical-inbox:12', 'handoff-not-recorded:13']);
@@ -246,7 +247,7 @@ test('reconcile: staging and pin mismatches', () => {
 });
 test('reconcile: queue/phase inconsistencies in a supplied state are reported, not repaired', () => {
   const s = JSON.parse(released().stateText);
-  s.queue.W3 = ['ALPHA', 'BETA'];
+  s.queue.W3 = ['ALPHA'];
   const out = reconcile(freeze(s), snap(s));
   assert.deepEqual(out.map((x) => x.kind), ['queue-phase-inconsistent']);
   assert.match(out[0].detail, /W3's queue names ALPHA, which is already RELEASED/);
@@ -271,13 +272,14 @@ test('subject paths: "*" is the whole tree; others are a file or a directory pre
 });
 
 // ---- control surfaces (5848241695): the CURRENT pointer fails closed ----
-test('CURRENT surface: a healthy comment at this head, or at an earlier head of this ledger, is ok', () => {
+test('CURRENT surface: a comment at this head is ok; one at an earlier head of this ledger is stale (actionable, not healthy)', () => {
   const r1 = released();
   const heads = ledgerHeads(r1.eventsText);
-  assert.equal(surfaceStatus(r1.state, snap(r1.state), heads).ok, true);
+  assert.deepEqual([surfaceStatus(r1.state, snap(r1.state), heads).ok, surfaceStatus(r1.state, snap(r1.state), heads).status], [true, 'ok']);
   const earlier = { ...snap(r1.state), currentSurface: { commentId: CURRENT_COMMENT, exists: true, markerHead: heads[1] } };
   const st = surfaceStatus(r1.state, earlier, heads);
-  assert.deepEqual([st.ok, st.detail], [true, 'behind the ledger head; re-render and edit in place']);
+  assert.deepEqual([st.ok, st.status], [false, 'stale']);
+  assert.match(st.detail, /Render from the present ledger and edit that comment in place; create no new comment/);
 });
 for (const [name, surface, re] of [
   ['the comment is deleted', { commentId: CURRENT_COMMENT, exists: false, markerHead: null }, /is missing; it is not re-created without a set-surfaces decision/],
@@ -309,7 +311,7 @@ test('CURRENT is byte-stable, embeds the ledgerHead, and says what the bootstrap
   assert.ok(t1.endsWith('\n'));
   assert.match(t1, /^- Genesis: bootstrap as of 2026-09-26T17:00:00Z\. /m);
   assert.match(t1, /\| ALPHA \| W3 \| work \| STAGED \(hosted\) \| ledger \| DELIVERED \| #520 \| aaaaaaaa \| aaaaaaaa \| — \| — \| — \|/);
-  assert.match(t1, /\| W3 \| #396 \| — \| ALPHA \| — \| BETA \| BETA \| on \|/);
+  assert.match(t1, /\| W3 \| #396 \| — \| ALPHA \| — \| — \| — \| on \|/);
   assert.deepEqual(verifyCurrent(r.state, t1), { status: 'current' });
   const imported = renderCurrent(build([boot({ packets: { 'LIVE-1': { owner: 'W3', completion: VERIFIED_ACTIVATION, phase: 'ACKED', refs: [comment(1)] } } })]).state);
   assert.match(imported, /\| LIVE-1 \| W3 \| work \| VERIFIED \(journey-activation\) \| bootstrap \| ACKED \|/);

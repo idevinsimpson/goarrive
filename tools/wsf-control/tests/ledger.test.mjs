@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  A, B, C, D, E, F, BASE, GENESIS, REPO, SOURCE_ONLY, STAGED_HOSTED, VERIFIED_ACTIVATION,
+  A, B, C, D, E, F, BASE, GENESIS, QUEUE_BETA, REPO, SOURCE_ONLY, STAGED_HOSTED, VERIFIED_ACTIVATION,
   add, boot, build, chain, comment, commit, done, pull, refused, run, test,
 } from './helpers.mjs';
 import { Refused, appendEvent, appendToDir } from '../append.mjs';
@@ -23,7 +23,7 @@ const delivered = () => add(released(), { type: 'deliver', packet: 'ALPHA', pr: 
 const raw = (r, e, head = r.state.ledgerHead) => appendEvent(r.eventsText, e, { expectHead: head });
 /** BETA (completes VERIFIED after a journey-activation proof) delivered, accepted and integrated. */
 function betaIntegrated() {
-  let r = chain(base(), { type: 'withdraw', packet: 'ALPHA' }, { type: 'release', packet: 'BETA', inbox: 396 }, { type: 'deliver', packet: 'BETA', pr: 516, subjectSha: B });
+  let r = chain(base(), { type: 'withdraw', packet: 'ALPHA' }, QUEUE_BETA, { type: 'release', packet: 'BETA', inbox: 396 }, { type: 'deliver', packet: 'BETA', pr: 516, subjectSha: B });
   const acceptance = 7777;
   r = raw(r, { type: 'accept', actor: 'Fable', source: comment(acceptance), packet: 'BETA', subjectSha: B });
   r = raw(r, { type: 'integrate', actor: 'L0', source: pull(516), packet: 'BETA', mergeSha: C, acceptance });
@@ -35,7 +35,7 @@ test('the standard program reduces, and state.json is exactly its reduction', ()
   assert.equal(r.state.eventCount, BASE.length);
   assert.equal(r.stateText, serialize(reduce(r.eventsText)));
   assert.deepEqual(checkTexts(r.eventsText, r.stateText).problems, []);
-  assert.deepEqual(r.state.queue.W3, ['ALPHA', 'BETA']);
+  assert.deepEqual(r.state.queue.W3, ['ALPHA']);
   assert.equal(r.state.criticalPath, 'ALPHA');
   assert.equal(r.state.repository, REPO);
   assert.deepEqual(r.state.surfaces.current, { pr: 365, commentId: 9001 });
@@ -57,7 +57,7 @@ for (const actor of ['W3', 'W7', 'Director', 'Owner']) {
 }
 test('a worker cannot write its own acceptance or queue; Fable/L0 recording the worker\'s own ACK or delivery comment is allowed', () => {
   refused(() => raw(delivered(), { type: 'accept', actor: 'W3', source: comment(6), packet: 'ALPHA', subjectSha: A }), /not a ledger writer/);
-  refused(() => raw(base(), { type: 'reorder-queue', actor: 'W3', source: comment(6), owner: 'W3', order: ['BETA', 'ALPHA'] }), /not a ledger writer/);
+  refused(() => raw(base(), { type: 'reorder-queue', actor: 'W3', source: comment(6), owner: 'W3', order: ['ALPHA'] }), /not a ledger writer/);
   const workersAck = comment(4242); // the worker's own ACK comment is the source; Fable is the writer
   const r = raw(released(), { type: 'ack', actor: 'Fable', source: workersAck, packet: 'ALPHA' });
   assert.equal(r.state.packets.ALPHA.phase, 'ACKED');
@@ -68,7 +68,7 @@ test('a worker cannot write its own acceptance or queue; Fable/L0 recording the 
 for (const [name, event, re] of [
   ['a release resting on a run result', { type: 'release', source: run(1), packet: 'ALPHA', inbox: 396 }, /release must rest on a comment, not a workflow_run/],
   ['a queue decision resting on a commit', { type: 'queue', source: commit(E), packet: 'GAMMA', owner: 'W3', completion: SOURCE_ONLY }, /queue must rest on a comment, not a commit/],
-  ['a block resting on a PR', { type: 'block', source: pull(1), packet: 'ALPHA', blockedBy: [{ packet: 'BETA', until: 'ACCEPTED' }] }, /block must rest on a comment/],
+  ['a block resting on a PR', { type: 'block', source: pull(1), packet: 'ALPHA', blockedBy: [{ packet: 'REF-1', until: 'ACCEPTED' }] }, /block must rest on a comment/],
   ['a source with a URL-shaped repo', { type: 'ack', source: { kind: 'comment', id: 1, repo: 'https://x.test/a' }, packet: 'ALPHA' }, /source must be \{ kind/],
   ['a source with an unknown kind', { type: 'ack', source: { kind: 'issue', id: 1, repo: REPO }, packet: 'ALPHA' }, /source must be \{ kind/],
   ['a commit source that is not a SHA', { type: 'reconcile-head', source: { kind: 'commit', id: 12, repo: REPO }, packet: 'ALPHA', prHeadSha: A }, /source must be \{ kind/],
@@ -235,7 +235,7 @@ for (const [name, event, re] of [
   ['ack before release', { type: 'ack', packet: 'ALPHA' }, /ack is not legal from QUEUED/],
   ['deliver before release', { type: 'deliver', packet: 'ALPHA', pr: 1, subjectSha: A }, /deliver is not legal from QUEUED/],
   ['accept a queued packet', { type: 'accept', packet: 'ALPHA', subjectSha: A }, /accept is not legal from QUEUED/],
-  ['begin-proof before integration', { type: 'begin-proof', packet: 'BETA', runId: 1, proofType: 'journey-activation' }, /begin-proof is not legal from QUEUED/],
+  ['begin-proof before integration', { type: 'begin-proof', packet: 'ALPHA', runId: 1, proofType: 'hosted' }, /begin-proof is not legal from QUEUED/],
   ['unblock a packet that is not blocked', { type: 'unblock', packet: 'ALPHA' }, /unblock is not legal from QUEUED/],
   ['a transition on an unknown packet', { type: 'ack', packet: 'NOPE' }, /packet NOPE does not exist/],
 ]) {
@@ -275,11 +275,11 @@ test('hand-edited state.json refused (reduce ≠ state), including whitespace-on
 
 // ---- one worker-owned packet; canonical inbox; queue ----
 test('two worker-owned packets refused: releasing BETA while W3 holds ALPHA', () => {
-  const err = refused(() => add(released(), { type: 'release', packet: 'BETA', inbox: 396 }), /W3 holds 2 worker-owned packets \(ALPHA, BETA\); at most one/);
+  const err = refused(() => add(add(released(), QUEUE_BETA), { type: 'release', packet: 'BETA', inbox: 396 }), /W3 holds 2 worker-owned packets \(ALPHA, BETA\); at most one/);
   assert.ok(err instanceof Refused);
 });
 test('a delivered packet frees the worker; a finding that would give W3 two is refused', () => {
-  const r = add(delivered(), { type: 'release', packet: 'BETA', inbox: 396 });
+  const r = chain(delivered(), QUEUE_BETA, { type: 'release', packet: 'BETA', inbox: 396 });
   assert.equal(r.state.packets.BETA.phase, 'RELEASED');
   refused(() => add(r, { type: 'finding', packet: 'ALPHA' }), /W3 holds 2 worker-owned packets/);
 });
@@ -290,21 +290,23 @@ test('a release outside the canonical inbox refused', () => {
 test('a queued packet that is already released refused; a queue naming a released packet fails the invariants', () => {
   refused(() => add(released(), { type: 'queue', packet: 'ALPHA', owner: 'W3', completion: SOURCE_ONLY }), /packet ALPHA already exists \(RELEASED\)/);
   const r = released();
-  assert.deepEqual(r.state.queue.W3, ['BETA']);
+  assert.deepEqual(r.state.queue.W3, []);
   const bad = JSON.parse(r.stateText);
-  bad.queue.W3 = ['ALPHA', 'BETA'];
+  bad.queue.W3 = ['ALPHA'];
   assert.equal(checkTexts(r.eventsText, serialize(bad)).ok, false);
   assert.ok(invariants(bad).some((p) => /W3's queue names ALPHA, which is already RELEASED/.test(p)));
 });
 test('reorder-queue must be a permutation of the queue', () => {
-  assert.deepEqual(add(base(), { type: 'reorder-queue', owner: 'W3', order: ['BETA', 'ALPHA'] }).state.queue.W3, ['BETA', 'ALPHA']);
-  refused(() => add(base(), { type: 'reorder-queue', owner: 'W3', order: ['BETA'] }), /must be a permutation/);
-  refused(() => add(base(), { type: 'reorder-queue', owner: 'W3', order: ['BETA', 'BETA'] }), /must be a permutation/);
+  const r = add(base(), { type: 'queue', packet: 'REF-2', owner: 'W3', kind: 'reference', completion: SOURCE_ONLY });
+  assert.deepEqual(r.state.queue.W3, ['ALPHA', 'REF-2']);
+  assert.deepEqual(add(r, { type: 'reorder-queue', owner: 'W3', order: ['REF-2', 'ALPHA'] }).state.queue.W3, ['REF-2', 'ALPHA']);
+  refused(() => add(r, { type: 'reorder-queue', owner: 'W3', order: ['REF-2'] }), /must be a permutation/);
+  refused(() => add(r, { type: 'reorder-queue', owner: 'W3', order: ['REF-2', 'REF-2'] }), /must be a permutation/);
 });
 
 // ---- critical path ----
 test('a terminal criticalPath refused; a reference cannot be the critical path; it clears on completion', () => {
-  refused(() => add(add(base(), { type: 'withdraw', packet: 'BETA' }), { type: 'set-critical-path', packet: 'BETA' }), /packet is terminal \(WITHDRAWN\)/);
+  refused(() => add(add(base(), { type: 'withdraw', packet: 'ALPHA' }), { type: 'set-critical-path', packet: 'ALPHA' }), /packet is terminal \(WITHDRAWN\)/);
   refused(() => add(base(), { type: 'set-critical-path', packet: 'REF-1' }), /a reference packet cannot be the critical path/);
   const r = add(base(), { type: 'withdraw', packet: 'ALPHA' });
   assert.equal(r.state.criticalPath, null);

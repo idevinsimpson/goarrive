@@ -125,6 +125,7 @@ any non-terminal ─withdraw→ WITHDRAWN
 ```
 
 These rules hold:
+- A QUEUED packet may be blocked, for example a NEXT that waits on an owner decision or on the ACTIVE packet's integration. While blocked it leaves its owner's driving queue, so it is never presented as NEXT and nothing asks for its release. Its position is remembered (`queueIndexBeforeBlock`), and `unblock` restores it to QUEUED at the same relative position; a packet imported as blocked from QUEUED returns at the end of the queue. If the restore would give the worker a second queued work packet, the `unblock` is refused.
 - `begin-proof` must name the contract's `proofType`.
 - `proof-pass` is legal only for a `VERIFIED` contract, and `stage` only for a `STAGED` one.
 - A packet that completes at STAGED cannot be marked VERIFIED instead.
@@ -140,6 +141,7 @@ These rules hold:
 - `state.json` is exactly its reduction.
 - A worker holds at most one worker-owned work packet.
 - Each queue holds exactly its owner's QUEUED packets, each once. A released packet cannot be queued again.
+- **One NEXT:** a worker has at most one queued work packet (ops v1.2). Reference packets are exempt and never become NEXT. `append` refuses a second queued work packet, and so does a bootstrap import, so no valid state can hide one.
 - A release is handed off only in the owner's canonical inbox.
 - A VERIFYING packet has a running proof.
 - Every artifact SHA is 40-hex.
@@ -152,7 +154,7 @@ These rules hold:
   - It is on only while the worker holds a worker-owned work packet, or has delivered work awaiting review.
   - Blocked, reference and queued packets never turn it on.
   - A worker's own check-in may disable itself while it is off.
-  - NEXT is the first work packet in queue order.
+  - NEXT is the worker's one queued work packet, if any.
 - **`ACTIONABLE`** (from `program-view`) is on when some transition, handoff or update is needed now: a `NEEDS_TRANSITION` or a reconcile finding.
 - **`MONITOR`** is always `on` in v1.
   - One lightweight, repo-native global Fable heartbeat stays enabled even when `ACTIONABLE=off`. When all work is blocked and every worker is off, a dependency that clears is still noticed: `program-view` then lists the `unblock`, with `reactivates=W#`.
@@ -169,7 +171,7 @@ The session builds a minimal snapshot before acting. It holds pointers and close
   "prs": { "520": { "state": "open", "merged": false, "headSha": "<40>", "changedSinceSubject": ["path/a"] } },
   "runs": { "54": { "status": "completed", "conclusion": "failure" } },
   "inboxHandoffs": [ { "inbox": 396, "commentId": 123, "packet": "PACKET-ID" } ],
-  "currentSurface": { "commentId": 456, "exists": true, "markerHead": "<64-hex from the comment's first line, or null>" },
+  "currentSurface": { "commentId": 456, "exists": true, "markerHead": "<64-hex from the comment's first line, or null>", "bodySha256": "<optional: sha256 of the comment body>" },
   "pin": { "approvedAppSha": "<40>" },
   "staging": { "servedSha": "<40>" },
   "triggers": { "W3": { "enabled": true } },
@@ -196,7 +198,8 @@ The session builds a minimal snapshot before acting. It holds pointers and close
 | `proof-run-concluded` | github | The ledger says RUNNING but the run concluded. Suggests `proof-pass`/`stage` on success, or `proof-fail` through a finding comment. |
 | `proof-result-drift` | github | The ledger's PASS or FAIL contradicts the run's conclusion. Reported, never silently corrected. |
 | `handoff-without-packet` / `handoff-outside-canonical-inbox` / `handoff-not-recorded` | ledger | A handoff comment the ledger does not account for. |
-| `control-surface-exception` | exception | The CURRENT comment is not in the snapshot, is not the recorded comment, is missing, has no marker, or carries a head this ledger never had. The check fails closed: no edit, and no silent replacement. |
+| `current-surface-stale` | ledger | The CURRENT comment carries an earlier head of this ledger: the crash window where the ledger was pushed but CURRENT was not yet edited. `CURRENT_SURFACE=stale` and `ACTIONABLE=on`. The repair is deterministic: render CURRENT from the present checked ledger and edit the configured comment in place. No new comment is created. |
+| `control-surface-exception` | exception | The CURRENT comment is not in the snapshot, is not the recorded comment, is missing, has no marker, carries a head this ledger never had, or (when `bodySha256` is given) is not the rendering of the head its marker names: hand-edited, or unverifiable. The check fails closed: no edit, and no silent replacement. |
 | `pin-mismatch` / `staging-mismatch` / `staging-pointer-missing` | github | The staging pointer disagrees with the pin or with what is served. |
 | `watch-on-without-work` / `work-without-watch` / `trigger-for-unknown-worker` | github | A check-in disagrees with the derived WATCH. |
 | `queue-phase-inconsistent` | ledger | A supplied state breaks an invariant. Reported, never repaired. |
