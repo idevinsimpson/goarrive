@@ -149,6 +149,19 @@ jobs:
           WSF_REQUESTED_SHA: ${{ inputs.app_sha }}
         run: node .github/wsf-staging/resolve-candidate.mjs .github/wsf-staging/approved-candidate.json
 
+      # THE FROZEN MILESTONE MANIFEST, CHECKED BEFORE ANYTHING IS BUILT
+      # (CONTROL-PLANE-CI-1 C3). Read from this operational checkout only. An
+      # absent manifest is allowed and printed as "no member-visible milestone
+      # declared"; a present one must be schema-valid, name exactly the approved
+      # candidate as productSha, and have a registered driver for every journey,
+      # or the deploy stops here. Deploy mode only: the other modes deploy
+      # nothing and have no changed journey to describe.
+      - name: Check the milestone manifest against the approved candidate
+        if: ${{ inputs.mode == 'deploy' }}
+        env:
+          WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
+        run: node .github/wsf-staging/check-milestone-manifest.mjs .github/wsf-staging/journeys/manifest.json
+
   # -------------------------------------------------------------- config ----
   # Privileged, and deliberately tiny: it reads the staging Web App's public
   # SDK config and nothing else. No application code is checked out here, so
@@ -648,6 +661,92 @@ jobs:
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SA }}
+
+      # REPORT-ONLY changed-journey smoke (CONTROL-PLANE-CI-1). It reads the
+      # reviewed milestone manifest from the OPERATIONAL checkout (never the
+      # candidate's). With no manifest it prints CHANGED_JOURNEY_SMOKE=skipped
+      # before any credential is minted. With one, each journey's reviewed
+      # driver (ops journeys/index.mjs) seeds its own `e5c-` synthetic fixtures
+      # into THIS step's own cleanup manifest and drives the hosted site in a
+      # browser; a journey without a driver is BLOCKED. It always exits 0, has
+      # no id, and is continue-on-error: "Require the hosted checks to have
+      # passed" below still reads only the Package E suite and the evidence
+      # scan. It runs after the re-authentication so its token is fresh.
+      - name: Run the changed-journey smoke (report-only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        working-directory: app
+        env:
+          WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-evidence
+          WSF_JOURNEY_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/manifest.json
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-evidence/changed-journeys/cleanup-manifest.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_JOURNEY_MANIFEST" ]; then
+            node ../ops/.github/wsf-staging/hosted-changed-journeys.mjs
+            exit 0
+          fi
+          set -a; . ../cfg/wsf-staging.env; set +a
+          # Its own copy of the SDK config, in its own 0700 child of the runner
+          # temp dir, written the same way the Package E step writes its copy.
+          export WSF_SDK_CONFIG_FILE="$RUNNER_TEMP/wsf-sdk-journeys/wsf-sdk-config.json"
+          node ../ops/.github/wsf-staging/write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ../ops/.github/wsf-staging/hosted-changed-journeys.mjs
+
+      # The changed-journey fixtures, removed from their own manifest by the same
+      # cleaner and the same provenance rules as every other hosted harness.
+      # BLOCKING whenever a fixture manifest exists (Director #513 C4): a run
+      # that leaves synthetic fixtures behind fails hosted-verify, and the card
+      # rendered below cannot say PASSED. With no manifest nothing was created,
+      # and the step says so without minting a credential.
+      - name: Remove changed-journey fixtures
+        if: always()
+        env:
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-evidence/changed-journeys/cleanup-manifest.json
+          WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-evidence/changed-journeys/cleanup-receipt.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_CLEANUP_MANIFEST" ]; then
+            echo "CHANGED_JOURNEY_CLEANUP=not needed (no changed-journey fixtures were created)"
+            exit 0
+          fi
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      # THE OWNER CARD, rendered only AFTER the fixture cleanup and from its
+      # receipt as well as the journey results: it names the cleanup outcome,
+      # and says PASSED only when every journey passed on the manifest's build
+      # AND cleanup is complete or nothing was created. Report-only itself; the
+      # blocking cleanup step above is what fails the job.
+      - name: Render the changed-journey owner card (report-only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          WSF_CHANGED_DIR: ${{ github.workspace }}/wsf-evidence/changed-journeys
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_CHANGED_DIR/changed-journeys.json" ]; then
+            echo "OWNER_CARD=not rendered (no changed-journey results in this run)"
+            exit 0
+          fi
+          node ops/.github/wsf-staging/owner-test-card.mjs \
+            --manifest ops/.github/wsf-staging/journeys/manifest.json \
+            --results "$WSF_CHANGED_DIR/changed-journeys.json" \
+            --cleanup-manifest "$WSF_CHANGED_DIR/cleanup-manifest.json" \
+            --cleanup-receipt "$WSF_CHANGED_DIR/cleanup-receipt.json" \
+            --staging-url https://westayfit-staging--staging-4a616y5m.web.app \
+            --out "$WSF_CHANGED_DIR/owner-test-card.md"
 
       - name: Remove synthetic fixtures
         if: always()

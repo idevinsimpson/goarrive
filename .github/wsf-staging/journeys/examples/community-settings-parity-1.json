@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "milestone": "COMMUNITY-SETTINGS-PARITY-1",
+  "productSha": "938e00d8c985993f69becc8924d3037f18425afc",
+  "previousKnownGoodSha": "74d1928145bbc76267498ee63b9423b6f6cdfae8",
+  "journeys": [
+    {
+      "id": "community",
+      "entry": "/community",
+      "setup": "signed-in member of two communities: a member of one, founding Champion of the other",
+      "actions": ["open Community", "switch the selected community with its chip", "return"],
+      "expected": [
+        "the banner names the selected community, with its Members and Your role facts",
+        "the founding Champion's role fact reads Champion",
+        "This period shows the selected community's own active goal",
+        "the selected community is still selected on return"
+      ],
+      "knownExclusions": ["the member roster: wsfCommunityMembers is transport-shut on staging"]
+    },
+    {
+      "id": "settings",
+      "entry": "/you",
+      "setup": "the same member, with the community they lead selected",
+      "actions": ["open You", "press Settings", "read the privacy sections", "press × Close"],
+      "expected": [
+        "Settings opens as the panel overlay",
+        "the selected community's privacy section comes first",
+        "each switch shows the stored name and activity visibility",
+        "Close dismisses the panel"
+      ],
+      "knownExclusions": ["changing a switch: wsfSetCommunityVisibility is transport-shut on staging"]
+    }
+  ]
+}

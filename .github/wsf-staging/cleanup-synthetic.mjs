@@ -87,7 +87,13 @@ async function api(url, { method = 'GET', body, allowStatus = [], expect = 'obje
   return { status: response.status, parsed };
 }
 
-function finish(status, extra, exitCode) {
+/**
+ * Write the receipt, then (only once it is written) run `afterReceipt`, then
+ * exit. The COMPLETE path removes the manifest in `afterReceipt`, so a receipt
+ * that cannot be written leaves the manifest in place: the two records of
+ * this cleanup are never both gone.
+ */
+function finish(status, extra, exitCode, afterReceipt = null) {
   const receipt = {
     completedAt: new Date().toISOString(),
     project: PROJECT_ID,
@@ -99,6 +105,7 @@ function finish(status, extra, exitCode) {
   // replaced by an ENOENT crash and the run showed no cleanup result at all.
   fs.mkdirSync(path.dirname(RECEIPT), { recursive: true, mode: 0o700 });
   fs.writeFileSync(RECEIPT, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+  if (afterReceipt) afterReceipt();
   console.log(`CLEANUP_STATUS=${status}`);
   for (const [k, v] of Object.entries(extra)) {
     if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') {
@@ -131,7 +138,7 @@ if (!fs.existsSync(MANIFEST)) {
   finish('MANIFEST_UNUSABLE', {
     reason: 'manifest file absent — the scope of what was created is unknown',
     manifestPreserved: false,
-    recovery: 'Identify run-tagged fixtures (wsfCommunityGroups/e5grp-<runTag>-*, wsfGoals/e5goal-<runTag>-*) and Auth users with emails wsf-<runTag>-*@example.com by console query before the next run.',
+    recovery: 'Identify the run\'s fixtures by its run tag before the next run: every harness puts the tag in its document ids (wsfCommunityGroups/e5grp-, e5jgrp-, e5cgrp-<runTag>…; wsfGoals/e5goal-, e5jgoal-, e5cgoal-<runTag>…; the memberships, goal shards and linked documents under those ids), its members\' wsfMemberProfiles/<uid> are linked through those memberships, and its Auth users have emails wsf-<runTag>-*@example.com. Find them by console query.',
   }, 1);
 }
 
@@ -360,8 +367,8 @@ const counts = {
 };
 
 if (complete) {
-  fs.rmSync(MANIFEST, { force: true });
-  finish('COMPLETE', { ...counts, manifestPreserved: false }, 0);
+  // Receipt first, manifest second: see finish().
+  finish('COMPLETE', { ...counts, manifestPreserved: false }, 0, () => fs.rmSync(MANIFEST, { force: true }));
 }
 
 // Incomplete: the manifest is the only record of what remains, so it stays.
