@@ -24,3 +24,9 @@ Rules:
 6. Inactive workers need no standing inbox entry. Before dispatching new work to an inactive worker, Fable names one canonical inbox.
 7. Evidence-only/export PRs are never worker inboxes.
 8. Closing an implementation PR does not close the canonical inbox unless the inbox itself is explicitly retired.
+
+
+9. One task has one authoritative handoff comment in the canonical inbox. If detailed governing text lives elsewhere, mirror only a link + exact SHA/scope.
+10. A worker check-in remains active because of actionable owned work, not because unrelated or blocked PRs remain open.
+11. Blocked/reference/evidence/history PRs are removed from the worker's active watch set until a new actionable inbox handoff arrives.
+12. The program-level Fable loop, not every worker, owns global monitoring and reactivation.
