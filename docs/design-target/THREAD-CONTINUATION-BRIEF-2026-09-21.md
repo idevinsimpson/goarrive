@@ -4,16 +4,16 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 11:15Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 11:17Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`74d19281`** = `87a86531` + You `18ba6de2` / Progress `bdc82c0e` routes (`2f57bbca`); vitest 1036 |
-| `main` | **`32563aa0`** (Merge #502: pin → `14ce1907`); before it `6c2e6b25` (#491) |
-| staging pin | `approvedAppSha` **`14ce1907`**, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED #502 `5843353545`) |
-| served staging | **`14ce1907`**, run 51 `36219503815`: 49 → 49, created none, `VERIFY=pass`, marker `14ce190`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5843464730`–`5843467412`); previous known-good **`0b460ce3`** (run 50) |
+| `main` | **`bc53a787`** (Merge #508: pin → `74d19281`); before it `32563aa0` (#502) |
+| staging pin | `approvedAppSha` **`74d19281`**, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED #508 `5845765890`) |
+| served staging | **`14ce1907`**, run 51 `36219503815`: 49 → 49, created none, `VERIFY=pass`, marker `14ce190`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5843464730`–`5843467412`); previous known-good **`0b460ce3`** (run 50). **Run 52 `36238227254`** (app `74d19281`, from main `bc53a787`) dispatched 11:15Z (#365 `5845782316`); rollback target `14ce1907` |
 
 **Active packets.**
 
@@ -22,7 +22,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | **SERVED** via run 51; hosted smoke BLOCKED from L0 (sandbox 403 on `*.web.app`, `5843469815`); OWNER TEST CARD `5843470410` | owner feedback → route; H3c successor with W4 |
 | **YOU-PARITY-1 Phase A** | W6 · #500 · `02f86fc2` | **ACCEPTED** `5842638280` → integrated `993f0796`; not staged | done |
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
-| You / Progress Phase B | W6 · `2f57bbca` | ACCEPTED → integrated `74d19281`; pin **#508 `fbcfc80c`** (W3; L0 `5845759060`: 49 → 49, run-all green) | W7 pin check (`5845759514`) → Director → L0 merges → dispatch → receipts + OWNER TEST CARD |
+| You / Progress Phase B | W6 · `2f57bbca` | ACCEPTED → integrated `74d19281`; pin **#508 `fbcfc80c`** ACCEPTED `5845765890`, merged → main `bc53a787`; **run 52 in flight** | four receipts + hosted smoke + OWNER TEST CARD |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 product `0e5d6f38` / evidence `ebcc038a` | W7 Check 51 PASS; 3 visual HOLD items fixed; **still HELD** `5845751705`: 62 px masthead, selected community first, "Champion", "× Close", type/spacing pass | W9 successor → W7 changed deps → Director pixels |
 | **MEMBER-SNAPSHOT-1** | backend worker **BLOCKED**: L0 `create_session` refused by classifier; not retried (`5842376324`) | serialized `index.ts` queue (`5842015136`) waits | owner-started session or Director assigns an existing worker |
