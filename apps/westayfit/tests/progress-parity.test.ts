@@ -57,8 +57,8 @@ describe('statusOf — the four lifecycle pills, and nothing claimed on an unkno
       tone: 'muted',
     });
   });
-  it('closed with no answer for the total says only CLOSED', () => {
-    expect(statusOf(goal({ open: false, shared: UNKNOWN_SHARED }))).toEqual({ label: 'CLOSED', tone: 'muted' });
+  it('closed with no answer for the total says CLOSED · RESULT UNAVAILABLE', () => {
+    expect(statusOf(goal({ open: false, shared: UNKNOWN_SHARED }))).toEqual({ label: 'CLOSED · RESULT UNAVAILABLE', tone: 'muted' });
   });
   it('open with no answer for the total is OPEN, never REACHED', () => {
     expect(statusOf(goal({ shared: UNKNOWN_SHARED })).label).toBe('OPEN');

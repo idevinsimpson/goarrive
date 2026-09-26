@@ -159,7 +159,7 @@ for (const vp of [
       await expect(open_).not.toContainText('REACHED');
       await expect(page.getByTestId('wsf-activity-goal-harbor-150-shared')).toHaveText('SHAREDUnknown');
       const closed = page.getByTestId('wsf-activity-goal-oak-jul');
-      await expect(closed).toContainText('CLOSED');
+      await expect(closed).toContainText('CLOSED · RESULT UNAVAILABLE');
       await expect(closed).toContainText('Oak Grove Together · July');
       await expect(closed).not.toContainText('UNFINISHED');
       await expect(page.getByTestId('wsf-activity-goal-oak-jul-shared')).toHaveText('SHAREDUnknown');

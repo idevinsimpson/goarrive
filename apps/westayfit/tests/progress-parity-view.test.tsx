@@ -137,7 +137,7 @@ describe('ProgressParityView — populated, in the reference order', () => {
   it('a shared total that did not answer reads Unknown, never zero', () => {
     render(ready({ open: [], finished: [g({ goalId: 'u', open: false, shared: UNKNOWN_SHARED })] }));
     expect(text('wsf-activity-goal-u-shared')).toBe('SHAREDUnknown');
-    expect(text('wsf-activity-goal-u')).toContain('CLOSED');
+    expect(text('wsf-activity-goal-u')).toContain('CLOSED · RESULT UNAVAILABLE');
     expect(text('wsf-activity-goal-u')).not.toContain('REACHED');
     expect(text('wsf-activity-goal-u')).not.toContain('UNFINISHED');
   });
