@@ -51,6 +51,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
   assert.ok(names.includes('wsf-hosted-evidence'), 'hosted evidence upload must be conditional');
   assert.ok(names.includes('wsf-player-evidence'), 'player evidence upload must be conditional');
   assert.ok(names.includes('wsf-cleanup-recovery-evidence'), 'recovery evidence upload must be conditional');
+  assert.ok(names.includes('wsf-social-demo-evidence'), 'social demo seed evidence upload must be conditional');
   for (const [, cond, name] of uploads) {
     assert.match(cond, /steps\.scan-[a-z-]+\.outcome == 'success'/, `${name} upload is not gated on a scan outcome`);
   }
@@ -60,7 +61,7 @@ test('every evidence upload is gated on its own scan step outcome', () => {
 });
 
 test('both scan steps carry the id their upload references', () => {
-  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence', 'scan-player-evidence', 'scan-recovery-evidence']) {
+  for (const id of ['scan-deployment-evidence', 'scan-hosted-evidence', 'scan-player-evidence', 'scan-recovery-evidence', 'scan-social-demo-evidence']) {
     assert.ok(text.includes(`id: ${id}`), `scan step id ${id} is missing`);
     assert.ok(text.includes(`steps.${id}.outcome == 'success'`), `nothing references ${id}`);
   }
@@ -76,7 +77,7 @@ test('the gate job has no OIDC capability', () => {
 });
 
 test('privileged jobs declare the wsf-staging environment', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'cleanup-recovery', 'social-demo-seed']) {
     assert.match(jobs[j], /environment: wsf-staging/, `${j} must declare the environment the trust condition requires`);
   }
 });
@@ -103,8 +104,9 @@ test('the browser jobs run the candidate-local Playwright binary', () => {
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery']) {
-    const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery', 'social-demo-seed']) {
+    // comment-stripped: comments explain installs, they are not installs
+    const installs = jobCode(j).split('\n').filter((l) => /npm (install|ci|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
     }
@@ -323,7 +325,7 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery'];
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery', 'social-demo-seed'];
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -384,6 +386,7 @@ test('player mode reaches only gate, config and the player journey', () => {
     'player-journey': true,
     'social-privacy': false,
     'cleanup-recovery': false,
+    'social-demo-seed': false,
   });
 });
 
@@ -423,6 +426,7 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     'player-journey': false,
     'social-privacy': false,
     'cleanup-recovery': false,
+    'social-demo-seed': false,
   });
 });
 
@@ -440,6 +444,7 @@ test('social-privacy mode reaches only gate, config and the privacy verification
     'player-journey': false,
     'social-privacy': true,
     'cleanup-recovery': false,
+    'social-demo-seed': false,
   });
 });
 
@@ -511,6 +516,7 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     'player-journey': false,
     'social-privacy': false,
     'cleanup-recovery': false,
+    'social-demo-seed': false,
   });
 });
 
@@ -527,10 +533,12 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
     after the job matrix above was extended to say what runs in it — which is
     the check that actually matters, because a mode no job names runs nothing.
   */
+  // `social-demo-seed` was added only together with its job, its exclusions
+  // below, and every other mode's reached-jobs expectation pinning it false.
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy'],
-    'exactly these five modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'social-demo-seed'],
+    'exactly these six modes exist'
   );
 });
 
@@ -647,6 +655,7 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     'player-journey': false,
     'social-privacy': false,
     'cleanup-recovery': true,
+    'social-demo-seed': false,
   });
 });
 
@@ -1062,6 +1071,159 @@ await test('the hosting check step is LIVE: nothing gates, skips or swallows it'
 
   assert.deepEqual(body, ['        run: node ops/.github/wsf-staging/check-hosting-routes.mjs app ops'],
     'the hosting check step carries more than its one command (an if:, continue-on-error, shell, env or a changed run line)');
+});
+
+// ---- the social-demo-seed mode (SOCIAL-STAGING-DEMO-1 / SOCIAL-DEMO-SEED-MODE)
+// A retained synthetic review fixture, seeded through the EXISTING identity.
+// These pin that the mode reaches nothing else, cannot be steered by its
+// inputs, and cannot apply anything but a reviewed plan.
+
+test('seed mode reaches the seed job and nothing else — not even the gate', () => {
+  assert.deepEqual(reachedJobs('social-demo-seed'), {
+    gate: false,
+    config: false,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'social-privacy': false,
+    'cleanup-recovery': false,
+    'social-demo-seed': true,
+  });
+  assert.equal(jobCondition('social-demo-seed'), "${{ inputs.mode == 'social-demo-seed' }}", 'an exact equality, never a negation');
+  for (const [name, body] of Object.entries(jobs)) {
+    if (name === 'social-demo-seed') continue;
+    assert.equal(/social-demo-seed/.test(jobCode(name)), false, `${name} must not name the seed mode`);
+  }
+});
+
+test('mail-preflight and the seed mode never reach each other', () => {
+  const m = /^ {4}if: (.*)$/m.exec(jobs['mail-preflight'])[1];
+  assert.equal(evaluate(m, { 'inputs.mode': 'social-demo-seed' }), false);
+  assert.equal(evaluate(jobCondition('social-demo-seed'), { 'inputs.mode': 'mail-preflight' }), false);
+});
+
+test('the seed job builds, deploys, repins, verifies a deployment, cleans up and reanchors NOTHING', () => {
+  const body = jobCode('social-demo-seed');
+  const forbidden = [
+    [/firebase deploy|hosting:channel:deploy|--only functions|functions:/, 'a deployment or functions update'],
+    [/expo export|build-staging\.sh|npm run build/, 'a build'],
+    [/approved-candidate\.json|resolve-candidate\.mjs/, 'a repin or candidate resolution'],
+    [/hosted-package-e-smoke\.mjs|hosted-player-journey\.mjs|playwright|chromium/i, 'the hosted suite or a browser'],
+    [/verify-deployment\.mjs|read-inventory\.mjs/, 'deployment verification'],
+    [/cleanup-synthetic\.mjs|--cleanup|--confirm-cleanup/, 'a cleanup'],
+    [/--reanchor/, 'a reanchor'],
+    [/actions\/download-artifact/, 'another run’s artifact'],
+  ];
+  for (const [re, what] of forbidden) assert.equal(re.test(body), false, `the seed job must not perform ${what}`);
+  assert.match(body, /seed-social-demo\.mjs/, 'the seed job runs the reviewed seed script');
+});
+
+test('the seed job takes exactly contents:read and id-token:write', () => {
+  const body = jobs['social-demo-seed'];
+  const block = body.slice(body.indexOf('permissions:'), body.indexOf('steps:'));
+  const granted = [...block.matchAll(/^\s+([a-z-]+): (read|write)$/gm)].map((x) => `${x[1]}:${x[2]}`).sort();
+  assert.deepEqual(granted, ['contents:read', 'id-token:write']);
+});
+
+/**
+ * The seed job's permissions, EXACTLY. The first version of this check
+ * collected `key: read|write` lines and could be satisfied by shapes it did
+ * not see (W7 Check 37, M8: a permission-broadening mutant survived). This
+ * one reads the literal block and admits exactly two lines, and it proves
+ * itself against the broadening shapes before it judges the real job.
+ */
+function seedPermissionsExact(jobText) {
+  const lines = jobText.split('\n');
+  const keys = lines.filter((l) => /^ {4}permissions:/.test(l));
+  if (keys.length !== 1 || keys[0] !== '    permissions:') return false;
+  const start = lines.indexOf('    permissions:');
+  const block = [];
+  for (let i = start + 1; i < lines.length && /^ {6}\S/.test(lines[i]); i += 1) block.push(lines[i]);
+  return JSON.stringify(block) === JSON.stringify(['      contents: read', '      id-token: write'])
+    && lines[start + 1 + block.length]?.startsWith('    steps:') === true;
+}
+
+test('M8: the seed job holds exactly contents:read and id-token:write, and every broadening shape is refused', () => {
+  const real = jobs['social-demo-seed'];
+  assert.equal(seedPermissionsExact(real), true, 'the real seed job must pass');
+  const perms = '    permissions:\n      contents: read\n      id-token: write\n';
+  assert.ok(real.includes(perms), 'the permissions block is where this check expects it');
+  const mutants = {
+    'contents: write': real.replace(perms, '    permissions:\n      contents: write\n      id-token: write\n'),
+    'an added pull-requests: write': real.replace(perms, perms + '      pull-requests: write\n'),
+    'an added actions: read': real.replace(perms, '    permissions:\n      actions: read\n      contents: read\n      id-token: write\n'),
+    'write-all': real.replace(perms, '    permissions: write-all\n'),
+    'read-all plus id-token': real.replace(perms, '    permissions: read-all\n'),
+    'id-token dropped': real.replace(perms, '    permissions:\n      contents: read\n'),
+    'a second permissions key': real.replace(perms, perms + '    permissions:\n      contents: write\n'),
+    'a flow-style map': real.replace(perms, '    permissions: { contents: write, id-token: write }\n'),
+  };
+  for (const [what, text] of Object.entries(mutants)) {
+    assert.notEqual(text, real, `mutant "${what}" did not apply`);
+    assert.equal(seedPermissionsExact(text), false, `permission-broadening mutant survived: ${what}`);
+  }
+});
+
+test('the seed job runs operational code from the running commit and installs only from the reviewed lockfile, scripts off', () => {
+  const body = jobCode('social-demo-seed');
+  assert.match(body, /ref: \$\{\{ github\.sha \}\}/, 'the operational checkout is pinned to the running commit');
+  assert.match(body, /persist-credentials: false/);
+  const npm = body.split('\n').filter((l) => /\bnpm\b/.test(l));
+  assert.deepEqual(npm.map((l) => l.trim()), ['run: npm ci --ignore-scripts --no-audit --no-fund'], 'one install: npm ci from the lockfile, lifecycle scripts off');
+  assert.match(stepBlock('social-demo-seed', 'Install the seed dependencies from the reviewed lockfile'), /working-directory: ops\/functions-westayfit/);
+  assert.equal(/npx|npm install/.test(body), false, 'no unpinned resolution');
+});
+
+test('dispatch inputs reach the seed job only through env, never shell text', () => {
+  const lines = jobCode('social-demo-seed').split('\n');
+  const withInputs = lines.filter((l) => /\$\{\{\s*inputs\./.test(l));
+  for (const l of withInputs) {
+    assert.match(l, /^\s+(if: \$\{\{ inputs\.mode == 'social-demo-seed' \}\}|[A-Z_]+: \$\{\{ inputs\.demo_[a-z_]+ \}\})$/, `an input appears outside an env mapping: ${l.trim()}`);
+  }
+  assert.ok(withInputs.length >= 4, 'the three demo inputs are mapped into env');
+  // and the step outputs used in shell are only the validator's fixed flag, through env
+  assert.equal(/run:.*\$\{\{\s*steps\.seed-inputs/.test(jobCode('social-demo-seed')), false);
+});
+
+test('inputs are validated, and the dependencies installed, BEFORE the job authenticates; the seed runs after', () => {
+  const body = jobCode('social-demo-seed');
+  const validate = body.indexOf('social-demo-inputs.mjs');
+  const install = body.indexOf('npm ci --ignore-scripts');
+  const auth = body.indexOf('google-github-actions/auth');
+  const seed = body.indexOf('seed-social-demo.mjs');
+  assert.ok(validate !== -1 && install !== -1 && auth !== -1 && seed !== -1);
+  assert.ok(validate < auth && install < auth && auth < seed);
+});
+
+test('APPLY re-plans and passes the reviewed-plan digest check before it writes, then verifies', () => {
+  const step = stepBlock('social-demo-seed', 'Plan, apply or verify the synthetic sample communities');
+  const apply = step.slice(step.indexOf('--apply)'), step.indexOf(';;', step.indexOf('--apply)')));
+  const plan = apply.indexOf('--plan --project');
+  const digest = apply.indexOf('node "$DIGEST"');
+  const write = apply.indexOf('"$SEED" --apply');
+  const verify = apply.indexOf('"$SEED" --verify');
+  assert.ok(plan !== -1 && digest !== -1 && write !== -1 && verify !== -1, 'apply must plan, check the digest, apply, verify');
+  assert.ok(plan < digest && digest < write && write < verify);
+  assert.match(step, /set -euo pipefail/, 'a failed digest check must stop the step before apply');
+  assert.match(step, /DEMO_PLAN_DIGEST= node "\$DIGEST"/, 'a plan run prints a digest but never compares one');
+  assert.match(step, /--project "\$STAGING_PROJECT"/);
+});
+
+test('demo_action is a closed choice of plan, apply, verify with plan as the default', () => {
+  const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\n# Nothing is granted'));
+  const block = onBlock.slice(onBlock.indexOf('      demo_action:'), onBlock.indexOf('      demo_owner_uid:'));
+  assert.match(block, /^\s+type: choice$/m);
+  assert.match(block, /^\s+default: plan$/m);
+  const options = [...block.slice(block.indexOf('options:')).matchAll(/^\s+- ([a-z-]+)$/gm)].map((x) => x[1]);
+  assert.deepEqual(options, ['plan', 'apply', 'verify']);
+});
+
+test('the seed job fails the run unless its seed step and its evidence scan both passed', () => {
+  const step = stepBlock('social-demo-seed', 'Require the seed step and the evidence scan to have passed');
+  assert.match(step, /if: always\(\)/);
+  assert.match(step, /steps\.scan-social-demo-evidence\.outcome/);
+  assert.match(step, /steps\.seed\.outcome/);
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);
