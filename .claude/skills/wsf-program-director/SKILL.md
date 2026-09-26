@@ -29,9 +29,13 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
    - A `wins=exception` finding (`CURRENT_SURFACE=exception`) stops every edit to the control surface. Report it, and never create a replacement comment silently.
    - `CURRENT_SURFACE=stale` (`current-surface-stale`) is the recoverable crash window: the ledger moved on but CURRENT was not edited. It is actionable: render from the present ledger and edit the existing comment in place (step 7).
 5. **Make one decision at a time.** Take one transition from `program-view` (Fable/L0), with its typed `source`:
-   - Decisions (queue, release, finding, accept, block, unblock, withdraw, critical path) rest on a comment.
+   - Decisions (queue, release, retract-release, transfer-owner, review, reassign-review, finding, accept, block, unblock, withdraw, critical path) rest on a comment.
+   - `ack` names the worker (`worker`), which must be the current owner. `review-pass` rests on the assigned W# reviewer's own PASS comment. It releases that reviewer's ball and is never acceptance: `accept` is refused until every assigned W# reviewer has passed.
+   - A `block` on a packet names an `until` its completion contract can reach. An `unblock` wakes whoever `program-view` names in `reactivates=`: the outstanding W# reviewers of an UNDER_REVIEW packet, never its implementer.
+   - A newer hold before ACK is `retract-release` (the packet returns to NEXT). A worker's death after ACK or CHANGES_REQUESTED is `transfer-owner` to a free, registered worker in its canonical inbox, and the new owner must ACK. A reviewer that died, retired or must be replaced is `reassign-review`.
    - `integrate` rests on the merge and carries the acceptance comment.
    - Proof and stage events may rest on the workflow run. A failed proof becomes `proof-fail` only through a focused finding comment.
+   - `stage` is the deployment receipt of the hosted proof's own run (same `runId`, served SHA = the integrated `mergeSha`). It never completes a packet; `proof-pass` on that run does, after the receipt.
    - A run result never grants acceptance or release.
 6. **Append.** Run `node tools/wsf-control/append.mjs <dir> <event.json> --expect-head <the ledgerHead you read>`.
    - `APPEND=noop` means the event already landed, for example after an uncertain push. Carry on from the head it prints.
@@ -41,7 +45,7 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
 8. **Hand off once.** Post one handoff to the owner's canonical inbox (the `inbox` in `worker-view`), naming the packet and the ledger head. A release outside that inbox is refused.
 9. **Dedupe wakes, and derive WATCH.**
    - A wake whose event is already recorded is a no-op.
-   - A worker's check-in follows `WATCH=` from `worker-view`, and may disable itself when it is off. WATCH follows the ball: the implementer while it works, the assigned W# reviewer during review. A worker holds one ball in total, so a reviewer's NEXT is not released until its review ends. Blocked, reference and waiting-on-review packets never keep it on.
+   - A worker's check-in follows `WATCH=` from `worker-view`, and may disable itself when it is off. WATCH follows the ball: the implementer while it works, the assigned W# reviewer during review until it records its `review-pass`. A worker holds one ball in total, so a reviewer's NEXT is not released until its review ends. Blocked, reference and waiting-on-review packets never keep it on.
    - Fable's global heartbeat follows `MONITOR=on`. It stays enabled even when `ACTIONABLE=off`, so a dependency that clears while every worker is off is still noticed. When `ACTIONABLE=off`, it is silent.
    - Post no status for an unchanged blocked lane.
 
@@ -50,7 +54,7 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
 Every packet declares `completion: {terminal, proofType}`. A packet is done only at its own terminal phase:
 - `INTEGRATED`, for `source-only`;
 - `VERIFIED`, after a `journey-activation` or `hosted` proof;
-- `STAGED`.
+- `STAGED`, after the deployment receipt (`stage`) and a passed hosted proof of the same run.
 
 An integrated packet whose contract needs a proof is **not** done. `program-view` lists its `begin-proof`, and a failed proof sends it back to its worker as CHANGES_REQUESTED.
 

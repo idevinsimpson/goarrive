@@ -8,6 +8,8 @@ const suites = [
   'closure.test.mjs',
   'review.test.mjs',
   'integrity.test.mjs',
+  'recovery.test.mjs',
+  'audit.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

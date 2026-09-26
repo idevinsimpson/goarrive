@@ -110,7 +110,7 @@ test('program-view lists the critical path and the transitions waiting on Fable/
   r = raw(r, { type: 'integrate', actor: 'L0', source: pull(520), packet: 'ALPHA', mergeSha: B, acceptance: 70 });
   v = programView(r.state);
   assert.ok(v.includes(`INTEGRATED_NOT_STAGED ALPHA merge=${B}`));
-  assert.ok(v.includes('NEEDS_TRANSITION ALPHA event=stage by=L0 :: integrated but not staged'));
+  assert.ok(v.includes('NEEDS_TRANSITION ALPHA event=begin-proof by=L0 :: integrated; staging needs a hosted proof with its deployment run'));
 });
 test('an external blocker clears only when the supplied snapshot says so', () => {
   const s = add(released(), { type: 'block', packet: 'ALPHA', blockedBy: EXT }).state;

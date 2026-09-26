@@ -3,11 +3,14 @@
  *
  *   bootstrap (line 1 only): the current state, imported as found
  *   QUEUED ─release→ RELEASED ─ack→ ACKED ─deliver→ DELIVERED ─review→ UNDER_REVIEW
+ *   RELEASED ─retract-release→ QUEUED (before ACK only; back to its queue position)
+ *   ACKED|CHANGES_REQUESTED ─transfer-owner→ RELEASED (to the new owner, who must ACK)
+ *   UNDER_REVIEW ─review-pass (per W# reviewer)→ UNDER_REVIEW; ─reassign-review→ UNDER_REVIEW
  *   DELIVERED|UNDER_REVIEW ─finding→ CHANGES_REQUESTED ─deliver→ DELIVERED
  *   DELIVERED|UNDER_REVIEW ─accept→ ACCEPTED ─integrate→ INTEGRATED
  *   INTEGRATED ─begin-proof→ VERIFYING ─proof-pass→ VERIFIED
  *                           VERIFYING ─proof-fail→ CHANGES_REQUESTED (a successor deliver follows)
- *   INTEGRATED|VERIFYING ─stage→ STAGED
+ *   VERIFYING ─stage (hosted, same run)→ VERIFYING with a served receipt ─proof-pass→ STAGED
  *   any non-terminal ─block→ BLOCKED ─unblock→ (the phase before the block)
  *     A QUEUED packet that is blocked leaves its owner's driving queue (so it is
  *     never presented as NEXT); its position is remembered and unblock restores it.
@@ -21,7 +24,7 @@
  * evidence/doc head; neither moves the subject, so evidence practice on a PR
  * never silently re-points a review or an acceptance.
  */
-import { GENESIS, SCHEMA_VERSION, isTerminal } from './schema.mjs';
+import { GENESIS, RE, SCHEMA_VERSION, isTerminal, unreachableBlocker } from './schema.mjs';
 
 export class Illegal extends Error {}
 const illegal = (m) => { throw new Illegal(m); };
@@ -59,7 +62,7 @@ function newPacket({ owner, kind = 'work', completion, label = null, subjectPath
     owner, kind, completion: clone(completion), label, origin,
     phase: 'QUEUED', phaseBeforeBlock: null, queueIndexBeforeBlock: null, inbox: null, pr: null, reviewers: [],
     artifact: { subjectSha: null, prHeadSha: null, evidenceSha: null, mergeSha: null },
-    proof: null, staged: null,
+    proof: null, served: null, releasedQueueIndex: null, reviewedBy: [],
     subjectPaths, blockedBy: [], importRefs: [],
     authority: { queued: null, released: null, accepted: null, lastTransition: null },
   };
@@ -119,7 +122,12 @@ function bootstrap(s, e) {
     s.queue[w] = [...q];
   }
   for (const [id, p] of Object.entries(s.packets)) {
-    for (const b of p.blockedBy) if (b.packet && !s.packets[b.packet]) illegal(`bootstrap: packet ${id} is blocked by ${b.packet}, which is not imported`);
+    for (const b of p.blockedBy.filter((x) => x.packet)) {
+      if (!s.packets[b.packet]) illegal(`bootstrap: packet ${id} is blocked by ${b.packet}, which is not imported`);
+      const why = unreachableBlocker(s, id, b);
+      if (why) illegal(`bootstrap: packet ${id}: ${why}`);
+      if (s.packets[b.packet].phase === 'WITHDRAWN') illegal(`bootstrap: packet ${id}: ${b.packet} is withdrawn, so it never reaches ${b.until}`);
+    }
   }
   if (e.criticalPath) setCriticalPath(s, need(s, e.criticalPath));
 }
@@ -181,10 +189,41 @@ export function applyEvent(state, e) {
       p.phase = 'RELEASED';
       p.inbox = e.inbox;
       p.authority.released = src;
+      p.releasedQueueIndex = s.queue[p.owner].indexOf(e.packet); // for a retraction before ACK
       s.queue[p.owner] = s.queue[p.owner].filter((x) => x !== e.packet);
       break;
     }
-    case 'ack': from(p, ['RELEASED'], 'ack'); p.phase = 'ACKED'; break;
+    case 'retract-release': {
+      // A newer authorized hold before the worker ACKs: back to NEXT. The release stays in the ledger as history.
+      from(p, ['RELEASED'], 'retract-release');
+      if (p.releasedQueueIndex === null) illegal('retract-release applies only to a packet released from its queue (a transferred packet is not)');
+      const q = s.queue[p.owner];
+      q.splice(Math.min(p.releasedQueueIndex, q.length), 0, e.packet);
+      p.phase = 'QUEUED';
+      p.inbox = null;
+      p.authority.released = null;
+      p.releasedQueueIndex = null;
+      break;
+    }
+    case 'ack':
+      from(p, ['RELEASED'], 'ack');
+      if (e.worker !== p.owner) illegal(`ack names ${e.worker}, but ${e.packet} is owned by ${p.owner}`);
+      p.phase = 'ACKED';
+      p.releasedQueueIndex = null;
+      break;
+    case 'transfer-owner': {
+      // Worker death after work began: the packet, its artifact and history stay; the new owner must ACK afresh.
+      from(p, ['ACKED', 'CHANGES_REQUESTED'], 'transfer-owner');
+      if (e.owner === p.owner) illegal(`transfer-owner: ${e.packet} is already owned by ${e.owner}`);
+      if (!s.workers[e.owner]) illegal(`transfer-owner: worker ${e.owner} is not registered`);
+      if (e.inbox !== s.workers[e.owner].inbox) illegal(`transfer-owner must hand off in ${e.owner}'s canonical inbox #${s.workers[e.owner].inbox}, not #${e.inbox}`);
+      p.owner = e.owner;
+      p.inbox = e.inbox;
+      p.phase = 'RELEASED';
+      p.authority.released = src;
+      p.releasedQueueIndex = null;
+      break;
+    }
     case 'deliver': {
       from(p, ['RELEASED', 'ACKED', 'CHANGES_REQUESTED', 'DELIVERED', 'UNDER_REVIEW'], 'deliver');
       // A correction after a failed post-integration proof lands on a new PR: the old one is merged.
@@ -198,14 +237,30 @@ export function applyEvent(state, e) {
       if (e.evidenceSha) p.artifact.evidenceSha = e.evidenceSha;
       break;
     }
-    case 'review': from(p, ['DELIVERED'], 'review'); p.phase = 'UNDER_REVIEW'; p.reviewers = [...e.reviewers]; break;
-    case 'finding': from(p, ['DELIVERED', 'UNDER_REVIEW'], 'finding'); p.phase = 'CHANGES_REQUESTED'; break;
-    case 'accept':
+    case 'review': from(p, ['DELIVERED'], 'review'); p.phase = 'UNDER_REVIEW'; p.reviewers = [...e.reviewers]; p.reviewedBy = []; break;
+    case 'review-pass':
+      // An assigned W# reviewer's independent PASS: its ball is released. Not acceptance.
+      from(p, ['UNDER_REVIEW'], 'review-pass');
+      if (!p.reviewers.includes(e.reviewer)) illegal(`review-pass: ${e.reviewer} is not an assigned reviewer of ${e.packet}`);
+      if (p.reviewedBy.includes(e.reviewer)) illegal(`review-pass: ${e.reviewer} has already passed ${e.packet} in this review cycle`);
+      p.reviewedBy = [...p.reviewedBy, e.reviewer];
+      break;
+    case 'reassign-review':
+      // A reviewer died, retired or must be replaced: the new set replaces the old; the original review stays history.
+      from(p, ['UNDER_REVIEW'], 'reassign-review');
+      p.reviewers = [...e.reviewers];
+      p.reviewedBy = p.reviewedBy.filter((r) => e.reviewers.includes(r));
+      break;
+    case 'finding': from(p, ['DELIVERED', 'UNDER_REVIEW'], 'finding'); p.phase = 'CHANGES_REQUESTED'; p.reviewedBy = []; break;
+    case 'accept': {
       from(p, ['DELIVERED', 'UNDER_REVIEW'], 'accept');
       if (e.subjectSha !== p.artifact.subjectSha) illegal(`accept names ${e.subjectSha.slice(0, 8)}, but the subject under review is ${String(p.artifact.subjectSha).slice(0, 8)}`);
+      const pending = p.phase === 'UNDER_REVIEW' ? p.reviewers.filter((r) => RE.worker.test(r) && !p.reviewedBy.includes(r)) : [];
+      if (pending.length) illegal(`accept: assigned W# review(s) not complete: ${pending.join(', ')}`);
       p.phase = 'ACCEPTED';
       p.authority.accepted = src;
       break;
+    }
     case 'integrate':
       from(p, ['ACCEPTED'], 'integrate');
       if (p.authority.accepted?.kind !== 'comment' || p.authority.accepted.id !== e.acceptance) {
@@ -224,29 +279,37 @@ export function applyEvent(state, e) {
       break;
     case 'proof-pass':
       from(p, ['VERIFYING'], 'proof-pass');
-      if (p.completion.terminal !== 'VERIFIED') illegal(`proof-pass: this packet completes at ${p.completion.terminal}, not VERIFIED`);
       if (e.runId !== p.proof.runId) illegal(`proof-pass names run ${e.runId}, but the proof in progress is run ${p.proof.runId}`);
       if (e.source.kind === 'workflow_run' && e.source.id !== e.runId) illegal('proof-pass: the source run is not the named run');
-      p.phase = 'VERIFIED';
+      // A STAGED packet completes on HOSTED VERIFIED, which needs the DEPLOYMENT RECEIPT of the same run first.
+      if (p.completion.terminal === 'STAGED' && p.served?.runId !== e.runId) illegal(`proof-pass: a STAGED packet needs the served receipt of run ${e.runId} (stage) before hosted verification completes it`);
+      p.phase = p.completion.terminal;
       p.proof = { ...p.proof, result: 'PASS', ...(e.evidenceRef ? { evidenceRef: e.evidenceRef } : {}) };
       break;
     case 'proof-fail':
       from(p, ['VERIFYING'], 'proof-fail');
       if (e.runId !== p.proof.runId) illegal(`proof-fail names run ${e.runId}, but the proof in progress is run ${p.proof.runId}`);
       p.phase = 'CHANGES_REQUESTED';
+      p.reviewedBy = []; // the ball is back with the owner; a correction needs a fresh review cycle
       p.proof = { ...p.proof, result: 'FAIL', ...(e.evidenceRef ? { evidenceRef: e.evidenceRef } : {}) };
       break;
     case 'stage':
-      from(p, ['INTEGRATED', 'VERIFYING'], 'stage');
+      // DEPLOYMENT RECEIPT only: what the run served. It never passes the proof and never completes the packet.
+      from(p, ['VERIFYING'], 'stage');
       if (p.completion.terminal !== 'STAGED') illegal(`stage: this packet completes at ${p.completion.terminal}, not STAGED`);
-      p.phase = 'STAGED';
-      p.staged = { runId: e.runId, servedSha: e.servedSha };
-      if (p.proof?.result === 'RUNNING') p.proof = { ...p.proof, result: 'PASS' };
+      // Within VERIFYING a STAGED packet's proof is hosted (its only contract proof type) and RUNNING (check.mjs).
+      if (e.runId !== p.proof.runId) illegal(`stage names run ${e.runId}, but the hosted proof in progress is run ${p.proof.runId}`);
+      if (e.servedSha !== p.artifact.mergeSha) illegal(`stage: served ${e.servedSha.slice(0, 8)} is not this packet's integrated subject ${String(p.artifact.mergeSha).slice(0, 8)}`);
+      p.served = { runId: e.runId, servedSha: e.servedSha };
       break;
     case 'block':
       live(p, 'block');
       if (p.phase === 'BLOCKED') illegal('block: the packet is already blocked');
-      for (const b of e.blockedBy) if (b.packet && !s.packets[b.packet]) illegal(`block: blocking packet ${b.packet} does not exist`);
+      for (const b of e.blockedBy.filter((x) => x.packet)) {
+        const why = unreachableBlocker(s, e.packet, b);
+        if (why) illegal(`block: ${why}`);
+        if (s.packets[b.packet].phase === 'WITHDRAWN') illegal(`block: ${b.packet} is withdrawn, so it never reaches ${b.until}`);
+      }
       p.phaseBeforeBlock = p.phase;
       if (p.phase === 'QUEUED') {
         // Out of the driving queue while blocked, so it is never presented as NEXT.

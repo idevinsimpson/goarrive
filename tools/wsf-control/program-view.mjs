@@ -39,6 +39,13 @@ export function programView(s, snapshot = null, { heads, renders } = {}) {
   }
   for (const p of packets.filter((x) => ['INTEGRATED', 'VERIFYING'].includes(x.phase) && x.completion.terminal === 'STAGED')) out.push(`INTEGRATED_NOT_STAGED ${p.id} merge=${p.artifact.mergeSha}`);
   for (const n of needed.filter((x) => x.event === 'unblock')) out.push(`BLOCKERS_CLEARED ${n.packet}`);
+  // UNDER_REVIEW: either W# reviews are still outstanding, or every W# reviewer has passed and it waits on a human.
+  for (const p of packets.filter((x) => x.phase === 'UNDER_REVIEW')) {
+    const pending = p.reviewers.filter((r) => /^W[1-9][0-9]?$/.test(r) && !(p.reviewedBy || []).includes(r));
+    out.push(pending.length
+      ? `AWAITING_REVIEW ${p.id} pending=${pending.join(',')}${p.reviewedBy?.length ? ` passed=${p.reviewedBy.join(',')}` : ''}`
+      : `AWAITING_ACCEPTANCE ${p.id} subject=${p.artifact.subjectSha}${p.reviewedBy?.length ? ` passed=${p.reviewedBy.join(',')}` : ''}`);
+  }
   const findings = snapshot ? reconcile(s, snapshot, { heads, renders }) : [];
   for (const x of findings.filter((y) => ['watch-on-without-work', 'work-without-watch', 'trigger-for-unknown-worker'].includes(y.kind))) {
     out.push(`WATCH_INCONSISTENT ${x.worker} ${x.kind}`);

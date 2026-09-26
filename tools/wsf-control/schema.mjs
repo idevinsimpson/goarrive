@@ -38,6 +38,25 @@ export const COMPLETIONS = Object.freeze({
   STAGED: ['hosted'],
 });
 
+/**
+ * The milestones a packet blocker may wait for, by the dependency's completion contract.
+ * A STAGED packet is never VERIFIED, and an INTEGRATED one is never proved: waiting on
+ * either would never clear.
+ */
+export const REACHABLE_UNTIL = Object.freeze({
+  INTEGRATED: ['ACCEPTED', 'INTEGRATED'],
+  VERIFIED: ['ACCEPTED', 'INTEGRATED', 'VERIFIED'],
+  STAGED: ['ACCEPTED', 'INTEGRATED', 'STAGED'],
+});
+/** Why a packet blocker can never clear, or null when it can. */
+export function unreachableBlocker(s, id, b) {
+  const dep = s.packets[b.packet];
+  if (!dep) return `blocking packet ${b.packet} does not exist`;
+  if (b.packet === id) return `${id} cannot be blocked by itself`;
+  if (!REACHABLE_UNTIL[dep.completion.terminal].includes(b.until)) return `${b.packet} completes at ${dep.completion.terminal}, so it never reaches ${b.until}`;
+  return null;
+}
+
 /** Terminal: withdrawn, or at the phase its own completion contract names. */
 export function isTerminal(packet) {
   return packet.phase === 'WITHDRAWN' || packet.phase === packet.completion.terminal;
@@ -184,10 +203,14 @@ export const EVENT_FIELDS = Object.freeze({
   'queue': [{ packet: T.packet, owner: T.worker, completion: T.completion }, { kind: T.kind, subjectPaths: T.paths, label: T.text }],
   'reorder-queue': [{ owner: T.worker, order: T.packets }, {}],
   'release': [{ packet: T.packet, inbox: T.int }, {}],
-  'ack': [{ packet: T.packet }, {}],
+  'ack': [{ packet: T.packet, worker: T.worker }, {}],
+  'retract-release': [{ packet: T.packet }, {}],
+  'transfer-owner': [{ packet: T.packet, owner: T.worker, inbox: T.int }, {}],
   'deliver': [{ packet: T.packet, pr: T.int, subjectSha: T.sha }, { prHeadSha: T.sha, evidenceSha: T.sha }],
   'review': [{ packet: T.packet, reviewers: T.reviewers }, {}],
   'finding': [{ packet: T.packet }, {}],
+  'review-pass': [{ packet: T.packet, reviewer: T.worker }, {}],
+  'reassign-review': [{ packet: T.packet, reviewers: T.reviewers }, {}],
   'accept': [{ packet: T.packet, subjectSha: T.sha }, {}],
   'integrate': [{ packet: T.packet, mergeSha: T.sha, acceptance: T.int }, {}],
   'begin-proof': [{ packet: T.packet, runId: T.int, proofType: T.proofType }, {}],
@@ -211,7 +234,8 @@ export const EVENT_FIELDS = Object.freeze({
 const C = ['comment'];
 export const SOURCE_RULES = Object.freeze({
   'bootstrap': C, 'set-canonical': C, 'set-surfaces': C, 'register-worker': C,
-  'queue': C, 'reorder-queue': C, 'release': C, 'ack': C, 'deliver': C, 'review': C, 'finding': C, 'accept': C,
+  'queue': C, 'reorder-queue': C, 'release': C, 'retract-release': C, 'ack': C, 'deliver': C, 'review': C, 'review-pass': C, 'reassign-review': C,
+  'finding': C, 'accept': C, 'transfer-owner': C,
   'block': C, 'unblock': C, 'withdraw': C, 'set-critical-path': C, 'proof-fail': C,
   'set-staging': ['workflow_run', 'comment'],
   'integrate': ['pull_request', 'commit'],

@@ -52,14 +52,14 @@ test('the bootstrap line chains from GENESIS and each later line from the sha256
 // ---- closed writers (5848257247) ----
 for (const actor of ['W3', 'W7', 'Director', 'Owner']) {
   test(`a non-writer actor is refused: ${actor}`, () => {
-    refused(() => raw(released(), { type: 'ack', actor, source: comment(5), packet: 'ALPHA' }), new RegExp(`actor "${actor}" is not a ledger writer`));
+    refused(() => raw(released(), { type: 'ack', worker: 'W3', actor, source: comment(5), packet: 'ALPHA' }), new RegExp(`actor "${actor}" is not a ledger writer`));
   });
 }
 test('a worker cannot write its own acceptance or queue; Fable/L0 recording the worker\'s own ACK or delivery comment is allowed', () => {
   refused(() => raw(delivered(), { type: 'accept', actor: 'W3', source: comment(6), packet: 'ALPHA', subjectSha: A }), /not a ledger writer/);
   refused(() => raw(base(), { type: 'reorder-queue', actor: 'W3', source: comment(6), owner: 'W3', order: ['ALPHA'] }), /not a ledger writer/);
   const workersAck = comment(4242); // the worker's own ACK comment is the source; Fable is the writer
-  const r = raw(released(), { type: 'ack', actor: 'Fable', source: workersAck, packet: 'ALPHA' });
+  const r = raw(released(), { type: 'ack', worker: 'W3', actor: 'Fable', source: workersAck, packet: 'ALPHA' });
   assert.equal(r.state.packets.ALPHA.phase, 'ACKED');
   assert.equal(raw(r, { type: 'deliver', actor: 'L0', source: comment(4243), packet: 'ALPHA', pr: 520, subjectSha: A }).state.packets.ALPHA.phase, 'DELIVERED');
 });
@@ -69,10 +69,10 @@ for (const [name, event, re] of [
   ['a release resting on a run result', { type: 'release', source: run(1), packet: 'ALPHA', inbox: 396 }, /release must rest on a comment, not a workflow_run/],
   ['a queue decision resting on a commit', { type: 'queue', source: commit(E), packet: 'GAMMA', owner: 'W3', completion: SOURCE_ONLY }, /queue must rest on a comment, not a commit/],
   ['a block resting on a PR', { type: 'block', source: pull(1), packet: 'ALPHA', blockedBy: [{ packet: 'REF-1', until: 'ACCEPTED' }] }, /block must rest on a comment/],
-  ['a source with a URL-shaped repo', { type: 'ack', source: { kind: 'comment', id: 1, repo: 'https://x.test/a' }, packet: 'ALPHA' }, /source must be \{ kind/],
-  ['a source with an unknown kind', { type: 'ack', source: { kind: 'issue', id: 1, repo: REPO }, packet: 'ALPHA' }, /source must be \{ kind/],
+  ['a source with a URL-shaped repo', { type: 'ack', worker: 'W3', source: { kind: 'comment', id: 1, repo: 'https://x.test/a' }, packet: 'ALPHA' }, /source must be \{ kind/],
+  ['a source with an unknown kind', { type: 'ack', worker: 'W3', source: { kind: 'issue', id: 1, repo: REPO }, packet: 'ALPHA' }, /source must be \{ kind/],
   ['a commit source that is not a SHA', { type: 'reconcile-head', source: { kind: 'commit', id: 12, repo: REPO }, packet: 'ALPHA', prHeadSha: A }, /source must be \{ kind/],
-  ['a source in another repository', { type: 'ack', source: { kind: 'comment', id: 1, repo: 'other/repo' }, packet: 'ALPHA' }, /source repository other\/repo is not the controlled repository/],
+  ['a source in another repository', { type: 'ack', worker: 'W3', source: { kind: 'comment', id: 1, repo: 'other/repo' }, packet: 'ALPHA' }, /source repository other\/repo is not the controlled repository/],
 ]) {
   test(`provenance refused: ${name}`, () => refused(() => raw(released(), { actor: 'Fable', ...event }), re));
 }
@@ -90,7 +90,7 @@ test('integrate rests on the merge (PR or commit) and must carry the acceptance 
 // ---- idempotent append (5848224264) ----
 test('an exact retry is a NO-OP: no new line, the existing head returned', () => {
   const r0 = released();
-  const ev = { type: 'ack', actor: 'Fable', source: comment(3131), packet: 'ALPHA' };
+  const ev = { type: 'ack', worker: 'W3', actor: 'Fable', source: comment(3131), packet: 'ALPHA' };
   const r1 = raw(r0, ev);
   const again = appendEvent(r1.eventsText, ev, { expectHead: r1.state.ledgerHead });
   assert.equal(again.noop, true);
@@ -100,7 +100,7 @@ test('an exact retry is a NO-OP: no new line, the existing head returned', () =>
 });
 test('a retry after an uncertain push is recognized even though the writer holds the old head', () => {
   const r0 = released();
-  const ev = { type: 'ack', actor: 'Fable', source: comment(3132), packet: 'ALPHA' };
+  const ev = { type: 'ack', worker: 'W3', actor: 'Fable', source: comment(3132), packet: 'ALPHA' };
   const landed = raw(r0, ev);
   const retry = appendEvent(landed.eventsText, ev, { expectHead: r0.state.ledgerHead });
   assert.equal(retry.noop, true);
@@ -114,7 +114,7 @@ test('the same identity with a different payload is a hard conflict', () => {
 });
 test('a stale-prev concurrent append is refused, and a missing expectHead is refused', () => {
   const r0 = released();
-  const r1 = raw(r0, { type: 'ack', actor: 'Fable', source: comment(3134), packet: 'ALPHA' });
+  const r1 = raw(r0, { type: 'ack', worker: 'W3', actor: 'Fable', source: comment(3134), packet: 'ALPHA' });
   refused(() => appendEvent(r1.eventsText, { type: 'deliver', actor: 'Fable', source: comment(3135), packet: 'ALPHA', pr: 520, subjectSha: A }, { expectHead: r0.state.ledgerHead }), /another decision was recorded; re-read and reconcile/);
   refused(() => appendEvent(r1.eventsText, { type: 'deliver', actor: 'Fable', source: comment(3135), packet: 'ALPHA', pr: 520, subjectSha: A }), /expectHead .* is required/);
 });
@@ -125,7 +125,7 @@ test('two different events from one GitHub comment are allowed when their identi
   assert.deepEqual([r.state.packets.ALPHA.phase, r.state.packets.GAMMA.phase], ['RELEASED', 'QUEUED']);
 });
 test('a caller cannot supply seq, id or prev', () => {
-  for (const k of ['seq', 'id', 'prev']) refused(() => raw(released(), { type: 'ack', actor: 'Fable', source: comment(1), packet: 'ALPHA', [k]: k === 'seq' ? 9 : GENESIS }), /assigned by append.mjs/);
+  for (const k of ['seq', 'id', 'prev']) refused(() => raw(released(), { type: 'ack', worker: 'W3', actor: 'Fable', source: comment(1), packet: 'ALPHA', [k]: k === 'seq' ? 9 : GENESIS }), /assigned by append.mjs/);
 });
 test('a ledger with a tampered id, or one identity twice, is refused', () => {
   const lines = released().eventsText.trimEnd().split('\n');
@@ -218,9 +218,12 @@ test('a packet that completes at STAGED cannot be marked VERIFIED instead', () =
   r = raw(r, { type: 'accept', actor: 'Fable', source: comment(70), packet: 'ALPHA', subjectSha: A });
   r = raw(r, { type: 'integrate', actor: 'L0', source: pull(520), packet: 'ALPHA', mergeSha: B, acceptance: 70 });
   r = raw(r, { type: 'begin-proof', actor: 'L0', source: run(71), packet: 'ALPHA', runId: 71, proofType: 'hosted' });
-  refused(() => raw(r, { type: 'proof-pass', actor: 'L0', source: run(71), packet: 'ALPHA', runId: 71 }), /completes at STAGED, not VERIFIED/);
+  refused(() => raw(r, { type: 'proof-pass', actor: 'L0', source: run(71), packet: 'ALPHA', runId: 71 }), /needs the served receipt of run 71/);
   r = raw(r, { type: 'stage', actor: 'L0', source: run(71), packet: 'ALPHA', runId: 71, servedSha: B });
-  assert.deepEqual([r.state.packets.ALPHA.phase, r.state.packets.ALPHA.staged, r.state.criticalPath], ['STAGED', { runId: 71, servedSha: B }, null]);
+  assert.deepEqual([r.state.packets.ALPHA.phase, r.state.packets.ALPHA.served, r.state.packets.ALPHA.proof.result], ['VERIFYING', { runId: 71, servedSha: B }, 'RUNNING']);
+  r = raw(r, { type: 'proof-pass', actor: 'L0', source: run(71), packet: 'ALPHA', runId: 71 });
+  // It completes at its own terminal, STAGED: never VERIFIED instead.
+  assert.deepEqual([r.state.packets.ALPHA.phase, r.state.packets.ALPHA.proof.result, r.state.criticalPath], ['STAGED', 'PASS', null]);
 });
 test('a source-only packet declared terminal at INTEGRATED finishes there', () => {
   let r = chain(base(), { type: 'queue', packet: 'DOCS-1', owner: 'W7', completion: SOURCE_ONLY }, { type: 'release', packet: 'DOCS-1', inbox: 400 }, { type: 'deliver', packet: 'DOCS-1', pr: 9, subjectSha: E });
@@ -232,12 +235,12 @@ test('a source-only packet declared terminal at INTEGRATED finishes there', () =
 
 // ---- illegal transitions ----
 for (const [name, event, re] of [
-  ['ack before release', { type: 'ack', packet: 'ALPHA' }, /ack is not legal from QUEUED/],
+  ['ack before release', { type: 'ack', worker: 'W3', packet: 'ALPHA' }, /ack is not legal from QUEUED/],
   ['deliver before release', { type: 'deliver', packet: 'ALPHA', pr: 1, subjectSha: A }, /deliver is not legal from QUEUED/],
   ['accept a queued packet', { type: 'accept', packet: 'ALPHA', subjectSha: A }, /accept is not legal from QUEUED/],
   ['begin-proof before integration', { type: 'begin-proof', packet: 'ALPHA', runId: 1, proofType: 'hosted' }, /begin-proof is not legal from QUEUED/],
   ['unblock a packet that is not blocked', { type: 'unblock', packet: 'ALPHA' }, /unblock is not legal from QUEUED/],
-  ['a transition on an unknown packet', { type: 'ack', packet: 'NOPE' }, /packet NOPE does not exist/],
+  ['a transition on an unknown packet', { type: 'ack', worker: 'W3', packet: 'NOPE' }, /packet NOPE does not exist/],
 ]) {
   test(`illegal transition refused: ${name}`, () => refused(() => add(base(), event), re));
 }
@@ -334,7 +337,7 @@ test('a successor deliver moves subjectSha (and the PR head with it); a differen
 
 // ---- block / unblock ----
 test('block keeps the phase it interrupted, and unblock restores it', () => {
-  let r = add(released(), { type: 'ack', packet: 'ALPHA' });
+  let r = add(released(), { type: 'ack', worker: 'W3', packet: 'ALPHA' });
   r = add(r, { type: 'block', packet: 'ALPHA', blockedBy: [{ external: 'OWNER-DEVICE', condition: 'device check pending', owner: 'Owner', unblockWhen: 'owner posts verdict' }] });
   assert.deepEqual([r.state.packets.ALPHA.phase, r.state.packets.ALPHA.phaseBeforeBlock], ['BLOCKED', 'ACKED']);
   r = add(r, { type: 'unblock', packet: 'ALPHA' });
@@ -371,7 +374,7 @@ test('free text is short and single-line; unknown fields (prose, titles, bodies)
 test('the envelope is checked', () => {
   const env = { seq: 1, id: GENESIS, prev: GENESIS, source: comment(1) };
   assert.deepEqual(validateEvent({ ...env, type: 'nope', actor: 'Fable' }), ['unknown event type "nope"']);
-  assert.ok(validateEvent({ ...env, type: 'ack', actor: 'Fable', packet: 'A1', source: undefined }).some((p) => /source must be/.test(p)));
+  assert.ok(validateEvent({ ...env, type: 'ack', worker: 'W3', actor: 'Fable', packet: 'A1', source: undefined }).some((p) => /source must be/.test(p)));
 });
 
 // ---- the single writer, on disk ----
@@ -402,7 +405,7 @@ test('append.mjs CLI refuses an illegal event, a worker writer, or a stale head,
   appendToDir(state, boot(), { expectHead: GENESIS });
   const before = ['events.jsonl', 'state.json'].map((f) => fs.readFileSync(path.join(state, f), 'utf8'));
   for (const [ev, head] of [
-    [{ actor: 'Fable', source: comment(2), type: 'ack', packet: 'NOPE' }, headOf(state)],
+    [{ actor: 'Fable', source: comment(2), type: 'ack', worker: 'W3', packet: 'NOPE' }, headOf(state)],
     [{ actor: 'W3', source: comment(3), type: 'register-worker', worker: 'W9', inbox: 409 }, headOf(state)],
     [{ actor: 'Fable', source: comment(4), type: 'register-worker', worker: 'W9', inbox: 409 }, E.slice(0, 40) + E.slice(0, 24)],
   ]) {

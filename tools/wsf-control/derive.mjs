@@ -18,7 +18,8 @@ export function workerBuckets(s, worker) {
   const mine = all.filter((p) => p.owner === worker);
   return {
     active: mine.filter((p) => WORKER_OWNED.includes(p.phase)),
-    reviewing: all.filter((p) => p.phase === 'UNDER_REVIEW' && p.reviewers.includes(worker)),
+    // A reviewer that has passed holds no ball: its WATCH is off while the packet waits on others or on acceptance.
+    reviewing: all.filter((p) => p.phase === 'UNDER_REVIEW' && p.reviewers.includes(worker) && !(p.reviewedBy || []).includes(worker)),
     waiting: mine.filter((p) => REVIEWER_OWNED.includes(p.phase)),
     blocked: mine.filter((p) => p.phase === 'BLOCKED'),
     // NEXT is the first WORK packet in queue order; a queued reference is released at will and never drives the loop.
@@ -36,16 +37,24 @@ export function workerWatch(s, worker) {
   return b.active.length > 0 || b.reviewing.length > 0;
 }
 
-/** How far a packet has come, for blockers. A failed proof sends it back: nothing after CHANGES_REQUESTED counts. */
-const RANK = { ACCEPTED: 1, INTEGRATED: 2, VERIFYING: 2, VERIFIED: 3, STAGED: 3 };
+/**
+ * The phases in which a dependency has reached each blocker milestone. A failed proof sends it
+ * back: nothing after CHANGES_REQUESTED counts. VERIFIED and STAGED are distinct milestones.
+ */
+const REACHED = {
+  ACCEPTED: ['ACCEPTED', 'INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'],
+  INTEGRATED: ['INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'],
+  VERIFIED: ['VERIFIED'],
+  STAGED: ['STAGED'],
+};
 
 /** Is one blocker cleared by the current state (and, for external conditions, the supplied snapshot)? */
 export function blockerCleared(s, blocker, snapshot = null) {
   if (blocker.packet) {
     const p = s.packets[blocker.packet];
     if (!p || p.phase === 'WITHDRAWN') return false;
-    if (isTerminal(p)) return true; // done by its own contract: nothing further will happen to it
-    return (RANK[p.phase] ?? 0) >= RANK[blocker.until];
+    // Being terminal is not enough: the dependency must have reached the named milestone.
+    return REACHED[blocker.until].includes(p.phase);
   }
   return snapshot?.externalConditions?.[blocker.external] === true;
 }
@@ -55,6 +64,20 @@ export function blockerCleared(s, blocker, snapshot = null) {
  * snapshot's run conclusions and external conditions. `reactivates` names the
  * worker whose WATCH the transition turns back on.
  */
+/**
+ * Who holds the ball once a blocked packet returns to its phase: the owner of worker-owned work,
+ * the outstanding W# reviewers of an UNDER_REVIEW packet, and no one for QUEUED or DELIVERED
+ * (Fable routes the review).
+ */
+export function ballAfterUnblock(p) {
+  if (WORKER_OWNED.includes(p.phaseBeforeBlock)) return p.owner;
+  if (p.phaseBeforeBlock === 'UNDER_REVIEW') {
+    const pending = p.reviewers.filter((r) => /^W[1-9][0-9]?$/.test(r) && !(p.reviewedBy || []).includes(r));
+    return pending.length ? pending.join(',') : null;
+  }
+  return null;
+}
+
 export function neededTransitions(s, snapshot = null) {
   const out = [];
   const push = (p, event, by, why, reactivates = null) => out.push({ packet: p.id, event, by, why, reactivates });
@@ -64,19 +87,20 @@ export function neededTransitions(s, snapshot = null) {
     if (p.phase === 'ACCEPTED') push(p, 'integrate', 'L0', 'accepted but not integrated');
     if (p.phase === 'INTEGRATED') {
       if (p.completion.terminal === 'VERIFIED') push(p, 'begin-proof', 'L0', `integrated; its completion contract needs a ${p.completion.proofType} proof`);
-      if (p.completion.terminal === 'STAGED') push(p, 'stage', 'L0', 'integrated but not staged');
+      if (p.completion.terminal === 'STAGED') push(p, 'begin-proof', 'L0', 'integrated; staging needs a hosted proof with its deployment run');
     }
     if (p.phase === 'VERIFYING') {
       const run = snapshot?.runs?.[String(p.proof.runId)];
       if (run?.status === 'completed' && run.conclusion === 'success') {
-        push(p, p.completion.terminal === 'VERIFIED' ? 'proof-pass' : 'stage', 'L0', `proof run ${p.proof.runId} concluded success`);
+        // STAGED: the deployment receipt (stage) is recorded first; hosted verification (proof-pass) then completes it.
+        const next = p.completion.terminal === 'STAGED' && p.served?.runId !== p.proof.runId ? 'stage' : 'proof-pass';
+        push(p, next, 'L0', `proof run ${p.proof.runId} concluded success`);
       } else if (run?.status === 'completed') {
         push(p, 'proof-fail', 'Fable', `proof run ${p.proof.runId} concluded ${run.conclusion}; a focused finding comment records the failure`, p.owner);
       }
     }
     if (p.phase === 'BLOCKED' && p.blockedBy.length && p.blockedBy.every((b) => blockerCleared(s, b, snapshot))) {
-      const back = WORKER_OWNED.includes(p.phaseBeforeBlock) || REVIEWER_OWNED.includes(p.phaseBeforeBlock);
-      push(p, 'unblock', 'Fable', 'every blocker has cleared', back ? p.owner : null);
+      push(p, 'unblock', 'Fable', 'every blocker has cleared', ballAfterUnblock(p));
     }
   }
   for (const w of Object.keys(s.workers).sort()) {

@@ -51,6 +51,7 @@ test('F4.3b: a successor delivery after the finding wakes no one until Fable rou
 });
 test('F4.4: acceptance turns both W# watches off; integration is L0\'s transition', () => {
   let r = add(delivered(), { type: 'review', packet: 'ALPHA', reviewers: ['W7'] });
+  r = add(r, { type: 'review-pass', packet: 'ALPHA', reviewer: 'W7' }); // O4: W7's independent PASS precedes acceptance
   r = raw(r, { type: 'accept', source: comment(9101), packet: 'ALPHA', subjectSha: 'a'.repeat(40) });
   assert.deepEqual(watch(r.state), { W3: false, W7: false });
   assert.ok(programView(r.state).includes('NEEDS_TRANSITION ALPHA event=integrate by=L0 :: accepted but not integrated'));
@@ -90,6 +91,7 @@ test('F4.9: a REVIEWING worker keeps one queued NEXT, but program-view does not 
   assert.ok(workerView(r.state, 'W7').includes('NEXT=GAMMA'));
   assert.ok(!programView(r.state).some((l) => /NEEDS_TRANSITION GAMMA event=release/.test(l)));
   refused(() => add(r, { type: 'release', packet: 'GAMMA', inbox: 400 }), /W7 holds 2 balls \(active GAMMA; reviewing ALPHA\)/);
+  r = add(r, { type: 'review-pass', packet: 'ALPHA', reviewer: 'W7' }); // O4: W7's independent PASS precedes acceptance
   r = raw(r, { type: 'accept', source: comment(9102), packet: 'ALPHA', subjectSha: 'a'.repeat(40) });
   assert.ok(programView(r.state).includes('NEEDS_TRANSITION GAMMA event=release by=Fable reactivates=W7 :: W7 holds no active packet and GAMMA is next'));
   assert.equal(add(r, { type: 'release', packet: 'GAMMA', inbox: 400 }).state.packets.GAMMA.phase, 'RELEASED');

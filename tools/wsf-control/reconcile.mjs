@@ -207,7 +207,7 @@ export function reconcile(state, snap, { heads, renders } = {}) {
         out.push(f('proof-run-concluded', 'github', {
           packet: p.id, run: p.proof.runId, detail: `the ledger says RUNNING; the run concluded ${run.conclusion}`,
           suggest: run.conclusion === 'success'
-            ? { type: p.completion.terminal === 'VERIFIED' ? 'proof-pass' : 'stage', packet: p.id, runId: p.proof.runId, by: 'L0' }
+            ? { type: p.completion.terminal === 'STAGED' && p.served?.runId !== p.proof.runId ? 'stage' : 'proof-pass', packet: p.id, runId: p.proof.runId, by: 'L0' }
             : { type: 'proof-fail', packet: p.id, runId: p.proof.runId, by: 'Fable', source: 'a focused finding comment' },
         }));
       } else if (p.proof.result === 'PASS' && (run.status !== 'completed' || run.conclusion !== 'success')) {

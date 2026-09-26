@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RE, isTerminal, screen } from './schema.mjs';
+import { RE, isTerminal, screen, unreachableBlocker } from './schema.mjs';
 import { reduce, serialize } from './reduce.mjs';
 import { workerBuckets } from './derive.mjs';
 
@@ -46,8 +46,13 @@ export function invariants(s) {
     }
     // Independent review: a W# implementation owner never reviews its own work packet.
     if (p.phase === 'UNDER_REVIEW' && p.kind === 'work' && p.reviewers.includes(p.owner)) problems.push(`${p.owner} cannot review its own work packet ${id}; review must be independent`);
+    // Review passes belong to the current cycle: only assigned reviewers, and none once the ball is back with the owner.
+    for (const r of p.reviewedBy || []) if (!p.reviewers.includes(r)) problems.push(`${id}: ${r} passed review but is not an assigned reviewer`);
+    const cycle = p.phase === 'BLOCKED' ? p.phaseBeforeBlock : p.phase;
+    if (['RELEASED', 'ACKED', 'DELIVERED', 'CHANGES_REQUESTED'].includes(cycle) && (p.reviewedBy || []).length) problems.push(`${id} is ${cycle} but still carries review passes (${p.reviewedBy.join(', ')}) from an ended review cycle`);
     if (p.phase === 'UNDER_REVIEW') for (const r of p.reviewers) if (RE.worker.test(r) && !s.workers[r]) problems.push(`reviewer ${r} of ${id} is not a registered worker`);
     if (p.phase === 'QUEUED' && !(s.queue[p.owner] || []).includes(id)) problems.push(`${id} is QUEUED but not in ${p.owner}'s queue`);
+    for (const b of p.blockedBy.filter((x) => x.packet)) { const why = unreachableBlocker(s, id, b); if (why) problems.push(`${id}: ${why}`); }
     if (p.phase === 'VERIFYING' && p.proof?.result !== 'RUNNING') problems.push(`${id} is VERIFYING without a running proof`);
     for (const k of ['subjectSha', 'prHeadSha', 'evidenceSha', 'mergeSha']) {
       const v = p.artifact[k];
