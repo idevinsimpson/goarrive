@@ -5068,3 +5068,113 @@ A flake filter in my runner then hid real catches. The final mutant results come
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. Artifacts were cleaned in both trees, and none is committed.
 
 **Status:** **PASS at `9d27fdb5` / `e60e5ec8`.** No changed-dependency finding. Next consumer: Director product acceptance → L0 integration / pin / staging. W7 merged, accepted and deployed nothing.
+
+## 62 · AUTONOMY-STATE-1A exact-source QA, #519 at exact `5933fdae2c5af1a59ee0d479412ccfabc39c9190` on main `37f18ea9` (handoff #434 `5848558377`; W3 #396 `5848407527`; W7 ACK `5848560769`): **ONE CONCRETE FINDING (F1); every other item PASS**
+
+- **Method:** tooling QA only, in a detached clean worktree.
+- **Not done:** no state branch, trigger, merge or cloud action.
+- **Probe harness:** 90 independent probes, run against the tools' own exports and CLIs on scratch ledgers and a scratch state directory. The harness lives in W7's scratchpad and is not committed; its assertions and refusal reasons are summarised here.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Scope** | **PASS.** Two commits on `37f18ea9`, touching 18 files, all under the reserved 1A paths: `tools/wsf-control/`, `docs/westayfit/ops/CONTROL_STATE.md`, `.claude/skills/wsf-program-director/SKILL.md` and the pointer `skills/wsf-program-director/SKILL.md`. No workflow, `.github/`, app, functions, rules or index file. No trigger change. The `wsf-control-state` branch does not exist on origin. |
+| **2** | **Suites** | **PASS.** On a clean checkout, `tools/wsf-control/run-all.mjs` passes: ledger 75, views 37, skill 6. The staging control `run-all` passes all 23 suites. The tree is clean after both. |
+| **3** | **Independent probes** | **88 / 90 PASS.** The two misses are F1. See the probe groups below. |
+| **4** | **Views** | **PASS.** See the P10 group below. |
+| **5** | **Skill** | **PASS.** See the skill bullets below. |
+
+**Row 3, the probe groups.** Each refusal was checked for its stated reason, not just for being refused.
+- **P1, closed writers:**
+  - actors `W3`, `W7`, `fable`, `L0 ` (trailing space), `Director`, `Owner`, missing and `""` are each refused, and `L0` is accepted;
+  - a hand-appended `W3` line with a correct hash chain is refused by `reduce`.
+- **P2, typed provenance:** each of these is refused:
+  - a `url` kind, a string comment id, a foreign repository, an extra `url` key, a short commit SHA, a missing source, a negative id;
+  - `queue` resting on a `workflow_run` or a `commit`.
+- **P3, honest genesis.** Positive control first: a valid imported ACCEPTED packet bootstraps, with `origin: bootstrap`. Then each of these is refused, for its own reason:
+  - a first line that is not a bootstrap;
+  - a second bootstrap;
+  - `history` or `acceptedAt` fields;
+  - ACCEPTED without `acceptedBy`;
+  - DELIVERED without refs;
+  - VERIFIED on a STAGED contract;
+  - INTEGRATED without `mergeSha`;
+  - a ref carrying a `url` key;
+  - a bootstrap source outside the repository.
+- **P4, idempotent append:**
+  - re-sending an event is `noop`, even with a stale head, and writes no byte;
+  - the same identity with a different payload, or a different actor, is a `conflict`;
+  - a stale `--expect-head` is refused ("another decision was recorded");
+  - a missing head is refused, and so are supplied `seq` / `id` / `prev`;
+  - an edited, reordered, removed or duplicated line breaks the ledger.
+- **P5, byte integrity:**
+  - on disk, `state.json` with one trailing byte, or with a hand-edited phase, fails `check`;
+  - `CURRENT` verifies `current`; a one-byte edit reads `hand-edited`; after a new event it reads `stale`.
+- **P6, one ACTIVE:**
+  - a second release to W3 is refused ("W3 holds 2 worker-owned packets; at most one");
+  - a release outside the canonical inbox is refused;
+  - `worker-view` prints `ACTIVE_NOW=ALPHA` and exactly one `NEXT=BETA`, in queue order, with GAMMA not shown;
+  - a released packet cannot be queued again.
+- **P7, completion and proof:**
+  - `accept` of a non-subject (evidence) SHA is refused;
+  - `begin-proof` with the wrong `proofType` is refused;
+  - `stage` on a VERIFIED contract and `proof-pass` on a STAGED contract are refused;
+  - `proof-pass` naming run 55 while run 54 is in progress is refused;
+  - `proof-fail` resting on a workflow run is refused ("must rest on a comment");
+  - **run 54:** a failed run 54 reconciles to `proof-run-concluded` (`wins=github`). The comment-sourced `proof-fail` moves the packet to CHANGES_REQUESTED, worker-owned. A later `proof-pass` on run 54 is refused, and a PASS recorded against the failed run 54 is reported as `proof-result-drift`;
+  - a STAGED contract completes at `stage`, and a source-only contract completes at INTEGRATED (`begin-proof` refused as terminal);
+  - `integrate` resting on a comment, or without an acceptance, is refused.
+- **P8, control surface fails closed:** each of these gives `control-surface-exception`:
+  - CURRENT missing from the snapshot;
+  - another comment id;
+  - `exists: false`;
+  - no marker;
+  - a foreign head.
+
+  The current head gives no exception. A snapshot with an unknown key, or a URL-shaped key, is refused.
+- **P9, ACTIONABLE vs MONITOR:**
+  - with every released packet blocked on an external condition, the output is `ACTIONABLE=off` / `MONITOR=on`, and the worker has `WATCH=off`;
+  - once the condition clears, it is `ACTIONABLE=on` with `NEEDS_TRANSITION EXT event=unblock … reactivates=W3`, and `MONITOR=on`.
+- **P10, views:**
+  - `program-view`, `worker-view`, `check` and `render-current` leave the state directory byte-identical (SHA-256 of every file before and after, all exit 0);
+  - on a state with one byte appended, every view exits 2 ("state.json is not the reduction"), and `append` refuses too.
+- **P11, secret and PII screen:**
+  - labels holding an email, a `ghp_` token, a bearer token, a URL, a JWT or a Google key are refused, and the message withholds the value;
+  - a label of 201 characters, or one spanning lines, is refused.
+
+**Row 5, the skill:**
+- Only Fable and L0 run `append`. A worker's comment can be a source, never the writer.
+- It grants no acceptance, pixel verdict, merge or deploy authority ("Never merge or deploy because of a phase").
+- There is one bootstrap, which imports current state; history is never fabricated.
+- It stores no secret, PII or URL.
+- The interaction override is scoped to WSF program work while the skill governs the session. The generic rules file is not edited.
+- The skill test confirms no secret-shaped content, and a short pointer with no frontmatter.
+
+**Observation for 1B, not a 1A finding.** `actor` is a self-declared string. The tool cannot tell Fable from a worker that writes `actor: "Fable"` with its own comment as the source. The "closed writer set" is therefore enforced in 1A by the schema and the procedure, and in practice by **who can push `wsf-control-state`**. 1B's branch protection is where a worker self-write is actually prevented.
+
+**F1 (the one concrete finding): the contract lets a QUEUED packet be blocked, but the ledger always refuses it.**
+- **The contract:**
+  - `CONTROL_STATE.md:123` and `transitions.mjs:11` state "any non-terminal ─block→ BLOCKED", and QUEUED is non-terminal;
+  - `transitions.mjs:244–250` (`case 'block'`) accepts a QUEUED packet and sets it BLOCKED.
+- **Why it fails:**
+  - unlike `withdraw` (`transitions.mjs:258`), `block` does not remove the packet from its owner's queue;
+  - so the invariant `check.mjs:27` ("W3's queue names QB, which is already BLOCKED") refuses every such append;
+  - bootstrap agrees with the refusal, not with the contract: `transitions.mjs:75` forbids `phaseBeforeBlock: QUEUED`.
+- **Fixture:**
+  1. bootstrap;
+  2. `queue QB → W3`;
+  3. `block QB` on an external condition, or on another packet's `ACCEPTED`.
+
+  The result is `APPEND=refused` both ways (probes P12 and P12b).
+- **Consequence:** the ledger cannot represent a queued packet that waits on a dependency, for example NEXT waiting for ACTIVE's integration, or a packet held for an owner decision. The only representable options are wrong:
+  - leave it unblocked, so it shows as `NEXT` and invites a premature release;
+  - record a `release` that did not happen, then block it (a fabricated decision);
+  - `withdraw` it.
+
+  The refusal is fail-closed: nothing is written. So this is a correctness gap in the contract, not an integrity hole.
+- **Smallest correction, the Director's choice:**
+  - **(a)** match the contract: `block` of a QUEUED packet removes it from the queue, remembering its position, and `unblock` restores it. Bootstrap would then accept `phaseBeforeBlock: QUEUED` for a blocked packet held out of the queue. Add a test.
+  - **(b)** narrow the contract: block is legal from RELEASED onward. `transitions.mjs` then refuses QUEUED explicitly, `CONTROL_STATE.md` and the transition comment say so, and dependency ordering between queued packets is expressed by queue order alone.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; the scratch ledgers were removed.
+
+**Status:** **one concrete finding (F1) at `5933fdae`; items 1, 2, 4 and 5 PASS, and 88 / 90 independent probes PASS**, the two misses being F1. W7 created no state branch, migrated no trigger, merged nothing and accepted nothing.
