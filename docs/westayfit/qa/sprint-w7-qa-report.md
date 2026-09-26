@@ -4291,20 +4291,20 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 - **H3b / H3c:** the first version failed each read name **once**. Home's pulse poll re-read and recovered within the window, so that version's H3c "fail" was the harness, not the product. It now fails every read for the whole refresh and samples for 8 s.
 - **H4b:** split into its own test with a clean page, rather than inheriting H4a's session.
 
-### Row → last-passing SHA (the standing matrix; updated in §47 and §48)
+### Row → last-passing SHA (the standing matrix; updated in §47, §48, §51 and §52)
 
 | Row(s) | Last passing | Dependencies: re-run when these change |
 |---|---|---|
 | H1a–g | `ad3d2f88` (and `889e9775`, `0b460ce3`) | `app/(tabs)/_layout.tsx`, the tab route files, `src/memberReads.ts` |
 | H2a–f | `ad3d2f88` (and `889e9775`, `0b460ce3`; H2e rule restated in §47) | `app/move/index.tsx`, `app/contribute/[goalId].tsx`, `app/(tabs)/_layout.tsx`, `src/ui/sheetMotion.ts`, `src/ui/MemberTabBar.tsx` |
 | H3a, H3b, H3d | `ad3d2f88` (and `889e9775`, `0b460ce3`) | the tab routes' read effects, `src/memberReads.ts` |
-| H3c | **none** (fails at `0b460ce3`, `889e9775` and `ad3d2f88`; the named successor) | Community Home's refresh handling |
+| H3c | **`87a86531` and `2e235c58`** (§52, corrected instrument). **Erratum:** every earlier H3c FAIL (§46–§50) was an instrument false negative, so none of them is a product result. | Community Home's refresh handling |
 | H4a | `ad3d2f88` (and `889e9775`, `0b460ce3`) | `src/memberReads.ts`, `src/auth*`, the tab routes' read effects |
 | H4b | **`ad3d2f88`** (fails at `0b460ce3` and `889e9775`; harness corrected in §48) | the same as H4a, plus the refusal handling, Community Home's return membership re-check and the Community tab's focus drop |
 | PERF truth T1 | `ad3d2f88` (and `889e9775`, `5633057a`, `0b460ce3`) | `src/memberReads.ts`, auth |
 | PERF truth T2 / T3 / T3b | **`ad3d2f88`** (and `889e9775`; all fail at `0b460ce3` and `5633057a`) | `src/memberReads.ts`, the Progress / You / contribute read paths, Community Home's refusal handling |
 | Check 44 / 45 rows | per §44 / §45 (PRESERVE at `0b460ce3`); Check 45 identical at `889e9775` and `ad3d2f88`; Check 44 identical at `889e9775`, and You / Progress are unchanged at `ad3d2f88` | You / Progress / Community / Settings routes |
-| H5 | — | W9's Settings panel |
+| H5a–g | **`2e235c58`** (§51; the control `87a86531` has no Settings panel, so H5 cannot complete there) | `app/settings.tsx`, `src/ui/sheetMotion.ts`, `app/(tabs)/you.tsx` Settings row, `src/ui/CommunityPrivacyControls.tsx` |
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
 
@@ -4565,3 +4565,67 @@ W7 did not read run 50's job log again.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
 
 **Status:** **Y-F10 closes on `18ba6de2`.** Not accepted, integrated or staged.
+
+## 51 · COMMUNITY-SETTINGS-PARITY-1 functional packet on immutable `2e235c58` (Director queue #434 `5845321377`; row-3 ruling #506 `5844878042`; L0 `5844260871` and `5844603601`; W7 ACK `5845335205`): **Check 45 PASS, Check 43 PASS, H5 PASS**
+
+- **Lineage, by git:** `87a86531` (development) → `1f6aa77e` → `ab0843dc` → `495cf847` → `b863fd53` → **`2e235c58`**.
+  - 23 files under `apps`. **The protected-path diff is empty.**
+  - `functions-westayfit` is `5a3f232e` at both SHAs.
+- **Builds:** detached worktrees at `87a86531` (the control) and `2e235c58`, each with an emulator-flagged build. Each bundle carries only its own SHA stamp.
+- **Scope, as ruled:** functional only. The visual successor (the panel geometry, the ring asset, matched evidence) is W9's and is not checked here. No unrelated suite was run.
+
+| # | Check | `87a86531` (control) | `2e235c58` |
+|---|---|---|---|
+| **1** | **Check 45, unchanged,** ×2 | FAIL-BEFORE **15 / 15 fail**; PRESERVE **13 / 13** | **FAIL-BEFORE 15 / 15 now pass** (C-F1–C-F9, S-F1–S-F6). **PRESERVE 13 / 13.** ×2 identical. |
+| **2** | **Check 43**, with selectors on W4's `wsf-privacy-panel-*` IDs and row 3 re-disposed (below) | U1 fail-first **4 / 4 fail** (the swallowed save error, as §43). U1c and the R rows pass, including the new row-3 assertions. | **7 / 7 PASS.** U1 lost: "That change wasn't saved. The switches show your saved setting." is still shown at settle, with the switch equal to the stored value. U1 land-but-drop: "We couldn't confirm that change. The switches show what's saved now." R rows 1–6 and R5 pass. |
+| **3** | **H5, Settings lifecycle** (new; 390×640; 10 cycles rotating Close / Escape / scrim), ×2 | **Cannot complete:** there is no Settings panel and no Close (`wsf-settings-close` is absent). This is consistent with Check 45's S-F1–S-F6 failing on the control. | **7 / 7 PASS, ×2:** see the rows below. |
+
+The H5 rows on `2e235c58`:
+- **H5a:** a modal dialog over the still-mounted You, 10 / 10.
+- **H5b:** focus enters on Close, 10 / 10.
+- **H5c:** Close, Escape and the scrim each return to `/you` with focus on the Settings row and no panel left, 10 / 10.
+- **H5d:** You's scroll is kept, 133 → 133 every cycle.
+- **H5e:** the panel travels. Entry paints 9 distinct positions; the median exit is **202 ms** (188–239).
+- **H5f:** no growth from cycle 2 to cycle 10: listeners 39 → 39, intervals 1 → 1, history 6 → 6.
+- **H5g:** reduced motion paints no intermediate frame on entry or exit, 3 / 3.
+
+**Check 43 changes (disclosed, mine; `sprint-w7-privacy-toggle-verify.spec.ts`):**
+1. **Selectors only:**
+   - the switch, error and loading locators accept W4's `wsf-privacy-panel-*` IDs **or** the pre-parity IDs, so the same file runs on both builds;
+   - they match W9's `W7-CHECK43-LOCAL-VARIANT.diff` in substance;
+   - no other assertion changed.
+2. **Row 3, re-disposed per the Director** (#506 `5844878042`).
+   - "The anonymous note is shown" is **no longer asserted.** W4's accepted C2 deleted that paragraph; it is measured as 1 on the control and 0 on the candidate.
+   - Row 3 now proves:
+     - **the authoritative stored truth after a reload:** stored `name: private` and `activity` not private, with the name switch resting OFF and the activity switch ON;
+     - **the anonymous behaviour where it surfaces:** another member's activity read lists **"anonymous"**, not M's name, while M is still counted today (2).
+   - Both builds pass it. The truth did not change; only the deleted copy did.
+
+**H5 instrument note (disclosed):** H5d first compared against a scroll taken before Playwright's click scrolled the Settings row into view (150 → 133 happened before the panel opened). It now compares against the scroll just before each press, with the row in view.
+
+**Status:** functional PASS on `2e235c58`. Visual acceptance is not W7's. Nothing is accepted, integrated or staged.
+
+## 52 · H3c re-measured with context-level injection (W4 #365 `5843808619`; L0 #434 `5844260871`; Director `5845321377`): **H3c PASS on `87a86531` and `2e235c58`; every earlier H3c FAIL was an instrument false negative**
+
+**The defect in my instrument:**
+- H3 installed its hold route, **unrouted it, then routed the 500 injection**.
+- Measured with the delivered statuses now counted, on unmodified `87a86531`:
+  - **with `page.route`** (my original, per W4): most failure windows answered **7 × 200** and the 500 handler never ran;
+  - **with `page.context().route` plus unroute / re-route: 0 / 3 runs delivered any 500** on `87a86531`, and 1 / 2 on `2e235c58`.
+- H3c's old verdict did not check delivery. So **every "H3c FAIL, Home silent" in §46, §47, §48 and §50 recorded a failure that was never injected.** Those rows are withdrawn as product findings.
+- **H3b's "never a fake zero" was also vacuous in those runs.** It is now gated the same way.
+
+**The correction** (`sprint-w7-hardened-journey.spec.ts`):
+- **One** context route for the whole test, switched between pass, hold and fail, and never unrouted between phases.
+- Each window counts the callable responses actually delivered.
+- H3b and H3c report **CANNOT-MEASURE** unless every read issued in the failure window was answered 5xx.
+- The handler's own counts are reported: pass 2, hold 5, **fail 7**.
+
+| Build | Runs | Delivered in the failure window (Home) | H3a | H3b | **H3c** | H3d |
+|---|---|---|---|---|---|---|
+| `87a86531` | 3 | **7 issued, 7 × 500, 0 OK**, every run | PASS | PASS | **PASS**: "Last known … Couldn't refresh. This is the last confirmed figure." at **321–328 ms** | PASS: `wsfGoalPulse` 1, `wsfMyContribution` 1 |
+| `2e235c58` | 3 | the same | PASS | PASS | **PASS** at 333–338 ms | PASS |
+
+This matches W4's measurement: 334–370 ms, with Retry, and the behaviour comes from RETURN-CONTINUITY-1, already in the base. **No product change is implied by this instrument task.** Whether HOME-REFRESH-TRUTH-1 closes is the Director's decision.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed. Emulators only (`demo-wsf-local`).

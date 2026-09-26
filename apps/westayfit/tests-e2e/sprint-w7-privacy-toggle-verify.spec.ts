@@ -224,10 +224,11 @@ function recorder() {
   const tick = () => {
     const t = Date.now();
     const obs: Record<string, string> = {};
-    const err = document.querySelector('[data-testid="wsf-privacy-error"]');
+    // Check 51 (selectors only): W4's panel IDs (`wsf-privacy-panel-*`) or the pre-parity IDs.
+    const err = document.querySelector('[data-testid="wsf-privacy-error"], [data-testid^="wsf-privacy-panel-error-"], [data-testid="wsf-privacy-panel-load-failed"]');
     obs['error'] = vis(err) ? `shown:${(err as HTMLElement).innerText.trim().slice(0, 120)}` : 'none';
-    obs['loading'] = vis(document.querySelector('[data-testid="wsf-privacy-loading"]')) ? 'shown' : 'none';
-    for (const el of Array.from(document.querySelectorAll('[data-testid^="wsf-privacy-name-"], [data-testid^="wsf-privacy-activity-"]'))) {
+    obs['loading'] = vis(document.querySelector('[data-testid="wsf-privacy-loading"], [data-testid="wsf-privacy-panel-loading"]')) ? 'shown' : 'none';
+    for (const el of Array.from(document.querySelectorAll('[data-testid^="wsf-privacy-name-"], [data-testid^="wsf-privacy-activity-"], [role="switch"][data-testid^="wsf-privacy-panel-name-"], [role="switch"][data-testid^="wsf-privacy-panel-activity-"]'))) {
       const input = el.querySelector('input') as HTMLInputElement | null;
       obs[el.getAttribute('data-testid') as string] = input ? (input.checked ? 'on' : 'off') : (el.getAttribute('aria-checked') ?? '?');
     }
@@ -240,7 +241,8 @@ function recorder() {
 type PEv = { k: string; id: string; t: number; v?: string };
 const events = (page: Page) => page.evaluate(() => (window as unknown as { __w7p: { ev: PEv[] } }).__w7p.ev);
 
-const sw = (page: Page, kind: 'name' | 'activity', g: string) => page.locator(`[data-testid="wsf-privacy-${kind}-${g}"]`).first();
+const sw = (page: Page, kind: 'name' | 'activity', g: string) =>
+  page.locator(`[data-testid="wsf-privacy-${kind}-${g}"], [data-testid="wsf-privacy-panel-${kind}-${g}"]`).first();
 async function switchState(page: Page, kind: 'name' | 'activity', g: string): Promise<'on' | 'off' | 'absent'> {
   const loc = sw(page, kind, g);
   if (!(await loc.count())) return 'absent';
@@ -260,7 +262,8 @@ async function openPrivacy(page: Page, fx: Fx): Promise<void> {
   await expect(sw(page, 'name', fx.b)).toBeVisible({ timeout: 40_000 });
   await page.waitForTimeout(600);
 }
-const errorVisible = async (page: Page) => (await page.locator('[data-testid="wsf-privacy-error"]:visible').count()) > 0;
+const errorVisible = async (page: Page) =>
+  (await page.locator('[data-testid="wsf-privacy-error"]:visible, [data-testid^="wsf-privacy-panel-error-"]:visible, [data-testid="wsf-privacy-panel-load-failed"]:visible').count()) > 0;
 
 /** Summarise the per-frame record from `since`: error paint spans and switch transitions. */
 function summarise(ev: PEv[], since: number, settleAt: number) {
@@ -405,7 +408,13 @@ test.describe(`W7 Check 43 · PRIVACY-TOGGLE (${LABEL})`, () => {
     expect.soft(r1.r.othersA.mNamedInMembers, 'row 1: M no longer named to others in A').toBe(false);
     expect.soft(r1.r.othersA.memberCount, 'row 1: still counted in A').toBe(2);
     expect.soft(r1.r.othersA.activityEntries, 'row 3: an anonymous row, not a missing one').toContain('anonymous');
-    expect.soft(r1.r.notes.anonymousNoteA, 'row 3: the anonymous note is shown').toBe(1);
+    // Check 51 row-3 disposition (Director #506 `5844878042`): W4's accepted C2 deleted the
+    // consequence paragraph, so its presence is no longer asserted (measured only, in `notes`).
+    // Row 3 now proves the AUTHORITATIVE stored switch truth after a reload, plus the anonymous
+    // behaviour where it surfaces (the anonymous activity row above, read as another member).
+    expect.soft(r1.sa.raw.activity, 'row 3: activity stays stored visible (not private)').not.toBe('private');
+    expect.soft(r1.r.ui.aName, 'row 3: after a reload the name switch rests on the stored OFF').toBe('off');
+    expect.soft(r1.r.ui.aActivity, 'row 3: after a reload the activity switch rests on the stored ON').toBe('on');
     expect.soft(r1.r.othersA.contributorsToday, 'row 3: still counted today').toBe(2);
 
     // Row 2: activity OFF → settle, then reload.

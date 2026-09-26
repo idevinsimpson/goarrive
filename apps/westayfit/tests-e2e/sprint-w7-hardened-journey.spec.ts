@@ -329,8 +329,28 @@ test.describe(`W7 HARDENED-MEMBER-JOURNEY-1 (${LABEL})`, () => {
     const load = async () => Object.values((await snap(page)).loadSeen).reduce((a, b) => a + b, 0);
     const known: Record<string, RegExp> = { home: new RegExp(fx.title), community: new RegExp(fx.community), activity: /35\s*squats/i, you: /35\s*squats/i };
     const rootText = (k: string) => page.locator(`[data-testid="${TAB_ROOT[k]}"]:visible`).first().innerText({ timeout: 3_000 }).catch(() => '');
+    // Check 52 correction (disclosed; W4 #365 `5843808619`, L0 #434 `5844260871`): the injections are
+    // CONTEXT-level. With page.route the failure-window handler was measured not to run in most FAILs
+    // (all 7 reads answered 200), so H3c recorded a failure the instrument never injected. Delivered
+    // callable statuses are now counted per window, and H3c is CANNOT-MEASURE unless every read issued
+    // in a failure window was actually answered 5xx.
+    const ctx = page.context();
+    const answered: Array<{ status: number; t: number }> = [];
+    page.on('response', (res) => { const u = new URL(res.url()); if (u.port === '5001') answered.push({ status: res.status(), t: Date.now() }); });
+    // ONE context route for the whole test, switched by mode (never unrouted and re-routed between
+    // phases: after an unroute + re-route the failure handler was still measured not to run in most
+    // windows). `handled` counts the requests the handler actually answered in each mode.
+    const inj = { mode: 'pass' as 'pass' | 'hold' | 'fail', handled: { pass: 0, hold: 0, fail: 0 } };
+    await ctx.route('**/us-central1/**', async (r) => {
+      const m = inj.mode;
+      inj.handled[m] += 1;
+      if (m === 'fail') return r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"status":"INTERNAL","message":"injected"}}' });
+      if (m === 'hold') await new Promise((res) => setTimeout(res, 1_500));
+      return r.continue();
+    });
+    await page.waitForTimeout(500);
     // (a) every read held 1.5 s (INJECTED delay of real answers).
-    await page.route('**/us-central1/**', async (r) => { await new Promise((res) => setTimeout(res, 1_500)); await r.continue(); });
+    inj.mode = 'hold';
     const held: Record<string, { knownAt300: boolean; loadDelta: number; calls: number }> = {};
     for (const k of ['community', 'activity', 'you', 'home']) {
       const l0 = await load(); const c0 = c.callables.length;
@@ -340,13 +360,14 @@ test.describe(`W7 HARDENED-MEMBER-JOURNEY-1 (${LABEL})`, () => {
       await page.waitForTimeout(1_900);
       held[k] = { knownAt300: known[k]!.test(t), loadDelta: (await load()) - l0, calls: c.callables.length - c0 };
     }
-    await page.unrouteAll({ behavior: 'wait' });
+    inj.mode = 'pass';
+    await page.waitForTimeout(2_000);
     v.row('H3a known content visible 300 ms into a held refresh, no loading frame (all four routes)', Object.values(held).every((x) => x.knownAt300 && x.loadDelta === 0), held);
     // (b) the next refresh fails: every read 500 while it runs (INJECTED). A failure that a later read in the
     // same window recovers from is not a failed refresh (first run's lesson: Home's pulse poll re-read and recovered).
-    await page.route('**/us-central1/**', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"status":"INTERNAL","message":"injected"}}' }));
+    inj.mode = 'fail';
     const STALE = /last known|could(n.t| not)|checking|retry|try again|unavailable|not live/i;
-    const failed: Record<string, { text: string; fakeZero: boolean; emptyClaim: boolean; staleWord: boolean; staleAtMs: number | null; issued: number }> = {};
+    const failed: Record<string, { text: string; fakeZero: boolean; emptyClaim: boolean; staleWord: boolean; staleAtMs: number | null; issued: number; answered5xx: number; answeredOk: number }> = {};
     for (const k of ['community', 'activity', 'you', 'home']) {
       const c0 = c.callables.length;
       const t0 = Date.now();
@@ -360,13 +381,17 @@ test.describe(`W7 HARDENED-MEMBER-JOURNEY-1 (${LABEL})`, () => {
         if (staleAtMs === null && STALE.test(t)) staleAtMs = Date.now() - t0;
         await page.waitForTimeout(250);
       }
-      failed[k] = { text: t.slice(0, 220), issued: c.callables.length - c0, fakeZero, emptyClaim, staleWord: staleAtMs !== null, staleAtMs };
+      const win = answered.filter((a) => a.t >= t0);
+      failed[k] = { text: t.slice(0, 220), issued: c.callables.length - c0, answered5xx: win.filter((a) => a.status >= 500).length, answeredOk: win.filter((a) => a.status < 400).length, fakeZero, emptyClaim, staleWord: staleAtMs !== null, staleAtMs };
     }
-    await page.unrouteAll({ behavior: 'wait' });
-    v.row('H3b a failed refresh (every read 500) never becomes a fake zero or an empty claim (all four routes)', Object.values(failed).every((x) => !x.fakeZero && !x.emptyClaim), failed);
+    inj.mode = 'pass';
+    measure('H3 injection', inj.handled);
+    // Measurable only when every route that issued reads had them all answered 5xx (none answered OK).
+    const injected = Object.values(failed).some((x) => x.issued > 0) && Object.values(failed).every((x) => x.issued === 0 || (x.answered5xx >= x.issued && x.answeredOk === 0));
+    v.row('H3b a failed refresh (every read 500) never becomes a fake zero or an empty claim (all four routes)', injected ? Object.values(failed).every((x) => !x.fakeZero && !x.emptyClaim) : null, failed);
     v.row('H3c where a refresh was issued and failed, the screen says so within 8 s (last-known / retry semantics)',
-      Object.values(failed).some((x) => x.issued > 0) ? Object.values(failed).every((x) => x.issued === 0 || x.staleWord) : null,
-      Object.fromEntries(Object.entries(failed).map(([k, x]) => [k, { issued: x.issued, staleAtMs: x.staleAtMs, text: x.text }])));
+      injected ? Object.values(failed).every((x) => x.issued === 0 || x.staleWord) : null,
+      Object.fromEntries(Object.entries(failed).map(([k, x]) => [k, { issued: x.issued, answered5xx: x.answered5xx, answeredOk: x.answeredOk, staleAtMs: x.staleAtMs, text: x.text }])));
     // (c) Retry performs one fresh read.
     let retry: { found: string | null; calls: Record<string, number> } = { found: null, calls: {} };
     for (const k of ['home', 'activity', 'you', 'community']) {
@@ -472,5 +497,109 @@ test.describe(`W7 HARDENED-MEMBER-JOURNEY-1 (${LABEL})`, () => {
     v.row('H4b after a fresh refusal and a released older answer, no member surface offers the removed community’s goal',
       old.captured === 1 && refusals.length > 0 ? Object.values(after).every((x) => !x) : null, { refusals, goalShownOn: after });
     measure('H4b verdicts', v.out);
+  });
+
+  /*
+    H5 SETTINGS LIFECYCLE (Check 51; Director #434 `5845321377`, #506 `5844878042`). Settings opened
+    from You's own row, 10 cycles at 390x640 (You scrolls), exits rotating Close / Escape / scrim:
+    a dialog over the still-mounted You; focus enters on Close; every exit returns to /you with focus
+    on the Settings row and You's scroll kept; the panel travels (entry shows intermediate frames;
+    exit measured press -> gone); no growth in listeners / intervals and no dialog left. Reduced
+    motion is measured in its own context: no intermediate frame on entry or exit.
+  */
+  test('H5 Settings lifecycle: dialog over You, focus in and back, three exits, motion, reduced motion, no growth', async ({ page, browser }) => {
+    test.setTimeout(360_000);
+    await page.setViewportSize({ width: 390, height: 640 });
+    const sampler = () => {
+      const S = { ev: [] as Array<{ t: number; v: string }> };
+      (window as unknown as { __w7s: typeof S }).__w7s = S;
+      let last: string | null = null;
+      const tick = () => {
+        const el = document.querySelector('[data-testid="wsf-settings-panel"]');
+        let v = 'none';
+        if (el) { const r = el.getBoundingClientRect(); if (r.width > 0 && r.height > 0) v = `${Math.round(r.left)}`; }
+        if (v !== last) { S.ev.push({ t: performance.now(), v }); last = v; }
+        requestAnimationFrame(tick);
+      };
+      if (document.documentElement) requestAnimationFrame(tick);
+      else addEventListener('DOMContentLoaded', () => requestAnimationFrame(tick));
+    };
+    await page.addInitScript(hardenInstrument, { roots: ROOTS, loading: LOADING });
+    await page.addInitScript(sampler);
+    const v = verdicts();
+    const fx = await fixture('h5', 3);
+    await signInVia(page, fx.email, fx.password);
+    await expect(shown(page, 'wsf-community')).toBeVisible({ timeout: 40_000 });
+    for (const k of ['community', 'activity', 'you']) await tab(page, k);
+    await scrollBy(page, 'wsf-you', 150);
+    const scroll0 = await scrollOf(page, 'wsf-you');
+    const evs = () => page.evaluate(() => (window as unknown as { __w7s: { ev: Array<{ t: number; v: string }> } }).__w7s.ev.slice());
+    const now = () => page.evaluate(() => performance.now());
+    const dialogs = () => page.locator('[data-testid="wsf-settings-panel"]:visible').count();
+    type Cyc = { i: number; exit: string; opened: boolean; overYou: boolean; focusIn: string | null; path: string; focusBack: string | null; scrollBefore: number | null; scroll: number | null; left: number; entryFrames: number; exitMs: number | null; snap?: Snap };
+    const cycles: Cyc[] = [];
+    const EXITS = ['close', 'escape', 'scrim'] as const;
+    for (let i = 1; i <= 10; i += 1) {
+      const exit = EXITS[(i - 1) % 3]!;
+      const e0 = (await evs()).length;
+      // The click itself scrolls the row into view (Playwright), so the kept scroll is the one just before
+      // the press, with the row already in view (first run's lesson: 150 -> 133 happened before the panel).
+      await shown(page, 'wsf-you-settings').scrollIntoViewIfNeeded({ timeout: 5_000 });
+      const scrollBefore = await scrollOf(page, 'wsf-you');
+      await shown(page, 'wsf-you-settings').click({ timeout: 10_000 });
+      const opened = await page.locator('[data-testid="wsf-settings-panel"]:visible').first().waitFor({ timeout: 10_000 }).then(() => true, () => false);
+      await page.waitForTimeout(700);
+      const overYou = (await page.locator('[data-testid="wsf-you"]').count()) > 0 && (await page.locator('[role="dialog"][aria-modal="true"]:visible, [data-testid="wsf-settings-panel"][aria-modal="true"]:visible').count()) > 0;
+      const focusIn = await focused(page);
+      const entry = (await evs()).slice(e0).filter((x) => x.v !== 'none');
+      const tPress = await now();
+      if (exit === 'close') await shown(page, 'wsf-settings-close').click({ timeout: 5_000 });
+      else if (exit === 'escape') await page.keyboard.press('Escape');
+      else await page.mouse.click(8, 320);
+      await page.waitForTimeout(900);
+      const gone = (await evs()).find((x) => x.t >= tPress && x.v === 'none');
+      const c: Cyc = {
+        i, exit, opened, overYou, focusIn, path: new URL(page.url()).pathname, focusBack: await focused(page), scrollBefore, scroll: await scrollOf(page, 'wsf-you'),
+        left: await dialogs(), entryFrames: new Set(entry.map((x) => x.v)).size, exitMs: gone ? Math.round(gone.t - tPress) : null,
+      };
+      if (i === 2 || i === 10) c.snap = await snap(page);
+      cycles.push(c);
+    }
+    measure('H5 cycles', cycles.map(({ snap: s0, ...c }) => ({ ...c, listeners: s0?.listeners, intervals: s0?.intervals, history: s0?.history })));
+    const all = (f: (c: Cyc) => boolean) => cycles.every(f);
+    const med = (a: number[]) => { const b = a.slice().sort((x, y) => x - y); return b[Math.floor(b.length / 2)] ?? null; };
+    const exitMs = cycles.map((c) => c.exitMs).filter((x): x is number => x !== null);
+    const c2 = cycles[1]!.snap!, c10 = cycles[9]!.snap!;
+    v.row('H5a Settings opens as a modal dialog over the still-mounted You (10/10)', all((c) => c.opened && c.overYou), cycles.map((c) => `${c.opened ? 'open' : 'no'}${c.overYou ? '/over' : ''}`));
+    v.row('H5b focus enters on Close (10/10)', all((c) => c.focusIn === 'wsf-settings-close'), cycles.map((c) => c.focusIn));
+    v.row('H5c Close, Escape and the scrim each return to /you with focus on the Settings row (10/10)', all((c) => c.path === '/you' && c.focusBack === 'wsf-you-settings' && c.left === 0), cycles.map((c) => `${c.exit}:${c.path}:${c.focusBack}:${c.left}`));
+    v.row('H5d You’s scroll is kept across every open / exit (10/10)', scroll0 !== null && scroll0 > 0 && all((c) => (c.scrollBefore ?? 0) > 0) ? all((c) => c.scroll === c.scrollBefore) : null,
+      { scroll0, before: cycles.map((c) => c.scrollBefore), after: cycles.map((c) => c.scroll) });
+    v.row('H5e the panel travels: entry paints intermediate frames; exit takes 100–450 ms (median)', all((c) => c.entryFrames > 1) && exitMs.length === 10 ? (med(exitMs)! >= 100 && med(exitMs)! <= 450) : exitMs.length === 10 ? false : null,
+      { entryFrames: cycles.map((c) => c.entryFrames), exitMs, medianExitMs: med(exitMs) });
+    v.row('H5f no growth (cycle 2 → 10) in window/document listeners or live intervals', c10.listeners <= c2.listeners && c10.intervals <= c2.intervals, { c2: { listeners: c2.listeners, intervals: c2.intervals, history: c2.history }, c10: { listeners: c10.listeners, intervals: c10.intervals, history: c10.history } });
+    // Reduced motion, in its own context.
+    const rctx = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 640 }, reducedMotion: 'reduce' });
+    const rp = await rctx.newPage();
+    await rp.addInitScript(sampler);
+    await signInVia(rp, fx.email, fx.password);
+    await expect(shown(rp, 'wsf-community')).toBeVisible({ timeout: 40_000 });
+    await shown(rp, 'wsf-member-tab-you').click({ timeout: 10_000 });
+    await expect(shown(rp, 'wsf-you')).toBeVisible({ timeout: 30_000 });
+    await rp.waitForTimeout(900);
+    const reduced: Array<{ entryFrames: number; exitFrames: number }> = [];
+    for (let i = 0; i < 3; i += 1) {
+      const e0 = (await rp.evaluate(() => (window as unknown as { __w7s: { ev: unknown[] } }).__w7s.ev.length));
+      await shown(rp, 'wsf-you-settings').click({ timeout: 10_000 });
+      await rp.waitForTimeout(700);
+      const e1 = (await rp.evaluate(() => (window as unknown as { __w7s: { ev: unknown[] } }).__w7s.ev.length));
+      await shown(rp, 'wsf-settings-close').click({ timeout: 5_000 }).catch(() => rp.keyboard.press('Escape'));
+      await rp.waitForTimeout(700);
+      const ev = await rp.evaluate(() => (window as unknown as { __w7s: { ev: Array<{ t: number; v: string }> } }).__w7s.ev.slice());
+      reduced.push({ entryFrames: new Set(ev.slice(e0, e1).filter((x) => x.v !== 'none').map((x) => x.v)).size, exitFrames: new Set(ev.slice(e1).filter((x) => x.v !== 'none').map((x) => x.v)).size });
+    }
+    await rctx.close();
+    v.row('H5g reduced motion: no intermediate frame on entry or exit (3/3)', reduced.every((r) => r.entryFrames === 1 && r.exitFrames <= 1), reduced);
+    measure('H5 verdicts', v.out);
   });
 });
