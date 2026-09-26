@@ -25,11 +25,14 @@ import { pathToFileURL } from 'node:url';
 import { validateManifest } from './milestone-manifest.mjs';
 
 /** Returns { status: 'absent' | 'valid' | 'refused', lines: [...] }. */
-export function checkMilestone({ manifestPath, approvedSha, drivers }) {
+export function checkMilestone({ manifestPath, approvedSha, drivers, required = false }) {
   if (!/^[0-9a-f]{40}$/.test(approvedSha || '')) {
     return { status: 'refused', lines: ['WSF_APPROVED_SHA must be the 40-character approved candidate'] };
   }
   if (!fs.existsSync(manifestPath)) {
+    // A run whose whole purpose is the manifest's journeys (the activation
+    // proof) has no "nothing declared" case: absence is a refusal there.
+    if (required) return { status: 'refused', lines: ['a milestone manifest is required for this run and there is none'] };
     return { status: 'absent', lines: ['no member-visible milestone is declared for this deploy; the changed-journey smoke will report skipped'] };
   }
   let m;
@@ -55,10 +58,15 @@ export function checkManifestObject(m, { approvedSha, drivers }) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const manifestPath = process.argv[2];
-  if (!manifestPath) { console.error('usage: check-milestone-manifest.mjs <manifest.json>'); process.exit(1); }
+  const args = process.argv.slice(2);
+  const required = args.includes('--require');
+  const manifestPath = args.find((a) => !a.startsWith('--'));
+  if (!manifestPath || args.some((a) => a.startsWith('--') && a !== '--require')) {
+    console.error('usage: check-milestone-manifest.mjs [--require] <manifest.json>');
+    process.exit(1);
+  }
   const { drivers } = await import('./journeys/index.mjs');
-  const r = checkMilestone({ manifestPath, approvedSha: process.env.WSF_APPROVED_SHA, drivers });
+  const r = checkMilestone({ manifestPath, approvedSha: process.env.WSF_APPROVED_SHA, drivers, required });
   for (const l of r.lines) (r.status === 'refused' ? console.error : console.log)(r.status === 'refused' ? `::error::${l}` : l);
   console.log(`MILESTONE_MANIFEST=${r.status}`);
   process.exit(r.status === 'refused' ? 1 : 0);

@@ -142,3 +142,42 @@ It runs in the credential-free `gate` job, deploy mode only, right after the can
 | Absent | `MILESTONE_MANIFEST=absent`: no member-visible milestone is declared. Never read as a pass. |
 | Schema-valid, `productSha` equals the approved candidate, a registered driver for every journey | `MILESTONE_MANIFEST=valid` |
 | Anything else (stale, mismatched, undriven, invalid) | `MILESTONE_MANIFEST=refused`, and the deploy stops before any build |
+
+## 6. `journey-activation`: the no-deploy activation proof (CONTROL-PLANE-ACTIVATION-1)
+
+A workflow mode that runs the accepted Community and Settings drivers once against staging **as it is served**. It builds nothing and deploys nothing of any kind. It changes no rules, index, IAM or app source, and takes no social write or roster path.
+
+| Step | What it does | On failure |
+| --- | --- | --- |
+| gate: activation manifest | `check-milestone-manifest.mjs --require journeys/examples/community-settings-parity-1.json`: present, valid, `productSha` = the approved candidate, a driver for every journey | refused before anything else |
+| gate: served marker | `check-served-marker.mjs` in the **credential-free gate**: `/health` must name the approved SHA (the verifier's rule) | the gate fails, so `config` and the activation job (the only jobs here that can obtain a token) never start: **no credential is minted** |
+| served marker, again | the same check inside the activation job, before its own authentication: a drift check between the gate and execution | the job stops before any fixture |
+| authenticate, run | the existing identity; `hosted-changed-journeys.mjs` seeds the bounded `e5c-` fixture and drives both journeys | a failed or blocked journey is recorded, never passed |
+| cleanup | `cleanup-synthetic.mjs` over the run's own manifest, **blocking** | the step fails; the manifest is kept in the evidence for recovery |
+| card | `owner-test-card.mjs` after cleanup, from the results and the cleaner's receipt | report only |
+| scan, upload | `scan-evidence.mjs`; the `wsf-activation-evidence` artifact is uploaded only when the scan passes | no upload |
+| verdict | `require-activation.mjs` recomputes the verdict from the evidence | `ACTIVATION=FAILED` with every reason |
+
+**ACTIVATION=PASSED** requires all of:
+- the marker matched;
+- the manifest names exactly `community` and `settings`;
+- both journeys PASSED on the served build, with their own assertions;
+- the cleanup receipt says COMPLETE (or NO_FIXTURES) and the cleanup step succeeded;
+- the scan passed.
+
+It uses the example manifest at its non-live path. The live deploy manifest `journeys/manifest.json` is never read or written by this mode.
+
+**Dispatch** (L0, once, after Director and W7 source acceptance, from the `main` that carries this mode). Run it only while `approved-candidate.json` on that `main` names the build staging serves, which is `938e00d8` today; otherwise the gate or the marker refuses.
+
+```sh
+gh workflow run wsf-staging-deploy.yml --ref main -f mode=journey-activation
+```
+
+Equivalently: **Actions → WSF staging deploy → Run workflow**, branch `main`, mode `journey-activation`, leaving `app_sha` blank. The receipt is the run's `Require the activation to have passed` log, which ends `ACTIVATION=PASSED` or `ACTIVATION=FAILED`, plus the `wsf-activation-evidence` artifact:
+- `served-marker.json`;
+- `changed-journeys/changed-journeys.json`;
+- the screenshots;
+- `cleanup-receipt.json`;
+- `owner-test-card.md`.
+
+`fastPath.applies` stays `false`. This mode proves the drivers; it does not switch on any fast path.

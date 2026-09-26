@@ -96,14 +96,14 @@ test('no npx invocation exists in any job', () => {
 });
 
 test('the browser jobs run the candidate-local Playwright binary', () => {
-  for (const j of ['hosted-verify', 'player-journey']) {
+  for (const j of ['hosted-verify', 'player-journey', 'journey-activation']) {
     assert.match(jobs[j], /apps\/westayfit\/node_modules\/\.bin\/playwright/, `${j}: not the candidate's CLI`);
     assert.match(jobs[j], /install --with-deps chromium/, `${j}: browsers not installed from that CLI`);
   }
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'cleanup-recovery']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -182,6 +182,9 @@ const WIRING = [
   ['player-journey', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
   ['social-privacy', 'Run the per-community privacy verification', '.github/wsf-staging/social-privacy-postop.mjs'],
   ['social-privacy', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
+  ['journey-activation', 'Read the served marker before any credential or fixture', '.github/wsf-staging/check-served-marker.mjs'],
+  ['journey-activation', 'Run the changed-journey activation', '.github/wsf-staging/hosted-changed-journeys.mjs'],
+  ['journey-activation', 'Remove changed-journey fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
 ];
 for (const [job, step, script] of WIRING) {
   test(`${path.basename(script)}: every required WSF_* variable is supplied by its step`, () => {
@@ -325,7 +328,7 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'cleanup-recovery'];
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'cleanup-recovery'];
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -385,6 +388,7 @@ test('player mode reaches only gate, config and the player journey', () => {
     'hosted-verify': false,
     'player-journey': true,
     'social-privacy': false,
+    'journey-activation': false,
     'cleanup-recovery': false,
   });
 });
@@ -424,6 +428,7 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     'hosted-verify': true,
     'player-journey': false,
     'social-privacy': false,
+    'journey-activation': false,
     'cleanup-recovery': false,
   });
 });
@@ -441,6 +446,7 @@ test('social-privacy mode reaches only gate, config and the privacy verification
     'hosted-verify': false,
     'player-journey': false,
     'social-privacy': true,
+    'journey-activation': false,
     'cleanup-recovery': false,
   });
 });
@@ -512,6 +518,7 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     'hosted-verify': false,
     'player-journey': false,
     'social-privacy': false,
+    'journey-activation': false,
     'cleanup-recovery': false,
   });
 });
@@ -531,8 +538,8 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   */
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy'],
-    'exactly these five modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'journey-activation'],
+    'exactly these six modes exist'
   );
 });
 
@@ -648,6 +655,7 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     'hosted-verify': false,
     'player-journey': false,
     'social-privacy': false,
+    'journey-activation': false,
     'cleanup-recovery': true,
   });
 });
@@ -1089,7 +1097,8 @@ await test('the changed-journey smoke and its cleanup run in hosted-verify, afte
   assert.equal(cleanup, changed + 1, 'its fixtures are removed right after it');
   assert.equal(render, cleanup + 1, 'C4: the owner card is rendered only after the cleanup');
   assert.ok(render < at('Remove synthetic fixtures') && render < scan && scan < gate);
-  for (const j of Object.keys(jobs).filter((k) => k !== 'hosted-verify')) {
+  // Its two callers: the deploy path's report-only smoke, and the no-deploy activation proof.
+  for (const j of Object.keys(jobs).filter((k) => k !== 'hosted-verify' && k !== 'journey-activation')) {
     assert.equal(/hosted-changed-journeys\.mjs/.test(jobs[j]), false, `${j} must not run the changed-journey smoke`);
   }
 });
@@ -1189,6 +1198,139 @@ await test('C3: the gate checks the frozen manifest against the approved candida
   assert.equal(/continue-on-error/.test(live), false, 'a refused manifest must stop the deploy');
   assert.equal(/id-token/.test(jobs.gate), false, 'the gate stays credential-free');
   assert.match(jobs.build, /needs:[^\n]*\bgate\b|needs:\s*\n(\s+- [a-z-]+\n)*\s+- gate\b/, 'the build must wait for the gate');
+});
+
+// ---- the journey-activation mode (CONTROL-PLANE-ACTIVATION-1) -------------------
+// The accepted drivers, once, against staging as it is served. No build, no
+// deploy; the served marker before any credential; blocking cleanup; a verdict
+// recomputed from the evidence.
+const ACTIVATION_MANIFEST = '.github/wsf-staging/journeys/examples/community-settings-parity-1.json';
+
+await test('journey-activation mode reaches only gate, config and the activation job', () => {
+  assert.deepEqual(reachedJobs('journey-activation'), {
+    gate: true,
+    config: true,
+    build: false,
+    deploy: false,
+    'hosted-verify': false,
+    'player-journey': false,
+    'social-privacy': false,
+    'journey-activation': true,
+    'cleanup-recovery': false,
+  });
+  const needs = /^ {4}needs: (.*)$/m.exec(jobs['journey-activation'])[1];
+  assert.equal(needs.replace(/[[\]\s]/g, ''), 'gate,config');
+  assert.equal(jobCondition('journey-activation'), "${{ inputs.mode == 'journey-activation' }}", 'exact equality, never a negation');
+});
+
+await test('the activation job builds, deploys and changes nothing, and has no social-write or live-manifest path', () => {
+  const body = jobCode('journey-activation');
+  const forbidden = [
+    [/firebase deploy|hosting:channel:deploy|--only (functions|hosting|firestore)/, 'a deploy'],
+    [/build-staging\.sh|expo export/, 'a build'],
+    [/hosted-package-e-smoke\.mjs|verify-deployment\.mjs|read-inventory\.mjs|check-build-stamp\.mjs/, 'the deploy path\'s checks'],
+    [/hosted-player-journey\.mjs|social-privacy-postop\.mjs/, 'another harness'],
+    [/gcloud|setIamPolicy|invoker|indexes|firestore\.rules/, 'a transport, IAM, rules or index change'],
+    [/wsfSetCommunityVisibility|wsfCommunityMembers/, 'a social write or roster call'],
+    [/journeys\/manifest\.json/, 'the live deploy manifest'],
+    [/FIREBASE_TOOLS/, 'deployment tooling'],
+  ];
+  for (const [re, what] of forbidden) assert.equal(re.test(body), false, `journey-activation must not use ${what}`);
+  const block = /^ {4}permissions:\n((?: {6}[^\n]*\n)+)/m.exec(jobs['journey-activation']);
+  assert.deepEqual(block[1].trim().split('\n').map((l) => l.trim()).sort(), ['contents: read', 'id-token: write']);
+  assert.match(jobs['journey-activation'], /^ {4}environment: wsf-staging$/m);
+});
+
+await test('the served marker is read BEFORE authentication, and a failed marker leaves every credential step skipped', () => {
+  const names = [...jobs['journey-activation'].matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((m) => (m[1] || m[2]).trim());
+  const at = (n) => { const i = names.indexOf(n); assert.ok(i >= 0, `missing step ${n}`); return i; };
+  const marker = at('Read the served marker before any credential or fixture');
+  assert.ok(marker < at('Authenticate to Google Cloud'), 'the marker comes before the first authentication');
+  assert.ok(marker < at('Run the changed-journey activation'), 'and before any fixture');
+  const live = (n) => stepBlock('journey-activation', n).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.match(live('Read the served marker before any credential or fixture'), /^\s+id: marker$/m);
+  assert.equal(/^\s+if:/m.test(live('Read the served marker before any credential or fixture')), false);
+  assert.equal(/continue-on-error/.test(live('Read the served marker before any credential or fixture')), false, 'a wrong marker must stop the job');
+  // Steps that would authenticate or seed must not run after a failed marker.
+  assert.equal(/^\s+if:/m.test(live('Authenticate to Google Cloud')), false, 'plain success-gated: skipped after a failed marker');
+  assert.equal(/^\s+if:/m.test(live('Run the changed-journey activation')), false);
+  assert.match(live('Re-authenticate before cleanup'), /^\s+if: \$\{\{ always\(\) && steps\.marker\.outcome == 'success' \}\}$/m,
+    'the re-authentication must not mint a credential after a wrong marker');
+});
+
+await test('the activation manifest is REQUIRED in the gate, from its non-live path, in activation mode only', () => {
+  const live = stepBlock('gate', 'Check the activation manifest against the approved candidate');
+  assert.match(live, /^\s+if: \$\{\{ inputs\.mode == 'journey-activation' \}\}$/m);
+  assert.match(live, /^\s+WSF_APPROVED_SHA: \$\{\{ steps\.candidate\.outputs\.app_sha \}\}$/m);
+  assert.match(live, new RegExp(`run: node \\.github/wsf-staging/check-milestone-manifest\\.mjs --require ${ACTIVATION_MANIFEST.replace(/\./g, '\\.')}$`, 'm'));
+  assert.equal(/continue-on-error/.test(live), false);
+  for (const step of ['Run the changed-journey activation', 'Render the activation owner card', 'Require the activation to have passed']) {
+    assert.ok(stepBlock('journey-activation', step).includes(ACTIVATION_MANIFEST.replace('.github/', '')), `${step} must read the same activation manifest`);
+  }
+});
+
+await test('activation cleanup is blocking, the card follows it, the scan gates the upload, and the verdict reads all three', () => {
+  const body = jobs['journey-activation'];
+  let previous = -1;
+  for (const marker of ['id: journeys', 'id: cleanup', 'Render the activation owner card', 'id: scan-activation-evidence', 'name: wsf-activation-evidence', 'Require the activation to have passed']) {
+    const at = body.indexOf(marker);
+    assert.notEqual(at, -1, `missing ${marker}`);
+    assert.ok(at > previous, `out of order: ${marker}`);
+    previous = at;
+  }
+  const cleanup = stepBlock('journey-activation', 'Remove changed-journey fixtures');
+  assert.match(cleanup, /^\s+if: always\(\)$/m);
+  assert.equal(/continue-on-error/.test(cleanup), false);
+  assert.match(cleanup, /^\s+node ops\/\.github\/wsf-staging\/cleanup-synthetic\.mjs\s*$/m);
+  assert.equal(/\|\||set \+e/.test(cleanup.slice(cleanup.indexOf('cleanup-synthetic.mjs'))), false);
+  const upload = /if: \$\{\{([^}]*)\}\}\n\s+with:\n\s+name: wsf-activation-evidence/.exec(text);
+  assert.match(upload[1], /steps\.scan-activation-evidence\.outcome == 'success'/);
+  const verdict = stepBlock('journey-activation', 'Require the activation to have passed');
+  assert.match(verdict, /^\s+if: always\(\)$/m);
+  for (const [k, id] of [['WSF_MARKER_OUTCOME', 'marker'], ['WSF_CLEANUP_OUTCOME', 'cleanup'], ['WSF_SCAN_OUTCOME', 'scan-activation-evidence']]) {
+    assert.match(verdict, new RegExp(`^\\s+${k}: \\$\\{\\{ steps\\.${id}\\.outcome \\}\\}$`, 'm'), `${k} must carry steps.${id}.outcome`);
+  }
+  assert.match(verdict, /^\s+WSF_ACTIVATION_JOURNEYS: community,settings$/m);
+  assert.match(verdict, /run: node ops\/\.github\/wsf-staging\/require-activation\.mjs$/m);
+  assert.equal(/continue-on-error/.test(verdict), false);
+  // The evidence is this mode's own, never another job's.
+  assert.equal(/wsf-(player-|privacy-|hosted-)?evidence\b/.test(jobCode('journey-activation').replace(/wsf-activation-evidence/g, '')), false);
+});
+
+// ---- A1 (Director #516): the marker precedes EVERY credential in this mode ------------
+await test('A1: the credential-free gate reads the served marker in journey-activation mode, blocking, after the manifest check', () => {
+  const names = [...jobs.gate.matchAll(/^      - name: (.+)$/gm)].map((m) => m[1].trim());
+  const manifest = names.indexOf('Check the activation manifest against the approved candidate');
+  const marker = names.indexOf('Read the served marker before any credentialed job');
+  assert.ok(manifest >= 0 && marker === manifest + 1, 'the gate reads the marker right after the activation manifest check');
+  const live = stepBlock('gate', 'Read the served marker before any credentialed job').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.match(live, /^\s+if: \$\{\{ inputs\.mode == 'journey-activation' \}\}$/m);
+  assert.match(live, /^\s+run: node \.github\/wsf-staging\/check-served-marker\.mjs$/m);
+  assert.match(live, /^\s+WSF_APPROVED_SHA: \$\{\{ steps\.candidate\.outputs\.app_sha \}\}$/m, 'against the exact approved candidate');
+  assert.equal(/continue-on-error/.test(live), false, 'a wrong marker must fail the gate');
+  assert.equal(/id-token/.test(jobs.gate), false, 'the gate stays credential-free');
+});
+
+await test('A1: in journey-activation mode every job holding id-token depends on the gate, and none can start after it fails', () => {
+  const reached = reachedJobs('journey-activation');
+  const needsOf = (name) => {
+    const m = /^ {4}needs: (.*)$/m.exec(jobs[name]);
+    const raw = m ? m[1].trim() : '';
+    return raw === '' ? [] : raw.startsWith('[') ? raw.replace(/[[\]\s]/g, '').split(',') : [raw];
+  };
+  const dependsOnGate = (name, seen = new Set()) => needsOf(name).some((n) => n === 'gate' || (!seen.has(n) && seen.add(n) && dependsOnGate(n, seen)));
+  const credentialed = Object.keys(jobs).filter((n) => reached[n] && /id-token: write/.test(jobs[n]));
+  assert.deepEqual(credentialed.sort(), ['config', 'journey-activation']);
+  for (const name of credentialed) {
+    assert.ok(dependsOnGate(name), `${name} holds id-token but does not depend on the gate`);
+    const cond = jobCondition(name) || '';
+    assert.equal(/always\(\)|failure\(\)|cancelled\(\)/.test(cond), false, `${name} could start after a failed gate: ${cond}`);
+  }
+});
+
+await test('A1: the activation job re-reads the marker as a drift check before its own authentication', () => {
+  const names = [...jobs['journey-activation'].matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((m) => (m[1] || m[2]).trim());
+  assert.ok(names.indexOf('Read the served marker before any credential or fixture') < names.indexOf('Authenticate to Google Cloud'));
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);

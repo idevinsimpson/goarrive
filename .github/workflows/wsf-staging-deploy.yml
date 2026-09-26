@@ -81,6 +81,14 @@ on:
           # writes NOTHING while wsfSetCommunityVisibility is SHUT, so it is
           # safe to run before and after the operator's Operation 2.
           - social-privacy
+          # `journey-activation` (CONTROL-PLANE-ACTIVATION-1) proves the
+          # accepted changed-journey drivers against staging AS IT IS SERVED:
+          # no build, no deploy of any kind. It reads the hosted marker before
+          # any credential or fixture, seeds only the bounded `e5c-` fixture,
+          # cleans it up blocking, and passes only if every journey in the
+          # activation manifest passed on the served build with cleanup
+          # COMPLETE and the evidence scan passing.
+          - journey-activation
 
       # WHY A RECOVERY MODE EXISTS.
       # Run 35495928362 created synthetic users and documents on staging and
@@ -126,7 +134,7 @@ jobs:
     # drag a gate (or the privileged config job behind it) along with it.
     # An explicit list, never a negation: a mode added later has to be named
     # here to get a credential.
-    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' }}
+    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' || inputs.mode == 'journey-activation' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -162,6 +170,30 @@ jobs:
           WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
         run: node .github/wsf-staging/check-milestone-manifest.mjs .github/wsf-staging/journeys/manifest.json
 
+      # The activation proof's manifest is REQUIRED (absence is a refusal),
+      # read from this operational checkout at its non-live path, and must
+      # name the approved candidate and only registered drivers. It is never
+      # the live deploy manifest (journeys/manifest.json).
+      - name: Check the activation manifest against the approved candidate
+        if: ${{ inputs.mode == 'journey-activation' }}
+        env:
+          WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
+        run: node .github/wsf-staging/check-milestone-manifest.mjs --require .github/wsf-staging/journeys/examples/community-settings-parity-1.json
+
+      # THE SERVED MARKER, IN THE CREDENTIAL-FREE GATE (Director #516 A1).
+      # `config` needs this job and authenticates, so a wrong or unreadable
+      # marker must fail HERE: then no job in this mode that can obtain a token
+      # can start, and no credential is minted at all. The activation job
+      # reads the marker again before its own authentication, as a drift
+      # check between this gate and its execution.
+      - name: Read the served marker before any credentialed job
+        if: ${{ inputs.mode == 'journey-activation' }}
+        env:
+          WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ runner.temp }}/wsf-gate-marker
+        run: node .github/wsf-staging/check-served-marker.mjs
+
   # -------------------------------------------------------------- config ----
   # Privileged, and deliberately tiny: it reads the staging Web App's public
   # SDK config and nothing else. No application code is checked out here, so
@@ -171,7 +203,7 @@ jobs:
     # Same list as the gate. A skipped `needs` already skips this job, but
     # stating the condition means the reachability of every privileged job can
     # be read off its own `if:` rather than inferred through the graph.
-    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' }}
+    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' || inputs.mode == 'journey-activation' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: wsf-staging
@@ -1102,6 +1134,189 @@ jobs:
             || { echo "::error::the privacy verification did not pass (see SOCIAL_PRIVACY_VERDICT and the BLOCKED/FAIL rows above)"; exit 1; }
           [ "${{ steps.scan-privacy-evidence.outcome }}" = "success" ] \
             || { echo "::error::the evidence scan rejected this run's evidence"; exit 1; }
+
+  # --------------------------------------------------- journey-activation ----
+  # CONTROL-PLANE-ACTIVATION-1: the accepted Community and Settings drivers,
+  # run once against staging AS IT IS SERVED. No build, no deploy, no rules,
+  # index, IAM or app-source change; no social write or roster path.
+  #
+  # ORDER IS THE SAFETY:
+  #   1. the gate (credential-free) resolved the approved candidate and refused
+  #      a missing, stale or undriven activation manifest;
+  #   2. the served marker is read BEFORE authentication: a build other than
+  #      the approved candidate stops the job with no credential and no fixture;
+  #   3. only then does the job authenticate and the reviewed runner seed the
+  #      bounded `e5c-` fixture and drive the journeys;
+  #   4. cleanup is blocking; the card is rendered after it;
+  #   5. the evidence is scanned, and uploaded only if the scan passes;
+  #   6. require-activation.mjs recomputes the verdict from the evidence and
+  #      passes only on every journey PASSED, cleanup COMPLETE and the scan.
+  # The evidence directory and artifact are this mode's own.
+  journey-activation:
+    needs: [gate, config]
+    if: ${{ inputs.mode == 'journey-activation' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - name: Check out the served candidate (for its Playwright dependency)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.app_sha }}
+          path: app
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # Defense in depth: the gate already refused a wrong marker before any
+      # credentialed job; this re-read catches drift between the gate and now.
+      - name: Read the served marker before any credential or fixture
+        id: marker
+        env:
+          WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-activation-evidence
+        run: node ops/.github/wsf-staging/check-served-marker.mjs
+
+      - name: Install candidate dependencies without lifecycle scripts
+        working-directory: app
+        run: npm --prefix apps/westayfit ci --ignore-scripts
+
+      - name: Install browsers using the candidate's pinned Playwright CLI
+        working-directory: app
+        run: |
+          set -euo pipefail
+          PW="apps/westayfit/node_modules/.bin/playwright"
+          [ -x "$PW" ] || { echo "::error::the candidate's Playwright CLI is not present at $PW"; exit 1; }
+          resolved="$(node -e '
+            const {createRequire} = require("node:module");
+            const req = createRequire(require("path").resolve("apps/westayfit/package.json"));
+            console.log(req.resolve("@playwright/test/package.json"));
+          ')"
+          case "$resolved" in
+            "$PWD/apps/westayfit/node_modules/"*) : ;;
+            *) echo "::error::@playwright/test resolved outside the candidate installation: $resolved"; exit 1 ;;
+          esac
+          echo "PLAYWRIGHT_VERSION=$("$PW" --version)"
+          "$PW" install --with-deps chromium
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-staging-env
+          path: cfg
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Run the changed-journey activation
+        id: journeys
+        working-directory: app
+        env:
+          WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-activation-evidence
+          WSF_JOURNEY_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/examples/community-settings-parity-1.json
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys/cleanup-manifest.json
+        run: |
+          set -euo pipefail
+          set -a; . ../cfg/wsf-staging.env; set +a
+          export WSF_SDK_CONFIG_FILE="$RUNNER_TEMP/wsf-sdk-activation/wsf-sdk-config.json"
+          node ../ops/.github/wsf-staging/write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ../ops/.github/wsf-staging/hosted-changed-journeys.mjs
+
+      # Only if the marker check passed: a run stopped on the wrong build must
+      # end with no credential minted at all.
+      - name: Re-authenticate before cleanup
+        if: ${{ always() && steps.marker.outcome == 'success' }}
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      # BLOCKING, as in hosted-verify: with a fixture manifest, the cleaner's
+      # exit status is this step's.
+      - name: Remove changed-journey fixtures
+        id: cleanup
+        if: always()
+        env:
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys/cleanup-manifest.json
+          WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys/cleanup-receipt.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_CLEANUP_MANIFEST" ]; then
+            echo "CHANGED_JOURNEY_CLEANUP=not needed (no changed-journey fixtures were created)"
+            exit 0
+          fi
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      - name: Render the activation owner card
+        if: always()
+        continue-on-error: true
+        env:
+          WSF_CHANGED_DIR: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_CHANGED_DIR/changed-journeys.json" ]; then
+            echo "OWNER_CARD=not rendered (no changed-journey results in this run)"
+            exit 0
+          fi
+          node ops/.github/wsf-staging/owner-test-card.mjs \
+            --manifest ops/.github/wsf-staging/journeys/examples/community-settings-parity-1.json \
+            --results "$WSF_CHANGED_DIR/changed-journeys.json" \
+            --cleanup-manifest "$WSF_CHANGED_DIR/cleanup-manifest.json" \
+            --cleanup-receipt "$WSF_CHANGED_DIR/cleanup-receipt.json" \
+            --staging-url https://westayfit-staging--staging-4a616y5m.web.app \
+            --out "$WSF_CHANGED_DIR/owner-test-card.md"
+
+      - name: Scan evidence before upload
+        id: scan-activation-evidence
+        if: always()
+        run: node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-activation-evidence"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-activation-evidence.outcome == 'success' }}
+        with:
+          name: wsf-activation-evidence
+          path: wsf-activation-evidence
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Require the activation to have passed
+        if: always()
+        env:
+          WSF_ACTIVATION_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/examples/community-settings-parity-1.json
+          WSF_ACTIVATION_JOURNEYS: community,settings
+          WSF_CHANGED_DIR: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_MARKER_OUTCOME: ${{ steps.marker.outcome }}
+          WSF_CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+          WSF_SCAN_OUTCOME: ${{ steps.scan-activation-evidence.outcome }}
+        run: node ops/.github/wsf-staging/require-activation.mjs
 
   # ----------------------------------------------------- cleanup-recovery ----
   # Remove the synthetic fixtures an EARLIER run created and could not remove
