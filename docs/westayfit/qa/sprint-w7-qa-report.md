@@ -5426,3 +5426,108 @@ The Check 62 queued-block probes (P12) now pass.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; every mutant was reverted.
 
 **Status:** **PASS at `6dcd448d`** on F1–F4, one-ball and the carry rows. O1 and O2 are for the Director. Next consumer: Director acceptance of 1A. W7 created no state branch, migrated no trigger, merged nothing and accepted nothing.
+
+## 66 · AUTONOMY-STATE-1A frozen O1–O7, #519 at exact `e5f69522b44760c4bc9561d9a99076f6f375fd0f` (`6dcd448d → 39251571 → e5f69522`; handoff #434 `5849446351`; delivery #519 `5849435244`; freeze `5849220668`; W7 ACK `5849449446`): **ONE CONCRETE O7 INVARIANT FAILURE; O1–O6 PASS**
+
+- **Scope:** a focused Phase-A exit review against the Director's frozen O1–O7 text (#519 `5849116723`, `5849138687`, `5849148679`, `5849163727`, `5849164141`, `5849187849`, `5849188118`).
+- **Method:** independent probes (69 rows) through the tools' exports, run on `6dcd448d` (fail-before) and on `e5f69522`.
+- **Not done:** no merge, state branch, trigger, workflow, deploy or cloud action.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage and scope** | **PASS.** `39251571`'s parent is `6dcd448d`, and `e5f69522`'s parent is `39251571`: additive, no rewrite. Every path since main `37f18ea9` is inside the 1A set (`tools/wsf-control/`, `CONTROL_STATE.md`, the two skill paths). No state branch, workflow, trigger or cloud change. |
+| **2** | **O1 / O2** | **PASS.** See the O1 / O2 bullets below. |
+| **3** | **O3 retract-release** | **PASS.** See the O3 bullets below. |
+| **4** | **O4 review-pass and reassign-review** | **PASS.** See the O4 bullets below. |
+| **5** | **O5 transfer-owner and stage** | **PASS.** See the O5 bullets below. |
+| **6** | **O6 unblock reactivation** | **PASS.** See the O6 bullets below. |
+| **7** | **O7 blocker reachability** | **FAIL, one concrete case (F1 below).** The rest of O7 passes; see the O7 bullets below. |
+| **8** | **The six disclosed design choices** | **Consistent with the frozen contract.** See the design-choice bullets below. |
+| **9** | **Evidence** | See the evidence bullets below. |
+
+**O1 / O2:**
+- With a configured CURRENT, a missing or `null` `bodySha256` gives `exception` under a current or an earlier marker, never `ok` or `stale`.
+- A verified earlier body is `stale`, a hand-edited earlier body is `exception`, and a verified current body is `ok`.
+- **The skill-created path:** `current-surface.mjs 777 <body>` on a CRLF copy of a real rendering gives marker h1 and a hash equal to the rendering. On an edited body the tool's output leads to `exception`, and `--missing` gives `exists: false` → `exception`.
+- The skill tells the session to fetch the exact body and use the tool.
+- **O2:** owner self-review is refused, alone or in a mixed set, and a bootstrap import of owner self-review is refused. A Director review wakes no W#.
+
+**O3, retract-release:**
+- RELEASED → retract gives QUEUED, NEXT again, and W3 `WATCH=off`.
+- Both `release` and `retract-release` stay in the ledger, and an exact retry is a no-op.
+- It is refused when another work packet took NEXT, and refused after ACK.
+- A reference packet is restored to its position and stays non-driving, and the prior relative position is kept.
+
+**O4, review-pass and reassign-review:**
+- Two reviewers: W7's pass turns only W7 off, and W5 stays on. `accept` is refused while W5 is outstanding and allowed after both pass. A pass never accepts.
+- A pass from an unassigned reviewer or from the owner is refused.
+- A `finding` turns the owner on and every reviewer off.
+- A successor delivery does not inherit an earlier pass (`accept` refused), and an exact duplicate pass is a no-op.
+- Reassigning W7 → W9 turns W7 off and W9 on, the owner stays off, and the subject and PR are unchanged.
+- Reassignment to the owner, to an unregistered worker or to a busy worker is refused. Reassignment to the Director wakes no W#. Both events stay in history.
+
+**O5, transfer-owner and stage:**
+- **Transfer:** from ACKED to W9's canonical inbox gives RELEASED; W3 goes off and W9 on. The old owner's ACK is refused and the new owner's succeeds.
+  - Refused: a non-canonical inbox, a self-transfer, an unregistered or busy new owner, and a pre-ACK (RELEASED) transfer.
+  - From CHANGES_REQUESTED, the transfer keeps the PR and subject and needs a new ACK.
+- **Stage:**
+  - `stage` with no hosted proof is refused.
+  - After `begin-proof` + `stage` the packet is still VERIFYING, with the proof RUNNING.
+  - `proof-pass` before the served receipt is refused.
+  - `stage` then `proof-pass` on the same run gives terminal STAGED.
+  - `proof-fail` after `stage` gives CHANGES_REQUESTED, with the served receipt kept.
+  - A wrong run id is refused, and so is `servedSha ≠ mergeSha`.
+  - VERIFIED and source-only completion are unchanged.
+
+**O6, unblock reactivation:**
+- ACKED reactivates W3.
+- UNDER_REVIEW reactivates W7, not W3.
+- With W7 passed and W9 outstanding, only W9.
+- With two outstanding reviewers, both are named in **one** transition.
+- DELIVERED wakes nobody.
+- After the actual `unblock`, `worker-view` agrees: W7 and W9 on, W3 off.
+
+**O7, blocker reachability (all passing except the case in F1):**
+- A source-only dependency with `until: STAGED` is refused, and so is a VERIFIED dependency with `until: STAGED`.
+- A STAGED dependency with `until: STAGED` is allowed. It does not clear at the served receipt (VERIFYING) and clears only at terminal STAGED.
+- A withdrawn dependency never clears.
+- An integrated dependency clears `until: INTEGRATED` while VERIFYING, and no longer counts after `proof-fail`.
+
+**Row 8, the six disclosed design choices:**
+1. **Strict `servedSha === mergeSha`:** O5 item 6 requires refusing a served SHA outside the integrated subject.
+2. **Owner-bound `ack.worker`:** O5 requires a fresh owner-bound ACK.
+3. **No `retract-release` after a transfer:** the freeze says there is no second competing rewind path, and pre-ACK death uses retract.
+4. **A second pass from the same reviewer under a different source is refused:** idempotency is kept.
+5. **DELIVERED → ACCEPTED stays legal:** O4 gates `accept` only on assigned W# reviewers, and a DELIVERED packet has none.
+6. **A withdrawn dependency keeps its dependent BLOCKED:** fail-closed, and O7 says WITHDRAWN never satisfies.
+
+None of them is the O7 failure below; that is not among the disclosed choices.
+
+**Row 9, evidence:**
+- **Probes on `e5f69522`:** 68 / 69.
+- **Fail-before:** on `6dcd448d` the probes fail (unknown `retract-release`, `ack.worker`, optional `bodySha256`, O7 refusals absent).
+- **Suites:**
+  - control `run-all`: ledger 75, views 37, skill 6, closure 13, review 10, integrity 11, recovery 37, audit 15;
+  - staging: 23 suites.
+- **W3's 48 mutants are not in the tree**, so I could not inspect them. The committed tests are what I could inspect, and the probes above stand in for independent mutants of each O.
+
+**F1 (the O7 invariant failure): a STAGED-hosted dependency can never satisfy `until: VERIFIED`, which the frozen O7 requires.**
+- **The frozen O7 text (#519 `5849188118`):**
+  - "VERIFIED may be satisfied by VERIFIED or a hosted-verified STAGED terminal";
+  - focused case 3: "STAGED-hosted dependency + until VERIFIED → allowed and clears only after hosted-verified STAGED".
+- **At `e5f69522`:**
+  - `schema.mjs` `REACHABLE_UNTIL.STAGED = ['ACCEPTED','INTEGRATED','STAGED']` refuses the block: "block: DEP completes at STAGED, so it never reaches VERIFIED" (my probe O7c).
+  - `derive.mjs` `REACHED.VERIFIED = ['VERIFIED']` would never clear it anyway.
+  - `CONTROL_STATE.md:134` states the opposite rule ("a STAGED packet does not satisfy `VERIFIED`").
+  - The packet's own `audit.test.mjs:71`, `:82` and the O7.5 test (`:109–118`) assert the refusal.
+- **This is not one of the six disclosed design choices.**
+- **Why it matters:** under O5, terminal STAGED now requires a hosted `proof-pass`, so a STAGED terminal *is* hosted-verified. A dependent that genuinely needs "verified" cannot be recorded against a staged packet, and would have to use `until: STAGED` (a stronger condition) or an external blocker.
+- **Smallest correction, verified locally and not pushed:**
+  - `REACHABLE_UNTIL.STAGED` gains `'VERIFIED'`;
+  - `REACHED.VERIFIED` gains `'STAGED'` (terminal only, which under O5 implies a hosted PASS; VERIFYING or the served receipt still do not clear it);
+  - flip `audit.test.mjs:71`, `:82` and the O7.5 assertion, and update `CONTROL_STATE.md:134`.
+- **With the two source lines changed:** my 69 / 69 probes pass, and only the packet's own O7.5-style assertions fail, as they encode the contradicting rule.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; the local fix was reverted (the tree is clean).
+
+**Status:** **FAIL on one concrete O7 invariant (F1) at `e5f69522`.** O1–O6, lineage, scope and the six design choices PASS. W7 merged, accepted and deployed nothing, and created no state branch or trigger.
