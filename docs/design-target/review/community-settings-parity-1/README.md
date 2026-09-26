@@ -174,6 +174,100 @@ show honestly. None of them is in the three HOLD items, and I have not changed a
 **H6** failed because its x = 20 scrim press now lands on the panel. It is fixed in
 `6f34ff7b` by the change described above, with no product change.
 
+## Route parity pass 2: product `ffb517e5` (Director `5845751705`, W9 ACK `5845892810`)
+
+The functional results (W7 Check 51 on `2e235c58`) carry forward. No data, Firebase, privacy
+or navigation behaviour changed. The `matched/` frames and manifests are **re-captured on
+`ffb517e5`**; the earlier `0e5d6f38` ones are in git history at `ebcc038a`.
+
+### What changed
+1. **The real masthead (62 px).** `MEMBER_TOP_BAR_BODY` goes from 52 to 62, hairline included.
+   This is the shared shell, so every member tab moves 10 px down. Measured, it now matches
+   the reference bar under its strip:
+   - the bar sits on the page's warm white `#FBFAF4` with the reference's `#D7DFE7` rule;
+   - the 24-high wordmark sits 20 px under the top edge (y 20–43, against the reference's
+     50–73 minus its 30 px strip);
+   - the menu glyph is three 3 px rules, 21 wide, on an 8 px pitch.
+
+   The 30 px prototype strip is **not** reproduced.
+2. **Tab bar rhythm.** It uses the reference's ground, rule and upward lift, with a
+   32×24 active pill and 11 px labels. Measured against the reference:
+   - glyphs sit at y 793–810 (reference 792–811);
+   - labels sit at y 819–826 (reference 819–826);
+   - the active pill sits at y 790–813 (reference 790–814).
+
+   The glyph artwork is a declared platform difference: the reference uses Lucide line
+   icons and the MOVE pulse, and no icon package is added.
+3. **Selected community first**, in both the chips and the Settings sections
+   (`currentFirst`). It changes presentation only, never server order, and is unit-tested.
+4. **Copy and controls:**
+   - **Role:** the banner fact reads **Champion** (`roleFact`; `roleLabel` is unchanged;
+     unit-tested).
+   - **Close:** a drawn **× CLOSE**. Its name is still "Close" and the target is ≥44 px.
+   - **Privacy hint:** reads "Members see “Alex M.”". This is the member's
+     `displayName.trim()`, the same rule the server's roster uses, taken from the already
+     loaded profile (`peekMemberProfile`), so no read is added.
+5. **Settings header geometry.** The rule sits 82 px under the panel top (y 94), the title is
+   22 px regular at line-height 1.5, and the body starts 19 px under the rule. The panel
+   now matches the reference row for row:
+
+   | element | candidate y | reference y |
+   |---|---|---|
+   | rule | 94 | 94 |
+   | note box | 113 | 113 |
+   | section 1 | 236 | 235 |
+   | first row | 267 | 267 |
+
+### Matched-fixture comparison on `ffb517e5` (full frames, no crop, no alignment)
+
+| comparison | differing share at `0e5d6f38` | **at `ffb517e5`** |
+|---|---|---|
+| Community 390×844 | 0.3402 | **0.3025** |
+| Community 390×640 | 0.3489 | **0.3380** |
+| Settings 390×844 | 0.2311 | **0.1169** |
+| Settings 390×640 | 0.2842 | **0.1336** |
+
+Other facts from the capture:
+- **Ring:** classification agreement 99.89 % / 99.87 %, mean channel delta 0.04.
+- **Panel:** at (12, 12), 366×820 and 366×616.
+- **Chips:** Oak, then Harbor.
+- **Role:** Member at 390×844, Champion at 390×640.
+
+**Diagnostic only, not evidence.** Most of the remaining Community share is the reference's
+30 px prototype strip, which is intentionally absent, so everything below it sits 30 px
+higher. Reading the reference 30 px lower gives:
+
+| frame | shifted share, whole frame | shifted share, above the tab bar |
+|---|---|---|
+| 390×844 | 0.0855 | 0.0730 |
+| 390×640 | 0.1657 | 0.1438 |
+
+At 390×640 the fixed tab bar also covers different content once the page shifts. The frames
+and composites themselves stay unaligned.
+
+### Annotated intentional differences (Director `5845751705`)
+1. **Truth:** the real group type and join-policy text ("FAMILY AND FRIENDS", "Anyone with
+   the link can join") stand in for the prototype's place and descriptor. The goal's real
+   window ("Sep 20 – 27", "Apr 1 – 30") replaces "This week" / "April".
+2. **Truth:** there is no 30 px prototype/sample strip, and no "SAMPLE MEMBER · DESIGN
+   PROTOTYPE" kicker; the kicker's space is kept.
+3. **Platform:**
+   - font rasterisation (no Avenir Next);
+   - tab and MOVE glyph artwork (no icon package);
+   - the chips' ✓ / ＋ text glyphs;
+   - the canonical privacy scope sentence and final note (W4 C3).
+
+### Results on `ffb517e5`
+
+| run | result | RAW |
+|---|---|---|
+| matched capture | 2/2: asserts inset, ring in bounds, 23 / 3, role, both orders, hint | `RAW-matched-ffb517e5.txt` |
+| `cp5` Settings motion / focus frames | 6/6 | `RAW-cap-ffb517e5.txt`, `CANDIDATE-cp5-*` |
+| W7 Check 45 (`18d8caca`), unchanged | FAIL-BEFORE **15/15**, PRESERVE **13/13** | `RAW-check45-ffb517e5.txt` |
+| dependency set (17 files, including `ui-community-home`) | **136 passed**, 3 skipped (gated) | `RAW-dep-ffb517e5.txt` |
+| vitest | **1034/1034** | `RAW-vitest-ffb517e5.txt` |
+| tsc | clean | — |
+
 ## Not ours
 
 - The H3c successor belongs to its owner, not this packet.

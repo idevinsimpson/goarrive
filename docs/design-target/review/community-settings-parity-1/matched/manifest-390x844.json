@@ -1,6 +1,6 @@
 {
   "fixtureOnly": "Every person, name and figure is the frozen reference’s sample data, seeded into the local emulator (demo-wsf-local) for this comparison only. No production read or write.",
-  "commit": "0e5d6f38",
+  "commit": "ffb517e5",
   "viewport": {
     "width": 390,
     "height": 844
@@ -13,30 +13,39 @@
     "role": "Your roleMember",
     "goals": "Goals3"
   },
+  "chipOrder": [
+    "w9match-oak-muibvckj-052cabm844",
+    "w9match-harbor-muibvckj-052cabm844"
+  ],
+  "settingsSectionOrder": [
+    "w9match-oak-muibvckj-052cabm844",
+    "w9match-harbor-muibvckj-052cabm844"
+  ],
+  "harborNameHint": "Members see “Alex M.”",
   "settingsSwitches": [
-    "wsf-privacy-panel-name-w9match-harbor-mui8h0x8-23cce1m844=true",
-    "wsf-privacy-panel-activity-w9match-harbor-mui8h0x8-23cce1m844=false",
-    "wsf-privacy-panel-name-w9match-oak-mui8h0x8-23cce1m844=false",
-    "wsf-privacy-panel-activity-w9match-oak-mui8h0x8-23cce1m844=true"
+    "wsf-privacy-panel-name-w9match-oak-muibvckj-052cabm844=false",
+    "wsf-privacy-panel-activity-w9match-oak-muibvckj-052cabm844=true",
+    "wsf-privacy-panel-name-w9match-harbor-muibvckj-052cabm844=true",
+    "wsf-privacy-panel-activity-w9match-harbor-muibvckj-052cabm844=false"
   ],
   "community": {
     "lovable": "../../community-parity-1/lovable-d4f60624/community-390x844.png",
     "lovableSha256": "725c7e18fb5e6b8835c585f2c9d1aa733315a7d5472fb73c29b471bc0156e9c0",
     "candidate": "CANDIDATE-FIXTURE-community-390x844.png",
-    "candidateSha256": "b857b50394306e78a19af0b7d78336972f069075720eed6df1b37abfc73b7586",
+    "candidateSha256": "a8d2021babe04fdcb520ae5b5e3171789eadb19d47a93b13b125318aee08f97a",
     "sideBySide": "cmp-community-390x844-side-by-side.png",
     "overlay50": "cmp-community-390x844-overlay-50.png",
     "difference": "cmp-community-390x844-difference.png",
-    "differingShare": 0.3402,
+    "differingShare": 0.3025,
     "bannerBox": {
       "x": 0,
-      "y": 52,
+      "y": 62,
       "width": 390,
       "height": 195
     },
     "ringBox": {
       "x": 220,
-      "y": 52,
+      "y": 62,
       "width": 170,
       "height": 170
     },
@@ -54,11 +63,11 @@
     "lovable": "../../community-parity-1/lovable-d4f60624/settings-390x844.png",
     "lovableSha256": "0aed9d15e3ba8072d6c3226e6600827cd5f8f8bcf770b7c7fe42e31c32365928",
     "candidate": "CANDIDATE-FIXTURE-settings-390x844.png",
-    "candidateSha256": "f7c088a63d853ff7874a4b11aabae02da8bcc15ebb6c9aeb5e2f5cb653a3ae20",
+    "candidateSha256": "e2325ea0302aac6d0c55c7456179eeab37eded9abad033995f721b0c01f49650",
     "sideBySide": "cmp-settings-390x844-side-by-side.png",
     "overlay50": "cmp-settings-390x844-overlay-50.png",
     "difference": "cmp-settings-390x844-difference.png",
-    "differingShare": 0.2311,
+    "differingShare": 0.1169,
     "panelBox": {
       "x": 12,
       "y": 12,

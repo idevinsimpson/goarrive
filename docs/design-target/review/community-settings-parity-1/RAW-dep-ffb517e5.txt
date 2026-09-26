@@ -1,0 +1,337 @@
+
+Running 139 tests using 1 worker
+
+[1/139] [chromium] › tests-e2e/community-list.spec.ts:223:5 › choosing a community remembers it and opens that community Home
+[2/139] [chromium] › tests-e2e/community-list.spec.ts:261:5 › switching from the current community opens the one that was tapped
+[3/139] [chromium] › tests-e2e/community-list.spec.ts:292:5 › retry recovers the list without a reload
+[4/139] [chromium] › tests-e2e/community-list.spec.ts:318:5 › Start a community goes to the creation screen, from empty and from a list
+[5/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:78:9 › COMMUNITY-PARITY · 390x844 › the reference hierarchy, top to bottom, with truthful banner facts
+[6/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:127:9 › COMMUNITY-PARITY · 390x844 › every chip is a 44 px target and only calls its callback
+[7/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:142:9 › COMMUNITY-PARITY · 390x844 › no active goal: no instrument, the member’s next step, facts intact
+[8/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:152:9 › COMMUNITY-PARITY · 390x844 › privacy: a press asks, the switch stays on the stored value
+[9/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:166:9 › COMMUNITY-PARITY · 390x844 › privacy: Space on a focused switch asks once, like a click
+[10/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:181:9 › COMMUNITY-PARITY · 390x844 › privacy: a failed save stays visible beside the stored value, with Retry
+[11/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:78:9 › COMMUNITY-PARITY · 390x640 › the reference hierarchy, top to bottom, with truthful banner facts
+[12/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:127:9 › COMMUNITY-PARITY · 390x640 › every chip is a 44 px target and only calls its callback
+[13/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:142:9 › COMMUNITY-PARITY · 390x640 › no active goal: no instrument, the member’s next step, facts intact
+[14/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:152:9 › COMMUNITY-PARITY · 390x640 › privacy: a press asks, the switch stays on the stored value
+[15/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:166:9 › COMMUNITY-PARITY · 390x640 › privacy: Space on a focused switch asks once, like a click
+[16/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:181:9 › COMMUNITY-PARITY · 390x640 › privacy: a failed save stays visible beside the stored value, with Retry
+[17/139] [chromium] › tests-e2e/sprint-w4-community-parity.spec.ts:291:7 › COMMUNITY-PARITY · evidence › fixture frames and cropped comparisons against the frozen reference
+[18/139] [chromium] › tests-e2e/sprint-w8-social-privacy.spec.ts:149:5 › the community surface names only the visible, and never leaks a uid
+[19/139] [chromium] › tests-e2e/sprint-w8-social-privacy.spec.ts:238:5 › an anonymous momentum row keeps the amount and loses the identity
+[20/139] [chromium] › tests-e2e/sprint-w8-social-privacy.spec.ts:266:5 › turning a name off removes it from activity that already happened
+[21/139] [chromium] › tests-e2e/sprint-w8-social-privacy.spec.ts:315:5 › the members directory refuses a non-member and leaks nothing to them
+[22/139] [chromium] › tests-e2e/sprint-w8-social-privacy.spec.ts:408:5 › a PROVEN zero renders the line: "0 people moved today"
+[23/139] [chromium] › tests-e2e/sprint-w8-social-privacy.spec.ts:433:5 › an UNESTABLISHED count renders nothing at all
+[24/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:213:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › Home: the tab stays mounted and visible behind every step, untouchable, and Close returns exact scroll, focus and instance
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:213:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › Home: the tab stays mounted and visible behind every step, untouchable, and Close returns exact scroll, focus and instance
+MEASURE Home · planted scroll: 121
+
+MEASURE Home · MOVE open: sheet / Home painted behind: {"sheet":true,"home":true}
+
+MEASURE Home · Tab stops outside the sheet: []
+
+MEASURE Home · after Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home","scroll":121,"sameInstance":true}
+
+[25/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:271:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › the receipt is in the sheet too, over the tab; “Back to community” still goes to the community
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:271:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › the receipt is in the sheet too, over the tab; “Back to community” still goes to the community
+MEASURE You · receipt: sheet / You painted behind: {"sheet":true,"you":true}
+
+[26/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:298:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › Escape and the scrim close the sheet back to the same tab
+[27/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:320:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › the sheet travels in and out; reduced motion gets none
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:320:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › the sheet travels in and out; reduced motion gets none
+MEASURE entry timeline (first 8 samples with the panel): [{"t":0,"y":28,"o":0},{"t":16,"y":19.8,"o":0.291253},{"t":29,"y":13.3,"o":0.523428},{"t":45,"y":8.7,"o":0.690781},{"t":62,"y":5.5,"o":0.804847},{"t":78,"y":3.4,"o":0.878866},{"t":95,"y":2.1,"o":0.926634},{"t":112,"y":1.2,"o":0.956872}]
+
+MEASURE exit timeline: [{"t":0,"y":0,"o":1},{"t":16,"y":0.4,"o":0.984098},{"t":32,"y":1.6,"o":0.94253},{"t":49,"y":3.3,"o":0.881586},{"t":66,"y":5.5,"o":0.804585},{"t":82,"y":8,"o":0.714507},{"t":99,"y":10.8,"o":0.613851},{"t":116,"y":13.9,"o":0.502019},{"t":134,"y":17.3,"o":0.381815},{"t":149,"y":20.9,"o":0.25389},{"t":165,"y":24.7,"o":0.117485}]
+
+MEASURE reduced-motion entry: [{"t":0,"y":0,"o":1},{"t":4,"y":0,"o":1},{"t":20,"y":0,"o":1},{"t":38,"y":0,"o":1}]
+
+[28/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:367:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › preserved: a cold one-goal link and “Already moved?” stay pages with their own Back; kiosk has no sheet
+[29/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:387:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › several goals: the chosen goal opens in a sheet over the chooser, and Back returns to the choice
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:387:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › several goals: the chosen goal opens in a sheet over the chooser, and Back returns to the choice
+MEASURE chooser · Tab stops outside the MOVE sheet: []
+
+[30/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:434:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › Close, then the browser’s Back inside the exit: one step back, not two
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:434:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › Close, then the browser’s Back inside the exit: one step back, not two
+MEASURE Close + browser Back: {"path":"/you","tab":"wsf-member-tab-you","sheets":0,"moveSheets":0}
+
+[31/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:449:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › Close while MOVE is still working out the goal: the answer does not open the flow
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:449:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › Close while MOVE is still working out the goal: the answer does not open the flow
+MEASURE Close during resolution: {"path":"/you","tab":"wsf-member-tab-you","sheets":0,"moveSheets":0,"sawFlow":false}
+
+[32/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:488:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › pressing MOVE again inside the exit: the tab behind cannot be reached until the sheet is gone; then MOVE opens normally
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:488:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › pressing MOVE again inside the exit: the tab behind cannot be reached until the sheet is gone; then MOVE opens normally
+MEASURE MOVE pressed inside the exit: {"path":"/you","tab":"wsf-member-tab-you","sheets":0,"moveSheets":0}
+
+[33/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:560:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › the goal sheet: focus enters on Close, Tab and Shift+Tab stay in the panel, the scrim is no stop
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:560:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › the goal sheet: focus enters on Close, Tab and Shift+Tab stay in the panel, the scrim is no stop
+MEASURE goal sheet · Tab / Shift+Tab stops: {"fwd":["wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close"],"back":["wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close"]}
+
+[34/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:576:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › the chooser, then a goal over it: each is contained while it is topmost; Close returns to the choice
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:576:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › the chooser, then a goal over it: each is contained while it is topmost; Close returns to the choice
+MEASURE chooser · stops: ["wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-close","wsf-move-choose-w9afpgoal1-muibywkh-6207c9f2","wsf-move-choose-w9afpgoal0-muibywkh-6207c9f2","wsf-move-close"]
+
+MEASURE goal over chooser · stops: ["wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close"]
+
+[35/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:605:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › a step that replaces the one the member was on keeps focus in the panel; a control the member is using keeps it
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:605:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › a step that replaces the one the member was on keeps focus in the panel; a control the member is using keeps it
+MEASURE count step · focus: "heading"
+
+MEASURE review step · focus: "heading"
+
+MEASURE receipt · focus: "wsf-contribute-result-headline"
+
+[36/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:646:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › pending and unknown keep focus in the panel (labelled injection: the reply is dropped)
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:646:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › pending and unknown keep focus in the panel (labelled injection: the reply is dropped)
+MEASURE pending / unknown · focus: "heading"
+
+[37/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:672:9 › APP-FEEL-PARITY-1 · Community Home loading is the final composition › 390x844: no second masthead while the community resolves
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:672:9 › APP-FEEL-PARITY-1 · Community Home loading is the final composition › 390x844: no second masthead while the community resolves
+MEASURE 844 · loading: {"wordmarks":["wsf-member-topbar-wordmark-home","wsf-member-topbar-wordmark"],"formWordmark":0,"h1s":[],"loadingText":"YOUR COMMUNITY\nLoading your community…"}
+
+[38/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:672:9 › APP-FEEL-PARITY-1 · Community Home loading is the final composition › 390x640: no second masthead while the community resolves
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:672:9 › APP-FEEL-PARITY-1 · Community Home loading is the final composition › 390x640: no second masthead while the community resolves
+MEASURE 640 · loading: {"wordmarks":["wsf-member-topbar-wordmark-home","wsf-member-topbar-wordmark"],"formWordmark":0,"h1s":[],"loadingText":"YOUR COMMUNITY\nLoading your community…"}
+
+[39/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:150:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from the Community tab: Home comes back as it was -- one instance, no loading, scroll kept
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:150:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from the Community tab: Home comes back as it was -- one instance, no loading, scroll kept
+MEASURE wordmark from Community: {"loading":[],"calls":{"wsfListGoals":3,"wsfGoalRecentAdditions":1,"wsfCommunityMembers":2,"wsfCommunityActivity":1,"wsfGoalPulse":1,"wsfMyContribution":1},"instances":1,"tab":"wsf-member-tab-home","scroll":136,"sameInstance":1}
+
+[40/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:186:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › on Home, by pointer and by Enter: a no-op
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:186:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › on Home, by pointer and by Enter: a no-op
+MEASURE wordmark on Home: {"loading":[],"calls":{},"instances":1,"path":"/community/w9afp2a-muibz7r8-9a1c05n"}
+
+[41/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:207:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from Progress by Enter: Home as it stands
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:207:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from Progress by Enter: Home as it stands
+MEASURE wordmark Enter from Progress: {"loading":[],"calls":{"wsfCommunityMembers":1,"wsfCommunityActivity":1,"wsfListGoals":1,"wsfGoalPulse":1,"wsfMyContribution":1},"instances":1}
+
+[42/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:230:7 › APP-FEEL-PARITY-1 cp2 · warm first render › the Community tab, first visit after Home: the known rows at once, no skeleton, then the fresh answer
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:230:7 › APP-FEEL-PARITY-1 cp2 · warm first render › the Community tab, first visit after Home: the known rows at once, no skeleton, then the fresh answer
+MEASURE Community tab first visit: {"loading":[],"calls":{"wsfMyCommunities":1,"wsfListGoals":2,"wsfGoalRecentAdditions":1,"wsfCommunityMembers":1},"msToRows":157}
+
+[43/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:247:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE with no open goal: “Go to your community” lands on the mounted community -- one instance, no loading, the sheet gone
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:247:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE with no open goal: “Go to your community” lands on the mounted community -- one instance, no loading, the sheet gone
+MEASURE MOVE no goal → Go to your community: {"loading":[],"calls":{"wsfCommunityMembers":1,"wsfCommunityActivity":1,"wsfListGoals":1},"instances":1,"sameInstance":1,"tab":"wsf-member-tab-home","path":"/community/w9afp2b-muibzdij-c6d305r"}
+
+[44/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:284:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE could not read: “Go Home” selects Home as it stands (labelled injection: the goal read fails)
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:284:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE could not read: “Go Home” selects Home as it stands (labelled injection: the goal read fails)
+MEASURE MOVE error → Go Home: {"loading":[],"calls":{"wsfCommunityMembers":2,"wsfCommunityActivity":2,"wsfListGoals":1,"wsfGoalPulse":1,"wsfMyContribution":1},"instances":1,"tab":"wsf-member-tab-home"}
+
+[45/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:313:7 › APP-FEEL-PARITY-1 cp2 · nothing outlives the account or the membership › sign out, then another account signs in on the same page: nothing of the first is ever shown
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:313:7 › APP-FEEL-PARITY-1 cp2 · nothing outlives the account or the membership › sign out, then another account signs in on the same page: nothing of the first is ever shown
+MEASURE names of the first account painted for the second: []
+
+[46/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:353:7 › APP-FEEL-PARITY-1 cp2 · nothing outlives the account or the membership › a membership lost while away: the list stops showing it as soon as the fresh read says so; a direct entry lands on the refusal
+[47/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:87:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x844 › one chip per community, the current one pressed; another selects it in place, announced, keyboard too
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:87:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x844 › one chip per community, the current one pressed; another selects it in place, announced, keyboard too
+MEASURE chip B box: {"x":20,"y":385,"width":174.734375,"height":44}
+
+[48/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:118:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x844 › Home follows the chosen community; the Community tab is never stale after a switch
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:118:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x844 › Home follows the chosen community; the Community tab is never stale after a switch
+MEASURE Home after choosing B: {"path":"/community/w9afp3b-muibzqxm-ce9ac5h844","homeInstances":1,"tabBars":1}
+
+[49/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:87:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x640 › one chip per community, the current one pressed; another selects it in place, announced, keyboard too
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:87:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x640 › one chip per community, the current one pressed; another selects it in place, announced, keyboard too
+MEASURE chip B box: {"x":20,"y":385,"width":174.734375,"height":44}
+
+[50/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:118:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x640 › Home follows the chosen community; the Community tab is never stale after a switch
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:118:9 › APP-FEEL-PARITY-1 cp3 · community chips · 390x640 › Home follows the chosen community; the Community tab is never stale after a switch
+MEASURE Home after choosing B: {"path":"/community/w9afp3b-muibzub9-952684h640","homeInstances":1,"tabBars":1}
+
+[51/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:152:7 › APP-FEEL-PARITY-1 cp3 · CURRENT after a switch made elsewhere › switching through a row (which opens that community’s Home) and coming back: CURRENT is the new one
+[52/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:200:7 › APP-FEEL-PARITY-1 cp3 · Settings from the side › from the menu: a panel over the dimmed, mounted tab; focus on Close, contained; Escape returns to the menu button
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:200:7 › APP-FEEL-PARITY-1 cp3 · Settings from the side › from the menu: a panel over the dimmed, mounted tab; focus on Close, contained; Escape returns to the menu button
+MEASURE Home painted behind the panel: true
+
+MEASURE panel box: {"x":12,"y":12,"width":366,"height":820}
+
+[53/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:239:7 › APP-FEEL-PARITY-1 cp3 · Settings from the side › from You’s row: Close returns focus to that row; Privacy still opens
+[54/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:266:7 › APP-FEEL-PARITY-1 cp3 · Settings from the side › it travels in from the right and out; reduced motion does neither; a cold link is still the page
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:266:7 › APP-FEEL-PARITY-1 cp3 · Settings from the side › it travels in from the right and out; reduced motion does neither; a cold link is still the page
+MEASURE panel entry (first 6): [{"t":0,"x":32,"o":0},{"t":4,"x":22.7,"o":0.291791},{"t":20,"x":15.3,"o":0.523045},{"t":36,"x":9.9,"o":0.690514},{"t":53,"x":6.3,"o":0.804671},{"t":70,"x":3.9,"o":0.879108}]
+
+MEASURE panel exit: [{"t":0,"x":0,"o":1},{"t":16,"x":0.5,"o":0.983986},{"t":33,"x":1.8,"o":0.942442},{"t":50,"x":3.8,"o":0.88147},{"t":66,"x":6.3,"o":0.804445},{"t":83,"x":9.1,"o":0.714346},{"t":100,"x":12.4,"o":0.613035},{"t":117,"x":15.9,"o":0.502519},{"t":133,"x":19.8,"o":0.382352},{"t":149,"x":23.9,"o":0.253667},{"t":166,"x":28.2,"o":0.117247}]
+
+[55/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:320:7 › APP-FEEL-PARITY-1 cp3 · a tab change fades › the new tab fades in over ~140 ms; reselect does not animate; reduced motion does not fade
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:320:7 › APP-FEEL-PARITY-1 cp3 · a tab change fades › the new tab fades in over ~140 ms; reselect does not animate; reduced motion does not fade
+MEASURE Community scene opacity from the press: [0.47,0.59,0.69,0.78,0.86,0.92,0.97,1,1,1,1,1]
+
+MEASURE reduced-motion opacity: [1,1,1,1,1,1]
+
+[56/139] [chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:365:7 › APP-FEEL-PARITY-1 cp3 · a tab change fades › the tab it leaves is gone at once: the two tabs are never painted together
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-3.spec.ts:365:7 › APP-FEEL-PARITY-1 cp3 · a tab change fades › the tab it leaves is gone at once: the two tabs are never painted together
+MEASURE to community: frames where the leaving tab shows through: []
+
+MEASURE to community: entering content opacity: [1,1,1,1,0.35,0.47,0.59,0.69,0.78,0.86,0.92,0.97,1,1,1,1]
+
+MEASURE to home: frames where the leaving tab shows through: []
+
+MEASURE to home: entering content opacity: [1,1,1,1,1,0.35,0.35,0.47,0.58,0.69,0.78,0.86,0.92,0.97,1,1]
+
+[57/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1-matched.spec.ts:316:9 › COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison › 390x844: Community and Settings routes against the frozen originals
+[58/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1-matched.spec.ts:316:9 › COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison › 390x640: Community and Settings routes against the frozen originals
+[59/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:170:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H1 the switch is the reference toggle: geometry, role and state, keyboard ring, Space
+[60/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:229:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H2 a re-read issued before a save lands does not put back what the save settled
+[61/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:274:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H3 a community with an unresolved save takes no second action; after the reply the next one goes through
+[62/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:311:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H4 membership lost before a save: its switches go at once and its block says so; nothing is stored
+[63/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:333:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H5 the roster follows a settled privacy change made in Settings
+[64/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:364:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H6 Close, Escape and the scrim during the exit are one dismissal, after repeated opens
+[65/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:402:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H7 reduced motion: Close dismisses without the 180 ms wait
+[66/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:423:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H8 closing mid-save is safe: the late reply does not overwrite or error the reopened panel
+[67/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:459:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H9 switching: every frame after a chip press pairs the heading with its own community
+[68/139] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:493:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H10 a failed goals read invents nothing: Goals is a dash and there is no "No active goal"
+[69/139] [chromium] › tests-e2e/sprint-w9-community-url-seam.spec.ts:45:5 › the community address is the same address from either entry point, and survives a cold load
+[chromium] › tests-e2e/sprint-w9-community-url-seam.spec.ts:45:5 › the community address is the same address from either entry point, and survives a cold load
+[W9] community address from the Community tab: ?groupId=w9seamother-muic0z8b-d68956
+
+[70/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from Home: Close and Escape return focus to MOVE; the tab and its scroll are kept
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from Home: Close and Escape return focus to MOVE; the tab and its scroll are kept
+MEASURE Home · planted scroll: 176
+
+MEASURE Home · MOVE Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+
+MEASURE Home · MOVE Escape: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+
+[71/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from Community: Close and Escape return focus to MOVE; the tab and its scroll are kept
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from Community: Close and Escape return focus to MOVE; the tab and its scroll are kept
+MEASURE Community · planted scroll: null
+
+MEASURE Community · MOVE Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-community"}
+
+MEASURE Community · MOVE Escape: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-community"}
+
+[72/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from You: Close and Escape return focus to MOVE; the tab and its scroll are kept
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from You: Close and Escape return focus to MOVE; the tab and its scroll are kept
+MEASURE You · planted scroll: null
+
+MEASURE You · MOVE Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-you"}
+
+MEASURE You · MOVE Escape: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-you"}
+
+[73/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:282:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: the route’s own Back returns focus to the Home hero’s “Already moved?”; Home keeps its scroll
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:282:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: the route’s own Back returns focus to the Home hero’s “Already moved?”; Home keeps its scroll
+MEASURE hero launcher · scroll at the press: 60
+
+MEASURE hero launcher · Back: {"focus":"wsf-community-goal-record-w9frgoal0-muic17q6-d14fd1b","tab":"wsf-member-tab-home"}
+
+[74/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:307:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: after MOVE from You hands straight to the one open goal, Back returns focus to MOVE on You
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:307:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: after MOVE from You hands straight to the one open goal, Back returns focus to MOVE on You
+MEASURE MOVE from You · Back: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-you"}
+
+[75/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:325:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: a goal chosen in the MOVE sheet gets focus back, and closing the sheet then returns it to MOVE
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:325:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: a goal chosen in the MOVE sheet gets focus back, and closing the sheet then returns it to MOVE
+MEASURE sheet choice · Back: {"focus":"wsf-move-choose-w9frgoal0-muic1ato-fdd872s"}
+
+[76/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:349:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to community” returns focus to the hero launcher that opened the flow
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:349:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to community” returns focus to the hero launcher that opened the flow
+MEASURE hero launcher · receipt · Back to community: {"focus":"wsf-community-goal-record-w9frgoal0-muic1cid-6e7678f","tab":"wsf-member-tab-home"}
+
+[77/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:368:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to community” after MOVE from You returns focus to MOVE, on the community
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:368:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to community” after MOVE from You returns focus to MOVE, on the community
+MEASURE MOVE from You · receipt · Back to community: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+
+[78/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:387:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to home” from the own-only receipt returns focus to MOVE, on the list the member left
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:387:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to home” from the own-only receipt returns focus to MOVE, on the list the member left
+MEASURE MOVE from the list · own-only receipt · Back to home: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+
+[79/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:413:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a contribution opened from Goal Setup: “Back to home” focuses the community’s heading, not body
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:413:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a contribution opened from Goal Setup: “Back to home” focuses the community’s heading, not body
+MEASURE Goal Setup · contribution · Back to home: {"focus":"wsf-community-name","tab":"wsf-member-tab-home"}
+
+[80/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:439:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a click on blank space after the return is the member’s: focus stays where they put it
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:439:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a click on blank space after the return is the member’s: focus stays where they put it
+MEASURE blank-space click after the return: {"focus":"body"}
+
+[81/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:466:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a restored control that is then taken away: focus moves on to the heading, not body
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:466:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a restored control that is then taken away: focus moves on to the heading, not body
+MEASURE launcher taken away after the return: {"focus":"body"}
+
+[82/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:489:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › cold arrivals: Back from a contribution opened directly, and Close on MOVE opened directly, focus the community’s heading
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:489:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › cold arrivals: Back from a contribution opened directly, and Close on MOVE opened directly, focus the community’s heading
+MEASURE cold contribute · Back: {"focus":"wsf-community-name"}
+
+MEASURE cold MOVE · Close: {"focus":"wsf-community-name"}
+
+[83/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:513:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › cold arrival on a Home with no heading: focus goes to the current tab
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:513:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › cold arrival on a Home with no heading: focus goes to the current tab
+MEASURE cold contribute (no community) · Back: {"path":"/","focus":"body","headings":0}
+
+[84/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:532:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a plain page load and a tab switch move nothing
+[85/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:545:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › the tab bar answers Enter: a keyboard member reaches every destination, and focus stays on the tab they chose
+[86/139] [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:563:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › Progress’s own “Start moving”: measured, and never body
+[chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:563:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › Progress’s own “Start moving”: measured, and never body
+MEASURE Progress Start moving · Close: {"path":"/community/w9fr-muic1ypk-97793eg","tab":"wsf-member-tab-home","focus":"wsf-community-name"}
+
+[87/139] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:189:7 › "Back to home" returns to Home as it stands, with confirmed figures › a list the member asked for: the same list, its address, and the committed total
+[88/139] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:232:7 › "Back to home" returns to Home as it stands, with confirmed figures › a Champion's first contribution: the same Community screen, not a copy of it
+[89/139] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:283:7 › "Back to home" returns to Home as it stands, with confirmed figures › a failed list re-read leaves the list standing, and the figures still update
+[90/139] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:327:7 › "Back to home" returns to Home as it stands, with confirmed figures › Back from a community to the list stays on the list, and the list is re-read
+[91/139] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:381:7 › "Back to home" returns to Home as it stands, with confirmed figures › control: a reload keeps the list the address asks for, with the committed total
+[92/139] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:397:7 › "Back to home" returns to Home as it stands, with confirmed figures › control: reselecting Home on the list reads nothing and keeps the list
+[93/139] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:127:7 › PERF-MOBILE-1 cp1 · useful before the reads return › Progress and You open on what is known: no skeleton, content before their reads return
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:127:7 › PERF-MOBILE-1 cp1 · useful before the reads return › Progress and You open on what is known: no skeleton, content before their reads return
+MEASURE Progress: ms to content with every read held 1.5 s; loading painted: {"progressMs":78,"progressLoading":[]}
+
+MEASURE You: ms to the member composition with every read held 1.5 s; loading painted: {"youMs":85,"youLoading":[]}
+
+[94/139] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:157:7 › PERF-MOBILE-1 cp1 · useful before the reads return › MOVE opens over the mounted tab on the known goal: no "working", no second identical goals read
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:157:7 › PERF-MOBILE-1 cp1 · useful before the reads return › MOVE opens over the mounted tab on the known goal: no "working", no second identical goals read
+MEASURE MOVE: ms to the movement step with every read held 1.5 s; loading painted; calls: {"moveMs":132,"moveLoading":[],"calls":["wsfGoalPulse {\"goalId\":\"w9perfg-muic2itc-34f5ddmv\"}","wsfMyContribution {\"goalId\":\"w9perfg-muic2itc-34f5ddmv\"}"]}
+
+[95/139] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:198:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › cold Home for a member of one community sends no identical read twice
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:198:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › cold Home for a member of one community sends no identical read twice
+MEASURE cold Home calls: ["wsfMyCommunities {}","wsfListGoals {\"groupId\":\"w9perfc-muic2n83-df65e9ch\",\"includeHistory\":true}","wsfGoalPulse {\"goalId\":\"w9perfg-muic2n83-df65e9ch\"}","wsfMyContribution {\"goalId\":\"w9perfg-muic2n83-df65e9ch\"}","wsfListChallenge {\"groupId\":\"w9perfc-muic2n83-df65e9ch\"}","wsfCommunityMembers {\"groupId\":\"w9perfc-muic2n83-df65e9ch\"}","wsfCommunityActivity {\"groupId\":\"w9perfc-muic2n83-df65e9ch\",\"goalId\":\"w9perfg-muic2n83-df65e9ch\"}"]
+
+[96/139] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:219:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › two accounts in one document: nothing of the first is painted for the second
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:219:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › two accounts in one document: nothing of the first is painted for the second
+MEASURE names of the first account painted for the second: []
+
+[97/139] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:264:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › a refused membership is forgotten: MOVE does not open on the lost community from the record
+[98/139] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:294:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › a return re-checks the membership: a held pre-removal goals answer cannot bring the community back
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:294:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › a return re-checks the membership: a held pre-removal goals answer cannot bring the community back
+MEASURE the removed community shown on: {"home":false,"community":false,"activity":false,"you":false}
+
+[99/139] [chromium] › tests-e2e/sprint-w9-shell-production.spec.ts:118:5 › the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE opens over the tab you were on
+[100/139] [chromium] › tests-e2e/sprint-w9-shell-production.spec.ts:314:5 › MOVE opens as a sheet over the tab the member was on, and Close returns to it
+[101/139] [chromium] › tests-e2e/sprint-w9-shell-production.spec.ts:526:5 › MOVE with nothing running is the same sheet, with the same way out
+[102/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 390px on all three surfaces
+[103/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 360px on all three surfaces
+[104/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 320px on all three surfaces
+[105/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 195px on all three surfaces
+[106/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 390px on all three surfaces
+[107/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 360px on all three surfaces
+[108/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 320px on all three surfaces
+[109/139] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 195px on all three surfaces
+[110/139] [chromium] › tests-e2e/ui-a11y.spec.ts:552:7 › R1b Manage: no overflow at 390px, confirmation open
+[111/139] [chromium] › tests-e2e/ui-a11y.spec.ts:552:7 › R1b Manage: no overflow at 195px, confirmation open
+[112/139] [chromium] › tests-e2e/ui-a11y.spec.ts:625:7 › R2 display contains every element at 1440×900 with maximum-length names
+[113/139] [chromium] › tests-e2e/ui-a11y.spec.ts:625:7 › R2 display contains every element at 390×844 with maximum-length names
+[114/139] [chromium] › tests-e2e/ui-a11y.spec.ts:686:5 › R3 every control is at least 44×44 across Community Home, the sheet, the contribution flow and the display
+[115/139] [chromium] › tests-e2e/ui-a11y.spec.ts:813:5 › R3 axe agrees about target size on Community Home and the contribution entry
+[116/139] [chromium] › tests-e2e/ui-a11y.spec.ts:848:5 › R4 every Tab stop shows a focus ring, and the controls that matter are on the path
+[117/139] [chromium] › tests-e2e/ui-a11y.spec.ts:927:5 › R5a the Manage sheet announces itself as a modal dialog called Champion tools
+[118/139] [chromium] › tests-e2e/ui-a11y.spec.ts:962:5 › R5b the Manage sheet traps focus, blocks the page behind it, and returns focus on Escape
+[119/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1056:7 › R6 reduced motion › nothing animates on Community Home or the display, and the WE starts at its true fill
+[120/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1119:7 › R6 reduced motion › while a contribution is recording, the only thing moving is inside the recording card
+[121/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1203:5 › R7a axe finds no WCAG A/AA violation on any state of any surface
+[122/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1266:5 › R7b every surface has a title, one level-1 heading, a named wordmark, and unambiguous controls
+[123/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1346:5 › R8 the entry error is announced, and the receipt is a polite live region
+[124/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1379:5 › R9 the entry field asks for a numeric keypad, a done key, and never triggers iOS zoom
+[125/139] [chromium] › tests-e2e/ui-a11y.spec.ts:1411:5 › R10 every number survives without colour (greyscale artifacts for human review)
+[126/139] [chromium] › tests-e2e/ui-app-shell.spec.ts:80:5 › the shell carries four destinations and the MOVE action, and Home is the community
+[127/139] [chromium] › tests-e2e/ui-app-shell.spec.ts:198:5 › Activity shows what this member actually recorded, and says it is private
+[128/139] [chromium] › tests-e2e/ui-app-shell.spec.ts:242:5 › the shell stays off the event surfaces and off the signed-out ones
+[129/139] [chromium] › tests-e2e/ui-community-home.spec.ts:256:5 › Community Home at phone size — member view, Champion view, full page
+[130/139] [chromium] › tests-e2e/ui-community-home.spec.ts:550:5 › a failed pulse read says so on the hero, and its retry can be read
+[131/139] [chromium] › tests-e2e/ui-community-home.spec.ts:599:5 › Living WE static states through the real data path
+[132/139] [chromium] › tests-e2e/you-page.spec.ts:186:5 › identity survives a failed goal read
+[133/139] [chromium] › tests-e2e/you-page.spec.ts:206:5 › retry recovers in place, without a reload
+[134/139] [chromium] › tests-e2e/you-page.spec.ts:229:5 › a goal with no recorded own part is not listed
+[135/139] [chromium] › tests-e2e/you-page.spec.ts:253:5 › the lead is the open goal ending soonest, not the first one back
+[136/139] [chromium] › tests-e2e/you-page.spec.ts:281:5 › a member of several communities is told that, not that they are in none
+[137/139] [chromium] › tests-e2e/you-page.spec.ts:299:5 › a member of nothing is told that, and offered a way in
+[138/139] [chromium] › tests-e2e/you-page.spec.ts:314:5 › a failed own-part read is admitted, not hidden
+[139/139] [chromium] › tests-e2e/you-page.spec.ts:337:5 › a signed-out visitor gets no member navigation
+  3 skipped
+  136 passed (6.9m)

@@ -1,6 +1,6 @@
 {
   "fixtureOnly": "Every person, name and figure is the frozen reference’s sample data, seeded into the local emulator (demo-wsf-local) for this comparison only. No production read or write.",
-  "commit": "0e5d6f38",
+  "commit": "ffb517e5",
   "viewport": {
     "width": 390,
     "height": 640
@@ -10,41 +10,50 @@
   "memberRole": "foundingChampion",
   "facts": {
     "members": "Members23",
-    "role": "Your roleFounding Champion",
+    "role": "Your roleChampion",
     "goals": "Goals3"
   },
+  "chipOrder": [
+    "w9match-oak-muibvh7q-a13691m640",
+    "w9match-harbor-muibvh7q-a13691m640"
+  ],
+  "settingsSectionOrder": [
+    "w9match-oak-muibvh7q-a13691m640",
+    "w9match-harbor-muibvh7q-a13691m640"
+  ],
+  "harborNameHint": "Members see “Alex M.”",
   "settingsSwitches": [
-    "wsf-privacy-panel-name-w9match-harbor-mui8h5wj-5fef8em640=true",
-    "wsf-privacy-panel-activity-w9match-harbor-mui8h5wj-5fef8em640=false",
-    "wsf-privacy-panel-name-w9match-oak-mui8h5wj-5fef8em640=false",
-    "wsf-privacy-panel-activity-w9match-oak-mui8h5wj-5fef8em640=true"
+    "wsf-privacy-panel-name-w9match-oak-muibvh7q-a13691m640=false",
+    "wsf-privacy-panel-activity-w9match-oak-muibvh7q-a13691m640=true",
+    "wsf-privacy-panel-name-w9match-harbor-muibvh7q-a13691m640=true",
+    "wsf-privacy-panel-activity-w9match-harbor-muibvh7q-a13691m640=false"
   ],
   "community": {
     "lovable": "../../community-parity-1/lovable-d4f60624/manage-community-page-390x640.png",
     "lovableSha256": "bcf9b22bbe3af524d1b93f9f81fbb7df0659b01b416a66cb8f636b6674ef261c",
     "candidate": "CANDIDATE-FIXTURE-community-390x640.png",
-    "candidateSha256": "9cf9a1ddb6f8c4dbbcc3ce5303556b94ad006ad04cddec77fd6110c47b183a41",
+    "candidateSha256": "a598aa9fcf17e48f997a499618ad4b325b077e20ebda3546cd49b7cd4030cded",
     "sideBySide": "cmp-community-390x640-side-by-side.png",
     "overlay50": "cmp-community-390x640-overlay-50.png",
     "difference": "cmp-community-390x640-difference.png",
-    "differingShare": 0.3489,
+    "differingShare": 0.338,
     "bannerBox": {
       "x": 0,
-      "y": 52,
+      "y": 62,
       "width": 390,
-      "height": 220
+      "height": 195
     },
     "ringBox": {
       "x": 220,
-      "y": 52,
+      "y": 62,
       "width": 170,
       "height": 170
     },
     "ring": {
       "window": "170x170 at each banner top-right corner",
-      "comparedPixels": 27023,
+      "comparedPixels": 27014,
       "maxChannelDelta": 21,
-      "meanChannelDelta": 0.039,
+      "meanChannelDelta": 0.038,
       "ringPixelsLovable": 9084,
       "ringPixelsCandidate": 9116,
       "ringClassificationAgreement": 0.9987
@@ -54,11 +63,11 @@
     "lovable": "../../community-parity-1/lovable-d4f60624/settings-390x640.png",
     "lovableSha256": "93d8552709a3302fbc4c4cc134bb5d25c4b3234873180d8009cf371657de4615",
     "candidate": "CANDIDATE-FIXTURE-settings-390x640.png",
-    "candidateSha256": "de768e4a713d9093b001f7fe4cb5cc5dcf218dbd00b8d950f062e995d4f08340",
+    "candidateSha256": "f1a725024c28c9a154f8d413b56cd36f5f913d8fdc4fa84f8851bc216e04d875",
     "sideBySide": "cmp-settings-390x640-side-by-side.png",
     "overlay50": "cmp-settings-390x640-overlay-50.png",
     "difference": "cmp-settings-390x640-difference.png",
-    "differingShare": 0.2842,
+    "differingShare": 0.1336,
     "panelBox": {
       "x": 12,
       "y": 12,

@@ -1,0 +1,6 @@
+
+Running 2 tests using 1 worker
+
+[1/2] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1-matched.spec.ts:316:9 › COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison › 390x844: Community and Settings routes against the frozen originals
+[2/2] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1-matched.spec.ts:316:9 › COMMUNITY-SETTINGS-PARITY-1 · matched-fixture route comparison › 390x640: Community and Settings routes against the frozen originals
+  2 passed (12.8s)
