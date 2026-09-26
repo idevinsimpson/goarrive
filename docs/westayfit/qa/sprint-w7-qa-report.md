@@ -4545,3 +4545,23 @@ W7 did not read run 50's job log again.
   - `bdc82c0e`: **FAIL-BEFORE 7 / 7 pass, PRESERVE 5 / 5**;
   - ×2 identical on both candidates.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed. Emulators only (`demo-wsf-local`). Nothing is accepted, integrated or staged.
+
+## 50b · The You Y-F10 successor on exact `18ba6de2` (Director HOLD #503 `5844877801`; W6 `5844971743`; L0 `5845024782`; W7 ACK `5845159063`): **Y-F10 PASS; its preservation rows hold; no new call, stage or loading field**
+
+- **Lineage, by git:** `18ba6de2` is one commit on `88ef59db`, touching 2 files (+38 / −4):
+  - `app/(tabs)/you.tsx` (+10 / −4): the route's `failed` state may carry `community`, passed only from the goals-read catch, after the current community is resolved;
+  - W6's hook spec (+28).
+
+  **No view file, no new read, and an empty protected-path diff.**
+- **Build:** a detached worktree with an emulator-flagged build, served beside `demo-wsf-local`. Its bundle is stamped `18ba6de2`.
+
+| # | Check | Result |
+|---|---|---|
+| **1** | **Check 44 A5, unchanged** (cold `/you`, goals read failing, INJECTED) | **`a0f1351a`: Y-F10 FAIL** (no band). **`18ba6de2`: Y-F10 PASS ×2.** The page shows "YOUR CURRENT COMMUNITY W7 Harbor Movers … ROLE Member … 2 members", then "Your identity and community are still here. We won't guess an amount or show it as zero." with Open community and Retry. **Y-P18 identity, Y-P19 Retry, Y-P20 no amount guessed as 0 and Y-P21 Sign out: PASS ×2.** |
+| **2** | **Callables on that failure path** (new measure-only Q5 in `sprint-w7-route-qa-you-progress.spec.ts`) | **Identical on both builds:** `wsfMyCommunities` and `wsfListGoals`, and nothing else. The band shows on `18ba6de2` (×2) but not on `a0f1351a`. |
+| **3** | **Check 41B, unchanged,** 12 / 12 runs, run alone, against `a0f1351a` | **0 changed call, stage, loading, mount or blocking fields across all 38 transitions.** You's first visit: 0 calls, 0 stages, no loading (17 / 19 ms, against 17 / 15). |
+
+- **Carried, not re-run (as ruled):** the rest of Check 50. The Progress delta `bdc82c0e` is accepted (#504 `5844877908`); W6 carries it onto this successor.
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
+
+**Status:** **Y-F10 closes on `18ba6de2`.** Not accepted, integrated or staged.

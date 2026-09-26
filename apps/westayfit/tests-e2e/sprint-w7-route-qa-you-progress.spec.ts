@@ -252,4 +252,19 @@ test.describe(`W7 Check 50 · You / Progress route QA (${LABEL})`, () => {
     fb('Q-F5 warm: the private hero names the member', t.slice(0, 200).toLowerCase().includes(name), t.replace(/\s+/g, ' ').slice(0, 120));
     report('Q4 Progress name warm', out);
   });
+
+  test('Q5 You, cold goals-read failure (INJECTED): the callables issued and the band (measure; Check 50b)', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await twoCommunities('q5');
+    await page.goto('/');
+    await remember(page, fx.m.uid, fx.c1.id);
+    await signInVia(page, fx.m.email, fx.m.password);
+    await expect(page.locator('[data-testid="wsf-community"]:visible').first()).toContainText(fx.A1.title, { timeout: 40_000 });
+    await page.route('**/wsfListGoals', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"status":"INTERNAL","message":"INJECTED"}}' }));
+    const calls: string[] = [];
+    page.on('request', (r) => { const u = new URL(r.url()); if (u.port === '5001') calls.push(u.pathname.split('/').pop() ?? ''); });
+    await page.goto('/you');
+    const t = await settledText(page, 'wsf-you', 'Retry');
+    note('Q5 You failure', { band: t.includes(fx.c1.name), calls: calls.slice().sort(), text: t.replace(/\s+/g, ' ').slice(0, 400) });
+  });
 });
