@@ -1194,6 +1194,14 @@ jobs:
         working-directory: app
         run: npm --prefix apps/westayfit ci --ignore-scripts
 
+      # The activation and cleanup token mints (working directory app/) resolve
+      # google-auth-library from the workspace root, where this installs it.
+      # Run 54 had no such step and failed with "Cannot find module". Least
+      # capability: only the exact library the mints use, script-free; this job
+      # holds no deployment tooling and no CLI.
+      - name: Install the pinned token library
+        run: npm install --no-save --ignore-scripts google-auth-library@9.15.1
+
       - name: Install browsers using the candidate's pinned Playwright CLI
         working-directory: app
         run: |
