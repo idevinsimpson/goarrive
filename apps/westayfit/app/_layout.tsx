@@ -9,7 +9,7 @@ import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
 import { StagingBanner } from '../src/StagingBanner';
 import { wsfTheme } from '../src/theme';
-import { isMoveSheetRoute } from '../src/ui/moveSheetRoute';
+import { isMoveSheetRoute, isOverMemberTabs } from '../src/ui/moveSheetRoute';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
 
 export default function RootLayout() {
@@ -121,6 +121,29 @@ function AppShell() {
                     presentation: 'transparentModal',
                     contentStyle: { backgroundColor: 'transparent' },
                     animation: reduced ? 'none' : 'slide_from_bottom',
+                  }
+                : {}
+            }
+          />
+          {/*
+            APP-FEEL-PARITY-1 CHECKPOINT 3. SETTINGS COMES IN FROM THE SIDE.
+
+            The owner: "Settings should enter from the side" (Director #365
+            `5834082617`). It was pushed as an ordinary opaque page. Opened
+            over the member's tabs -- from the top bar's menu or You's row --
+            it is now presented like the reference's utility panels: a
+            transparent modal, so the tab stays mounted and dimmed behind a
+            panel from the right (app/settings.tsx draws it). A cold or deep
+            link keeps the page.
+          */}
+          <Stack.Screen
+            name="settings"
+            options={({ route, navigation }) =>
+              isOverMemberTabs(route, navigation.getState())
+                ? {
+                    presentation: 'transparentModal',
+                    contentStyle: { backgroundColor: 'transparent' },
+                    animation: reduced ? 'none' : 'slide_from_right',
                   }
                 : {}
             }

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
-import { rememberCurrentCommunity } from '../../../../../src/currentCommunity';
+import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../../../src/currentCommunity';
 import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
 import { describeCallableError } from '../../../../../src/callableErrors';
 import { FormShell } from '../../../../../src/AuthFormPrimitives';
@@ -104,7 +104,14 @@ import {
   kit,
 } from '../../../../../src/ui/kit';
 import { LIVING_WE_ASPECT } from '../../../../../src/ui/livingWeCalibration';
-import { forgetCommunity, readGoals, readMyCommunities } from '../../../../../src/memberReads';
+import {
+  SAME_LOAD_MS,
+  forgetCommunity,
+  peekMyCommunities,
+  readGoals,
+  readMyCommunities,
+  readOwnCredit,
+} from '../../../../../src/memberReads';
 import {
   MomentumRow,
   PresenceRow,
@@ -327,6 +334,11 @@ type MyContributionResponse = { ownCredit: number; unit: string; repeatPolicy?: 
  */
 const PULSE_SETTLE_MS = 2_600;
 
+/** `wsfListGoals`'s answer to an account that is not an active member here. */
+function refusedMembership(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === 'functions/not-found';
+}
+
 export default function CommunityPage() {
   const params = useLocalSearchParams<{ groupId: string }>();
   const groupId = params.groupId;
@@ -488,6 +500,34 @@ export default function CommunityPage() {
   useEffect(() => {
     if (groupId) rememberCurrentCommunity(user?.uid ?? null, groupId);
   }, [groupId, user?.uid]);
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 3. HOME FOLLOWS THE MEMBER'S CHOICE.
+
+    The member can choose a different community without leaving the Community
+    tab (its chips, as the reference does). This screen stays mounted in the
+    Home tab meanwhile, so coming back to Home used to show the community
+    they had just switched away from. On a return, if the remembered choice
+    is a different community this account belongs to (from its own last
+    read), Home opens that one in its own stack -- replacing, so Back does not
+    lead to the old one, and never over the tabs.
+
+    Only a RETURN: the first focus is this screen being opened, which is
+    itself the member's choice and has just been remembered above.
+  */
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) {
+        focusedOnce.current = true;
+        return;
+      }
+      const uid = user?.uid ?? null;
+      const ids = peekMyCommunities(uid)?.items.map((i) => i.groupId);
+      if (!uid || !groupId || !ids || ids.length === 0) return;
+      const chosen = resolveCurrentCommunity(uid, ids);
+      if (chosen && chosen !== groupId) router.replace(`/community/${chosen}` as never);
+    }, [user?.uid, groupId, router]),
+  );
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
@@ -918,8 +958,13 @@ export default function CommunityPage() {
         try {
           // The same read Home's list makes, shared when it is in flight
           // (src/memberReads.ts): the list redirecting here asks at the same
-          // moment, and one answer serves both.
-          const myResult = { data: (await readMyCommunities(user.uid)) as unknown as MyCommunitiesResponse };
+          // moment, and one answer serves both. PERF-MOBILE-1: by the time
+          // this screen asks, that answer has usually SETTLED (measured on
+          // `0b460ce3`: a second wsfMyCommunities on every cold Home). An
+          // answer read for this account within the same load is this read.
+          const myResult = {
+            data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as MyCommunitiesResponse,
+          };
           if (cancelled) return;
           otherCommunityCount = Math.max(0, myResult.data.items.length - 1);
           const item = myResult.data.items.find((i) => i.groupId === groupId);
@@ -998,8 +1043,6 @@ export default function CommunityPage() {
     if (!ready || !user || !groupId) return;
 
     let cancelled = false;
-    // Loading only when there is nothing of this account's for this community
-    // to stand on (a warm re-entry keeps its last goals until this lands).
     setGoalsState({ kind: 'loading' });
 
     (async () => {
@@ -1010,7 +1053,12 @@ export default function CommunityPage() {
         // history row needs to state its result. The screen splits active from
         // closed below; the server does not decide the layout. Shared with an
         // identical read in flight (src/memberReads.ts).
-        const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
+        // PERF-MOBILE-1: the list that opened this community reads the same
+        // goals at the same moment (measured: two identical wsfListGoals, 3 ms
+        // apart); one answer from this load serves both. A Retry reads fresh.
+        const result = {
+          data: await readGoals<ListedGoal>(user.uid, groupId, goalsReloadToken === 0 ? SAME_LOAD_MS : 0),
+        };
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
@@ -1019,8 +1067,11 @@ export default function CommunityPage() {
         // screen keeps its own fixed copy (rendered by the goals-error hero
         // and the Champion panel, neither of which prints this message).
         console.warn('[wsf] goal list failed', e);
-        // Warm goals already on screen stay; their figures fall to the
-        // last-known treatment through the progress reads.
+        if (refusedMembership(e)) {
+          forgetCommunity(user.uid, groupId);
+          setState({ kind: 'notMember' });
+          return;
+        }
         setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();
@@ -1053,16 +1104,27 @@ export default function CommunityPage() {
     let cancelled = false;
     (async () => {
       try {
-        const fn = httpsCallable<
-          { groupId: string; includeHistory: boolean },
-          ListGoalsResponse
-        >(getFirebaseFunctions(), 'wsfListGoals');
-        const result = await fn({ groupId, includeHistory: true });
+        // Fresh (a return is not the same load), through the shared layer so
+        // the answer is the account's record for every surface.
+        const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
         if (cancelled) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
         if (cancelled) return;
         console.warn('[wsf] goal list refresh failed', e);
+        /*
+          PERF-MOBILE-1 SUCCESSOR (Director #489 `5841198083`, #494
+          `5841264164`). A FRESH REFUSAL IS NOT A STALE READ. `wsfListGoals`
+          answers `not-found` to an account that is no longer an active member
+          here. That is the server's proof, not a network hiccup: this
+          community's record goes and the page stops showing its figures as
+          "last known". Any other failure keeps the last-known treatment.
+        */
+        if (refusedMembership(e)) {
+          forgetCommunity(user.uid, groupId);
+          setState({ kind: 'notMember' });
+          return;
+        }
         setProgressReloadToken((n) => n + 1);
       }
     })();
@@ -1108,14 +1170,14 @@ export default function CommunityPage() {
       (async () => {
         try {
           const pulseFn = httpsCallable<{ goalId: string }, PulseTotals>(functions, 'wsfGoalPulse');
-          const ownFn = httpsCallable<{ goalId: string }, MyContributionResponse>(
-            functions,
-            'wsfMyContribution'
-          );
+          // The member's own part, fresh, through the shared layer: the same
+          // answer then opens Progress, You and MOVE without asking again.
           const [pulseResult, ownResult] = await Promise.all([
             pulseFn({ goalId: goal.goalId }),
             goal.status === 'active'
-              ? ownFn({ goalId: goal.goalId }).catch(() => null)
+              ? readOwnCredit(user.uid, goal.goalId)
+                  .then((data) => ({ data: data as unknown as MyContributionResponse }))
+                  .catch(() => null)
               : Promise.resolve(null),
           ]);
           if (cancelled) return;

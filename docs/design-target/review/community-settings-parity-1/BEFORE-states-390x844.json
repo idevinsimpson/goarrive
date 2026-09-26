@@ -1,0 +1,21 @@
+{
+  "commit": "889e9775",
+  "settingsPanel": 0,
+  "switched": {},
+  "stage": "BEFORE",
+  "device": "390x844",
+  "frames": [
+    {
+      "file": "BEFORE-community-390x844.png",
+      "sha256": "a71ef3b79e692b36ed9c771030f32e01d9d487b78f44a8492d42a0eae6f8e86d"
+    },
+    {
+      "file": "BEFORE-community-lower-390x844.png",
+      "sha256": "a71ef3b79e692b36ed9c771030f32e01d9d487b78f44a8492d42a0eae6f8e86d"
+    },
+    {
+      "file": "BEFORE-settings-open-390x844.png",
+      "sha256": "48d0798e929db23cab5be9b8eedd0c7e64ee56cb2093fe9a48031e6bfa359cfe"
+    }
+  ]
+}

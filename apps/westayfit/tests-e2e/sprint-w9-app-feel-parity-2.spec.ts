@@ -285,8 +285,12 @@ test.describe('APP-FEEL-PARITY-1 cp2 · warm first render', () => {
     test.setTimeout(240_000);
     const fx = await seed('g');
     await signInVia(page, fx.email, PASSWORD);
-    await openA(page, fx);
+    // PERF-MOBILE-1 (#494): MOVE now decides at once from goals this account
+    // already knows, and reads them only when it does not. So the goal read
+    // is made to fail from before the community loads: nothing knows the
+    // goals, and MOVE must read them. The assertions below are unchanged.
     await page.route('**/wsfListGoals', (route) => route.abort('failed'));
+    await openA(page, fx);
     await page.getByTestId('wsf-member-tab-move').last().click();
     await expect(page.locator('[data-testid="wsf-move-error-home"]:visible')).toBeVisible({ timeout: 40_000 });
     await page.unroute('**/wsfListGoals');

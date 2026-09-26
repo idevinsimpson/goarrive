@@ -1,7 +1,6 @@
 import { router, useLocalSearchParams, useNavigation, usePathname } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -40,7 +39,7 @@ import {
   type RepeatPolicy,
 } from '../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
+import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import {
   KIOSK_TICK_MS,
   KIOSK_UNRESOLVED_NOTICE,
@@ -55,6 +54,16 @@ import {
   runKioskFinish,
   type KioskOutcome,
 } from '../../src/kioskSession';
+import {
+  SAME_LOAD_MS,
+  forgetCommunity,
+  noteConfirmedContribution,
+  peekGoals,
+  peekOwnCredit,
+  readGoals,
+  readMyCommunities,
+  readOwnCredit,
+} from '../../src/memberReads';
 import { moveAttemptIdFor } from '../../src/moveSession';
 import {
   clearPendingIfAttempt,
@@ -177,6 +186,41 @@ type ScreenContext =
   | { kind: 'verified'; groupId: string; communityName: string; goalTitle: string };
 
 type ListedGoal = { goalId: string; title: string };
+
+/**
+ * PERF-MOBILE-1. THE GOAL AS THIS ACCOUNT ALREADY KNOWS IT.
+ *
+ * Measured on `0b460ce3` (W7 Check 41B): opening MOVE on a goal the tab
+ * beneath had just shown still waited on `wsfGoalPulse` and
+ * `wsfMyContribution` before the movement step appeared. When this account's
+ * own record (src/memberReads.ts) holds the goal -- open, with its confirmed
+ * shared total, target and unit, from `wsfListGoals` -- and the member's own
+ * confirmed part in it, the step opens on those at once. The fresh reads
+ * below still run and replace them; the write itself is decided by the
+ * server, never by this.
+ *
+ * Anything less is not known: no record, a goal not in it, a total the list
+ * did not carry, a goal that is not open. Then the screen loads exactly as it
+ * always did.
+ */
+function knownGoal(
+  uid: string | null,
+  goalId: string | undefined,
+  groupId: string | null,
+): { state: LoadState; guideKey: string | null; policy: RepeatPolicy } | null {
+  if (!uid || !goalId || !groupId) return null;
+  const goal = peekGoals<Record<string, unknown>>(uid, groupId)?.goals.find((g) => g.goalId === goalId);
+  const own = peekOwnCredit(uid, goalId);
+  if (!goal || !own || goal.status !== 'active') return null;
+  const { sharedTotal, target, unit } = goal;
+  if (typeof sharedTotal !== 'number' || typeof target !== 'number' || typeof unit !== 'string') return null;
+  if (typeof own.ownCredit !== 'number') return null;
+  return {
+    state: { kind: 'ready', pulse: { sharedTotal, target, unit, status: 'active' }, ownCredit: own.ownCredit },
+    guideKey: typeof own.activityGuideKey === 'string' ? own.activityGuideKey : null,
+    policy: resolveRepeatPolicy(own.repeatPolicy),
+  };
+}
 
 // The pre-write steps. Everything after "Record" is derived from the
 // attempt's own state (sending, unknown, refused, confirmed), not from here.
@@ -429,7 +473,8 @@ export default function ContributeToGoal() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [asSheet, rootNavigation]);
-  const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const [known] = useState(() => knownGoal(user?.uid ?? null, goalId, groupIdHint));
+  const [state, setState] = useState<LoadState>(() => known?.state ?? { kind: 'loading' });
   // A6. When this screen last heard a confirmed answer about the goal — set by
   // the cold load and by every successful poll tick. Client receipt time, the
   // same fact (and the same wording) as Community Home and the public display.
@@ -440,7 +485,7 @@ export default function ContributeToGoal() {
   const [entryError, setEntryError] = useState<string | null>(null);
   const [reviewCount, setReviewCount] = useState<number | null>(null);
   // The goal's optional guide override, from the authenticated own-credit read.
-  const [activityGuideKey, setActivityGuideKey] = useState<string | null>(null);
+  const [activityGuideKey, setActivityGuideKey] = useState<string | null>(() => known?.guideKey ?? null);
   // The counting guide is collapsed on arrival and remembers nothing: no
   // storage, no per-account preference. Reset with every context change below,
   // exactly like the entry itself.
@@ -451,7 +496,7 @@ export default function ContributeToGoal() {
   // the server answers — not the resolved default, because before the answer
   // arrives the screen knows nothing. Nothing that depends on it renders
   // before the load completes, so this value is never the one on screen.
-  const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>('once');
+  const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>(() => known?.policy ?? 'once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
@@ -541,21 +586,25 @@ export default function ContributeToGoal() {
     // Nothing from the previous context stays on screen while the new one
     // loads: not the pending screen, not the receipt, not the typed entry,
     // not an error, not a refusal, and not the previous ready-state totals.
+    // What this account's record already knows about this goal (PERF-MOBILE-1,
+    // `knownGoal`); nothing, for a context it does not know.
+    const recorded = knownGoal(uid, goalId, groupIdHint);
     setPending(null);
     setLastResult(null);
-    setRepeatPolicy('once');
+    setRepeatPolicy(recorded?.policy ?? 'once');
     setLegacyOrphan(null);
     setRefusal(null);
     sharedBeforeRef.current = null;
     setEntry('');
     setEntryError(null);
     setReviewCount(null);
-    setActivityGuideKey(null);
+    setActivityGuideKey(recorded?.guideKey ?? null);
     setGuideOpen(false);
     setSubmitting(false);
     setStep(initialStep);
     setContext({ kind: 'none' });
-    setState({ kind: 'loading' });
+    setState(recorded?.state ?? { kind: 'loading' });
+    setPulseAt(null);
     setTimerBase(0);
     setTimerStartedAt(null);
     setTimerRunning(false);
@@ -607,16 +656,14 @@ export default function ContributeToGoal() {
           getFirebaseFunctions(),
           'wsfGoalPulse'
         );
-        const mineFn = httpsCallable<{ goalId: string }, MyContribution>(
-          getFirebaseFunctions(),
-          'wsfMyContribution'
-        );
         // Own credit comes from the server on every load — authenticated,
-        // uncached, keyed by the caller's uid — so a reload, a closed goal or
-        // an authorized correction never shows a stale or invented number.
+        // keyed by the caller's uid — so a reload, a closed goal or an
+        // authorized correction never shows a stale or invented number. It is
+        // read through this account's record (src/memberReads.ts): fresh, and
+        // the answer is then the record every surface opens on.
         const [pulseRes, mineRes] = await Promise.all([
           pulseFn({ goalId }),
-          mineFn({ goalId }),
+          readOwnCredit(user.uid, goalId).then((data) => ({ data: data as unknown as MyContribution })),
         ]);
         if (cancelled) return;
         const pulse = pulseRes.data;
@@ -639,6 +686,10 @@ export default function ContributeToGoal() {
           e instanceof FirebaseError &&
           (e.code === 'functions/not-found' || e.code === 'functions/invalid-argument')
         ) {
+          // Not this account's to see (or not a goal): whatever its record
+          // holds for the community it came through goes, so nothing opens on
+          // it again from memory (PERF-MOBILE-1, src/memberReads.ts).
+          if (groupIdHint) forgetCommunity(user.uid, groupIdHint);
           setState({ kind: 'notFound' });
           return;
         }
@@ -662,7 +713,7 @@ export default function ContributeToGoal() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId]);
+  }, [ready, user, goalId, groupIdHint]);
 
   // Optional labels, verified server-side before they are shown together.
   // Independent of the goal load: a failure here only means the generic
@@ -672,17 +723,24 @@ export default function ContributeToGoal() {
     let cancelled = false;
     (async () => {
       try {
-        const listFn = httpsCallable<{ groupId: string }, { goals: ListedGoal[] }>(
-          getFirebaseFunctions(),
-          'wsfListGoals'
-        );
-        const listed = await listFn({ groupId: groupIdHint });
+        /*
+          PERF-MOBILE-1. THE SAME AUTHORIZED ANSWERS MOVE HAS JUST READ.
+          This asked `wsfListGoals` a second time (without history, so it could
+          not even share the first) and read the group document for its name.
+          Both facts are in this account's own record: its goals list from
+          `wsfListGoals` (which refuses a non-member, exactly as before) and
+          its communities from `wsfMyCommunities` (which lists only this
+          account's active memberships). A read from this load is reused; a
+          cold link reads them.
+        */
+        const [listed, mine] = await Promise.all([
+          readGoals<ListedGoal>(user.uid, groupIdHint, SAME_LOAD_MS),
+          readMyCommunities(user.uid, SAME_LOAD_MS),
+        ]);
         if (cancelled) return;
-        const goal = listed.data.goals.find((g) => g.goalId === goalId);
+        const goal = listed.goals.find((g) => g.goalId === goalId);
         if (!goal) return;
-        const snap = await getDoc(doc(getFirebaseFirestore(), 'wsfCommunityGroups', groupIdHint));
-        if (cancelled) return;
-        const name = (snap.data() as { displayName?: unknown } | undefined)?.displayName;
+        const name = mine.items.find((i) => i.groupId === groupIdHint)?.displayName;
         if (typeof name !== 'string' || !name) return;
         setContext({ kind: 'verified', groupId: groupIdHint, communityName: name, goalTitle: goal.title });
       } catch {
@@ -698,7 +756,10 @@ export default function ContributeToGoal() {
   // an attempt is in flight, unknown, refused or confirmed, the screen shows
   // that attempt's own truth and a cached poll must not overwrite it.
   const beforeWrite = !pending && !refusal && !lastResult;
-  const shouldPoll = beforeWrite && (state.kind === 'ready' || state.kind === 'closed');
+  // The poll starts once this screen's own fresh read has landed (`pulseAt`),
+  // exactly as before PERF-MOBILE-1: opening on the account's record must not
+  // send a second identical pulse alongside the fresh one (measured).
+  const shouldPoll = beforeWrite && pulseAt !== null && (state.kind === 'ready' || state.kind === 'closed');
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready || !user || !goalId) return;
@@ -760,6 +821,11 @@ export default function ContributeToGoal() {
             clearInterval(timer);
             timer = null;
           }
+          // The refusal and the eviction happen together (Director #494
+          // `5841264164`): what this account's record holds for the community
+          // this goal came through goes, so no tab opens on it again. With no
+          // community named in the route, none is guessed.
+          if (groupIdHint) forgetCommunity(user.uid, groupIdHint);
           setState((prev) => (prev.kind === 'ready' || prev.kind === 'closed' ? { kind: 'notFound' } : prev));
           return;
         }
@@ -861,10 +927,24 @@ export default function ContributeToGoal() {
         data.unit === undefined ||
         data.status === undefined
       ) {
+        // An own-only receipt: the server no longer shows this account the
+        // community's figures. What its record holds for that community goes.
+        if (groupIdHint) forgetCommunity(owner, groupIdHint);
         attemptRef.current = null;
         setReviewCount(null);
         return;
       }
+      // PERF-MOBILE-1: the account's record takes exactly what this confirmed
+      // receipt states (src/memberReads.ts, `noteConfirmedContribution`).
+      noteConfirmedContribution(owner, {
+        goalId: startedGoal,
+        groupId: groupIdHint,
+        ownCredit: data.ownCredit,
+        sharedTotal: data.sharedTotal,
+        target: data.target,
+        unit: data.unit,
+        status: data.status,
+      });
       const nextStatus = data.status;
       setState({
         kind: nextStatus === 'active' ? 'ready' : 'closed',
@@ -881,7 +961,7 @@ export default function ContributeToGoal() {
       setEntry('');
       setReviewCount(null);
     },
-    [goalId]
+    [goalId, groupIdHint]
   );
 
   // Entry → review. No network write happens here.

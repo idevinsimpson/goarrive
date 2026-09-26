@@ -1,0 +1,52 @@
+{
+  "commit": "e7dc36ee",
+  "animationsHeldPerFrame": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2
+  ],
+  "exitsReleased": 1,
+  "focusOnOpen": {
+    "testId": "wsf-settings-close",
+    "label": "Close"
+  },
+  "focusAfterClose": {
+    "testId": "wsf-you-settings",
+    "label": "Settings"
+  },
+  "stage": "CANDIDATE",
+  "device": "390x844",
+  "frames": [
+    {
+      "file": "CANDIDATE-settings-entry-000ms-390x844.png",
+      "sha256": "c5f0c2d026b09281c4e6ed2e05ed11c9a7f063aaaf5bf71e12b9360613004903"
+    },
+    {
+      "file": "CANDIDATE-settings-entry-120ms-390x844.png",
+      "sha256": "1def2ae53500972fb2a5f708a7a6d7ab2d65b3791e6355634724ca644e8f47a2"
+    },
+    {
+      "file": "CANDIDATE-settings-entry-240ms-390x844.png",
+      "sha256": "638dca16f9a21ec5493da972cc7c2a058d4f8178f1fbf4e0a321876b322fdba2"
+    },
+    {
+      "file": "CANDIDATE-settings-exit-000ms-390x844.png",
+      "sha256": "c3535d61a1260de739907e7ddcb27f8cc721a86d39a71f775b8a299234bb5172"
+    },
+    {
+      "file": "CANDIDATE-settings-exit-090ms-390x844.png",
+      "sha256": "a88b30b190213dc3199723b76a78ffbdc939e7065e0afed131ee4b5e2d310a89"
+    },
+    {
+      "file": "CANDIDATE-settings-exit-170ms-390x844.png",
+      "sha256": "025e0922e99a0f9a26075d240c79629921b85a720ce77eb62b2f95ffa6991d34"
+    },
+    {
+      "file": "CANDIDATE-settings-closed-390x844.png",
+      "sha256": "47beb538e0e24c5752fdf1a62ef569eb28b9da1c252e8c28780c92eba29c7b17"
+    }
+  ]
+}
