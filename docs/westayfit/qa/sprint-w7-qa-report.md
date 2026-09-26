@@ -4443,3 +4443,27 @@ Medians of 3 runs, shown as 844 / 640. The `889e9775` values are in brackets.
 - Emulators only (`demo-wsf-local`).
 
 **Status:** **H4b, the Director's pass-after row for the HOLD, passes on `ad3d2f88` and fails on both earlier builds.** No regression in any W7 row. H3c remains the named successor. Nothing is accepted, integrated or staged.
+
+## 49 · PERF-MOBILE-1 staging pin check: #502 at exact `ca2cc4c0bc1c3c4aafba8b70231c0e38525aee6c` (L0 #434 `5842769988`; L0 receipt #502 `5842768054`; Director ACCEPTED #494 `5842637914`; W7 ACK `5842807627`): **PASS**
+
+This is the Check 42 method. It was run on a detached worktree at `ca2cc4c0` and on git objects. It is local only: no dispatch, no staging access and no product rerun.
+
+| # | Check | Result |
+|---|---|---|
+| **1** | Head, base, scope | **PASS.** `ca2cc4c0` has one commit and one parent, `main` `6c2e6b25`. `main` is still `6c2e6b25`, and the tree is `114d0c07`. **Exactly one file changes**, `.github/wsf-staging/approved-candidate.json` (+9 / −5). **Changed keys:** `approvedAppSha`, `packageLabel`, `sourceAcceptedOn`, `_expectedPriorFunctionsNote` and `_fullCandidateNote`. **Added:** three `_previous…0b460ce3` history keys and `_rollbackNote`. **Unchanged:** `expectedPriorFunctions` **49**, `candidateAddedFunctions` (`wsfsetcommunityvisibility`, `wsfcommunitymembers`, `wsfcommunityactivity`) and `project` `westayfit-staging`. |
+| **2** | The candidate is the product Check 48 passed | **PASS.** `approvedAppSha` = `14ce19079fc08bbab7ffeace8b94e062a8928f9a`, whose parents are `0b460ce3` (first) and `ad3d2f88`. **Its tree `61018729` equals `ad3d2f88`'s tree**, byte for byte. It is **not** the development head `87997c58`. |
+| **3** | `resolve-candidate` (the real script) | **PASS.** **On the head:** an empty request and the full `14ce1907…` both resolve to `14ce1907…` (exit 0). The full `0b460ce3`, `87997c58`, `ad3d2f88` and `889e9775` SHAs are **refused** ("syntactically valid but is NOT the approved candidate", exit 1). A short SHA is refused on syntax. **Control, `main`'s pin:** an empty request resolves to `0b460ce3`, and the full `14ce1907` is refused. `ad3d2f88` is refused only because the pin names the merge, whose tree is identical. |
+| **4** | The real `read-inventory` gate, with synthetic inventories | **PASS.** 49 names (the verifier's `BASE_EXPECTED` 46 + the 3 additions = 49 unique) give `PREFLIGHT_BEFORE=49`, `PREFLIGHT_BASELINE_MATCHES_APPROVAL=true`, exit 0. **48 and 50 are refused** ("… approved against 49", exit 1). |
+| **5** | Boundary `0b460ce3..14ce1907` and the expected deploy | **PASS.** 71 files, +2526 / −273. **The protected-path diff is empty:** `firebase.json`, `.firebaserc`, `firestore.rules`, `firestore.indexes.json`, the root and app `package*.json`, `app.json`, `.github/`, `scripts/westayfit/`, `functions/` and `functions-westayfit/`. `functions-westayfit` is tree **`5a3f232e` at both SHAs**, the same tree Check 42 counted at 49 exports. So the expected deploy is **49 → 49, `CREATED_THIS_DEPLOY=none`**. |
+| **6** | Rollback | **PASS.** `_rollbackNote` names `0b460ce3` (run 50, `main` `a4b228a5`). Because the functions tree is unchanged, re-pinning `0b460ce3` stays compatible with the 49-function inventory. This is a note, not a gate. |
+| **7** | Tests and guards on the pin tree | **PASS.** `node .github/wsf-staging/tests/run-all.mjs` exits 0 ("all suites passed"). `verify-deployment.test.mjs` and every file under `.github/wsf-staging/tests` and `scripts/` are byte-identical to `main`. `check-evidence-intact` exits 0. |
+
+**Not checked (carried from #502's own list):**
+- the three social services are transport-SHUT;
+- there is no READY receipt for the `wsfContributions` index;
+- email is blocked at runtime;
+- the kiosk hold stands.
+
+W7 did not read run 50's job log again.
+
+**Status:** **PASS on the pin at `ca2cc4c0`.** Nothing is dispatched, accepted, integrated or staged by W7.
