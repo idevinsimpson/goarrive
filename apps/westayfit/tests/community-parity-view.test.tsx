@@ -11,10 +11,13 @@ import {
   anonymousRemainder,
   bannerSupport,
   canDrawLivingWe,
+  effectiveTotal,
   goalFigures,
   goalMeta,
   goalPill,
   goalsCountFact,
+  totalValue,
+  validTarget,
   type CommunityParityProps,
   type DrawableGoal,
   type ParityGoal,
@@ -136,6 +139,42 @@ describe('the rules — unknown is never zero', () => {
     expect(anonymousRemainder(23, { state: 'loaded', value: { named: NAMED, complete: false } })).toBeNull();
     expect(anonymousRemainder(23, { state: 'failed' })).toBeNull();
     expect(anonymousRemainder(1, complete)).toBe(0);
+  });
+
+  it('fails closed on an impossible figure: never NaN, Infinity or a negative — and never clamped to zero', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
+      for (const state of ['confirmed', 'lastKnown'] as const) {
+        const g = goal({ total: { state, value: bad } });
+        expect(effectiveTotal(g.total), `${state} ${bad}`).toEqual({ state: 'failed' });
+        expect(totalValue(g.total)).toBeNull();
+        expect(canDrawLivingWe(g)).toBe(false);
+        expect(goalPill(g)).toEqual({ label: 'Unknown', tone: 'unknown' });
+        expect(goalFigures(g)).toBe('Total can’t be confirmed right now');
+      }
+    }
+    // Zero is a real figure, not an impossible one.
+    expect(totalValue(confirmed(0))).toBe(0);
+    expect(canDrawLivingWe(goal({ total: confirmed(0) }))).toBe(true);
+    // A target is a target only when finite and positive.
+    for (const badTarget of [Number.NaN, Number.POSITIVE_INFINITY, -500, 0]) {
+      expect(validTarget(badTarget)).toBeNull();
+      const g = goal({ target: badTarget });
+      expect(canDrawLivingWe(g)).toBe(false);
+      expect(goalFigures(g)).toBe('241 squats');
+      expect(goalPill(g).label).toBe('Open');
+    }
+  });
+
+  it('renders an impossible total as unknown: no Living WE, no number, no NaN on screen', () => {
+    render(props({ goals: { state: 'loaded', value: { featured: goal({ total: confirmed(Number.NaN) }), otherOpen: [] } } }));
+    expect(byId('wsf-parity-living-we')).toBeNull();
+    expect(byId('wsf-parity-total')).toBeNull();
+    expect(text('wsf-parity-period-unknown')).toContain('Progress unknown');
+    expect(text('wsf-parity-period-status')).toBe('UNKNOWN');
+    expect(container.textContent).not.toMatch(/NaN|Infinity|-\d/);
+    render(props({ goals: { state: 'loaded', value: { featured: goal({ target: Number.POSITIVE_INFINITY }), otherOpen: [] } } }));
+    expect(byId('wsf-parity-living-we')).toBeNull();
+    expect(container.textContent).not.toMatch(/NaN|Infinity|∞/);
   });
 
   it('draws Living WE only for a positive target and a confirmed figure', () => {

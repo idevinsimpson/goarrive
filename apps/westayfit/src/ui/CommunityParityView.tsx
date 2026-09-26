@@ -5,6 +5,7 @@ import {
   anonymousRemainder,
   bannerSupport,
   canDrawLivingWe,
+  effectiveTotal,
   goalFigures,
   goalMeta,
   goalPill,
@@ -337,13 +338,15 @@ function FeaturedGoal({ goal, onOpenGoal }: { goal: ParityGoal; onOpenGoal?: (go
 
 /** A featured goal with no instrument: why, in plain words. */
 function instrumentlessHeadline(goal: ParityGoal): string {
-  if (goal.total.state === 'loading') return 'Loading the total…';
-  if (goal.total.state === 'failed') return 'Progress unknown';
+  const t = effectiveTotal(goal.total);
+  if (t.state === 'loading') return 'Loading the total…';
+  if (t.state === 'failed') return 'Progress unknown';
   return goalFigures(goal);
 }
 function instrumentlessDetail(goal: ParityGoal): string {
-  if (goal.total.state === 'loading') return 'The confirmed total is on its way.';
-  if (goal.total.state === 'failed') return 'We can’t confirm the current total. Nothing is shown as zero.';
+  const t = effectiveTotal(goal.total);
+  if (t.state === 'loading') return 'The confirmed total is on its way.';
+  if (t.state === 'failed') return 'We can’t confirm the current total. Nothing is shown as zero.';
   return 'No target set — no progress instrument.';
 }
 

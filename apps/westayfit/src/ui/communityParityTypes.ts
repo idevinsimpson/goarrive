@@ -62,9 +62,27 @@ export type ParityGoal = {
   windowLabel?: string | null;
 };
 
+/**
+ * FAIL CLOSED ON AN IMPOSSIBLE FIGURE. A confirmed or last-known total is a
+ * total only when it is finite and not negative; anything else (NaN, ±Infinity,
+ * a negative) reads exactly as `failed` — unknown for the instrument, the
+ * figures and the pill. It is never clamped to zero: an unusable number is not
+ * evidence that nobody moved.
+ */
+export function effectiveTotal(total: GoalTotal): GoalTotal {
+  if (total.state !== 'confirmed' && total.state !== 'lastKnown') return total;
+  return Number.isFinite(total.value) && total.value >= 0 ? total : { state: 'failed' };
+}
+
+/** A target is a target only when it is finite and positive; otherwise `null`. */
+export function validTarget(target: number | null): number | null {
+  return target !== null && Number.isFinite(target) && target > 0 ? target : null;
+}
+
 /** The figure a total carries, or `null` when there is none to show. */
 export function totalValue(total: GoalTotal): number | null {
-  return total.state === 'confirmed' || total.state === 'lastKnown' ? total.value : null;
+  const t = effectiveTotal(total);
+  return t.state === 'confirmed' || t.state === 'lastKnown' ? t.value : null;
 }
 
 /** The goals collection for this community, split by the canonical rules. */
@@ -196,12 +214,13 @@ export type DrawableGoal = ParityGoal & {
 };
 
 /**
- * Living WE is drawn only for a positive target and a confirmed figure — the
- * live total, or a last-known one, which the view dims and labels "last
- * known" as the reference does. Loading and failed totals draw nothing.
+ * Living WE is drawn only for a finite positive target and a usable confirmed
+ * figure — the live total, or a last-known one, which the view dims and labels
+ * "last known" as the reference does. Loading, failed and impossible totals
+ * draw nothing.
  */
 export function canDrawLivingWe(goal: ParityGoal): goal is DrawableGoal {
-  return goal.target !== null && goal.target > 0 && totalValue(goal.total) !== null;
+  return validTarget(goal.target) !== null && totalValue(goal.total) !== null;
 }
 
 export type PillTone =
@@ -222,18 +241,19 @@ export type PillTone =
  */
 export function goalPill(goal: ParityGoal): { label: string; tone: PillTone } {
   if (goal.status === 'scheduled') return { label: 'Scheduled', tone: 'scheduled' };
-  if (goal.total.state === 'loading') {
+  const t = effectiveTotal(goal.total);
+  if (t.state === 'loading') {
     return { label: goal.status === 'closed' ? 'Closed' : 'Open', tone: 'pending' };
   }
-  if (goal.total.state === 'failed') return { label: 'Unknown', tone: 'unknown' };
-  if (goal.total.state === 'lastKnown') return { label: 'Last known · not live', tone: 'unknown' };
-  const total = goal.total.value;
-  if (goal.target === null || goal.target <= 0) {
+  if (t.state === 'failed') return { label: 'Unknown', tone: 'unknown' };
+  if (t.state === 'lastKnown') return { label: 'Last known · not live', tone: 'unknown' };
+  const target = validTarget(goal.target);
+  if (target === null) {
     return goal.status === 'closed'
       ? { label: 'Closed', tone: 'unfinished' }
       : { label: 'Open', tone: 'open' };
   }
-  switch (progressPhase(total, goal.target, goal.status)) {
+  switch (progressPhase(t.value, target, goal.status)) {
     case 'closedReached':
       return { label: 'Closed · reached', tone: 'closedReached' };
     case 'closedUnreached':
@@ -279,12 +299,13 @@ export function goalMeta(goal: DrawableGoal): { strong: string; soft: string } {
  * plainly when the total is loading or cannot be confirmed.
  */
 export function goalFigures(goal: ParityGoal): string {
-  if (goal.total.state === 'loading') return 'Loading the total…';
-  if (goal.total.state === 'failed') return 'Total can’t be confirmed right now';
-  const total = goal.total.value;
-  const suffix = goal.total.state === 'lastKnown' ? ' · last known' : '';
-  if (goal.target === null || goal.target <= 0) return `${formatCount(total)} ${goal.unit}${suffix}`;
-  return `${formatCount(total)} of ${formatCount(goal.target)} ${goal.unit}${suffix}`;
+  const t = effectiveTotal(goal.total);
+  if (t.state === 'loading') return 'Loading the total…';
+  if (t.state === 'failed') return 'Total can’t be confirmed right now';
+  const suffix = t.state === 'lastKnown' ? ' · last known' : '';
+  const target = validTarget(goal.target);
+  if (target === null) return `${formatCount(t.value)} ${goal.unit}${suffix}`;
+  return `${formatCount(t.value)} of ${formatCount(target)} ${goal.unit}${suffix}`;
 }
 
 export function peopleLabel(n: number): string {
@@ -352,19 +373,4 @@ export function privacySaveErrorCopy(kind: PrivacySaveErrorKind, displayName: st
     case 'membershipRefused':
       return `You’re no longer a member of ${displayName}, so this setting can’t be changed.`;
   }
-}
-
-/** The consequence of the stored pair, in the feed's own words. */
-export function privacyConsequence(stored: PrivacyCommunity['stored']): string | null {
-  const nameOn = stored.name === 'visible';
-  const activityOn = stored.activity === 'visible';
-  if (!nameOn && activityOn) {
-    return 'Your activity appears as “Anonymous member.” Your effort still counts toward the total.';
-  }
-  if (!activityOn) {
-    return nameOn
-      ? 'Your activity is not shown here. Your effort still counts toward the total.'
-      : 'You are not listed and your activity is not shown here. Your effort still counts toward the total.';
-  }
-  return null;
 }

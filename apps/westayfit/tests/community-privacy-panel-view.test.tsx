@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  privacyConsequence,
   privacySaveErrorCopy,
   type CommunityPrivacyPanelProps,
   type PrivacyCommunity,
@@ -79,13 +78,25 @@ describe('no optimistic privacy', () => {
     expect(checked('wsf-privacy-panel-activity-oak')).toBe('true');
   });
 
-  it('shows exactly the stored pair, and its consequence in the feed’s words', () => {
-    render(props([{ ...OAK, stored: { name: 'private', activity: 'visible' } }]));
+  it('shows exactly the stored pair; each toggle’s own hint carries the consequence', () => {
+    render(props([{ ...OAK, stored: { name: 'private', activity: 'private' } }]));
     expect(checked('wsf-privacy-panel-name-oak')).toBe('false');
-    expect(checked('wsf-privacy-panel-activity-oak')).toBe('true');
-    expect(text('wsf-privacy-panel-note-oak')).toContain('“Anonymous member.”');
-    expect(privacyConsequence({ name: 'private', activity: 'private' })).toContain('You are not listed');
-    expect(privacyConsequence({ name: 'visible', activity: 'visible' })).toBeNull();
+    expect(checked('wsf-privacy-panel-activity-oak')).toBe('false');
+    expect(text('wsf-privacy-panel-name-oak-hint')).toBe('Members see “Anonymous member”');
+    expect(text('wsf-privacy-panel-activity-oak-hint')).toBe('No rows — still counts in the total');
+    // No extra per-community consequence paragraph (Director `5841929675` C2):
+    // the block is its heading and its two toggles, as in the reference.
+    expect(byId('wsf-privacy-panel-block-oak')?.textContent).toBe(
+      'Oak Grove Together' +
+        'Show my name and initials' + 'Members see “Anonymous member”' +
+        'Show my individual activity' + 'No rows — still counts in the total',
+    );
+  });
+
+  it('the final note promises only the exact amounts that can be read', () => {
+    render(props([OAK]));
+    expect(text('wsf-privacy-panel-foot')).toBe('Your private Progress keeps the exact amounts we can read for you.');
+    expect(text('wsf-privacy-panel')).not.toContain('always keeps');
   });
 
   it('while saving, both switches refuse a second press and say so', () => {

@@ -1,7 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
-  privacyConsequence,
   privacySaveErrorCopy,
   type CommunityPrivacyPanelProps,
   type PrivacyCommunity,
@@ -90,7 +89,7 @@ export function CommunityPrivacyPanelView({
 
         {load === 'ready' ? (
           <Text style={s.foot} testID="wsf-privacy-panel-foot">
-            Your private history in Progress always keeps exact amounts.
+            Your private Progress keeps the exact amounts we can read for you.
           </Text>
         ) : null}
       </ScrollView>
@@ -169,7 +168,6 @@ function CommunityBlock({
   onRetrySave: CommunityPrivacyPanelProps['onRetrySave'];
 }) {
   const refused = c.saveError === 'membershipRefused';
-  const consequence = refused ? null : privacyConsequence(c.stored);
   const busy = c.saving !== null;
   return (
     <View style={s.block} testID={`wsf-privacy-panel-block-${c.groupId}`}>
@@ -207,12 +205,6 @@ function CommunityBlock({
       )}
 
       <SaveError community={c} busy={busy} onRetrySave={onRetrySave} />
-
-      {consequence ? (
-        <Text style={s.note} testID={`wsf-privacy-panel-note-${c.groupId}`}>
-          {consequence}
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -349,6 +341,5 @@ const s = StyleSheet.create({
   textAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   textActionLabel: { color: NAVY, fontSize: 14, fontWeight: '800', textDecorationLine: 'underline' },
 
-  note: { color: MUTED_FG, fontSize: 12, lineHeight: 17, paddingTop: 8 },
   foot: { color: MUTED_FG, fontSize: 13, lineHeight: 19, marginTop: 10 },
 });
