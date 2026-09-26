@@ -14,7 +14,7 @@ Packet sources:
 | | |
 |---|---|
 | Base | `claude/wsf-app-shell` @ `0b460ce3f2f0766406100fef14d9a444c8cad43a` |
-| Product SHA | **`12cd9d697ccda8d93db75d40b99cd530a84a8850`**. It supersedes `5c4041f3` (the reference's period labels in the fixture, #495 `5841257894`) and `f79a3c49`. It is **stacked on You `66e56c4d`** by merge commit `9aacd613` (#365 `5841122582`), so the Progress delta is reviewed relative to You |
+| Product SHA | **`b8b96f61900a9d256bb28e820ad7b7e7be4fecec`**. It is **restacked on the final You `5e76a10c`** by merge commit `3b13901a` (#365 `5841342492`). Progress's own component, helpers and fixture are byte-identical to `12cd9d69`; only `goalTruth`'s closed-unknown label (from You) and three test expectations changed. It supersedes `12cd9d69` (the reference's period labels, #495 `5841257894`), `5c4041f3` (stacked on You `66e56c4d` via `9aacd613`) and `f79a3c49`. The Progress delta is reviewed relative to You |
 | Component | **`apps/westayfit/src/ui/ProgressParityView.tsx`**, blob `7514eea5` |
 | Pure rules | `apps/westayfit/src/progressParity.ts`, blob `37dbc2bb`, on the shared `src/goalTruth.ts` (from You) |
 | Fixture | `apps/westayfit/app/design-target/progress-parity.tsx`, blob `e12dde7b`. Emulator builds only; `?state=populated\|first-eligible\|no-open-goal\|partial\|failure\|receipts-contract\|unknown-shared` |
@@ -48,7 +48,7 @@ The order is the reference's:
 5. **Your receipts / Recent contributions**. This is the seam; see below.
 6. **By goal / Goals you helped**. Each row shows **YOURS** and **SHARED** apart, with the
    reference's lifecycle pill: `OPEN`, `REACHED · STILL OPEN`, `CLOSED · REACHED` or
-   `CLOSED · UNFINISHED`. A closed goal whose total did not answer says only `CLOSED`; its
+   `CLOSED · UNFINISHED`. A closed goal whose total did not answer says `CLOSED · RESULT UNAVAILABLE`; its
    SHARED cell says `Unknown`, never zero.
 7. *No scores, streaks or rankings — just what was recorded.*
 
@@ -92,7 +92,7 @@ This applies the Director's You review (#492 `5841012915`) to Progress, through 
   `src/goalTruth.ts`:
   - an unknown position is `Unknown`, never 0;
   - an open goal says `OPEN`;
-  - a closed goal says only `CLOSED`.
+  - a closed goal says `CLOSED · RESULT UNAVAILABLE` (from `b8b96f61`; `CLOSED` alone before).
 - **No date is interpreted in the view.** `endsAt` is now `periodLabel: string | null`, formatted
   by the Phase B adapter in the goal's own timezone and shown verbatim. `whenLabel()` is removed.
 - **A new fixture state, `unknown-shared`,** has an open goal and a finished goal whose totals did
@@ -103,6 +103,11 @@ own semantic period labels: "This week" (both open goals), "August" and "July". 
 "Ends Sep 27" / "Ended …". The component, helpers and `goalTruth` are unchanged. The shared module
 is `src/goalTruth.ts`; the review calls it `memberGoalTruth.ts`, and it was not renamed, to keep
 You's product SHA stable.
+
+**`12cd9d69` → `b8b96f61`.** Progress is restacked on the final You product. Focused re-runs on
+`b8b96f61`: goal-truth + Progress pure + view **38 / 38**, e2e **14 / 14**, `ts:check` 0, evidence
+guard 9 / 20. **Every frame and the manifest are byte-identical** to `12cd9d69`; the closed-unknown
+row sits below the fold even at 390×844, so its new label is proven by e2e, not by a frame.
 
 ## Focused tests on `12cd9d69` (the fixture and one e2e assertion changed; focused runs only)
 
