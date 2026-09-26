@@ -85,7 +85,7 @@ if nobody writes down which URL was actually hit.*
 
 R-1 covers the ruleset. The index file has identical replace-the-whole-file semantics on `firebase deploy --only firestore:indexes`, and one extra edge: a deploy from a stale file can propose **deleting** indexes it does not contain. A dropped composite index is a production outage on whatever query needed it, with a rebuild measured in minutes to hours.
 
-Currently latent — 48 indexes, zero for `wsf*`, because WSF runs no compound queries at all; every read is a direct `doc()` get. The first one (M-U3 invites, or listing a member's communities) walks straight into it.
+Historical note: the original entry was written before WSF introduced a composite-index requirement. That is no longer current. As of the September 26 reconciliation, WSF source/development includes index-dependent work and cloud READY state is a separate release gate. Do not infer index readiness from source presence or an accepted implementation; require the bounded operator/read-back receipt before the dependent callable is treated as ready.
 
 **Mitigation:** GATE 0 — the live-vs-`main` diff built for the rules deploy — has no equivalent for indexes. Build one against the indexes endpoint before the first WSF index ships, and never accept an index deploy that proposes a deletion.
 
