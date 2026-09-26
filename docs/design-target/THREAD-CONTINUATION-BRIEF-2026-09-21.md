@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 11:35Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 12:22Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -24,7 +24,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
 | **You / Progress Phase B** | W6 · `2f57bbca` | **SERVED** `74d19281` via run 52; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5845904027` | owner feedback → route |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
-| COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 product `0e5d6f38` / evidence `ebcc038a` | W7 Check 51 PASS; 3 visual HOLD items fixed; **still HELD** `5845751705`: 62 px masthead, selected community first, "Champion", "× Close", type/spacing pass | W9 successor → W7 changed deps → Director pixels |
+| COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 product **`ffb517e5`** / evidence `ecd99bf2` | Check 51 PASS carried; **Director visual PASS `5846187950`**; L0 receipt `5846206550` (trial merge on `74d19281`: tsc 0, vitest 1042, guard intact; one additive `scripts/westayfit/render-banner-ring.mjs`) | W7 changed-dependency check incl. You/Progress on trial merge (`5846207843`; W7 busy) → Director product ACCEPTED → integrate → pin → stage |
 | **MEMBER-SNAPSHOT-1** | backend worker **BLOCKED**: L0 `create_session` refused by classifier; not retried (`5842376324`) | serialized `index.ts` queue (`5842015136`) waits | owner-started session or Director assigns an existing worker |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
