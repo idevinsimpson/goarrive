@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 05:05Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 05:20Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -13,13 +13,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | development `claude/wsf-app-shell` | **`87a86531`** = PERF `14ce1907` + You / Progress Phase A (`87997c58`) + Community Phase A `646c9579` (pure, unstaged) |
 | `main` | **`32563aa0`** (Merge #502: pin → `14ce1907`); before it `6c2e6b25` (#491) |
 | staging pin | `approvedAppSha` **`14ce1907`**, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED #502 `5843353545`) |
-| served staging | `0b460ce3` (run 50); **run 51 `36219503815` deploying `14ce1907`** (dispatch receipt `5843367873`); rollback `0b460ce3` |
+| served staging | **`14ce1907`**, run 51 `36219503815`: 49 → 49, created none, `VERIFY=pass`, marker `14ce190`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5843464730`–`5843467412`); previous known-good **`0b460ce3`** (run 50) |
 
 **Active packets.**
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | ACCEPTED → integrated `14ce1907` → pin #502 merged → **run 51 deploying** | receipts → PERF hosted smoke → OWNER TEST CARD |
+| **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | **SERVED** via run 51; hosted smoke BLOCKED from L0 (sandbox 403 on `*.web.app`, `5843469815`); OWNER TEST CARD `5843470410` | owner feedback → route; H3c successor with W4 |
 | **YOU-PARITY-1 Phase A** | W6 · #500 · `02f86fc2` | **ACCEPTED** `5842638280` → integrated `993f0796`; not staged | done |
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
 | You / Progress Phase B | W6 · #503 `a0f1351a` / #504 `bdc82c0e` | lead rule RULED `5843356469` (W6 proposal); #504 re-points 3 specs | W7 route QA → Director → integrate → stage |
