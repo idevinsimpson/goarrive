@@ -2746,3 +2746,36 @@ Released by Director `5846709025`. Base `74d19281`; receipt `baae5e21`. The chan
 - 10 of the 35 own-total reads are for goals the cap then drops.
 
 **Not measured:** production's microsecond precision (taken from Firestore's documented behaviour), the composite index (the emulator does not enforce indexes), and the HTTP transport (the callable ran in-process).
+
+### MEMBER-SNAPSHOT-1 successor recheck: exact product `8dc65316d282fc9ee0e91dcb4bb631b263825e98` — **PASS**
+
+Released by Director `5847278911`. The receipt commit is `8fd2568b`. The predecessor `b71cf07f` failed under my evidence at `e01c9772`.
+
+**Boundary.** From `b71cf07f` to `8fd2568b`, only three files change: `functions-westayfit/src/index.ts`, the focused snapshot test, and `docs/westayfit/member-snapshot-1-receipt.md`. Nothing touches the app, rules, indexes, auth, packages or deployment.
+
+**F1: exact cursor. PASS.**
+- The cursor now carries `{s: seconds, n: nanoseconds, id}` and resumes with `startAfter(new Timestamp(s, n), id)`, under the same ordering: `updatedAt desc`, then `__name__ desc`.
+- My 30-row probe P6 on `8dc65316` covered five variants: an identical sub-millisecond instant, the same millisecond with different microseconds, a whole-millisecond control, `serverTimestamp()` in a batch, and sequential `serverTimestamp()` writes. Each returned page 1 = 25 and page 2 = 5, with 30 unique rows, 0 skipped and 0 duplicated. `nextCursor` was set after page 1 and `null` only after page 2.
+- On `b71cf07f` the same probe skips 5 rows in the first two variants.
+- The successor's own new tests, run against the `b71cf07f` source, fail 2 of 12: "loses no row that shares a millisecond…" and "refuses cursor instants outside Firestore's range…". On `8dc65316` they pass.
+
+**F2: invalid input returns `invalid-argument`. PASS.** Each of the following, on `8dc65316`, returns `invalid-argument`:
+- seconds above or below Firestore's range, and a huge `s`;
+- `n` below 0, `n` above 999,999,999, a fractional `n`, and a fractional `s`;
+- a legacy `{t}` cursor, including a huge legacy `t`, which on `b71cf07f` resolved or returned `internal`;
+- a path-bearing id, and a missing `n`.
+
+The boundary values `s` = max with `n` = 999,999,999, and `s` = min with `n` = 0, resolve.
+
+**F3: caps before own-total reads. PASS.**
+- Own-total reads now run on the returned goals after the 35/50 caps.
+- On the receipt fixture of 20 communities / 4 active each / 25 owned, the snapshot returns 50 goals with **47 RPCs and 715 docs**: own-total `getAll` fell from 35 docs to 25, and shards stay at 500.
+- My earlier byte measurement on this fixture was 14,860 (the receipt says ≤14,900), and the response shape is unchanged. I did not re-measure bytes.
+- The two disclosed remaining cost-shape limits were not expanded, per the packet.
+
+**Counts.**
+- On `8dc65316`, the PR snapshot suite plus the W5 probes gave 25/25; the probe file alone gave 13/13.
+- On `b71cf07f`, the W5 probes plus the old suite gave 20/23, failing P6a, P6b and the new F2 probe.
+- The successor's own test file run against the `b71cf07f` source gave 10/12.
+
+Local emulators only (`demo-wsf-local`). No broad suite, no cloud. The callable stays held until the composite index has a cloud READY receipt.
