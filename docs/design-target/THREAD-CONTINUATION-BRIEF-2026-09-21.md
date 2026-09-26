@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 13:52Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 14:13Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -25,7 +25,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | You / Progress Phase B | W6 · `2f57bbca` | served since run 52 (card `5845904027`, step 5 corrected `5846137910`) | owner feedback → route |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
-| **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `b71cf07f` / W3 #509 | index source **ACCEPTED** `5846703053`, integrated `6deefe7d` (`5846712362`; workflow never deploys indexes); snapshot awaiting QA | bounded operator index create + READY receipt before snapshot stages |
+| **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `b71cf07f` / index #509 | index source integrated `6deefe7d`; **W5 QA FAIL** on `b71cf07f` (ms cursor loses sub-ms rows; #395 `5846801130`, #510 `5846800450`; W5 woken by `trig_0129dWVD…`, idle→ACK proven); Director correction to W4 (#394 `5846941753`) | W4 successor SHA (W4 check-in 14:16Z) → W5 changed rows → Director; staging needs index READY |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
