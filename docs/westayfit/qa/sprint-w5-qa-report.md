@@ -2835,3 +2835,25 @@ This was a read-only check. The key value is not reproduced anywhere. It is iden
 - The multi-movement DECISIONS entry and addendum §10 explicitly forbid invented equivalents and mixed-unit totals.
 
 The audit was read-only: no edit to #520, no merge, deploy or cloud action.
+
+## SECRET-HYGIENE-1 (Director `5849086217`) — delivered as a carry-ready change against `main` `37f18ea9`
+
+The change is packaged for L0 in two files, neither of which contains the credential (both verified: 0 key-shaped literals):
+- `sprint-w5-secret-hygiene-1.patch` — `git apply` onto `main`. It adds one rule to `scan-evidence.mjs`, a new `tests/committed-secrets.test.mjs`, and a `run-all` registration.
+- `sprint-w5-secret-hygiene-1.SKILL.md` — the full post-image of `skills/browser-use-e2e/SKILL.md`. It is shipped as a file rather than as a diff, because a diff's removal lines would reproduce the value.
+
+**What changes**
+1. **Source.** Both literal uses in `skills/browser-use-e2e/SKILL.md` (line 12 and the client snippet) now read `BROWSER_USE_API_KEY` from the environment (`os.environ[...]`, with `import os` added). A security notice says the old key stays in git history and must be revoked and replaced by the account owner.
+2. **Prevention.** The existing redacting scanner (`scan-evidence.mjs`) gains the rule `browser-use-api-key`, `/\bbu_[A-Za-z0-9_-]{20,}/`. The new suite `committed-secrets.test.mjs` (5 cases) runs that scanner over `skills/`, `.claude/`, and root `AGENTS.md`/`CLAUDE.md`. A synthetic canary, `bu_SYNTHETICcanaryNotARealKey…`, is refused by path, line and rule, and the test asserts the value is never echoed. Env-var references and placeholders are allowed.
+
+**Evidence**
+- **Fail-before, on `main`'s `SKILL.md` with the new rule:** exit 1, with `browser-use-e2e/SKILL.md` line 12 and line 28 matching `browser-use-api-key (value withheld)`. The output contains no key.
+- **The same scanner without the new rule** returns `clean` on `skills/`, which is the gap this closes.
+- **Pass-after:** `committed-secrets` 5/5. The full `run-all` exits 0: all suites passed, including `scan-evidence` 11.
+- **Replay:** on a fresh `main` worktree, `git apply --check` is clean and the four files come out as expected.
+
+**Limit.** `run-all` is a contributor/worker gate. No GitHub workflow runs it on PRs, so recurrence is caught when the gate is run, not enforced by CI. The owner can add enforcement with GitHub secret scanning and push protection.
+
+**Owner action still required.** Revoke the exposed Browser Use Cloud key (sha256 prefix `45b5e468`) in the Browser Use dashboard. Then provision its replacement only through `BROWSER_USE_API_KEY` in a local `.env` or shell, or a runner's secret store. No agent may do this.
+
+No provider call, key validation, rotation, IAM/WIF/secret-store change, history rewrite or branch cleanup.
