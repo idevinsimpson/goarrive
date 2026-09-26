@@ -69,7 +69,7 @@ async function currentTab(page: Page): Promise<string | null> {
 
 async function currentPanelName(page: Page): Promise<string> {
   return page
-    .locator('[data-testid="wsf-community-index-current"]:visible')
+    .locator('[data-testid="wsf-parity-banner"]:visible')
     .first()
     .innerText()
     .catch(() => '');
@@ -92,8 +92,8 @@ for (const vp of [PHONE, SHORT]) {
       await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
       await openCommunityTab(page);
 
-      const chipA = page.locator(`[data-testid="wsf-community-index-chip-${fx.a}"]:visible`);
-      const chipB = page.locator(`[data-testid="wsf-community-index-chip-${fx.b}"]:visible`);
+      const chipA = page.locator(`[data-testid="wsf-parity-chip-${fx.a}"]:visible`);
+      const chipB = page.locator(`[data-testid="wsf-parity-chip-${fx.b}"]:visible`);
       await expect(chipA).toBeVisible({ timeout: 20_000 });
       await expect(chipA).toHaveAttribute('aria-pressed', 'true');
       await expect(chipB).toHaveAttribute('aria-pressed', 'false');
@@ -122,7 +122,7 @@ for (const vp of [PHONE, SHORT]) {
       await page.goto(`/community/${fx.a}`);
       await expect(page.locator('[data-testid="wsf-community-hero-presence"]:visible')).toBeVisible({ timeout: 60_000 });
       await openCommunityTab(page);
-      await page.locator(`[data-testid="wsf-community-index-chip-${fx.b}"]:visible`).click();
+      await page.locator(`[data-testid="wsf-parity-chip-${fx.b}"]:visible`).click();
       await expect.poll(() => currentPanelName(page), { timeout: 20_000 }).toContain('Roswell Lunch Walkers');
 
       await page.getByTestId('wsf-member-tab-home').last().click();
@@ -136,12 +136,12 @@ for (const vp of [PHONE, SHORT]) {
       // Switch back through Home's own Switch → the list's row A → Community tab
       // must say CURRENT: A.
       await openCommunityTab(page);
-      await page.locator(`[data-testid="wsf-community-index-chip-${fx.a}"]:visible`).click();
+      await page.locator(`[data-testid="wsf-parity-chip-${fx.a}"]:visible`).click();
       await page.getByTestId('wsf-member-tab-home').last().click();
       await expect(page.locator('[data-testid="wsf-community-name"]:visible')).toHaveText('Alpharetta Morning Movers', { timeout: 40_000 });
       await openCommunityTab(page);
       await expect.poll(() => currentPanelName(page), { timeout: 20_000 }).toContain('Alpharetta Morning Movers');
-      await expect(page.locator(`[data-testid="wsf-community-index-chip-${fx.a}"]:visible`)).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator(`[data-testid="wsf-parity-chip-${fx.a}"]:visible`)).toHaveAttribute('aria-pressed', 'true');
     });
   });
 }
@@ -254,8 +254,8 @@ test.describe('APP-FEEL-PARITY-1 cp3 · Settings from the side', () => {
     // holds this community's section and its switches.
     await row.click();
     const panel = page.locator('[data-testid="wsf-settings-panel"]:visible');
-    await expect(panel.locator(`[data-testid="wsf-privacy-block-${fx.a}"]`)).toBeVisible({ timeout: 20_000 });
-    await expect(panel.locator(`[data-testid="wsf-privacy-name-${fx.a}"]`)).toBeVisible();
+    await expect(panel.locator(`[data-testid="wsf-privacy-panel-block-${fx.a}"]`)).toBeVisible({ timeout: 20_000 });
+    await expect(panel.locator(`[data-testid="wsf-privacy-panel-name-${fx.a}"]`)).toBeVisible();
   });
 
   test('it travels in from the right and out; reduced motion does neither; a cold link is still the page', async ({ page }) => {

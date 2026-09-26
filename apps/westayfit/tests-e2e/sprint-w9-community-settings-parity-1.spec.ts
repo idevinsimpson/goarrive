@@ -13,10 +13,11 @@ import { firestoreRead, firestoreWrite, seedProfile, seedShards, seedVerifiedUse
  *       focus only, and Space toggles it
  *   H2  a re-read issued before a save lands does not put back what that
  *       save settled
- *   H3  a switch whose save is unresolved takes no second action; the other
- *       setting in the same community stays usable
- *   H4  membership lost before a save: the block goes at once, and the
- *       member is told access changed; nothing is stored
+ *   H3  a community with an unresolved save takes no second action on either
+ *       switch (W4's accepted panel marks the community busy); after the
+ *       reply, the settled value shows and the next action goes through
+ *   H4  membership lost before a save: that community's switches go at once
+ *       and its block says the member no longer belongs; nothing is stored
  *   H5  the roster follows a settled privacy change: turned off in Settings,
  *       the member is no longer named on the Community tab
  *   H6  Close, Escape and the scrim, pressed together during the exit, are
@@ -28,6 +29,9 @@ import { firestoreRead, firestoreWrite, seedProfile, seedShards, seedVerifiedUse
  *       the heading and the This period title belong to one community
  *   H10 a failed goals read invents nothing: Goals is a dash, never 0, and
  *       no "No active goal"
+ *
+ * Since the resume on `87a86531` the panel is W4's `CommunityPrivacyPanelView`
+ * and the tab W4's `CommunityParityView`; these rows read their test IDs.
  *
  * Emulators only; synthetic accounts; injected delays and failures are
  * labelled where they are made.
@@ -121,7 +125,7 @@ async function stored(groupId: string, uid: string, field: 'communityNameVisibil
 }
 
 const sw = (page: Page, kind: 'name' | 'activity', g: string) =>
-  page.locator(`[data-testid="wsf-privacy-${kind}-${g}"]:visible`).first();
+  page.locator(`[data-testid="wsf-privacy-panel-${kind}-${g}"]:visible`).first();
 
 async function checked(page: Page, kind: 'name' | 'activity', g: string): Promise<'on' | 'off'> {
   return sw(page, kind, g).evaluate((el) => {
@@ -172,20 +176,22 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     await openPanel(page, fx);
 
     const geo = await sw(page, 'name', fx.c1.id).evaluate((el) => {
-      const r = el.getBoundingClientRect();
       const kids = Array.from(el.querySelectorAll('*')).map((k) => k.getBoundingClientRect());
+      const track = kids.find((k) => Math.round(k.width) === 48 && Math.round(k.height) === 28) ?? null;
       const thumb = kids.find((k) => Math.round(k.width) === 20 && Math.round(k.height) === 20) ?? null;
       return {
         role: el.getAttribute('role'),
         ariaChecked: el.getAttribute('aria-checked'),
-        w: Math.round(r.width),
-        h: Math.round(r.height),
-        thumb: thumb ? { left: Math.round(thumb.left - r.left), right: Math.round(r.right - thumb.right), top: Math.round(thumb.top - r.top) } : null,
+        track: track ? { w: Math.round(track.width), h: Math.round(track.height) } : null,
+        thumb:
+          track && thumb
+            ? { left: Math.round(thumb.left - track.left), right: Math.round(track.right - thumb.right), top: Math.round(thumb.top - track.top) }
+            : null,
       };
     });
     expect(geo.role, JSON.stringify(geo)).toBe('switch');
     expect(geo.ariaChecked).toBe('true');
-    expect([geo.w, geo.h]).toEqual([48, 28]);
+    expect(geo.track, 'a 48 x 28 track').toEqual({ w: 48, h: 28 });
     expect(geo.thumb, 'a 20 px thumb').not.toBeNull();
     expect([geo.thumb!.right, geo.thumb!.top], 'on: the thumb sits 4 px from the right and the top').toEqual([4, 4]);
 
@@ -200,7 +206,7 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
         outline: a ? getComputedStyle(a).outlineStyle : null,
       };
     });
-    expect(ring.id).toBe(`wsf-privacy-name-${fx.c1.id}`);
+    expect(ring.id).toBe(`wsf-privacy-panel-name-${fx.c1.id}`);
     expect(ring.visible).toBe(true);
     expect(ring.outline).toBe('solid');
 
@@ -209,11 +215,10 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     await expect.poll(() => checked(page, 'name', fx.c1.id), { timeout: 20_000 }).toBe('off');
     await expect.poll(() => stored(fx.c1.id, fx.m.uid, 'communityNameVisibility'), { timeout: 20_000 }).toBe('private');
     const off = await sw(page, 'name', fx.c1.id).evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const t = Array.from(el.querySelectorAll('*'))
-        .map((k) => k.getBoundingClientRect())
-        .find((k) => Math.round(k.width) === 20);
-      return t ? Math.round(t.left - r.left) : null;
+      const kids = Array.from(el.querySelectorAll('*')).map((k) => k.getBoundingClientRect());
+      const track = kids.find((k) => Math.round(k.width) === 48 && Math.round(k.height) === 28);
+      const t = kids.find((k) => Math.round(k.width) === 20 && Math.round(k.height) === 20);
+      return track && t ? Math.round(t.left - track.left) : null;
     });
     expect(off, 'off: the thumb sits 4 px from the left').toBe(4);
   });
@@ -248,7 +253,6 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     });
 
     await flip(page, 'name', fx.c1.id);
-    await expect(page.locator('[data-testid="wsf-privacy-error"]:visible')).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => heldReads, { timeout: 20_000 }).toBeGreaterThan(0);
 
     // While that (older) re-read is held, the activity save lands.
@@ -264,7 +268,7 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 
-  test('H3 a switch with an unresolved save takes no second action; the other setting stays usable', async ({ page }) => {
+  test('H3 a community with an unresolved save takes no second action; after the reply the next one goes through', async ({ page }) => {
     test.setTimeout(200_000);
     const fx = await fixture('h3');
     await signIn(page, fx);
@@ -286,21 +290,22 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     await flip(page, 'name', fx.c1.id);
     await expect.poll(() => sent.length, { timeout: 20_000 }).toBe(1);
     await flip(page, 'name', fx.c1.id);
-    await page.waitForTimeout(600);
-    expect(sent, 'a second press on the unresolved switch sends nothing').toEqual(['name:private']);
-
     await flip(page, 'activity', fx.c1.id);
-    await expect.poll(() => stored(fx.c1.id, fx.m.uid, 'communityActivityVisibility'), { timeout: 20_000 }).toBe('private');
-    await expect.poll(() => checked(page, 'activity', fx.c1.id), { timeout: 20_000 }).toBe('off');
+    await page.waitForTimeout(600);
+    expect(sent, 'no second action while the community is unresolved').toEqual(['name:private']);
+    expect(await checked(page, 'name', fx.c1.id), 'nothing optimistic').toBe('on');
 
     held.open();
     await expect.poll(() => checked(page, 'name', fx.c1.id), { timeout: 20_000 }).toBe('off');
-    expect(await checked(page, 'activity', fx.c1.id), "the name reply did not move activity").toBe('off');
+    await flip(page, 'activity', fx.c1.id);
+    await expect.poll(() => stored(fx.c1.id, fx.m.uid, 'communityActivityVisibility'), { timeout: 20_000 }).toBe('private');
+    await expect.poll(() => checked(page, 'activity', fx.c1.id), { timeout: 20_000 }).toBe('off');
+    expect(await checked(page, 'name', fx.c1.id), 'the activity reply did not move name').toBe('off');
     expect(sent).toEqual(['name:private', 'activity:private']);
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 
-  test('H4 membership lost before a save: the block goes at once and says access changed; nothing is stored', async ({ page }) => {
+  test('H4 membership lost before a save: its switches go at once and its block says so; nothing is stored', async ({ page }) => {
     test.setTimeout(200_000);
     const fx = await fixture('h4');
     await signIn(page, fx);
@@ -312,12 +317,13 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     // Removed on the server while the panel is open.
     await membership(fx.c2.id, fx.m.uid, 'member', { membershipStatus: { stringValue: 'removed' } });
     await flip(page, 'name', fx.c2.id);
-    await expect(page.locator('[data-testid="wsf-privacy-error"]:visible')).toContainText(
-      `Your access to ${fx.c2.name} has changed`,
+    await expect(page.locator(`[data-testid="wsf-privacy-panel-error-${fx.c2.id}"]:visible`)).toContainText(
+      `no longer a member of ${fx.c2.name}`,
       { timeout: 20_000 },
     );
-    await expect(page.locator(`[data-testid="wsf-privacy-block-${fx.c2.id}"]`)).toHaveCount(0, { timeout: 5_000 });
-    await expect(page.locator(`[data-testid="wsf-privacy-block-${fx.c1.id}"]:visible`)).toBeVisible();
+    const block = page.locator(`[data-testid="wsf-privacy-panel-block-${fx.c2.id}"]:visible`);
+    await expect(block.locator('[role="switch"]')).toHaveCount(0);
+    await expect(sw(page, 'name', fx.c1.id)).toBeVisible();
     expect(await stored(fx.c2.id, fx.m.uid, 'communityNameVisibility')).toBeNull();
   });
 
@@ -326,9 +332,9 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     const fx = await fixture('h5');
     await signIn(page, fx);
     await page.goto('/community');
-    const roster = page.locator('[data-testid="wsf-community-index-roster"]:visible');
+    const roster = page.locator('[data-testid="wsf-parity-roster"]:visible');
     await expect(roster).toContainText(fx.m.name, { timeout: 40_000 });
-    await expect(roster).toContainText('1 member shown without a name');
+    await expect(roster).toContainText('1 member shown without names');
 
     await toYou(page);
     await openPanel(page, fx);
@@ -428,7 +434,7 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     await expect.poll(() => replied, { timeout: 10_000 }).toBe(true);
     await page.waitForTimeout(1_000);
     expect(await checked(page, 'name', fx.c1.id)).toBe('off');
-    await expect(page.locator('[data-testid="wsf-privacy-error"]:visible')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="wsf-privacy-panel-error-"]:visible')).toHaveCount(0);
     expect(errors).toEqual([]);
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
@@ -445,14 +451,15 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
       const t0 = performance.now();
       while (performance.now() - t0 < 2_500) {
         const vis = (el: Element | null) => (el && (el as HTMLElement).getClientRects().length > 0 ? (el as HTMLElement) : null);
-        const title = Array.from(document.querySelectorAll('[data-testid="wsf-community-index-title"]')).map(vis).find(Boolean);
-        const period = Array.from(document.querySelectorAll('[data-testid="wsf-community-index-period"] [role="heading"]')).map(vis).find(Boolean);
-        if (title && period) out.push({ name: title.innerText.trim(), period: period.innerText.trim() });
+        const title = Array.from(document.querySelectorAll('[data-testid="wsf-parity-name"]')).map(vis).find(Boolean);
+        const period = Array.from(document.querySelectorAll('[data-testid="wsf-parity-period-title"]')).map(vis).find(Boolean);
+        const loading = Array.from(document.querySelectorAll('[data-testid="wsf-parity-goals-loading"]')).map(vis).find(Boolean);
+        if (title && (period || loading)) out.push({ name: title.innerText.trim(), period: period ? period.innerText.trim() : 'Reading …' });
         await new Promise((r) => requestAnimationFrame(r));
       }
       return out;
     });
-    await page.locator(`[data-testid="wsf-community-index-chip-${fx.c2.id}"]:visible`).click();
+    await page.locator(`[data-testid="wsf-parity-chip-${fx.c2.id}"]:visible`).click();
     const frames = await sampling;
     const bad = frames.filter(
       (f) =>
@@ -476,10 +483,10 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     );
     await page.goto('/community');
     const rows = page.locator('[data-testid="wsf-community-index-rows"]:visible');
-    await expect(rows).toContainText('Goals could not be read just now', { timeout: 40_000 });
-    await expect(page.locator('[data-testid="wsf-community-index-goal-count"]:visible')).toHaveText('—');
+    await expect(rows).toContainText('This community’s goals couldn’t be loaded just now.', { timeout: 40_000 });
+    await expect(page.locator('[data-testid="wsf-parity-fact-goals"]:visible')).toContainText('—');
     await expect(rows).not.toContainText('No active goal');
-    await expect(rows).toContainText('Past goals could not be read just now.');
+    await expect(rows).toContainText('Past goals couldn’t be loaded just now.');
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 });

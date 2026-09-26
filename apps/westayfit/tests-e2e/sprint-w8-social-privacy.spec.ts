@@ -284,21 +284,20 @@ test('turning a name off removes it from activity that already happened', async 
     // Turn the name off through the real settings screen.
     await page.goto('/settings/privacy');
     await expect(page.getByTestId('wsf-privacy-screen')).toBeVisible({ timeout: 40_000 });
-    const toggle = page.getByTestId(`wsf-privacy-name-${fx.groupId}`);
+    const toggle = page.getByTestId(`wsf-privacy-panel-name-${fx.groupId}`);
     await expect(toggle).toBeVisible({ timeout: 20_000 });
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await toggle.click();
     /*
-      WAIT FOR THE CONSEQUENCE COPY, NOT FOR THE SWITCH'S OWN ATTRIBUTE.
-      react-native-web renders Switch as a div wrapper and puts no aria-checked
-      on the node carrying the testID, so asserting it there waits forever on a
-      control that did flip. The note below renders ONLY in the name-off +
-      activity-on state, and the screen adopts the SETTLED server value rather
-      than the requested one — so its appearance is proof the write landed,
-      which is the thing actually worth waiting for.
+      WAIT FOR THE SETTLED VALUE ON THE SWITCH ITSELF. The privacy panel is now
+      W4's CommunityPrivacyPanelView (COMMUNITY-SETTINGS-PARITY-1), whose switch
+      carries `aria-checked` from the STORED value only -- the route adopts the
+      server's settled answer and renders nothing optimistic -- so its turning
+      false is proof the write landed. (The old react-native-web Switch carried
+      no aria-checked on this node, and this test waited on a consequence note
+      the accepted panel no longer draws.)
     */
-    await expect(page.getByTestId(`wsf-privacy-note-${fx.groupId}`)).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 20_000 });
 
     // The OLD contribution is now anonymous: current preference governs history.
     await page.goto(`/community/${fx.groupId}`);

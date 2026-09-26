@@ -284,16 +284,19 @@ test.describe(`COMMUNITY-SETTINGS-PARITY-1 frames · ${STAGE}`, () => {
       const { stage, label, commit } = await openCommunity(page, device, fx);
       await shoot(page, device, label, 'community', 1_500);
 
-      await stage.locator('[data-testid="wsf-community-index"]:visible').evaluate((el) => {
-        const lower = el.querySelector('[data-testid="wsf-community-index-history"]') as HTMLElement | null;
-        const box = el as HTMLElement;
+      // W4's view scrolls itself: the scroller is the first scrollable element inside the tab.
+      await stage.locator('[data-testid="wsf-community-index"]:visible').evaluate((root) => {
+        const lower = root.querySelector('[data-testid="wsf-parity-history"]') as HTMLElement | null;
+        const box = (Array.from(root.querySelectorAll('*')).find(
+          (n) => (n as HTMLElement).scrollHeight > (n as HTMLElement).clientHeight + 2 && /(auto|scroll)/.test(getComputedStyle(n).overflowY),
+        ) ?? root) as HTMLElement;
         box.scrollTop = lower
           ? lower.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12
           : 600;
       });
       await shoot(page, device, label, 'community-lower', 600);
-      await stage.locator('[data-testid="wsf-community-index"]:visible').evaluate((el) => {
-        (el as HTMLElement).scrollTop = 0;
+      await stage.locator('[data-testid="wsf-community-index"]:visible').evaluate((root) => {
+        for (const n of Array.from(root.querySelectorAll('*'))) (n as HTMLElement).scrollTop = 0;
       });
 
       /*
@@ -303,18 +306,18 @@ test.describe(`COMMUNITY-SETTINGS-PARITY-1 frames · ${STAGE}`, () => {
       */
       const switched: Record<string, { name: string; period: string }> = {};
       const pairNow = async () => ({
-        name: await stage.locator('[data-testid="wsf-community-index-title"]:visible').innerText(),
+        name: await stage.locator('[data-testid="wsf-parity-name"]:visible').innerText(),
         period: await stage
-          .locator('[data-testid="wsf-community-index-period"]:visible [role="heading"]')
+          .locator('[data-testid="wsf-parity-period-title"]:visible, [data-testid="wsf-parity-goals-loading"]:visible')
           .first()
           .innerText(),
       });
       const coherent = ({ name, period }: { name: string; period: string }) =>
         (name === 'Harbor Movers' && period === 'Harbor Squat Month') ||
-        (name === 'Summit Walkers' && (period === 'Summit Steps' || /^Reading /.test(period)));
+        (name === 'Summit Walkers' && (period === 'Summit Steps' || /^Loading /.test(period)));
       if (CANDIDATE) {
         await page.waitForTimeout(400);
-        await stage.locator(`[data-testid="wsf-community-index-chip-${fx.c2.id}"]:visible`).click();
+        await stage.locator(`[data-testid="wsf-parity-chip-${fx.c2.id}"]:visible`).click();
         await shoot(page, device, label, 'switch-000ms', 0);
         switched.at000 = await pairNow();
         await page.waitForTimeout(50);

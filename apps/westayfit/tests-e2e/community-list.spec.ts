@@ -251,8 +251,8 @@ test('choosing a community remembers it and opens that community Home', async ({
 
   // Coming back, the chosen one is now the current one and nothing is asked.
   await page.goto('/community');
-  await expect(page.getByTestId('wsf-community-index-current')).toBeVisible({ timeout: 40_000 });
-  await expect(page.getByTestId('wsf-community-index-current')).toContainText('Westside Walkers');
+  await expect(page.getByTestId('wsf-parity-banner')).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('wsf-parity-banner')).toContainText('Westside Walkers');
   await expect(page.getByTestId('wsf-community-index-choose')).toHaveCount(0);
 
   await context.close();
@@ -268,8 +268,8 @@ test('switching from the current community opens the one that was tapped', async
     [REMEMBER_KEY(fx.uid), fx.alpha],
   );
   await page.goto('/community');
-  await expect(page.getByTestId('wsf-community-index-current')).toBeVisible({ timeout: 40_000 });
-  await expect(page.getByTestId('wsf-community-index-current')).toContainText(
+  await expect(page.getByTestId('wsf-parity-banner')).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('wsf-parity-banner')).toContainText(
     'Alpharetta Morning Movers',
   );
 
@@ -327,7 +327,9 @@ test('Start a community goes to the creation screen, from empty and from a list'
     await page.goto('/community');
     await expect(page.getByTestId('wsf-community-index-empty')).toBeVisible({ timeout: 40_000 });
 
-    // There is no join-by-code route, so there must be no Join control at all.
+    // COMMUNITY-SETTINGS-PARITY-1: the empty state draws no Join control. (The
+    // reference's Join chip belongs to the populated tab, and goes where a code
+    // is typed -- Home's "Join with a code"; see below.)
     await expect(page.getByRole('link', { name: 'Join a community' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Join a community' })).toHaveCount(0);
 
@@ -342,8 +344,14 @@ test('Start a community goes to the creation screen, from empty and from a list'
     await signInVia(page, one.email, one.password);
     await page.goto('/community');
     await expect(page.getByTestId('wsf-community-index-rows')).toBeVisible({ timeout: 40_000 });
-    await expect(page.getByRole('link', { name: 'Join a community' })).toHaveCount(0);
-    await page.getByTestId('wsf-community-index-start').click();
+    // COMMUNITY-SETTINGS-PARITY-1 (Director #489 `5841270180`: "joined-community
+    // chips + Join / Start"): the populated tab's Join is REAL -- it opens the one
+    // place a typed code is taken, Home's list -- rather than absent.
+    await page.getByTestId('wsf-parity-join').click();
+    await expect(page).toHaveURL(/[?&]view=communities/, { timeout: 30_000 });
+    await page.goto('/community');
+    await expect(page.getByTestId('wsf-community-index-rows')).toBeVisible({ timeout: 40_000 });
+    await page.getByTestId('wsf-parity-start').click();
     await expect(page).toHaveURL(/\/start-community$/, { timeout: 30_000 });
     await context.close();
   }

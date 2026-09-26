@@ -211,7 +211,7 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
       the same screen, at the same scroll.
     */
     for (const [key, ready] of [
-      ['community', 'wsf-community-index-title'],
+      ['community', 'wsf-community-index'],
       ['activity', 'wsf-activity-title'],
       ['you', 'wsf-you-name'],
     ] as const) {
@@ -235,7 +235,7 @@ test('the shipping shell: the active tab is a no-op, tabs stay mounted, and MOVE
     for (const [key, ready] of [
       ['you', 'wsf-you-name'],
       ['activity', 'wsf-activity-title'],
-      ['community', 'wsf-community-index-title'],
+      ['community', 'wsf-community-index'],
     ] as const) {
       await page.getByTestId(`wsf-member-tab-${key}`).last().click();
       await expect(page.getByTestId(ready)).toBeVisible({ timeout: 30_000 });
