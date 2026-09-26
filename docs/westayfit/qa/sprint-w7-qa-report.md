@@ -4467,3 +4467,81 @@ This is the Check 42 method. It was run on a detached worktree at `ca2cc4c0` and
 W7 did not read run 50's job log again.
 
 **Status:** **PASS on the pin at `ca2cc4c0`.** Nothing is dispatched, accepted, integrated or staged by W7.
+
+## 50 · ROUTE QA: You #503 (product `a0f1351a`, evidence `88ef59db`) and Progress #504 (product `bdc82c0e`, evidence `3ba527d3`) on development `87997c58` (Director release #434 `5843356920`; lead ruling #503 `5843356469`; L0 receipt #503 `5843152440`; W7 ACK `5843359948`)
+
+**Verdicts, separate:**
+- **You `a0f1351a`: PASS on every routed item.** One Check 44 row stays open for the Director: Y-F10.
+- **Progress `bdc82c0e`: PASS on every routed item.** One Check 44 row stays open for the Director: P-F5, which fails on a cold load only.
+- **No regression in any W7 row on either build.**
+
+**Build and setup:**
+- Detached worktrees at `87997c58` (the control), `a0f1351a` and `bdc82c0e`, each with an emulator-flagged `build:web`. Each bundle carries only its own SHA stamp.
+- They were served beside `demo-wsf-local`. The emulator stack was restarted after the container restart, with the functions tree `5a3f232e` and 49 callables.
+
+**Lineage, by git:**
+- `87997c58` → `0fb63d96` → `341a41e5` → **`a0f1351a`** → `88ef59db` (evidence) → `d9a419ea` → `216f9d96` → **`bdc82c0e`** → `3ba527d3` (evidence).
+- The protected-path diff from `87997c58` is **empty for both products**.
+- **Scope:**
+  - You: 7 files. The route adapter, `RefreshNote` (new), `YouParityView`, `youParity`, W6's hook spec and two unit tests.
+  - Progress: 8 files. The route adapter, `progressParity`, `ProgressParityView`, W6's hook spec, one unit test and **the three re-pointed specs**.
+- The evidence commits touch docs only. Progress's lineage includes the You evidence commit, which is also docs only.
+
+| # | Check | You `a0f1351a` | Progress `bdc82c0e` |
+|---|---|---|---|
+| **1** | **Check 44, unchanged, as the pass-after.** Control `87997c58`: FAIL-BEFORE 19 / 19 fail and PRESERVE 44 / 44 pass, identical to `889e9775`. | **You FAIL-BEFORE 9 / 10 now pass** (Y-F1–Y-F9). **PRESERVE 44 / 44.** Open: **Y-F10**, below. | **FAIL-BEFORE 17 / 19 pass**: You 9 / 10 carried, and Progress **P-F1–P-F4 and P-F6–P-F9**. **PRESERVE 44 / 44.** Open: Y-F10 and **P-F5** (cold). |
+| **2** | **The lead-row rule** (`5843356469`). New spec `sprint-w7-route-qa-you-progress.spec.ts`, Q1: the member is in C1 (selected) and C2; C2's credited goal ends **sooner** than either of C1's; C2 is already in the record from its Home. | **PASS.** The lead is C1's soonest-ending goal, even though C2's ends sooner (Q-P2). C2's goal is under "Other goals you helped" with **"W7 Lunch Crew … · Ends Mon, Sep 28"**, its own name and period (Q-F1–Q-F3), and C1's name is not attached to it (Q-P3). On the control, C2's goal is absent. | carried: identical |
+| **3** | **Partial when not in the record** (Q2): a cold `/you` where C2 was never read | **PASS.** "Some goals could not be loaded, so this list may be short." (Q-F4). Nothing of C2 is invented (Q-P4). **No read is fanned out to C2** (Q-P5): the only callables name C1. The control shows no partial note. | carried |
+| **4** | **Unknown shared is never 0** | **PASS:** Y-F6 / Y-F7 (Unknown, never "0 of"). | **PASS:** P-F6. You is carried. |
+| **5** | **No added blocking read against accepted PERF.** Check 41B, unchanged, 12 / 12 runs per build, run alone. | **0 changed call, stage, loading, mount or blocking fields across all 38 transitions.** You's first visit makes 0 calls, has 0 stages and paints no loading: 17 / 15 ms (control 12 / 14). | Progress's first visit makes 0 calls, has 0 stages and paints no loading: 11 / 11 ms (control 15 / 14). The only field change: "MOVE open" needed 0 stages in some runs, where it always needed 1 (fewer, not more). |
+| **6** | **Settings still works; no account / admin hierarchy regression** | **PASS.** Check 45, unchanged, on `a0f1351a`: PRESERVE 13 / 13 and FAIL-BEFORE 15 / 15, row for row identical to `ad3d2f88`, which includes the Settings privacy truths. Check 44's Y-F5 (email and Sign out below the member story) now passes. The sign-out and identity PRESERVE rows hold. | carried |
+| **7** | **Exact own unit totals; the YOURS / SHARED split; lifecycles** | — | **PASS:** P-F1 ("73 squats recorded", "12 minutes recorded"; no blended 85), P-F3 and P-F4. P-P2 / P-P3 hold. |
+| **8** | **No-open-goal CTA truth** | You Y-F8 / Y-F9 PASS | **PASS:** P-F8 / P-F9. #504's no-community card: no Start moving, and a way to a community (re-pointed `sprint-w8-progress-copy`). |
+| **9** | **Partial and failure truth** | A5: identity, Retry and Sign out survive, and no amount is guessed (PRESERVE). **Y-F10 open**, below. | **PASS:** P-F7 (partial offers Retry). P-P12 holds. The failure card keeps identity and refuses to guess. |
+| **10** | **`periodLabel` pass-through**, in the goal's own zone (Q3): a goal ending 20:00 UTC, which is the **next** day in `Asia/Tokyo` | **PASS** on a secondary row: "Ends Sat, Oct 3", not the UTC "Fri, Oct 2" (Q-F6). The lead card prints no period, by the accepted view (`YouParityView.tsx:452` writes it on secondary rows only). | **PASS:** "W7 Tokyo Movers … · Ends Sat, Oct 3" (Q-F7). The control prints no period on either route. |
+| **11** | **The private dated-receipt seam** | — | **PASS:** "Dated receipts aren't available here yet." There is no dated row and no relative time (P-P5), and `receipts: null` in the adapter. |
+| **12** | **#504's three re-pointed specs.** Assertion-by-assertion diff, plus runs. | — | **Legitimate re-points. None weakens a truth, accessibility or performance check. Measured:** the **old** versions pass 12 / 12 on the control; the **new** versions pass **12 / 12** on `bdc82c0e`; the **new** versions **fail 7 / 12 on the control**, exactly the 7 re-pointed tests, so none is vacuous. Detail below. |
+| **13** | **H carry** (both route exits changed: You gains Start moving → `/move`; Progress drops Go Home and gains Open community) | **H1 7 / 7, H3a / b / d, H4a and H4b PASS.** H3c (Home) fails identically on the control; it is the named successor. | **The same, plus H2 16 / 16** with per-visit requests identical to the control (Home 7, Progress 2–3, You 2–3). |
+| **14** | **W6's hook specs** | — | `sprint-w6-you-hook` + `sprint-w6-progress-hook`: **9 passed**, 2 gated skips, on `bdc82c0e`. |
+| **15** | **Evidence** | `88ef59db`: every route PNG and Lovable reference matches its manifest SHA-256. **The route PNGs and side-by-sides are byte-identical to the parked hook `b99f59a4`**, as W6 states. | `3ba527d3`: the same. **Byte-identical to `3a7ad0d8`.** The 390×640 frame has no Lovable counterpart (`lovable: null`, declared). |
+
+### The re-pointed specs, one by one
+
+1. **`progress-list`, three tests:**
+   - "N goals you have added to / N running · N finished" becomes the summary line, **plus one exact total per unit** (`aria-label` "120 squats recorded" …) and lifecycle-pill counts. This is **stronger**: units are asserted separate, not just counted.
+   - The corrected goal: "80%" becomes **"2,400 / 3,000 push-ups" plus "CLOSED · UNFINISHED"**. `not.toContainText('REACHED')` is kept.
+   - Partial: "RECORDED" becomes "YOURS". The partial note is still asserted.
+2. **`sprint-w8-progress-copy`, three tests:**
+   - **Populated:** the Living WE assertion is removed. The Progress reference draws none, and the SHARED cell asserts the real total instead. REACHED becomes **"CLOSED · REACHED"**, and the units are asserted in the YOURS cells.
+   - **Empty:** it now asserts the **no-community truth**: no Start moving, a way to a community, and never "your community". This closes a gap Check 44 recorded on the base.
+   - **Error:** the in-card Home and MOVE buttons become the persistent tab bar's controls, and the reassurance copy becomes the reference's.
+3. **`ui-app-shell`, one test:** the page-wide `not.toContainText('1,847')` is **narrowed to the YOURS cell** (`not.toContainText('1,8')`), because the reference now shows the shared total, labelled SHARED. The own-number truth is kept and made exact (`toHaveText('YOURS20 squats')`).
+
+**Precision notes (not weakenings):**
+- (a) The SHARED cell's value is asserted only by its label and target, not by "1,847".
+- (b) W8's "no privacy clarification on the error card" assertion is removed, because the accepted Progress view now shows the clarification on the failure card too. Whether a clarification belongs where there is no summary is a copy question for the Director.
+
+### Open rows for the Director (not regressions; W7 fixes nothing)
+
+1. **Y-F10, You: "the community stays on screen when the goals read fails"** (a Check 44 FAIL-BEFORE row, from the Director's Phase B rules #456).
+   - On a **cold** load with the goals read failing, the adapter's `fail()` shows the view's `failed` state. It keeps the name, "Contribution details unavailable", Retry and Sign out, **but not the community band**.
+   - When the record already holds the page, it stays on screen as stale with Retry. That case passes; the cold case does not.
+   - The accepted `YouState` `failed` kind carries no community. Closing this needs a view-contract change, or a Director ruling that the row is satisfied.
+2. **P-F5, Progress: "the member is named in the private hero".**
+   - It **fails on a cold `/activity` load** and **passes warm**: "PRIVATE TO YOU · MARA ROUTE …" once the account has read the profile (Q-F5, after You).
+   - This is W6's disclosed design: the name comes only from the record, with no extra read. The Director decides whether the cold hero may go unnamed.
+3. **You's partial copy, "Some goals could not be loaded…",** also appears when another community was simply **not read yet**, not failed. W6 disclosed this as loose wording ("not false") and kept the accepted Phase A string. MEMBER-SNAPSHOT-1 removes the case.
+4. **The committed route frames show a single community.** They carry no "other community" row, so the other-community composition is evidenced by this check's text rows, not by frames.
+
+### Instrument disclosures (mine)
+
+- **New spec:** `sprint-w7-route-qa-you-progress.spec.ts` (`07598136`), corrected at `23a451cb` after the first runs.
+  - **Q3's two rows** were written as PRESERVE. The control prints no period on either route, so they became FAIL-BEFORE.
+  - **Q-F6** first put the zoned goal in You's **lead**, which by the accepted view never prints a period. The zoned goal is now a secondary row, which is the Director's "every secondary row names its … period".
+  - **Q-F5** compared the name case-sensitively; the hero upper-cases it.
+- **Final runs, labelled:**
+  - control: FAIL-BEFORE **7 / 7 fail**, PRESERVE **5 / 5**;
+  - `a0f1351a`: You rows 5 / 5 pass (Q-F5 / Q-F7 are Progress rows, still failing there), PRESERVE 5 / 5;
+  - `bdc82c0e`: **FAIL-BEFORE 7 / 7 pass, PRESERVE 5 / 5**;
+  - ×2 identical on both candidates.
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed. Emulators only (`demo-wsf-local`). Nothing is accepted, integrated or staged.
