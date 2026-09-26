@@ -2779,3 +2779,30 @@ The boundary values `s` = max with `n` = 999,999,999, and `s` = min with `n` = 0
 - The successor's own test file run against the `b71cf07f` source gave 10/12.
 
 Local emulators only (`demo-wsf-local`). No broad suite, no cloud. The callable stays held until the composite index has a cloud READY receipt.
+
+## SECURITY / OPS FINDING: Browser Use credential in `skills/browser-use-e2e/SKILL.md` (Director `5848177252`)
+
+This was a read-only check. The key value is not reproduced anywhere. It is identified only by prefix `bu_`, length 46 and sha256 prefix `45b5e468`.
+
+**Exposure**
+- **The repository is public** (GitHub `visibility: public`).
+- The literal key is at `skills/browser-use-e2e/SKILL.md` lines 12 and 28 on `main` `37f18ea9` and on development `claude/wsf-app-shell` `6c7f975c`.
+- It entered in `81789e80` on 2026-04-04 and was re-added by `b7e57764` and `11bb1dbc`, both on `main`.
+- It is in the tip tree of **350 remote branches**. It is the only Browser Use key found on any branch.
+
+**The earlier fix was never merged**
+- `dcc0bbcc` (2026-08-31, branch `fix/remove-leaked-browseruse-key`) replaced both occurrences with `BROWSER_USE_API_KEY` and added a rotation notice.
+- No PR was ever opened for that branch, and it is not an ancestor of `main`.
+- Branches cut later re-carry the literal (`7c89c41b` … `38fea68f`).
+
+**Whether the key is active: CANNOT-MEASURE.** Testing it would mean using it, and no provider-side access is authorised. Since the repository is public, the key must be treated as compromised whatever its current state.
+
+**Other secrets**
+- On `main` under `skills/**`, `.claude/**`, `docs/westayfit`, `docs/wsf-staging`, `.github/wsf-staging`, `CLAUDE.md` and `AGENTS.md`, I scanned for the following patterns and found no other live-looking provider secret: Browser Use, OpenAI `sk-`, Stripe `sk_`/`rk_`/`whsec_`, Resend, GitHub `ghp_`/`github_pat_`, Slack `xox*`, AWS `AKIA`, Google `AIza`, PEM private keys and service-account JSON.
+- Two `AIza…` hits are synthetic test canaries: `scan-evidence.test.mjs:32` (marked "CANARY … dO_nOt_DiScLoSe") and `write-sdk-config.test.mjs:17` (marked TEST). They are intentional.
+
+**Remediation**
+1. **Rotation (owner only).** Devin, as the Browser Use Cloud account holder, revokes the exposed key in the Browser Use dashboard and issues a new one. Removing the key from source does not revoke it; only the provider-side revocation ends the exposure. No agent may do this.
+2. **Source fix.** Carry `dcc0bbcc`'s two-line change to `main` as a docs-only PR, either by cherry-picking `-x` or by recreating it: use the `BROWSER_USE_API_KEY` env var in both places and keep the rotation notice. Development branches then pick it up on their next merge from `main`.
+3. **History.** Removing the literal from HEAD does not remove it from history, from 350 branch tips, or from any clone. Rewriting history is not recommended: this repo syncs to Lovable and forbids force-pushes, and rotation (item 1) is what neutralises the key. Stale branches can be pruned separately, at the owner's discretion.
+4. **Prevention (optional).** Add a secret-pattern check (the `bu_` prefix and similar) to an existing CI or pre-commit lane, and enable GitHub secret scanning and push protection in repo settings (owner).
