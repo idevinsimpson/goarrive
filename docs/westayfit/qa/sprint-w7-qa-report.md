@@ -4784,3 +4784,77 @@ Operational QA only. It was run from detached worktrees of `cf13140b` and `6be81
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
 
 **Status:** **PASS at `a1f5e7a4`.** Check 58's C4 failure is closed. C1–C3 (Check 57) and C5, C6 and the boundary (Check 58) carry. W7 merged, activated and deployed nothing.
+
+## 60 · HOME-NORTHSTAR-PARITY-1, #514 at exact `6ba49f100dd828c6ab6b007fe6a47087de397111` on base `6deefe7d`, evidence `5e8a22ae` (handoff #434 `5847519588`; W7 ACK `5847521409`): **PASS**
+
+- **Scope:** changed dependencies only. The broad accepted lanes were not re-run.
+- **Environment:** Chromium on the emulators (`demo-wsf-local`). Both builds were built locally with auth and emulators on: base on :5039, product on :5040.
+- **New spec:** `sprint-w7-home-northstar.spec.ts`. It is W7's own, independent of W9's spec, and every row was run on both the base and the product.
+- **No evidence gate was set.**
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Scope / lineage** | **PASS.** `6deefe7d..6ba49f10` touches exactly two files: the Home route `app/(tabs)/(home)/community/[groupId]/index.tsx` and the new `sprint-w9-home-northstar-parity-1.spec.ts`. No shell, memberReads, functions, rules, indexes, Community, Progress, You or `LivingWeProgress` file changes. The evidence commit `5e8a22ae` has parent `6ba49f10`, and every file it touches is under `docs/design-target/review/home-northstar-parity-1/`. |
+| **2** | **W9's focused spec**, exact, producer skipped (no capture gate) | **PASS:** 6 / 6 truth rows on `6ba49f10`. On the base, 4 pass and 2 fail: the "default" hierarchy and the "reached and still open" kicker. That is the expected fail-before. |
+| **3** | **Truth rows**, run independently by W7 on product and base | **PASS on `6ba49f10`, all eight** (T1–T7 below, with T4 and T5 counted separately). |
+| **4** | **Navigation / motion carry** | **PASS.** See T8, H1 and H2 below. |
+| **5** | **Layout guard** | **PASS.** See L1–L4 below. |
+| **6** | **Existing Home-dependent specs**: W9's exact 18 files (the list in `RAW-home-dependents-6ba49f10.txt`), run by W7 on `6ba49f10` | **119 / 119 passed** (8.1 min). The product diff changes no existing spec, so no assertion was weakened. |
+| **7** | **Evidence provenance** | **PASS**, with one point outside my reach; see the evidence bullets below. |
+
+**Row 3, the truth rows** (all PASS on `6ba49f10`):
+- **T1, default:**
+  - the hero reads "241 of 500 squats", the confirmed figure;
+  - "You've added 25 squats" is a separate line, distinct from the shared total.
+- **T2, unknown.** A context route answered all 2 `wsfGoalPulse` reads 500 from the start. The result:
+  - no figure;
+  - no hero moved-today row;
+  - "Progress couldn't be loaded".
+- **T3, last known.** A warm return whose 2 pulse reads were answered 500:
+  - the "LAST KNOWN" pill shows, and 241 is kept;
+  - "Couldn't refresh. This is the last confirmed figure." shows;
+  - that sentence appears twice in `innerText` by design: an `aria-live` region plus an `aria-hidden` visible copy. Same on base.
+- **T4, reached and open:** 512 / 500 reads "GOAL REACHED … 12 beyond our goal · still open".
+- **T5, closed goal only:**
+  - no hero, and no Start / Already moved actions;
+  - the closed goal appears only under HISTORY.
+- **T6, warm Home → Community → Home:** 155 frames watched on Home, with 0 frames missing the hero, 0 loading frames and 1 hero node throughout.
+- **T7, Home reselect:**
+  - same URL, `history.length` unchanged (3), same hero DOM node;
+  - the page does not remount. The `wsfGoalPulse` and `wsfMyContribution` requests seen in that window are identical on base, so they are not caused by this packet.
+
+**Row 4, navigation and motion carry:**
+- **T8, action destinations:**
+  - "Start moving" goes to `/contribute/<goal>?groupId=…&mode=move`, and "Already moved" goes to `…&mode=record`;
+  - both are identical to the base;
+  - Back returns to the same Home URL with the hero present.
+- **The action handlers themselves:** the diff changes no `href`, `onPress` or router line.
+- **H1 (10 warm switch cycles): PASS** on `6ba49f10`, with no loading frame and one instance per route.
+- **H2 (MOVE lifecycle from Home, Progress and You): PASS** on `6ba49f10`, with Close returning to the opener 10 / 10.
+- **Base-only note, not a finding on this PR:** on base `6deefe7d`, H2e failed once. The first Home visit made 9 requests where the mode is 7. On a re-run it passed (7). The product passed.
+- **Shell:** the shell tab fade, focus and scroll files are not in the diff.
+
+**Row 5, layout guard:**
+- **L1:** at 390 and at 360, `scrollWidth` equals `clientWidth`, and 0 elements extend past the viewport.
+- **L2:** the pair is side by side, both 54 px tall; primary 189 px wide, secondary 153 px.
+- **L3:** exactly one h1.
+- **L4, 390×640:** a laid-out short height, not a crop:
+  - the hero top moves from 209 to 197 and its height from 279 to 245;
+  - Start's bottom is at 488, above the tab bar at 565.
+
+**Row 7, evidence provenance:**
+- `MANIFEST.sha256`: 29 / 29 hashes verify, and the set equals the directory.
+- Every frame is at full viewport: 390×640 or 390×844 for frames, overlays and differences. Side-by-sides are 792 wide (two frames, 12 px apart, plus a label strip).
+- The candidate and base frames are labelled "FIXTURE SAMPLE DATA · NOT ACCEPTED".
+- **The one point outside my reach:** the reference PNGs' SHA-256 match the hashes W9's README records, but the packet's own hashes live in the external Lovable project, which W7 does not read. The reference-to-packet match is W9's statement, not W7's measurement.
+
+**Not adjudicated:** the intentional North-Star differences are the Director's to decide. They are the prototype strip, the join / window copy, the pinned cross-lane copy, platform fonts and icons, and the 62 px shell.
+
+**Instrument corrections, disclosed.** My first run of the new spec had three instrument errors, the same on both builds, each fixed before the run reported above:
+- **L2:** the tiles were located by label, which waited out the test timeout. They are now located by testID prefix.
+- **T2:** the moved-today check was scoped to the whole page. The header's "0 people moved today" comes from the momentum read, not the pulse. It is now scoped to the pulse-gated hero row `wsf-community-hero-moved-today`.
+- **T5:** the "120 of 500" check matched the closed goal under HISTORY. It now checks only the text above HISTORY.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. Artifacts were cleaned in both trees, and none is committed.
+
+**Status:** **PASS at `6ba49f10`.** No changed-dependency finding. Next consumer: Director product acceptance → L0 integration. W7 merged, accepted and deployed nothing.
