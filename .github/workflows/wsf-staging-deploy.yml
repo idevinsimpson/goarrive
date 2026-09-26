@@ -178,7 +178,7 @@ jobs:
         if: ${{ inputs.mode == 'journey-activation' }}
         env:
           WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
-        run: node .github/wsf-staging/check-milestone-manifest.mjs --require .github/wsf-staging/journeys/examples/community-settings-parity-1.json
+        run: node .github/wsf-staging/check-milestone-manifest.mjs --require .github/wsf-staging/journeys/examples/home-northstar-parity-1.json
 
       # THE SERVED MARKER, IN THE CREDENTIAL-FREE GATE (Director #516 A1).
       # `config` needs this job and authenticates, so a wrong or unreadable
@@ -1238,7 +1238,7 @@ jobs:
           WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
           WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
           WSF_RESULT_DIR: ${{ github.workspace }}/wsf-activation-evidence
-          WSF_JOURNEY_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/examples/community-settings-parity-1.json
+          WSF_JOURNEY_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/examples/home-northstar-parity-1.json
           WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys/cleanup-manifest.json
         run: |
           set -euo pipefail
@@ -1294,7 +1294,7 @@ jobs:
             exit 0
           fi
           node ops/.github/wsf-staging/owner-test-card.mjs \
-            --manifest ops/.github/wsf-staging/journeys/examples/community-settings-parity-1.json \
+            --manifest ops/.github/wsf-staging/journeys/examples/home-northstar-parity-1.json \
             --results "$WSF_CHANGED_DIR/changed-journeys.json" \
             --cleanup-manifest "$WSF_CHANGED_DIR/cleanup-manifest.json" \
             --cleanup-receipt "$WSF_CHANGED_DIR/cleanup-receipt.json" \
@@ -1317,8 +1317,8 @@ jobs:
       - name: Require the activation to have passed
         if: always()
         env:
-          WSF_ACTIVATION_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/examples/community-settings-parity-1.json
-          WSF_ACTIVATION_JOURNEYS: community,settings
+          WSF_ACTIVATION_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/examples/home-northstar-parity-1.json
+          WSF_ACTIVATION_JOURNEYS: home
           WSF_CHANGED_DIR: ${{ github.workspace }}/wsf-activation-evidence/changed-journeys
           WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
           WSF_MARKER_OUTCOME: ${{ steps.marker.outcome }}
