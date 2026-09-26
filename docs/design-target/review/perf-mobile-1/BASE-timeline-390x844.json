@@ -1,0 +1,104 @@
+{
+  "stage": "BASE",
+  "commit": "0b460ce3",
+  "device": "390x844",
+  "instrumentation": "every callable answer held 1500 ms after Home settled",
+  "journeys": {
+    "progress": {
+      "shutterMsFromPress": [
+        94,
+        169,
+        602,
+        7368
+      ],
+      "loadingPainted": {
+        "wsf-activity-loading": {
+          "firstMs": 85,
+          "lastMs": 4681
+        }
+      }
+    },
+    "you": {
+      "shutterMsFromPress": [
+        80,
+        161,
+        602,
+        7357
+      ],
+      "loadingPainted": {
+        "wsf-you-loading": {
+          "firstMs": 74,
+          "lastMs": 4694
+        }
+      }
+    },
+    "move": {
+      "shutterMsFromPress": [
+        87,
+        191,
+        602,
+        7348
+      ],
+      "loadingPainted": {
+        "wsf-move-working": {
+          "firstMs": 80,
+          "lastMs": 3138
+        }
+      }
+    }
+  },
+  "frames": [
+    {
+      "file": "BASE-progress-000ms-390x844.png",
+      "sha256": "8f94bcd6a6cba75b58225993655874a7165bc088391640ff949c756897d741eb"
+    },
+    {
+      "file": "BASE-progress-150ms-390x844.png",
+      "sha256": "8f94bcd6a6cba75b58225993655874a7165bc088391640ff949c756897d741eb"
+    },
+    {
+      "file": "BASE-progress-600ms-390x844.png",
+      "sha256": "8f94bcd6a6cba75b58225993655874a7165bc088391640ff949c756897d741eb"
+    },
+    {
+      "file": "BASE-progress-settled-390x844.png",
+      "sha256": "f0e92e4ead6dfaa35e22e87acdeda07c0c4900c0157df9f49e5c41264efc0570"
+    },
+    {
+      "file": "BASE-you-000ms-390x844.png",
+      "sha256": "df09c3350cae3ddd1a45373dcd6c8e078492fe063c33d7f3632b0c7ed1c72105"
+    },
+    {
+      "file": "BASE-you-150ms-390x844.png",
+      "sha256": "df09c3350cae3ddd1a45373dcd6c8e078492fe063c33d7f3632b0c7ed1c72105"
+    },
+    {
+      "file": "BASE-you-600ms-390x844.png",
+      "sha256": "df09c3350cae3ddd1a45373dcd6c8e078492fe063c33d7f3632b0c7ed1c72105"
+    },
+    {
+      "file": "BASE-you-settled-390x844.png",
+      "sha256": "33b7681a3ff181a8a58eef77b070f8a92768ac7d95183508aebd9555e86423a1"
+    },
+    {
+      "file": "BASE-move-000ms-390x844.png",
+      "sha256": "7f3a194e975f6956fb206eab1e07eedd78f95b8315d06f77df1eeae458b831d9"
+    },
+    {
+      "file": "BASE-move-150ms-390x844.png",
+      "sha256": "8a7d617179e431613a64eb8b70d942eb847d6a078b89ebb07068c843521b9c55"
+    },
+    {
+      "file": "BASE-move-600ms-390x844.png",
+      "sha256": "7af33f410bc08eb8535fb30d003801677222dede1c1687c9b7441f917cb3e37d"
+    },
+    {
+      "file": "BASE-move-settled-390x844.png",
+      "sha256": "a77108bd6ad4f73d5e528217ac5572a8009e6f7bee37c34a0b8c8640cab16476"
+    }
+  ],
+  "video": {
+    "file": "BASE-timeline-390x844.webm",
+    "sha256": "b231d144be76f53f643e5e3907e0fabcd9d418d959da119f0523a0e281104146"
+  }
+}
