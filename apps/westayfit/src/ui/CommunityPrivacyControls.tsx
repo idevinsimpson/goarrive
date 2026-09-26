@@ -1,6 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../auth';
 import { describeCallableError } from '../callableErrors';
@@ -30,8 +30,32 @@ import { ACTION_GREEN, CARD_BORDER, HAIRLINE, INK_QUIET, NAVY, SURFACE, TEXT_MUT
  *     and says that what is shown was rechecked with the server (a save can
  *     land even though its reply was lost);
  *   · a refusal (`not-found` / `permission-denied`: this account no longer
- *     belongs there) says access changed, and that community's record goes.
+ *     belongs there) says access changed, and that community's block and
+ *     record go at once.
+ *
+ * NO LATE ANSWER OVERWRITES A NEWER ONE (hardening addendum, Director #489
+ * `5841405625`). Every community + setting has a generation, advanced by each
+ * action on it. A save's reply is adopted only if nothing newer happened to
+ * that setting, and only for that setting (the reply also carries the other
+ * one, which another save may have moved since). A re-read issued before a
+ * save lands does not put back what the save settled. A switch takes no
+ * second action while its own save is unresolved: nothing optimistic is
+ * shown, so a second press could only repeat the first intent. An account
+ * epoch, advanced on sign-in change and on close, drops every reply that
+ * arrives for an account or a panel that is no longer here.
  */
+
+type Setting = 'name' | 'activity';
+const keyOf = (groupId: string, setting: Setting) => `${groupId}:${setting}`;
+
+/** Settled privacy changes, for surfaces that show who is named (the roster). */
+const settledListeners = new Set<(groupId: string) => void>();
+export function onPrivacySettled(listener: (groupId: string) => void): () => void {
+  settledListeners.add(listener);
+  return () => {
+    settledListeners.delete(listener);
+  };
+}
 
 type Vis = 'visible' | 'private';
 
@@ -54,22 +78,64 @@ export function CommunityPrivacyControls() {
   const [rows, setRows] = useState<CommunityRow[]>([]);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   /** Guards a landed answer against a newer load and against another account. */
   const live = useRef(0);
+  /** Advanced on every account change and on unmount: older replies are dropped. */
+  const epoch = useRef(0);
+  /** Per community + setting: advanced by each action on it. */
+  const gens = useRef(new Map<string, number>());
+  const busyRef = useRef<ReadonlySet<string>>(busy);
+  busyRef.current = busy;
+
+  useEffect(() => {
+    epoch.current += 1;
+    gens.current = new Map();
+    return () => {
+      epoch.current += 1;
+    };
+  }, [uid]);
+
+  const markBusy = (key: string, on: boolean) =>
+    setBusy((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
 
   const load = useCallback(
     async ({ quiet }: { quiet: boolean }) => {
       if (!uid) return;
       const token = ++live.current;
+      const ep = epoch.current;
+      // What each setting's generation was when this read was issued.
+      const issued = new Map(gens.current);
       if (!quiet) setPhase('loading');
       try {
         const answer = await readMyCommunities(uid);
-        if (live.current !== token) return;
-        setRows((answer.items ?? []) as unknown as CommunityRow[]);
+        if (live.current !== token || epoch.current !== ep) return;
+        const fresh = (answer.items ?? []) as unknown as CommunityRow[];
+        setRows((prev) =>
+          fresh.map((f) => {
+            const shown = prev.find((r) => r.groupId === f.groupId);
+            if (!shown) return f;
+            // A setting acted on since this read was issued keeps what its
+            // own save settled; the read is older than that.
+            const keep = (setting: Setting) => {
+              const k = keyOf(f.groupId, setting);
+              return (gens.current.get(k) ?? 0) !== (issued.get(k) ?? 0) || busyRef.current.has(k);
+            };
+            return {
+              ...f,
+              nameVisibility: keep('name') ? shown.nameVisibility : f.nameVisibility,
+              activityVisibility: keep('activity') ? shown.activityVisibility : f.activityVisibility,
+            };
+          }),
+        );
         setPhase('ready');
       } catch (e) {
-        if (live.current !== token) return;
+        if (live.current !== token || epoch.current !== ep) return;
         if (!quiet) {
           setNotice({ kind: 'error', text: describeCallableError(e, 'Your communities could not be loaded just now.') });
           setPhase('failed');
@@ -86,9 +152,15 @@ export function CommunityPrivacyControls() {
   }, [ready, uid, load]);
 
   const setVisibility = useCallback(
-    async (row: CommunityRow, patch: { name?: Vis; activity?: Vis }) => {
+    async (row: CommunityRow, setting: Setting, value: Vis) => {
       if (!uid) return;
-      setBusy(row.groupId);
+      const key = keyOf(row.groupId, setting);
+      if (busyRef.current.has(key)) return;
+      const gen = (gens.current.get(key) ?? 0) + 1;
+      gens.current.set(key, gen);
+      const ep = epoch.current;
+      busyRef.current = new Set([...busyRef.current, key]);
+      markBusy(key, true);
       // A new action is the member moving on: the previous message goes.
       setNotice(null);
       try {
@@ -96,19 +168,27 @@ export function CommunityPrivacyControls() {
           getFirebaseFunctions(),
           'wsfSetCommunityVisibility',
         );
-        const res = await fn({ groupId: row.groupId, ...patch });
-        // ADOPT THE SETTLED VALUE, never the requested one.
+        const res = await fn({ groupId: row.groupId, [setting]: value });
+        if (epoch.current !== ep || gens.current.get(key) !== gen) return;
+        // ADOPT THE SETTLED VALUE, never the requested one -- and only for the
+        // setting this save was about.
+        const settled = res.data[setting];
         setRows((prev) =>
           prev.map((r) =>
             r.groupId === row.groupId
-              ? { ...r, nameVisibility: res.data.name, activityVisibility: res.data.activity }
+              ? setting === 'name'
+                ? { ...r, nameVisibility: settled }
+                : { ...r, activityVisibility: settled }
               : r,
           ),
         );
+        settledListeners.forEach((l) => l(row.groupId));
       } catch (e) {
+        if (epoch.current !== ep) return;
         const code = (e as { code?: unknown } | null)?.code;
         if (typeof code === 'string' && REFUSED.has(code)) {
           forgetCommunity(uid, row.groupId);
+          setRows((prev) => prev.filter((r) => r.groupId !== row.groupId));
           setNotice({
             kind: 'accessChanged',
             text: `Your access to ${row.displayName} has changed, so its settings are no longer shown here.`,
@@ -120,9 +200,12 @@ export function CommunityPrivacyControls() {
           });
         }
         // Re-read rather than guess -- quietly, and without clearing the message.
+        // This setting's own generation is unchanged, so the re-read may set it.
+        markBusy(key, false);
+        busyRef.current = new Set([...busyRef.current].filter((k) => k !== key));
         await load({ quiet: true });
       } finally {
-        setBusy(null);
+        if (epoch.current === ep) markBusy(key, false);
       }
     },
     [uid, load],
@@ -184,14 +267,12 @@ export function CommunityPrivacyControls() {
                     : 'Members here see “Anonymous member” instead of your name.'}
                 </Text>
               </View>
-              <Switch
+              <PrivacySwitch
                 value={nameOn}
-                disabled={busy === r.groupId}
-                onValueChange={(v) => void setVisibility(r, { name: v ? 'visible' : 'private' })}
-                trackColor={{ true: ACTION_GREEN, false: '#D3CEC4' }}
-                style={st.switch}
+                disabled={busy.has(keyOf(r.groupId, 'name'))}
+                onChange={(v) => void setVisibility(r, 'name', v ? 'visible' : 'private')}
                 testID={`wsf-privacy-name-${r.groupId}`}
-                accessibilityLabel={`Show my name in ${r.displayName}`}
+                label={`Show my name in ${r.displayName}`}
               />
             </View>
 
@@ -204,14 +285,12 @@ export function CommunityPrivacyControls() {
                     : 'Your contributions are not listed one by one. They still count toward the total.'}
                 </Text>
               </View>
-              <Switch
+              <PrivacySwitch
                 value={activityOn}
-                disabled={busy === r.groupId}
-                onValueChange={(v) => void setVisibility(r, { activity: v ? 'visible' : 'private' })}
-                trackColor={{ true: ACTION_GREEN, false: '#D3CEC4' }}
-                style={st.switch}
+                disabled={busy.has(keyOf(r.groupId, 'activity'))}
+                onChange={(v) => void setVisibility(r, 'activity', v ? 'visible' : 'private')}
                 testID={`wsf-privacy-activity-${r.groupId}`}
-                accessibilityLabel={`Show my activity in ${r.displayName}`}
+                label={`Show my activity in ${r.displayName}`}
               />
             </View>
 
@@ -241,6 +320,90 @@ export function CommunityPrivacyControls() {
   );
 }
 
+/** Keyboard focus only: a pointer press does not draw the ring. */
+function ensureSwitchCss(): void {
+  if (typeof document === 'undefined' || document.getElementById('wsf-privacy-switch')) return;
+  const style = document.createElement('style');
+  style.id = 'wsf-privacy-switch';
+  style.textContent =
+    '[data-wsf-switch]:focus{outline:none}' +
+    '[data-wsf-switch]:focus-visible{outline:2px solid #3B9FD8;outline-offset:2px}';
+  document.head.appendChild(style);
+}
+
+/**
+ * THE REFERENCE'S TOGGLE (Director #489 `5841078939`; Lovable `d4f60624`
+ * ui.tsx): a 48 x 28 track, a 20 px thumb at a 4 px inset, action green when
+ * on, and a visible ring for keyboard focus. react-native-web's Switch draws a
+ * 28 px thumb over a thinner track and has no ring of its own, so the control
+ * is drawn here: a real `role="switch"` with `aria-checked`, pressed by
+ * pointer, Enter or Space.
+ */
+function PrivacySwitch({
+  value,
+  disabled,
+  onChange,
+  testID,
+  label,
+}: {
+  value: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+  testID: string;
+  label: string;
+}) {
+  ensureSwitchCss();
+  const toggle = () => {
+    if (!disabled) onChange(!value);
+  };
+  return (
+    <Pressable
+      onPress={toggle}
+      disabled={disabled}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      testID={testID}
+      hitSlop={8}
+      style={[sw.track, value ? sw.trackOn : sw.trackOff, disabled ? sw.trackBusy : null]}
+      {...({
+        'aria-checked': value,
+        'aria-disabled': disabled,
+        dataSet: { wsfSwitch: '1' },
+        // Space toggles a switch; react-native-web only maps Enter for this role.
+        onKeyDown: (e: { nativeEvent?: { key?: string }; preventDefault?: () => void }) => {
+          if (e.nativeEvent?.key === ' ') {
+            e.preventDefault?.();
+            toggle();
+          }
+        },
+      } as Record<string, unknown>)}
+    >
+      <View style={[sw.thumb, value ? sw.thumbOn : sw.thumbOff]} />
+    </Pressable>
+  );
+}
+
+const sw = StyleSheet.create({
+  track: { width: 48, height: 28, borderRadius: 14, justifyContent: 'center' },
+  trackOn: { backgroundColor: ACTION_GREEN },
+  trackOff: { backgroundColor: '#D3CEC4' },
+  trackBusy: { opacity: 0.6 },
+  thumb: {
+    position: 'absolute',
+    top: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#081D36',
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  thumbOn: { left: 24 },
+  thumbOff: { left: 4 },
+});
+
 const st = StyleSheet.create({
   wrap: { gap: 12 },
   scope: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 18 },
@@ -264,7 +427,6 @@ const st = StyleSheet.create({
   ctrlText: { flex: 1, gap: 2 },
   ctrlLabel: { color: NAVY, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   hint: { color: TEXT_MUTED, fontSize: 12, lineHeight: 16 },
-  switch: { width: 48, height: 28 },
   note: { color: TEXT_MUTED, fontSize: 12.5, lineHeight: 17, paddingTop: 4 },
   footnote: { color: INK_QUIET, fontSize: 12.5, lineHeight: 17 },
 });

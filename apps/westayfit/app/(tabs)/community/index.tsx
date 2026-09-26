@@ -39,6 +39,7 @@ import {
   totalOfTargetParts,
 } from '../../../src/ui/progressFormat';
 import { peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../../src/memberReads';
+import { onPrivacySettled } from '../../../src/ui/CommunityPrivacyControls';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.
@@ -125,6 +126,30 @@ type State =
   | { kind: 'error' }
   | { kind: 'ready'; items: Enriched[]; currentId: string | null; momentum: Addition[]; roster: Roster };
 
+/*
+  COMMUNITY-SETTINGS-PARITY-1. THE ROSTER, AS THE REFERENCE DRAWS IT LAST:
+  who is in the current community, by the names they chose to show.
+  `wsfCommunityMembers` applies every member's privacy choice server-side; a
+  failure says so rather than guessing a list. The answer carries the
+  community it was read for, so it can never be drawn under another
+  community's heading.
+*/
+async function readRoster(groupId: string): Promise<Roster> {
+  try {
+    const r = await httpsCallable<
+      { groupId: string },
+      { members: { displayName: string; role: string }[]; nextCursor: string | null }
+    >(getFirebaseFunctions(), 'wsfCommunityMembers')({ groupId });
+    return {
+      groupId,
+      people: Array.isArray(r.data?.members) ? r.data.members : [],
+      complete: (r.data?.nextCursor ?? null) === null,
+    };
+  } catch {
+    return { groupId, failed: true };
+  }
+}
+
 function activeGoals(goals: Goal[] | 'failed' | 'pending'): Goal[] {
   return goals === 'failed' || goals === 'pending' ? [] : goals.filter((g) => g.status === 'active');
 }
@@ -194,6 +219,17 @@ export default function CommunityIndexScreen() {
   // The request that is allowed to publish. A retry, a sign-out or an unmount
   // while a slow read is in flight must not let a stale answer land.
   const liveRef = useRef(0);
+
+  /*
+    WHO IS NAMED FOLLOWS THE CHOICE AS IT IS NOW (hardening addendum, #489
+    `5841405625`). A privacy change settled in Settings re-reads the current
+    community's roster, so a member who turns their name off is not still
+    listed by name when they come back to this tab. `rosterGen` makes that
+    re-read win over any older roster read still in flight.
+  */
+  const rosterGen = useRef(0);
+  const [rosterNonce, setRosterNonce] = useState(0);
+  useEffect(() => onPrivacySettled(() => setRosterNonce((n) => n + 1)), []);
 
   useEffect(() => {
     if (!ready || !user) return;
@@ -268,35 +304,27 @@ export default function CommunityIndexScreen() {
         );
       };
 
-      /*
-        COMMUNITY-SETTINGS-PARITY-1. THE ROSTER, AS THE REFERENCE DRAWS IT
-        LAST: who is in the current community, by the names they chose to
-        show. `wsfCommunityMembers` applies every member's privacy choice
-        server-side; a failure says so rather than guessing a list. The
-        answer carries the community it was read for, so it can never be
-        drawn under another community's heading.
-      */
-      const readRoster = async (): Promise<Roster> => {
-        if (!current) return 'pending';
-        try {
-          const r = await httpsCallable<
-            { groupId: string },
-            { members: { displayName: string; role: string }[]; nextCursor: string | null }
-          >(fns, 'wsfCommunityMembers')({ groupId: current.groupId });
-          return {
-            groupId: current.groupId,
-            people: Array.isArray(r.data?.members) ? r.data.members : [],
-            complete: (r.data?.nextCursor ?? null) === null,
-          };
-        } catch {
-          return { groupId: current.groupId, failed: true };
-        }
-      };
+      const rosterIssued = rosterGen.current;
+      const readCurrentRoster = async (): Promise<Roster> => (current ? readRoster(current.groupId) : 'pending');
 
-      const [momentum, roster] = await Promise.all([readMomentum().catch(() => [] as Addition[]), readRoster()]);
+      const [momentum, fetched] = await Promise.all([
+        readMomentum().catch(() => [] as Addition[]),
+        readCurrentRoster(),
+      ]);
 
       if (liveRef.current === token) {
-        setState({ kind: 'ready', items: enriched, currentId, momentum, roster });
+        setState((prev) => {
+          // A roster re-read after a privacy change is newer than this one.
+          const roster =
+            rosterGen.current !== rosterIssued &&
+            prev.kind === 'ready' &&
+            prev.roster !== 'pending' &&
+            fetched !== 'pending' &&
+            prev.roster.groupId === fetched.groupId
+              ? prev.roster
+              : fetched;
+          return { kind: 'ready', items: enriched, currentId, momentum, roster };
+        });
       }
     })();
 
@@ -308,6 +336,19 @@ export default function CommunityIndexScreen() {
   // Back on this tab: if the member's current community moved while they
   // were elsewhere, the tab follows it.
   const currentIdNow = state.kind === 'ready' ? state.currentId : null;
+
+  // The re-read a settled privacy change asks for: the roster only.
+  useEffect(() => {
+    if (rosterNonce === 0 || !currentIdNow) return;
+    const gen = ++rosterGen.current;
+    const groupId = currentIdNow;
+    void readRoster(groupId).then((roster) => {
+      if (rosterGen.current !== gen) return;
+      setState((prev) => (prev.kind === 'ready' && prev.currentId === groupId ? { ...prev, roster } : prev));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rosterNonce]);
+
   const idsNow = state.kind === 'ready' ? state.items.map((i) => i.groupId).join(',') : '';
   useFocusEffect(
     useCallback(() => {
