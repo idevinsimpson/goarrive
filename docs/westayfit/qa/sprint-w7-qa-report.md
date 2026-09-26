@@ -5531,3 +5531,34 @@ None of them is the O7 failure below; that is not among the disclosed choices.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; the local fix was reverted (the tree is clean).
 
 **Status:** **FAIL on one concrete O7 invariant (F1) at `e5f69522`.** O1–O6, lineage, scope and the six design choices PASS. W7 merged, accepted and deployed nothing, and created no state branch or trigger.
+
+## 66D · AUTONOMY-STATE-1A closure delta, #519 at exact `cc78509adc4f45e2c938e54b4212dce2bd7b78d7` on `e5f69522` (handoff #434 `5849613670`; L0 receipt #519 `5849611782`; W7 ACK `5849658074`): **PASS**
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Delta and scope** | **PASS.** One commit, parent `e5f69522`. Four files: `schema.mjs` (`REACHABLE_UNTIL.STAGED` gains `VERIFIED`), `derive.mjs` (`REACHED.VERIFIED` gains `STAGED`), `CONTROL_STATE.md` (the O7 paragraph) and `audit.test.mjs`. All paths since main are inside the 1A set. |
+| **2** | **Check 66 F1 / O7 case 3** | **PASS.** See the case-3 bullets below. |
+| **3** | **The rest of O1–O7 unchanged** | **PASS.** My Check 66 probes pass **69 / 69** on `cc78509a` (68 / 69 on `e5f69522`). |
+| **4** | **Test changes** | **PASS.** See the test-change bullets below. |
+| **5** | **Suites and mutants** | **PASS.** See the suite bullets below. |
+
+**Row 2, O7 case 3:**
+- `block XPK until VERIFIED` on a STAGED-hosted dependency is **allowed**.
+- It is **not** cleared at DELIVERED, ACCEPTED, INTEGRATED, VERIFYING or the deployment receipt (`stage`), nor after `proof-fail`.
+- It **is** cleared at terminal STAGED after the hosted `proof-pass` (a timing probe on the exact head).
+
+**Row 4, test changes:**
+- The old refusal row (`ALPHA until VERIFIED`, a STAGED dependency) is removed.
+- The reachable set for ALPHA gains `VERIFIED`.
+- O7.5 now asserts that STAGED and VERIFIED are not reached at the receipt, that both are reached at terminal STAGED, and that a VERIFIED-terminal packet still never satisfies STAGED.
+- The new O7.6 is exactly Check 66's case 3.
+- The `audit` count stays 15: one table row removed, one test added.
+
+**Row 5, suites and mutants:**
+- **Control `run-all`:** ledger 75, views 37, skill 6, closure 13, review 10, integrity 11, recovery 37, audit 15.
+- **Staging suite:** green.
+- **Reverting either line** (schema or derive) makes `run-all` fail (exit 1).
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; the tree is clean.
+
+**Status:** **PASS at `cc78509a`.** Check 66's F1 is closed, and O1–O6 carry. Next consumer: Director acceptance of Phase A. W7 merged, accepted and deployed nothing.
