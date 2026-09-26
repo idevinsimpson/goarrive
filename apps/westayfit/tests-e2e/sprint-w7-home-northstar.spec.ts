@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 
 import { FIRESTORE_EMULATOR, PROJECT_ID, seedProfile, seedShards, seedVerifiedUser, signInVia, stampId } from './helpers/mobile';
+import { seedContribution, seedMembershipWithVisibility } from './sprint-w8-social-fixture';
 
 /**
  * W7 — CHECK 60: HOME-NORTHSTAR-PARITY-1 (#514), exact product `6ba49f10` on
@@ -259,5 +260,120 @@ test.describe(`W7 Check 60 · Home North Star (${LABEL})`, () => {
     const laidOut = g640.hero !== null && g844.hero !== null && (g640.hero.h !== g844.hero.h || g640.hero.top !== g844.hero.top);
     const actionsInFirstScreen = g640.startBottom !== null && g640.tabsTop !== null && g640.startBottom <= g640.tabsTop;
     measure('L4 short height', { verdict: verdict(laidOut && actionsInFirstScreen), g844, g640, laidOut, actionsInFirstScreen });
+  });
+});
+
+// Check 60D: the visual-closure delta (descriptor, two glyphs, Home-only momentum row).
+test.describe(`W7 Check 60D · Home visual-closure delta (${LABEL})`, () => {
+  test('D1 descriptor: open goal, closed only, goal list failed, goal list loading', async ({ page, browser }) => {
+    test.setTimeout(240_000);
+    const identity = async (p: Page) => {
+      const d = await p.locator('[data-testid="wsf-community-descriptor"]:visible').allInnerTexts();
+      const h = await p.locator('[data-testid="wsf-community-human-line"]:visible').allInnerTexts();
+      return { descriptor: d, humanLine: h, privateCopy: /Private community/.test(await pageText(p)) };
+    };
+    const fxA = await fixture('d1a', { shared: 241, own: 25 });
+    await signInHome(page, fxA);
+    const open = await identity(page);
+    const ctxB = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    const pB = await ctxB.newPage();
+    const fxB = await fixture('d1b', { shared: 120, own: 10, open: false });
+    await signInHome(pB, fxB);
+    const closed = await identity(pB);
+    await ctxB.close();
+    // Every wsfListGoals read answered 500 from the start.
+    const ctxC = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    let failedReads = 0;
+    await ctxC.route('**/wsfListGoals', (r) => { failedReads += 1; return r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"status":"INTERNAL","message":"INJECTED"}}' }); });
+    const pC = await ctxC.newPage();
+    const fxC = await fixture('d1c', { shared: 241, own: 25 });
+    await signInHome(pC, fxC);
+    const failed = { ...(await identity(pC)), delivered: failedReads, text: (await pageText(pC)).slice(0, 200) };
+    await ctxC.close();
+    // wsfListGoals held for 6 s: sampled while pending, then after release.
+    const ctxD = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 844 } });
+    let held = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    await ctxD.route('**/wsfListGoals', async (r) => { held += 1; await gate; return r.continue(); });
+    const pD = await ctxD.newPage();
+    const fxD = await fixture('d1d', { shared: 241, own: 25 });
+    await signInVia(pD, fxD.email, fxD.password);
+    await expect(shown(pD, 'wsf-community')).toBeVisible({ timeout: 40_000 });
+    await pD.waitForTimeout(1_000);
+    const pending = { ...(await identity(pD)), held };
+    release();
+    await pD.waitForTimeout(3_000);
+    const settled = await identity(pD);
+    await ctxD.close();
+    measure('D1a descriptor, open goal', { verdict: verdict(open.descriptor.join() === 'Moving together' && open.humanLine.length === 0 && !open.privateCopy), ...open });
+    measure('D1b descriptor, closed goal only', { verdict: verdict(closed.descriptor.length === 0 && closed.humanLine.join() === 'Ready to get moving.' && !closed.privateCopy), ...closed });
+    measure('D1c descriptor, goal list failed', { verdict: verdict(failed.delivered > 0 ? failed.descriptor.length === 0 && failed.humanLine.length === 0 && !/Moving together|Ready to get moving/.test(failed.text) : null), ...failed });
+    measure('D1d descriptor, goal list pending', { verdict: verdict(pending.held > 0 ? pending.descriptor.length === 0 && pending.humanLine.length === 0 && settled.descriptor.join() === 'Moving together' : null), pending, settled });
+  });
+
+  test('D2 glyphs: decorative, names unchanged, 44+ targets', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await fixture('d2', { shared: 241, own: 25 });
+    await signInHome(page, fx);
+    const out: Record<string, unknown> = {};
+    for (const [key, pre, name] of [['start', 'wsf-community-goal-link-', 'Start moving'], ['record', 'wsf-community-goal-record-', 'Already moved? Record squats']] as const) {
+      const el = page.locator(`[data-testid^="${pre}"]:visible`).first();
+      const byName = await page.getByRole('link', { name, exact: true }).count();
+      const info = await el.evaluate((e) => {
+        const glyphs = Array.from(e.querySelectorAll('[data-testid="wsf-action-glyph"]'));
+        const r = e.getBoundingClientRect();
+        return {
+          aria: e.getAttribute('aria-label'), href: e.getAttribute('href'), tag: e.tagName,
+          glyphs: glyphs.length, hidden: glyphs.every((g) => g.closest('[aria-hidden="true"]') !== null),
+          inside: glyphs.every((g) => { const q = g.getBoundingClientRect(); return q.width > 0 && q.left >= r.left && q.right <= r.right && q.top >= r.top && q.bottom <= r.bottom; }),
+          w: Math.round(r.width), h: Math.round(r.height), text: (e as HTMLElement).innerText.trim(),
+        };
+      });
+      out[key] = { byName, ...info };
+    }
+    const ok = (o: { byName: number; aria: string | null; glyphs: number; hidden: boolean; inside: boolean; h: number; w: number }, name: string) =>
+      o.byName === 1 && o.aria === name && o.glyphs === 1 && o.hidden && o.inside && o.h >= 44 && o.w >= 44;
+    measure('D2 glyphs', { verdict: verdict(ok(out.start as never, 'Start moving') && ok(out.record as never, 'Already moved? Record squats')), ...out });
+  });
+
+  test('D3 momentum row: exact amount right-aligned, identity only as the server gives it', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await fixture('d3', { shared: 241, own: 25 });
+    const s = stampId();
+    const goalId = `w7c60g-d3-${fx.groupId.split('w7c60-d3-')[1]}`;
+    const others: Record<string, string> = {};
+    for (const [label, name, vis] of [
+      ['named', 'Kira Tern', {}], ['anon', 'Hidden Harper', { name: 'private' }], ['quiet', 'Quiet Quinn', { activity: 'private' }],
+    ] as const) {
+      const u = await seedVerifiedUser(`wsf-w7c60-d3${label}-${s}@example.com`, fx.password);
+      await seedProfile(u, name);
+      await seedMembershipWithVisibility(fx.groupId, u, 'member', vis as never);
+      others[label] = u;
+    }
+    await seedContribution(fx.groupId, goalId, others.named!, 14, 5);
+    await seedContribution(fx.groupId, goalId, others.anon!, 1250, 12);
+    await seedContribution(fx.groupId, goalId, others.quiet!, 33, 18);
+    await seedContribution(fx.groupId, goalId, fx.uid, 20, 25);
+    await signInHome(page, fx);
+    await page.waitForTimeout(2_000);
+    const rows = await page.locator('[data-testid="wsf-momentum-row"]:visible').evaluateAll((els) => els.map((e) => {
+      const r = e.getBoundingClientRect();
+      const texts = Array.from(e.querySelectorAll('div, span')).filter((n) => n.children.length === 0 && (n.textContent || '').trim() !== '')
+        .map((n) => { const q = n.getBoundingClientRect(); return { t: (n.textContent || '').trim(), left: Math.round(q.left), right: Math.round(q.right) }; });
+      return { text: (e as HTMLElement).innerText.replace(/\s+/g, ' ').trim(), right: Math.round(r.right), h: Math.round(r.height), texts };
+    }));
+    const all = rows.map((r) => r.text).join(' | ');
+    const amt = (n: string) => rows.find((r) => r.texts.some((t) => t.t === n));
+    const rightAligned = (n: string) => { const r = amt(n); const t = r?.texts.find((x) => x.t === n); return !!r && !!t && r.right - t.right <= 2 && r.texts.every((x) => x.t === n || x.left < t.left); };
+    const named = rows.find((r) => /Kira Tern/.test(r.text));
+    const anon = rows.find((r) => /Anonymous member/.test(r.text) && /1,250/.test(r.text));
+    const checks = {
+      namedAmountRight: rightAligned('+14 squats'), namedSecondary: !!named && /added 14 squats · /.test(named.text),
+      anonKeepsAmount: !!anon && rightAligned('+1,250 squats'), anonNoName: !/Hidden Harper/.test(all),
+      quietAbsent: !/Quiet Quinn/.test(all) && !/\b33 squats/.test(all), noYou: !/\(you\)/.test(all),
+      noUid: !Object.values(others).concat(fx.uid).some((u) => all.includes(u)), rowsTall: rows.every((r) => r.h >= 44),
+    };
+    measure('D3 momentum row', { verdict: verdict(rows.length > 0 ? Object.values(checks).every(Boolean) : null), rows: rows.length, checks, text: all.slice(0, 400) });
   });
 });

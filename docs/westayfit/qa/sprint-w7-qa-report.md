@@ -4994,3 +4994,77 @@ A flake filter in my runner then hid real catches. The final mutant results come
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; mutant edits were reverted in the detached worktree.
 
 **Status:** **PASS at `44da30fc`.** Check 61's F1 is closed. Rows 1–10 and A1 carry from Check 61 and were not reopened. W7 merged, dispatched, activated and deployed nothing.
+
+## 60D · HOME-NORTHSTAR-PARITY-1 visual-closure delta `6ba49f10 → 9d27fdb5bb9303785ae348678200f5f68211fb3b`, evidence `e60e5ec823897521eb3c2c60508e761d4da63ef9` (queue #434 `5848069362`; Director visual PASS #514 `5848068378`; W9 `5847955998`; W7 ACK `5848157807`): **PASS**
+
+**Scope:** the delta only; Check 60 is not reopened.
+- **Environment:** Chromium on the emulators (`demo-wsf-local`). `9d27fdb5` was built locally with auth and emulators on and served on :5041. `6ba49f10` (:5040) was the control.
+- **Instrument:** new delta rows D1–D3 in `sprint-w7-home-northstar.spec.ts`, run on both builds with Check 60's rows.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage and scope** | **PASS.** See the lineage bullets below. |
+| **2** | **Descriptor (D1)** | **PASS on `9d27fdb5`; fails before on `6ba49f10`**, which shows "Private community" in all four states. See the D1 bullets below. |
+| **3** | **Glyphs (D2)** | **PASS**, for both Start moving and Already moved. See the D2 bullets below. |
+| **4** | **Momentum row (D3)** | **PASS.** Seeded rows: a named member, a name-private member, an activity-private member, and the viewer. See the D3 bullets below. |
+| **5** | **Affected truth rows (Check 60 carry)** | **PASS on `9d27fdb5`**, with every value equal to Check 60's. See the carry bullets below. |
+| **6** | **W9's spec and the affected specs** | **PASS.** See the spec-run bullets below. |
+| **7** | **Evidence `e60e5ec8`** | **PASS.** See the evidence bullets below. |
+
+**Row 1, lineage and scope:**
+- `9d27fdb5`'s parent is `5e8a22ae`, and `e60e5ec8`'s parent is `9d27fdb5`.
+- The product delta `5e8a22ae..9d27fdb5` touches two files: the Home route (+220 / −19) and W9's spec (+18 / −1), +238 / −20 in total.
+- The evidence commit touches only `docs/design-target/review/home-northstar-parity-1/`.
+- The protected-path diff from `6deefe7d` is unchanged: the Home route, W9's spec and the evidence directory only.
+- **W9's spec delta:**
+  - one assertion changed, as the Director required: "Private community" became "Moving together";
+  - everything else is added: the human line absent with a goal and present with none, the Start moving `aria-label`, one `aria-hidden` glyph per action, and a momentum row with `+20 squats`, `added 20 squats` and no "(you)".
+
+**Row 2, the descriptor (D1):**
+
+| State | What shows |
+|---|---|
+| **D1a** open goal | the descriptor is "Moving together"; no human line; no "Private community" |
+| **D1b** closed goal only | no descriptor; the human line is "Ready to get moving." |
+| **D1c** every `wsfListGoals` read answered 500 (1 delivered) | neither line; only "Goals couldn't be loaded" |
+| **D1d** `wsfListGoals` held | while pending, neither line; after release, "Moving together" |
+
+**Row 3, the glyphs (D2):**
+- Each action has exactly one `wsf-action-glyph` inside an `aria-hidden` subtree, laid out inside the control.
+- `getByRole('link', { name, exact })` finds exactly one control each for "Start moving" and "Already moved? Record squats".
+- Each control is still an `<a>` with an unchanged `href`, at 189×54 and 153×54.
+- The visible label is unchanged ("Start moving" / "Already moved").
+
+**Row 4, the momentum row (D3):**
+- The exact `+N squats` is the rightmost text, flush with the row's right edge (≤ 2 px), and every other text sits left of it: `+14 squats` named, `+1,250 squats` anonymous.
+- The secondary line reads "added N squats · Xm ago".
+- The name-private member shows as "Anonymous member", keeps the exact amount, and the name never appears.
+- The activity-private member's row is absent.
+- No "(you)" appears, and no uid appears in the text.
+- Rows are ≥ 44 px.
+- **On `6ba49f10`:** the same three rows, with the amount only inside the sentence. So the right alignment fails before, as expected.
+
+**Row 5, the Check 60 carry:**
+- T1–T8 all pass.
+- **L1:** no overflow at 390 or 360. **L2:** tiles 189×54 and 153×54. **L3:** one h1.
+- **L4:** hero 209 / 279 at 844 and 197 / 245 at 640; Start's bottom at 488, above the tab bar at 565.
+- **T8:** destinations unchanged (`mode=move` / `mode=record`), and Back returns to Home with the hero.
+
+**Row 6, spec runs on `9d27fdb5`:**
+- **W9's spec, exact:** 6 / 6 truth rows. The producer was skipped and no capture gate was set.
+- **127 / 127 in one run (8.7 min)** over the union of two lists, 19 files:
+  - W9's 8 directly affected files, from `RAW-affected-9d27fdb5.txt`;
+  - Check 60's 18 Home-dependent files.
+- My selector search for "directly affected" was too broad (an unescaped `(you)` matched almost every file). I ran the union instead of narrowing the list by argument.
+
+**Row 7, the evidence:**
+- `MANIFEST.sha256` verifies 33 / 33, and the set equals the directory.
+- The candidate frames are 390×640 and 390×844, full viewport; side-by-sides are 792 wide. The candidate manifests record `crop: none`, commit `9d27fdb5` and fixture-only data.
+- The reference PNGs are byte-identical to `5e8a22ae`'s (`fcb0d786…`, `8f79bb31…`), and the base frames are unchanged.
+- The Lovable-packet hash match remains W9's statement; W7 does not read the external project.
+
+**Not adjudicated:** the pixel and creative disposition, which is the Director's (visual PASS `5848068378`).
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. Artifacts were cleaned in both trees, and none is committed.
+
+**Status:** **PASS at `9d27fdb5` / `e60e5ec8`.** No changed-dependency finding. Next consumer: Director product acceptance → L0 integration / pin / staging. W7 merged, accepted and deployed nothing.
