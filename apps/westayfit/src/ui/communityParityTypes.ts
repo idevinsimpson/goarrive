@@ -117,7 +117,10 @@ export type CommunityParityProps = {
   displayName: string;
   groupType?: string | null;
   joinPolicy?: string | null;
-  /** `null` when the member count is not known. */
+  /**
+   * `null` when the member count is not known. An impossible count (NaN,
+   * ±Infinity, a negative, a fraction) is treated exactly as `null`.
+   */
   memberCount: number | null;
   /** The member's own role in this community, or `null` when not known. */
   role: string | null;
@@ -195,6 +198,19 @@ export function goalsCountFact(
 }
 
 /**
+ * FAIL CLOSED ON AN IMPOSSIBLE MEMBER COUNT (W5 K-F1, Director `5842638933`).
+ * A member count is known only when it is a whole number and not negative;
+ * anything else (NaN, ±Infinity, a negative, a fraction) reads as `null` —
+ * unknown for the MEMBERS fact, the roster heading and the anonymous
+ * remainder. It is never clamped: an unusable number is not a count. A known
+ * zero stays a real zero (and `-0` is that zero, not "-0").
+ */
+export function knownMemberCount(memberCount: number | null): number | null {
+  if (memberCount === null || !Number.isInteger(memberCount) || memberCount < 0) return null;
+  return memberCount === 0 ? 0 : memberCount;
+}
+
+/**
  * The anonymous remainder: how many members are not shown by name. Derived
  * ONLY when the visible set is known complete and the member count is known;
  * otherwise `null` (the view then says nothing about a remainder).
@@ -203,8 +219,9 @@ export function anonymousRemainder(
   memberCount: number | null,
   roster: CommunityParityProps['roster'],
 ): number | null {
-  if (memberCount === null || roster.state !== 'loaded' || !roster.value.complete) return null;
-  return Math.max(0, memberCount - roster.value.named.length);
+  const known = knownMemberCount(memberCount);
+  if (known === null || roster.state !== 'loaded' || !roster.value.complete) return null;
+  return Math.max(0, known - roster.value.named.length);
 }
 
 /** A goal whose instrument can be drawn: a positive target and a figure. */

@@ -16,6 +16,7 @@ import {
   goalMeta,
   goalPill,
   goalsCountFact,
+  knownMemberCount,
   totalValue,
   validTarget,
   type CommunityParityProps,
@@ -141,6 +142,20 @@ describe('the rules — unknown is never zero', () => {
     expect(anonymousRemainder(1, complete)).toBe(0);
   });
 
+  it('fails closed on an impossible member count: unknown, never a count — and never clamped to zero (K-F1)', () => {
+    const complete = { state: 'loaded' as const, value: { named: NAMED, complete: true } };
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -3, 2.5]) {
+      expect(anonymousRemainder(bad, complete), String(bad)).toBeNull();
+      expect(knownMemberCount(bad), String(bad)).toBeNull();
+    }
+    // A known count stays known; a known zero is a real zero, and -0 is that zero.
+    expect(knownMemberCount(23)).toBe(23);
+    expect(knownMemberCount(0)).toBe(0);
+    expect(Object.is(knownMemberCount(-0), 0)).toBe(true);
+    expect(knownMemberCount(null)).toBeNull();
+    expect(anonymousRemainder(0, { state: 'loaded', value: { named: [], complete: true } })).toBe(0);
+  });
+
   it('fails closed on an impossible figure: never NaN, Infinity or a negative — and never clamped to zero', () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
       for (const state of ['confirmed', 'lastKnown'] as const) {
@@ -264,6 +279,27 @@ describe('the view — the reference hierarchy', () => {
     click('wsf-parity-goals-failed-retry');
     expect(p.onRetryGoals).toHaveBeenCalledTimes(1);
     expect(p.onRetryHistory).not.toHaveBeenCalled();
+  });
+
+  it('renders an impossible member count as not known: MEMBERS —, "Members", no remainder (K-F1)', () => {
+    const complete = { state: 'loaded' as const, value: { named: NAMED, complete: true } };
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -3, 2.5]) {
+      render(props({ memberCount: bad, roster: complete }));
+      expect(text('wsf-parity-fact-members'), String(bad)).toBe('MEMBERS—');
+      expect(text('wsf-parity-roster-count'), String(bad)).toBe('Members');
+      expect(byId('wsf-parity-anonymous'), String(bad)).toBeNull();
+      expect(container.textContent, String(bad)).not.toMatch(/NaN|Infinity|-\d/);
+    }
+    // Controls: a known count renders as itself, and a known zero is a real zero.
+    render(props({ memberCount: 23, roster: complete }));
+    expect(text('wsf-parity-fact-members')).toBe('MEMBERS23');
+    expect(text('wsf-parity-roster-count')).toBe('23 people');
+    expect(text('wsf-parity-anonymous')).toContain('21 members shown without names');
+    for (const zero of [0, -0]) {
+      render(props({ memberCount: zero, roster: { state: 'loaded', value: { named: [], complete: true } } }));
+      expect(text('wsf-parity-fact-members'), String(zero)).toBe('MEMBERS0');
+      expect(text('wsf-parity-roster-count'), String(zero)).toBe('0 people');
+    }
   });
 
   it('a failed roster read keeps its heading, says so, and retries only the roster', () => {

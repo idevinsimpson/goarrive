@@ -10,6 +10,7 @@ import {
   goalMeta,
   goalPill,
   goalsCountFact,
+  knownMemberCount,
   peopleLabel,
   roleFact,
   type CommunityParityProps,
@@ -67,6 +68,7 @@ export function CommunityParityView(props: CommunityParityProps) {
   } = props;
   const support = bannerSupport(groupType, joinPolicy);
   const goalsCount = goalsCountFact(goals, history);
+  const members = knownMemberCount(memberCount);
   const roleText = roleFact(role);
 
   return (
@@ -89,7 +91,7 @@ export function CommunityParityView(props: CommunityParityProps) {
             </Text>
           ) : null}
           <View style={s.facts} testID="wsf-parity-facts">
-            <Fact label="MEMBERS" value={memberCount === null ? null : formatCount(memberCount)} testID="wsf-parity-fact-members" />
+            <Fact label="MEMBERS" value={members === null ? null : formatCount(members)} testID="wsf-parity-fact-members" />
             <Fact label="YOUR ROLE" value={roleText} testID="wsf-parity-fact-role" />
             <Fact label="GOALS" value={goalsCount === null ? null : formatCount(goalsCount)} testID="wsf-parity-fact-goals" />
           </View>
@@ -193,7 +195,7 @@ export function CommunityParityView(props: CommunityParityProps) {
         <View style={s.block} testID="wsf-parity-roster">
           <Text style={s.eyebrow}>MEMBERS</Text>
           <Text style={s.h2} accessibilityRole="header" aria-level={2} testID="wsf-parity-roster-count">
-            {memberCount === null ? 'Members' : peopleLabel(memberCount)}
+            {members === null ? 'Members' : peopleLabel(members)}
           </Text>
           <RosterBody {...props} />
         </View>
