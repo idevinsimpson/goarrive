@@ -175,6 +175,7 @@ function supplied(block, name) {
 const WIRING = [
   ['hosted-verify', 'Run the Package E hosted authorization checks', '.github/wsf-staging/hosted-package-e-smoke.mjs'],
   ['hosted-verify', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
+  ['hosted-verify', 'Run the changed-journey smoke (report-only)', '.github/wsf-staging/hosted-changed-journeys.mjs'],
   ['deploy', 'Verify the deployed state', '.github/wsf-staging/verify-deployment.mjs'],
   ['player-journey', 'Run the browser/player journey', '.github/wsf-staging/hosted-player-journey.mjs'],
   ['player-journey', 'Remove synthetic fixtures', '.github/wsf-staging/cleanup-synthetic.mjs'],
@@ -1062,6 +1063,43 @@ await test('the hosting check step is LIVE: nothing gates, skips or swallows it'
 
   assert.deepEqual(body, ['        run: node ops/.github/wsf-staging/check-hosting-routes.mjs app ops'],
     'the hosting check step carries more than its one command (an if:, continue-on-error, shell, env or a changed run line)');
+});
+
+// ---- the changed-journey smoke (CONTROL-PLANE-CI-1) --------------------------
+// Report-only until it is independently accepted: it must run where staging is
+// reachable, read its manifest from the operational checkout, and be unable to
+// move the hosted-verify result in either direction.
+await test('the changed-journey smoke runs in hosted-verify AFTER the Package E suite and BEFORE the gate', () => {
+  const names = [...jobs['hosted-verify'].matchAll(/^      - name: (.+)$/gm)].map((m) => m[1].trim());
+  const smoke = names.indexOf('Run the Package E hosted authorization checks');
+  const changed = names.indexOf('Run the changed-journey smoke (report-only)');
+  const gate = names.indexOf('Require the hosted checks to have passed');
+  assert.ok(smoke >= 0 && changed >= 0 && gate >= 0, 'a hosted-verify step is missing');
+  assert.equal(changed, smoke + 1, 'the changed-journey smoke must directly follow the Package E suite');
+  assert.ok(changed < gate);
+  for (const j of Object.keys(jobs).filter((k) => k !== 'hosted-verify')) {
+    assert.equal(/hosted-changed-journeys\.mjs/.test(jobs[j]), false, `${j} must not run the changed-journey smoke`);
+  }
+});
+
+await test('the changed-journey smoke is report-only: continue-on-error, no id, and no gate reads it', () => {
+  const block = stepBlock('hosted-verify', 'Run the changed-journey smoke (report-only)');
+  const live = block.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.match(live, /^\s+continue-on-error: true$/m);
+  assert.equal(/^\s+id:/m.test(live), false, 'an id would let a later step gate on it');
+  assert.match(live, /^\s+if: \$\{\{ !cancelled\(\) \}\}$/m);
+  const gate = stepBlock('hosted-verify', 'Require the hosted checks to have passed');
+  const refs = [...gate.matchAll(/steps\.([a-z0-9-]+)\.outcome/g)].map((m) => m[1]).sort();
+  assert.deepEqual(refs, ['scan-hosted-evidence', 'smoke'], 'the hosted gate must read exactly the Package E suite and the evidence scan');
+  // No credential: it neither mints a token nor reads the env artifact.
+  assert.equal(/WSF_GOOGLE_ACCESS_TOKEN|GoogleAuth|wsf-staging\.env|WSF_SDK_CONFIG_FILE/.test(live), false);
+});
+
+await test('the changed-journey manifest and script come from the OPERATIONAL checkout, not the candidate', () => {
+  const block = stepBlock('hosted-verify', 'Run the changed-journey smoke (report-only)');
+  assert.match(block, /^\s+WSF_JOURNEY_MANIFEST: \$\{\{ github\.workspace \}\}\/ops\/\.github\/wsf-staging\/journeys\/manifest\.json$/m);
+  assert.match(block, /^\s+run: node \.\.\/ops\/\.github\/wsf-staging\/hosted-changed-journeys\.mjs$/m);
+  assert.match(block, /^\s+WSF_RESULT_DIR: \$\{\{ github\.workspace \}\}\/wsf-evidence$/m, 'its results must pass through the same evidence scan');
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);

@@ -640,6 +640,25 @@ jobs:
           ')"
           node ../ops/.github/wsf-staging/hosted-package-e-smoke.mjs
 
+      # REPORT-ONLY changed-journey smoke (CONTROL-PLANE-CI-1). It reads the
+      # reviewed milestone manifest from the OPERATIONAL checkout (never the
+      # candidate's), prints CHANGED_JOURNEY_SMOKE=skipped when there is none,
+      # reports a journey without a registered driver as BLOCKED, and always
+      # exits 0. No gate reads it: "Require the hosted checks to have passed"
+      # below still checks only the Package E suite and the evidence scan, and
+      # continue-on-error keeps even a crash of this step out of the job
+      # result. It holds no cloud credential of its own.
+      - name: Run the changed-journey smoke (report-only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        working-directory: app
+        env:
+          WSF_APPROVED_SHA: ${{ needs.gate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-evidence
+          WSF_JOURNEY_MANIFEST: ${{ github.workspace }}/ops/.github/wsf-staging/journeys/manifest.json
+        run: node ../ops/.github/wsf-staging/hosted-changed-journeys.mjs
+
       # Cleanup runs whatever the smoke did, and re-authenticates first because
       # the smoke can outlive the token that started it.
       - name: Re-authenticate before cleanup

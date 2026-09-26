@@ -17,6 +17,10 @@ const suites = [
   'check-hosting-routes.test.mjs',
   'mail-preflight-domain.test.mjs',
   'social-privacy-postop.test.mjs',
+  'pin-candidate.test.mjs',
+  'milestone-manifest.test.mjs',
+  'owner-test-card.test.mjs',
+  'hosted-changed-journeys.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {
