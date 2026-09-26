@@ -20,8 +20,9 @@ import { ProgressParityView, useProgressCompact } from '../../src/ui/ProgressPar
  * partial | failure | receipts-contract | unknown-shared (an open and a
  * finished goal whose shared totals did not answer; canonical truth only).
  *
- * Period labels are given as the route adapter will give them: already
- * formatted in the goal's own timezone. The view shows them verbatim.
+ * Period labels are the reference's own semantic labels ("This week",
+ * "August", "July"), as the route adapter will supply them; the view shows
+ * them verbatim (Director #495 `5841257894`).
  *
  * `receipts-contract` IS NOT A CANONICAL STATE. It fills the receipt slot from
  * props to show the slot is ready for a future authorized source; its band
@@ -60,7 +61,7 @@ const OAK_500: ProgressGoal = {
   target: 500,
   shared: knownShared(241),
   open: true,
-  periodLabel: 'Ends Sep 27',
+  periodLabel: 'This week',
 };
 const HARBOR_150: ProgressGoal = {
   goalId: 'harbor-150',
@@ -71,7 +72,7 @@ const HARBOR_150: ProgressGoal = {
   target: 150,
   shared: knownShared(155),
   open: true,
-  periodLabel: 'Ends Oct 1',
+  periodLabel: 'This week',
 };
 const OAK_AUG: ProgressGoal = {
   goalId: 'oak-aug',
@@ -82,7 +83,7 @@ const OAK_AUG: ProgressGoal = {
   target: 1000,
   shared: knownShared(1024),
   open: false,
-  periodLabel: 'Ended Aug 31',
+  periodLabel: 'August',
 };
 const OAK_JUL: ProgressGoal = {
   goalId: 'oak-jul',
@@ -93,7 +94,7 @@ const OAK_JUL: ProgressGoal = {
   target: 800,
   shared: knownShared(612),
   open: false,
-  periodLabel: 'Ended Jul 31',
+  periodLabel: 'July',
 };
 
 /** The reference's own receipt rows — FIXTURE PROPS, for the contract state only. */

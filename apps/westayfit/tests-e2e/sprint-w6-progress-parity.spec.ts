@@ -160,7 +160,7 @@ for (const vp of [
       await expect(page.getByTestId('wsf-activity-goal-harbor-150-shared')).toHaveText('SHAREDUnknown');
       const closed = page.getByTestId('wsf-activity-goal-oak-jul');
       await expect(closed).toContainText('CLOSED');
-      await expect(closed).toContainText('Oak Grove Together · Ended Jul 31');
+      await expect(closed).toContainText('Oak Grove Together · July');
       await expect(closed).not.toContainText('UNFINISHED');
       await expect(page.getByTestId('wsf-activity-goal-oak-jul-shared')).toHaveText('SHAREDUnknown');
       // Own parts are known and still add up: 25 + 20 + 60 + 40.
