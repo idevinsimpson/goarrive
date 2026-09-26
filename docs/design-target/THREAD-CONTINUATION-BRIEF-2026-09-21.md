@@ -4,13 +4,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 12:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 13:03Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`74d19281`** = `87a86531` + You `18ba6de2` / Progress `bdc82c0e` routes (`2f57bbca`); vitest 1036 |
+| development `claude/wsf-app-shell` | **`938e00d8`** = `74d19281` + Community/Settings `ffb517e5` (tree `3851ff33`); vitest 1042 |
 | `main` | **`bc53a787`** (Merge #508: pin → `74d19281`); before it `32563aa0` (#502) |
 | staging pin | `approvedAppSha` **`74d19281`**, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED #508 `5845765890`) |
 | served staging | **`74d19281`**, run 52 `36238227254` from main `bc53a787`: 49 → 49, created none, `VERIFY=pass`, marker `74d1928`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5845874904`–`5845902669`); previous known-good **`14ce1907`** (run 51) |
@@ -24,7 +24,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
 | **You / Progress Phase B** | W6 · `2f57bbca` | **SERVED** `74d19281` via run 52 (Director checkpoint `5846190598`); hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5845904027` (step 5 corrected by W6 `5846137910`: cold-failure band is You's, not Progress's) | owner feedback → route |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
-| COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 product **`ffb517e5`** / evidence `ecd99bf2` | Check 51 carried; **Director visual PASS `5846187950`**; L0 receipt `5846206550` (trial merge on `74d19281`: tsc 0, vitest 1042, guard intact); **W7 Check 54 ACKed** (`5846189645`; L0 asks You/Progress on trial merge `5846207843`) | W7 PASS → Director ACCEPTED → integrate → pin → stage immediately |
+| **COMMUNITY-SETTINGS-PARITY-1** | W9 · #506 · `ffb517e5` | **ACCEPTED** `5846465707` (W7 Check 54 PASS `5846278987`) → integrated **`938e00d8`** (`5846474990`; ring generator offline, not on build path) | W3 pin (`5846476221`; W3 busy, hourly :13) → W7 pin check → Director → L0 merge → dispatch |
 | **PERSONAL-FIRST SCALE (snapshot)** | existing **W4** · #447 · base `74d19281` | **EXECUTING** (W4 ACK `5846196303`; no new session, no trigger); stops at the missing-index seam | product SHA + read-count / response-size receipt → L0 git → W7 → Director |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
