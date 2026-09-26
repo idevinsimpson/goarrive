@@ -87,7 +87,13 @@ async function api(url, { method = 'GET', body, allowStatus = [], expect = 'obje
   return { status: response.status, parsed };
 }
 
-function finish(status, extra, exitCode) {
+/**
+ * Write the receipt, then (only once it is written) run `afterReceipt`, then
+ * exit. The COMPLETE path removes the manifest in `afterReceipt`, so a receipt
+ * that cannot be written leaves the manifest in place: the two records of
+ * this cleanup are never both gone.
+ */
+function finish(status, extra, exitCode, afterReceipt = null) {
   const receipt = {
     completedAt: new Date().toISOString(),
     project: PROJECT_ID,
@@ -99,6 +105,7 @@ function finish(status, extra, exitCode) {
   // replaced by an ENOENT crash and the run showed no cleanup result at all.
   fs.mkdirSync(path.dirname(RECEIPT), { recursive: true, mode: 0o700 });
   fs.writeFileSync(RECEIPT, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+  if (afterReceipt) afterReceipt();
   console.log(`CLEANUP_STATUS=${status}`);
   for (const [k, v] of Object.entries(extra)) {
     if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') {
@@ -360,8 +367,8 @@ const counts = {
 };
 
 if (complete) {
-  fs.rmSync(MANIFEST, { force: true });
-  finish('COMPLETE', { ...counts, manifestPreserved: false }, 0);
+  // Receipt first, manifest second: see finish().
+  finish('COMPLETE', { ...counts, manifestPreserved: false }, 0, () => fs.rmSync(MANIFEST, { force: true }));
 }
 
 // Incomplete: the manifest is the only record of what remains, so it stays.

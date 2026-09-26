@@ -45,20 +45,29 @@ export const CLEANUP_STATES = Object.freeze({
 });
 
 /**
- * The cleanup outcome for a run, receipt first: cleanup-synthetic.mjs deletes
- * its manifest once it is COMPLETE, so the receipt is the record of a finished
- * cleanup. With no usable receipt: a fixture manifest still present means
- * cleanup did not run (NOT_RUN); neither file means nothing was created.
+ * The cleanup outcome for a run. Fails closed:
+ * - a receipt that exists is read; one that cannot be read, or states no known
+ *   outcome, is UNKNOWN (never "not needed");
+ * - with no receipt, fixtures are proven to have existed if the fixture
+ *   manifest is still there OR the results show a driver actually ran (the
+ *   cleaner removes its manifest, so the manifest's absence proves nothing):
+ *   either is NOT_RUN;
+ * - NOT_NEEDED only when neither file exists and no driver ran.
  */
 const RECEIPT_STATES = ['COMPLETE', 'NO_FIXTURES', 'INCOMPLETE', 'MANIFEST_UNUSABLE'];
-export function cleanupStatus({ manifestPath, receiptPath }) {
-  let receipt = null;
-  if (receiptPath) {
-    try { receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')); } catch { receipt = null; }
+export function cleanupStatus({ manifestPath, receiptPath, driversRan }) {
+  if (typeof driversRan !== 'boolean') throw new Error('cleanupStatus needs driversRan (true or false)');
+  if (receiptPath && fs.existsSync(receiptPath)) {
+    let receipt;
+    try { receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')); } catch { return 'UNKNOWN'; }
+    return RECEIPT_STATES.includes(receipt?.status) ? receipt.status : 'UNKNOWN';
   }
-  if (receipt !== null) return RECEIPT_STATES.includes(receipt?.status) ? receipt.status : 'UNKNOWN';
-  return manifestPath && fs.existsSync(manifestPath) ? 'NOT_RUN' : 'NOT_NEEDED';
+  if ((manifestPath && fs.existsSync(manifestPath)) || driversRan) return 'NOT_RUN';
+  return 'NOT_NEEDED';
 }
+
+/** A driver ran for a journey unless it was BLOCKED (blocked means nothing was exercised or seeded). */
+export const driversRanIn = (results) => Array.isArray(results?.results) && results.results.some((r) => r?.status !== 'blocked');
 
 export class Refusal extends Error {}
 const refuse = (m) => { throw new Refusal(m); };
@@ -172,7 +181,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     if (rf !== undefined) {
       try { results = JSON.parse(fs.readFileSync(rf, 'utf8')); } catch { refuse('the results file is missing or is not JSON'); }
     }
-    const cleanup = cleanupStatus({ manifestPath: cleanupManifest, receiptPath: arg(argv, 'cleanup-receipt') });
+    const cleanup = cleanupStatus({ manifestPath: cleanupManifest, receiptPath: arg(argv, 'cleanup-receipt'), driversRan: driversRanIn(results) });
     const card = renderCard(manifest, results, { stagingUrl: arg(argv, 'staging-url'), cleanup });
     fs.writeFileSync(out, card.text);
     console.log(`OWNER_CARD_CLEANUP=${cleanup}`);

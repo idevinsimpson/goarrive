@@ -276,6 +276,27 @@ await test('the REAL cleaner accepts the kit\'s manifest and removes everything 
   assert.equal(be.accounts.size + be.docs.size, 0, 'nothing the kit created is left behind');
 });
 
+await test('C4a: the cleaner writes its COMPLETE receipt BEFORE removing the manifest; an unwritable receipt leaves the manifest', async () => {
+  const dir = tmp();
+  const be = backend();
+  const kit = kitFor(dir, be);
+  await kit.memberInTwoCommunities('community');
+  const blocker = path.join(dir, 'not-a-directory');
+  fs.writeFileSync(blocker, 'x'); // the receipt's parent is a file, so the receipt cannot be written
+  const { server, base } = await serve(be);
+  const r = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [CLEANUP], {
+      env: { ...process.env, WSF_GOOGLE_ACCESS_TOKEN: 'test-token', WSF_CLEANUP_MANIFEST: kit.manifestPath,
+        WSF_CLEANUP_RECEIPT: path.join(blocker, 'cleanup-receipt.json'), WSF_API_BASE: base },
+    });
+    child.on('close', (code) => resolve({ code }));
+  });
+  server.close();
+  assert.equal(be.accounts.size + be.docs.size, 0, 'the fixtures themselves were removed');
+  assert.notEqual(r.code, 0, 'an unwritable receipt fails the cleaner, and so the blocking step');
+  assert.ok(fs.existsSync(kit.manifestPath), 'with no receipt, the manifest must survive as the record that fixtures existed');
+});
+
 // ---- the drivers against a faithful model -----------------------------------------------
 await test('COMMUNITY on a faithful model: real actions, every assertion holds', async () => {
   const { r, failed } = await drive('community');

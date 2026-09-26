@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { CLEANUP_STATES, cleanupStatus, renderCard } from '../owner-test-card.mjs';
+import { CLEANUP_STATES, cleanupStatus, driversRanIn, renderCard } from '../owner-test-card.mjs';
 
 const CLI = path.resolve('.github/wsf-staging/owner-test-card.mjs');
 let passed = 0;
@@ -157,28 +157,63 @@ test('C4: REFUSED: no cleanup outcome, or one the card does not know', () => {
   assert.throws(() => renderCard(manifest(), null, { stagingUrl: URL_, cleanup: 'DONE' }), /cleanup outcome must be one of/);
 });
 
-test('C4: the cleanup outcome is read from the cleaner\'s receipt first; fixtures with no receipt are NOT_RUN', () => {
+test('C4a: the cleanup outcome fails closed; NOT_NEEDED only when no file exists and no driver ran', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cln-'));
   const m = path.join(d, 'cleanup-manifest.json');
   const r = path.join(d, 'cleanup-receipt.json');
-  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'NOT_NEEDED', 'neither file: nothing was created');
-  fs.writeFileSync(m, '{}');
-  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'NOT_RUN', 'fixtures recorded, no receipt: cleanup did not run');
+  const st = (driversRan) => cleanupStatus({ manifestPath: m, receiptPath: r, driversRan });
+  assert.equal(st(false), 'NOT_NEEDED', 'neither file and no driver ran: nothing was created');
+  assert.equal(st(true), 'NOT_RUN', 'W7 Check 58: drivers ran, manifest gone, no receipt: NOT cleaned');
   fs.writeFileSync(r, '{');
-  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'NOT_RUN', 'an unreadable receipt is no receipt');
-  for (const st of ['COMPLETE', 'NO_FIXTURES', 'INCOMPLETE', 'MANIFEST_UNUSABLE']) {
-    fs.writeFileSync(r, JSON.stringify({ status: st }));
-    assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), st);
+  assert.equal(st(true), 'UNKNOWN', 'W7 Check 58: an unusable receipt is never NOT_NEEDED');
+  assert.equal(st(false), 'UNKNOWN', 'an unusable receipt is never NOT_NEEDED, even with no driver');
+  fs.rmSync(r);
+  fs.writeFileSync(m, '{}');
+  assert.equal(st(false), 'NOT_RUN', 'fixtures recorded, no receipt: cleanup did not run');
+  for (const s of ['COMPLETE', 'NO_FIXTURES', 'INCOMPLETE', 'MANIFEST_UNUSABLE']) {
+    fs.writeFileSync(r, JSON.stringify({ status: s }));
+    assert.equal(st(true), s);
   }
-  for (const st of ['NOT_NEEDED', 'PASSED', null]) {
-    fs.writeFileSync(r, JSON.stringify({ status: st }));
-    assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'UNKNOWN', `a receipt may not claim ${st}`);
+  for (const s of ['NOT_NEEDED', 'PASSED', null]) {
+    fs.writeFileSync(r, JSON.stringify({ status: s }));
+    assert.equal(st(true), 'UNKNOWN', `a receipt may not claim ${s}`);
   }
-  // The cleaner deletes its manifest on COMPLETE: the receipt alone must still read COMPLETE.
   fs.rmSync(m);
   fs.writeFileSync(r, JSON.stringify({ status: 'COMPLETE' }));
-  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'COMPLETE');
+  assert.equal(st(true), 'COMPLETE', 'the cleaner removes its manifest on COMPLETE: the receipt alone reads COMPLETE');
+  assert.throws(() => cleanupStatus({ manifestPath: m, receiptPath: r }), /needs driversRan/);
 });
+
+test('C4a: driversRanIn reads the results: any non-blocked journey ran a driver', () => {
+  assert.equal(driversRanIn(null), false);
+  assert.equal(driversRanIn(results([])), false);
+  assert.equal(driversRanIn(results([{ ...pass('you', null), status: 'blocked', reason: 'no registered driver', assertions: [] }])), false);
+  assert.equal(driversRanIn(results([pass('you')])), true);
+  assert.equal(driversRanIn(results([{ ...pass('you'), status: 'failed', reason: 'threw', assertions: [] }])), true);
+});
+
+// W7 Check 58, exactly: both journeys PASSED, the fixture manifest gone, and the receipt missing or unusable.
+for (const [name, receipt] of [['missing', null], ['unusable (non-JSON)', '{'], ['COMPLETE', JSON.stringify({ status: 'COMPLETE' })]]) {
+  test(`C4a (W7 Check 58): drivers PASSED + no manifest + ${name} receipt through the CLI`, () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-c58-'));
+    const mf = path.join(d, 'm.json');
+    const rf = path.join(d, 'r.json');
+    const receiptPath = path.join(d, 'cleanup-receipt.json');
+    fs.writeFileSync(mf, JSON.stringify(manifest()));
+    fs.writeFileSync(rf, JSON.stringify(results([pass('community'), pass('you')])));
+    if (receipt !== null) fs.writeFileSync(receiptPath, receipt);
+    const out = path.join(d, 'card.md');
+    const r = spawnSync(process.execPath, [CLI, '--manifest', mf, '--results', rf, '--cleanup-manifest', path.join(d, 'gone.json'),
+      '--cleanup-receipt', receiptPath, '--staging-url', URL_, '--out', out], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    if (name === 'COMPLETE') {
+      assert.match(r.stdout, /OWNER_CARD_CLEANUP=COMPLETE\nOWNER_CARD_SUMMARY=PASSED/);
+    } else {
+      assert.match(r.stdout, /OWNER_CARD_SUMMARY=INCOMPLETE/);
+      assert.doesNotMatch(fs.readFileSync(out, 'utf8'), /status: PASSED/);
+    }
+  });
+}
 
 test('C4: the CLI requires --cleanup-manifest, so a card cannot be rendered blind to cleanup', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-card-'));
