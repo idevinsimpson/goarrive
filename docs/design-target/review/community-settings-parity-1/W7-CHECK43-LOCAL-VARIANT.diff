@@ -1,0 +1,18 @@
+227c227
+<     const err = document.querySelector('[data-testid="wsf-privacy-error"]');
+---
+>     const err = document.querySelector('[data-testid^="wsf-privacy-panel-error-"], [data-testid="wsf-privacy-panel-load-failed"]') /* W9 LOCAL VARIANT */;
+229,230c229,230
+<     obs['loading'] = vis(document.querySelector('[data-testid="wsf-privacy-loading"]')) ? 'shown' : 'none';
+<     for (const el of Array.from(document.querySelectorAll('[data-testid^="wsf-privacy-name-"], [data-testid^="wsf-privacy-activity-"]'))) {
+---
+>     obs['loading'] = vis(document.querySelector('[data-testid="wsf-privacy-panel-loading"]') /* W9 LOCAL VARIANT */) ? 'shown' : 'none';
+>     for (const el of Array.from(document.querySelectorAll('[role="switch"][data-testid^="wsf-privacy-panel-name-"], [role="switch"][data-testid^="wsf-privacy-panel-activity-"]') /* W9 LOCAL VARIANT */)) {
+243c243
+< const sw = (page: Page, kind: 'name' | 'activity', g: string) => page.locator(`[data-testid="wsf-privacy-${kind}-${g}"]`).first();
+---
+> const sw = (page: Page, kind: 'name' | 'activity', g: string) => page.locator(`[data-testid="wsf-privacy-panel-${kind}-${g}"]`).first(); // W9 LOCAL VARIANT
+263c263
+< const errorVisible = async (page: Page) => (await page.locator('[data-testid="wsf-privacy-error"]:visible').count()) > 0;
+---
+> const errorVisible = async (page: Page) => (await page.locator('[data-testid^="wsf-privacy-panel-error-"]:visible, [data-testid="wsf-privacy-panel-load-failed"]:visible') /* W9 LOCAL VARIANT */.count()) > 0;
