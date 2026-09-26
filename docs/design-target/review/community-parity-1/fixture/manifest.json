@@ -1,0 +1,140 @@
+{
+  "lovableProject": "e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+  "lovableRef": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a",
+  "source": "src/ui/CommunityParityView.tsx + src/ui/CommunityPrivacyPanelView.tsx via /design-target/community-parity",
+  "frames": [
+    {
+      "state": "normal",
+      "viewport": "390x844",
+      "fixture": "fixture/community-parity-normal-390x844.png",
+      "fixtureSha256": "01660171f1f63f89cd3a984447830c5ebd72a8d0b7e9939206d5093c8b412ef0",
+      "lovable": "lovable-d4f60624/community-390x844.png",
+      "lovableSha256": "725c7e18fb5e6b8835c585f2c9d1aa733315a7d5472fb73c29b471bc0156e9c0",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "sideBySide": "fixture/cmp-community-parity-normal-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-community-parity-normal-390x844-overlay-50.png",
+      "difference": "fixture/cmp-community-parity-normal-390x844-difference.png",
+      "differingPixelShare": 0.0618
+    },
+    {
+      "state": "normal",
+      "viewport": "390x640",
+      "fixture": "fixture/community-parity-normal-390x640.png",
+      "fixtureSha256": "e1cb5cdf0d743142ade00a838f225f4320aebec3f3549cfaba42faefe8fb03b9",
+      "lovable": "lovable-d4f60624/manage-community-page-390x640.png",
+      "lovableSha256": "bcf9b22bbe3af524d1b93f9f81fbb7df0659b01b416a66cb8f636b6674ef261c",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 473
+      },
+      "note": "The reference 390×640 original is its Champion capture (\"Your role: Champion\"); the fixture is the member state.",
+      "sideBySide": "fixture/cmp-community-parity-normal-390x640-side-by-side.png",
+      "overlay50": "fixture/cmp-community-parity-normal-390x640-overlay-50.png",
+      "difference": "fixture/cmp-community-parity-normal-390x640-difference.png",
+      "differingPixelShare": 0.141
+    },
+    {
+      "state": "no-goal",
+      "viewport": "390x844",
+      "fixture": "fixture/community-parity-no-goal-390x844.png",
+      "fixtureSha256": "da6bfcf13661b873115f138ac092a8e3cb7120e267df8ecc881cfcc198ae4e8e",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "reference": "none: the frozen reference has no original of this state"
+    },
+    {
+      "state": "no-goal",
+      "viewport": "390x640",
+      "fixture": "fixture/community-parity-no-goal-390x640.png",
+      "fixtureSha256": "6469bf1865be5d4242cac4af63b6ba78b789f286f7c908869d335c5d845d436b",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 473
+      },
+      "reference": "none: the frozen reference has no original of this state"
+    },
+    {
+      "state": "privacy",
+      "viewport": "390x844",
+      "fixture": "fixture/community-parity-privacy-390x844.png",
+      "fixtureSha256": "03c8a2185f5d306b4d4a7cbc8127b0f70983412a1859e4822773d628b9e1c501",
+      "lovable": "lovable-d4f60624/settings-390x844.png",
+      "lovableSha256": "0aed9d15e3ba8072d6c3226e6600827cd5f8f8bcf770b7c7fe42e31c32365928",
+      "crop": {
+        "x": 0,
+        "y": 95,
+        "width": 390,
+        "height": 737
+      },
+      "sideBySide": "fixture/cmp-community-parity-privacy-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-community-parity-privacy-390x844-overlay-50.png",
+      "difference": "fixture/cmp-community-parity-privacy-390x844-difference.png",
+      "differingPixelShare": 0.143
+    },
+    {
+      "state": "privacy",
+      "viewport": "390x640",
+      "fixture": "fixture/community-parity-privacy-390x640.png",
+      "fixtureSha256": "4427e85904c8777fbd63949dedad2881ea4e153c5dd0599f96b663a31b9584bb",
+      "lovable": "lovable-d4f60624/settings-390x640.png",
+      "lovableSha256": "93d8552709a3302fbc4c4cc134bb5d25c4b3234873180d8009cf371657de4615",
+      "crop": {
+        "x": 0,
+        "y": 95,
+        "width": 390,
+        "height": 533
+      },
+      "sideBySide": "fixture/cmp-community-parity-privacy-390x640-side-by-side.png",
+      "overlay50": "fixture/cmp-community-parity-privacy-390x640-overlay-50.png",
+      "difference": "fixture/cmp-community-parity-privacy-390x640-difference.png",
+      "differingPixelShare": 0.2134
+    },
+    {
+      "state": "privacy-failed",
+      "viewport": "390x844",
+      "fixture": "fixture/community-parity-privacy-failed-390x844.png",
+      "fixtureSha256": "094c8c98accf70fff31472225905ccb1f8bfb6255851cc45cd4e7d4d8f4ab2b7",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 95,
+        "width": 390,
+        "height": 737
+      },
+      "reference": "none: the frozen reference has no original of this state"
+    },
+    {
+      "state": "privacy-failed",
+      "viewport": "390x640",
+      "fixture": "fixture/community-parity-privacy-failed-390x640.png",
+      "fixtureSha256": "ae1147c2e88bde3360756b32d84422f522e61587b9bb6afb11af59f61424a94e",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 95,
+        "width": 390,
+        "height": 533
+      },
+      "reference": "none: the frozen reference has no original of this state"
+    }
+  ]
+}
