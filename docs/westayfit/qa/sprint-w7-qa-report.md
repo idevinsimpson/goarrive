@@ -5562,3 +5562,48 @@ None of them is the O7 failure below; that is not among the disclosed choices.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; the tree is clean.
 
 **Status:** **PASS at `cc78509a`.** Check 66's F1 is closed, and O1–O6 carry. Next consumer: Director acceptance of Phase A. W7 merged, accepted and deployed nothing.
+
+## 67 · #521 F1 least-capability successor at exact `839f18f6ad37b241c95cd9bfe308a1811c4c8b3f` (F1 delta `48ea7cdd` on `be4d66ce`; merge of main `5d58ed07`; handoff #434 `5850153946`; W7 ACK `5850156655`): **PASS**
+
+- **Method:** local and static only.
+- **Not done:** no merge, dispatch or cloud action; HOME-HOSTED-JOURNEY-1 (Step 2) is not touched.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Least capability** | **PASS.** See the least-capability bullets below. |
+| **2** | **No Firebase tooling path** | **PASS.** See the no-Firebase bullets below. |
+| **3** | **Resolution** | **PASS.** See the resolution bullets below. |
+| **4** | **Boundaries unchanged** | **PASS.** `git diff 5d58ed07 839f18f6` touches four files. The only workflow hunk is one 8-line insertion (`@@ -1196,0 +1197,8`), so every other `journey-activation` step is byte-identical to main: the marker before credentials, no build or deploy, bounded `e5c-` fixtures, blocking cleanup, the owner card after cleanup, the evidence scan, and the deploy / rules / index / IAM / social-write bans. |
+| **5** | **Escape mutants** | **PASS: 16 / 16 caught** by `workflow-contract` and/or `token-dependency`. See the mutant bullets below. |
+| **6** | **Merge resolution** | **PASS.** `839f18f6`'s parents are `48ea7cdd` and `5d58ed07` (current main); there was no rebase. Exactly one file differs from **both** parents: `.github/wsf-staging/tests/run-all.mjs`, which keeps both `token-dependency.test.mjs` and main's `committed-secrets.test.mjs`. Every other file equals one parent, so no accepted main control or security test was dropped and no other behaviour changed. |
+| **7** | **Suites** | **PASS.** Focused: `token-dependency` 8, `workflow-contract` 94, `committed-secrets` 5. Staging `run-all`: 25 suites, "all suites passed", 3 / 3 runs. The tree stays clean. |
+
+**Row 1, least capability.**
+- The F1 delta (`be4d66ce..48ea7cdd`) replaces `Install pinned deployment tooling` (`npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"`) with `Install the pinned token library` (`npm install --no-save --ignore-scripts google-auth-library@9.15.1`).
+- The new install runs once, at the workspace root, with no `if`.
+- It comes after the served-marker re-read and before `Authenticate to Google Cloud` and both token mints.
+
+**Row 2, no Firebase tooling path.**
+- The `journey-activation` YAML has no `FIREBASE_TOOLS`, `firebase-tools`, firebase CLI or binary path, `npx` / `npm exec` / `yarn` / `pnpm` firebase, bare `firebase <cmd>`, or `npm run`.
+- The seven scripts the job runs, and everything they import (14 files, transitively), import only Node built-ins. `hosted-changed-journeys` also resolves the candidate's Playwright. None of them references firebase-tools.
+- **The candidate's own dependency tree:** `apps/westayfit/package.json` has a `deploy:staging` script that calls `firebase`. But the candidate lockfile (at `938e00d8` and at `a3127651`) contains **no `firebase-tools` and no package providing a `firebase` binary**; there is only the `firebase` web SDK. So `npm ci --ignore-scripts` installs no CLI, and the job never runs an npm script.
+
+**Row 3, resolution:**
+- **Fail before:** `token-dependency` against main `5d58ed07`'s workflow (the run-54 shape: no token-library install) exits 1.
+- **Pass after:** on `839f18f6` it passes 8 / 8, including the suite's own no-install and `ops/` negative controls.
+- **A real registry install** of `google-auth-library@9.15.1`, scripts-off, into a scratch runner-shaped workspace (`ops/`, `app/`, `cfg/`) gives version 9.15.1. Its only binary is `uuid`, there are 0 firebase packages, and `require("google-auth-library").GoogleAuth` is a function from both `app/` and the root.
+
+**Row 5, the mutants:**
+- **Firebase tooling:**
+  - the firebase-tools install restored, or added as a second install;
+  - `require("firebase-tools").deploy(…)`;
+  - `npm exec firebase -- …`;
+  - `"$(npm root)/.bin/firebase" deploy`;
+  - the candidate's `npm run deploy:staging`;
+  - `npx -y firebase-tools deploy`, `yarn dlx firebase-tools deploy`, `pnpm dlx firebase-tools deploy`.
+- **The token library:** an unpinned or wrong-version library, a saved install, an install with scripts, a conditional (`if: false`) install (caught by `token-dependency`), an extra package, and the install removed.
+- **Check 63's F1 bypasses** (`npm exec`, `$(npm root)/.bin`, programmatic `require`) are all caught now.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; every mutant was reverted, and the scratch install is removed.
+
+**Status:** **PASS at `839f18f6`.** Check 63's F1 is closed by least capability rather than a text guard, and the merge is clean. W7 merged, dispatched and deployed nothing.
