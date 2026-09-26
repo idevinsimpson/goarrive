@@ -5,7 +5,7 @@ GoArrive (G->A) is an online fitness coaching platform and coach operating syste
 
 ## Two Applications Live In This Repository
 
-As of 2026-08-26, this repository hosts **two first-party applications** that ship from the same Firebase project (`goarrive`) but are otherwise isolated:
+This repository hosts **two first-party applications**. The established production architecture shares the `goarrive` Firebase project with isolated app/codebase/hosting boundaries; current WSF staging is separately controlled in `westayfit-staging`. Do not infer a production-project split from the staging environment:
 
 - `apps/goarrive/` — the GoArrive coach/member fitness platform (the subject of everything else in this file).
 - `apps/westayfit/` — We Stay Fit, the community movement product (see `docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md` for the current WSF authority map).
