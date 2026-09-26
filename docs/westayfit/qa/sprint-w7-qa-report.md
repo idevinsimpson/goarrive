@@ -5229,3 +5229,70 @@ Both deltas were posted at 18:03–18:04Z, before my Check 62 delivery (18:08Z).
 Everything else in Check 62 stands.
 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run, and no artifacts.
+
+## 63 · CONTROL-PLANE-ACTIVATION-1 run-54 correction, #521 at exact `be4d66ce71cac663f2cfefd9ac89bfa31ececd79` on main `37f18ea9` (handoff #434 `5848768641`; L0 receipt #521 `5848766774`; W3 #396 `5848718822`; W7 ACK `5848792623`): **ONE FINDING (F1, the guard); the fix itself PASS**
+
+- **Method:** local and static only, in a detached worktree.
+- **Not done:** no dispatch, no cloud action, and #519 is not touched.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Scope** | **PASS.** One commit whose parent is `37f18ea9`. Four files, all under `.github/`: the workflow (+7), `run-all.mjs` (+1), the new `token-dependency.test.mjs` (161 lines) and `workflow-contract.test.mjs` (+6 / −1). No app, functions, rules, index, firebase config, package or lock file. |
+| **2** | **The new step** | **PASS.** See the new-step bullets below. |
+| **3** | **Boundaries unchanged** | **PASS.** The only workflow hunk is the 7-line insertion, so every other activation step is byte-identical to main: the marker-before-credentials order, no build or deploy, the fail-closed verdict, the `e5c-` fixtures, blocking cleanup, the owner card after cleanup, and upload only after the scan. `run-all` runs 24 suites, all passing. |
+| **4** | **Fail before, pass after** | **PASS.** See the fail-before bullets below. |
+| **5** | **The contract rule** | **F1**, below. The fix itself adds no CLI call, but the new rule does not close the CLI path it describes. |
+
+**Row 2, the new step:**
+- `journey-activation` gains exactly one step, `Install pinned deployment tooling`: `npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"`.
+- It runs at the workspace root, with no `working-directory` and no `if`.
+- It comes after `Read the served marker before any credential or fixture`, and after `npm ci --ignore-scripts` for the candidate.
+- It comes before `Authenticate to Google Cloud`, and before both token mints: the activation in `app/`, and fixture cleanup at the root.
+- `FIREBASE_TOOLS` is the workflow-level `firebase-tools@15.30.1`.
+- It is byte-identical to the install lines in `hosted-verify` and `cleanup-recovery`.
+- **Real resolution, not only the test's stub:** a script-free install of `firebase-tools@15.30.1` into a scratch runner-shaped workspace (`ops/`, `app/`, `cfg/`) puts `google-auth-library` 9.15.1 at the root. `require("google-auth-library")` then resolves from `app/` and from the root, and `GoogleAuth` is a function.
+
+**Row 4, fail before and pass after:**
+- `token-dependency.test.mjs` run against main's exact workflow (`WSF_WORKFLOW_UNDER_TEST`) exits 1. The error names both journey-activation token mints: "Run the changed-journey activation" and "Remove changed-journey fixtures".
+- On `be4d66ce` it exits 0, with 7 passed.
+- It carries its own negative controls: the run-54 reproduction with no install ("Cannot find module 'google-auth-library'"), and an install into `ops/` that `app/` cannot walk up to.
+- `run-all` on `be4d66ce`: **0 / 10 failures**, 24 suites.
+
+**Mutants.** Each was inserted in `journey-activation`, and run against be4d's `workflow-contract`, be4d's `token-dependency`, and main's `workflow-contract` (the blanket ban).
+
+| Mutant | Caught on be4d by |
+|---|---|
+| `node_modules/.bin/firebase projects:list` | contract, "the firebase CLI" |
+| `firebase use …` | contract, "the firebase CLI" |
+| `npx firebase …`, `npx -y firebase-tools …`, `npx --package=firebase-tools firebase …`, `npx -y firebase-tools deploy …` | contract, the existing all-jobs rule "npx must not resolve packages" |
+| a second unpinned install (`npm install --no-save firebase-tools`) | contract, "privileged install without --ignore-scripts" |
+| a second install with scripts | contract, the same rule |
+| the install made conditional (`if: always()`, `if: false`) | token-dependency |
+| the install without `--ignore-scripts` | both |
+| the install in `ops/` | token-dependency |
+| the install moved after auth | token-dependency |
+| the install removed | both |
+| **`npm exec firebase -- projects:list`** | **NOT CAUGHT** |
+| **`"$(npm root)/.bin/firebase" deploy --project westayfit-staging`** (a whole-project deploy) | **NOT CAUGHT** |
+| **`node -e 'require("firebase-tools").deploy({project: …})'`** | **NOT CAUGHT** |
+
+**F1 (the guard, not a live path): the new CLI rule is bypassable, and this change is what makes the bypass reachable.**
+- **Why it is reachable now:**
+  - on main, `journey-activation` never installed firebase-tools, so no spelling of its CLI or module could run there (and `npx` is banned in every job);
+  - `be4d66ce` installs it, so the job now holds a working `firebase` binary and the `firebase-tools` module;
+  - the only guard left is the contract's text rule.
+- **What the rule misses:**
+  - the regex `/node_modules\/\.bin\/firebase|npx\s+(?:--yes\s+)?firebase|(?:^|[\s;&|(])firebase\s+[a-z]/m`, the deploy rule `/firebase deploy|hosting:channel:deploy|--only …/`, and the exact-line assertion (filtered on `/FIREBASE_TOOLS/`) all miss `npm exec firebase -- …`, `"$(npm root)/.bin/firebase" deploy`, and programmatic `require("firebase-tools")`;
+  - the second is an unrestricted whole-project deploy.
+- **The current workflow is safe:** it contains no such call, so the delivered step does not open a live path. The gap is that the guard does not hold the "no firebase CLI call" line it claims to hold.
+- **Smallest fix, verified locally and not pushed:** in `workflow-contract.test.mjs`, widen the exact-line assertion's filter from `/FIREBASE_TOOLS/` to `/firebase/i`. In `journey-activation` the install line is the only line that mentions firebase at all, so:
+  - the unmutated workflow still passes (exit 0);
+  - all three escapes are caught ("deployment tooling appears in journey-activation only as the exact pinned, script-free install");
+  - the existing catches are unchanged.
+- **Alternative, the Director's choice:** install only `google-auth-library@9.15.1` pinned, with `--ignore-scripts`, in this job. That removes the CLI from the job entirely, at the cost of a second pin to keep in step with `hosted-verify`.
+
+**Instrument correction, disclosed.** My first mutant pass did not apply. The anchor matched six identical `Install pinned deployment tooling` steps across jobs. I re-anchored on the run-54 comment, which is unique to `journey-activation`.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts. The scratch npm workspace is outside the repository, and every mutant was reverted (the tree is clean).
+
+**Status:** **one finding (F1) at `be4d66ce`.** Items 1–4 PASS: the run-54 correction itself is correct, bounded and proven fail-before / pass-after. Item 5's guard needs the one-line widening, or the narrower install. W7 dispatched, merged and accepted nothing.
