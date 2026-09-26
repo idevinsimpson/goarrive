@@ -25,6 +25,7 @@
 export const OWNED_RUN_TAG_PREFIXES = Object.freeze({
   'e5h-': 'hosted-package-e-smoke.mjs (the 24-row hosted authorization suite)',
   'e5j-': 'hosted-player-journey.mjs (the browser/player journey)',
+  'e5p-': 'social-privacy-postop.mjs (the post-operator per-community privacy verification)',
 });
 
 /**
