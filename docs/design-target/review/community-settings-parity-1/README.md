@@ -1,6 +1,6 @@
 # COMMUNITY-SETTINGS-PARITY-1 — evidence (PR #506)
 
-Product head **`495cf847`** on base `87a86531` (branch `claude/wsf-w9-community-settings-parity-2`).
+Product head **`2e235c58`** (the `495cf847` product plus a unit-test casing fix) on base `87a86531` (branch `claude/wsf-w9-community-settings-parity-2`).
 Supersedes the parked #497 run (`aa22c723` / `e7dc36ee` / `e07453b4`); the older
 `RAW-*-aa22c723.log` / `RAW-*-e7dc36ee.log` files that sit in this directory in some
 checkouts were never committed (`*.log` is gitignored) and are not part of this record.
@@ -30,8 +30,8 @@ integrated, not staged. Emulators only (`demo-wsf-local`); nothing deployed.
 | `src/ui/communityParityTypes.ts` | `footer?: ReactNode` | secondary features after the core, outside W4's view |
 | `src/ui/CommunityParityView.tsx` | renders `footer` after the roster | same |
 | `src/ui/CommunityParityView.tsx` | Fact labels "Members" / "Your role" / "Goals" + `textTransform: 'uppercase'` | W7 Check 45 C-F2 / C-F7 read the accessible text; it looks identical |
-| `src/ui/CommunityParityView.tsx` | `bannerRing` becomes a quarter ring inside the banner's bounds | the full ring was laid out past the right edge at 360 px (`ui-app-shell`) |
-| `tests-e2e/sprint-w4-community-parity.spec.ts` | four text assertions follow the label casing | `'Members23'`, `'Your roleMember'`, `'Goals3'`, `'Goals2'` |
+| `src/ui/CommunityParityView.tsx` | `bannerRing` becomes a quarter ring inside the banner's bounds | the full ring was laid out past the right edge at 360 px (`ui-app-shell`). **This changes the accepted pixels: the new ring is not the reference arc (centred on the corner at radii 130–170, where the reference is centred 40 px in at 90–130). The accepted Phase-A frames no longer describe the banner. This is the Director's call (W4 `5844202722`).** |
+| `tests-e2e/sprint-w4-community-parity.spec.ts`, `tests/community-parity-view.test.tsx` (`2e235c58`) | text assertions follow the label casing | `'Members23'`, `'Your roleMember'`, `'Goals3'`, `'Goals2'` |
 
 ### Spec rows whose meaning changed (not weakened — the product changed)
 
@@ -44,7 +44,9 @@ integrated, not staged. Emulators only (`demo-wsf-local`); nothing deployed.
 - H3 — the whole community is busy during a save, so there is no second action to take.
 - H4 — the refused block says "no longer a member of…" and shows no switches.
 
-## Results on `495cf847`
+## Results
+
+The e2e runs below are on `495cf847`. `2e235c58` changes only a unit test file, so no app code differs.
 
 | Run | Result | RAW |
 |---|---|---|
@@ -53,8 +55,9 @@ integrated, not staged. Emulators only (`demo-wsf-local`); nothing deployed.
 | W7 Check 43, labelled local variant | **6/7**; the one failure is row 3's anonymous note, removed by W4 hardening C2 by design — W7's call | `RAW-w7-check43-variant-495cf847.txt`, `W7-CHECK43-LOCAL-VARIANT.diff` |
 | Dependency set (15 spec files) | **133 passed, 1 skipped** (W4's frame capture, gated on `WSF_CAPTURE_FRAMES`) | `RAW-dependency-495cf847.txt` |
 | Frame capture (`WSF_CSP_STAGE=CANDIDATE`) | **6/6** | `RAW-capture-495cf847.txt` |
-| vitest | 1028 / 1028 | — |
-| `tsc --noEmit` | clean | — |
+| vitest at `495cf847` | **1022 passed / 6 failed** — my earlier "1028/1028" was wrong (found by W4 `5844202722`, reproduced by L0 `5844257231`): `tests/community-parity-view.test.tsx` still expected the uppercase Fact text | `RAW-vitest-495cf847.txt` |
+| vitest at `2e235c58` | **1028 / 1028** — only the label casing in those assertions changed | `RAW-vitest-2e235c58.txt` |
+| `tsc --noEmit` | clean at `495cf847` and `2e235c58` | — |
 
 The Check 43 variant changes only selectors (every changed line is marked
 `/* W9 LOCAL VARIANT */`); no assertion is changed. W7's own spec copies are not committed.

@@ -1,0 +1,168 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /home/user/goarrive/apps/westayfit
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > orders banner → facts → communities → this period → history → members
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > orders banner → facts → communities → this period → history → members
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > shows a fact whose read failed as not known — never zero, never a fabricated count
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > shows a fact whose read failed as not known — never zero, never a fabricated count
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > renders an impossible member count as not known: MEMBERS —, "Members", no remainder (K-F1)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > renders an impossible member count as not known: MEMBERS —, "Members", no remainder (K-F1)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > keeps a failed history read apart from "no past goals"
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > keeps a failed history read apart from "no past goals"
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > renders no history rows, and no goal count, when history is not part of the read
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > renders no history rows, and no goal count, when history is not part of the read
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > labels the other open goals separately from the featured one
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx > the view — the reference hierarchy > labels the other open goals separately from the featured one
+The current testing environment is not configured to support act(...)
+
+stderr | tests/community-parity-view.test.tsx
+"shadow*" style props are deprecated. Use "boxShadow".
+
+ ❯ tests/community-parity-view.test.tsx (27 tests | 6 failed) 860ms
+     × orders banner → facts → communities → this period → history → members 59ms
+     × shows a fact whose read failed as not known — never zero, never a fabricated count 28ms
+     × renders an impossible member count as not known: MEMBERS —, "Members", no remainder (K-F1) 27ms
+     × keeps a failed history read apart from "no past goals" 77ms
+     × renders no history rows, and no goal count, when history is not part of the read 38ms
+     × labels the other open goals separately from the featured one 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/community-parity-view.test.tsx > the view — the reference hierarchy > orders banner → facts → communities → this period → history → members
+AssertionError: expected 'Members23' to be 'MEMBERS23' // Object.is equality
+
+Expected: "MEMBERS23"
+Received: "Members23"
+
+ ❯ tests/community-parity-view.test.tsx:256:45
+    254|     expect(text('wsf-parity-banner-eyebrow')).toBe('FAMILY AND FRIENDS…
+    255|     expect(text('wsf-parity-descriptor')).toBe('Private community');
+    256|     expect(text('wsf-parity-fact-members')).toBe('MEMBERS23');
+       |                                             ^
+    257|     expect(text('wsf-parity-fact-role')).toBe('YOUR ROLEMember');
+    258|     expect(text('wsf-parity-fact-goals')).toBe('GOALS3');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  tests/community-parity-view.test.tsx > the view — the reference hierarchy > shows a fact whose read failed as not known — never zero, never a fabricated count
+AssertionError: expected 'Members—' to be 'MEMBERS—' // Object.is equality
+
+Expected: "MEMBERS—"
+Received: "Members—"
+
+ ❯ tests/community-parity-view.test.tsx:273:45
+    271|   it('shows a fact whose read failed as not known — never zero, never …
+    272|     const p = render(props({ memberCount: null, role: null, goals: { s…
+    273|     expect(text('wsf-parity-fact-members')).toBe('MEMBERS—');
+       |                                             ^
+    274|     expect(text('wsf-parity-fact-role')).toBe('YOUR ROLE—');
+    275|     expect(text('wsf-parity-fact-goals')).toBe('GOALS—');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  tests/community-parity-view.test.tsx > the view — the reference hierarchy > renders an impossible member count as not known: MEMBERS —, "Members", no remainder (K-F1)
+AssertionError: NaN: expected 'Members—' to be 'MEMBERS—' // Object.is equality
+
+Expected: "MEMBERS—"
+Received: "Members—"
+
+ ❯ tests/community-parity-view.test.tsx:288:60
+    286|     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NE…
+    287|       render(props({ memberCount: bad, roster: complete }));
+    288|       expect(text('wsf-parity-fact-members'), String(bad)).toBe('MEMBE…
+       |                                                            ^
+    289|       expect(text('wsf-parity-roster-count'), String(bad)).toBe('Membe…
+    290|       expect(byId('wsf-parity-anonymous'), String(bad)).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  tests/community-parity-view.test.tsx > the view — the reference hierarchy > keeps a failed history read apart from "no past goals"
+AssertionError: expected 'Goals—' to be 'GOALS—' // Object.is equality
+
+Expected: "GOALS—"
+Received: "Goals—"
+
+ ❯ tests/community-parity-view.test.tsx:333:43
+    331|     expect(byId('wsf-parity-history-empty')).toBeNull();
+    332|     expect(text('wsf-parity-history')).not.toContain('No past goals');
+    333|     expect(text('wsf-parity-fact-goals')).toBe('GOALS—');
+       |                                           ^
+    334|     click('wsf-parity-history-failed-retry');
+    335|     expect(p.onRetryHistory).toHaveBeenCalledTimes(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  tests/community-parity-view.test.tsx > the view — the reference hierarchy > renders no history rows, and no goal count, when history is not part of the read
+AssertionError: expected 'Goals—' to be 'GOALS—' // Object.is equality
+
+Expected: "GOALS—"
+Received: "Goals—"
+
+ ❯ tests/community-parity-view.test.tsx:341:43
+    339|     render(props({ history: { state: 'unavailable' } }));
+    340|     expect(byId('wsf-parity-history')).toBeNull();
+    341|     expect(text('wsf-parity-fact-goals')).toBe('GOALS—');
+       |                                           ^
+    342|   });
+    343|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  tests/community-parity-view.test.tsx > the view — the reference hierarchy > labels the other open goals separately from the featured one
+AssertionError: expected 'Goals4' to be 'GOALS4' // Object.is equality
+
+Expected: "GOALS4"
+Received: "Goals4"
+
+ ❯ tests/community-parity-view.test.tsx:362:43
+    360|     expect(text('wsf-parity-also-open-g2')).toContain('155 of 150 squa…
+    361|     expect(text('wsf-parity-also-open-g2')).toContain('REACHED · STILL…
+    362|     expect(text('wsf-parity-fact-goals')).toBe('GOALS4');
+       |                                           ^
+    363|   });
+    364|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed | 58 passed (59)
+      Tests  6 failed | 1022 passed (1028)
+   Start at  08:00:22
+   Duration  24.99s (transform 2.73s, setup 0ms, import 9.31s, tests 7.46s, environment 46.10s)
+
