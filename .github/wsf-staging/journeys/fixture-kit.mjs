@@ -7,8 +7,12 @@
  * - community, goal, shard and membership documents carry the run tag in
  *   their path; the one untagged shape, `wsfMemberProfiles/<uid>`, is linked
  *   through a run-tagged membership of the same uid;
- * - every account and document is written to the cleanup manifest BEFORE the
- *   request that creates it, so a crash leaves nothing untracked;
+ * - every DOCUMENT is written to the cleanup manifest BEFORE the request that
+ *   creates it. An ACCOUNT cannot be: its uid exists only once signUp returns
+ *   it. It is tracked immediately after a successful create and before any
+ *   document that depends on it. A crash inside that one window leaves an
+ *   account the manifest does not name; its run-specific synthetic email
+ *   (`wsf-<runTag>-…@example.com`) is how it is found and removed by hand;
  * - nothing here deletes anything. The workflow's cleanup step, running
  *   cleanup-synthetic.mjs over this run's own manifest, is the only deleter.
  *

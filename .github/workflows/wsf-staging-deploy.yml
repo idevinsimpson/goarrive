@@ -702,18 +702,19 @@ jobs:
 
       # The changed-journey fixtures, removed from their own manifest by the same
       # cleaner and the same provenance rules as every other hosted harness.
-      # Report-only like the smoke it follows: an incomplete cleanup is a
-      # warning with the manifest preserved in the hosted evidence for recovery.
+      # BLOCKING whenever a fixture manifest exists (Director #513 C4): a run
+      # that leaves synthetic fixtures behind fails hosted-verify, and the card
+      # rendered below cannot say PASSED. With no manifest nothing was created,
+      # and the step says so without minting a credential.
       - name: Remove changed-journey fixtures
         if: always()
-        continue-on-error: true
         env:
           WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-evidence/changed-journeys/cleanup-manifest.json
           WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-evidence/changed-journeys/cleanup-receipt.json
         run: |
           set -euo pipefail
           if [ ! -f "$WSF_CLEANUP_MANIFEST" ]; then
-            echo "CHANGED_JOURNEY_CLEANUP=nothing to remove (no changed-journey fixtures were created)"
+            echo "CHANGED_JOURNEY_CLEANUP=not needed (no changed-journey fixtures were created)"
             exit 0
           fi
           export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
@@ -721,8 +722,31 @@ jobs:
             new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
               .getAccessToken().then((t)=>process.stdout.write(t||""));
           ')"
-          node ops/.github/wsf-staging/cleanup-synthetic.mjs \
-            || { echo "::warning::changed-journey fixtures were not fully removed; their manifest is preserved in the hosted evidence"; exit 1; }
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      # THE OWNER CARD, rendered only AFTER the fixture cleanup and from its
+      # receipt as well as the journey results: it names the cleanup outcome,
+      # and says PASSED only when every journey passed on the manifest's build
+      # AND cleanup is complete or nothing was created. Report-only itself; the
+      # blocking cleanup step above is what fails the job.
+      - name: Render the changed-journey owner card (report-only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          WSF_CHANGED_DIR: ${{ github.workspace }}/wsf-evidence/changed-journeys
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_CHANGED_DIR/changed-journeys.json" ]; then
+            echo "OWNER_CARD=not rendered (no changed-journey results in this run)"
+            exit 0
+          fi
+          node ops/.github/wsf-staging/owner-test-card.mjs \
+            --manifest ops/.github/wsf-staging/journeys/manifest.json \
+            --results "$WSF_CHANGED_DIR/changed-journeys.json" \
+            --cleanup-manifest "$WSF_CHANGED_DIR/cleanup-manifest.json" \
+            --cleanup-receipt "$WSF_CHANGED_DIR/cleanup-receipt.json" \
+            --staging-url https://westayfit-staging--staging-4a616y5m.web.app \
+            --out "$WSF_CHANGED_DIR/owner-test-card.md"
 
       - name: Remove synthetic fixtures
         if: always()

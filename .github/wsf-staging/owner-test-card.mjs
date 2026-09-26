@@ -12,10 +12,14 @@
  * - an unknown status, a result for a journey the manifest does not name, or two
  *   results for one journey are refused rather than guessed at;
  * - device review is always NOT RUN here: visual and feel review is Devin's
- *   verdict and no script can supply it.
+ *   verdict and no script can supply it;
+ * - the changed-journey FIXTURE CLEANUP is part of the verdict. The card is
+ *   rendered after cleanup, from its receipt: a run that leaves its synthetic
+ *   fixtures behind (or never cleaned them) is not a PASSED milestone.
  *
  * Summary: FAILED when any verified journey failed; PASSED only when every
- * journey passed on the manifest's build; INCOMPLETE otherwise.
+ * journey passed on the manifest's build AND cleanup is COMPLETE or nothing was
+ * created; INCOMPLETE otherwise.
  *
  * Deterministic: no clock, no network. Exit 0 = rendered. Exit 1 = refused.
  */
@@ -28,6 +32,33 @@ const SHA = /^[0-9a-f]{40}$/;
 const STATUSES = ['passed', 'failed', 'blocked'];
 const RESULT_KEYS = ['journeyId', 'status', 'servedMarker', 'setupId', 'actionsPerformed', 'assertions', 'reason', 'artifact'];
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Cleanup outcomes, and which of them let a card say PASSED. */
+export const CLEANUP_STATES = Object.freeze({
+  COMPLETE: { ok: true, text: 'COMPLETE — every recorded fixture removed and read back' },
+  NO_FIXTURES: { ok: true, text: 'COMPLETE — the fixture manifest recorded nothing to remove' },
+  NOT_NEEDED: { ok: true, text: 'not needed — no fixtures were created' },
+  INCOMPLETE: { ok: false, text: 'INCOMPLETE — fixtures remain; the manifest is preserved for recovery' },
+  MANIFEST_UNUSABLE: { ok: false, text: 'NOT DONE — the cleaner refused the fixture manifest (MANIFEST_UNUSABLE)' },
+  NOT_RUN: { ok: false, text: 'NOT RUN — fixtures were created and there is no cleanup receipt' },
+  UNKNOWN: { ok: false, text: 'UNKNOWN — the cleanup receipt does not state a known outcome' },
+});
+
+/**
+ * The cleanup outcome for a run, receipt first: cleanup-synthetic.mjs deletes
+ * its manifest once it is COMPLETE, so the receipt is the record of a finished
+ * cleanup. With no usable receipt: a fixture manifest still present means
+ * cleanup did not run (NOT_RUN); neither file means nothing was created.
+ */
+const RECEIPT_STATES = ['COMPLETE', 'NO_FIXTURES', 'INCOMPLETE', 'MANIFEST_UNUSABLE'];
+export function cleanupStatus({ manifestPath, receiptPath }) {
+  let receipt = null;
+  if (receiptPath) {
+    try { receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')); } catch { receipt = null; }
+  }
+  if (receipt !== null) return RECEIPT_STATES.includes(receipt?.status) ? receipt.status : 'UNKNOWN';
+  return manifestPath && fs.existsSync(manifestPath) ? 'NOT_RUN' : 'NOT_NEEDED';
+}
 
 export class Refusal extends Error {}
 const refuse = (m) => { throw new Refusal(m); };
@@ -79,7 +110,8 @@ function verdict(manifest, served, r) {
   return { label: 'FAILED', detail: bad.length ? `${r.reason}; did not hold: ${bad.join('; ')}` : r.reason };
 }
 
-export function renderCard(manifest, results, { stagingUrl }) {
+export function renderCard(manifest, results, { stagingUrl, cleanup }) {
+  if (!Object.hasOwn(CLEANUP_STATES, cleanup)) refuse(`the cleanup outcome must be one of ${Object.keys(CLEANUP_STATES).join(', ')}`);
   const errors = validateManifest(manifest);
   if (errors.length) refuse(`the manifest is invalid:\n${errors.join('\n')}`);
   if (typeof stagingUrl !== 'string' || !/^https:\/\/[^\s]+$/.test(stagingUrl)) refuse('--staging-url must be an https URL');
@@ -87,7 +119,9 @@ export function renderCard(manifest, results, { stagingUrl }) {
 
   const rows = manifest.journeys.map((j) => ({ j, v: verdict(manifest, servedSha, byId.get(j.id)) }));
   const count = (l) => rows.filter((r) => r.v.label === l).length;
-  const summary = count('FAILED') ? 'FAILED' : count('PASSED') === rows.length ? 'PASSED' : 'INCOMPLETE';
+  const journeysPassed = count('PASSED') === rows.length;
+  const cleanupOk = CLEANUP_STATES[cleanup].ok;
+  const summary = count('FAILED') ? 'FAILED' : journeysPassed && cleanupOk ? 'PASSED' : 'INCOMPLETE';
   const tally = ['PASSED', 'FAILED', 'BLOCKED', 'NOT VERIFIED', 'NOT RUN'].map((l) => `${count(l)} ${l.toLowerCase()}`).join(', ');
 
   const out = [];
@@ -97,7 +131,8 @@ export function renderCard(manifest, results, { stagingUrl }) {
   out.push(`- Milestone product SHA: ${manifest.productSha}`);
   out.push(`- Previous known-good / rollback SHA: ${manifest.previousKnownGoodSha}`);
   out.push(`- Milestone: ${manifest.milestone}`);
-  out.push(`- Hosted changed-journey status: ${results === null ? 'NOT RUN' : summary} (${tally})`);
+  out.push(`- Hosted changed-journey status: ${results === null ? 'NOT RUN' : summary} (${tally})${journeysPassed && !cleanupOk && results !== null ? ' — every journey passed, but fixture cleanup is not complete' : ''}`);
+  out.push(`- Changed-journey cleanup: ${CLEANUP_STATES[cleanup].text}`);
   out.push('- Device review: NOT RUN — Devin\'s verdict', '');
   rows.forEach(({ j, v }, i) => {
     out.push(`## ${i + 1}. ${j.id}`, '');
@@ -127,15 +162,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   try {
     const mf = arg(argv, 'manifest');
     const out = arg(argv, 'out');
-    if (!mf || !out) refuse('usage: owner-test-card.mjs --manifest <m.json> [--results <r.json>] --staging-url <https://…> --out <card.md>');
+    const cleanupManifest = arg(argv, 'cleanup-manifest');
+    if (!mf || !out || cleanupManifest === undefined) {
+      refuse('usage: owner-test-card.mjs --manifest <m.json> [--results <r.json>] --cleanup-manifest <path> [--cleanup-receipt <path>] --staging-url <https://…> --out <card.md>');
+    }
     let manifest, results = null;
     try { manifest = JSON.parse(fs.readFileSync(mf, 'utf8')); } catch { refuse('the manifest is missing or is not JSON'); }
     const rf = arg(argv, 'results');
     if (rf !== undefined) {
       try { results = JSON.parse(fs.readFileSync(rf, 'utf8')); } catch { refuse('the results file is missing or is not JSON'); }
     }
-    const card = renderCard(manifest, results, { stagingUrl: arg(argv, 'staging-url') });
+    const cleanup = cleanupStatus({ manifestPath: cleanupManifest, receiptPath: arg(argv, 'cleanup-receipt') });
+    const card = renderCard(manifest, results, { stagingUrl: arg(argv, 'staging-url'), cleanup });
     fs.writeFileSync(out, card.text);
+    console.log(`OWNER_CARD_CLEANUP=${cleanup}`);
     console.log(`OWNER_CARD_SUMMARY=${card.summary}`);
   } catch (e) {
     if (!(e instanceof Refusal)) throw e;

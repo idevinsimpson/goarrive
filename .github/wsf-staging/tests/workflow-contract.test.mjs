@@ -1081,28 +1081,67 @@ await test('the changed-journey smoke and its cleanup run in hosted-verify, afte
   const reauth = at('Re-authenticate before cleanup');
   const changed = at('Run the changed-journey smoke (report-only)');
   const cleanup = at('Remove changed-journey fixtures');
+  const render = at('Render the changed-journey owner card (report-only)');
   const scan = at('Scan evidence before upload');
   const gate = at('Require the hosted checks to have passed');
   assert.ok(smoke < reauth, 'the Package E suite runs first');
   assert.equal(changed, reauth + 1, 'the changed-journey smoke follows the re-authentication, so its token is fresh');
   assert.equal(cleanup, changed + 1, 'its fixtures are removed right after it');
-  assert.ok(cleanup < at('Remove synthetic fixtures') && cleanup < scan && scan < gate);
+  assert.equal(render, cleanup + 1, 'C4: the owner card is rendered only after the cleanup');
+  assert.ok(render < at('Remove synthetic fixtures') && render < scan && scan < gate);
   for (const j of Object.keys(jobs).filter((k) => k !== 'hosted-verify')) {
     assert.equal(/hosted-changed-journeys\.mjs/.test(jobs[j]), false, `${j} must not run the changed-journey smoke`);
   }
 });
 
-await test('the changed-journey smoke and its cleanup are report-only: continue-on-error, no id, and the gate reads neither', () => {
+await test('the changed-journey smoke and its card are report-only; the gate reads neither', () => {
   const smoke = liveLines(stepBlock('hosted-verify', 'Run the changed-journey smoke (report-only)'));
-  const cleanup = liveLines(stepBlock('hosted-verify', 'Remove changed-journey fixtures'));
-  for (const [name, live, cond] of [['smoke', smoke, /^\s+if: \$\{\{ !cancelled\(\) \}\}$/m], ['cleanup', cleanup, /^\s+if: always\(\)$/m]]) {
+  const card = liveLines(stepBlock('hosted-verify', 'Render the changed-journey owner card (report-only)'));
+  for (const [name, live] of [['smoke', smoke], ['card', card]]) {
     assert.match(live, /^\s+continue-on-error: true$/m, `${name} must be continue-on-error`);
     assert.equal(/^\s+id:/m.test(live), false, `${name}: an id would let a later step gate on it`);
-    assert.match(live, cond, `${name} has the wrong condition`);
+    assert.match(live, /^\s+if: \$\{\{ !cancelled\(\) \}\}$/m, `${name} has the wrong condition`);
   }
   const gate = stepBlock('hosted-verify', 'Require the hosted checks to have passed');
   const refs = [...gate.matchAll(/steps\.([a-z0-9-]+)\.outcome/g)].map((m) => m[1]).sort();
   assert.deepEqual(refs, ['scan-hosted-evidence', 'smoke'], 'the hosted gate must read exactly the Package E suite and the evidence scan');
+});
+
+await test('C4: the changed-journey cleanup is BLOCKING whenever a fixture manifest exists', () => {
+  const live = liveLines(stepBlock('hosted-verify', 'Remove changed-journey fixtures'));
+  assert.match(live, /^\s+if: always\(\)$/m, 'cleanup runs whatever the smoke did');
+  assert.equal(/continue-on-error/.test(live), false, 'a failed cleanup must fail hosted-verify');
+  assert.equal(/^\s+id:/m.test(live), false);
+  // The only early success is "no manifest, nothing created", and it comes before the cleaner.
+  const noManifest = live.indexOf('if [ ! -f "$WSF_CLEANUP_MANIFEST" ]; then');
+  const cleaner = live.indexOf('node ops/.github/wsf-staging/cleanup-synthetic.mjs');
+  assert.ok(noManifest !== -1 && cleaner > noManifest);
+  assert.equal((live.match(/exit 0/g) || []).length, 1, 'exactly one success exit: the no-manifest branch');
+  assert.ok(live.indexOf('exit 0') < cleaner);
+  const after = live.slice(cleaner);
+  assert.match(after, /^node ops\/\.github\/wsf-staging\/cleanup-synthetic\.mjs\s*$/m, 'the cleaner\'s exit status is the step\'s');
+  assert.equal(/\|\||set \+e|; *true|exit 0/.test(after), false, 'nothing may swallow a cleanup failure');
+  assert.match(live, /^\s+set -euo pipefail$/m);
+});
+
+await test('C4: the card step reads the cleanup manifest and receipt the cleanup step wrote, and the manifest from ops', () => {
+  const cleanup = stepBlock('hosted-verify', 'Remove changed-journey fixtures');
+  const card = liveLines(stepBlock('hosted-verify', 'Render the changed-journey owner card (report-only)'));
+  const envOf = (b, k) => (new RegExp(`^\\s+${k}: (.+)$`, 'm').exec(b) || [])[1];
+  const dir = envOf(card, 'WSF_CHANGED_DIR');
+  assert.equal(dir, '${{ github.workspace }}/wsf-evidence/changed-journeys');
+  assert.equal(envOf(cleanup, 'WSF_CLEANUP_MANIFEST'), `${dir}/cleanup-manifest.json`);
+  assert.equal(envOf(cleanup, 'WSF_CLEANUP_RECEIPT'), `${dir}/cleanup-receipt.json`);
+  assert.match(card, /--cleanup-manifest "\$WSF_CHANGED_DIR\/cleanup-manifest\.json"/);
+  assert.match(card, /--cleanup-receipt "\$WSF_CHANGED_DIR\/cleanup-receipt\.json"/);
+  assert.match(card, /--results "\$WSF_CHANGED_DIR\/changed-journeys\.json"/);
+  assert.match(card, /--manifest ops\/\.github\/wsf-staging\/journeys\/manifest\.json/);
+  assert.match(card, /node ops\/\.github\/wsf-staging\/owner-test-card\.mjs/);
+});
+
+await test('C4: the runner itself never renders the owner card', () => {
+  const src = fs.readFileSync(path.resolve('.github/wsf-staging/hosted-changed-journeys.mjs'), 'utf8');
+  assert.equal(/renderCard|owner-test-card\.md/.test(src.replace(/^\s*\*.*$/gm, '')), false);
 });
 
 await test('with no manifest, the changed-journey step exits before minting any credential or writing the SDK config', () => {

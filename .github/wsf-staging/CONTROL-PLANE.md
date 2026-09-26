@@ -116,7 +116,7 @@ It reads the manifest from the **operational** checkout at `.github/wsf-staging/
 | Journey has no driver in `journeys/index.mjs` | Reports it BLOCKED |
 | At least one driver to run | Mints its token and SDK config, then launches the browser only after `/health` names the deployed SHA |
 
-It writes `changed-journeys/changed-journeys.json`, `owner-test-card.md` and one screenshot per driven journey into the hosted evidence. The existing scan checks them before upload.
+It writes `changed-journeys/changed-journeys.json` and one screenshot per driven journey into the hosted evidence; the owner card is rendered later, after fixture cleanup. The existing scan checks all of them before upload.
 
 **Drivers** (`journeys/index.mjs`, reviewed code):
 
@@ -125,7 +125,11 @@ It writes `changed-journeys/changed-journeys.json`, `owner-test-card.md` and one
 | `community` | Signs in through `/signin`, opens `/community`, checks the banner name, the Members and Your role facts ("Champion" for the founding Champion) and This period; presses the other community's chip and checks all of them again; reloads and checks the selection held. | The roster: `wsfCommunityMembers` is transport-shut on staging. |
 | `settings` | Selects the community it leads with its chip, opens You, presses Settings, checks the panel overlay, that the selected community's section is first, every switch's stored state, the "Anonymous member" hint and the CHAMPION badge; presses × Close and checks it dismissed. | Changing a switch: `wsfSetCommunityVisibility` is transport-shut on staging. |
 
-**Fixtures** (`journeys/fixture-kit.mjs`): one preverified synthetic member in two synthetic communities, seeded through the admin REST path with the run tag `e5c-…` (registered in `run-tag.mjs`). Every account and document is tracked in the step's **own** cleanup manifest before it is created; the password is never written. The next step, "Remove changed-journey fixtures", runs `cleanup-synthetic.mjs` over that manifest (report-only: an incomplete cleanup is a warning with the manifest preserved in the evidence).
+**Fixtures** (`journeys/fixture-kit.mjs`): one preverified synthetic member in two synthetic communities, seeded through the admin REST path with the run tag `e5c-…` (registered in `run-tag.mjs`). Every document is tracked in the step's **own** cleanup manifest before it is written. An account is tracked immediately after sign-up returns its uid, before any document that depends on it; if the process dies inside that window, the account is found by its run-specific email `wsf-<runTag>-…@example.com`. The password is never written.
+
+The next step, "Remove changed-journey fixtures", runs `cleanup-synthetic.mjs` over that manifest. It is **blocking** whenever a fixture manifest exists: a cleanup that is not complete fails `hosted-verify`, and the manifest is preserved in the evidence for recovery.
+
+The owner card is rendered only after that, by "Render the changed-journey owner card", from the results **and** the cleanup receipt. It names the cleanup outcome, and says PASSED only when every journey passed on the manifest's build and cleanup is complete or nothing was created.
 
 An example manifest for COMMUNITY-SETTINGS-PARITY-1 is at `journeys/examples/`; no live manifest ships with this tooling.
 

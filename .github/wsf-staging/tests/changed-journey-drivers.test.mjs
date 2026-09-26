@@ -19,13 +19,14 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createFixtureKit } from '../journeys/fixture-kit.mjs';
 import { drivers } from '../journeys/index.mjs';
 import { runHook } from '../hosted-changed-journeys.mjs';
 import { isOwnedRunTag } from '../run-tag.mjs';
 
 const CLEANUP = path.resolve('.github/wsf-staging/cleanup-synthetic.mjs');
+const CARD = path.resolve('.github/wsf-staging/owner-test-card.mjs');
 const EXAMPLE = path.resolve('.github/wsf-staging/journeys/examples/community-settings-parity-1.json');
 const PROJECT = 'westayfit-staging';
 const RUN_TAG = 'e5c-testrun01';
@@ -56,7 +57,7 @@ function backend() {
 }
 
 /** The same state served over HTTP in the shape cleanup-synthetic.mjs speaks. */
-function serve(be) {
+function serve(be, { failDeletes = false } = {}) {
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (d) => { raw += d; });
@@ -70,6 +71,7 @@ function serve(be) {
       if (req.url.includes('accounts:batchDelete')) { for (const id of body.localIds || []) be.accounts.delete(id); return json(200, {}); }
       const m = /\/documents\/(.+)$/.exec(req.url);
       const p = m ? decodeURIComponent(m[1]) : null;
+      if (req.method === 'DELETE' && failDeletes) return json(503, { error: { status: 'UNAVAILABLE' } });
       if (req.method === 'DELETE') { if (!be.docs.has(p)) return json(404, { error: { status: 'NOT_FOUND' } }); be.docs.delete(p); return json(200, {}); }
       if (req.method === 'GET') return be.docs.has(p) ? json(200, { name: p, fields: be.docs.get(p) }) : json(404, { error: { status: 'NOT_FOUND' } });
       return json(400, { error: { status: 'UNEXPECTED' } });
@@ -167,7 +169,8 @@ function fakeApp(fx, bugs = {}) {
   }
   const page = {
     goto: async (url) => { st.path = new URL(url).pathname; },
-    reload: async () => {},
+    // A reload keeps the product's remembered selection; the seeded defect drops it.
+    reload: async () => { if (bugs.reloadLosesSelection) st.selected = null; },
     waitForTimeout: async () => {},
     waitForURL: async (pred) => { if (!pred(new URL(`https://staging.example.test${st.path}`))) throw new Error('page.waitForURL: Timeout exceeded'); },
     locator,
@@ -203,7 +206,7 @@ async function drive(name, bugs = {}) {
 }
 
 // ---- the fixture kit ------------------------------------------------------------------
-await test('the kit tracks every account and document BEFORE the request that creates it', async () => {
+await test('the kit tracks every DOCUMENT before its write, and every ACCOUNT as soon as sign-up returns its uid, before any dependent write', async () => {
   const dir = tmp();
   const be = backend();
   const manifestPath = path.join(dir, 'cleanup-manifest.json');
@@ -211,8 +214,10 @@ await test('the kit tracks every account and document BEFORE the request that cr
   be.fetchImpl = async (url, opts) => {
     const m = /\/documents\/(.+)$/.exec(url);
     if (m && opts.method === 'PATCH') {
-      const tracked = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).docs;
-      assert.ok(tracked.includes(decodeURIComponent(m[1])), `${m[1]} was written before it was tracked`);
+      const tracked = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      assert.ok(tracked.docs.includes(decodeURIComponent(m[1])), `${m[1]} was written before it was tracked`);
+      // An account's uid exists only once signUp returns; by the next write it must be tracked.
+      for (const uid of be.accounts.keys()) assert.ok(tracked.users.includes(uid), `account ${uid} was not tracked before a dependent write`);
     }
     return inner(url, opts);
   };
@@ -298,6 +303,8 @@ await test('SETTINGS selects the community it needs through the product, not by 
 const DEFECTS = [
   ['community', { chipIgnored: true }, /after switching, the banner names/],
   ['community', { foundingLabel: true }, /Your role fact reads Champion/],
+  // C5: switch, then a reload that returns to the original community.
+  ['community', { reloadLosesSelection: true }, /on return, the selected community is still Summit Journey Club/],
   ['settings', { settingsIgnoresSelection: true, serverOrderBFirst: false }, /privacy sections list Summit Journey Club first/],
   ['settings', { nameAlwaysOn: true }, /Harbor Journey Crew: the name switch shows the stored value \(off\)/],
   ['settings', { noAnonymousHint: true }, /a private name is explained as "Anonymous member"/],
@@ -319,41 +326,79 @@ await test('a sign-in that does not leave /signin throws; the driver does not co
   );
 });
 
-// ---- through the hook, with the real registry and the example manifest ----------------------
-await test('the hook runs both registered drivers from the example manifest: PASSED, with actions, assertions and screenshots', async () => {
+// ---- through the hook, the cleaner and the card, as the workflow orders them ----------
+/**
+ * The hosted-verify sequence end to end: the runner (real registry, example
+ * manifest), then the REAL cleaner over the kit's own manifest, then the card
+ * CLI reading the results and the cleaner's receipt. `failDeletes` makes the
+ * fake API refuse deletions, which is a cleanup that cannot complete.
+ */
+async function sequence({ failDeletes = false } = {}) {
   const d = tmp();
   const manifest = JSON.parse(fs.readFileSync(EXAMPLE, 'utf8'));
-  fs.writeFileSync(path.join(d, 'manifest.json'), JSON.stringify(manifest));
-  const hs = {};
+  const mf = path.join(d, 'manifest.json');
+  fs.writeFileSync(mf, JSON.stringify(manifest));
+  const changed = path.join(d, 'evidence', 'changed-journeys');
   const env = {
-    WSF_JOURNEY_MANIFEST: path.join(d, 'manifest.json'), WSF_STAGING_URL: 'https://staging.example.test',
+    WSF_JOURNEY_MANIFEST: mf, WSF_STAGING_URL: 'https://staging.example.test',
     WSF_APPROVED_SHA: manifest.productSha, WSF_RESULT_DIR: path.join(d, 'evidence'),
   };
+  const hs = {};
   const browser = {
     newContext: async () => ({ newPage: async () => new Proxy({}, { get: (_, k) => (k === 'then' ? undefined : (...a) => hs.current.page[k](...a)) }), close: async () => {} }),
     close: async () => {},
   };
+  let h = null;
   let fixturesMade = 0;
-  const r = await runHook(env, {
+  const hook = await runHook(env, {
     fetch: async () => ({ ok: true, text: async () => `commit ${manifest.productSha.slice(0, 7)}` }),
     launch: async () => browser,
     fixtures: () => {
       fixturesMade += 1;
-      const h = harness({});
+      h = harness({});
       hs.current = { get page() { return h.app().page; } };
       return h.fixtures;
     },
   });
-  assert.equal(fixturesMade, 1, 'one fixture kit per run');
-  assert.ok(r.lines.includes('CHANGED_JOURNEY_SMOKE=PASSED'), r.lines.join('\n'));
-  for (const x of r.results.results) {
+  const receipt = path.join(changed, 'cleanup-receipt.json');
+  const { server, base } = await serve(h.be, { failDeletes });
+  const cleanup = await runCleanup(base, h.kit.manifestPath, receipt);
+  server.close();
+  const cardPath = path.join(changed, 'owner-test-card.md');
+  const card = spawnSync(process.execPath, [CARD, '--manifest', mf, '--results', path.join(changed, 'changed-journeys.json'),
+    '--cleanup-manifest', h.kit.manifestPath, '--cleanup-receipt', receipt,
+    '--staging-url', 'https://staging.example.test', '--out', cardPath], { encoding: 'utf8' });
+  return { hook, fixturesMade, cleanup, card, cardText: fs.existsSync(cardPath) ? fs.readFileSync(cardPath, 'utf8') : null, be: h.be };
+}
+
+await test('the runner drives both registered drivers from the example manifest, writes results only, and cleanup + card make it PASSED', async () => {
+  const s = await sequence();
+  assert.equal(s.fixturesMade, 1, 'one fixture kit per run');
+  for (const x of s.hook.results.results) {
     assert.equal(x.status, 'passed', `${x.journeyId}: ${x.reason}`);
     assert.ok(x.actionsPerformed.length >= 4 && x.assertions.length >= 10);
     assert.equal(x.artifact, `changed-journeys/${x.journeyId}.png`);
   }
-  const card = fs.readFileSync(path.join(d, 'evidence', 'changed-journeys', 'owner-test-card.md'), 'utf8');
-  assert.match(card, /Hosted changed-journey status: PASSED \(2 passed/);
-  assert.match(card, /Device review: NOT RUN — Devin's verdict/);
+  assert.equal(s.cleanup.code, 0, s.cleanup.out);
+  assert.equal(s.cleanup.receipt.status, 'COMPLETE');
+  assert.equal(s.be.accounts.size + s.be.docs.size, 0);
+  assert.equal(s.card.status, 0, s.card.stderr);
+  assert.match(s.card.stdout, /OWNER_CARD_CLEANUP=COMPLETE\nOWNER_CARD_SUMMARY=PASSED/);
+  assert.match(s.cardText, /Hosted changed-journey status: PASSED \(2 passed/);
+  assert.match(s.cardText, /Changed-journey cleanup: COMPLETE — every recorded fixture removed and read back/);
+  assert.match(s.cardText, /Device review: NOT RUN — Devin's verdict/);
+});
+
+await test('C4: a cleanup that cannot complete fails its step AND leaves no PASSED card, though every journey passed', async () => {
+  const s = await sequence({ failDeletes: true });
+  assert.ok(s.hook.results.results.every((x) => x.status === 'passed'), 'the journeys themselves passed');
+  assert.notEqual(s.cleanup.code, 0, 'the cleaner exits non-zero, which fails the blocking workflow step');
+  assert.equal(s.cleanup.receipt.status, 'INCOMPLETE');
+  assert.ok(s.be.accounts.size + s.be.docs.size > 0, 'fixtures really remain');
+  assert.equal(s.card.status, 0, s.card.stderr);
+  assert.match(s.card.stdout, /OWNER_CARD_CLEANUP=INCOMPLETE\nOWNER_CARD_SUMMARY=INCOMPLETE/);
+  assert.doesNotMatch(s.cardText, /status: PASSED/);
+  assert.match(s.cardText, /every journey passed, but fixture cleanup is not complete/);
 });
 
 console.log(`\nchanged-journey-drivers: ${passed} passed`);

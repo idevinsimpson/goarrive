@@ -24,7 +24,10 @@
  *   or destroy each other's record of what was created.
  *
  * Writes changed-journeys.json (the results document owner-test-card.mjs
- * reads) and owner-test-card.md into WSF_RESULT_DIR/changed-journeys/.
+ * reads) into WSF_RESULT_DIR/changed-journeys/. It does NOT render the owner
+ * card: the workflow renders it after "Remove changed-journey fixtures", from
+ * the cleanup receipt as well, so no card can say PASSED while this run's
+ * fixtures remain.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -32,7 +35,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { validateManifest } from './milestone-manifest.mjs';
-import { renderCard } from './owner-test-card.mjs';
+import { checkResults } from './owner-test-card.mjs';
 import { createFixtureKit } from './journeys/fixture-kit.mjs';
 
 const PROJECT_ID = 'westayfit-staging';
@@ -159,12 +162,12 @@ export async function runHook(env, deps = {}) {
     }
 
     const results = { schemaVersion: 1, servedSha, results: out };
+    checkResults(manifest, results); // the card step must be able to read what is written here
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'changed-journeys.json'), `${JSON.stringify(results, null, 2)}\n`);
-    const card = renderCard(manifest, results, { stagingUrl: STAGING_URL });
-    fs.writeFileSync(path.join(dir, 'owner-test-card.md'), card.text);
     for (const r of out) say(`CHANGED_JOURNEY ${r.journeyId}=${r.status}${r.reason ? ` (${r.reason})` : ''}`);
-    say(`CHANGED_JOURNEY_SMOKE=${card.summary}`);
+    const n = (st) => out.filter((r) => r.status === st).length;
+    say(`CHANGED_JOURNEY_RESULTS=${n('passed')} passed, ${n('failed')} failed, ${n('blocked')} blocked (the owner card is rendered after fixture cleanup)`);
     return { lines, results };
   } catch (e) {
     say(`CHANGED_JOURNEY_SMOKE=error (${short(e)})`);

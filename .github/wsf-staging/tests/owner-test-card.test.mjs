@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { renderCard } from '../owner-test-card.mjs';
+import { CLEANUP_STATES, cleanupStatus, renderCard } from '../owner-test-card.mjs';
 
 const CLI = path.resolve('.github/wsf-staging/owner-test-card.mjs');
 let passed = 0;
@@ -28,7 +28,7 @@ const pass = (journeyId, marker = A) => ({
   assertions: [{ expected: `${journeyId} looks right`, ok: true }], reason: null, artifact: null,
 });
 const results = (list, servedSha = A) => ({ schemaVersion: 1, servedSha, results: list });
-const card = (r, m = manifest()) => renderCard(m, r, { stagingUrl: URL_ });
+const card = (r, m = manifest(), cleanup = 'COMPLETE') => renderCard(m, r, { stagingUrl: URL_, cleanup });
 const refused = (r, re, m) => assert.throws(() => card(r, m), re);
 
 test('every journey passed on the manifest build: PASSED, with the required header', () => {
@@ -104,7 +104,7 @@ test('REFUSED: passed with an assertion that did not hold', () => refused(result
 test('REFUSED: failed or blocked without a reason', () => refused(results([{ ...pass('you'), status: 'failed', reason: null }]), /without a reason/));
 test('REFUSED: an unknown result key', () => refused(results([{ ...pass('you'), verdict: 'ok' }]), /unknown key "verdict"/));
 test('REFUSED: an invalid manifest', () => refused(null, /manifest is invalid/, { ...manifest(), extra: 1 }));
-test('REFUSED: a non-https staging link', () => assert.throws(() => renderCard(manifest(), null, { stagingUrl: 'http://x' }), /https URL/));
+test('REFUSED: a non-https staging link', () => assert.throws(() => renderCard(manifest(), null, { stagingUrl: 'http://x', cleanup: 'COMPLETE' }), /https URL/));
 
 test('the CLI is deterministic and prints OWNER_CARD_SUMMARY', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-card-'));
@@ -112,7 +112,7 @@ test('the CLI is deterministic and prints OWNER_CARD_SUMMARY', () => {
   const rf = path.join(d, 'r.json');
   fs.writeFileSync(mf, JSON.stringify(manifest()));
   fs.writeFileSync(rf, JSON.stringify(results([pass('community')])));
-  const go = (out) => spawnSync(process.execPath, [CLI, '--manifest', mf, '--results', rf, '--staging-url', URL_, '--out', out], { encoding: 'utf8' });
+  const go = (out) => spawnSync(process.execPath, [CLI, '--manifest', mf, '--results', rf, '--cleanup-manifest', path.join(d, 'no-fixtures.json'), '--staging-url', URL_, '--out', out], { encoding: 'utf8' });
   const r1 = go(path.join(d, '1.md'));
   const r2 = go(path.join(d, '2.md'));
   assert.equal(r1.status, 0, r1.stderr);
@@ -123,6 +123,70 @@ test('the CLI is deterministic and prints OWNER_CARD_SUMMARY', () => {
   assert.equal(r3.status, 1);
   assert.match(r3.stderr, /OWNER_CARD=refused/);
   assert.equal(fs.existsSync(path.join(d, '3.md')), false);
+});
+
+// ---- C4: cleanup is part of the verdict -----------------------------------------------
+test('C4: every journey passed but cleanup INCOMPLETE is never PASSED, and the card says why', () => {
+  const c = card(results([pass('community'), pass('you')]), manifest(), 'INCOMPLETE');
+  assert.equal(c.summary, 'INCOMPLETE');
+  assert.match(c.text, /Hosted changed-journey status: INCOMPLETE \(2 passed, [^)]*\) — every journey passed, but fixture cleanup is not complete/);
+  assert.match(c.text, /- Changed-journey cleanup: INCOMPLETE — fixtures remain; the manifest is preserved for recovery/);
+  assert.doesNotMatch(c.text, /status: PASSED/);
+});
+
+for (const bad of ['INCOMPLETE', 'MANIFEST_UNUSABLE', 'NOT_RUN', 'UNKNOWN']) {
+  test(`C4: cleanup ${bad} keeps an all-passed card from PASSED`, () => {
+    assert.equal(card(results([pass('community'), pass('you')]), manifest(), bad).summary, 'INCOMPLETE');
+  });
+}
+for (const ok of ['COMPLETE', 'NO_FIXTURES', 'NOT_NEEDED']) {
+  test(`C4: cleanup ${ok} lets an all-passed card say PASSED, and names the outcome`, () => {
+    const c = card(results([pass('community'), pass('you')]), manifest(), ok);
+    assert.equal(c.summary, 'PASSED');
+    assert.ok(c.text.includes(`- Changed-journey cleanup: ${CLEANUP_STATES[ok].text}`));
+  });
+}
+
+test('C4: a verified failure stays FAILED whatever the cleanup outcome', () => {
+  const failed = { ...pass('you'), status: 'failed', reason: 'x', assertions: [{ expected: 'you looks right', ok: false }] };
+  assert.equal(card(results([pass('community'), failed]), manifest(), 'INCOMPLETE').summary, 'FAILED');
+});
+
+test('C4: REFUSED: no cleanup outcome, or one the card does not know', () => {
+  assert.throws(() => renderCard(manifest(), null, { stagingUrl: URL_ }), /cleanup outcome must be one of/);
+  assert.throws(() => renderCard(manifest(), null, { stagingUrl: URL_, cleanup: 'DONE' }), /cleanup outcome must be one of/);
+});
+
+test('C4: the cleanup outcome is read from the cleaner\'s receipt first; fixtures with no receipt are NOT_RUN', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-cln-'));
+  const m = path.join(d, 'cleanup-manifest.json');
+  const r = path.join(d, 'cleanup-receipt.json');
+  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'NOT_NEEDED', 'neither file: nothing was created');
+  fs.writeFileSync(m, '{}');
+  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'NOT_RUN', 'fixtures recorded, no receipt: cleanup did not run');
+  fs.writeFileSync(r, '{');
+  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'NOT_RUN', 'an unreadable receipt is no receipt');
+  for (const st of ['COMPLETE', 'NO_FIXTURES', 'INCOMPLETE', 'MANIFEST_UNUSABLE']) {
+    fs.writeFileSync(r, JSON.stringify({ status: st }));
+    assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), st);
+  }
+  for (const st of ['NOT_NEEDED', 'PASSED', null]) {
+    fs.writeFileSync(r, JSON.stringify({ status: st }));
+    assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'UNKNOWN', `a receipt may not claim ${st}`);
+  }
+  // The cleaner deletes its manifest on COMPLETE: the receipt alone must still read COMPLETE.
+  fs.rmSync(m);
+  fs.writeFileSync(r, JSON.stringify({ status: 'COMPLETE' }));
+  assert.equal(cleanupStatus({ manifestPath: m, receiptPath: r }), 'COMPLETE');
+});
+
+test('C4: the CLI requires --cleanup-manifest, so a card cannot be rendered blind to cleanup', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-card-'));
+  const mf = path.join(d, 'm.json');
+  fs.writeFileSync(mf, JSON.stringify(manifest()));
+  const r = spawnSync(process.execPath, [CLI, '--manifest', mf, '--staging-url', URL_, '--out', path.join(d, 'c.md')], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--cleanup-manifest <path>/);
 });
 
 console.log(`\nowner-test-card: ${passed} passed`);

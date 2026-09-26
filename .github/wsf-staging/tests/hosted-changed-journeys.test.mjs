@@ -76,9 +76,8 @@ await test('no registered driver: every journey BLOCKED, the browser is never la
     assert.equal(x.status, 'blocked');
     assert.equal(x.reason, 'no registered driver');
   }
-  assert.ok(r.lines.includes('CHANGED_JOURNEY_SMOKE=INCOMPLETE'));
-  const card = fs.readFileSync(path.join(out, 'owner-test-card.md'), 'utf8');
-  assert.match(card, /\*\*BLOCKED\*\* — no registered driver/);
+  assert.ok(r.lines.includes('CHANGED_JOURNEY_RESULTS=0 passed, 0 failed, 2 blocked (the owner card is rendered after fixture cleanup)'));
+  assert.equal(fs.existsSync(path.join(out, 'owner-test-card.md')), false, 'C4: the runner never renders the card; the post-cleanup step does');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'changed-journeys.json'), 'utf8')), r.results);
 });
 
@@ -105,7 +104,7 @@ await test('a driver whose assertions hold: passed on the observed build, one br
   assert.equal(s.calls.closed, 1);
   assert.equal(r.results.servedSha, A);
   assert.equal(byId(r).community.status, 'passed');
-  assert.ok(r.lines.includes('CHANGED_JOURNEY_SMOKE=PASSED'));
+  assert.ok(r.lines.some((l) => l.startsWith('CHANGED_JOURNEY_RESULTS=1 passed, 0 failed, 0 blocked')));
 });
 
 await test('the health marker does not name the deployed SHA: BLOCKED, driver never called, no browser', async () => {
@@ -143,7 +142,7 @@ await test('a failing assertion, an empty driver result and a throwing driver ar
   assert.ok(fs.existsSync(path.join(out, 'progress.png')));
   assert.equal(s.calls.launch, 1, 'one browser for the whole run');
   assert.equal(s.calls.closed, 1);
-  assert.ok(r.lines.includes('CHANGED_JOURNEY_SMOKE=FAILED'));
+  assert.ok(r.lines.some((l) => l.startsWith('CHANGED_JOURNEY_RESULTS=0 passed, 3 failed, 0 blocked')));
 });
 
 await test('a driver to run without the fixture credentials is reported as an error, with the browser closed', async () => {
@@ -184,7 +183,7 @@ await test('the CLI always exits 0 and says it gates nothing, with the real regi
   const cases = [
     [{}, /CHANGED_JOURNEY_SMOKE=skipped/],
     // Journey ids with no driver: nothing to drive, so no network, browser or credential.
-    [setup(manifestFor(A, ['kiosk', 'home'])).env, /CHANGED_JOURNEY_SMOKE=INCOMPLETE/],
+    [setup(manifestFor(A, ['kiosk', 'home'])).env, /CHANGED_JOURNEY_RESULTS=0 passed, 0 failed, 2 blocked/],
     [setup('{').env, /CHANGED_JOURNEY_SMOKE=error/],
   ];
   for (const [env, re] of cases) {

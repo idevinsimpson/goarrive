@@ -131,7 +131,7 @@ if (!fs.existsSync(MANIFEST)) {
   finish('MANIFEST_UNUSABLE', {
     reason: 'manifest file absent — the scope of what was created is unknown',
     manifestPreserved: false,
-    recovery: 'Identify run-tagged fixtures (wsfCommunityGroups/e5grp-<runTag>-*, wsfGoals/e5goal-<runTag>-*) and Auth users with emails wsf-<runTag>-*@example.com by console query before the next run.',
+    recovery: 'Identify the run\'s fixtures by its run tag before the next run: every harness puts the tag in its document ids (wsfCommunityGroups/e5grp-, e5jgrp-, e5cgrp-<runTag>…; wsfGoals/e5goal-, e5jgoal-, e5cgoal-<runTag>…; the memberships, goal shards and linked documents under those ids), its members\' wsfMemberProfiles/<uid> are linked through those memberships, and its Auth users have emails wsf-<runTag>-*@example.com. Find them by console query.',
   }, 1);
 }
 
