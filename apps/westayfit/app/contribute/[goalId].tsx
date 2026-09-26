@@ -821,6 +821,11 @@ export default function ContributeToGoal() {
             clearInterval(timer);
             timer = null;
           }
+          // The refusal and the eviction happen together (Director #494
+          // `5841264164`): what this account's record holds for the community
+          // this goal came through goes, so no tab opens on it again. With no
+          // community named in the route, none is guessed.
+          if (groupIdHint) forgetCommunity(user.uid, groupIdHint);
           setState((prev) => (prev.kind === 'ready' || prev.kind === 'closed' ? { kind: 'notFound' } : prev));
           return;
         }

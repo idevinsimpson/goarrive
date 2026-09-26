@@ -333,6 +333,11 @@ type MyContributionResponse = { ownCredit: number; unit: string; repeatPolicy?: 
  */
 const PULSE_SETTLE_MS = 2_600;
 
+/** `wsfListGoals`'s answer to an account that is not an active member here. */
+function refusedMembership(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === 'functions/not-found';
+}
+
 export default function CommunityPage() {
   const params = useLocalSearchParams<{ groupId: string }>();
   const groupId = params.groupId;
@@ -1033,6 +1038,11 @@ export default function CommunityPage() {
         // screen keeps its own fixed copy (rendered by the goals-error hero
         // and the Champion panel, neither of which prints this message).
         console.warn('[wsf] goal list failed', e);
+        if (refusedMembership(e)) {
+          forgetCommunity(user.uid, groupId);
+          setState({ kind: 'notMember' });
+          return;
+        }
         setGoalsState({ kind: 'failed', message: 'Could not load goals.' });
       }
     })();
@@ -1073,6 +1083,19 @@ export default function CommunityPage() {
       } catch (e) {
         if (cancelled) return;
         console.warn('[wsf] goal list refresh failed', e);
+        /*
+          PERF-MOBILE-1 SUCCESSOR (Director #489 `5841198083`, #494
+          `5841264164`). A FRESH REFUSAL IS NOT A STALE READ. `wsfListGoals`
+          answers `not-found` to an account that is no longer an active member
+          here. That is the server's proof, not a network hiccup: this
+          community's record goes and the page stops showing its figures as
+          "last known". Any other failure keeps the last-known treatment.
+        */
+        if (refusedMembership(e)) {
+          forgetCommunity(user.uid, groupId);
+          setState({ kind: 'notMember' });
+          return;
+        }
         setProgressReloadToken((n) => n + 1);
       }
     })();

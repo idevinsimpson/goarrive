@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import {
   readGoals,
   readMyCommunities,
   readOwnCredit,
+  wasRefused,
 } from '../../src/memberReads';
 import {
   ACTION_GREEN,
@@ -86,6 +87,7 @@ type Goal = {
 
 type Row = {
   goalId: string;
+  groupId: string;
   title: string;
   community: string;
   unit: string;
@@ -130,6 +132,7 @@ function composeProgress(owned: Array<Owned | null>, partialAlready: boolean): R
     if (yourPart <= 0) continue;
     const row: Row = {
       goalId: goal.goalId,
+      groupId: community.groupId,
       title: goal.title,
       community: community.displayName,
       unit: (typeof own?.unit === 'string' && own.unit) || goal.unit,
@@ -225,16 +228,60 @@ export default function ActivityScreen() {
   */
   const [checking, setChecking] = useState(false);
   const [stale, setStale] = useState(false);
+
+  /*
+    PERF-MOBILE-1 SUCCESSOR (Director #494 `5841250834`, `5841341300`).
+    THIS SCREEN STAYS MOUNTED UNDER MOVE AND BEHIND OTHER TABS, SO EVERY
+    RETURN TO IT RECOMPOSES FROM THE ACCOUNT'S RECORD FIRST.
+    A confirmed receipt has already written the member's new own part there,
+    so closing MOVE shows it at once, with no read. When the record no longer
+    holds everything (a refusal forgot a community; a receipt removed a list
+    it could not patch), the rows of a refused community go at once and the
+    rest stay while a revalidation reads what is missing. A warm return with
+    a whole record makes no call at all.
+  */
+  const [revalidate, setRevalidate] = useState(0);
+  const keepOnScreen = useRef(false);
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) {
+        focusedOnce.current = true;
+        return;
+      }
+      if (!ready || !user) return;
+      const uid = user.uid;
+      const recorded = progressFromRecord(uid);
+      if (recorded) {
+        setState(recorded);
+        return;
+      }
+      setState((prev) =>
+        prev.kind === 'ready'
+          ? {
+              ...prev,
+              running: prev.running.filter((r) => !wasRefused(uid, r.groupId)),
+              finished: prev.finished.filter((r) => !wasRefused(uid, r.groupId)),
+            }
+          : prev,
+      );
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    }, [ready, user]),
+  );
+
   useEffect(() => {
     if (!ready || !user) return;
     const token = ++liveRef.current;
     const uid = user.uid;
     const reuse = attempt > 0 ? 0 : SAME_LOAD_MS;
     const recorded = attempt > 0 ? null : progressFromRecord(uid);
-    setState(recorded ?? { kind: 'loading' });
+    const keep = keepOnScreen.current;
+    keepOnScreen.current = false;
+    setState((prev) => recorded ?? (keep && prev.kind === 'ready' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
-    const slow = recorded
+    const slow = recorded || keep
       ? setTimeout(() => {
           if (liveRef.current === token) setChecking(true);
         }, CHECKING_AFTER_MS)
@@ -251,7 +298,7 @@ export default function ActivityScreen() {
       } catch {
         if (liveRef.current !== token) return;
         settle();
-        if (recorded) setStale(true);
+        if (recorded || keep) setStale(true);
         else setState({ kind: 'error' });
         return;
       }
@@ -298,7 +345,7 @@ export default function ActivityScreen() {
       liveRef.current += 1;
       if (slow) clearTimeout(slow);
     };
-  }, [ready, user, attempt]);
+  }, [ready, user, attempt, revalidate]);
 
   // Every state arrives at its own top.
   const phase = state.kind;

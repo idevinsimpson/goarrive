@@ -1,5 +1,5 @@
 import { signOut } from 'firebase/auth';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -17,6 +17,7 @@ import {
   readMemberProfile,
   readMyCommunities,
   readOwnCredit,
+  wasRefused,
   type MemberProfileAnswer,
 } from '../../src/memberReads';
 import { memberCountLabel, roleCardLabel } from '../../src/labels';
@@ -271,6 +272,40 @@ export default function You() {
   */
   const [checking, setChecking] = useState(false);
   const [stale, setStale] = useState(false);
+
+  /*
+    PERF-MOBILE-1 SUCCESSOR (Director #494 `5841250834`, `5841341300`).
+    EVERY RETURN TO THIS MOUNTED SCREEN RECOMPOSES FROM THE ACCOUNT'S RECORD
+    FIRST: a confirmed receipt has already written the new own part there, so
+    closing MOVE shows it with no read. When the record no longer holds
+    everything, the page keeps what it shows and revalidates -- except a
+    community a fresh server answer refused, whose figures go at once. A warm
+    return with a whole record makes no call.
+  */
+  const [revalidate, setRevalidate] = useState(0);
+  const keepOnScreen = useRef(false);
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) {
+        focusedOnce.current = true;
+        return;
+      }
+      if (!ready || !user) return;
+      const uid = user.uid;
+      const recorded = youFromRecord(uid);
+      if (recorded) {
+        setScreen(recorded);
+        return;
+      }
+      setScreen((prev) =>
+        prev.kind === 'member' && wasRefused(uid, prev.community.groupId) ? { kind: 'loading' } : prev,
+      );
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    }, [ready, user]),
+  );
+
   useEffect(() => {
     if (!ready) return;
     if (!user) {
@@ -281,10 +316,12 @@ export default function You() {
     const uid = user.uid;
     const reuse = reloads > 0 ? 0 : SAME_LOAD_MS;
     const recorded = reloads > 0 ? null : youFromRecord(uid);
-    setScreen(recorded ?? { kind: 'loading' });
+    const keep = keepOnScreen.current;
+    keepOnScreen.current = false;
+    setScreen((prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
-    const slow = recorded
+    const slow = recorded || keep
       ? setTimeout(() => {
           if (live.current === token) setChecking(true);
         }, CHECKING_AFTER_MS)
@@ -308,6 +345,10 @@ export default function You() {
         settle();
         if (recorded && recorded.kind === 'member') {
           setScreen({ ...recorded, profile });
+          setStale(true);
+          return;
+        }
+        if (keep) {
           setStale(true);
           return;
         }
@@ -370,7 +411,7 @@ export default function You() {
     return () => {
       if (slow) clearTimeout(slow);
     };
-  }, [ready, user, reloads]);
+  }, [ready, user, reloads, revalidate]);
 
   const onSignOut = useCallback(() => {
     setSigningOut(true);

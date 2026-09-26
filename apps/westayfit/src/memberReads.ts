@@ -77,6 +77,42 @@ let owner: string | null = null;
 const store = new Map<string, Entry>();
 
 /*
+  PERF-MOBILE-1 SUCCESSOR (Director #494 `5841250834`, `5841341300`).
+  WHICH ANSWER IS THE NEWEST IS A GENERATION, NEVER A CLOCK.
+
+  Every key carries a generation. Anything that replaces or removes a key
+  from outside a read -- a confirmed receipt, a refusal, a forget -- advances
+  it first. A read remembers the generation it was issued at (and the
+  account epoch), and its answer is recorded ONLY if nothing has advanced
+  since. So an own-part read issued before a receipt and answered after it
+  can never put the older figure back, and a read issued before a refusal
+  can never bring the lost community back.
+
+  `groupGoals` remembers which goal ids each community's goal list named, so
+  forgetting a community reaches every own part recorded in it even when the
+  list itself is already gone. It is metadata only: no fetched value lives
+  there. `refused` names the communities a fresh server answer refused this
+  session, so a mounted screen can drop them at once.
+
+  All of it belongs to one account and is cleared with it.
+*/
+let epoch = 0;
+const versions = new Map<string, number>();
+const groupGoals = new Map<string, Set<string>>();
+const refused = new Set<string>();
+const version = (key: string): number => versions.get(key) ?? 0;
+const advance = (key: string): void => {
+  versions.set(key, version(key) + 1);
+};
+function resetRecord(): void {
+  store.clear();
+  versions.clear();
+  groupGoals.clear();
+  refused.clear();
+  epoch += 1;
+}
+
+/*
   THE RECORD ENDS WITH THE SESSION, whichever screen ended it. The member can
   sign out from the menu, from You, from Home's list, from a flow's gate; the
   record does not rely on each of them remembering to clear it. The first
@@ -104,7 +140,7 @@ function scope(uid: string | null): boolean {
     return false;
   }
   if (owner !== uid) {
-    store.clear();
+    resetRecord();
     owner = uid;
   }
   return true;
@@ -112,7 +148,7 @@ function scope(uid: string | null): boolean {
 
 /** Sign-out, and anything else that ends the account's session on this device. */
 export function clearMemberReads(): void {
-  store.clear();
+  resetRecord();
   owner = null;
 }
 
@@ -121,8 +157,10 @@ function peek<T>(uid: string | null, key: string): T | undefined {
   return store.get(key)?.value as T | undefined;
 }
 
+/** Removes a key; its generation advances first, so no older read can put it back. */
 function forget(uid: string | null, key: string): void {
   if (!scope(uid)) return;
+  advance(key);
   store.delete(key);
 }
 
@@ -134,22 +172,48 @@ function forget(uid: string | null, key: string): void {
  * `reuseMs`: a settled answer at most this old is the answer, and no request
  * is made. 0 (the default) always asks the server.
  */
-function read<T>(uid: string, key: string, fetch: () => Promise<T>, reuseMs = 0): Promise<T> {
+function read<T>(
+  uid: string,
+  key: string,
+  fetch: () => Promise<T>,
+  reuseMs = 0,
+  onRecorded?: (value: T) => void,
+): Promise<T> {
   scope(uid);
   const entry = store.get(key) ?? {};
   if (entry.inflight) return entry.inflight as Promise<T>;
   if (reuseMs > 0 && entry.at !== undefined && Date.now() - entry.at <= reuseMs) {
     return Promise.resolve(entry.value as T);
   }
-  const p = fetch()
-    .then((value) => {
-      if (owner === uid) store.set(key, { value, at: Date.now() });
+  const issuedEpoch = epoch;
+  const issuedVersion = version(key);
+  const sameAccount = () => owner === uid && epoch === issuedEpoch;
+  const stillCurrent = () => sameAccount() && version(key) === issuedVersion;
+  const p: Promise<T> = fetch()
+    .then((value): T | Promise<T> => {
+      if (stillCurrent()) {
+        store.set(key, { value, at: Date.now() });
+        onRecorded?.(value);
+        return value;
+      }
+      if (sameAccount()) {
+        // SUPERSEDED while in flight, for this same account. A receipt that
+        // replaced the key is newer than this answer: that is the answer. A
+        // key that was removed (a refusal, a receipt that could not patch a
+        // list) is asked again, fresh, rather than answered from before.
+        const now = store.get(key);
+        if (now && now.at !== undefined) return now.value as T;
+        return read(uid, key, fetch, 0, onRecorded);
+      }
+      // Another account owns the record now: nothing is recorded, and the
+      // screen that asked drops the answer by its own account guard.
       return value;
     })
     .catch((e: unknown) => {
-      if (owner === uid) {
+      if (stillCurrent()) {
         const cur = store.get(key);
-        if (cur) store.set(key, { value: cur.value, at: cur.at });
+        if (cur && cur.at !== undefined) store.set(key, { value: cur.value, at: cur.at });
+        else store.delete(key);
       }
       throw e;
     });
@@ -213,7 +277,27 @@ export function readGoals<G>(uid: string, groupId: string, reuseMs = 0): Promise
       return { goals: Array.isArray(r.data?.goals) ? r.data.goals : [] };
     },
     reuseMs,
+    (answer) => {
+      // An authorized list for this community: it is a membership again, and
+      // these are the goal ids its own parts may be recorded under.
+      refused.delete(groupId);
+      for (const g of answer.goals as Array<{ goalId?: unknown }>) {
+        if (typeof g.goalId === 'string') registerGoal(groupId, g.goalId);
+      }
+    },
   );
+}
+
+function registerGoal(groupId: string, goalId: string): void {
+  const ids = groupGoals.get(groupId) ?? new Set<string>();
+  ids.add(goalId);
+  groupGoals.set(groupId, ids);
+}
+
+/** True when a fresh server answer refused this community this session. */
+export function wasRefused(uid: string | null, groupId: string): boolean {
+  if (!scope(uid)) return false;
+  return refused.has(groupId);
 }
 
 // ---- wsfMyContribution: the member's own confirmed part -----------------------
@@ -314,26 +398,29 @@ export type ConfirmedReceipt = {
 export function noteConfirmedContribution(uid: string | null, receipt: ConfirmedReceipt): void {
   if (!scope(uid)) return;
   const now = Date.now();
-  const own = store.get(ownKey(receipt.goalId));
-  const previous = (own?.value ?? {}) as OwnCreditAnswer;
-  store.set(ownKey(receipt.goalId), {
-    value: { ...previous, ownCredit: receipt.ownCredit, unit: receipt.unit },
-    at: now,
-  });
+  const ownKeyOf = ownKey(receipt.goalId);
+  const previous = (store.get(ownKeyOf)?.value ?? {}) as OwnCreditAnswer;
+  advance(ownKeyOf);
+  store.set(ownKeyOf, { value: { ...previous, ownCredit: receipt.ownCredit, unit: receipt.unit }, at: now });
   if (!receipt.groupId) return;
+  registerGoal(receipt.groupId, receipt.goalId);
+  // The community's goal list always moves on: patched when a settled list
+  // can take the receipt's exact total, otherwise removed so that no list
+  // read before the receipt can land its older total (asked again, fresh).
   const key = goalsKey(receipt.groupId);
   const listed = store.get(key);
   const goals = (listed?.value as ListedGoalsAnswer<Record<string, unknown>> | undefined)?.goals;
-  if (!listed || listed.inflight || !Array.isArray(goals)) return;
-  const index = goals.findIndex((g) => g.goalId === receipt.goalId);
-  if (index < 0) return;
-  if (receipt.status !== 'active' || goals[index]!.status !== 'active') {
-    store.delete(key);
-    return;
+  advance(key);
+  if (listed && !listed.inflight && listed.at !== undefined && Array.isArray(goals)) {
+    const index = goals.findIndex((g) => g.goalId === receipt.goalId);
+    if (index >= 0 && receipt.status === 'active' && goals[index]!.status === 'active') {
+      const next = goals.slice();
+      next[index] = { ...goals[index]!, sharedTotal: receipt.sharedTotal };
+      store.set(key, { value: { goals: next }, at: listed.at });
+      return;
+    }
   }
-  const next = goals.slice();
-  next[index] = { ...goals[index]!, sharedTotal: receipt.sharedTotal };
-  store.set(key, { value: { goals: next }, at: listed.at });
+  store.delete(key);
 }
 
 // ---- lost membership -------------------------------------------------------
@@ -344,8 +431,14 @@ export function noteConfirmedContribution(uid: string | null, receipt: Confirmed
  * still names it are dropped, so no surface can open on them again.
  */
 export function forgetCommunity(uid: string | null, groupId: string): void {
-  const goals = peekGoals<{ goalId?: unknown }>(uid, groupId)?.goals ?? [];
-  for (const g of goals) if (typeof g.goalId === 'string') forget(uid, ownKey(g.goalId));
+  if (!scope(uid)) return;
+  const ids = new Set(groupGoals.get(groupId) ?? []);
+  for (const g of peekGoals<{ goalId?: unknown }>(uid, groupId)?.goals ?? []) {
+    if (typeof g.goalId === 'string') ids.add(g.goalId);
+  }
+  for (const goalId of ids) forget(uid, ownKey(goalId));
   forget(uid, goalsKey(groupId));
+  groupGoals.delete(groupId);
   forget(uid, MINE);
+  refused.add(groupId);
 }

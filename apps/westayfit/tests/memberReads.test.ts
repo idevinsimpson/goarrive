@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const calls: Array<{ name: string; data: unknown }> = [];
-const answers: Record<string, (data: unknown) => unknown> = {};
+const answers: Record<string, (data: unknown) => unknown | Promise<unknown>> = {};
 let authListener: ((u: { uid: string } | null) => void) | null = null;
 
 vi.mock('../src/firebase', () => ({
@@ -31,7 +31,7 @@ vi.mock('firebase/functions', () => ({
   httpsCallable: (_f: unknown, name: string) => async (data: unknown) => {
     calls.push({ name, data });
     await Promise.resolve();
-    return { data: answers[name]!(data) };
+    return { data: await answers[name]!(data) };
   },
 }));
 
@@ -48,7 +48,16 @@ import {
   readMemberProfile,
   readMyCommunities,
   readOwnCredit,
+  wasRefused,
 } from '../src/memberReads';
+
+/** An answer the test releases when it chooses (a held server response). */
+function held<T>(value: T): { answer: () => Promise<T>; release: () => void } {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((r) => (release = r));
+  return { answer: () => gate.then(() => value), release: () => release() };
+}
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 type G = { goalId: string; status: string; sharedTotal?: number; target?: number };
 
@@ -181,5 +190,87 @@ describe('memberReads (PERF-MOBILE-1 cp1)', () => {
       status: 'active',
     });
     expect(peekOwnCredit('u1', 'a')).toBeUndefined();
+  });
+
+  describe('generations: an answer issued before a change never lands after it (Director #494 5841250834, 5841341300)', () => {
+    it('a stale own read after a receipt: the receipt wins in the record and in the answer', async () => {
+      const old = held({ ownCredit: 35, unit: 'squats' });
+      answers.wsfMyContribution = old.answer;
+      const pending = readOwnCredit('u1', 'a');
+      await flush();
+      noteConfirmedContribution('u1', { goalId: 'a', groupId: 'g1', ownCredit: 55, sharedTotal: 235, target: 500, unit: 'squats', status: 'active' });
+      old.release();
+      expect(await pending).toMatchObject({ ownCredit: 55 });
+      expect(peekOwnCredit('u1', 'a')).toMatchObject({ ownCredit: 55 });
+    });
+
+    it('a goals read in flight at the receipt cannot land its older total: the list is asked again', async () => {
+      const old = held({ goals: [{ goalId: 'a', status: 'active', sharedTotal: 180, target: 500 }] });
+      answers.wsfListGoals = old.answer;
+      const pending = readGoals<G>('u1', 'g1');
+      await flush();
+      noteConfirmedContribution('u1', { goalId: 'a', groupId: 'g1', ownCredit: 55, sharedTotal: 200, target: 500, unit: 'squats', status: 'active' });
+      answers.wsfListGoals = () => ({ goals: [{ goalId: 'a', status: 'active', sharedTotal: 200, target: 500 }] });
+      old.release();
+      expect((await pending).goals[0]).toMatchObject({ sharedTotal: 200 });
+      expect(peekGoals<G>('u1', 'g1')!.goals[0]).toMatchObject({ sharedTotal: 200 });
+      expect(calls.filter((c) => c.name === 'wsfListGoals')).toHaveLength(2);
+    });
+
+    it('a goals read in flight at a refusal cannot bring the community back', async () => {
+      const old = held({ goals: [{ goalId: 'a', status: 'active', sharedTotal: 180, target: 500 }] });
+      answers.wsfListGoals = old.answer;
+      const pending = readGoals<G>('u1', 'g1');
+      await flush();
+      forgetCommunity('u1', 'g1');
+      // The server now refuses this account for g1.
+      answers.wsfListGoals = () => Promise.reject(Object.assign(new Error('Community not found.'), { code: 'functions/not-found' }));
+      old.release();
+      await expect(pending).rejects.toMatchObject({ code: 'functions/not-found' });
+      expect(peekGoals('u1', 'g1')).toBeUndefined();
+      expect(wasRefused('u1', 'g1')).toBe(true);
+    });
+
+    it('an own read in flight at a refusal cannot put the own part back', async () => {
+      const old = held({ ownCredit: 9, unit: 'squats' });
+      answers.wsfMyContribution = old.answer;
+      await readGoals<G>('u1', 'g1');
+      const pending = readOwnCredit('u1', 'a');
+      await flush();
+      forgetCommunity('u1', 'g1');
+      answers.wsfMyContribution = () => ({ ownCredit: 9, unit: 'squats' });
+      old.release();
+      await pending;
+      // The only value now recorded is from a request made after the refusal.
+      expect(calls.filter((c) => c.name === 'wsfMyContribution')).toHaveLength(2);
+    });
+
+    it('forgetting a community reaches every own part recorded in it, even when its list is already gone', async () => {
+      await readGoals<G>('u1', 'g1');
+      await readOwnCredit('u1', 'a');
+      // A receipt while a list read is in flight removes the list...
+      answers.wsfListGoals = held({ goals: [] }).answer;
+      void readGoals<G>('u1', 'g1').catch(() => undefined);
+      await flush();
+      noteConfirmedContribution('u1', { goalId: 'a', groupId: 'g1', ownCredit: 55, sharedTotal: 200, target: 500, unit: 'squats', status: 'active' });
+      expect(peekGoals('u1', 'g1')).toBeUndefined();
+      // ...and the refusal still finds the own part through the registry.
+      forgetCommunity('u1', 'g1');
+      expect(peekOwnCredit('u1', 'a')).toBeUndefined();
+    });
+
+    it('a new account clears generations, the registry and refusals with the record', async () => {
+      await readGoals<G>('u1', 'g1');
+      forgetCommunity('u1', 'g1');
+      expect(wasRefused('u1', 'g1')).toBe(true);
+      expect(wasRefused('u2', 'g1')).toBe(false);
+    });
+
+    it('an authorized goals answer lifts a refusal (membership again)', async () => {
+      forgetCommunity('u1', 'g1');
+      expect(wasRefused('u1', 'g1')).toBe(true);
+      await readGoals<G>('u1', 'g1');
+      expect(wasRefused('u1', 'g1')).toBe(false);
+    });
   });
 });
