@@ -1,0 +1,101 @@
+WE STAY FIT — PROJECT INSTRUCTIONS — VERSION 3.1
+September 26, 2026
+
+AUTHORITY AND CURRENT TRUTH
+Use WE STAY FIT Strategic Master v3.0 — The Living WE System (September 11, 2026) plus the September 26, 2026 v3.1 addendum as the governing product strategy. Devin's newer explicit decisions govern their stated scope. The compact instructions summarize the master; they do not replace its detail.
+
+Before acting on current implementation/release state, read the canonical CURRENT STATE record in the Fable/L0 control inbox and the current exact branch/environment evidence. Do not infer current state from a dated master, old PR body, branch name, or agent memory.
+
+For member-visible work, use the exact frozen journey reference in docs/westayfit/ops/NORTH_STAR_JOURNEY_MANIFEST.json or the issued journey packet. A newer Lovable edit never silently moves an issued reference.
+
+PURPOSE AND BRAND
+We Stay Fit makes shared movement/progress visible in existing communities. The community is the product and enduring identity, not its percentage. A goal is its current story. My contribution matters here—and I can see it. Joining is as legitimate as starting; organizing, recruiting, sharing, coaching purchases, prizes, queues, and kiosks are not conditions of belonging.
+
+Name: WE STAY FIT.
+Exact primary tagline: Turn your community into a place that moves.
+Exact supporting line: Shared challenges. More movement. Stronger communities.
+Campaign invitation: See what WE can do.
+Achievement response: Look what WE did.
+Keep Living WE internal. Avoid Every move fills the WE, Fill your WE, Help WE, WE points, forced WE grammar, and superseded slogans. Use coach/member/fitness coaching. Keep the full WE STAY FIT wordmark prominent; the WE monogram is the progress instrument.
+
+NORTH STAR AND APP FEEL
+WSF is a native-feeling mobile community app, not a generic responsive SaaS/dashboard. Lead with the selected community, current goal, Living WE, human presence where permitted, and one clear movement action. Avoid long stacks of bordered cards, repeated signed-in marketing heroes, administrative metadata dominating the page, and shrinking the Living WE into decoration.
+
+For visible journeys follow: ACTUAL BEFORE → frozen/reviewed TARGET → implementation → ACTUAL AFTER → functional/truth QA → visual/product acceptance → integration/staging/hosted proof → owner device/feel verdict.
+
+Lovable has two distinct roles. Public marketing Lovable/Supabase remains a separate marketing/inquiry surface. The "WE Community Home" Lovable project is a design/interaction North Star laboratory only. Never port localStorage authority, simulated ledgers, reviewer tools, sample identities/totals, or unsupported prototype actions into production truth.
+
+MEMBER SHELL
+Primary member spaces: Home, Community, Progress, You.
+MOVE is a focused action flow over the member context, not a fifth tab.
+Settings is a utility surface, not a primary destination.
+
+Preserve meaningful back/close destinations, mounted context/scroll where supported, focus return, reduced motion, and explicit cold/deep-link fallbacks. Kiosk does not inherit the ordinary personal-device member shell.
+
+Surface jobs:
+- Home: selected-community heartbeat; dominant current Living WE; exact progress; MOVE; own part; restrained truthful presence/momentum.
+- Community: belonging, people, community facts, goals/history, contextual Champion actions.
+- Progress: private exact own contribution history and goal/unit-specific context; no rankings, streak pressure, or blended scores.
+- You: identity, selected-community belonging/role, meaningful own contribution context, account utilities.
+
+THE LIVING WE
+Distinguish static brand mark, active progress mark for one defined goal, and achievement treatment for a reached goal. One active WE has a community, named goal, clear unit, positive fixed target, contribution window/time zone, and status. Milestones are checkpoints, not extra earned WEs. No mixed-unit average, personal health score, community fitness score, city percentage, ranking, or trophy economy.
+
+Confirmed progress drives the fill. Below completion show at most one decimal percentage rounded down; positive values below 0.1% read less than 0.1%. Use the true ratio for fill and the 90% near-goal state. At/above target the mark stops at full while valid overshoot remains recorded. No inflated fill, fake activity, zero-to-current reload, premature 100%, inactivity decay, or fake completion.
+
+Reached and closed are separate states. Fixed targets do not move silently. New goals are explicitly new and count new eligible contributions. Crossing contributions stay intact with their original goal. Retry the same attempt without double counting. Pending/unknown is neither confirmed success nor definite failure. Authorized corrections update totals and achievement validity visibly.
+
+GOAL COMPOSITION
+The v3.0 one-goal/clear-unit contract still governs. Prototype support for several same-unit movements inside one goal is not automatically a settled production-semantic change. Before shipping such a goal, the goal must explicitly define the common unit and qualifying actions. Unlike units never share one percentage.
+
+Keep separate: general community goal/unit catalog; FitLife event activity menu; sensor/wearable tracking. The expo baseline still excludes wearable/automatic step tracking and step equivalents.
+
+AUTHENTICATED COMMUNITY PRESENCE AND PRIVACY
+Authenticated member communities may show truthful member presence and recent momentum when permitted. Per-community "show my name" / "show my contributions" choices govern member visibility. Explicit privacy choices persist through supported membership continuity; Champions do not override them.
+
+Community-visible does not mean internet-public, public-display-visible, kiosk-visible, marketing-public, or publication-authorized. Membership access, community visibility, and publication authority remain separate.
+
+Public/shared displays default to permitted aggregates, not member identity. Protect emails, phones, private membership, private totals/locations, tokens, previews, exports, and kiosk sessions. No health/body data, GPS trails, or individual nutrition/coaching plans in WSF. Do not silently reinstate adults-only enforcement; under-13 data, public child names, child location/health data, and youth-specific systems remain excluded pending approved eligibility/consent policy.
+
+START, JOIN, AND CONTINUATION
+A bounded real Start-a-community path is part of the useful product: approved identity → community identity/admission → one approved goal/activity configuration with positive target/window/time zone → trusted community-scoped Founding Champion role → working invite/join → another eligible account can join and contribute.
+
+This does not authorize general discovery, a full Champion dashboard, organization self-verification, contact imports, payments, or broad automation. Joining remains complete and legitimate by itself.
+
+MEMBER EXPERIENCE AND CONTRIBUTION TRUTH
+Explain required joining/sign-in before a credited physical attempt. Group remainders are not personal prescriptions. Show exact own effort and truthful shared change. Under concurrency never credit other people's effort to the member. Confirmed recording is not independently verified exercise. Show stale status honestly; pause logging if trustworthy recovery is unavailable.
+
+Celebration consumes canonical contribution/goal truth. A replayed/lost-response receipt may truthfully say the same attempt counted once, without creating another contribution. Do not turn rewards into a second ledger or points system.
+
+Sharing is secondary. No forced sharing, recruiting, ranking, prize participation, or coaching upsell. Only working actions appear actionable.
+
+MARKETING AND LIVE
+Lead creative with community, goal, current result, invitation, and WSF attribution. Four core templates remain launch, progress/near-goal, goal reached, final recap. Saved social/email images and printed progress posters are timestamped snapshots, not live. Goal links retain authorized history and a separate next-goal path. Move Marker tap/scan wording must match actual capability.
+
+LIVE is the same product truth on different surfaces. Phone is a complete personal participation surface. Kiosk/station is optional shared interaction with independent sessions and explicit privacy/reset/recovery. Public display is read-only collective output with publication authorization and anonymous aggregate defaults. Test true cross-device totals; a same-browser demo is insufficient. Shared/unattended kiosk use is not cleared by source or visual acceptance alone.
+
+ARCHITECTURE
+WSF public marketing remains separate from the authenticated Firebase product at apps/westayfit in idevinsimpson/goarrive. Supabase/Lovable owns approved marketing/inquiries; Firebase owns active WSF communities, memberships, goals, contributions, permissions, and member settings. GoArrive owns individualized coaching, Workout Player, scheduling, and billing.
+
+No dual active membership/contribution system. No WSF global custom claims. No incidental GoArrive changes. Shared rules/indexes require scoped authority, drift review, and regression evidence. A Hosting preview is not an isolated backend.
+
+OPERATIONS AND RELEASE
+Use docs/westayfit/ops/FABLE_OPERATING_PROTOCOL_v1.md and the canonical worker inbox map for current coordination.
+- one implementation owner per write surface/workflow;
+- one ACTIVE NOW packet per worker;
+- at most one NEXT;
+- one authoritative handoff per task;
+- no duplicate full packets;
+- no-op sweeps stay silent;
+- worker polls stop without actionable owned work.
+
+Keep evidence labels separate: SOURCE INSPECTED, IMPLEMENTER REPORTED, TEST VERIFIED, VISUAL VERIFIED, DEPLOYMENT RECEIPT, HOSTED VERIFIED, DEVICE VERIFIED, OWNER ACCEPTED.
+
+Member-visible staging milestones should carry a frozen journey manifest and changed-journey proof. A pin is not a deployment; a build is not hosted verification; a generic HTTP 200 is not journey acceptance. The human pin gate remains in force until explicitly changed.
+
+Preserve the September 28 feature freeze, October 4 code freeze, and October 11 event as recorded planning constraints; they do not prove readiness. Current blockers/readiness live in the canonical CURRENT STATE record, not this instruction block.
+
+No spending, legal approval, new data collection, public publishing, production release, or unrelated merge is authorized by these instructions alone.
+
+R&D
+Camera/vision movement counting remains isolated R&D unless explicitly adopted. No automatic contribution credit, verified-exercise claim, video/frame storage, or production/native readiness is implied by an R&D acceptance.
