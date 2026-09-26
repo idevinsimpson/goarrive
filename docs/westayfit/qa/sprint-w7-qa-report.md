@@ -5333,3 +5333,96 @@ Everything else in Check 62 stands.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
 
 **Status:** **PASS at `70a6a515`.** Next consumer: Director acceptance → L0 merge → one `deploy` dispatch for `a3127651`. W7 dispatched, merged and accepted nothing.
+
+## 65 · AUTONOMY-STATE-1A final closure, #519 at exact `6dcd448df9a6abf0785737d9e68d1cbe0e4acb73` (three commits on `5933fdae`; handoff #434 `5849055268`; W7 ACK `5849058359`): **PASS, with two observations for the Director**
+
+- **Scope:** a focused closure review; the full 1A audit was not restarted.
+- **Method:** a new closure probe set (41 rows) on `5933fdae` (fail-before) and `6dcd448d` (pass-after), and 10 revert-the-fix mutants against `run-all`. The Check 62 probe set was re-run for the carry rows.
+- **Not done:** no state branch, trigger, cloud action, merge or deploy.
+- **Scope of the delta:** all paths are still inside the 1A set: `tools/wsf-control/`, `CONTROL_STATE.md` and the skill.
+
+| # | Item | `5933fdae` | **`6dcd448d`** |
+|---|---|---|---|
+| **1** | **F1: queued block / unblock** | fails (refused by the invariant) | **PASS.** See the F1 bullets below. |
+| **2** | **F2: stale CURRENT** | fails (`ok` / `ACTIONABLE=off`) | **PASS.** See the F2 bullets below. |
+| **3** | **F3: one driving NEXT** | fails (both append) | **PASS.** See the F3 bullets below. |
+| **4** | **F4: review ownership** | fails (owner WATCH on while DELIVERED; the reviewer never watches) | **PASS.** See the F4 bullets below. |
+| **5** | **One ball total** | fails | **PASS.** See the one-ball bullets below. |
+| **6** | **Carry** | n/a | **PASS: 90 / 90**, see the carry bullets below. |
+
+**F1, queued block and unblock:**
+- A QUEUED work packet blocks, and leaves the queue: it is not `NEXT`, and no release is suggested.
+- `unblock` restores it at its original position.
+- `unblock` is refused when another work packet took the one NEXT in the meantime.
+- A reference packet blocks and unblocks back to its position and stays non-driving.
+- A bootstrap may import a packet blocked from QUEUED, and on `unblock` it returns at the queue end.
+
+**F2, stale CURRENT:**
+- A marker on an earlier known head gives **`CURRENT_SURFACE=stale`, `ACTIONABLE=on`**, with the finding `current-surface-stale` (`suggest: render-current-and-edit-in-place`, the configured comment 777, the present head).
+- Stale with a matching body hash stays `stale`.
+- These are all `exception`: a hand-edited body (stale or current marker), a foreign head, and a body hash for a head with no known rendering (unverifiable).
+- A current marker with the correct body reads `ok` / `ACTIONABLE=off`.
+
+**F3, one driving NEXT:**
+- A second queued work packet is refused by `append`.
+- A bootstrap with two queued work packets is refused.
+- Reference packets are exempt, and another worker may hold its own NEXT.
+
+**F4, review ownership:**
+- While DELIVERED, the owner has `WATCH=off` and is shown as `WAITING`, and `program-view` asks Fable to route a review.
+- The assigned W7 gets `REVIEWING` and `WATCH=on`, while the owner stays off.
+- A `finding` hands the ball back to the owner (owner on, reviewer off).
+- `accept` turns both off.
+- A Director, Owner, Fable or L0 reviewer wakes no W#.
+- An unregistered `W8` reviewer is refused, and a second simultaneous review for W7 is refused.
+- Several free reviewers on one packet are allowed.
+
+**One ball total.** Each of these is refused:
+- a review assigned to a worker with active implementation;
+- a release to a reviewing worker;
+- a `finding` back to an owner who is reviewing elsewhere;
+- unblocking a released packet into a reviewing worker.
+
+A reviewing worker may keep one queued NEXT; `program-view` does not suggest releasing it until the review leaves the worker. After `accept`, it is suggested and appendable.
+
+**Carry:** the Check 62 probe set passes 90 / 90, including:
+- closed writers, typed provenance, bootstrap-not-backfill;
+- idempotent append and stale-head refusal, byte integrity;
+- completion contracts including run 54;
+- fail-closed surfaces;
+- read-only views that refuse an invalid state;
+- the secret, PII and URL screen.
+
+The Check 62 queued-block probes (P12) now pass.
+
+**Suites and mutants:**
+- **`tools/wsf-control/run-all.mjs`:** ledger 75, views 37, skill 6, closure 13, review 10, exit 0.
+- **Staging control `run-all`:** 23 suites, 3 / 3 runs.
+- **10 / 10 revert-the-fix mutants are caught by `run-all`:**
+  - `block` keeps the packet queued;
+  - `unblock` appends instead of restoring the position;
+  - no one-NEXT check;
+  - stale reads ok;
+  - no one-ball check;
+  - several reviews per W#;
+  - `WAITING` keeps WATCH on;
+  - release suggested while reviewing;
+  - unregistered reviewer accepted;
+  - body hash ignored.
+
+**Observations for the Director (not F1–F4 regressions):**
+- **O1: hand-edit detection depends on an optional snapshot field the procedure does not collect.**
+  - The tool treats a hand-edited CURRENT as `exception` only when the snapshot carries `bodySha256`.
+  - With no hash, a hand-edited comment with the current marker reads `ok` (probe F2i).
+  - A hand-edited comment with an earlier marker reads `stale`, whose repair overwrites it in place.
+  - The skill's snapshot step (SKILL.md line 20) still lists only "it exists, and its marker head".
+  - **Smallest fix:** add `bodySha256` (the sha256 of the comment body) to that step, or make it required in `validateSnapshot`.
+- **O2: an owner may be its own W# reviewer.** `review PKT reviewers=[W3]`, where W3 owns PKT, is accepted, and W3's WATCH turns on as reviewer. No F4 criterion forbids it, but it defeats independent review. Whether to refuse `reviewers ∋ owner` is the Director's call.
+
+**Instrument notes, disclosed:**
+- The new F3 rule refuses two queued work packets per worker, so two Check 62 carry fixtures that queued several work packets for W3 were adapted: P5b now queues BETA for W7, and P6 now releases ALPHA before queuing BETA, with GAMMA as a reference.
+- On `5933fdae` the F2 closure block aborts on `bodySha256`, which was an unknown key there. That is part of its fail-before.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; every mutant was reverted.
+
+**Status:** **PASS at `6dcd448d`** on F1–F4, one-ball and the carry rows. O1 and O2 are for the Director. Next consumer: Director acceptance of 1A. W7 created no state branch, migrated no trigger, merged nothing and accepted nothing.
