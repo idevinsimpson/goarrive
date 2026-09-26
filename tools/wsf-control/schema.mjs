@@ -40,13 +40,14 @@ export const COMPLETIONS = Object.freeze({
 
 /**
  * The milestones a packet blocker may wait for, by the dependency's completion contract.
- * A STAGED packet is never VERIFIED, and an INTEGRATED one is never proved: waiting on
- * either would never clear.
+ * A terminal STAGED packet has passed its hosted proof, so it also satisfies VERIFIED. A
+ * VERIFIED packet is never staged, and an INTEGRATED one is never proved: waiting on either
+ * would never clear.
  */
 export const REACHABLE_UNTIL = Object.freeze({
   INTEGRATED: ['ACCEPTED', 'INTEGRATED'],
   VERIFIED: ['ACCEPTED', 'INTEGRATED', 'VERIFIED'],
-  STAGED: ['ACCEPTED', 'INTEGRATED', 'STAGED'],
+  STAGED: ['ACCEPTED', 'INTEGRATED', 'VERIFIED', 'STAGED'],
 });
 /** Why a packet blocker can never clear, or null when it can. */
 export function unreachableBlocker(s, id, b) {

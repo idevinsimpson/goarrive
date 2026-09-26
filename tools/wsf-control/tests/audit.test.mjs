@@ -68,7 +68,6 @@ const withDeps = () => chain(reg(base(), 'W9', 409),
   { type: 'queue', packet: 'SRC', owner: 'W7', completion: SOURCE_ONLY },
   { type: 'queue', packet: 'VER', owner: 'W9', completion: { terminal: 'VERIFIED', proofType: 'hosted' } });
 for (const [dep, until, re] of [
-  ['ALPHA', 'VERIFIED', /block: ALPHA completes at STAGED, so it never reaches VERIFIED/],
   ['SRC', 'VERIFIED', /block: SRC completes at INTEGRATED, so it never reaches VERIFIED/],
   ['SRC', 'STAGED', /block: SRC completes at INTEGRATED, so it never reaches STAGED/],
   ['VER', 'STAGED', /block: VER completes at VERIFIED, so it never reaches STAGED/],
@@ -79,7 +78,7 @@ for (const [dep, until, re] of [
   });
 }
 test('O7.1: every milestone the contract reaches is accepted', () => {
-  for (const [dep, untils] of [['ALPHA', ['ACCEPTED', 'INTEGRATED', 'STAGED']], ['SRC', ['ACCEPTED', 'INTEGRATED']], ['VER', ['ACCEPTED', 'INTEGRATED', 'VERIFIED']]]) {
+  for (const [dep, untils] of [['ALPHA', ['ACCEPTED', 'INTEGRATED', 'VERIFIED', 'STAGED']], ['SRC', ['ACCEPTED', 'INTEGRATED']], ['VER', ['ACCEPTED', 'INTEGRATED', 'VERIFIED']]]) {
     for (const until of untils) {
       const holder = dep === 'ALPHA' ? 'REF-1' : 'ALPHA';
       assert.equal(add(withDeps(), { type: 'block', packet: holder, blockedBy: [{ packet: dep, until }] }).state.packets[holder].phase, 'BLOCKED');
@@ -106,20 +105,40 @@ test('O7.4: the invariant names an impossible blocker in any state', () => {
   s.packets.ALPHA.blockedBy = [{ packet: 'SRC', until: 'STAGED' }];
   assert.ok(invariants(s).includes('ALPHA: SRC completes at INTEGRATED, so it never reaches STAGED'));
 });
-test('O7.5: terminal alone never clears a blocker: a STAGED dependency does not satisfy VERIFIED, an INTEGRATED one does not satisfy STAGED', () => {
+test('O7.5: terminal alone never clears a blocker: an INTEGRATED one does not satisfy STAGED or VERIFIED; a STAGED one satisfies VERIFIED only at hosted-verified terminal STAGED', () => {
   let r = delivered();
   r = raw(r, { type: 'accept', source: comment(9601), packet: 'ALPHA', subjectSha: A });
   r = raw(r, { type: 'integrate', actor: 'L0', source: pull(520), packet: 'ALPHA', mergeSha: B, acceptance: 9601 });
   assert.deepEqual(['ACCEPTED', 'INTEGRATED', 'STAGED'].map((until) => blockerCleared(r.state, { packet: 'ALPHA', until })), [true, true, false]);
   r = L0(r, { type: 'begin-proof', source: run(91), packet: 'ALPHA', runId: 91, proofType: 'hosted' });
+  // Hosted proof running, then the deployment receipt: neither STAGED nor VERIFIED is reached yet.
+  assert.deepEqual(['STAGED', 'VERIFIED'].map((until) => blockerCleared(r.state, { packet: 'ALPHA', until })), [false, false]);
   r = L0(r, { type: 'stage', source: run(91), packet: 'ALPHA', runId: 91, servedSha: B });
+  assert.deepEqual(['STAGED', 'VERIFIED'].map((until) => blockerCleared(r.state, { packet: 'ALPHA', until })), [false, false]);
   r = L0(r, { type: 'proof-pass', source: run(91), packet: 'ALPHA', runId: 91 });
   assert.equal(r.state.packets.ALPHA.phase, 'STAGED');
-  assert.deepEqual(['ACCEPTED', 'INTEGRATED', 'STAGED', 'VERIFIED'].map((until) => blockerCleared(r.state, { packet: 'ALPHA', until })), [true, true, true, false]);
+  // Terminal STAGED is hosted-verified (O5): it satisfies VERIFIED as well as STAGED.
+  assert.deepEqual(['ACCEPTED', 'INTEGRATED', 'STAGED', 'VERIFIED'].map((until) => blockerCleared(r.state, { packet: 'ALPHA', until })), [true, true, true, true]);
+  // A VERIFIED-terminal packet still never satisfies STAGED.
+  const v = structuredClone(r.state);
+  Object.assign(v.packets.ALPHA, { completion: { terminal: 'VERIFIED', proofType: 'hosted' }, phase: 'VERIFIED' });
+  assert.deepEqual(['VERIFIED', 'STAGED'].map((until) => blockerCleared(v, { packet: 'ALPHA', until })), [true, false]);
   // A terminal INTEGRATED (source-only) packet never reaches STAGED or VERIFIED.
   const s = structuredClone(r.state);
   Object.assign(s.packets.ALPHA, { completion: SOURCE_ONLY, phase: 'INTEGRATED' });
   assert.deepEqual(['INTEGRATED', 'STAGED', 'VERIFIED'].map((until) => blockerCleared(s, { packet: 'ALPHA', until })), [true, false, false]);
+});
+test('O7.6 (Check 66 F1): a STAGED-hosted dependency + until VERIFIED is allowed and clears only after hosted-verified STAGED', () => {
+  let r = chain(delivered(), { type: 'queue', packet: 'GAMMA', owner: 'W7', completion: SOURCE_ONLY },
+    { type: 'block', packet: 'GAMMA', blockedBy: [{ packet: 'ALPHA', until: 'VERIFIED' }] });
+  const unblockNeeded = (st) => neededTransitions(st).some((n) => n.packet === 'GAMMA' && n.event === 'unblock');
+  r = raw(r, { type: 'accept', source: comment(9604), packet: 'ALPHA', subjectSha: A });
+  r = raw(r, { type: 'integrate', actor: 'L0', source: pull(520), packet: 'ALPHA', mergeSha: B, acceptance: 9604 });
+  r = L0(r, { type: 'begin-proof', source: run(93), packet: 'ALPHA', runId: 93, proofType: 'hosted' });
+  r = L0(r, { type: 'stage', source: run(93), packet: 'ALPHA', runId: 93, servedSha: B });
+  assert.equal(unblockNeeded(r.state), false); // a deployment receipt is not hosted verification
+  r = L0(r, { type: 'proof-pass', source: run(93), packet: 'ALPHA', runId: 93 });
+  assert.equal(unblockNeeded(r.state), true);
 });
 test('O7.5: a failed proof sends the dependency back: it no longer counts as INTEGRATED', () => {
   let r = delivered();

@@ -39,12 +39,14 @@ export function workerWatch(s, worker) {
 
 /**
  * The phases in which a dependency has reached each blocker milestone. A failed proof sends it
- * back: nothing after CHANGES_REQUESTED counts. VERIFIED and STAGED are distinct milestones.
+ * back: nothing after CHANGES_REQUESTED counts. VERIFIED is met by VERIFIED or by terminal STAGED,
+ * which needs a passed hosted proof (a deployment receipt or VERIFYING alone never meets it);
+ * STAGED is met only by STAGED.
  */
 const REACHED = {
   ACCEPTED: ['ACCEPTED', 'INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'],
   INTEGRATED: ['INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'],
-  VERIFIED: ['VERIFIED'],
+  VERIFIED: ['VERIFIED', 'STAGED'],
   STAGED: ['STAGED'],
 };
 
