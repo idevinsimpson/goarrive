@@ -5607,3 +5607,76 @@ None of them is the O7 failure below; that is not among the disclosed choices.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; every mutant was reverted, and the scratch install is removed.
 
 **Status:** **PASS at `839f18f6`.** Check 63's F1 is closed by least capability rather than a text guard, and the merge is clean. W7 merged, dispatched and deployed nothing.
+
+## §68. Check 68R: HOME-HOSTED-JOURNEY-1 full successor at `84010706`
+
+- **Handoff:** #434 `5850998261`. PR #527, head `8401070663191ecfccd4ded296f7701a61966346`, base main `fff23048`, first delivery `abc02ad5`.
+- **Method:** reviewed in detached worktrees at `84010706` and `abc02ad5`, and read the product at `a3127651` through `git show`. No emulator, no browser run, no cloud.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage / scope** | **PASS.** `abc02ad5` has one parent, `fff23048` (current main). `84010706` has one parent, `abc02ad5`. `fff23048..84010706` touches 9 files, all under `.github/`, +460 / −15. The Step-2 delta `abc02ad5..84010706` is additive and touches two files: `wsf-staging-deploy.yml` (5 lines) and `workflow-contract.test.mjs`. |
+| **2** | **Framework reuse and manifest** | **PASS.** See the manifest bullets below. |
+| **3** | **Home driver truth** | **PASS.** Every testID, string and navigation the driver relies on exists in the product at `a3127651`. See the driver bullets below. |
+| **4** | **Cleanup and owner card** | **PASS.** The driver calls nothing that writes, and `wsfContribute` fires only on submit. See the cleanup bullets below. |
+| **5** | **Activation re-point** | **PASS.** See the re-point bullets below. |
+| **6** | **Fail before / pass after** | **PASS.** See the gate bullets below. |
+| **7** | **Mutants** | **PASS: 8 / 8 killed, plus one variant.** See the mutant bullets below. |
+| **8** | **Suites** | **PASS.** Focused: `home-journey` 25, `hosted-changed-journeys` 13, `check-milestone-manifest` 10, `changed-journey-drivers` 18, `journey-activation` 9, `owner-test-card` 35, `workflow-contract` 95. Staging `run-all`: "all suites passed", exit 0. The worktree is clean after the run. |
+
+**Row 2, framework reuse and manifest.**
+- Home is one new driver, `journeys/home.mjs`, registered in the frozen `drivers` object. It reuses the existing `vis`, `textWhen`, `attr` and `recorder` helpers, the fixture kit's `memberInTwoCommunities`, and the existing runner, cleaner and owner card; nothing in the framework changed.
+- `home-northstar-parity-1.json` pins `productSha` `a31276516e786ac8f848269de4c839b3b9e13123`, which equals `approvedAppSha` on main. It pins `previousKnownGoodSha` `938e00d8c985993f69becc8924d3037f18425afc`. Both objects exist.
+- A wrong id fails closed: the gate prints `no registered driver for journey home` (`MILESTONE_MANIFEST=refused`).
+
+**Row 3, Home driver truth.**
+- **Test IDs:** all 14 test IDs the driver reads exist in the product at `a3127651`. The two tab IDs are built as `wsf-member-tab-${tab.key}`, with keys `home` and `community`.
+- **Total:** the goal total is one Text node, so it reads "120 of 500 squats". On a narrow hero the count and the rest are split by `\n`, which `textWhen` collapses to a space.
+- **Own part:**
+  - The row renders when `ownCredit != null`.
+  - `wsfMyContribution` returns `ownCredit: 0` (`total ?? 0`) for an active member with no own record.
+  - With 0 it reads "Your first contribution counts here.". The separate `wsf-community-your-part-shared-<goalId>` reads "Part of our shared 120" while the figure is live.
+  - Neither figure is merged into the other, which is exactly what the `[own]` rows assert.
+- **Actions:**
+  - Start moving links to `contributeHref(g,'move')`, and the move screen is `wsf-contribute-move-screen`.
+  - Already moved links to `contributeHref(g,'record')`. Its `accessibilityLabel` is `Already moved? Record ${unit}`, and the entry screen is `wsf-contribute-entry-screen`.
+- **Back:** the first `wsf-contribute-back` in the DOM is the chrome "Back". It calls `router.back()` when it can go back, which is the case after an in-app push.
+- **Community→Home:** the Home tab is `navigate('(home)')`, which keeps the stack mounted, so the page returns to `/community/<groupId>`.
+- **Exclusions:** who moved today, presence and Members (the shut `wsfCommunityMembers` / `wsfCommunityActivity`), recording a contribution, and Lovable parity are `knownExclusions`, not rows. A test holds them there.
+- **What this is not:** a static read of the product and the model. The hosted run on staging is still the first real measurement.
+
+**Row 4, cleanup and owner card.**
+- The driver never presses a submit; it leaves by Back. In the contribute screen `wsfContribute` is called only from `sendContribute` (submit); on open it reads only `wsfGoalPulse`.
+- The only fixtures are the kit's tracked `memberInTwoCommunities('home')`.
+- The home-journey tests hold these properties:
+  - The real cleaner removes every fixture.
+  - A missing cleaner receipt is never PASSED.
+  - A cleanup that cannot complete is INCOMPLETE.
+  - A manifest row the driver does not assert fails.
+
+**Row 5, activation re-point.**
+- `grep journeys/examples` in `wsf-staging-deploy.yml` finds exactly 4 references, all `home-northstar-parity-1.json`, at lines 181, 1241, 1297 and 1320.
+- Line 1321 is `WSF_ACTIVATION_JOURNEYS: home`. The workflow hunks change only those 5 lines.
+- `workflow-contract`'s `ACTIVATION_MANIFEST` constant names the same file. Its new test ties the manifest to `approvedAppSha`, to the verdict's journey list and to a single manifest location.
+- `community-settings-parity-1.json` stays as history. Outside tests, it is referenced only in `CONTROL-PLANE.md` and `approved-candidate.json` notes.
+
+**Row 6, fail before / pass after.**
+- **Fail before:** `abc02ad5`'s gate step (`--require …/community-settings-parity-1.json`, with `WSF_APPROVED_SHA=a3127651…`) refuses a3127651 with "the manifest is for 938e00d8…" (`MILESTONE_MANIFEST=refused`, exit 1).
+- **Pass after:** `84010706`'s step validates it: `HOME-NORTHSTAR-PARITY-1: 1 journey (home), each with a registered driver`, `MILESTONE_MANIFEST=valid`, exit 0.
+- **Swapped SHA:** with the approved SHA set to `938e00d8`, it refuses (exit 1).
+
+**Row 7, the mutants.** Each mutant ran in the worktree and was reverted.
+- **M1, missing registration:** the gate refuses. `home-journey` fails ("home is registered"), and so do `workflow-contract` and `hosted-changed-journeys`.
+- **M2, wrong SHA:**
+  - With `938e00d8`, the gate refuses as a same-commit rollback.
+  - With the variant `fff23048`, the gate refuses as a pin mismatch, and both `home-journey` and `workflow-contract` fail.
+- **M3, fabricated PASS (the `[figures]` row forced true):** `home-journey` fails with "expected a failed [figures] assertion". The seeded `totalOff` defect surfaces only in `[returns]`, so it is caught.
+- **M4, skipped cleanup (`continue-on-error` on the cleanup step):** `workflow-contract` fails.
+- **M5, owner-card overclaim (an unmeasured row added to the manifest):** `home-journey` fails ("each must be a row the driver asserts").
+- **M6, one old manifest location restored (the owner card, line 1297):** `workflow-contract` fails ("owner card must read the same activation manifest").
+- **M7, journeys widened to `home,community`:** `workflow-contract` fails ("the verdict must require exactly the manifest's journeys").
+- **M8, constant drift (`ACTIVATION_MANIFEST` pointed back at the old manifest):** `workflow-contract` fails at the gate-step regex.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
+
+**Status:** **PASS at `84010706`.** W7 merged, dispatched and deployed nothing, and gives no creative verdict.
