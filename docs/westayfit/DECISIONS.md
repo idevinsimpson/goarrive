@@ -495,6 +495,19 @@ sequencing/status role.
 **Current-state rule:** volatile SHA/run/blocker/worker state lives in the canonical
 editable CURRENT STATE comment on #365, not in dated strategic documents.
 
-**Unresolved, deliberately not decided here:** general multi-movement goal semantics and
-the durable general activity catalog versus the actual FitLife menu. Prototype capability
-does not silently settle those product semantics.
+**Originally unresolved in this reconciliation:** general multi-movement goal semantics and
+the durable general activity catalog versus the actual FitLife menu. The multi-movement
+question was explicitly settled by Devin later on September 26: different movements CAN
+share one defined goal percentage. The durable general activity catalog versus the actual
+FitLife menu remains unresolved.
+
+
+## 2026-09-26 — Different movements may share one Living WE percentage
+
+Owner decision: **different / unlike movements CAN contribute to the same defined goal and share the same Living WE percentage.** The percentage belongs to the shared goal, not to a single movement type.
+
+This supersedes the narrower earlier reading that a push-up, squat, jumping jack, or other unlike movement must necessarily have a separate WE merely because the movement differs.
+
+Truth constraint remains: the goal must say what the target measures and which movements/actions qualify. Do not silently mix unlike measurement units or invent equivalents unless a separately approved rule defines a truthful common unit or conversion.
+
+Scope: this settles multi-movement shared-percentage semantics. It does not settle the permanent general activity catalog versus the FitLife event menu.
