@@ -4255,3 +4255,55 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 - That is a fresh proof of membership loss without the cache or screen invalidation the Director's rule requires.
 
 **Status:** diagnostic only. Nothing is accepted, integrated or staged.
+
+## 46 · HARDENED-MEMBER-JOURNEY-1: the standing hardening rows, baselined on served `0b460ce3f2f0766406100fef14d9a444c8cad43a` (Director #434 `5841402228`; W7 ACK `5841416878`)
+
+- **What it holds:** the new spec `sprint-w7-hardened-journey.spec.ts` carries only the rows not already covered by Checks 41B, 43, 44 and 45 and the PERF truth spec. H5 (Settings lifecycle) is appended when W9's panel lands.
+- **Setup:** emulators only (`demo-wsf-local`); synthetic accounts; Chromium at 390×844, and H2 at 390×640.
+- **The instrument:** an init script records, per frame:
+  - mounted instances per route root;
+  - loading frames;
+  - live `setInterval` ids;
+  - net window and document listeners;
+
+  alongside callables and Firestore listen channels per cycle.
+
+### The rows at `0b460ce3`
+
+| Row | What | At `0b460ce3` |
+|---|---|---|
+| **H1a** | 10 warm cycles Home → Community → Progress → You → Home: no loading frame | **PASS** (0 in all 10) |
+| **H1b** | one mounted instance per route, no remount after the warm pass | **PASS** (1 / 1 / 1 / 1) |
+| **H1c–e** | no growth from cycle 2 to cycle 10 in mounted screen roots, live intervals and net listeners | **PASS** (4 → 4, 1 → 1, 37 → 37) |
+| **H1f–g** | callables and listen channels per cycle do not grow | **PASS**: 5 per cycle, all Home's revalidation; 0 listens. `history.length` is recorded, not asserted (5, flat) |
+| **H2a–e** ×3 openers | 10 MOVE open / Close cycles from Home, Progress and You: Close returns to the opener tab; focus returns to the MOVE control; scroll kept; one tab bar and no sheet left; requests per visit flat | **PASS** on all 15 rows. Scroll held at 150 on every opener. Requests per visit: Home 10, Progress 5, You 5, flat. H2 runs at 390×640 with three closed goals so that Progress and You scroll; at 390×844 with one goal, their scroll row was CANNOT-MEASURE in the first run. |
+| **H2f** | one confirmed contribution, then 5 more open / Close cycles | **PASS**: 1 `wsfContribute` and exactly 1 ledger row |
+| **H3a** | every read held 1.5 s (INJECTED delay): known content 300 ms into the switch, no loading frame | **PASS** on all four routes (only Home issues reads on a warm switch) |
+| **H3b** | a refresh whose reads all fail (INJECTED 500) never becomes a fake zero or an empty claim; sampled every 250 ms for 8 s | **PASS** on all four routes |
+| **H3c** | where a refresh was issued and failed, the screen says so within 8 s (last-known or retry wording) | **FAIL, Home.** 7 reads, all 500, over 8 s; Home keeps showing "Open · … 180 of 500 squats 36% complete" with no stale or last-known word. That is Check 27's recorded **silent failed refresh**, re-measured. Refusals (403 / 404) do produce "Last known" (T2); a transient 500 does not. |
+| **H3d** | Retry performs one fresh read | **PASS**: Home's Refresh gives `wsfGoalPulse` 1 and `wsfMyContribution` 1, none repeated |
+| **H4a** | A warm; A's Home revalidation held (3 requests); A signs out in the page; B signs in (same document, marker-proved); A's held answers released into B's session | **PASS**: no frame shows A's goal, community or name |
+| **H4b** | M warm; a real pre-removal `wsfListGoals` answer held; membership removed; a fresh read meets the refusals (`wsfListGoals` 404, `wsfCommunityMembers` / `wsfCommunityActivity` 403, `wsfGoalPulse` 404); the old answer released | **FAIL**: Home, Community, Progress and You all still show the removed community's goal. It is the same gap as T2; there is no eviction on the base. |
+| **H5** | Settings lifecycle | **not built**: appended when W9's panel lands |
+
+**How this spec was corrected before being relied on (disclosed):**
+- **H2:** 390×640 plus closed goals, because the first run could not measure scroll on Progress and You.
+- **H3b / H3c:** the first version failed each read name **once**. Home's pulse poll re-read and recovered within the window, so that version's H3c "fail" was the harness, not the product. It now fails every read for the whole refresh and samples for 8 s.
+- **H4b:** split into its own test with a clean page, rather than inheriting H4a's session.
+
+### Row → last-passing SHA (the standing matrix)
+
+| Row(s) | Last passing | Dependencies: re-run when these change |
+|---|---|---|
+| H1a–g | `0b460ce3` | `app/(tabs)/_layout.tsx`, the tab route files, `src/memberReads.ts` |
+| H2a–f | `0b460ce3` | `app/move/index.tsx`, `app/contribute/[goalId].tsx`, `app/(tabs)/_layout.tsx`, `src/ui/sheetMotion.ts`, `src/ui/MemberTabBar.tsx` |
+| H3a, H3b, H3d | `0b460ce3` | the tab routes' read effects, `src/memberReads.ts` |
+| H3c | **none** (fails at `0b460ce3`) | Community Home's refresh handling |
+| H4a | `0b460ce3` | `src/memberReads.ts`, `src/auth*`, the tab routes' read effects |
+| H4b | **none** (fails at `0b460ce3`) | the same as H4a, plus the refusal handling |
+| PERF truth T1 | `5633057a` (and `0b460ce3`) | `src/memberReads.ts`, auth |
+| PERF truth T2 / T3 / T3b | **none** (all fail at `0b460ce3` and `5633057a`) | `src/memberReads.ts`, the Progress / You / contribute read paths |
+| Check 44 / 45 rows | per §44 / §45 (PRESERVE at `0b460ce3`) | You / Progress / Community / Settings routes |
+| H5 | — | W9's Settings panel |
+
+**Status:** tests and evidence only. Nothing is accepted, integrated or staged.
