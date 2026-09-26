@@ -22,6 +22,13 @@ import { FIRESTORE_EMULATOR, PROJECT_ID, seedProfile, seedShards, seedVerifiedUs
  *       (periodLabel pass-through): a goal whose end falls on a different
  *       calendar day in its zone than in the browser's.
  *
+ * Corrections after the first runs, disclosed in report §50:
+ *   · Q3's two rows were written as PRESERVE; the control prints no period on
+ *     either route, so they are FAIL-BEFORE.
+ *   · Q-F6 first put the zoned goal in You's LEAD, which by the accepted view
+ *     never prints a period; the zoned goal is now a secondary row.
+ *   · Q-F5 compared the name case-sensitively; the hero upper-cases it.
+ *
  * Row labels as in Check 44: [FAIL-BEFORE] must fail on the control
  * `87997c58` and pass on the candidate; [PRESERVE] must pass on both.
  * Emulators only (demo-wsf-local); synthetic accounts; Chromium at 390x844.
@@ -199,7 +206,7 @@ test.describe(`W7 Check 50 · You / Progress route QA (${LABEL})`, () => {
 
   test('Q3 You and Progress write the period in the goal’s own time zone', async ({ page }) => {
     test.setTimeout(180_000);
-    const { out, pv } = rows();
+    const { out, fb } = rows();
     const s = stampId();
     const m = await person('q3m', `Tomo Zone ${s.slice(-4)}`);
     const o = await person('q3o', `Olu Champion ${s.slice(-4)}`);
@@ -208,7 +215,11 @@ test.describe(`W7 Check 50 · You / Progress route QA (${LABEL})`, () => {
     // 20:00 UTC, six days out: the next calendar day in Tokyo.
     const end = new Date(Date.now() + 6 * DAY); end.setUTCHours(20, 0, 0, 0);
     const Z: G = { id: `w7c50Z-${s}`, title: `Tokyo Squats ${s.slice(-4)}`, unit: 'squats', target: 400, shared: 60, own: 9, open: true, endsAt: end, tz: 'Asia/Tokyo' };
+    // A sooner goal leads on You, so the zoned goal is a secondary row there: the accepted
+    // You view writes a period on its secondary rows only, never on the lead card.
+    const L: G = { id: `w7c50L-${s}`, title: `Tokyo Lead ${s.slice(-4)}`, unit: 'minutes', target: 100, shared: 20, own: 4, open: true, endsAt: inDays(2.3) };
     await goal(c.id, o.uid, m.uid, Z);
+    await goal(c.id, o.uid, m.uid, L);
     const want = endsLabel(end, 'Asia/Tokyo'), utc = endsLabel(end, 'UTC');
     await page.goto('/');
     await remember(page, m.uid, c.id);
@@ -219,8 +230,8 @@ test.describe(`W7 Check 50 · You / Progress route QA (${LABEL})`, () => {
     await page.goto('/activity');
     const tProg = await settledText(page, 'wsf-activity', Z.title);
     note('Q3 labels', { want, utc, you: after(tYou, Z.title).replace(/\s+/g, ' '), progress: after(tProg, Z.title).replace(/\s+/g, ' ') });
-    pv('Q-P6 You: the period is written in the goal’s zone', tYou.includes(want) && !tYou.includes(utc), { want, utc });
-    pv('Q-P7 Progress: the period is written in the goal’s zone', tProg.includes(want) && !tProg.includes(utc), { want, utc });
+    fb('Q-F6 You: a secondary row’s period is written in the goal’s zone', after(tYou, Z.title).includes(want) && !tYou.includes(utc), { want, utc });
+    fb('Q-F7 Progress: the period is written in the goal’s zone', tProg.includes(want) && !tProg.includes(utc), { want, utc });
     report('Q3 period in the goal zone', out);
   });
 
@@ -236,9 +247,9 @@ test.describe(`W7 Check 50 · You / Progress route QA (${LABEL})`, () => {
     await settledText(page, 'wsf-you', fx.A1.title);
     await page.locator('[data-testid="wsf-member-tab-activity"]:visible').first().click();
     const t = await settledText(page, 'wsf-activity', fx.A1.title);
-    const name = `Mara Route`;
+    const name = 'mara route'; // the hero upper-cases it: compare without case
     note('Q4 Progress hero (warm)', t.replace(/\s+/g, ' ').slice(0, 200));
-    fb('Q-F5 warm: the private hero names the member', t.slice(0, 200).includes(name), t.replace(/\s+/g, ' ').slice(0, 120));
+    fb('Q-F5 warm: the private hero names the member', t.slice(0, 200).toLowerCase().includes(name), t.replace(/\s+/g, ' ').slice(0, 120));
     report('Q4 Progress name warm', out);
   });
 });
