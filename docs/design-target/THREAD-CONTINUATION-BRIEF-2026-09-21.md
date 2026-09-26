@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 01:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 02:35Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -19,13 +19,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **PERF-MOBILE-1 cp1** | W9 · #494 · product **`889e9775`** / evidence `f6ae5f25` | W7 Check 47 PASS on routed rows (`5841848373`); **Director HARDENING HOLD** `5841923744`: H4b (joined pre-removal `wsfListGoals` repopulates a removed community) blocks acceptance; fix = one background own-membership read on Community Home return; H3c is a later successor | W9 successor → W7 H4b + T1–T3b carry + 41B → Director → L0 merges → W3 pin from `main` `6c2e6b25`; expect 49 → 49 |
-| **YOU-PARITY-1 Phase A** | W6 · #492 · **`5e76a10c`** / `cf3423ec` | **W5 PASS** `5841558662`; Director `5841926397`: keep `5e76a10c`, add Y-F1 guard (NaN / ±Infinity / negative → unknown) as one successor; `2d71db08` RefreshNote moves to Phase B | W6 successor → W5 delta → Director pixel → L0 integrates (accelerator `5840999929`), no staging |
-| **PROGRESS-PARITY-1 Phase A** | W6 · #495 · head `006d0899` | Director: restack exact `b8b96f61` on the hardened You SHA; Progress files byte-identical | W5 delta → Director pixel |
-| YOU-PARITY-1 Phase B | W6 · #498 · `b99f59a4` (on `889e9775` + `2d71db08`) | L0 receipt `5841931755`: protected diff empty; both bases held | restack on accepted PERF + hardened You → W7 |
-| **COMMUNITY-PRESENTATION-ACCELERATOR-1** | W4 · #496 · product `6acd0243` / evidence `8a00228e` | delivered, pure components only | Director review → W5 |
-| **COMMUNITY-SETTINGS-PARITY-1 cp1** | W9 · #497 · `aa22c723` (on `889e9775` + parked cp3 `e7ea3432`) | Settings holds privacy controls; failed save stays said | after PERF acceptance; W7 |
-| **MEMBER-SNAPSHOT-1** (`5841348058`) | Phase A backend (W4 or bounded backend worker); Phase B consumer after PERF | Phase A does **not** merge before PERF stages unless its consumer is ready | per release train |
+| **PERF-MOBILE-1 cp1** | W9 · #494 · product **`ad3d2f88`** / evidence `b36989e7` (H4b successor to `889e9775`) | W7 Check 47 PASS on `889e9775`; Director H4b hold `5841923744` → fix: membership re-read on Community Home return; L0 receipt `5842367622` (protected empty, tsc 0, memberReads 18/18); exact W7 H4b file can't finish (Home helper waits for replaced root) | W7 → Director → L0 merges → W3 pin from `main` `6c2e6b25`; 49 → 49 |
+| **YOU-PARITY-1 Phase A** | W6 · #500 · **`02f86fc2`** (Y-F1 on W5-PASSED `5e76a10c`) | only `goalTruth.ts` + tests changed (#492 `5842368767`, which corrects L0 `5841755815`) | W5 delta (wake `trig_01A19bgdQD8jVNj7aPYfPX6Q`) → Director pixel → L0 integrates (accelerator), no staging |
+| **PROGRESS-PARITY-1 Phase A** | W6 · #501 · **`92993f09`** | Progress files byte-identical to `b8b96f61` | W5 delta → Director pixel |
+| You / Progress Phase B | W6 · #498 `4f0b4c33`, #499 `b129ccec` | parked (`5841997009`); adapters `db6c2e2d` / `7f8f0feb` rebase on accepted PERF + Phase A; open lead-row question `5842099001` | rebase → W7 |
+| **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · product **`db41ffd2`** / evidence `88d5969e` | C1–C3 hardened; L0 receipt `5842013758` (7 added files, tsc 0 merged) | W5 QA (`5842003820`) → Director → L0 integrates, no staging; then W4 HOME-REFRESH-TRUTH-1 (`5842043740`) |
+| COMMUNITY-SETTINGS-PARITY-1 | W9 · #497 · `e07453b4` | parked; will adopt W4's pure components (`5841956725`) | after PERF + #496 integrate |
+| **MEMBER-SNAPSHOT-1** | backend worker **BLOCKED**: L0 `create_session` refused by classifier; not retried (`5842376324`) | serialized `index.ts` queue (`5842015136`) waits | owner-started session or Director assigns an existing worker |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
