@@ -68,6 +68,18 @@ test('the CLI: absent and valid exit 0; refused exits 1 before any deploy', () =
   assert.match(x.stderr, /::error::the manifest is for/);
 });
 
+test('--require (the activation proof): ABSENT is a refusal, a valid manifest still passes', () => {
+  const absent = checkMilestone({ manifestPath: path.join(d, 'none.json'), approvedSha: APPROVED, drivers, required: true });
+  assert.equal(absent.status, 'refused');
+  assert.match(absent.lines[0], /a milestone manifest is required for this run/);
+  assert.equal(checkMilestone({ manifestPath: EXAMPLE, approvedSha: APPROVED, drivers, required: true }).status, 'valid');
+  const cli = spawnSync(process.execPath, [CLI, '--require', path.join(d, 'none.json')], { encoding: 'utf8', env: { ...process.env, WSF_APPROVED_SHA: APPROVED } });
+  assert.equal(cli.status, 1);
+  assert.match(cli.stdout, /MILESTONE_MANIFEST=refused/);
+  const unknown = spawnSync(process.execPath, [CLI, '--allow-absent', EXAMPLE], { encoding: 'utf8' });
+  assert.equal(unknown.status, 1, 'an unknown flag is a usage error, never ignored');
+});
+
 test('on this branch, a live manifest (if any) passes the pre-deploy check for the approved candidate', () => {
   // No edit here when a manifest lands: that would make every visible
   // milestone a release-environment code change (C1).
