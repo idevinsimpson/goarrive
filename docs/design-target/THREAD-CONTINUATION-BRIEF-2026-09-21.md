@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 13:06Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 13:24Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -42,7 +42,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Blocked.** W8 / W2 out of credits; L0 `create_session` refused (#365 `5840866823`; snapshot lane now on existing W4). Owner: Operation 2; lab phone test (`5826104270`); MOVEMENT-VISION R&D.
 
-**Operating rules.** One writer per file. Only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA. SENT ≠ ACK ≠ executing. No new or replacement worker. **L0 alone dispatches WSF staging via the workflow and skill; no production, no credential workaround, no IAM / WIF change; no secrets, no force-push.** Real comment ids only; models change only by the owner. **Worker wake:** handoff comment on the worker's PR; if unACKed and idle, **one** deduplicated one-shot `create_trigger` bound to that session; never for a busy worker, never interrupt.
+**Operating rules.** One writer per file. Only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA. SENT ≠ ACK ≠ executing. No new or replacement worker. **L0 alone dispatches WSF staging via the workflow and skill; no production, no credential workaround, no IAM / WIF change; no secrets, no force-push.** Real comment ids only; models change only by the owner. **Canonical inboxes** (`5846610187` / `5846610445`): W4 #394, W5 #395, W3 #396, W7 #434; mirror actionable instructions there with a link. **Worker wake:** handoff comment on the worker's inbox PR; if unACKed and idle, **one** deduplicated one-shot `create_trigger` bound to that session; never for a busy worker, never interrupt.
 
 **Elsewhere:** the parity register and roster below.
 
