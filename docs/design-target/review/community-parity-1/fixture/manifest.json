@@ -74,7 +74,7 @@
       "state": "privacy",
       "viewport": "390x844",
       "fixture": "fixture/community-parity-privacy-390x844.png",
-      "fixtureSha256": "03c8a2185f5d306b4d4a7cbc8127b0f70983412a1859e4822773d628b9e1c501",
+      "fixtureSha256": "ad911d5f1cef2879cf94cea5a35c8ae3b85ff99274fecc4457a964cec292473b",
       "lovable": "lovable-d4f60624/settings-390x844.png",
       "lovableSha256": "0aed9d15e3ba8072d6c3226e6600827cd5f8f8bcf770b7c7fe42e31c32365928",
       "crop": {
@@ -86,13 +86,13 @@
       "sideBySide": "fixture/cmp-community-parity-privacy-390x844-side-by-side.png",
       "overlay50": "fixture/cmp-community-parity-privacy-390x844-overlay-50.png",
       "difference": "fixture/cmp-community-parity-privacy-390x844-difference.png",
-      "differingPixelShare": 0.143
+      "differingPixelShare": 0.0934
     },
     {
       "state": "privacy",
       "viewport": "390x640",
       "fixture": "fixture/community-parity-privacy-390x640.png",
-      "fixtureSha256": "4427e85904c8777fbd63949dedad2881ea4e153c5dd0599f96b663a31b9584bb",
+      "fixtureSha256": "65de0d2acdb81614d28a60b28a047983ab3d230279c399981c2811c392791145",
       "lovable": "lovable-d4f60624/settings-390x640.png",
       "lovableSha256": "93d8552709a3302fbc4c4cc134bb5d25c4b3234873180d8009cf371657de4615",
       "crop": {
@@ -104,13 +104,13 @@
       "sideBySide": "fixture/cmp-community-parity-privacy-390x640-side-by-side.png",
       "overlay50": "fixture/cmp-community-parity-privacy-390x640-overlay-50.png",
       "difference": "fixture/cmp-community-parity-privacy-390x640-difference.png",
-      "differingPixelShare": 0.2134
+      "differingPixelShare": 0.1884
     },
     {
       "state": "privacy-failed",
       "viewport": "390x844",
       "fixture": "fixture/community-parity-privacy-failed-390x844.png",
-      "fixtureSha256": "094c8c98accf70fff31472225905ccb1f8bfb6255851cc45cd4e7d4d8f4ab2b7",
+      "fixtureSha256": "c3b5b487581732d346f27e768d04266618c16a40395d145ca70f05ce58586f50",
       "lovable": null,
       "lovableSha256": null,
       "crop": {
@@ -125,7 +125,7 @@
       "state": "privacy-failed",
       "viewport": "390x640",
       "fixture": "fixture/community-parity-privacy-failed-390x640.png",
-      "fixtureSha256": "ae1147c2e88bde3360756b32d84422f522e61587b9bb6afb11af59f61424a94e",
+      "fixtureSha256": "d0c0ef712b379c3ebbec0f22834513d4376d78ec4b25c7c5a7be042546d9c362",
       "lovable": null,
       "lovableSha256": null,
       "crop": {

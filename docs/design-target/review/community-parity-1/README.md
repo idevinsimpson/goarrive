@@ -5,7 +5,8 @@ data mapping in `5840935220`. **This is component-level evidence, not route
 acceptance.** The Community and Settings routes are W9's. W9 imports these views
 and owns the wiring and the real transition evidence.
 
-- **Product:** `6acd02437bce9ab10ac68e038eb5dccb3c4fff8a`, from exact `0b460ce3`. It adds
+- **Product:** `db41ffd2110ff92467c238ec6be306ef92587701`, which is `6acd0243` plus the
+  Director's hardening corrections C1–C3 (#496 `5841929675`), from exact `0b460ce3`. It adds
   `src/ui/CommunityParityView.tsx`, `src/ui/CommunityPrivacyPanelView.tsx` and
   `src/ui/communityParityTypes.ts`. The frames come from the gated fixture
   `app/design-target/community-parity.tsx`.
@@ -58,8 +59,21 @@ verdict.
 |---|---|
 | normal 390×844 | 0.0618 |
 | normal 390×640 | 0.1410 |
-| privacy 390×844 | 0.1430 |
-| privacy 390×640 | 0.2134 |
+| privacy 390×844 | 0.0934 |
+| privacy 390×640 | 0.1884 |
+
+**After C2 / C3** (`db41ffd2`), only the privacy frames and their comparisons were
+re-captured. Before them the privacy shares were 0.1430 and 0.2134. The Community
+frames (normal and no-goal, and their comparisons) came out **byte-identical** on the
+re-capture, so they carry unchanged.
+
+| state | 390×844 sha256 | 390×640 sha256 |
+|---|---|---|
+| privacy (re-captured) | `ad911d5f1cef2879cf94cea5a35c8ae3b85ff99274fecc4457a964cec292473b` | `65de0d2acdb81614d28a60b28a047983ab3d230279c399981c2811c392791145` |
+| privacy-failed (re-captured) | `c3b5b487581732d346f27e768d04266618c16a40395d145ca70f05ce58586f50` | `d0c0ef712b379c3ebbec0f22834513d4376d78ec4b25c7c5a7be042546d9c362` |
+
+The frames table above gives the privacy hashes as they were at `6acd0243`; this
+table supersedes them.
 
 ## Intentional reference differences (what the share is made of)
 
@@ -80,10 +94,11 @@ fixture is the member state. The reference also starts its banner 4 px lower at 
 heights (`@media (max-height: 700px) .screen { padding-top: 10px }`). The rows below
 agree.
 
-**4. The consequence note under each privacy block.** For example: "Your activity appears
-as “Anonymous member.” Your effort still counts toward the total." It is the canonical
-privacy screen's existing copy (W8's), kept because it states what the stored pair means.
-The reference has none, so the privacy frames run longer than the originals.
+**4. The final note.** It reads "Your private Progress keeps the exact amounts we can read
+for you." The reference's "always keeps exact amounts" would promise dated private
+history that is not currently readable (C3). *(At `6acd0243` each privacy block also
+carried a consequence paragraph. C2 removed it: each toggle's own hint carries the
+consequence, as in the reference, and the privacy rows now line up with the original's.)*
 
 **5. The privacy scope sentence.** It carries the canonical boundary ("never the public
 web, a display, a kiosk or marketing") in place of the prototype's "in a real app".
