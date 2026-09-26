@@ -1233,9 +1233,14 @@ await test('the activation job builds, deploys and changes nothing, and has no s
     [/gcloud|setIamPolicy|invoker|indexes|firestore\.rules/, 'a transport, IAM, rules or index change'],
     [/wsfSetCommunityVisibility|wsfCommunityMembers/, 'a social write or roster call'],
     [/journeys\/manifest\.json/, 'the live deploy manifest'],
-    [/FIREBASE_TOOLS/, 'deployment tooling'],
+    // The pinned tooling is installed only so the token mints can resolve
+    // google-auth-library (run 54); its CLI is never invoked here.
+    [/node_modules\/\.bin\/firebase|npx\s+(?:--yes\s+)?firebase|(?:^|[\s;&|(])firebase\s+[a-z]/m, 'the firebase CLI'],
   ];
   for (const [re, what] of forbidden) assert.equal(re.test(body), false, `journey-activation must not use ${what}`);
+  assert.deepEqual(body.split('\n').filter((l) => /FIREBASE_TOOLS/.test(l)).map((l) => l.trim()),
+    ['run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"'],
+    'deployment tooling appears in journey-activation only as the exact pinned, script-free install');
   const block = /^ {4}permissions:\n((?: {6}[^\n]*\n)+)/m.exec(jobs['journey-activation']);
   assert.deepEqual(block[1].trim().split('\n').map((l) => l.trim()).sort(), ['contents: read', 'id-token: write']);
   assert.match(jobs['journey-activation'], /^ {4}environment: wsf-staging$/m);

@@ -1194,6 +1194,13 @@ jobs:
         working-directory: app
         run: npm --prefix apps/westayfit ci --ignore-scripts
 
+      # The activation and cleanup token mints (working directory app/) resolve
+      # google-auth-library from the workspace root, where this installs it.
+      # Run 54 had no such step and failed with "Cannot find module". Same
+      # pinned tooling and --ignore-scripts as hosted-verify and cleanup-recovery.
+      - name: Install pinned deployment tooling
+        run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"
+
       - name: Install browsers using the candidate's pinned Playwright CLI
         working-directory: app
         run: |
