@@ -1,0 +1,46 @@
+{
+  "commit": "e7dc36ee",
+  "settingsPanel": 1,
+  "switched": {
+    "at000": {
+      "name": "Summit Walkers",
+      "period": "Summit Steps"
+    },
+    "at050": {
+      "name": "Summit Walkers",
+      "period": "Summit Steps"
+    },
+    "settled": {
+      "name": "Summit Walkers",
+      "period": "Summit Steps"
+    }
+  },
+  "stage": "CANDIDATE",
+  "device": "390x640",
+  "frames": [
+    {
+      "file": "CANDIDATE-community-390x640.png",
+      "sha256": "a8b7ba7c6c026dcb745a8d0d590b4f992a464d0437fffe1ab88e11c34f961271"
+    },
+    {
+      "file": "CANDIDATE-community-lower-390x640.png",
+      "sha256": "f6e15d06b975f872e66b40519bd223c141a84881d0215ac1f757a83e5146a872"
+    },
+    {
+      "file": "CANDIDATE-switch-000ms-390x640.png",
+      "sha256": "53fced156e78f5b5786dc87d296ebb87b61c65e195b2f7e4ecb1d5687c3be0eb"
+    },
+    {
+      "file": "CANDIDATE-switch-050ms-390x640.png",
+      "sha256": "53fced156e78f5b5786dc87d296ebb87b61c65e195b2f7e4ecb1d5687c3be0eb"
+    },
+    {
+      "file": "CANDIDATE-switch-settled-390x640.png",
+      "sha256": "53fced156e78f5b5786dc87d296ebb87b61c65e195b2f7e4ecb1d5687c3be0eb"
+    },
+    {
+      "file": "CANDIDATE-settings-open-390x640.png",
+      "sha256": "06a3a70cf2ba6a4b3fa9c3866283ca343ef60926b25a9524cf9bff33d1c31947"
+    }
+  ]
+}
