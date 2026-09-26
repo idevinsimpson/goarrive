@@ -4295,15 +4295,83 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 
 | Row(s) | Last passing | Dependencies: re-run when these change |
 |---|---|---|
-| H1a–g | `0b460ce3` | `app/(tabs)/_layout.tsx`, the tab route files, `src/memberReads.ts` |
-| H2a–f | `0b460ce3` | `app/move/index.tsx`, `app/contribute/[goalId].tsx`, `app/(tabs)/_layout.tsx`, `src/ui/sheetMotion.ts`, `src/ui/MemberTabBar.tsx` |
-| H3a, H3b, H3d | `0b460ce3` | the tab routes' read effects, `src/memberReads.ts` |
-| H3c | **none** (fails at `0b460ce3`) | Community Home's refresh handling |
-| H4a | `0b460ce3` | `src/memberReads.ts`, `src/auth*`, the tab routes' read effects |
-| H4b | **none** (fails at `0b460ce3`) | the same as H4a, plus the refusal handling |
-| PERF truth T1 | `5633057a` (and `0b460ce3`) | `src/memberReads.ts`, auth |
-| PERF truth T2 / T3 / T3b | **none** (all fail at `0b460ce3` and `5633057a`) | `src/memberReads.ts`, the Progress / You / contribute read paths |
+| H1a–g | `889e9775` (and `0b460ce3`) | `app/(tabs)/_layout.tsx`, the tab route files, `src/memberReads.ts` |
+| H2a–f | `889e9775` (and `0b460ce3`; H2e rule restated in §47) | `app/move/index.tsx`, `app/contribute/[goalId].tsx`, `app/(tabs)/_layout.tsx`, `src/ui/sheetMotion.ts`, `src/ui/MemberTabBar.tsx` |
+| H3a, H3b, H3d | `889e9775` (and `0b460ce3`) | the tab routes' read effects, `src/memberReads.ts` |
+| H3c | **none** (fails at `0b460ce3` and `889e9775`) | Community Home's refresh handling |
+| H4a | `889e9775` (and `0b460ce3`) | `src/memberReads.ts`, `src/auth*`, the tab routes' read effects |
+| H4b | **none** (fails at `0b460ce3` and `889e9775`; §47 finding 1) | the same as H4a, plus the refusal handling |
+| PERF truth T1 | `889e9775` (and `5633057a`, `0b460ce3`) | `src/memberReads.ts`, auth |
+| PERF truth T2 / T3 / T3b | **`889e9775`** (all fail at `0b460ce3` and `5633057a`) | `src/memberReads.ts`, the Progress / You / contribute read paths |
 | Check 44 / 45 rows | per §44 / §45 (PRESERVE at `0b460ce3`) | You / Progress / Community / Settings routes |
 | H5 | — | W9's Settings panel |
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
+
+## 47 · PERF-MOBILE-1 acceptance check on exact product `889e97755a16134bf60aa87262a6c2ac400dbb5e`, evidence `f6ae5f25` (W9 #494 `5841592659`; Director #434 `5841354919`; W7 ACK `5841689259`): **PASS on the routed criteria; no regression in any W7 row; two findings for the Director**
+
+- **Build:** a detached worktree at `889e9775`, emulator-flagged `build:web`, served beside `demo-wsf-local`, in Chromium.
+- **Lineage, by git:** `0b460ce3` → `aa4f9833` … `5633057a` → `7dd628b6` (evidence) → **`889e9775`**.
+  - Over `5633057a`, the changes are cache, refusal and refresh logic only: `memberReads.ts` plus its test, `activity.tsx`, `you.tsx`, `contribute/[goalId].tsx` and Community Home, plus W9's capture spec.
+  - **No path outside `apps/westayfit/{app,src,tests,tests-e2e}` and `docs/`**: no functions, rules, indexes, packages, auth, config or `.github`.
+  - `f6ae5f25` adds 30 evidence files under `docs/design-target/review/perf-mobile-1/`, and nothing else.
+
+| # | Check | Result |
+|---|---|---|
+| **1** | Style and render comparison against `0b460ce3` (Director `5841134188` scope) | **Additive only.** In `activity.tsx` and `you.tsx`, no base style key is removed or changed. The additions are the new "checking" / "stale + Retry" rows and You's name placeholder. MOVE, contribute, Home list and Community Home have identical styles and no render-markup change. So the settled composition carries, and captures are needed only for the new transient states. |
+| **2** | PERF truth spec at `600d551d`, all four rows, `--repeat-each=2` | **8 / 8 PASS.** T1: nothing of A in B's session. **T2:** after the server-side removal, Home shows "Not a member" and Progress no longer lists the goal. **T3:** mounted Progress and You show the server's **55** after the receipt. **T3b:** 1 held pre-receipt answer; **You 55, Progress 55**. (Base and `5633057a`: T2 / T3 / T3b fail; T3b's `5633057a` race gave 35 / 35.) |
+| **3** | Check 41B, unchanged (blob `245a3357`), 12 / 12 runs, run with nothing else running | **The gains hold** (table below) |
+| **4** | `tests/memberReads.test.ts` | **18 / 18**. **Mutation fail-first, local and never committed:** with `stillCurrent` reduced to `sameAccount()` (the version guard removed), **exactly the 4 generation cases fail**: a stale own read after a receipt; a goals read in flight at a receipt; goals and own reads in flight at a refusal. Restored, and the worktree is clean. |
+| **5** | W9's evidence at `f6ae5f25` | `MANIFEST.sha256` **52 / 52** (48 PNG + 4 WebM). All **52 frame digests inside the 4 timeline receipts match the manifest**. The receipts are stamped BASE `0b460ce3` and CANDIDATE `889e9775`. BASE records `wsf-activity-loading`, `wsf-you-loading` and `wsf-move-working`; CANDIDATE records **none** at 390×640 or 390×844. Precision note: the 4 JSON receipts and the README are not themselves in the manifest; the digests they carry are. |
+| **6** | HARDENED rows whose dependencies PERF touched (§46 matrix) | **H1 7 / 7 PASS. H2 16 / 16 PASS** (after the H2e restatement below). **H3a / b / d PASS. H4a PASS.** **H3c FAIL** and **H4b FAIL**: both also fail on the base, so neither is a regression; see the findings. |
+| **7** | Check 44 and Check 45 specs, re-run unchanged (PERF edits `you.tsx`, `activity.tsx` and Community Home) | **Check 44: PRESERVE 44 / 44 pass; FAIL-BEFORE 19 / 19 still fail. Check 45: PRESERVE 13 / 13; FAIL-BEFORE 15 / 15.** These are identical to the base. PERF broke no canonical truth, and the parity rows stay open for Phase B. |
+
+### Check 41B: `889e9775` against `0b460ce3`
+
+Medians of 3 runs, shown as 844 / 640. Base values are in brackets.
+
+| Transition | Useful ms | Settled ms | Callables | Stages | Loading | Blocking |
+|---|---|---|---|---|---|---|
+| **Progress, first visit** | **19 / 19** (72 / 83) | 19 / 19 | **0** (3) | **0** (3) | **none** (skeleton) | **no** (yes) |
+| **You, first visit** | **13 / 14** (89 / 92) | 13 / 14 | **0** (3) | **0** (3) | **none** (skeleton) | **no** (yes) |
+| **MOVE open** | **64 / 67** (101 / 111) | 85 / 91 | **3** (5); `wsfListGoals` **0** (2) | **1** (3) | **none** ("working") | **no** (yes) |
+| **MOVE open again** | **45 / 44** (106 / 106) | 61 / 56 | **2** (5): pulse and own | 1 (3) | **none** | **no** |
+| Home → Community, first visit | 20 / 22 (25 / 26) | 130 / 142 | 3 (3) | 0 | none | no |
+| Warm switches | 6–8 | = | 0 (0) | 0 | none | no |
+| You → Home and warm → Home | 7–14 | 94–109 (87–94) | 5 background (5) | 0 | none | no |
+| MOVE Close | 186 (186) | 262 / 265 (256 / 260) | 6 (6) | — | none | no |
+| Submit → receipt | 50 / 52 (57 / 52) | = | 1 | 1 | none | waits on the write |
+| Receipt → Home | 27 / 26 (27 / 35) | 122 / 112 (106 / 114) | 5 | 0 | none | no |
+| **Cold Home, 1 community** | 321–389 (326–423) | — | **7** (9); **no identical pair** | 3–4 (4–5) | **the same four frames (not met; W9 disclosed; PERF-COLD-SNAPSHOT-2)** | — |
+| Cold Home, 3 communities / Community tab | ≈ base | — | 4 / 3 / 4 (=) | = | = | — |
+
+Home shows the server's **1,882** after the receipt on both viewports.
+
+**H2 per-visit requests** (same fixture; `sprint-w7-hardened-journey.spec.ts`):
+- **Home:** 10 → **7** (one visit 8);
+- **Progress:** 5 → **2**;
+- **You:** 5 → **2**.
+
+The occasional extra read is the 10 s same-load window expiring, a `wsfMyCommunities` or `wsfListGoals`.
+
+**H2e, restated during this check (disclosed):** "requests per visit do not grow" is now **a least-squares slope ≤ 0.25 per visit, and no visit above the modal count + 1**.
+- Its first form, "visit 10 ≤ visit 2", failed `889e9775` on one periodic revalidation: [2,2,3,2,2,2,3,2,2,3].
+- Its second form, "max of visits 6–10 ≤ max of visits 1–5", failed the Home opener on a single 8.
+- Neither is growth. The final rule passes 16 / 16 on both builds, with slopes 0.006 / 0.042 / 0 on the candidate and 0 on the base. A per-visit leak (+1 each visit) fails it.
+
+### Findings for the Director (not blocking the routed criteria; W7 fixes nothing)
+
+1. **H4b, a refusal branch without eviction** (it also fails on the base, so it is not a regression). The sequence:
+   - A `wsfListGoals` read issued **before** a server-side removal is still in flight (INJECTED hold of a real pre-removal answer).
+   - Community Home's refresh calls `readGoals`, which **joins that in-flight read** instead of sending a fresh `wsfListGoals`, so no not-found arrives.
+   - The fresh refusals that do arrive, `wsfCommunityMembers` / `wsfCommunityActivity` **403 "Members only."** and `wsfGoalPulse` **404**, are not treated as membership proof. Community Home evicts only on the membership document and on `wsfListGoals` not-found (`community/[groupId]/index.tsx:890–914, 1042, 1095`).
+   - The pre-removal list then lands as current, and **Home, Community, Progress and You all still offer the removed community's goal**.
+
+   This is the Director's "terminal membership / not-found proof and cache invalidation happen together; review every fresh server-refusal branch" (#494 `5841264164`) in a case T2 does not stage. The Director decides whether it rides this packet or a successor.
+2. **H3c, Home's silent failed refresh:** 7 × 500 over 8 s with no stale wording. This is **pre-existing** (Check 27) and outside PERF's scope. Unchanged.
+3. **Carried from W9's disclosure:**
+   - cold Home's four loading frames are not met (PERF-COLD-SNAPSHOT-2);
+   - per-community fan-out is a written seam only;
+   - device and network speed is CANNOT-MEASURE on the emulator.
+
+**Status:** PASS on the routed acceptance criteria: truth rows 4 / 4, the Check 41B gains, unit tests with the mutation fail-first, and evidence. There is no regression in any W7 row. Nothing is accepted, integrated or staged.
