@@ -10,7 +10,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`6c7f975c`** = `938e00d8` + ops docs (#515, v1.2) + index source `1f99d67f` |
+| development `claude/wsf-app-shell` | **`a3127651`** = `6c7f975c` + HOME `9d27fdb5` (#514 `5848589381`); since `938e00d8`: ops docs + index source `1f99d67f` |
 | `main` | **`37f18ea9`** (#516 ACTIVATION-1 `44da30fc` merged by L0); pin unchanged `938e00d8` |
 | staging pin | `approvedAppSha` **`938e00d8`**, 49, three social retained (Director ACCEPTED #511 `5846667051`) |
 | served staging | **`938e00d8`**, run 53 `36245419181` from main `7ab19e8f`: 49 → 49, created none, `VERIFY=pass`, marker `938e00d`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5846776040`–`5846777689`); previous known-good **`74d19281`** (run 52) |
@@ -25,9 +25,9 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
 | **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `8dc65316` / index #509 | `b71cf07f` FAIL → successor `8dc65316`; W5 recheck woken `trig_016FDPDU…` (#395 `5847278911`) | W5 → Director; staging needs index READY |
-| CONTROL-PLANE-ACTIVATION-1 | W3 · #516 merged | **run 54 `36257846281` ACTIVATION=FAILED, fail-closed** (no token: job lacks `$FIREBASE_TOOLS` install → `google-auth-library` missing; no fixtures; staging unchanged) — #365 `5848249295`, #516 `5848250200` | W3 workflow fix → accept → one re-run |
+| CONTROL-PLANE-ACTIVATION-1 | W3 · #516 merged | **run 54 `36257846281` ACTIVATION=FAILED, fail-closed** (no `$FIREBASE_TOOLS` install → `google-auth-library` missing; staging unchanged) — #516 `5848250200` | **W3 ACTIVE NOW** `5848559677` → W7 → accept → one re-run |
 | AUTONOMY-STATE-1A | #519 `d01c4cd9` | additive `tools/wsf-control` + docs/skills; tests green (L0 `5848305557`) | Director review |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` / ev `e60e5ec8` | **Director visual PASS** `5848068378`; trial merge on `6c7f975c` clean (tsc 0, vitest 1042) | W7 delta → Director product ACCEPTED → integrate → pin → stage |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` / ev `e60e5ec8` | **ACCEPTED** `5848551777` (W7 60D `5848268986`) → **integrated `a3127651`** (tsc 0, vitest 1042, evidence intact) | **W3 NEXT** HOME-PIN-1 `5848590307` → W7 pin check → accept → dispatch |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
