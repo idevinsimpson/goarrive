@@ -152,6 +152,33 @@ describe('ProgressParityView — period labels', () => {
   });
 });
 
+describe('ProgressParityView — revalidation (PERF-MOBILE-1)', () => {
+  const draw = (refresh?: { checking: boolean; stale: boolean; onRetry: () => void }) => {
+    const actions: ProgressParityActions = { onRetry: vi.fn(), onStartMoving: vi.fn(), onOpenCommunity: vi.fn(), onOpenReceipt: vi.fn() };
+    act(() => {
+      root.render(<ProgressParityView state={ready()} actions={actions} refresh={refresh} />);
+    });
+  };
+  it('draws nothing when idle or not passed', () => {
+    draw();
+    expect(byId('wsf-activity-checking')).toBeNull();
+    draw({ checking: false, stale: false, onRetry: vi.fn() });
+    expect(byId('wsf-activity-checking')).toBeNull();
+    expect(byId('wsf-activity-stale')).toBeNull();
+  });
+  it('says it is checking, then keeps what was read when the refresh fails, and retries by callback', () => {
+    const onRetry = vi.fn();
+    draw({ checking: true, stale: false, onRetry });
+    expect(text('wsf-activity-checking')).toBe('Checking for updates…');
+    expect(before('wsf-activity-subtitle', 'wsf-activity-checking')).toBe(true);
+    draw({ checking: false, stale: true, onRetry });
+    expect(text('wsf-activity-stale')).toContain('This is what was last read.');
+    expect(byId('wsf-activity-total-0')!.getAttribute('aria-label')).toBe('145 squats recorded');
+    click('wsf-activity-stale-retry');
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('ProgressParityView — the receipt contract', () => {
   it('rows from a source draw the reference’s row and only call back', () => {
     const receipts: ProgressReceipt[] = [
