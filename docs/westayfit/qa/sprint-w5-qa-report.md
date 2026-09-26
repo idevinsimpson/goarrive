@@ -2656,3 +2656,33 @@ Released in L0 `5842371466`, per Director `5841927035`. Everything below was mea
 - **C2 (low):** an empty receipts array draws only a heading.
 - **C3 (low):** a zero-credit goal draws "0 squats recorded".
 - **C4 (low):** the `MemberTabBar` import.
+
+## QA2: Community / Privacy pure Phase A, exact product `db41ffd2110ff92467c238ec6be306ef92587701` — **PASS, with one finding (K-F1)**
+
+This was released in Director `5842003820` and L0 `5842371466`. The evidence commit is `88d5969e`.
+
+**Scope.** Three commits on `0b460ce3`. They add seven files: two views, the types, the fixture, two view tests and the e2e spec. `package-lock.json` is unchanged.
+
+**Measured**
+- Focused vitest (`community-parity-view`, `community-privacy-panel-view`): 40/40.
+- `tsc`: 0.
+- `sprint-w4-community-parity.spec.ts` against an emulator-flagged export: 12/12 at 390×844 and 390×640; the evidence case is skipped.
+- W5 probes: K1–K6 and V1–V4, 10/10. They are saved as `sprint-w5-pr496-*-probe.test.tsx.txt`.
+
+| # | row | verdict | evidence |
+| --- | --- | --- | --- |
+| 1 | purity | **PASS** | The views and types import only react, react-native, labels, kit, `CommunityPresence`, `LivingWeProgress`, `progressFormat` and `MemberTabBar` (for its constants; see C4 on #495). None of them uses Firebase, the router, auth, storage, a timer or an overlay. |
+| 2 | numeric fail-closed | **PASS** | `effectiveTotal` and `validTarget` turn NaN, ±Infinity, negative totals and non-positive or infinite targets into "unknown" or "no target". K1 ran seven impossible total/target pairs; none drew a Living WE, a percentage, "to go", reached/unfinished, NaN, ∞ or a negative. K2 showed that a confirmed 0 stays a real zero. |
+| 3 | read truth | **PASS for every read state; see K-F1** | K3: the failed/loading goals, history, roster, communities and a null member count all show "—" or "Members", never 0 people, "No past goals yet" or "No active goal". K4: an incomplete roster claims no anonymous remainder. |
+| 4 | privacy | **PASS** | V1: pressing a switch asks the route for the change, and the switch stays on the stored value (no optimistic flip). V2: Space asks once, and a row that is saving ignores both Space and click. V3: `membershipRefused` hides the switches and Retry and names the reason. The not-saved and unconfirmed copy is explicit, and the e2e spec shows a failed save staying visible, with Retry, beside the stored value. |
+| 5 | copy | **PASS** | V4: the footer promises nothing dated ("Your private Progress keeps the exact amounts we can read for you."). The consequence paragraph removed in `db41ffd2` stays gone, and the focused tests pin that. |
+| 6 | accessibility | **PASS** | Toggle rows have `minHeight` 60 and a 48×28 track. Retry is `minHeight` 44. Switches have role `switch` with `aria-checked`, `aria-busy`, `aria-describedby` and a polite live hint. The e2e spec proves Space works and that every chip is at least 44 px. |
+| 7 | hierarchy | **PASS** | K6: banner → facts → communities → period → history → roster, checked by DOM order. The e2e spec confirms it at both heights. |
+| 8 | focused tests only | **PASS** | No full suite was run and no pixels were scored. |
+
+**K-F1 (moderate, one line to fix): an impossible member count renders as a number.**
+- `memberCount` is `number | null`, but only `null` is treated as unknown.
+- `formatCount(NaN)` returns `'0'`, so a NaN count renders the MEMBERS fact as **"0"** and the roster heading as **"0 people"**. That is exactly the fabricated zero row 3 forbids.
+- A negative count renders as "-3" and "-3 people".
+- The route shouldn't ever pass either value, but Y-F1 on You was closed for the same class of problem.
+- **Smallest fix:** treat a `memberCount` that is not finite or is below 0 as `null` (one helper, used by the fact, the heading and `anonymousRemainder`), and add a test for it.
