@@ -12,6 +12,9 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
@@ -113,12 +116,11 @@ import {
   readOwnCredit,
 } from '../../../../../src/memberReads';
 import {
-  MomentumRow,
   initialsOf,
+  relativeWhen,
   type ActivityRow,
   type PresencePerson,
 } from '../../../../../src/ui/CommunityPresence';
-import { policyDescriptor } from '../../../../../src/ui/communityParityTypes';
 import { LivingWeProgress } from '../../../../../src/ui/LivingWeProgress';
 import {
   formatCount,
@@ -3827,17 +3829,28 @@ export default function CommunityPage() {
             ) : null}
           </View>
           {/*
-            HOME-NORTHSTAR-PARITY-1. The reference's descriptor slot, under the
-            name. The prototype's free-form line ("Moving together this week")
-            has no canonical field, so the slot carries the join policy in the
-            same existing label words the Community banner uses -- true, and
-            nothing invented.
+            HOME-NORTHSTAR-PARITY-1. THE REFERENCE'S COMMUNAL LINE, under the name
+            (Director #514 `5847715387`): what the community is doing together,
+            never its settings. "Moving together" only once the goal list has
+            confirmed an open goal to move toward -- never "this week", which
+            no field here establishes. With no goal running, the existing
+            truthful line takes the slot, under its own testID. While the goal
+            list is loading or has failed, the slot keeps its height and says
+            nothing.
           */}
-          {group.joinPolicy ? (
+          {goalsState.kind === 'loaded' && featured ? (
             <Text style={styles.identityDescriptor} testID="wsf-community-descriptor">
-              {policyDescriptor(group.joinPolicy)}
+              Moving together
             </Text>
-          ) : null}
+          ) : humanLine ? (
+            <Text style={styles.identityDescriptor} testID="wsf-community-human-line">
+              {humanLine}
+            </Text>
+          ) : (
+            <Text style={styles.identityDescriptor} {...({ 'aria-hidden': true } as Record<string, unknown>)}>
+              {'\u00A0'}
+            </Text>
+          )}
           {/*
             PRESENCE — PEOPLE FIRST, THEN THE PROOF THAT THEY MOVED.
 
@@ -3919,11 +3932,6 @@ export default function CommunityPage() {
               ) : null}
             </View>
           </View>
-          {humanLine ? (
-            <Text style={styles.humanLine} testID="wsf-community-human-line">
-              {humanLine}
-            </Text>
-          ) : null}
         </View>
 
         {/* The active goal: the product hero, on its own navy surface. */}
@@ -4172,14 +4180,18 @@ export default function CommunityPage() {
                   </View>
                 ) : (
                 <View style={[styles.actions, styles.actionPair]}>
-                  <ButtonLink
+                  <GlyphButtonLink
+                    glyph="pulse"
+                    glyphColor={ON_ACTION}
                     href={contributeHref(featured.goalId, 'move')}
                     style={[styles.primaryButton, styles.pairPrimary]}
                     textStyle={styles.primaryButtonText}
                     testID={`wsf-community-goal-link-${featured.goalId}`}
                     label="Start moving"
                   />
-                  <ButtonLink
+                  <GlyphButtonLink
+                    glyph="history"
+                    glyphColor="#0B1F3A"
                     href={contributeHref(featured.goalId, 'record')}
                     style={[styles.heroSecondaryAction, styles.pairSecondary]}
                     textStyle={styles.heroSecondaryActionText}
@@ -4377,7 +4389,7 @@ export default function CommunityPage() {
                 {momentum.entries.length > 0 ? 'We’re showing up' : 'Quiet so far'}
               </Text>
               {momentum.entries.slice(0, 3).map((row, i) => (
-                <MomentumRow key={i} row={row} first={i === 0} />
+                <HomeMomentumRow key={i} row={row} />
               ))}
             </View>
           ) : null}
@@ -4725,6 +4737,166 @@ function heroRings(w: number, h: number): object {
   return Platform.OS === 'web' ? { backgroundImage: `${a}, ${b}` } : { experimental_backgroundImage: `${a}, ${b}` };
 }
 
+/**
+ * HOME-NORTHSTAR-PARITY-1 (Director #514 `5847715387`). THE TWO ACTION GLYPHS.
+ *
+ * The reference sets Lucide's `Activity` (a pulse) on Start moving and
+ * `History` (a clock with a return arrow) on Already moved. The app has no
+ * icon package, and its only native glyphs are the shell's four tab glyphs,
+ * drawn from plain Views (TabGlyph) -- so these two are drawn the same way,
+ * here: line segments and a ring, no SVG, no font, nothing that can render
+ * as a missing-glyph box. Decorative: the button's own name says what it
+ * does, so the glyph is hidden from assistive technology.
+ */
+type Seg = [number, number, number, number];
+/** Activity: flat, up, down through the baseline, up, flat -- on a 20 box. */
+const PULSE: Seg[] = [
+  [1, 10, 5, 10],
+  [5, 10, 8, 3],
+  [8, 3, 12, 17],
+  [12, 17, 15, 10],
+  [15, 10, 19, 10],
+];
+
+function Stroke({ seg, color, weight }: { seg: Seg; color: string; weight: number }) {
+  const [x1, y1, x2, y2] = seg;
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  const deg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: (x1 + x2) / 2 - len / 2,
+        top: (y1 + y2) / 2 - weight / 2,
+        width: len + weight * 0.6,
+        height: weight,
+        borderRadius: weight / 2,
+        backgroundColor: color,
+        transform: [{ rotate: `${deg}deg` }],
+      }}
+    />
+  );
+}
+
+function ActionGlyph({ name, color, size }: { name: 'pulse' | 'history'; color: string; size: number }) {
+  const hidden = {
+    accessibilityElementsHidden: true,
+    importantForAccessibility: 'no-hide-descendants' as const,
+    testID: 'wsf-action-glyph',
+    ...({ 'aria-hidden': true } as Record<string, unknown>),
+  };
+  if (name === 'pulse') {
+    return (
+      <View style={{ width: size, height: size }} {...hidden}>
+        <View style={{ width: 20, height: 20, transform: [{ scale: size / 20 }], transformOrigin: 'top left' } as object}>
+          {PULSE.map((seg, i) => (
+            <Stroke key={i} seg={seg} color={color} weight={2} />
+          ))}
+        </View>
+      </View>
+    );
+  }
+  // History: a ring open at the upper left, its return tick there, and two hands.
+  return (
+    <View style={{ width: size, height: size }} {...hidden}>
+      <View style={{ width: 20, height: 20, transform: [{ scale: size / 20 }], transformOrigin: 'top left' } as object}>
+        <View
+          style={{
+            position: 'absolute',
+            left: 2,
+            top: 2,
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            borderWidth: 2,
+            borderColor: color,
+            borderTopColor: 'transparent',
+            transform: [{ rotate: '-45deg' }],
+          }}
+        />
+        <Stroke seg={[2.5, 3.5, 2.5, 8]} color={color} weight={2} />
+        <Stroke seg={[2.5, 8, 7, 8]} color={color} weight={2} />
+        <Stroke seg={[10, 6, 10, 10]} color={color} weight={2} />
+        <Stroke seg={[10, 10, 13, 12]} color={color} weight={2} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The reference's action: glyph, 9 px, label, centred together. The same
+ * link mechanics as `ButtonLink` (Link asChild on a flattened Pressable, the
+ * href kept for cold loads, the testID on the element a test clicks); only
+ * the content is a row. The accessible name is the label unless one is given.
+ */
+function GlyphButtonLink({
+  href,
+  style,
+  textStyle,
+  testID,
+  label,
+  accessibilityLabel,
+  glyph,
+  glyphColor,
+}: {
+  href: string;
+  style: StyleProp<ViewStyle>;
+  textStyle: StyleProp<TextStyle>;
+  testID: string;
+  label: string;
+  accessibilityLabel?: string;
+  glyph: 'pulse' | 'history';
+  glyphColor: string;
+}) {
+  return (
+    <Link href={href as never} asChild>
+      <Pressable
+        style={StyleSheet.flatten(style)}
+        testID={testID}
+        accessibilityRole="link"
+        accessibilityLabel={accessibilityLabel ?? label}
+      >
+        <View style={glyphStyles.row}>
+          <ActionGlyph name={glyph} color={glyphColor} size={glyph === 'pulse' ? 20 : 17} />
+          <Text style={[textStyle, glyphStyles.label]}>{label}</Text>
+        </View>
+      </Pressable>
+    </Link>
+  );
+}
+
+/**
+ * HOME-NORTHSTAR-PARITY-1 (Director #514 `5847715387`). THE REFERENCE'S
+ * MOMENTUM ROW, on Home only: who, then the movement and when, and the exact
+ * amount on its own at the right. The same `ActivityRow` the shared row
+ * reads, so the same truths hold: a member showing activity but not a name is
+ * "Anonymous member" with their amount; a member who hid activity has no row.
+ * "(you)" is never added: the activity read carries no uid and no self marker,
+ * so nothing here could say which row is the viewer's without guessing.
+ */
+function HomeMomentumRow({ row }: { row: ActivityRow }) {
+  const named = row.displayName !== null && row.displayName.trim() !== '';
+  const amount = `${row.amount.toLocaleString()}${row.unit ? ` ${row.unit}` : ''}`;
+  return (
+    <View style={rowStyles.row} testID="wsf-momentum-row">
+      <View style={[rowStyles.avatar, named ? null : rowStyles.avatarAnon]}>
+        <Text style={[rowStyles.avatarText, named ? null : rowStyles.avatarTextAnon]}>
+          {named ? initialsOf(row.displayName!) : '·'}
+        </Text>
+      </View>
+      <View style={rowStyles.text}>
+        <Text style={rowStyles.who} numberOfLines={1}>
+          {named ? row.displayName : 'Anonymous member'}
+        </Text>
+        <Text style={rowStyles.what} numberOfLines={1}>
+          {`added ${amount}${row.at ? ` · ${relativeWhen(row.at)}` : ''}`}
+        </Text>
+      </View>
+      <Text style={rowStyles.amount}>{`+${amount}`}</Text>
+    </View>
+  );
+}
+
 function Row({
   label,
   value,
@@ -4888,7 +5060,6 @@ const styles = StyleSheet.create({
     borderRadius: wsfTheme.radius.pill,
     overflow: 'hidden',
   },
-  humanLine: { color: wsfTheme.colors.textMuted, fontSize: 17, lineHeight: 24 },
   // W7. One quiet line above the feed: a fact about the community's goals,
   // not a leaderboard and not a nudge.
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
@@ -5514,6 +5685,36 @@ const styles = StyleSheet.create({
 // { 0: …, 1: … }, which react-native-web then fails to apply — it takes the
 // whole screen down. So the composed footer link style is flattened here,
 // once, rather than written as an array at the call site.
+const glyphStyles = StyleSheet.create({
+  // .primary-action / .secondary-action: glyph, 9 (7 on the secondary), label.
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, flexShrink: 1, minWidth: 0 },
+  label: { flexShrink: 1, textAlign: 'center' },
+});
+
+const rowStyles = StyleSheet.create({
+  // .activity-row: avatar / text / amount, a hairline under it. 54 tall, not
+  // the reference's 60, so the first row stays whole above the tab bar at
+  // 390x844 (the Director's standing guard, sprint-w8-social-privacy).
+  row: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#D7DFE7',
+  },
+  // .activity-avatar: 34, navy, 10 px initials.
+  avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#0B1F3A', alignItems: 'center', justifyContent: 'center' },
+  avatarAnon: { backgroundColor: '#EFEFE6' },
+  avatarText: { color: '#FFFFFF', fontSize: 10, lineHeight: 12, fontWeight: '800' },
+  avatarTextAnon: { color: '#4B5C71', fontSize: 14 },
+  text: { flex: 1, minWidth: 0 },
+  who: { color: '#081D36', fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  what: { color: '#4B5C71', fontSize: 10, lineHeight: 15 },
+  // .activity-row > strong: the confirmed amount, right, green.
+  amount: { color: '#005D12', fontSize: 12, lineHeight: 17, fontWeight: '800', flexShrink: 0 },
+});
+
 const stackStyles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   // .avatar-sm / .avatar-stack .avatar: 29, a 2 px ring of the page, -6 overlap.

@@ -272,7 +272,9 @@ test.describe('HOME-NORTHSTAR-PARITY-1 · truth rows', () => {
     await openHome(page, fx);
     const g = fx.goalId!;
     await expect(vis(page, `wsf-community-goal-total-${g}`)).toHaveText('241 of 500 squats', { timeout: 30_000 });
-    await expect(vis(page, 'wsf-community-descriptor')).toHaveText('Private community');
+    // The communal line, never the join policy (Director #514 `5847715387`).
+    await expect(vis(page, 'wsf-community-descriptor')).toHaveText('Moving together');
+    await expect(vis(page, 'wsf-community-human-line')).toHaveCount(0);
     // Three faces and "+20": every one of the 23 is visible here.
     await expect(vis(page, 'wsf-presence-row')).toContainText('+20');
     await expect(vis(page, 'wsf-community-hero-moved-today')).toHaveText(/12 people moved today\.$/, { timeout: 30_000 });
@@ -288,6 +290,18 @@ test.describe('HOME-NORTHSTAR-PARITY-1 · truth rows', () => {
     expect(record!.height).toBeGreaterThanOrEqual(44);
     expect(start!.width).toBeGreaterThan(record!.width);
     await expect(vis(page, `wsf-community-goal-record-${g}`)).toHaveAttribute('aria-label', 'Already moved? Record squats');
+    await expect(vis(page, `wsf-community-goal-link-${g}`)).toHaveAttribute('aria-label', 'Start moving');
+    // Each action carries its glyph beside the label, and stays a 44+ target.
+    for (const id of [`wsf-community-goal-link-${g}`, `wsf-community-goal-record-${g}`]) {
+      const glyphs = await vis(page, id).evaluate((el) => el.querySelectorAll('[data-testid="wsf-action-glyph"][aria-hidden="true"]').length);
+      expect(glyphs, `${id} has its glyph`).toBeGreaterThan(0);
+    }
+    // The momentum row: the exact amount at the right, the movement and time
+    // under the name, and no guessed "(you)".
+    const row = vis(page, 'wsf-momentum-row').first();
+    await expect(row).toContainText('+20 squats', { timeout: 30_000 });
+    await expect(row).toContainText('added 20 squats');
+    await expect(row).not.toContainText('(you)');
     // One level-1 heading, and nothing laid out past the viewport.
     expect(await page.locator('h1:visible, [role="heading"][aria-level="1"]:visible').count()).toBe(1);
     const over = await page.evaluate(() =>
@@ -343,6 +357,9 @@ test.describe('HOME-NORTHSTAR-PARITY-1 · truth rows', () => {
     const fx = await fixture('n', 'no-open-goal');
     await openHome(page, fx);
     await expect(vis(page, 'wsf-community-no-goal')).toContainText('No goal running yet', { timeout: 30_000 });
+    // No goal to move toward: the truthful line takes the descriptor slot.
+    await expect(vis(page, 'wsf-community-human-line')).toHaveText('Ready to get moving.');
+    await expect(vis(page, 'wsf-community-descriptor')).toHaveCount(0);
     await expect(vis(page, 'wsf-community-goal-hero')).toHaveCount(0);
     await expect(vis(page, 'wsf-community-hero-moved-today')).toHaveCount(0);
     await expect(page.locator('[data-testid^="wsf-community-goal-link-"]:visible')).toHaveCount(0);
