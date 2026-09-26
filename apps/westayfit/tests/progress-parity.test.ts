@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
 import {
   bodyOf,
   heroEyebrow,
@@ -10,7 +11,6 @@ import {
   statusOf,
   summaryLine,
   unitTotals,
-  whenLabel,
   type ProgressGoal,
   type ProgressState,
 } from '../src/progressParity';
@@ -31,8 +31,9 @@ const goal = (over: Partial<ProgressGoal> = {}): ProgressGoal => ({
   unit: 'squats',
   yourPart: 25,
   target: 500,
-  sharedTotal: 241,
+  shared: knownShared(241),
   open: true,
+  periodLabel: null,
   ...over,
 });
 
@@ -41,34 +42,34 @@ describe('statusOf — the four lifecycle pills, and nothing claimed on an unkno
     expect(statusOf(goal())).toEqual({ label: 'OPEN', tone: 'open' });
   });
   it('open at or past the target is REACHED · STILL OPEN', () => {
-    expect(statusOf(goal({ sharedTotal: 500 })).label).toBe('REACHED · STILL OPEN');
-    expect(statusOf(goal({ sharedTotal: 515 })).label).toBe('REACHED · STILL OPEN');
+    expect(statusOf(goal({ shared: knownShared(500) })).label).toBe('REACHED · STILL OPEN');
+    expect(statusOf(goal({ shared: knownShared(515) })).label).toBe('REACHED · STILL OPEN');
   });
   it('closed at or past the target is CLOSED · REACHED on navy', () => {
-    expect(statusOf(goal({ open: false, sharedTotal: 1024, target: 1000 }))).toEqual({
+    expect(statusOf(goal({ open: false, shared: knownShared(1024), target: 1000 }))).toEqual({
       label: 'CLOSED · REACHED',
       tone: 'closedReached',
     });
   });
   it('closed short of the target is CLOSED · UNFINISHED, muted', () => {
-    expect(statusOf(goal({ open: false, sharedTotal: 612, target: 800 }))).toEqual({
+    expect(statusOf(goal({ open: false, shared: knownShared(612), target: 800 }))).toEqual({
       label: 'CLOSED · UNFINISHED',
       tone: 'muted',
     });
   });
   it('closed with no answer for the total says only CLOSED', () => {
-    expect(statusOf(goal({ open: false, sharedTotal: null }))).toEqual({ label: 'CLOSED', tone: 'muted' });
+    expect(statusOf(goal({ open: false, shared: UNKNOWN_SHARED }))).toEqual({ label: 'CLOSED', tone: 'muted' });
   });
   it('open with no answer for the total is OPEN, never REACHED', () => {
-    expect(statusOf(goal({ sharedTotal: null })).label).toBe('OPEN');
+    expect(statusOf(goal({ shared: UNKNOWN_SHARED })).label).toBe('OPEN');
   });
 });
 
 describe('isReachedNow', () => {
   it('needs a confirmed total and a usable target', () => {
-    expect(isReachedNow({ sharedTotal: 500, target: 500 })).toBe(true);
-    expect(isReachedNow({ sharedTotal: null, target: 500 })).toBe(false);
-    expect(isReachedNow({ sharedTotal: 10, target: 0 })).toBe(false);
+    expect(isReachedNow({ shared: knownShared(500), target: 500 })).toBe(true);
+    expect(isReachedNow({ shared: UNKNOWN_SHARED, target: 500 })).toBe(false);
+    expect(isReachedNow({ shared: knownShared(10), target: 0 })).toBe(false);
   });
 });
 
@@ -144,22 +145,13 @@ describe('orderedGoals', () => {
 
 describe('sharedCell', () => {
   it('total / target unit', () => {
-    expect(sharedCell(goal({ sharedTotal: 1024, target: 1000 }))).toBe('1,024 / 1,000 squats');
+    expect(sharedCell(goal({ shared: knownShared(1024), target: 1000 }))).toBe('1,024 / 1,000 squats');
   });
   it('a bare total with no usable target', () => {
-    expect(sharedCell(goal({ sharedTotal: 30, target: 0 }))).toBe('30 squats');
+    expect(sharedCell(goal({ shared: knownShared(30), target: 0 }))).toBe('30 squats');
   });
   it('Unknown when the total did not answer — never zero', () => {
-    expect(sharedCell(goal({ sharedTotal: null }))).toBe('Unknown');
-  });
-});
-
-describe('whenLabel', () => {
-  it('open ends, finished ended, unreadable nothing', () => {
-    expect(whenLabel({ open: true, endsAt: '2026-09-27T16:00:00.000Z' })).toBe('Ends Sep 27');
-    expect(whenLabel({ open: false, endsAt: '2026-08-31T23:00:00.000Z' })).toBe('Ended Aug 31');
-    expect(whenLabel({ open: true })).toBeNull();
-    expect(whenLabel({ open: true, endsAt: 'not a date' })).toBeNull();
+    expect(sharedCell(goal({ shared: UNKNOWN_SHARED }))).toBe('Unknown');
   });
 });
 

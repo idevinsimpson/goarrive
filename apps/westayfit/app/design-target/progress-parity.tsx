@@ -2,6 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import type { ProgressGoal, ProgressReceipt, ProgressState } from '../../src/progressParity';
 import { NAVY } from '../../src/ui/kit';
 import { ProgressParityView, useProgressCompact } from '../../src/ui/ProgressParityView';
@@ -16,7 +17,11 @@ import { ProgressParityView, useProgressCompact } from '../../src/ui/ProgressPar
  * originals pixel for pixel.
  *
  * `?state=` picks the state: populated | first-eligible | no-open-goal |
- * partial | failure | receipts-contract.
+ * partial | failure | receipts-contract | unknown-shared (an open and a
+ * finished goal whose shared totals did not answer; canonical truth only).
+ *
+ * Period labels are given as the route adapter will give them: already
+ * formatted in the goal's own timezone. The view shows them verbatim.
  *
  * `receipts-contract` IS NOT A CANONICAL STATE. It fills the receipt slot from
  * props to show the slot is ready for a future authorized source; its band
@@ -43,10 +48,6 @@ function previewAllowed(): boolean {
 export const REFERENCE_MASTHEAD = 92;
 export const REFERENCE_MASTHEAD_COMPACT = 86;
 
-const DAY = 24 * 60 * 60_000;
-const FIXED_NOW = Date.UTC(2026, 8, 25, 16, 0, 0);
-const at = (days: number) => new Date(FIXED_NOW + days * DAY).toISOString();
-
 const OAK = { communityId: 'oak', community: 'Oak Grove Together' };
 const HARBOR = { communityId: 'harbor', community: 'Harbor Lunch Crew' };
 
@@ -57,9 +58,9 @@ const OAK_500: ProgressGoal = {
   unit: 'squats',
   yourPart: 25,
   target: 500,
-  sharedTotal: 241,
+  shared: knownShared(241),
   open: true,
-  endsAt: at(2),
+  periodLabel: 'Ends Sep 27',
 };
 const HARBOR_150: ProgressGoal = {
   goalId: 'harbor-150',
@@ -68,9 +69,9 @@ const HARBOR_150: ProgressGoal = {
   unit: 'squats',
   yourPart: 20,
   target: 150,
-  sharedTotal: 155,
+  shared: knownShared(155),
   open: true,
-  endsAt: at(6),
+  periodLabel: 'Ends Oct 1',
 };
 const OAK_AUG: ProgressGoal = {
   goalId: 'oak-aug',
@@ -79,9 +80,9 @@ const OAK_AUG: ProgressGoal = {
   unit: 'squats',
   yourPart: 60,
   target: 1000,
-  sharedTotal: 1024,
+  shared: knownShared(1024),
   open: false,
-  endsAt: '2026-08-31T23:00:00.000Z',
+  periodLabel: 'Ended Aug 31',
 };
 const OAK_JUL: ProgressGoal = {
   goalId: 'oak-jul',
@@ -90,9 +91,9 @@ const OAK_JUL: ProgressGoal = {
   unit: 'squats',
   yourPart: 40,
   target: 800,
-  sharedTotal: 612,
+  shared: knownShared(612),
   open: false,
-  endsAt: '2026-07-31T23:00:00.000Z',
+  periodLabel: 'Ended Jul 31',
 };
 
 /** The reference's own receipt rows — FIXTURE PROPS, for the contract state only. */
@@ -122,6 +123,11 @@ const STATES: Record<string, ProgressState> = {
   partial: { ...READY, finished: [], partial: true },
   failure: { kind: 'failed', memberName: 'Alex M.' },
   'receipts-contract': { ...READY, receipts: CONTRACT_RECEIPTS },
+  'unknown-shared': {
+    ...READY,
+    open: [OAK_500, { ...HARBOR_150, shared: UNKNOWN_SHARED }],
+    finished: [OAK_AUG, { ...OAK_JUL, shared: UNKNOWN_SHARED }],
+  },
 };
 
 export default function ProgressParityFixture() {

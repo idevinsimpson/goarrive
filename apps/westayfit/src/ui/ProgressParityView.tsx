@@ -9,7 +9,6 @@ import {
   statusOf,
   summaryLine,
   unitTotals,
-  whenLabel,
   type ProgressGoal,
   type ProgressReceipt,
   type ProgressState,
@@ -308,14 +307,13 @@ function Receipts({ receipts, onOpen }: { receipts: ProgressReceipt[] | null; on
 }
 
 function GoalRow({ goal }: { goal: ProgressGoal }) {
-  const when = whenLabel(goal);
   return (
     <View style={s.goal} testID={`wsf-activity-goal-${goal.goalId}`}>
       <View style={s.goalTop}>
         <Text style={s.goalTitle}>{goal.title}</Text>
         <Pill status={statusOf(goal)} />
       </View>
-      <Text style={s.goalComm}>{[goal.community, when].filter(Boolean).join(' · ')}</Text>
+      <Text style={s.goalComm}>{[goal.community, goal.periodLabel].filter(Boolean).join(' · ')}</Text>
       <View style={s.split}>
         <View style={s.splitCell} testID={`wsf-activity-goal-${goal.goalId}-yours`}>
           <Text style={s.splitLabel}>YOURS</Text>

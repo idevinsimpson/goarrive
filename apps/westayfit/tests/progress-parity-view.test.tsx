@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
 import type { ProgressGoal, ProgressReceipt, ProgressState } from '../src/progressParity';
 import { ProgressParityView, type ProgressParityActions } from '../src/ui/ProgressParityView';
 
@@ -38,11 +39,12 @@ const g = (over: Partial<ProgressGoal>): ProgressGoal => ({
   unit: 'squats',
   yourPart: 1,
   target: 100,
-  sharedTotal: 10,
+  shared: knownShared(10),
   open: true,
+  periodLabel: null,
   ...over,
 });
-const OAK_500 = g({ goalId: 'oak-500', title: '500 squats together', yourPart: 25, target: 500, sharedTotal: 241 });
+const OAK_500 = g({ goalId: 'oak-500', title: '500 squats together', yourPart: 25, target: 500, shared: knownShared(241) });
 const HARBOR_150 = g({
   goalId: 'harbor-150',
   title: '150 squats this week',
@@ -50,10 +52,10 @@ const HARBOR_150 = g({
   community: 'Harbor Lunch Crew',
   yourPart: 20,
   target: 150,
-  sharedTotal: 155,
+  shared: knownShared(155),
 });
-const OAK_AUG = g({ goalId: 'oak-aug', title: '1,000 squats in August', yourPart: 60, target: 1000, sharedTotal: 1024, open: false });
-const OAK_JUL = g({ goalId: 'oak-jul', title: '800 squats in July', yourPart: 40, target: 800, sharedTotal: 612, open: false });
+const OAK_AUG = g({ goalId: 'oak-aug', title: '1,000 squats in August', yourPart: 60, target: 1000, shared: knownShared(1024), open: false });
+const OAK_JUL = g({ goalId: 'oak-jul', title: '800 squats in July', yourPart: 40, target: 800, shared: knownShared(612), open: false });
 
 const ready = (over: Partial<Extract<ProgressState, { kind: 'ready' }>> = {}): ProgressState => ({
   kind: 'ready',
@@ -133,11 +135,20 @@ describe('ProgressParityView — populated, in the reference order', () => {
   });
 
   it('a shared total that did not answer reads Unknown, never zero', () => {
-    render(ready({ open: [], finished: [g({ goalId: 'u', open: false, sharedTotal: null })] }));
+    render(ready({ open: [], finished: [g({ goalId: 'u', open: false, shared: UNKNOWN_SHARED })] }));
     expect(text('wsf-activity-goal-u-shared')).toBe('SHAREDUnknown');
     expect(text('wsf-activity-goal-u')).toContain('CLOSED');
     expect(text('wsf-activity-goal-u')).not.toContain('REACHED');
     expect(text('wsf-activity-goal-u')).not.toContain('UNFINISHED');
+  });
+});
+
+describe('ProgressParityView — period labels', () => {
+  it('shows the period label exactly as given, never re-derived from a date', () => {
+    render(ready({ open: [{ ...OAK_500, periodLabel: 'This week' }], finished: [] }));
+    expect(text('wsf-activity-goal-oak-500')).toContain('Oak Grove Together · This week');
+    render(ready({ open: [{ ...OAK_500, periodLabel: null }], finished: [] }));
+    expect(text('wsf-activity-goal-oak-500')).not.toContain('Oak Grove Together ·');
   });
 });
 

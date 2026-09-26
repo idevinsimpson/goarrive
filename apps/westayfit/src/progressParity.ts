@@ -13,7 +13,22 @@
  * client-denied (see the header of activity.tsx and
  * docs/design-target/review/page-04-progress/PRIVATE-HISTORY-CONTRACT.md).
  * So `receipts` is `null` — unavailable — and never an invented list.
+ *
+ * The shared-position and lifecycle rules are src/goalTruth.ts, shared with
+ * YouParityView: an unknown shared total is never 0 and never decides reached
+ * or unfinished, and no date is interpreted here.
  */
+
+import {
+  isReachedNow,
+  sharedCell,
+  statusOf,
+  type LifecycleStatus,
+  type LifecycleTone,
+  type SharedPosition,
+} from './goalTruth';
+
+export { isReachedNow, sharedCell, statusOf };
 
 /** A goal this member has a RECORDED part in, with both figures kept apart. */
 export type ProgressGoal = {
@@ -26,11 +41,15 @@ export type ProgressGoal = {
   /** Exactly what this member recorded. Never summed with another unit. */
   yourPart: number;
   target: number;
-  /** Where the community stands; `null` when the aggregate read did not answer. */
-  sharedTotal: number | null;
+  /** Where the community stands: a different number, or not known at all. */
+  shared: SharedPosition;
   /** status === 'active' on the goal. */
   open: boolean;
-  endsAt?: string;
+  /**
+   * The goal's window as the route formats it in the goal's own timezone
+   * ("Ended Aug 31", "This week"), shown verbatim; null when there is none.
+   */
+  periodLabel: string | null;
 };
 
 /**
@@ -66,29 +85,10 @@ export type ProgressState =
       receipts: ProgressReceipt[] | null;
     };
 
-export type ProgressTone = 'open' | 'closedReached' | 'muted';
-export type ProgressStatus = { label: string; tone: ProgressTone };
+export type ProgressTone = LifecycleTone;
+export type ProgressStatus = LifecycleStatus;
 
 const n = (v: number) => v.toLocaleString('en-US');
-
-/** Reached only on a confirmed total against a usable target. */
-export function isReachedNow(goal: Pick<ProgressGoal, 'sharedTotal' | 'target'>): boolean {
-  return typeof goal.sharedTotal === 'number' && goal.target > 0 && goal.sharedTotal >= goal.target;
-}
-
-/**
- * The reference's lifecycle pill (`baseView` → `statusLabel`, upper-cased by
- * its CSS). A closed goal whose total did not answer says only CLOSED: whether
- * it was reached is not known, so it is not claimed either way.
- */
-export function statusOf(goal: Pick<ProgressGoal, 'open' | 'sharedTotal' | 'target'>): ProgressStatus {
-  const reached = isReachedNow(goal);
-  if (goal.open) return { label: reached ? 'REACHED · STILL OPEN' : 'OPEN', tone: 'open' };
-  if (goal.sharedTotal === null) return { label: 'CLOSED', tone: 'muted' };
-  return reached
-    ? { label: 'CLOSED · REACHED', tone: 'closedReached' }
-    : { label: 'CLOSED · UNFINISHED', tone: 'muted' };
-}
 
 /**
  * Private totals, ONE PER UNIT, in the order the units first appear. The key is
@@ -120,23 +120,6 @@ export type ProgressBody = 'goals' | 'firstEligible' | 'noOpenGoal';
 export function bodyOf(state: Extract<ProgressState, { kind: 'ready' }>): ProgressBody {
   if (state.open.length + state.finished.length > 0) return 'goals';
   return state.canStart ? 'firstEligible' : 'noOpenGoal';
-}
-
-/** The "Shared" cell: unknown, a bare total with no usable target, or total / target. */
-export function sharedCell(goal: Pick<ProgressGoal, 'sharedTotal' | 'target' | 'unit'>): string {
-  if (goal.sharedTotal === null) return 'Unknown';
-  return goal.target > 0
-    ? `${n(goal.sharedTotal)} / ${n(goal.target)} ${goal.unit}`
-    : `${n(goal.sharedTotal)} ${goal.unit}`;
-}
-
-/** "Ends Oct 2" / "Ended Sep 14", or null when the window cannot be read. */
-export function whenLabel(goal: Pick<ProgressGoal, 'open' | 'endsAt'>): string | null {
-  if (!goal.endsAt) return null;
-  const d = new Date(goal.endsAt);
-  if (Number.isNaN(d.getTime())) return null;
-  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  return goal.open ? `Ends ${day}` : `Ended ${day}`;
 }
 
 /** The hero eyebrow: private, and whose. */

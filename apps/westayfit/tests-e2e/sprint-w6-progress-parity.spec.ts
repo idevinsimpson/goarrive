@@ -151,6 +151,23 @@ for (const vp of [
       await context.close();
     });
 
+    test('unknown shared totals: OPEN and CLOSED only, Unknown never 0', async ({ browser }) => {
+      const { context, page } = await phone(browser, vp);
+      await open(page, 'unknown-shared');
+      const open_ = page.getByTestId('wsf-activity-goal-harbor-150');
+      await expect(open_).toContainText('OPEN');
+      await expect(open_).not.toContainText('REACHED');
+      await expect(page.getByTestId('wsf-activity-goal-harbor-150-shared')).toHaveText('SHAREDUnknown');
+      const closed = page.getByTestId('wsf-activity-goal-oak-jul');
+      await expect(closed).toContainText('CLOSED');
+      await expect(closed).toContainText('Oak Grove Together · Ended Jul 31');
+      await expect(closed).not.toContainText('UNFINISHED');
+      await expect(page.getByTestId('wsf-activity-goal-oak-jul-shared')).toHaveText('SHAREDUnknown');
+      // Own parts are known and still add up: 25 + 20 + 60 + 40.
+      await expect(page.getByTestId('wsf-activity-total-0')).toHaveAttribute('aria-label', '145 squats recorded');
+      await context.close();
+    });
+
     test('keyboard: receipts are reached by Tab in order and open with Enter', async ({ browser }) => {
       const { context, page } = await phone(browser, vp);
       await open(page, 'receipts-contract');
@@ -193,6 +210,9 @@ const SHOTS: Shot[] = [
   { state: 'partial', vp: V640, lovable: null },
   { state: 'failure', vp: V844, lovable: 'progress-failure-390x844.png' },
   { state: 'failure', vp: V640, lovable: null },
+  // Canonical truth the reference never draws (Director #492 5841012915).
+  { state: 'unknown-shared', vp: V844, lovable: null },
+  { state: 'unknown-shared', vp: V640, lovable: null },
 ];
 
 const sha256 = (file: string) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
