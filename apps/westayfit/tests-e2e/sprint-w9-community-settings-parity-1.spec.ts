@@ -353,6 +353,14 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
     await expect(roster).not.toContainText(fx.q.name);
   });
 
+  /** Inside the panel's 12 px left margin, where only the scrim is. */
+  const SCRIM_POINT = { x: 6, y: 400 };
+  const scrimAt = (page: Page, pt: { x: number; y: number }) =>
+    page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-testid]')?.getAttribute('data-testid') === 'wsf-settings-scrim',
+      pt,
+    );
+
   test('H6 Close, Escape and the scrim during the exit are one dismissal, after repeated opens', async ({ page }) => {
     test.setTimeout(200_000);
     const fx = await fixture('h6');
@@ -365,14 +373,20 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
       await openPanel(page, fx);
       if (how === 'close') await page.locator('[data-testid="wsf-settings-close"]:visible').click();
       else if (how === 'escape') await page.keyboard.press('Escape');
-      else await page.locator('[data-testid="wsf-settings-scrim"]').click({ position: { x: 20, y: 400 }, force: true });
+      else {
+        // The panel sits 12 px in from every edge (Director #506 `5844878042`), so
+        // the scrim is reachable in that margin -- and only there.
+        expect(await scrimAt(page, SCRIM_POINT), 'the point is the scrim, not the panel').toBe(true);
+        await page.mouse.click(SCRIM_POINT.x, SCRIM_POINT.y);
+      }
       await expect(page.locator('[data-testid="wsf-settings-panel"]')).toHaveCount(0, { timeout: 8_000 });
     }
 
     await openPanel(page, fx);
     await page.locator('[data-testid="wsf-settings-close"]:visible').click();
     await page.keyboard.press('Escape');
-    await page.locator('[data-testid="wsf-settings-scrim"]').click({ position: { x: 20, y: 400 }, force: true, timeout: 2_000 }).catch(() => undefined);
+    // As before: the scrim only if it is still there mid-exit.
+    if (await scrimAt(page, SCRIM_POINT)) await page.mouse.click(SCRIM_POINT.x, SCRIM_POINT.y);
     await expect(page.locator('[data-testid="wsf-settings-panel"]')).toHaveCount(0, { timeout: 8_000 });
     await page.waitForTimeout(800);
 
