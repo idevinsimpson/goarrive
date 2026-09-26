@@ -229,11 +229,11 @@ A community works without a prize, kiosk, queue, coach purchase, or organization
 
 ## 10. Goal composition remains truth-first
 
-The v3.0 one-goal / clear-unit contract still governs.
+Different movements CAN contribute to the same defined community goal and therefore share the same Living WE percentage. This explicitly supersedes any earlier reading that each unlike movement must necessarily have its own WE.
 
-A prototype may explore several same-unit movements inside one goal, but this is not automatically a settled production-semantic change. Do not silently turn "one clearly defined goal" into an arbitrary mixed-activity score.
+The percentage belongs to the shared goal. A multi-movement goal must state what the target measures and which movements/actions qualify so members can understand exactly how each valid contribution advances that one shared result.
 
-Before shipping a multi-movement goal, the named goal must still state exactly what unit the target measures and what actions qualify. Unlike units never share one percentage. Hold seconds, repetitions, laps, manually recorded steps, and custom count units remain semantically distinct unless an explicit new product decision defines a common unit truthfully.
+Different movement names do not require separate percentages or separate WEs. Measurement truth still matters: do not silently blend unlike units or invent equivalents unless an explicit approved rule defines a truthful common unit or conversion. Hold seconds, repetitions, laps, manually recorded steps, and custom count units remain semantically distinct unless such a rule exists.
 
 Distinguish:
 - the general community goal/unit catalog;
