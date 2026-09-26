@@ -27,11 +27,20 @@
  * notch belongs to the device, not to the bar, and a number baked in for "a
  * modern phone" is wrong on every phone that is not that one.
  *
- * 52 is the 44pt minimum touch target for the two controls plus 4 above and
- * below — comfortably tappable, still compact enough to read as native chrome
- * rather than a web header.
+ * 62, hairline included: the frozen reference's real top bar at these mobile
+ * viewports (Lovable `d4f60624`, measured under its 30 px prototype strip,
+ * which is not reproduced). Both 44pt controls fit with room above and below
+ * (Director #506 `5845751705`; it was 52).
  */
-export const MEMBER_TOP_BAR_BODY = 52;
+export const MEMBER_TOP_BAR_BODY = 62;
+
+/**
+ * The shell's ground and its rules, measured on the frozen reference: the top
+ * and bottom bars sit on the page's own warm white, not a darker cream, and
+ * each is edged by one cool hairline.
+ */
+export const MEMBER_SHELL_GROUND = '#FBFAF4';
+export const MEMBER_SHELL_RULE = '#D7DFE7';
 
 /**
  * The distance from the bar's hairline to the first pixel of page content,

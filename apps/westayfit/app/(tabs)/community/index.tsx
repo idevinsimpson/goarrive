@@ -6,10 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../../src/auth';
 import { mapWithLimit } from '../../../src/concurrency';
-import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { currentFirst, rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
 import { getFirebaseFunctions } from '../../../src/firebase';
-import { memberCountLabel, roleCardLabel } from '../../../src/labels';
-import { formatSinceShort } from '../../../src/ui/dates';
+import { memberCountLabel } from '../../../src/labels';
+import { formatPeriod, formatSinceShort } from '../../../src/ui/dates';
 import {
   ACTION_GREEN,
   CREAM,
@@ -26,10 +26,17 @@ import {
   display,
   elevation,
 } from '../../../src/ui/kit';
-import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
-import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../../src/ui/progressFormat';
+import {
+  fillRatio,
+  formatCount,
+  percentLabel,
+  totalOfTargetLabel,
+} from '../../../src/ui/progressFormat';
 import { peekGoals, peekMyCommunities, readGoals, readMyCommunities, wasRefused } from '../../../src/memberReads';
+import { CommunityParityView } from '../../../src/ui/CommunityParityView';
+import type { CommunityParityProps, ParityGoal } from '../../../src/ui/communityParityTypes';
+import { onPrivacySettled } from '../../../src/ui/CommunityPrivacyControls';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.
@@ -44,24 +51,22 @@ import { peekGoals, peekMyCommunities, readGoals, readMyCommunities, wasRefused 
  * and this screen asks rather than picking the first. Marking a row CURRENT by
  * convenience would be the interface inventing a fact.
  *
- * PRESENCE WITHOUT IDENTITIES. The recent-movement strip is amounts, units and
- * coarse times. `wsfGoalRecentAdditions` rebuilds every row from `amount` and
- * `at` alone, so a uid or a name cannot ride out of it even from a hand-edited
- * document — and it is readable on the MEMBER route, for every community a
- * member is active in, not only display-authorized ones. There are no photos,
- * no names of who moved, no reactions and no count of who is here, because
- * none of that exists: `memberCount` is a roll, not a presence.
+ * WHO IS HERE IS WHAT MEMBERS CHOSE TO SHOW. The roster is
+ * `wsfCommunityMembers`: the names of members whose "Show my name" is on, and
+ * -- only when that list is complete -- how many are here without a name. The
+ * recent-movement strip is amounts, units and coarse times; its callable
+ * rebuilds every row from `amount` and `at` alone, so no uid or name can ride
+ * out of it. There are no photos, reactions or rankings.
  *
  * ONE BAD READ MUST NOT EMPTY THE SCREEN. Goals are enriched per community,
  * bounded and in parallel, and each community's failure is its own. A member
  * whose third community will not load still sees the first two and still has
  * their way back into the one they were in.
  *
- * THERE IS NO JOIN CONTROL, and that is deliberate. `/join/[joinCode]` takes
- * the code from the route; nothing in the product accepts a typed one. A
- * "Join" button here would go nowhere, so joining is explained where it is
- * true — in words, in the empty state — and manual join-code entry is a
- * recorded product seam rather than a drawn button.
+ * JOIN GOES WHERE A CODE IS TAKEN. `/join/[joinCode]` takes the code from the
+ * route, and the one place a typed code is accepted is Home's list ("Join
+ * with a code", `/?view=communities`). The Join chip opens exactly that and
+ * is named for it.
  */
 
 /** At most this many community goal reads are in flight at once. */
@@ -76,6 +81,9 @@ type Membership = {
   displayName: string;
   memberCount: number;
   role: string;
+  /** Stored enums; the banner states them through the shared labels or not at all. */
+  groupType?: string;
+  joinPolicy?: string;
 };
 
 type Goal = {
@@ -85,7 +93,20 @@ type Goal = {
   unit: string;
   status: string;
   sharedTotal?: number;
+  startsAt?: string;
+  endsAt?: string;
+  timezone?: string;
 };
+
+/**
+ * The current community's roster, from `wsfCommunityMembers`: the members who
+ * chose to be named, and whether that list is the whole of them. The server
+ * applies each member's privacy choice; this screen never sees a private name.
+ */
+type Roster =
+  | { groupId: string; people: { displayName: string; role: string }[]; complete: boolean }
+  | { groupId: string; failed: true }
+  | 'pending';
 
 type Addition = { amount: number; unit: string; at: string };
 
@@ -100,7 +121,31 @@ type Enriched = Membership & { goals: Goal[] | 'failed' | 'pending' };
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; items: Enriched[]; currentId: string | null; momentum: Addition[] };
+  | { kind: 'ready'; items: Enriched[]; currentId: string | null; momentum: Addition[]; roster: Roster };
+
+/*
+  COMMUNITY-SETTINGS-PARITY-1. THE ROSTER, AS THE REFERENCE DRAWS IT LAST:
+  who is in the current community, by the names they chose to show.
+  `wsfCommunityMembers` applies every member's privacy choice server-side; a
+  failure says so rather than guessing a list. The answer carries the
+  community it was read for, so it can never be drawn under another
+  community's heading.
+*/
+async function readRoster(groupId: string): Promise<Roster> {
+  try {
+    const r = await httpsCallable<
+      { groupId: string },
+      { members: { displayName: string; role: string }[]; nextCursor: string | null }
+    >(getFirebaseFunctions(), 'wsfCommunityMembers')({ groupId });
+    return {
+      groupId,
+      people: Array.isArray(r.data?.members) ? r.data.members : [],
+      complete: (r.data?.nextCursor ?? null) === null,
+    };
+  } catch {
+    return { groupId, failed: true };
+  }
+}
 
 function activeGoals(goals: Goal[] | 'failed' | 'pending'): Goal[] {
   return goals === 'failed' || goals === 'pending' ? [] : goals.filter((g) => g.status === 'active');
@@ -133,6 +178,7 @@ function warmState(uid: string | null): State | null {
     items: enriched,
     currentId: resolveCurrentCommunity(uid, items.map((m) => m.groupId)),
     momentum: [],
+    roster: 'pending',
   };
 }
 
@@ -142,6 +188,22 @@ export default function CommunityIndexScreen() {
     () => (ready && user ? warmState(user.uid) : null) ?? { kind: 'loading' },
   );
   const [attempt, setAttempt] = useState(0);
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 3. WHICH COMMUNITY IS CURRENT IS RE-ASKED,
+    NOT REMEMBERED BY THIS SCREEN.
+
+    This tab stays mounted, and it used to decide CURRENT once, when it first
+    loaded. A member who then switched community -- from its own rows, from
+    Home's Switch, from a chip -- came back to a tab still naming the old one
+    as CURRENT and offering only it as the other row (measured on `91392f9d`
+    and after it). Now a chip, or any focus of this tab that finds the
+    remembered choice (`resolveCurrentCommunity`) has moved, re-renders the
+    tab around the member's actual choice: at once from what this account
+    already read (src/memberReads.ts), then from the fresh reads.
+  */
+  const [selection, setSelection] = useState(0);
+  const retrying = useRef(false);
+  const [announcement, setAnnouncement] = useState('');
   const safeArea = useSafeAreaInsets();
 
   /*
@@ -155,13 +217,25 @@ export default function CommunityIndexScreen() {
   // while a slow read is in flight must not let a stale answer land.
   const liveRef = useRef(0);
 
+  /*
+    WHO IS NAMED FOLLOWS THE CHOICE AS IT IS NOW (hardening addendum, #489
+    `5841405625`). A privacy change settled in Settings re-reads the current
+    community's roster, so a member who turns their name off is not still
+    listed by name when they come back to this tab. `rosterGen` makes that
+    re-read win over any older roster read still in flight.
+  */
+  const rosterGen = useRef(0);
+  const [rosterNonce, setRosterNonce] = useState(0);
+  useEffect(() => onPrivacySettled(() => setRosterNonce((n) => n + 1)), []);
+
   useEffect(() => {
     if (!ready || !user) return;
     const token = ++liveRef.current;
     const uid = user.uid;
     // A retry, or an account with nothing already read, starts from loading;
     // a warm first frame for THIS account stays up while the fresh reads run.
-    const warm = attempt === 0 ? warmState(uid) : null;
+    const warm = retrying.current ? null : warmState(uid);
+    retrying.current = false;
     setState(warm ?? { kind: 'loading' });
 
     (async () => {
@@ -177,7 +251,7 @@ export default function CommunityIndexScreen() {
 
       if (items.length === 0) {
         if (liveRef.current === token) {
-          setState({ kind: 'ready', items: [], currentId: null, momentum: [] });
+          setState({ kind: 'ready', items: [], currentId: null, momentum: [], roster: 'pending' });
         }
         return;
       }
@@ -201,10 +275,12 @@ export default function CommunityIndexScreen() {
         items.map((m) => m.groupId),
       );
 
-      let momentum: Addition[] = [];
       const current = currentId ? enriched.find((e) => e.groupId === currentId) : undefined;
       const open = current ? activeGoals(current.goals).slice(0, MOMENTUM_GOAL_LIMIT) : [];
-      if (open.length > 0) {
+
+      // Recent movement and the roster are independent reads: side by side.
+      const readMomentum = async (): Promise<Addition[]> => {
+        if (open.length === 0) return [];
         const recent = httpsCallable<{ goalId: string }, { additions: Addition[] }>(
           fns,
           'wsfGoalRecentAdditions',
@@ -213,52 +289,102 @@ export default function CommunityIndexScreen() {
           const r = await recent({ goalId: g.goalId });
           return Array.isArray(r.data?.additions) ? r.data.additions : [];
         });
-        momentum = reads
-          .flatMap((r) => (r.ok ? r.value : []))
-          .filter((a) => typeof a.amount === 'number' && typeof a.at === 'string')
-          // Merged on the real instant, never on the order the reads returned:
-          // two goals' tails interleave in time and stitching them end to end
-          // would present a false sequence.
-          .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-          .slice(0, MOMENTUM_ROWS);
-      }
+        return (
+          reads
+            .flatMap((r) => (r.ok ? r.value : []))
+            .filter((a) => typeof a.amount === 'number' && typeof a.at === 'string')
+            // Merged on the real instant, never on the order the reads returned:
+            // two goals' tails interleave in time and stitching them end to end
+            // would present a false sequence.
+            .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+            .slice(0, MOMENTUM_ROWS)
+        );
+      };
+
+      const rosterIssued = rosterGen.current;
+      const readCurrentRoster = async (): Promise<Roster> => (current ? readRoster(current.groupId) : 'pending');
+
+      const [momentum, fetched] = await Promise.all([
+        readMomentum().catch(() => [] as Addition[]),
+        readCurrentRoster(),
+      ]);
 
       if (liveRef.current === token) {
-        setState({ kind: 'ready', items: enriched, currentId, momentum });
+        setState((prev) => {
+          // A roster re-read after a privacy change is newer than this one.
+          const roster =
+            rosterGen.current !== rosterIssued &&
+            prev.kind === 'ready' &&
+            prev.roster !== 'pending' &&
+            fetched !== 'pending' &&
+            prev.roster.groupId === fetched.groupId
+              ? prev.roster
+              : fetched;
+          return { kind: 'ready', items: enriched, currentId, momentum, roster };
+        });
       }
     })();
 
     return () => {
       liveRef.current += 1;
     };
-  }, [ready, user, attempt]);
+  }, [ready, user, attempt, selection]);
 
-  /*
-    PERF-MOBILE-1 H4b (Director #494 `5841923744`). This tab stays mounted.
-    A community this account has since been refused (proved by Community
-    Home's membership re-check, or by any other fresh refusal) leaves it as
-    soon as the tab is looked at again -- its name, goal and figures are not
-    shown as if access still existed. Nothing is fetched to do it.
-  */
+  // Back on this tab: if the member's current community moved while they
+  // were elsewhere, the tab follows it.
+  const currentIdNow = state.kind === 'ready' ? state.currentId : null;
+
+  // The re-read a settled privacy change asks for: the roster only.
+  useEffect(() => {
+    if (rosterNonce === 0 || !currentIdNow) return;
+    const gen = ++rosterGen.current;
+    const groupId = currentIdNow;
+    void readRoster(groupId).then((roster) => {
+      if (rosterGen.current !== gen) return;
+      setState((prev) => (prev.kind === 'ready' && prev.currentId === groupId ? { ...prev, roster } : prev));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rosterNonce]);
+
   const idsNow = state.kind === 'ready' ? state.items.map((i) => i.groupId).join(',') : '';
   useFocusEffect(
     useCallback(() => {
       if (!user || !idsNow) return;
+      /*
+        PERF-MOBILE-1 H4b (Director #494 `5841923744`; integrated `14ce1907`).
+        A community this account has since been refused leaves the mounted
+        tab as soon as it is looked at again, with no read.
+      */
       const refused = idsNow.split(',').filter((id) => wasRefused(user.uid, id));
-      if (refused.length === 0) return;
-      setState((prev) => {
-        if (prev.kind !== 'ready') return prev;
-        const items = prev.items.filter((i) => !refused.includes(i.groupId));
-        const currentId =
-          prev.currentId && refused.includes(prev.currentId)
-            ? resolveCurrentCommunity(
-                user.uid,
-                items.map((i) => i.groupId),
-              )
-            : prev.currentId;
-        return { ...prev, items, currentId, momentum: currentId === prev.currentId ? prev.momentum : [] };
-      });
-    }, [user, idsNow]),
+      if (refused.length > 0) {
+        setState((prev) => {
+          if (prev.kind !== 'ready') return prev;
+          const items = prev.items.filter((i) => !refused.includes(i.groupId));
+          const currentId =
+            prev.currentId && refused.includes(prev.currentId)
+              ? resolveCurrentCommunity(
+                  user.uid,
+                  items.map((i) => i.groupId),
+                )
+              : prev.currentId;
+          return { ...prev, items, currentId, momentum: currentId === prev.currentId ? prev.momentum : [] };
+        });
+        return;
+      }
+      const chosen = resolveCurrentCommunity(user.uid, idsNow.split(','));
+      if (chosen && chosen !== currentIdNow) setSelection((n) => n + 1);
+    }, [user, idsNow, currentIdNow]),
+  );
+
+  /** A chip: the member's choice, in place, said out loud. */
+  const select = useCallback(
+    (groupId: string, name: string) => {
+      if (!user || groupId === currentIdNow) return;
+      rememberCurrentCommunity(user.uid, groupId);
+      setAnnouncement(`Now showing ${name}.`);
+      setSelection((n) => n + 1);
+    },
+    [user, currentIdNow],
   );
 
   /** Choosing or switching: remember it, then open that community's Home. */
@@ -278,9 +404,11 @@ export default function CommunityIndexScreen() {
             page and gave the member two different Home gestures -- and this
             one navigated INTO the tab tree from inside it, which pushed a new
             community screen instead of returning to the mounted one. */}
-      <Text style={[display.md, styles.pageTitle]} testID="wsf-community-index-title">
-        Community
-      </Text>
+      {state.kind === 'ready' && state.currentId && ready && user ? null : (
+        <Text style={[display.md, styles.pageTitle]} testID="wsf-community-index-title">
+          Community
+        </Text>
+      )}
 
       {!ready || !user ? (
         <Text style={styles.note} testID="wsf-community-index-signed-out">
@@ -289,14 +417,65 @@ export default function CommunityIndexScreen() {
       ) : state.kind === 'loading' ? (
         <LoadingBody />
       ) : state.kind === 'error' ? (
-        <FailureBody onRetry={() => setAttempt((n) => n + 1)} />
+        <FailureBody
+          onRetry={() => {
+            retrying.current = true;
+            setAttempt((n) => n + 1);
+          }}
+        />
       ) : state.items.length === 0 ? (
         <EmptyBody />
       ) : (
-        <ReadyBody state={state} onOpen={open} />
+        <>
+          <Chips state={state} onSelect={select} />
+          <ReadyBody state={state} onOpen={open} />
+        </>
       )}
     </View>
   );
+
+  const announce = (
+    <Text
+      style={styles.visuallyHidden}
+      testID="wsf-community-index-announce"
+      {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+    >
+      {announcement}
+    </Text>
+  );
+
+  /*
+    COMMUNITY-SETTINGS-PARITY-1 (Director #497 `5841956174`). The current
+    community is drawn by W4's accepted `CommunityParityView`; this route only
+    resolves its reads into the view's props (`toParityProps`) and keeps the
+    canonical capability the reference does not draw -- rows that open another
+    community's Home, and recent movement -- in the view's footer, after the
+    core. The view scrolls itself.
+  */
+  if (ready && user && state.kind === 'ready' && state.currentId && state.items.some((i) => i.groupId === state.currentId)) {
+    const ready_ = state;
+    return (
+      <View style={styles.scroll} testID="wsf-community-index">
+        <CommunityParityView
+          {...toParityProps(ready_, {
+            onSelectCommunity: (groupId) => {
+              const item = ready_.items.find((i) => i.groupId === groupId);
+              if (item) select(groupId, item.displayName);
+            },
+            onJoin: () => router.push('/?view=communities' as never),
+            onStart: () => router.push('/start-community' as never),
+            onRetryGoals: () => setAttempt((n) => n + 1),
+            onRetryHistory: () => setAttempt((n) => n + 1),
+            onRetryRoster: () => setRosterNonce((n) => n + 1),
+            onShowMoreMembers: () => router.push(`/community/${ready_.currentId}/members` as never),
+          })}
+          footer={<SecondaryFooter state={ready_} onOpen={open} />}
+          testID="wsf-community-index-rows"
+        />
+        {announce}
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -305,6 +484,8 @@ export default function CommunityIndexScreen() {
       testID="wsf-community-index"
     >
       {body}
+      {/* The chip's announcement: polite, and not a visible line of copy. */}
+      {announce}
     </ScrollView>
   );
 }
@@ -431,8 +612,95 @@ function EmptyBody() {
   );
 }
 
-/* ── ready ───────────────────────────────────────────────────────────────── */
+/* ── your communities ───────────────────────────────────────────────────── */
 
+/**
+ * THE REFERENCE'S SWITCHER (Lovable `a15a610e`, screens/community.tsx): one
+ * chip per community this account belongs to, the current one filled and
+ * checked and pressed; pressing another selects it here, in place.
+ *
+ * Since COMMUNITY-SETTINGS-PARITY-1 the row always shows, as the reference
+ * draws it: every joined community, then Join and Start -- so a member of one
+ * community still sees where more come from.
+ */
+function Chips({
+  state,
+  onSelect,
+}: {
+  state: Extract<State, { kind: 'ready' }>;
+  onSelect: (groupId: string, name: string) => void;
+}) {
+  return (
+    <View style={styles.chipsBlock} testID="wsf-community-index-chips">
+      <Text style={styles.eyebrow} {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}>
+        YOUR COMMUNITIES
+      </Text>
+      <View style={styles.chipsRow}>
+        {state.items.map((item) => {
+          const on = item.groupId === state.currentId;
+          return (
+            <Pressable
+              key={item.groupId}
+              onPress={() => onSelect(item.groupId, item.displayName)}
+              accessibilityRole="button"
+              accessibilityLabel={on ? `${item.displayName}, current` : `Show ${item.displayName}`}
+              accessibilityState={{ selected: on }}
+              {...({ 'aria-pressed': on } as Record<string, unknown>)}
+              style={[styles.switchChip, on ? styles.switchChipOn : null]}
+              testID={`wsf-community-index-chip-${item.groupId}`}
+            >
+              {on ? <Text style={[styles.switchChipText, styles.switchChipTextOn]}>✓ </Text> : null}
+              <Text
+                style={[styles.switchChipText, on ? styles.switchChipTextOn : null]}
+                numberOfLines={1}
+              >
+                {item.displayName}
+              </Text>
+            </Pressable>
+          );
+        })}
+        {/*
+          JOIN AND START, as the reference's dashed chips. Join opens the one
+          place this product takes a join code today (Home's list, with its
+          "Join with a code" field), and is named for exactly that; Start
+          opens community creation. Both are real destinations.
+        */}
+        <Pressable
+          onPress={() => router.push('/?view=communities' as never)}
+          accessibilityRole="link"
+          accessibilityLabel="Join with a code"
+          style={[styles.switchChip, styles.switchChipGhost]}
+          testID="wsf-community-index-join"
+        >
+          <Text style={styles.switchChipIcon} aria-hidden>
+            +
+          </Text>
+          <Text style={[styles.switchChipText, styles.switchChipTextGhost]}>Join</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/start-community' as never)}
+          accessibilityRole="link"
+          accessibilityLabel="Start a community"
+          style={[styles.switchChip, styles.switchChipGhost]}
+          testID="wsf-community-index-start"
+        >
+          <Text style={styles.switchChipIcon} aria-hidden>
+            +
+          </Text>
+          <Text style={[styles.switchChipText, styles.switchChipTextGhost]}>Start</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/* ── several memberships, none chosen ────────────────────────────────────── */
+
+/**
+ * SEVERAL MEMBERSHIPS AND NONE CHOSEN. `resolveCurrentCommunity()` returned
+ * null, so the screen asks instead of picking. Every row is an equal choice
+ * and says so.
+ */
 function ReadyBody({
   state,
   onOpen,
@@ -440,139 +708,136 @@ function ReadyBody({
   state: Extract<State, { kind: 'ready' }>;
   onOpen: (groupId: string) => void;
 }) {
-  const current = state.currentId
-    ? state.items.find((i) => i.groupId === state.currentId)
-    : undefined;
-  const others = state.items.filter((i) => i.groupId !== current?.groupId);
-
   return (
     <View style={styles.stateWrap} testID="wsf-community-index-rows">
-      {current ? (
-        <CurrentPanel item={current} momentum={state.momentum} />
-      ) : (
-        /*
-          SEVERAL MEMBERSHIPS AND NONE CHOSEN. `resolveCurrentCommunity()`
-          returned null, so the screen asks instead of picking. Every row is an
-          equal choice and says so.
-        */
-        <View style={styles.choosePanel} testID="wsf-community-index-choose">
-          <Text style={styles.chooseTitle}>Choose which community Home opens</Text>
-          <Text style={styles.chooseBody}>
-            You are in {state.items.length} communities and have not opened one yet. Pick one — you
-            can switch whenever you like.
-          </Text>
-        </View>
-      )}
-
-      {others.length > 0 ? (
-        <View style={styles.others}>
-          {current ? <Text style={styles.eyebrow}>ALSO YOURS</Text> : null}
-          {others.map((item) => (
-            <OtherRow
-              key={item.groupId}
-              item={item}
-              cue={current ? 'Switch' : 'Choose'}
-              onPress={() => onOpen(item.groupId)}
-            />
-          ))}
-        </View>
-      ) : null}
-
-      <View style={styles.actionRow}>
-        <Pill
-          label="Start a community"
-          testID="wsf-community-index-start"
-          onPress={() => router.replace('/start-community')}
-        />
+      <View style={styles.choosePanel} testID="wsf-community-index-choose">
+        <Text style={styles.chooseTitle}>Choose which community Home opens</Text>
+        <Text style={styles.chooseBody}>
+          You are in {state.items.length} communities and have not opened one yet. Pick one — you
+          can switch whenever you like.
+        </Text>
+      </View>
+      <View style={styles.others}>
+        {state.items.map((item) => (
+          <OtherRow key={item.groupId} item={item} cue="Choose" onPress={() => onOpen(item.groupId)} />
+        ))}
       </View>
     </View>
   );
 }
 
-function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[] }) {
-  const open = activeGoals(item.goals);
-  const lead = open[0];
-  const role = roleCardLabel(item.role);
+/* ── the current community: W4's pure view, fed by this route's reads ───── */
 
+/** "Sep 1 – 30", in the goal's own zone; null when it cannot be said. */
+function periodOf(g: Goal): string | null {
+  return g.startsAt && g.endsAt ? formatPeriod(g.startsAt, g.endsAt, { timeZone: g.timezone ?? null }) : null;
+}
+
+/** A listed goal as the view's `ParityGoal`. No confirmed total is `failed`, never 0. */
+function toParityGoal(g: Goal): ParityGoal {
+  return {
+    goalId: g.goalId,
+    title: g.title,
+    unit: g.unit,
+    target: g.target,
+    total: typeof g.sharedTotal === 'number' ? { state: 'confirmed', value: g.sharedTotal } : { state: 'failed' },
+    status: g.status === 'closed' ? 'closed' : 'active',
+    windowLabel: periodOf(g),
+  };
+}
+
+type ParityCallbacks = Pick<
+  CommunityParityProps,
+  | 'onSelectCommunity'
+  | 'onJoin'
+  | 'onStart'
+  | 'onRetryGoals'
+  | 'onRetryHistory'
+  | 'onRetryRoster'
+  | 'onShowMoreMembers'
+>;
+
+/**
+ * THE ADAPTER (Director #497 `5841956174`: route state in, pure view out).
+ * Every read that has not answered is `loading`, every one that failed is
+ * `failed`; nothing unknown becomes a zero or an empty list here.
+ */
+function toParityProps(state: Extract<State, { kind: 'ready' }>, callbacks: ParityCallbacks): CommunityParityProps {
+  const current = state.items.find((i) => i.groupId === state.currentId)!;
+  const goals = current.goals;
+  const open = goals === 'pending' || goals === 'failed' ? [] : activeGoals(goals).map(toParityGoal);
+  // Newest first, on the same rule as Community Home's history.
+  const closed =
+    goals === 'pending' || goals === 'failed'
+      ? []
+      : goals
+          .filter((g) => g.status === 'closed')
+          .sort((a, b) =>
+            (a.endsAt ?? '') === (b.endsAt ?? '')
+              ? a.goalId.localeCompare(b.goalId)
+              : (b.endsAt ?? '').localeCompare(a.endsAt ?? ''),
+          )
+          .map(toParityGoal);
+  const roster = state.roster !== 'pending' && state.roster.groupId === current.groupId ? state.roster : null;
+  return {
+    groupId: current.groupId,
+    displayName: current.displayName,
+    groupType: current.groupType ?? null,
+    joinPolicy: current.joinPolicy ?? null,
+    memberCount: typeof current.memberCount === 'number' ? current.memberCount : null,
+    role: typeof current.role === 'string' ? current.role : null,
+    communities: {
+      state: 'loaded',
+      value: currentFirst(state.items, current.groupId).map((i) => ({ groupId: i.groupId, displayName: i.displayName })),
+    },
+    goals:
+      goals === 'pending'
+        ? { state: 'loading' }
+        : goals === 'failed'
+          ? { state: 'failed' }
+          : { state: 'loaded', value: { featured: open[0] ?? null, otherOpen: open.slice(1) } },
+    history:
+      goals === 'pending' ? { state: 'loading' } : goals === 'failed' ? { state: 'failed' } : { state: 'loaded', value: closed },
+    roster:
+      roster === null
+        ? { state: 'loading' }
+        : 'failed' in roster
+          ? { state: 'failed' }
+          : {
+              state: 'loaded',
+              value: {
+                named: roster.people.map((p, i) => ({ key: `${i}`, displayName: p.displayName, role: p.role ?? null })),
+                complete: roster.complete,
+              },
+            },
+    ...callbacks,
+  };
+}
+
+/**
+ * What this route draws beyond the reference, after it (capability map #489
+ * `5841270180`): the rows that open another community's Home, then recent
+ * movement.
+ */
+function SecondaryFooter({
+  state,
+  onOpen,
+}: {
+  state: Extract<State, { kind: 'ready' }>;
+  onOpen: (groupId: string) => void;
+}) {
+  const others = state.items.filter((i) => i.groupId !== state.currentId);
   return (
-    <View style={styles.currentPanel} testID="wsf-community-index-current">
-      <View style={styles.currentTop}>
-        <Text style={styles.currentPill}>CURRENT</Text>
-        {role ? <Text style={styles.rolePill}>{role}</Text> : null}
-      </View>
-      <Text style={[display.lg, styles.currentName]} numberOfLines={2}>
-        {item.displayName}
-      </Text>
-      <Text style={styles.currentMeta} testID="wsf-community-index-member-count">
-        {memberCountLabel(item.memberCount)}
-      </Text>
-
-      <View style={styles.currentRule} />
-
-      <Text style={styles.eyebrowDark}>WHAT WE&apos;RE DOING</Text>
-      {item.goals === 'pending' ? (
-        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-pending">
-          Reading progress…
-        </Text>
-      ) : item.goals === 'failed' ? (
-        /*
-          THIS COMMUNITY'S READ FAILED, and only this one. Saying so where the
-          progress would have been is the honest answer; blanking the screen or
-          showing a zero would both be worse, and a zero would be a lie.
-        */
-        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-unavailable">
-          Progress could not be loaded just now.
-        </Text>
-      ) : !lead ? (
-        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-nogoal">
-          No goal running yet.
-        </Text>
-      ) : (
-        <View style={styles.currentGoalRow}>
-          {/* The one Living WE on this screen, beside a real shared total. */}
-          <LivingWeProgress
-            completed={lead.sharedTotal ?? 0}
-            target={lead.target}
-            unit={lead.unit}
-            width={74}
-            surface="dark"
-            testID="wsf-community-index-we"
-          />
-          <View style={styles.currentGoalText}>
-            <Text style={styles.currentGoalTitle} numberOfLines={1}>
-              {lead.title}
-            </Text>
-            <Text style={styles.currentGoalTotal}>
-              {typeof lead.sharedTotal === 'number'
-                ? totalOfTargetLabel(lead.sharedTotal, lead.target, lead.unit)
-                : `Target ${formatCount(lead.target)} ${lead.unit}`}
-            </Text>
-            {typeof lead.sharedTotal === 'number' ? (
-              <>
-                <Track total={lead.sharedTotal} target={lead.target} dark />
-                <Text style={styles.currentGoalPct}>
-                  {percentLabel(lead.sharedTotal, lead.target)}
-                </Text>
-              </>
-            ) : null}
-          </View>
-        </View>
-      )}
-
-      {open.length > 1 ? (
-        <View style={styles.currentSecond}>
-          <Text style={styles.currentSecondTitle} numberOfLines={1}>
-            {open[1]!.title}
-          </Text>
-          {typeof open[1]!.sharedTotal === 'number' ? (
-            <Text style={styles.currentSecondPct}>
-              {percentLabel(open[1]!.sharedTotal!, open[1]!.target)}
-            </Text>
-          ) : null}
+    <View style={styles.footer}>
+      {others.length > 0 ? (
+        <View style={styles.others}>
+          <Text style={styles.eyebrow}>OPEN ANOTHER COMMUNITY</Text>
+          {others.map((item) => (
+            <OtherRow key={item.groupId} item={item} cue="Switch" onPress={() => onOpen(item.groupId)} />
+          ))}
         </View>
       ) : null}
-
-      {momentum.length > 0 ? <Momentum rows={momentum} /> : null}
+      {state.momentum.length > 0 ? <Momentum rows={state.momentum} /> : null}
     </View>
   );
 }
@@ -581,7 +846,7 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
 function Momentum({ rows }: { rows: Addition[] }) {
   return (
     <View style={styles.momentum} testID="wsf-community-index-momentum">
-      <Text style={styles.eyebrowDark}>RECENT MOVEMENT</Text>
+      <Text style={styles.eyebrow}>Recent movement</Text>
       <View style={styles.momentumRows}>
         {rows.map((r, i) => {
           const since = formatSinceShort(r.at);
@@ -694,54 +959,9 @@ const styles = StyleSheet.create({
   note: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   stateWrap: { gap: 14 },
 
-  eyebrow: { color: '#2F7D4F', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
-  eyebrowDark: { color: PROGRESS_GREEN, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
+  eyebrow: { color: '#2F7D4F', fontSize: 11, lineHeight: 15, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase' },
 
-  currentPanel: { backgroundColor: NAVY, borderRadius: 22, padding: 18, gap: 8, ...elevation.card },
-  currentTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  currentPill: {
-    color: '#04260F',
-    backgroundColor: PROGRESS_GREEN,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  rolePill: {
-    color: ON_NAVY_MUTED,
-    borderColor: ON_NAVY_RULE,
-    borderWidth: 1,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  currentName: { color: ON_NAVY },
-  currentMeta: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
-  currentRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 4 },
-  currentUnavailable: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
-  currentGoalRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  currentGoalText: { flex: 1, gap: 3 },
-  currentGoalTitle: { color: ON_NAVY, fontSize: 15, lineHeight: 20, fontWeight: '800' },
-  currentGoalTotal: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
-  currentGoalPct: { color: PROGRESS_GREEN, fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  currentSecond: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: ON_NAVY_RULE,
-    paddingTop: 8,
-    gap: 10,
-  },
-  currentSecondTitle: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18, flex: 1 },
-  currentSecondPct: { color: PROGRESS_GREEN, fontSize: 12, fontWeight: '800' },
+  footer: { paddingTop: 32, gap: 32 },
 
   choosePanel: { gap: 4 },
   chooseTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '900' },
@@ -771,21 +991,23 @@ const styles = StyleSheet.create({
   },
   cueText: { color: INK_QUIET, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
 
-  momentum: { gap: 7, paddingTop: 4 },
+  momentum: { gap: 7 },
   momentumRows: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 5,
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  chipAmount: { color: PROGRESS_GREEN, fontSize: 13, fontWeight: '900' },
-  chipUnit: { color: ON_NAVY, fontSize: 11, fontWeight: '700' },
-  chipAgo: { color: ON_NAVY_MUTED, fontSize: 11 },
-  momentumNote: { color: ON_NAVY_MUTED, fontSize: 11, lineHeight: 15 },
+  chipAmount: { color: '#2B6E37', fontSize: 13, fontWeight: '900' },
+  chipUnit: { color: NAVY, fontSize: 11, fontWeight: '700' },
+  chipAgo: { color: TEXT_MUTED, fontSize: 11 },
+  momentumNote: { color: TEXT_MUTED, fontSize: 11, lineHeight: 15 },
 
   emptyPanel: { backgroundColor: NAVY, borderRadius: 22, padding: 20, gap: 10, ...elevation.card },
   emptyTitle: { color: ON_NAVY },
@@ -857,6 +1079,28 @@ const styles = StyleSheet.create({
   primaryText: { color: ON_ACTION, fontSize: 15, fontWeight: '900' },
 
   actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', paddingTop: 2 },
+  chipsBlock: { gap: 8 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  /* The reference's .switch-chip: 44 px tall, 22 px round, 1.5 px rule. */
+  switchChip: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: '#D7DFE7',
+    backgroundColor: '#FFFFFF',
+    maxWidth: '100%',
+  },
+  switchChipOn: { borderColor: NAVY, backgroundColor: NAVY },
+  switchChipText: { color: NAVY, fontSize: 13, fontWeight: '800', flexShrink: 1 },
+  switchChipTextOn: { color: '#FFFFFF' },
+  /* .switch-chip.ghost: a dashed rule and the action green's text. */
+  switchChipGhost: { borderStyle: 'dashed', borderColor: '#C9D3DD' },
+  switchChipTextGhost: { color: '#2F7D4F' },
+  switchChipIcon: { color: '#2F7D4F', fontSize: 15, lineHeight: 17, fontWeight: '800', marginRight: 6 },
+  visuallyHidden: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   pill: {
     borderWidth: 1.5,
     borderColor: '#C9C5BC',

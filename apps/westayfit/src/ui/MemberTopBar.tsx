@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CARD_BORDER, CREAM, HAIRLINE, INK_QUIET, NAVY, TEXT_MUTED } from './kit';
-import { MEMBER_TOP_BAR_BODY } from './memberShellMetrics';
+import { CARD_BORDER, CREAM, INK_QUIET, NAVY, TEXT_MUTED } from './kit';
+import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE, MEMBER_TOP_BAR_BODY } from './memberShellMetrics';
 import { WsfWordmark } from './WsfWordmark';
 
 /**
@@ -111,7 +111,7 @@ export function MemberTopBar({
           accessibilityLabel="We Stay Fit, go Home"
           testID="wsf-member-topbar-wordmark-home"
         >
-          <WsfWordmark variant="navy" height={22} testID="wsf-member-topbar-wordmark" />
+          <WsfWordmark variant="navy" height={24} testID="wsf-member-topbar-wordmark" />
         </Pressable>
 
         <Pressable
@@ -169,21 +169,25 @@ export function MemberTopBar({
 }
 
 const styles = StyleSheet.create({
-  wrap: { backgroundColor: CREAM },
+  wrap: { backgroundColor: MEMBER_SHELL_GROUND },
+  /* The frozen reference's bar: 62 with its hairline, the 24-high wordmark's
+     top 20 under the bar's top edge and the menu glyph centred on the same
+     line -- so the content box starts 3 lower than a plain centre. */
   bar: {
     height: MEMBER_TOP_BAR_BODY,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
+    paddingTop: 3,
     borderBottomWidth: 1,
-    borderBottomColor: HAIRLINE,
+    borderBottomColor: MEMBER_SHELL_RULE,
   },
-  // 44 is the minimum target; the bar is 52, so both controls are centred in
-  // it with 4 to spare and the bar's height does not depend on either.
+  // 44 is the minimum target; the bar is 62, so both controls are centred in
+  // it with room to spare and the bar's height does not depend on either.
   //
   // THE WORDMARK IS THE SIDE THAT GIVES. At 200% text zoom the usable width
-  // halves to ~195 px, and the artwork's natural width at height 22 does not
+  // halves to ~195 px, and the artwork's natural width at height 24 does not
   // fit beside a 44 px control. `WsfWordmark` already carries `maxWidth: 100%`,
   // but that resolves against THIS box, so without a shrink here the row kept
   // its natural width and pushed the menu button off the right edge — the
@@ -197,8 +201,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  burger: { width: 20, gap: 4 },
-  burgerRule: { height: 2, borderRadius: 1, backgroundColor: NAVY },
+  // The reference's glyph: three 3 px rules, 21 wide, on an 8 px pitch.
+  burger: { width: 21, gap: 5 },
+  burgerRule: { height: 3, borderRadius: 1.5, backgroundColor: NAVY },
   sheet: {
     position: 'absolute',
     top: MEMBER_TOP_BAR_BODY,

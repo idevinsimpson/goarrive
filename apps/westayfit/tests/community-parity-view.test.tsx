@@ -253,9 +253,9 @@ describe('the view — the reference hierarchy', () => {
     expect(text('wsf-parity-name')).toBe('Oak Grove Together');
     expect(text('wsf-parity-banner-eyebrow')).toBe('FAMILY AND FRIENDS');
     expect(text('wsf-parity-descriptor')).toBe('Private community');
-    expect(text('wsf-parity-fact-members')).toBe('MEMBERS23');
-    expect(text('wsf-parity-fact-role')).toBe('YOUR ROLEMember');
-    expect(text('wsf-parity-fact-goals')).toBe('GOALS3');
+    expect(text('wsf-parity-fact-members')).toBe('Members23');
+    expect(text('wsf-parity-fact-role')).toBe('Your roleMember');
+    expect(text('wsf-parity-fact-goals')).toBe('Goals3');
     expect(text('wsf-parity-period-title')).toBe('500 squats together');
     expect(text('wsf-parity-period-status')).toBe('OPEN');
     expect(text('wsf-parity-total')).toBe('241');
@@ -270,9 +270,9 @@ describe('the view — the reference hierarchy', () => {
 
   it('shows a fact whose read failed as not known — never zero, never a fabricated count', () => {
     const p = render(props({ memberCount: null, role: null, goals: { state: 'failed' } }));
-    expect(text('wsf-parity-fact-members')).toBe('MEMBERS—');
-    expect(text('wsf-parity-fact-role')).toBe('YOUR ROLE—');
-    expect(text('wsf-parity-fact-goals')).toBe('GOALS—');
+    expect(text('wsf-parity-fact-members')).toBe('Members—');
+    expect(text('wsf-parity-fact-role')).toBe('Your role—');
+    expect(text('wsf-parity-fact-goals')).toBe('Goals—');
     expect(text('wsf-parity-roster-count')).toBe('Members');
     expect(byId('wsf-parity-goals-failed')).not.toBeNull();
     expect(byId('wsf-parity-living-we')).toBeNull();
@@ -285,19 +285,19 @@ describe('the view — the reference hierarchy', () => {
     const complete = { state: 'loaded' as const, value: { named: NAMED, complete: true } };
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -3, 2.5]) {
       render(props({ memberCount: bad, roster: complete }));
-      expect(text('wsf-parity-fact-members'), String(bad)).toBe('MEMBERS—');
+      expect(text('wsf-parity-fact-members'), String(bad)).toBe('Members—');
       expect(text('wsf-parity-roster-count'), String(bad)).toBe('Members');
       expect(byId('wsf-parity-anonymous'), String(bad)).toBeNull();
       expect(container.textContent, String(bad)).not.toMatch(/NaN|Infinity|-\d/);
     }
     // Controls: a known count renders as itself, and a known zero is a real zero.
     render(props({ memberCount: 23, roster: complete }));
-    expect(text('wsf-parity-fact-members')).toBe('MEMBERS23');
+    expect(text('wsf-parity-fact-members')).toBe('Members23');
     expect(text('wsf-parity-roster-count')).toBe('23 people');
     expect(text('wsf-parity-anonymous')).toContain('21 members shown without names');
     for (const zero of [0, -0]) {
       render(props({ memberCount: zero, roster: { state: 'loaded', value: { named: [], complete: true } } }));
-      expect(text('wsf-parity-fact-members'), String(zero)).toBe('MEMBERS0');
+      expect(text('wsf-parity-fact-members'), String(zero)).toBe('Members0');
       expect(text('wsf-parity-roster-count'), String(zero)).toBe('0 people');
     }
   });
@@ -330,7 +330,7 @@ describe('the view — the reference hierarchy', () => {
     expect(byId('wsf-parity-history-failed')).not.toBeNull();
     expect(byId('wsf-parity-history-empty')).toBeNull();
     expect(text('wsf-parity-history')).not.toContain('No past goals');
-    expect(text('wsf-parity-fact-goals')).toBe('GOALS—');
+    expect(text('wsf-parity-fact-goals')).toBe('Goals—');
     click('wsf-parity-history-failed-retry');
     expect(p.onRetryHistory).toHaveBeenCalledTimes(1);
   });
@@ -338,7 +338,7 @@ describe('the view — the reference hierarchy', () => {
   it('renders no history rows, and no goal count, when history is not part of the read', () => {
     render(props({ history: { state: 'unavailable' } }));
     expect(byId('wsf-parity-history')).toBeNull();
-    expect(text('wsf-parity-fact-goals')).toBe('GOALS—');
+    expect(text('wsf-parity-fact-goals')).toBe('Goals—');
   });
 
   it('says there is no active goal, with the Champion or member next step', () => {
@@ -359,7 +359,7 @@ describe('the view — the reference hierarchy', () => {
     expect(byId('wsf-parity-also-open')?.getAttribute('aria-label')).toBe('Also open');
     expect(text('wsf-parity-also-open-g2')).toContain('155 of 150 squats');
     expect(text('wsf-parity-also-open-g2')).toContain('REACHED · STILL OPEN');
-    expect(text('wsf-parity-fact-goals')).toBe('GOALS4');
+    expect(text('wsf-parity-fact-goals')).toBe('Goals4');
   });
 
   it('never draws Living WE or a number for a total that cannot be confirmed', () => {

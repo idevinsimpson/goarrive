@@ -63,3 +63,16 @@ export function resolveCurrentCommunity(
   if (memberOf.length === 1) return memberOf[0];
   return null;
 }
+
+/**
+ * The member's communities as they are PRESENTED: the current one first, then
+ * the rest in the order they came (the server's), so the member's context is
+ * the first thing each list says (Director #506 `5845751705`). Presentation
+ * only: nothing is re-sorted at the source, and an unknown or missing current
+ * id leaves the order exactly as it was.
+ */
+export function currentFirst<T extends { groupId: string }>(items: readonly T[], currentId: string | null | undefined): T[] {
+  const i = currentId ? items.findIndex((c) => c.groupId === currentId) : -1;
+  if (i <= 0) return [...items];
+  return [items[i]!, ...items.slice(0, i), ...items.slice(i + 1)];
+}

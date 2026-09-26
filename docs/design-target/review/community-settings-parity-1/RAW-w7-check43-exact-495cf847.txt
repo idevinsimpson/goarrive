@@ -1,0 +1,180 @@
+
+Running 7 tests using 1 worker
+
+[1/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (refused) — is the error still shown once the switch rests on the stored value?
+  1) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (refused) — is the error still shown once the switch rests on the stored value? 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="wsf-privacy-name-w7c43a-mui0xfww-18b11curefu"]').first()
+    Expected: visible
+    Timeout: 40000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 40000ms
+      - waiting for locator('[data-testid="wsf-privacy-name-w7c43a-mui0xfww-18b11curefu"]').first()
+
+
+      257 | async function openPrivacy(page: Page, fx: Fx): Promise<void> {
+      258 |   await page.goto('/settings/privacy');
+    > 259 |   await expect(sw(page, 'name', fx.a)).toBeVisible({ timeout: 40_000 });
+          |                                        ^
+      260 |   await expect(sw(page, 'name', fx.b)).toBeVisible({ timeout: 40_000 });
+      261 |   await page.waitForTimeout(600);
+      262 | }
+        at openPrivacy (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:259:40)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:315:7
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-84de9--rests-on-the-stored-value--chromium/error-context.md
+
+
+[2/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (lost) — is the error still shown once the switch rests on the stored value?
+  2) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (lost) — is the error still shown once the switch rests on the stored value? 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="wsf-privacy-name-w7c43a-mui0ycbk-04d791ulost"]').first()
+    Expected: visible
+    Timeout: 40000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 40000ms
+      - waiting for locator('[data-testid="wsf-privacy-name-w7c43a-mui0ycbk-04d791ulost"]').first()
+
+
+      257 | async function openPrivacy(page: Page, fx: Fx): Promise<void> {
+      258 |   await page.goto('/settings/privacy');
+    > 259 |   await expect(sw(page, 'name', fx.a)).toBeVisible({ timeout: 40_000 });
+          |                                        ^
+      260 |   await expect(sw(page, 'name', fx.b)).toBeVisible({ timeout: 40_000 });
+      261 |   await page.waitForTimeout(600);
+      262 | }
+        at openPrivacy (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:259:40)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:315:7
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-938f0--rests-on-the-stored-value--chromium/error-context.md
+
+
+[3/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (landButDrop) — is the error still shown once the switch rests on the stored value?
+  3) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (landButDrop) — is the error still shown once the switch rests on the stored value? 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="wsf-privacy-name-w7c43a-mui0z8md-b2e4f9uland"]').first()
+    Expected: visible
+    Timeout: 40000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 40000ms
+      - waiting for locator('[data-testid="wsf-privacy-name-w7c43a-mui0z8md-b2e4f9uland"]').first()
+
+
+      257 | async function openPrivacy(page: Page, fx: Fx): Promise<void> {
+      258 |   await page.goto('/settings/privacy');
+    > 259 |   await expect(sw(page, 'name', fx.a)).toBeVisible({ timeout: 40_000 });
+          |                                        ^
+      260 |   await expect(sw(page, 'name', fx.b)).toBeVisible({ timeout: 40_000 });
+      261 |   await page.waitForTimeout(600);
+      262 | }
+        at openPrivacy (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:259:40)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:315:7
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-b3a55--rests-on-the-stored-value--chromium/error-context.md
+
+
+[4/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (realRefusal) — is the error still shown once the switch rests on the stored value?
+  4) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (realRefusal) — is the error still shown once the switch rests on the stored value? 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="wsf-privacy-name-w7c43a-mui104y6-c0163fureal"]').first()
+    Expected: visible
+    Timeout: 40000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 40000ms
+      - waiting for locator('[data-testid="wsf-privacy-name-w7c43a-mui104y6-c0163fureal"]').first()
+
+
+      257 | async function openPrivacy(page: Page, fx: Fx): Promise<void> {
+      258 |   await page.goto('/settings/privacy');
+    > 259 |   await expect(sw(page, 'name', fx.a)).toBeVisible({ timeout: 40_000 });
+          |                                        ^
+      260 |   await expect(sw(page, 'name', fx.b)).toBeVisible({ timeout: 40_000 });
+      261 |   await page.waitForTimeout(600);
+      262 | }
+        at openPrivacy (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:259:40)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:315:7
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-bdea5--rests-on-the-stored-value--chromium/error-context.md
+
+
+[5/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:350:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1c positive control: a persistent error is seen by the same instrument
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:350:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1c positive control: a persistent error is seen by the same instrument
+MEASURE U1c control (head): {"errorVisibleAtSettle":false,"errorSpans":[],"errorEverPainted":false,"loadingFlashes":[],"switchTimeline":[],"settleAfterMs":4242}
+
+  5) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:350:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1c positive control: a persistent error is seen by the same instrument 
+
+    Error: the instrument sees a persistent error
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      360 |     const r = { errorVisibleAtSettle: await errorVisible(page), ...s };
+      361 |     measure('U1c control', r);
+    > 362 |     expect(r.errorVisibleAtSettle, 'the instrument sees a persistent error').toBe(true);
+          |                                                                              ^
+      363 |     await page.unrouteAll({ behavior: 'ignoreErrors' });
+      364 |   });
+      365 |
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:362:78
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-d16b9-seen-by-the-same-instrument-chromium/error-context.md
+
+
+[6/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths
+  6) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="wsf-privacy-name-w7c43a-mui115ue-a6ae4crows"]').first()
+    Expected: visible
+    Timeout: 40000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 40000ms
+      - waiting for locator('[data-testid="wsf-privacy-name-w7c43a-mui115ue-a6ae4crows"]').first()
+
+
+      257 | async function openPrivacy(page: Page, fx: Fx): Promise<void> {
+      258 |   await page.goto('/settings/privacy');
+    > 259 |   await expect(sw(page, 'name', fx.a)).toBeVisible({ timeout: 40_000 });
+          |                                        ^
+      260 |   await expect(sw(page, 'name', fx.b)).toBeVisible({ timeout: 40_000 });
+      261 |   await page.waitForTimeout(600);
+      262 | }
+        at openPrivacy (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:259:40)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:373:5
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-65a89-at-others-read-public-paths-chromium/error-context.md
+
+
+[7/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:456:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R5 a nonmember (and a signed-out caller) cannot set, and nothing is written
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:456:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R5 a nonmember (and a signed-out caller) cannot set, and nothing is written
+MEASURE R5 nonmember (head): {"nonmember":{"ok":false,"code":"PERMISSION_DENIED","message":"Members only."},"signedOut":{"ok":false,"code":"UNAUTHENTICATED"},"nonmemberMembershipDocCreated":false,"mStoredUnchanged":true,"nonmemberReadMembers":{"ok":false,"code":"PERMISSION_DENIED"}}
+
+  6 failed
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (refused) — is the error still shown once the switch rests on the stored value? 
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (lost) — is the error still shown once the switch rests on the stored value? 
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (landButDrop) — is the error still shown once the switch rests on the stored value? 
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (realRefusal) — is the error still shown once the switch rests on the stored value? 
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:350:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1c positive control: a persistent error is seen by the same instrument 
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths 
+  1 passed (3.6m)

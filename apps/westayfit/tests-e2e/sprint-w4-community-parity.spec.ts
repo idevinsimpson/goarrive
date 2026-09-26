@@ -81,9 +81,9 @@ for (const vp of [
       await expect(page.getByTestId('wsf-parity-name')).toHaveText('Oak Grove Together');
       await expect(page.getByTestId('wsf-parity-banner-eyebrow')).toHaveText('FAMILY AND FRIENDS');
       await expect(page.getByTestId('wsf-parity-descriptor')).toHaveText('Anyone with the link can join');
-      await expect(page.getByTestId('wsf-parity-fact-members')).toHaveText('MEMBERS23');
-      await expect(page.getByTestId('wsf-parity-fact-role')).toHaveText('YOUR ROLEMember');
-      await expect(page.getByTestId('wsf-parity-fact-goals')).toHaveText('GOALS3');
+      await expect(page.getByTestId('wsf-parity-fact-members')).toHaveText('Members23');
+      await expect(page.getByTestId('wsf-parity-fact-role')).toHaveText('Your roleMember');
+      await expect(page.getByTestId('wsf-parity-fact-goals')).toHaveText('Goals3');
       await expect(page.getByTestId('wsf-parity-period-title')).toHaveText('500 squats together');
       await expect(page.getByTestId('wsf-parity-total')).toHaveText('241');
       await expect(page.getByTestId('wsf-parity-living-we')).toHaveAttribute('data-fill-ratio', '0.4820');
@@ -145,7 +145,7 @@ for (const vp of [
       await expect(page.getByTestId('wsf-parity-period-title')).toHaveText('No active goal');
       await expect(page.getByTestId('wsf-parity-no-goal')).toContainText('Your Champion can start the next goal.');
       await expect(page.getByTestId('wsf-parity-living-we')).toHaveCount(0);
-      await expect(page.getByTestId('wsf-parity-fact-goals')).toHaveText('GOALS2');
+      await expect(page.getByTestId('wsf-parity-fact-goals')).toHaveText('Goals2');
       await context.close();
     });
 

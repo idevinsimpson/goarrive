@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   anonymousRemainder,
@@ -76,7 +76,9 @@ export function CommunityParityView(props: CommunityParityProps) {
       <ScrollView contentContainerStyle={s.body}>
         {/* 1–2 · the identity banner and its facts */}
         <View style={s.banner} testID="wsf-parity-banner">
-          <View style={s.bannerRing} pointerEvents="none" />
+          <View style={s.bannerRing} pointerEvents="none" aria-hidden testID="wsf-parity-banner-ring">
+            <Image source={BANNER_RING_ASSET} style={s.bannerRingImage} accessible={false} resizeMode="stretch" />
+          </View>
           {support.eyebrow ? (
             <Text style={s.bannerEyebrow} testID="wsf-parity-banner-eyebrow">
               {support.eyebrow.toUpperCase()}
@@ -91,9 +93,10 @@ export function CommunityParityView(props: CommunityParityProps) {
             </Text>
           ) : null}
           <View style={s.facts} testID="wsf-parity-facts">
-            <Fact label="MEMBERS" value={members === null ? null : formatCount(members)} testID="wsf-parity-fact-members" />
-            <Fact label="YOUR ROLE" value={roleText} testID="wsf-parity-fact-role" />
-            <Fact label="GOALS" value={goalsCount === null ? null : formatCount(goalsCount)} testID="wsf-parity-fact-goals" />
+            {/* The reference's <dt>Members</dt>, uppercased by style as its CSS does. */}
+            <Fact label="Members" value={members === null ? null : formatCount(members)} testID="wsf-parity-fact-members" />
+            <Fact label="Your role" value={roleText} testID="wsf-parity-fact-role" />
+            <Fact label="Goals" value={goalsCount === null ? null : formatCount(goalsCount)} testID="wsf-parity-fact-goals" />
           </View>
         </View>
 
@@ -199,6 +202,8 @@ export function CommunityParityView(props: CommunityParityProps) {
           </Text>
           <RosterBody {...props} />
         </View>
+
+        {props.footer ?? null}
       </ScrollView>
     </View>
   );
@@ -547,8 +552,11 @@ const PILL_GREEN_BG = '#E0F0DB';
 const BANNER_SUB = '#C2D8E5';
 const BANNER_DT = '#A6C3D4';
 const BANNER_RULE = 'rgba(255,255,255,0.18)';
-/** color-mix(confirmed 14%, transparent) over navy. */
-const BANNER_RING = 'rgba(145,203,125,0.14)';
+/**
+ * The ring: color-mix(confirmed 14%, transparent) over navy, i.e.
+ * rgba(145,203,125,0.14) -- rendered into the asset, not drawn here.
+ */
+const BANNER_RING_ASSET = require('../../assets/brand/derived/banner-ring.png') as number;
 
 const PILL_BG: Record<PillTone, object> = {
   open: { backgroundColor: PILL_GREEN_BG },
@@ -602,16 +610,17 @@ const s = StyleSheet.create({
     backgroundColor: NAVY,
     overflow: 'hidden',
   },
-  bannerRing: {
-    position: 'absolute',
-    right: -90,
-    top: -90,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    borderWidth: 40,
-    borderColor: BANNER_RING,
-  },
+  /*
+    The reference's `.community-banner::after` ring, exactly: a 260×260 circle
+    with a 40 px BANNER_RING border at right −90 / top −90, clipped by the
+    banner. Drawn as a View it would be laid out 90 px past the banner's right
+    edge, which the shell's guard (ui-app-shell R1) measures even when clipped.
+    So it is the circle's visible 170×170 crop, rendered by
+    scripts/westayfit/render-banner-ring.mjs into a transparent asset and placed
+    in bounds at right 0 / top 0 (Director #506 `5845316335`, W4 option (a)).
+  */
+  bannerRing: { position: 'absolute', right: 0, top: 0, width: 170, height: 170 },
+  bannerRingImage: { width: 170, height: 170 },
   bannerName: {
     color: SURFACE,
     fontSize: 31,
@@ -623,7 +632,7 @@ const s = StyleSheet.create({
   bannerSub: { color: BANNER_SUB, fontSize: 14, lineHeight: 21 },
   facts: { marginTop: 18, flexDirection: 'row', gap: 8 },
   fact: { flex: 1, paddingTop: 8, borderTopWidth: 1, borderTopColor: BANNER_RULE },
-  factDt: { color: BANNER_DT, fontSize: 10, lineHeight: 15, letterSpacing: 1 },
+  factDt: { color: BANNER_DT, fontSize: 10, lineHeight: 15, letterSpacing: 1, textTransform: 'uppercase' },
   factDd: { color: SURFACE, fontSize: 17, lineHeight: 25, fontWeight: '800', marginTop: 2 },
 
   switcher: { marginTop: 18 },

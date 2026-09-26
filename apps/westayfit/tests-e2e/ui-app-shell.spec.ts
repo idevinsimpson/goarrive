@@ -130,7 +130,7 @@ test('the shell carries four destinations and the MOVE action, and Home is the c
     // honest empty state — before the shutter.
     for (const [key, testId, settled] of [
       ['activity', 'wsf-activity-title', ['wsf-activity-rows', 'wsf-activity-empty', 'wsf-activity-error']],
-      ['community', 'wsf-community-index-title', ['wsf-community-index-rows', 'wsf-community-index-empty', 'wsf-community-index-error']],
+      ['community', 'wsf-community-index', ['wsf-community-index-rows', 'wsf-community-index-empty', 'wsf-community-index-error']],
       ['you', 'wsf-you-title', ['wsf-you-identity', 'wsf-you-signed-out']],
     ] as const) {
       await page.getByTestId(`wsf-member-tab-${key}`).click();

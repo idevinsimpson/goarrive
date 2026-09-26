@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { groupTypeCardLabel, joinPolicyLabel, roleLabel } from '../labels';
 import {
   beyondTarget,
@@ -143,6 +145,12 @@ export type CommunityParityProps = {
   onRetryRoster?: () => void;
   onShowMoreMembers?: () => void;
   onOpenGoal?: (goalId: string) => void;
+  /**
+   * The route's own secondary content, drawn AFTER the reference hierarchy
+   * inside the same scroll (Director #489 `5841270180`: canonical capability
+   * survives after the North-Star core). This view gives it no style.
+   */
+  footer?: ReactNode;
   testID?: string;
 };
 
@@ -176,9 +184,16 @@ export function policyDescriptor(joinPolicy: string): string {
   return joinPolicy === 'inviteOnly' ? `${label} can join` : `${label} community`;
 }
 
-/** "Founding Champion", "Co-Champion", "Member" — or null when not known. */
+/**
+ * The member-facing role: "Champion", "Co-Champion", "Member" — or null when
+ * not known. A founding Champion reads as "Champion" here, as in the frozen
+ * reference: the fact states the member's role, and "Founding" grants no
+ * capability a member acts on (Director #506 `5845751705`). The wider
+ * `roleLabel` wording is unchanged.
+ */
 export function roleFact(role: string | null): string | null {
-  return role === null ? null : roleLabel(role);
+  if (role === null) return null;
+  return role === 'foundingChampion' ? 'Champion' : roleLabel(role);
 }
 
 /**
