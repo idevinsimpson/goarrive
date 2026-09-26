@@ -5,8 +5,9 @@ data mapping in `5840935220`. **This is component-level evidence, not route
 acceptance.** The Community and Settings routes are W9's. W9 imports these views
 and owns the wiring and the real transition evidence.
 
-- **Product:** `db41ffd2110ff92467c238ec6be306ef92587701`, which is `6acd0243` plus the
-  Director's hardening corrections C1–C3 (#496 `5841929675`), from exact `0b460ce3`. It adds
+- **Product:** `646c9579bc5761a219d76c49f24dd64eaa3e485b`, which is `db41ffd2` plus the
+  Director's condition K-F1 (#496 `5842638933`), and `db41ffd2` is `6acd0243` plus the
+  hardening corrections C1–C3 (`5841929675`), all from exact `0b460ce3`. It adds
   `src/ui/CommunityParityView.tsx`, `src/ui/CommunityPrivacyPanelView.tsx` and
   `src/ui/communityParityTypes.ts`. The frames come from the gated fixture
   `app/design-target/community-parity.tsx`.
@@ -74,6 +75,13 @@ re-capture, so they carry unchanged.
 
 The frames table above gives the privacy hashes as they were at `6acd0243`; this
 table supersedes them.
+
+**After K-F1** (`646c9579`), an impossible member count (NaN, ±Infinity, a negative,
+a fraction) reads as unknown. No valid state changes. All 21 files in `fixture/`
+(8 frames, 12 comparisons, `manifest.json`) were re-captured, gated, from the
+`646c9579` build after an ungated run that wrote nothing. Every one came out
+**byte-identical**, so the evidence carries unchanged and the hashes and shares
+above stand.
 
 ## Intentional reference differences (what the share is made of)
 
