@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../src/auth';
+import { CommunityPrivacyControls } from '../src/ui/CommunityPrivacyControls';
 import {
   CREAM,
   HAIRLINE,
@@ -113,25 +114,22 @@ export default function SettingsScreen() {
     </View>
   );
 
+  /*
+    COMMUNITY-SETTINGS-PARITY-1. THE PANEL HOLDS THE PRIVACY CONTROLS THEMSELVES
+    (Director #489 `5841078939`): one section per joined community, its name as
+    the heading and its two switches under it, with the scope said once. The
+    separate Privacy page stays for a direct link (`/settings/privacy`) and
+    draws the same controls.
+  */
   const rows = (
     <>
       <View style={st.identity}>
         {asPanel ? null : <Text style={st.eyebrow}>Settings</Text>}
-        <Text style={st.title}>Your preferences</Text>
+        <Text style={st.title} {...({ role: 'heading', 'aria-level': 3 } as Record<string, unknown>)}>
+          Privacy
+        </Text>
       </View>
-
-      <Pressable
-        onPress={() => router.push('/settings/privacy')}
-        accessibilityRole="link"
-        style={st.row}
-        testID="wsf-settings-privacy-row"
-      >
-        <View style={st.rowText}>
-          <Text style={st.rowTitle}>Privacy</Text>
-          <Text style={st.rowSub}>How you appear in each of your communities</Text>
-        </View>
-        <Text style={st.chevron}>›</Text>
-      </Pressable>
+      <CommunityPrivacyControls />
     </>
   );
 

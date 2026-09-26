@@ -249,9 +249,13 @@ test.describe('APP-FEEL-PARITY-1 cp3 · Settings from the side', () => {
     await expect.poll(() => focusedId(page), { timeout: 8_000 }).toBe('wsf-you-settings');
     expect(await currentTab(page)).toBe('wsf-member-tab-you');
 
+    // COMMUNITY-SETTINGS-PARITY-1 (Director #489 `5841078939`) replaced the
+    // panel's Privacy row with the privacy controls themselves: the panel now
+    // holds this community's section and its switches.
     await row.click();
-    await page.locator('[data-testid="wsf-settings-privacy-row"]:visible').click();
-    await expect(page).toHaveURL(/\/settings\/privacy/, { timeout: 20_000 });
+    const panel = page.locator('[data-testid="wsf-settings-panel"]:visible');
+    await expect(panel.locator(`[data-testid="wsf-privacy-block-${fx.a}"]`)).toBeVisible({ timeout: 20_000 });
+    await expect(panel.locator(`[data-testid="wsf-privacy-name-${fx.a}"]`)).toBeVisible();
   });
 
   test('it travels in from the right and out; reduced motion does neither; a cold link is still the page', async ({ page }) => {

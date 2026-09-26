@@ -611,15 +611,23 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
         </Text>
       ) : (
         <View style={styles.currentGoalRow}>
-          {/* The one Living WE on this screen, beside a real shared total. */}
-          <LivingWeProgress
-            completed={lead.sharedTotal ?? 0}
-            target={lead.target}
-            unit={lead.unit}
-            width={74}
-            surface="dark"
-            testID="wsf-community-index-we"
-          />
+          {/*
+            The one Living WE on this screen -- only beside a real shared total.
+            C-F9 (W7 Check 45; Director #489 `5841279872`): an unknown total
+            drew the instrument as "0 of <target>". No confirmed total, or no
+            positive target, means no instrument, no percentage and no
+            remaining figure; the target is still stated as a target.
+          */}
+          {typeof lead.sharedTotal === 'number' && lead.target > 0 ? (
+            <LivingWeProgress
+              completed={lead.sharedTotal}
+              target={lead.target}
+              unit={lead.unit}
+              width={74}
+              surface="dark"
+              testID="wsf-community-index-we"
+            />
+          ) : null}
           <View style={styles.currentGoalText}>
             <Text style={styles.currentGoalTitle} numberOfLines={1}>
               {lead.title}
