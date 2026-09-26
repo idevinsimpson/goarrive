@@ -4968,3 +4968,29 @@ A flake filter in my runner then hid real catches. The final mutant results come
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run, and no artifacts.
 
 **Status:** **PASS at `a78b321b` on rows 1–10, with F1** (test-only, one helper). Next consumer: Director source acceptance → L0 merge → exactly one no-app-redeploy activation run. W7 merged, dispatched, activated and deployed nothing.
+
+## 61D · CONTROL-PLANE-ACTIVATION-1, F1 only, #516 at exact `44da30fcffb0f767a1eabec5a6843bfcffc8d638` against `a78b321b` (handoff #434 `5848030555`; Director `5847935578`; W3 `5848026696`; W7 ACK `5848031584`): **PASS**
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Test-only** | **PASS.** One commit, one file: `.github/wsf-staging/tests/journey-activation.test.mjs` (+32 / −17). |
+| **2** | **Streams separate; three independent asserts** | **PASS.** `node()` collects `stdout` and `stderr` separately. `out` is now only a labelled message. The new `failedWith(r, reason)` asserts four things independently: exit 1, `^ACTIVATION=FAILED$` on stdout, no `^ACTIVATION=PASSED$` on stdout, and the reason on stderr. The success path also asserts an empty stderr. |
+| **3** | **Nothing dropped or weakened** | **PASS.** I compared the old and new assertions one by one, below. |
+| **4** | **Standalone determinism** | **PASS: 0 / 50 failures** on the exact head. On `a78b321b` it was 15 / 30. |
+| **5** | **`run-all` determinism** | **PASS: 0 / 20 failures**, 23 suites, "all suites passed". On `a78b321b` it was 2 / 10. |
+| **6** | **Verdict mutants** | **PASS.** Run on the exact head with no race workaround, 5 runs each: **M7** (scan ignored), **M8** (NOT_RUN / UNKNOWN / NOT_NEEDED accepted), **M9** (marker ignored) and **M12** (card ignored) are each **caught 5 / 5**. |
+
+**Row 3, old against new:**
+- **Every `[\s\S]*ACTIVATION=FAILED` regex** (scan, journey set, cleanup not run, card INCOMPLETE, UNKNOWN, drift marker) became `failedWith` with the same reason text. That adds exit 1 and a PASSED-absence check.
+- **Each assertion that matched a reason alone** became `failedWith` too:
+  - journey failed;
+  - blocked with no driver;
+  - cleanup INCOMPLETE;
+  - NOT_RUN.
+- **The secondary reason asserts** (settings blocked, blocking cleanup step) now check stderr.
+- **The success path** keeps its stdout regex and adds the empty-stderr check.
+- **No other line changed.**
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts; mutant edits were reverted in the detached worktree.
+
+**Status:** **PASS at `44da30fc`.** Check 61's F1 is closed. Rows 1–10 and A1 carry from Check 61 and were not reopened. W7 merged, dispatched, activated and deployed nothing.
