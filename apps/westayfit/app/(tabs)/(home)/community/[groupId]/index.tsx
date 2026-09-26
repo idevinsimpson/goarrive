@@ -850,6 +850,12 @@ export default function CommunityPage() {
   const [leaveState, setLeaveState] = useState<
     { kind: 'idle' } | { kind: 'confirming' } | { kind: 'leaving' } | { kind: 'failed'; message: string }
   >({ kind: 'idle' });
+  /**
+   * Set once this account is proved no longer a member here (PERF-MOBILE-1
+   * H4b): every refresh answer that lands after that proof is dropped, so an
+   * older joined read cannot put the community back on screen.
+   */
+  const refusedHere = useRef(false);
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -864,6 +870,7 @@ export default function CommunityPage() {
     }
 
     let cancelled = false;
+    refusedHere.current = false;
 
     (async () => {
       try {
@@ -1078,10 +1085,10 @@ export default function CommunityPage() {
         // Fresh (a return is not the same load), through the shared layer so
         // the answer is the account's record for every surface.
         const result = { data: await readGoals<ListedGoal>(user.uid, groupId) };
-        if (cancelled) return;
+        if (cancelled || refusedHere.current) return;
         setGoalsState({ kind: 'loaded', goals: result.data.goals ?? [] });
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled || refusedHere.current) return;
         console.warn('[wsf] goal list refresh failed', e);
         /*
           PERF-MOBILE-1 SUCCESSOR (Director #489 `5841198083`, #494
@@ -1104,6 +1111,55 @@ export default function CommunityPage() {
       cancelled = true;
     };
   }, [ready, user, groupId, returnToken, goalsState.kind]);
+
+  /*
+    PERF-MOBILE-1 H4b (Director #494 `5841923744`; W7 Check 47). A RETURN
+    RE-CHECKS THE MEMBERSHIP ITSELF.
+
+    The refresh above can JOIN a goals read issued before the membership was
+    removed (src/memberReads.ts shares a read in flight), so no fresh
+    `not-found` arrives; the refusals that do arrive (members / activity 403,
+    pulse 404) are not proof, since an infrastructure 403 looks the same. So
+    each genuine return also reads this account's own membership document --
+    the one the entry read above uses -- in the background:
+      · missing, refused, or not `active`: this community's record goes, the
+        page says so, and every refresh answer that lands afterwards is
+        dropped (`refusedHere`);
+      · active: nothing changes;
+      · any other failure: what is on screen stays; nothing is evicted on a
+        guess.
+    One document read per return, never polled, and no loading pixels.
+  */
+  const checkedReturn = useRef(0);
+  useEffect(() => {
+    if (!wsfAuthEnabled) return;
+    if (!ready || !user || !groupId) return;
+    if (returnToken === 0 || returnToken === checkedReturn.current) return;
+    checkedReturn.current = returnToken;
+    const uid = user.uid;
+    let cancelled = false;
+    (async () => {
+      let gone: boolean;
+      try {
+        const snap = await getDoc(doc(getFirebaseFirestore(), 'wsfMemberships', `${groupId}_${uid}`));
+        gone = !snap.exists() || (snap.data() as { membershipStatus?: unknown }).membershipStatus !== 'active';
+      } catch (e) {
+        // Refused is the same fact as absent (see the entry read above).
+        if ((e as { code?: string } | null)?.code !== 'permission-denied') {
+          console.warn('[wsf] membership re-check failed', e);
+          return;
+        }
+        gone = true;
+      }
+      if (cancelled || !gone) return;
+      refusedHere.current = true;
+      forgetCommunity(uid, groupId);
+      setState({ kind: 'notMember' });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, groupId, returnToken]);
 
   // Confirmed progress for every listed goal, from the same aggregate the
   // contribution and display screens use (wsfGoalPulse admits an active

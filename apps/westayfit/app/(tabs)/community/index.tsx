@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -29,7 +29,7 @@ import {
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
 import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../../src/ui/progressFormat';
-import { peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../../src/memberReads';
+import { peekGoals, peekMyCommunities, readGoals, readMyCommunities, wasRefused } from '../../../src/memberReads';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.
@@ -232,6 +232,34 @@ export default function CommunityIndexScreen() {
       liveRef.current += 1;
     };
   }, [ready, user, attempt]);
+
+  /*
+    PERF-MOBILE-1 H4b (Director #494 `5841923744`). This tab stays mounted.
+    A community this account has since been refused (proved by Community
+    Home's membership re-check, or by any other fresh refusal) leaves it as
+    soon as the tab is looked at again -- its name, goal and figures are not
+    shown as if access still existed. Nothing is fetched to do it.
+  */
+  const idsNow = state.kind === 'ready' ? state.items.map((i) => i.groupId).join(',') : '';
+  useFocusEffect(
+    useCallback(() => {
+      if (!user || !idsNow) return;
+      const refused = idsNow.split(',').filter((id) => wasRefused(user.uid, id));
+      if (refused.length === 0) return;
+      setState((prev) => {
+        if (prev.kind !== 'ready') return prev;
+        const items = prev.items.filter((i) => !refused.includes(i.groupId));
+        const currentId =
+          prev.currentId && refused.includes(prev.currentId)
+            ? resolveCurrentCommunity(
+                user.uid,
+                items.map((i) => i.groupId),
+              )
+            : prev.currentId;
+        return { ...prev, items, currentId, momentum: currentId === prev.currentId ? prev.momentum : [] };
+      });
+    }, [user, idsNow]),
+  );
 
   /** Choosing or switching: remember it, then open that community's Home. */
   const open = useCallback(

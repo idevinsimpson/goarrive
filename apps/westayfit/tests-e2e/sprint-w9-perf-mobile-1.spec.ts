@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
+  FIRESTORE_EMULATOR,
+  PROJECT_ID,
   firestoreWrite,
   seedActiveGoal,
   seedCommunity,
@@ -279,5 +281,66 @@ test.describe('PERF-MOBILE-1 cp1 · cold Home and isolation', () => {
     await page.getByTestId('wsf-member-tab-move').last().click();
     await page.waitForTimeout(3_000);
     expect(await page.locator('[data-testid="wsf-contribute-timer"]:visible').count(), 'no flow on the lost goal').toBe(0);
+  });
+
+  /*
+    H4b (Director #494 `5841923744`; W7 Check 47). A return RE-CHECKS THE
+    MEMBERSHIP: the goals read the refresh joins was issued before the removal
+    (INJECTED: its real answer is held), so no fresh refusal comes from it.
+    The return's own membership read proves the removal; the community leaves
+    every surface, and the older answer, released afterwards, brings nothing
+    back.
+  */
+  test('a return re-checks the membership: a held pre-removal goals answer cannot bring the community back', async ({ page }) => {
+    test.setTimeout(300_000);
+    const fx = await seed('rr');
+    await landOnHome(page, fx);
+    for (const k of ['community', 'activity', 'you', 'home']) {
+      await visible(page, `wsf-member-tab-${k}`).click();
+      await page.waitForTimeout(1_200);
+    }
+    const held: { armed: boolean; captured: number; release: (() => void) | null } = { armed: true, captured: 0, release: null };
+    await page.route('**/wsfListGoals', async (route) => {
+      if (!held.armed) return route.continue();
+      held.armed = false;
+      const res = await route.fetch();
+      held.captured += 1;
+      await new Promise<void>((resolve) => {
+        held.release = resolve;
+      });
+      return route.fulfill({ response: res });
+    });
+    await visible(page, 'wsf-member-tab-community').click();
+    await visible(page, 'wsf-member-tab-home').click();
+    await expect.poll(() => held.captured, { timeout: 15_000 }).toBe(1);
+
+    // Removed while away: the membership document is deleted.
+    const del = await fetch(
+      `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}/databases/(default)/documents/wsfMemberships/${fx.groupId}_${fx.uid}`,
+      { method: 'DELETE', headers: { authorization: 'Bearer owner' } },
+    );
+    expect(del.ok).toBe(true);
+    await visible(page, 'wsf-member-tab-community').click();
+    await page.waitForTimeout(1_200);
+    await visible(page, 'wsf-member-tab-home').click();
+    await expect(visible(page, 'wsf-community-not-member')).toBeVisible({ timeout: 20_000 });
+
+    held.release?.();
+    await page.waitForTimeout(2_500);
+    const shown: Record<string, boolean> = {};
+    for (const [k, root] of [
+      ['home', 'wsf-community'],
+      ['community', 'wsf-community-index'],
+      ['activity', 'wsf-activity'],
+      ['you', 'wsf-you'],
+    ] as const) {
+      await visible(page, `wsf-member-tab-${k}`).click();
+      await page.waitForTimeout(1_200);
+      const t = await page.locator(`[data-testid="${root}"]:visible`).first().innerText({ timeout: 3_000 }).catch(() => '');
+      shown[k] = t.includes('October Squat Challenge') || t.includes(fx.name);
+    }
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    measure('the removed community shown on', shown);
+    expect(shown).toEqual({ home: false, community: false, activity: false, you: false });
   });
 });
