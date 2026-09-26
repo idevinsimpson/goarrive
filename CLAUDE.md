@@ -62,7 +62,7 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/known-issues-and-lessons.md` | Resolved bugs, performance risks, and architectural decisions to preserve. |
 | `.claude/testing-and-quality.md` | Testing infrastructure, quality checklist, and deployment verification. |
 | `.claude/existing-docs-index.md` | Index of all existing documentation files with relevance ratings. |
-| `.claude/firebase-deploy-setup.md` | **Mandatory.** How to deploy to staging/production using the service account key in non-interactive environments. |
+| `.claude/firebase-deploy-setup.md` | **GoArrive deploy path only.** Do not use its service-account-key procedure for WSF staging; WSF uses the reviewed operational-main staging control plane. |
 | `.claude/interaction-rules.md` | **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol. |
 | `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split based on authentication state. |
 | `docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md` | **Mandatory for any We Stay Fit work.** Defines current product/visual/technical/current-state precedence and marks older WSF documents as governing, historical, or superseded. |
