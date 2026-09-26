@@ -27,14 +27,28 @@ const CARD_URL = 'https://westayfit-staging.example.test';
 let passed = 0;
 const test = async (n, f) => { await f(); passed += 1; console.log(`  ok  ${n}`); };
 
+/**
+ * Run one of the workflow's scripts. stdout and stderr are collected SEPARATELY:
+ * two pipes give no ordering guarantee between them, so no assertion may depend
+ * on how they interleave (W7 Check 61 F1). `out` is for failure messages only.
+ */
 function node(script, env) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(W, script), ...(env.ARGS || [])], { env: { ...process.env, ...env } });
-    let out = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { out += d; });
-    child.on('close', (code) => resolve({ code, out }));
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (code) => resolve({ code, stdout, stderr, out: `--- stdout\n${stdout}--- stderr\n${stderr}` }));
   });
+}
+
+/** A failed verdict: exit 1, the verdict line on stdout, and the named reason on stderr, each asserted on its own stream. */
+function failedWith(r, reason) {
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.stdout, /^ACTIVATION=FAILED$/m, r.out);
+  assert.doesNotMatch(r.stdout, /^ACTIVATION=PASSED$/m, r.out);
+  assert.match(r.stderr, reason, r.out);
 }
 
 /**
@@ -136,7 +150,8 @@ async function activation({ health = `Commit ${SERVED.slice(0, 7)}`, jobHealth =
 await test('SUCCESS PATH (modeled): marker match, both journeys PASSED, cleanup COMPLETE, scan passes → ACTIVATION=PASSED', async () => {
   const a = await activation();
   assert.equal(a.verdict.code, 0, a.verdict.out);
-  assert.match(a.verdict.out, /ACTIVATION_CARD=PASSED\nACTIVATION_CLEANUP=COMPLETE\nACTIVATION=PASSED/);
+  assert.match(a.verdict.stdout, /ACTIVATION_CARD=PASSED\nACTIVATION_CLEANUP=COMPLETE\nACTIVATION=PASSED/);
+  assert.equal(a.verdict.stderr, '', 'a passing verdict names no reason');
   assert.equal(a.fixturesMade, 1);
   assert.equal(a.be.accounts.size + a.be.docs.size, 0, 'every fixture removed');
   assert.match(a.card, /Hosted changed-journey status: PASSED \(2 passed/);
@@ -171,14 +186,14 @@ await test('DRIFT: the gate saw the served build but the job re-read does not �
   assert.equal(a.fixturesMade, 0);
   assert.equal(fs.existsSync(path.join(a.changed, 'cleanup-manifest.json')), false);
   assert.equal(a.verdict.code, 1);
-  assert.match(a.verdict.out, /served-marker check did not pass[\s\S]*ACTIVATION=FAILED/);
+  failedWith(a.verdict, /served-marker check did not pass/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(a.evidence, 'served-marker.json'), 'utf8')).status, 'mismatch', 'the refusal is itself evidence');
 });
 
 await test('JOURNEY FAILURE: a product defect fails a driver → ACTIVATION=FAILED, card never PASSED, fixtures still cleaned', async () => {
   const a = await activation({ bugs: { chipIgnored: true } });
   assert.equal(a.verdict.code, 1);
-  assert.match(a.verdict.out, /journey community is failed/);
+  failedWith(a.verdict, /journey community is failed/);
   assert.doesNotMatch(a.card, /status: PASSED/);
   assert.equal(a.outcome.cleanup, 'success');
   assert.equal(a.be.accounts.size + a.be.docs.size, 0);
@@ -187,8 +202,8 @@ await test('JOURNEY FAILURE: a product defect fails a driver → ACTIVATION=FAIL
 await test('BLOCKED / NO DRIVER: a journey without a registered driver → ACTIVATION=FAILED', async () => {
   const a = await activation({ drivers: {} });
   assert.equal(a.verdict.code, 1);
-  assert.match(a.verdict.out, /journey community is blocked \(no registered driver\)/);
-  assert.match(a.verdict.out, /journey settings is blocked/);
+  failedWith(a.verdict, /journey community is blocked \(no registered driver\)/);
+  assert.match(a.verdict.stderr, /journey settings is blocked/);
   assert.equal(a.fixturesMade, 0);
 });
 
@@ -196,8 +211,8 @@ await test('CLEANUP FAILURE: journeys PASSED but cleanup INCOMPLETE → ACTIVATI
   const a = await activation({ failDeletes: true });
   assert.equal(a.outcome.cleanup, 'failure', 'the blocking cleanup step fails');
   assert.equal(a.verdict.code, 1);
-  assert.match(a.verdict.out, /cleanup is INCOMPLETE, not COMPLETE/);
-  assert.match(a.verdict.out, /blocking cleanup step did not succeed/);
+  failedWith(a.verdict, /cleanup is INCOMPLETE, not COMPLETE/);
+  assert.match(a.verdict.stderr, /blocking cleanup step did not succeed/);
   assert.doesNotMatch(a.card, /status: PASSED/);
   assert.ok(fs.existsSync(path.join(a.changed, 'cleanup-manifest.json')), 'the manifest stays for recovery');
   assert.equal(JSON.parse(fs.readFileSync(path.join(a.changed, 'cleanup-receipt.json'), 'utf8')).status, 'INCOMPLETE');
@@ -209,9 +224,9 @@ await test('the verdict refuses outcomes the evidence cannot support: missing re
   const env = { WSF_ACTIVATION_MANIFEST: MANIFEST, WSF_CHANGED_DIR: a.changed, WSF_STAGING_URL: CARD_URL,
     WSF_MARKER_OUTCOME: 'success', WSF_CLEANUP_OUTCOME: 'success', WSF_SCAN_OUTCOME: 'success', WSF_ACTIVATION_JOURNEYS: 'community,settings' };
   assert.equal((await node('require-activation.mjs', env)).code, 0, 'the untouched evidence passes');
-  assert.match((await node('require-activation.mjs', { ...env, WSF_SCAN_OUTCOME: 'failure' })).out, /evidence scan did not pass[\s\S]*ACTIVATION=FAILED/);
-  assert.match((await node('require-activation.mjs', { ...env, WSF_ACTIVATION_JOURNEYS: 'community' })).out, /not exactly community[\s\S]*ACTIVATION=FAILED/);
-  assert.match((await node('require-activation.mjs', { ...env, WSF_CLEANUP_OUTCOME: '' })).out, /cleanup step did not succeed \(not run\)[\s\S]*ACTIVATION=FAILED/);
+  failedWith(await node('require-activation.mjs', { ...env, WSF_SCAN_OUTCOME: 'failure' }), /evidence scan did not pass/);
+  failedWith(await node('require-activation.mjs', { ...env, WSF_ACTIVATION_JOURNEYS: 'community' }), /not exactly community/);
+  failedWith(await node('require-activation.mjs', { ...env, WSF_CLEANUP_OUTCOME: '' }), /cleanup step did not succeed \(not run\)/);
   // A result recorded on another build is NOT VERIFIED: only the card verdict sees it.
   const resultsPath = path.join(a.changed, 'changed-journeys.json');
   const good = fs.readFileSync(resultsPath, 'utf8');
@@ -220,14 +235,14 @@ await test('the verdict refuses outcomes the evidence cannot support: missing re
   fs.writeFileSync(resultsPath, JSON.stringify(other));
   const unverified = await node('require-activation.mjs', env);
   assert.equal(unverified.code, 1);
-  assert.match(unverified.out, /the owner-card verdict is INCOMPLETE[\s\S]*ACTIVATION=FAILED/);
+  failedWith(unverified, /the owner-card verdict is INCOMPLETE/);
   fs.writeFileSync(resultsPath, good);
   fs.rmSync(path.join(a.changed, 'cleanup-receipt.json'));
   const noReceipt = await node('require-activation.mjs', env);
   assert.equal(noReceipt.code, 1);
-  assert.match(noReceipt.out, /cleanup is NOT_RUN, not COMPLETE/);
+  failedWith(noReceipt, /cleanup is NOT_RUN, not COMPLETE/);
   fs.writeFileSync(path.join(a.changed, 'cleanup-receipt.json'), '{');
-  assert.match((await node('require-activation.mjs', env)).out, /cleanup is UNKNOWN, not COMPLETE[\s\S]*ACTIVATION=FAILED/);
+  failedWith(await node('require-activation.mjs', env), /cleanup is UNKNOWN, not COMPLETE/);
 });
 
 await test('the activation manifest is exactly COMMUNITY-SETTINGS-PARITY-1 on the served 938e00d8, journeys community + settings', () => {
