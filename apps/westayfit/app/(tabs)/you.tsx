@@ -133,7 +133,12 @@ type Screen =
    * count comes with the state so the screen can say the true thing.
    */
   | { kind: 'pickCommunity'; profile: Profile; count: number }
-  | { kind: 'failed'; profile: Profile }
+  /**
+   * `community` is present only when the failure came after this exact
+   * current community was resolved (Director #503 `5844877801`, W7 Y-F10):
+   * the page keeps what it knows and guesses nothing else.
+   */
+  | { kind: 'failed'; profile: Profile; community?: Community }
   | {
       kind: 'member';
       profile: Profile;
@@ -425,7 +430,7 @@ export default function You() {
         displayName: null,
         memberSince: null,
       }));
-      const fail = async () => {
+      const fail = async (community?: Community) => {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
@@ -438,7 +443,7 @@ export default function You() {
           setStale(true);
           return;
         }
-        setScreen({ kind: 'failed', profile });
+        setScreen(community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
       };
 
       let communities: Community[] = [];
@@ -478,7 +483,8 @@ export default function You() {
       try {
         goals = (await readGoals<Goal>(uid, community.groupId, reuse)).goals ?? [];
       } catch {
-        await fail();
+        // The current community is already resolved: keep it on screen.
+        await fail(community);
         return;
       }
       if (live.current !== token) return;
