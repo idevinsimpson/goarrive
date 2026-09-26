@@ -160,9 +160,12 @@ const shown = (page: Page, id: string) => page.locator(`[data-testid="${id}"]:vi
 const currentTab = (page: Page) => page.evaluate(() => (document.querySelector('[data-testid="wsf-member-tabs"] [data-current="true"]') as HTMLElement | null)?.getAttribute('data-testid') ?? null);
 const focused = (page: Page) => page.evaluate(() => (document.activeElement?.closest('[data-testid]') as HTMLElement | null)?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? null);
 const TAB_ROOT: Record<string, string> = { home: 'wsf-community', community: 'wsf-community-index', activity: 'wsf-activity', you: 'wsf-you' };
-async function tab(page: Page, key: string, settleMs = 900) {
+// Check 48 harness correction: after a removal (H4b only), Home's correct end state is "Not a member", a different root.
+const rootOf = (page: Page, key: string, removed = false) =>
+  page.locator(`[data-testid="${TAB_ROOT[key]}"]:visible${removed && key === 'home' ? ', [data-testid="wsf-community-not-member"]:visible' : ''}`).first();
+async function tab(page: Page, key: string, settleMs = 900, removed = false) {
   await shown(page, `wsf-member-tab-${key}`).click({ timeout: 10_000 });
-  await expect(shown(page, TAB_ROOT[key])).toBeVisible({ timeout: 30_000 });
+  await expect(rootOf(page, key, removed)).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(settleMs);
 }
 async function scrollOf(page: Page, id: string): Promise<number | null> {
@@ -456,13 +459,13 @@ test.describe(`W7 HARDENED-MEMBER-JOURNEY-1 (${LABEL})`, () => {
     const refusals: string[] = [];
     page.on('response', (res) => { const u = new URL(res.url()); if (u.port === '5001' && res.status() >= 400) refusals.push(`${u.pathname.split('/').pop()} ${res.status()}`); });
     await tab(page, 'community', 1_500);
-    await tab(page, 'home', 2_500); // a fresh read meets the refusal
+    await tab(page, 'home', 2_500, true); // a fresh read meets the refusal
     old.release?.();
     await page.waitForTimeout(3_000);
     const after: Record<string, boolean> = {};
     for (const k of ['home', 'community', 'activity', 'you']) {
-      await tab(page, k, 1_500);
-      const t = await page.locator(`[data-testid="${TAB_ROOT[k]}"]:visible`).first().innerText({ timeout: 3_000 }).catch(() => '');
+      await tab(page, k, 1_500, true);
+      const t = await rootOf(page, k, true).innerText({ timeout: 3_000 }).catch(() => '');
       after[k] = t.includes(m.title);
     }
     await page.unrouteAll({ behavior: 'ignoreErrors' });
