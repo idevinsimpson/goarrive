@@ -4652,3 +4652,24 @@ This is the Check 49 method, run locally by git and with the real staging script
 W7 did not re-read run 51's job log.
 
 **Status:** **PASS on the pin at `fbcfc80c`.** W7 dispatched nothing. Nothing is accepted, integrated or staged by W7.
+
+## 54 · COMMUNITY-SETTINGS-PARITY-1 pass 2, exact product `ffb517e5` (evidence `ecd99bf2`) against control `0e5d6f38` (Director route #434 `5846188045`; W7 ACK `5846189645`): **PASS on every changed dependency**
+
+- **Lineage, by git:** `0e5d6f38` → `6f34ff7b` (W9's spec: the scrim press inside the 12 px margin) → `ebcc038a` (evidence) → **`ffb517e5`** → `ecd99bf2`. The evidence commit is docs only.
+  - **Product delta:** `settings.tsx`; `MemberTopBar`, `MemberTabBar` and `memberShellMetrics`; `currentCommunity.ts` (`currentFirst`); `CommunityPrivacyControls`; the Community tab adapter; `communityParityTypes.ts` (`roleFact`); and 2 W9 specs plus 2 unit tests.
+  - **The protected-path diff over `0e5d6f38` is empty.**
+- **Builds:** detached worktrees, each with an emulator-flagged build. Each bundle carries only its own SHA stamp.
+
+| # | Item | `0e5d6f38` | **`ffb517e5`** |
+|---|---|---|---|
+| **1** | **Shared top bar and tabs.** New spec `sprint-w7-csp-pass2.spec.ts` M1, plus H1, H2 and `ui-app-shell`. | The top-bar body is 52 on Home / Community / Progress / You. H1 7 / 7, H2 16 / 16, `ui-app-shell` 3 / 3. | **62 on all four tabs.** **Reselecting the active tab is a no-op:** the same mounted root, the same path and `history.length`, and the same single callable as the control. **H1 7 / 7; H2 16 / 16** (Home 7 per visit, slope 0.018); **`ui-app-shell` 3 / 3** (R1 no horizontal overflow). |
+| **2** | **Settings × Close and the panel** (M1, H5, Check 45 B1) | Close 64×46; H5 7 / 7 | **The accessible name is exactly "Close"** (drawn as "× CLOSE" through the text transform), **83×44**. **H5 7 / 7 ×3:** focus enters on Close; Close, Escape and the scrim each return to the Settings row; scroll kept; median exit 202 ms; reduced motion; no growth. Check 45 S-F1–S-F6 pass. |
+| **3** | **`currentFirst`** (M3): C1 then C2 in the server's answer; C2 remembered | The chips and the Settings sections follow the server order: C1 first | **C2 leads the chips and the Settings sections.** **Every `wsfMyCommunities` answer stays C1, C2** (4 / 4). The unit tests are 14 / 14 (`currentCommunity`, role fact). |
+| **4** | **`roleFact`** (M4): a founding Champion | The Community fact reads "Founding Champion" | **The Community fact reads "Champion".** **You still reads "Founding Champion"**: the global `roleLabel` / `roleCardLabel` is unchanged (`labels.ts` is untouched). |
+| **5** | **The cache-only privacy hint** (M5) | Opening Settings requests `wsfMyCommunities` only; the hint is generic | **Opening Settings requests `wsfMyCommunities` only, the same as the control:** no added callable or Firestore read. Warm, after You read the profile: "Members see "Mara Pass …"". **Cold `/settings/privacy`: the generic "Members see your name"**, with no name invented. |
+| **6** | **Carry** | Check 45 PRESERVE 13 / 13, FAIL-BEFORE 15 / 15 passing | **Check 45 identical** (15 / 15 and 13 / 13). **Check 43 7 / 7.** |
+
+- **For L0's pin check (precision, not a defect):** the #506 lineage adds **`scripts/westayfit/render-banner-ring.mjs`**. It came in at `0e5d6f38`, before this pass. It is an offline, deterministic generator for the ring asset, and no build or runtime path uses it. Its `--check` confirms that the committed `banner-ring{,@2x,@3x}.png` bytes match. A future pin's protected-path set over `scripts/westayfit/` will therefore not be empty.
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed. Emulators only (`demo-wsf-local`).
+
+**Status:** **PASS on `ffb517e5` for the routed changed dependencies.** Visual acceptance is the Director's. Nothing is accepted, integrated or staged.
