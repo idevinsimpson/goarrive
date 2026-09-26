@@ -450,14 +450,22 @@ test.describe('APP-FEEL-PARITY-1 · the exit window cannot exit twice', () => {
     test.setTimeout(240_000);
     const fx = await seed('x2', 1);
     await signInVia(page, fx.email, PASSWORD);
-    await openYou(page, fx);
     // Hold the resolver's goal read, and let it answer inside the exit.
+    //
+    // PERF-MOBILE-1 (#494): MOVE now decides at once from what this account
+    // already knows, so it is "still working out the goal" only while the
+    // goals are NOT yet known. This reaches that state honestly: a fresh
+    // document on You, with the goals read held from before it loads, so
+    // neither You nor MOVE has an answer when MOVE is pressed. The assertions
+    // below are unchanged.
     let release: () => void = () => undefined;
     const held = new Promise<void>((r) => (release = r));
     await page.route('**/wsfListGoals', async (route: Route) => {
       await held;
       await route.continue();
     });
+    await page.goto('/you');
+    await expect(page.locator('[data-testid="wsf-you-loading"]:visible, [data-testid="wsf-you-identity"]:visible').first()).toBeVisible({ timeout: 40_000 });
     await page.evaluate(() => {
       (window as unknown as { __w9SawFlow: boolean }).__w9SawFlow = false;
       new MutationObserver(() => {

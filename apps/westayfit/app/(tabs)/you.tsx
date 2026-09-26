@@ -1,14 +1,25 @@
 import { signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
 import { resolveCurrentCommunity } from '../../src/currentCommunity';
-import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions } from '../../src/firebase';
+import { getFirebaseAuth } from '../../src/firebase';
+import {
+  SAME_LOAD_MS,
+  peekGoals,
+  peekMemberProfile,
+  peekMyCommunities,
+  peekOwnCredit,
+  readGoals,
+  readMemberProfile,
+  readMyCommunities,
+  readOwnCredit,
+  wasRefused,
+  type MemberProfileAnswer,
+} from '../../src/memberReads';
 import { memberCountLabel, roleCardLabel } from '../../src/labels';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import {
@@ -113,7 +124,8 @@ type Row = {
   endsAt?: string;
 };
 
-type Profile = { displayName: string | null; memberSince: string | null };
+/** `pending`: the profile has not been read yet; the name waits, it is not guessed. */
+type Profile = { displayName: string | null; memberSince: string | null; pending?: boolean };
 
 type Screen =
   | { kind: 'loading' }
@@ -154,13 +166,145 @@ function n(v: number): string {
   return v.toLocaleString('en-US');
 }
 
+/** How long a revalidation may take before the page says it is checking. */
+const CHECKING_AFTER_MS = 400;
+
+function toProfile(answer: MemberProfileAnswer): Profile {
+  return { displayName: answer.displayName, memberSince: monthAndYear(answer.createdAt) };
+}
+
+/** The member's page from their goals and own parts. `null`: that read failed. */
+function composeMember(
+  profile: Profile,
+  community: Community,
+  owned: Array<{ goal: Goal; own: { ownCredit?: unknown; unit?: unknown } | null } | null>,
+): Screen {
+  let partial = false;
+  const open: Row[] = [];
+  const finished: Row[] = [];
+  for (const item of owned) {
+    if (!item) {
+      partial = true;
+      continue;
+    }
+    const { goal, own } = item;
+    const yourPart = typeof own?.ownCredit === 'number' ? own.ownCredit : 0;
+    // ONLY GOALS THIS MEMBER ACTUALLY PUT SOMETHING INTO. A goal they never
+    // touched is the community's business, not a row on their own page.
+    if (yourPart <= 0) continue;
+    const row: Row = {
+      goalId: goal.goalId,
+      title: goal.title,
+      unit: (typeof own?.unit === 'string' && own.unit) || goal.unit,
+      target: goal.target,
+      yourPart,
+      sharedTotal: typeof goal.sharedTotal === 'number' ? goal.sharedTotal : 0,
+      open: goal.status === 'active',
+      endsAt: goal.endsAt,
+    };
+    (row.open ? open : finished).push(row);
+  }
+  // Soonest to end leads: it is the one with something still to do in it.
+  open.sort((a, b) => (a.endsAt ?? '').localeCompare(b.endsAt ?? ''));
+  finished.sort((a, b) => (b.endsAt ?? '').localeCompare(a.endsAt ?? ''));
+  return { kind: 'member', profile, community, open, finished, partial };
+}
+
+/**
+ * The page from this account's record alone, or `null` when the record does
+ * not hold every fact the page needs (src/memberReads.ts).
+ */
+function youFromRecord(uid: string): Screen | null {
+  const mine = peekMyCommunities(uid);
+  if (!mine) return null;
+  const known = peekMemberProfile(uid);
+  const profile: Profile = known ? toProfile(known) : { displayName: null, memberSince: null, pending: true };
+  const communities = mine.items as unknown as Community[];
+  if (communities.length === 0) return { kind: 'noCommunity', profile };
+  const currentId = resolveCurrentCommunity(
+    uid,
+    communities.map((c) => c.groupId),
+  );
+  const community = communities.find((c) => c.groupId === currentId) ?? null;
+  if (!community) return { kind: 'pickCommunity', profile, count: communities.length };
+  const goals = peekGoals<Goal>(uid, community.groupId)?.goals;
+  if (!goals) return null;
+  const owned: Array<{ goal: Goal; own: { ownCredit?: unknown; unit?: unknown } }> = [];
+  for (const goal of goals) {
+    const own = peekOwnCredit(uid, goal.goalId);
+    if (!own) return null;
+    owned.push({ goal, own });
+  }
+  return composeMember(profile, community, owned);
+}
+
 export default function You() {
   const { ready, user } = useWsfAuth();
-  const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+  // The first frame already stands on the account's record when it can: a
+  // loading state painted for one frame and then replaced is still a flash.
+  const [screen, setScreen] = useState<Screen>(
+    () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
+  );
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
+
+  /*
+    PERF-MOBILE-1. YOU OPENS ON WHAT THIS ACCOUNT ALREADY KNOWS.
+
+    Measured on `0b460ce3` (W7 Check 41B): the first visit painted a full
+    skeleton behind four serial reads -- the profile, then the communities,
+    then the goals, then each own part -- three of which Home had read a
+    moment before. Now:
+      · when this account's record (src/memberReads.ts) holds the member's
+        communities, the current community's goals and the own part in each,
+        the page opens on them at once (`youFromRecord`); the name waits in
+        its place until the profile is read, it is never guessed;
+      · every read runs through the same record, the profile alongside the
+        rest instead of before it, and an answer from this load is reused;
+      · what was opened on stays in place while this revalidates. If that
+        takes longer than a moment the page says it is checking; if it fails
+        the page keeps what was last read and says so, with a Retry. A Retry
+        reads everything fresh.
+    Nothing is synthesized: a fact the record does not hold means the page
+    loads exactly as before.
+  */
+  const [checking, setChecking] = useState(false);
+  const [stale, setStale] = useState(false);
+
+  /*
+    PERF-MOBILE-1 SUCCESSOR (Director #494 `5841250834`, `5841341300`).
+    EVERY RETURN TO THIS MOUNTED SCREEN RECOMPOSES FROM THE ACCOUNT'S RECORD
+    FIRST: a confirmed receipt has already written the new own part there, so
+    closing MOVE shows it with no read. When the record no longer holds
+    everything, the page keeps what it shows and revalidates -- except a
+    community a fresh server answer refused, whose figures go at once. A warm
+    return with a whole record makes no call.
+  */
+  const [revalidate, setRevalidate] = useState(0);
+  const keepOnScreen = useRef(false);
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) {
+        focusedOnce.current = true;
+        return;
+      }
+      if (!ready || !user) return;
+      const uid = user.uid;
+      const recorded = youFromRecord(uid);
+      if (recorded) {
+        setScreen(recorded);
+        return;
+      }
+      setScreen((prev) =>
+        prev.kind === 'member' && wasRefused(uid, prev.community.groupId) ? { kind: 'loading' } : prev,
+      );
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    }, [ready, user]),
+  );
 
   useEffect(() => {
     if (!ready) return;
@@ -169,43 +313,61 @@ export default function You() {
       return;
     }
     const token = ++live.current;
-    setScreen({ kind: 'loading' });
+    const uid = user.uid;
+    const reuse = reloads > 0 ? 0 : SAME_LOAD_MS;
+    const recorded = reloads > 0 ? null : youFromRecord(uid);
+    const keep = keepOnScreen.current;
+    keepOnScreen.current = false;
+    setScreen((prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
+    setStale(false);
+    setChecking(false);
+    const slow = recorded || keep
+      ? setTimeout(() => {
+          if (live.current === token) setChecking(true);
+        }, CHECKING_AFTER_MS)
+      : null;
+    const settle = () => {
+      if (slow) clearTimeout(slow);
+      if (live.current === token) setChecking(false);
+    };
 
     void (async () => {
-      // THE PROFILE FIRST, AND ON ITS OWN. It is the member's own document and
-      // the only thing on this page that does not need a callable — so an
-      // identity is on screen even when every goal read fails.
-      let profile: Profile = { displayName: null, memberSince: null };
-      try {
-        const snap = await getDoc(doc(getFirebaseFirestore(), 'wsfMemberProfiles', user.uid));
-        const data = snap.data() as { displayName?: unknown; createdAt?: unknown } | undefined;
-        profile = {
-          displayName: typeof data?.displayName === 'string' ? data.displayName : null,
-          memberSince: monthAndYear(data?.createdAt),
-        };
-      } catch {
-        // An unreadable profile is not a failure of the page: the account is
-        // still signed in and still has a way out.
-      }
-      if (live.current !== token) return;
+      // THE PROFILE ALONGSIDE THE REST. It is the member's own document and
+      // needs no callable, so an identity is on screen even when every goal
+      // read fails -- but nothing else has to wait for it.
+      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(toProfile, () => ({
+        displayName: null,
+        memberSince: null,
+      }));
+      const fail = async () => {
+        const profile = await profileRead;
+        if (live.current !== token) return;
+        settle();
+        if (recorded && recorded.kind === 'member') {
+          setScreen({ ...recorded, profile });
+          setStale(true);
+          return;
+        }
+        if (keep) {
+          setStale(true);
+          return;
+        }
+        setScreen({ kind: 'failed', profile });
+      };
 
-      const fns = getFirebaseFunctions();
       let communities: Community[] = [];
       try {
-        const listMine = httpsCallable<Record<string, never>, { items: Community[] }>(
-          fns,
-          'wsfMyCommunities',
-        );
-        const r = await listMine({});
-        communities = Array.isArray(r.data?.items) ? r.data.items : [];
+        communities = (await readMyCommunities(uid, reuse)).items as unknown as Community[];
       } catch {
-        if (live.current !== token) return;
-        setScreen({ kind: 'failed', profile });
+        await fail();
         return;
       }
       if (live.current !== token) return;
 
       if (communities.length === 0) {
+        const profile = await profileRead;
+        if (live.current !== token) return;
+        settle();
         setScreen({ kind: 'noCommunity', profile });
         return;
       }
@@ -214,76 +376,42 @@ export default function You() {
       // there are several and none is remembered; this page then has no single
       // community to speak for and says so rather than choosing one.
       const currentId = resolveCurrentCommunity(
-        user.uid,
+        uid,
         communities.map((c) => c.groupId),
       );
       const community = communities.find((c) => c.groupId === currentId) ?? null;
       if (!community) {
+        const profile = await profileRead;
+        if (live.current !== token) return;
+        settle();
         setScreen({ kind: 'pickCommunity', profile, count: communities.length });
         return;
       }
 
-      let partial = false;
-
-      // Bounded and parallel, with each failure isolated — the pattern Progress
-      // was accepted on. One goal that will not load must not empty the page.
-      const listGoals = httpsCallable<
-        { groupId: string; includeHistory: boolean },
-        { goals: Goal[] }
-      >(fns, 'wsfListGoals');
       let goals: Goal[] = [];
       try {
-        const r = await listGoals({ groupId: community.groupId, includeHistory: true });
-        goals = Array.isArray(r.data?.goals) ? r.data.goals : [];
+        goals = (await readGoals<Goal>(uid, community.groupId, reuse)).goals ?? [];
       } catch {
-        if (live.current !== token) return;
-        setScreen({ kind: 'failed', profile });
+        await fail();
         return;
       }
       if (live.current !== token) return;
 
-      const myContribution = httpsCallable<{ goalId: string }, { ownCredit: number; unit: string }>(
-        fns,
-        'wsfMyContribution',
-      );
-      const owned = await mapWithLimit(goals, READ_LIMIT, async (goal) => {
-        const own = await myContribution({ goalId: goal.goalId });
-        return { goal, own: own.data };
-      });
+      // Bounded and parallel, with each failure isolated — the pattern Progress
+      // was accepted on. One goal that will not load must not empty the page.
+      const owned = await mapWithLimit(goals, READ_LIMIT, async (goal) => ({
+        goal,
+        own: await readOwnCredit(uid, goal.goalId, reuse),
+      }));
+      const profile = await profileRead;
       if (live.current !== token) return;
-
-      const open: Row[] = [];
-      const finished: Row[] = [];
-      for (const settled of owned) {
-        if (!settled.ok) {
-          partial = true;
-          continue;
-        }
-        const { goal, own } = settled.value;
-        const yourPart = typeof own?.ownCredit === 'number' ? own.ownCredit : 0;
-        // ONLY GOALS THIS MEMBER ACTUALLY PUT SOMETHING INTO. A goal they never
-        // touched is the community's business, not a row on their own page.
-        if (yourPart <= 0) continue;
-        const row: Row = {
-          goalId: goal.goalId,
-          title: goal.title,
-          unit: own?.unit || goal.unit,
-          target: goal.target,
-          yourPart,
-          sharedTotal: typeof goal.sharedTotal === 'number' ? goal.sharedTotal : 0,
-          open: goal.status === 'active',
-          endsAt: goal.endsAt,
-        };
-        (row.open ? open : finished).push(row);
-      }
-
-      // Soonest to end leads: it is the one with something still to do in it.
-      open.sort((a, b) => (a.endsAt ?? '').localeCompare(b.endsAt ?? ''));
-      finished.sort((a, b) => (b.endsAt ?? '').localeCompare(a.endsAt ?? ''));
-
-      setScreen({ kind: 'member', profile, community, open, finished, partial });
+      settle();
+      setScreen(composeMember(profile, community, owned.map((o) => (o.ok ? o.value : null))));
     })();
-  }, [ready, user, reloads]);
+    return () => {
+      if (slow) clearTimeout(slow);
+    };
+  }, [ready, user, reloads, revalidate]);
 
   const onSignOut = useCallback(() => {
     setSigningOut(true);
@@ -311,9 +439,13 @@ export default function You() {
             community screen instead of returning to the mounted one. */}
         <Text style={s.pageTag} testID="wsf-you-title">You</Text>
       </View>
-      <Text style={[display.lg, s.name]} testID="wsf-you-name" accessibilityRole="header">
-        {profile.displayName ?? 'You'}
-      </Text>
+      {profile.pending ? (
+        <View style={[s.skelOnNavy, { width: '62%', height: 30 }]} testID="wsf-you-name-pending" />
+      ) : (
+        <Text style={[display.lg, s.name]} testID="wsf-you-name" accessibilityRole="header">
+          {profile.displayName ?? 'You'}
+        </Text>
+      )}
       {profile.memberSince ? (
         <Text style={s.since} testID="wsf-you-since">{`Member since ${profile.memberSince}`}</Text>
       ) : null}
@@ -480,6 +612,26 @@ export default function You() {
         {screen.kind === 'member' ? (
           <>
             {identity(screen.profile, user?.email ?? null)}
+            {checking ? (
+              <Text style={s.refreshNote} testID="wsf-you-checking">
+                Checking for updates…
+              </Text>
+            ) : null}
+            {stale ? (
+              <View style={s.refreshRow} testID="wsf-you-stale">
+                <Text style={[s.refreshNote, s.refreshNoteInRow]}>
+                  Couldn’t check for updates just now. This is what was last read.
+                </Text>
+                <Pressable
+                  onPress={() => setReloads((v) => v + 1)}
+                  accessibilityRole="button"
+                  style={s.refreshRetry}
+                  testID="wsf-you-stale-retry"
+                >
+                  <Text style={s.refreshRetryText}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <View style={s.sheet} testID="wsf-you-member">
               <View style={s.belong} testID="wsf-you-community">
                 <Text style={s.belongName}>{screen.community.displayName}</Text>
@@ -585,6 +737,11 @@ function GoalRow({ row, finished }: { row: Row; finished?: boolean }) {
 }
 
 const s = StyleSheet.create({
+  refreshRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 10, marginHorizontal: 20 },
+  refreshNote: { color: INK_QUIET, fontSize: 13, lineHeight: 18, marginTop: 10, marginHorizontal: 20 },
+  refreshNoteInRow: { marginTop: 0, marginHorizontal: 0, flexShrink: 1 },
+  refreshRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  refreshRetryText: { color: NAVY, fontSize: 14, fontWeight: '700', textDecorationLine: 'underline' },
   screen: { flex: 1, backgroundColor: CREAM },
   body: { flexGrow: 1 },
 
