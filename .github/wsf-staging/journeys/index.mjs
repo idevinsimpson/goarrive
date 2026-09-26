@@ -1,20 +1,23 @@
 /**
- * The changed-journey driver registry, read by hosted-changed-journeys.mjs.
+ * The changed-journey driver registry, read by hosted-changed-journeys.mjs and
+ * by check-milestone-manifest.mjs (every journey a manifest names must have a
+ * driver here before a deploy is allowed to start).
  *
  * A driver is keyed by a milestone manifest journey id and exercises that
  * journey against the hosted staging site:
  *
- *   async ({ page, baseUrl, journey }) => ({
- *     setupId,            // the fixture or account shape it used, or null
+ *   async ({ page, baseUrl, journey, fixtures }) => ({
+ *     setupId,            // the fixture shape it used (never an email or password)
  *     actionsPerformed,   // what it actually did, in order
- *     assertions,         // [{ expected, ok }], one per manifest expectation it checked
+ *     assertions,         // [{ expected, ok }], each from what the page rendered
  *   })
  *
- * A journey with no driver here is reported BLOCKED ("no registered driver"),
- * never passed. Drivers are reviewed code on the operational branch, like the
- * rest of this directory; the candidate cannot supply one.
- *
- * Empty on purpose: the first drivers arrive with the first milestone manifest,
- * reviewed against that milestone's journeys.
+ * `fixtures` is journeys/fixture-kit.mjs, bound to this run's tag and its own
+ * cleanup manifest. Drivers are reviewed code on the operational branch, like
+ * the rest of this directory: adding or changing one is a release-environment
+ * change and takes the human path. The candidate cannot supply one.
  */
-export const drivers = Object.freeze({});
+import { community } from './community.mjs';
+import { settings } from './settings.mjs';
+
+export const drivers = Object.freeze({ community, settings });

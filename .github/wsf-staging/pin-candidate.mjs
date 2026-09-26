@@ -33,6 +33,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { checkManifestObject } from './check-milestone-manifest.mjs';
+import { drivers as registeredDrivers } from './journeys/index.mjs';
 
 // THE PROTECTED PATHS, defined once. A pin whose candidate differs from the
 // served pin on any of these leaves the fast path and gets explicit review:
@@ -58,14 +60,19 @@ export const PROTECTED_PATHS = Object.freeze([
 // THE RELEASE ENVIRONMENT: the operational files a staging run executes. A
 // change here between the run that served the current pin and the operational
 // head this pin will be dispatched from means the next run is not the same
-// procedure, so it too leaves the fast path. The approval file itself is the
-// thing being changed and is excluded.
+// procedure, so it too leaves the fast path. Two files are excluded, and only
+// these two exact paths: the approval file (the thing being changed) and the
+// milestone manifest (reviewed release DATA: every visible milestone changes
+// its productSha, and it is validated on its own below and again pre-deploy).
+// The workflow, this generator, the smoke runner, the driver registry and
+// every driver stay inside: a change to any of them takes the human path.
 export const RELEASE_ENVIRONMENT_PATHS = Object.freeze([
   '.github/workflows/wsf-staging-deploy.yml',
   '.github/wsf-staging/',
   'firebase.westayfit.staging.json',
 ]);
 const APPROVAL_REL = '.github/wsf-staging/approved-candidate.json';
+export const MANIFEST_REL = '.github/wsf-staging/journeys/manifest.json';
 const VERIFIER_REL = '.github/wsf-staging/verify-deployment.mjs';
 const ROLLBACK_AUTHORITY = 'Director #365 5841628546';
 
@@ -162,7 +169,7 @@ export function measure(repo, { previous, candidate, runMain, opsHead }) {
     },
     verifier: { ref: verifierRef, base: verifierBase(show(verifierRef, VERIFIER_REL)) },
     releaseEnvironment: opsHead
-      ? { from: runMain, to: opsHead, delta: diffNames(repo, runMain, opsHead, RELEASE_ENVIRONMENT_PATHS, [APPROVAL_REL]) }
+      ? { from: runMain, to: opsHead, delta: diffNames(repo, runMain, opsHead, RELEASE_ENVIRONMENT_PATHS, [APPROVAL_REL, MANIFEST_REL]) }
       : null,
   };
 }
@@ -248,7 +255,7 @@ export function boundaryNote({ previous, candidate, run, m }) {
 }
 
 // ---- invariants -----------------------------------------------------------------
-export function invariants({ previous, candidate, run, added, m }) {
+export function invariants({ previous, candidate, run, added, m, milestone = null }) {
   const reasons = [];
   if (!m.ancestor) reasons.push(`lineage: ${s8(previous)} is not an ancestor of ${s8(candidate)}`);
   if (m.protectedDelta.length) reasons.push(`protected paths changed: ${m.protectedDelta.join(', ')}`);
@@ -285,6 +292,7 @@ export function invariants({ previous, candidate, run, added, m }) {
       candidate: m.exports.candidate === null ? null : m.exports.candidate.length,
     },
     releaseEnvironment: m.releaseEnvironment,
+    milestone,
     fastPath: {
       eligible: reasons.length === 0,
       reasons,
@@ -309,7 +317,7 @@ function insertHistory(entries, prefix, key, value, anchor) {
 }
 
 /** The pure part: previous approval + measured facts -> next approval object. */
-export function nextApproval(prev, { candidate, run, label, acceptedOn, m }) {
+export function nextApproval(prev, { candidate, run, label, acceptedOn, m, milestone = null }) {
   const previous = prev.approvedAppSha;
   const p8 = s8(previous);
   const added = Array.isArray(prev.candidateAddedFunctions) ? [...prev.candidateAddedFunctions] : [];
@@ -340,7 +348,7 @@ export function nextApproval(prev, { candidate, run, label, acceptedOn, m }) {
     `HISTORICAL, the boundary note for the ${p8} pin: ${prev._fullCandidateNote}`, '_fullCandidateNote');
   insertHistory(entries, '_previousPackageLabel', `_previousPackageLabel${p8}`,
     `HISTORICAL, the label of the ${p8} pin, which ${ran}: ${prev.packageLabel}`, null);
-  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m })]);
+  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone })]);
   return Object.fromEntries(entries);
 }
 
@@ -352,7 +360,7 @@ const FLAGS = {
   'run-id': 'int', 'run-number': 'int', 'run-main': 'sha', 'run-date': 'date',
   'inventory-before': 'int', 'inventory-after': 'int', created: 'created',
   verify: 'str', 'hosted-marker': 'str', 'hosted-verify': 'str',
-  'label-file': 'path', 'accepted-on': 'date', out: 'path', receipt: 'path?',
+  'label-file': 'path', 'accepted-on': 'date', out: 'path', receipt: 'path?', manifest: 'path?',
 };
 
 export function parseArgs(argv) {
@@ -374,6 +382,38 @@ export function parseArgs(argv) {
     if (t === 'created' && !/^(none|wsf[a-z0-9]+(,wsf[a-z0-9]+)*)$/.test(v)) refuse('--created must be none or a comma list of lower-case wsf service names');
   }
   return a;
+}
+
+/**
+ * The milestone this pin declares. `--manifest <file>` is the manifest the pin
+ * PR commits; `--manifest none` declares no member-visible milestone (the PR
+ * removes any manifest at the operational head). Without the flag, a manifest
+ * already at the operational head must describe this candidate. Whatever is
+ * declared is checked exactly as the pre-deploy gate will check it, plus the
+ * rollback SHA, so a pin is never generated that the gate would then refuse.
+ */
+function milestoneFor(repo, a, { previous, candidate }) {
+  const opsRef = a['ops-head'] || a['run-main'];
+  const atOps = git(repo, ['show', `${opsRef}:${MANIFEST_REL}`], { allowFail: true });
+  if (a.manifest === 'none') return { declared: 'none', removesManifestAtOpsHead: atOps !== null };
+  let mf;
+  let declared = 'supplied';
+  if (a.manifest === undefined) {
+    if (atOps === null) return { declared: 'none', removesManifestAtOpsHead: false };
+    try { mf = JSON.parse(atOps); } catch { refuse(`the manifest at ${s8(opsRef)} is not JSON`); }
+    if (mf?.productSha !== candidate) {
+      refuse(`the manifest at ${s8(opsRef)} is for ${mf?.productSha}, not this candidate: pass --manifest <file> for ${s8(candidate)}, or --manifest none for a release with no member-visible milestone`);
+    }
+    declared = 'at operational head';
+  } else {
+    try { mf = JSON.parse(fs.readFileSync(a.manifest, 'utf8')); } catch { refuse('the --manifest file is missing or is not JSON'); }
+  }
+  const r = checkManifestObject(mf, { approvedSha: candidate, drivers: registeredDrivers });
+  if (r.status !== 'valid') refuse(`the milestone manifest would be refused before deploy: ${r.lines.join('; ')}`);
+  if (mf.previousKnownGoodSha !== previous) {
+    refuse(`the manifest's previousKnownGoodSha is ${mf.previousKnownGoodSha}, not the served pin ${previous} it rolls back to`);
+  }
+  return { declared, milestone: mf.milestone, journeys: mf.journeys.map((j) => j.id) };
 }
 
 export function generate(argv) {
@@ -417,7 +457,8 @@ export function generate(argv) {
   if (!label.trim() || /[\r\n]/.test(label)) refuse('the label must be one non-empty line of reviewed prose');
 
   const m = measure(repo, { previous, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
-  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m });
+  const milestone = milestoneFor(repo, a, { previous, candidate });
+  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone });
   return { args: a, next, text: serialize(next) };
 }
 

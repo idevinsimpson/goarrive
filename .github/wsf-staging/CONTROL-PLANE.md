@@ -21,7 +21,8 @@ node .github/wsf-staging/pin-candidate.mjs \
   --label-file <file holding the reviewed packageLabel, one line> \
   --accepted-on YYYY-MM-DD \
   --out .github/wsf-staging/approved-candidate.json \
-  --receipt <optional receipt path>
+  --receipt <optional receipt path> \
+  --manifest <the milestone manifest this pin PR commits | none>
 ```
 
 The run values are copied from the deploy job log of the run that served the
@@ -30,7 +31,12 @@ current pin. The script **refuses** (exit 1, nothing written) when:
 - the approval file at `--run-main` does not approve the SHA being replaced;
 - `--inventory-before` is not the file's `expectedPriorFunctions`;
 - the candidate is not a commit, or is the SHA already approved;
-- that pin was already rotated into history, or the label is not one line.
+- that pin was already rotated into history, or the label is not one line;
+- the milestone does not check out. A supplied `--manifest` (or one already at
+  `--ops-head`) must pass the same check the pre-deploy gate runs (section 5),
+  and its `previousKnownGoodSha` must be the served pin. A manifest at
+  `--ops-head` for another product is refused unless the pin supplies a new
+  one or passes `--manifest none` and removes it.
 
 It **derives**:
 - `approvedAppSha`, `expectedPriorFunctions` (the run's AFTER) and `sourceAcceptedOn`;
@@ -48,6 +54,15 @@ It carries forward `candidateAddedFunctions` and every other key unchanged.
 - the candidate exports exactly the verifier's expected set;
 - the serving run created nothing and moved nothing;
 - the release environment is unchanged between `--run-main` and `--ops-head`.
+
+**The release environment** is the workflow, `.github/wsf-staging/` (the
+generator, the smoke runner, the driver registry and every driver) and
+`firebase.westayfit.staging.json`. Exactly two files are excluded, because
+they are reviewed release **data**, not procedure:
+- `approved-candidate.json`;
+- `journeys/manifest.json`, which every visible milestone changes.
+
+A change to any other file there leaves the fast path.
 
 `fastPath.applies` is always `false`.
 
@@ -91,7 +106,7 @@ The summary is PASSED, FAILED or INCOMPLETE. Device review is always `NOT RUN �
 
 ## 4. `hosted-changed-journeys.mjs`: the report-only hook in hosted-verify
 
-It runs after the Package E suite, with `continue-on-error`. It has no step id, and the hosted gate does not read it.
+It runs after the Package E suite and the re-authentication, with `continue-on-error`. It has no step id, and the hosted gate does not read it.
 
 It reads the manifest from the **operational** checkout at `.github/wsf-staging/journeys/manifest.json`.
 
@@ -99,8 +114,27 @@ It reads the manifest from the **operational** checkout at `.github/wsf-staging/
 | --- | --- |
 | No manifest | Prints `CHANGED_JOURNEY_SMOKE=skipped` |
 | Journey has no driver in `journeys/index.mjs` | Reports it BLOCKED |
-| At least one driver to run | Launches the browser only after `/health` names the deployed SHA |
+| At least one driver to run | Mints its token and SDK config, then launches the browser only after `/health` names the deployed SHA |
 
-It writes `changed-journeys/changed-journeys.json` and `owner-test-card.md` into the hosted evidence. The existing scan checks them before upload.
+It writes `changed-journeys/changed-journeys.json`, `owner-test-card.md` and one screenshot per driven journey into the hosted evidence. The existing scan checks them before upload.
 
-The driver registry ships empty. Drivers arrive with the first milestone manifest, reviewed against its journeys.
+**Drivers** (`journeys/index.mjs`, reviewed code):
+
+| Journey id | What it does | What it does not do |
+| --- | --- | --- |
+| `community` | Signs in through `/signin`, opens `/community`, checks the banner name, the Members and Your role facts ("Champion" for the founding Champion) and This period; presses the other community's chip and checks all of them again; reloads and checks the selection held. | The roster: `wsfCommunityMembers` is transport-shut on staging. |
+| `settings` | Selects the community it leads with its chip, opens You, presses Settings, checks the panel overlay, that the selected community's section is first, every switch's stored state, the "Anonymous member" hint and the CHAMPION badge; presses × Close and checks it dismissed. | Changing a switch: `wsfSetCommunityVisibility` is transport-shut on staging. |
+
+**Fixtures** (`journeys/fixture-kit.mjs`): one preverified synthetic member in two synthetic communities, seeded through the admin REST path with the run tag `e5c-…` (registered in `run-tag.mjs`). Every account and document is tracked in the step's **own** cleanup manifest before it is created; the password is never written. The next step, "Remove changed-journey fixtures", runs `cleanup-synthetic.mjs` over that manifest (report-only: an incomplete cleanup is a warning with the manifest preserved in the evidence).
+
+An example manifest for COMMUNITY-SETTINGS-PARITY-1 is at `journeys/examples/`; no live manifest ships with this tooling.
+
+## 5. `check-milestone-manifest.mjs`: the frozen manifest, checked before deploy
+
+It runs in the credential-free `gate` job, deploy mode only, right after the candidate is resolved.
+
+| Manifest | Result |
+| --- | --- |
+| Absent | `MILESTONE_MANIFEST=absent`: no member-visible milestone is declared. Never read as a pass. |
+| Schema-valid, `productSha` equals the approved candidate, a registered driver for every journey | `MILESTONE_MANIFEST=valid` |
+| Anything else (stale, mismatched, undriven, invalid) | `MILESTONE_MANIFEST=refused`, and the deploy stops before any build |

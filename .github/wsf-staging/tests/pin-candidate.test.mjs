@@ -73,6 +73,17 @@ const OPS_CHANGED = commit('ops head changing the automation');
 write('.github/wsf-staging/approved-candidate.json', serialize({ ...approval0, approvedAppSha: B0 }));
 const RUN_MAIN_OTHER = commit('ops main approving a different SHA');
 
+// C1: operational heads that each change exactly one kind of thing since the serving run.
+const MANIFEST_REL = '.github/wsf-staging/journeys/manifest.json';
+const manifestFor = (productSha, over = {}) => JSON.stringify({
+  schemaVersion: 1, milestone: 'FIXTURE-MILESTONE-1', productSha, previousKnownGoodSha: P,
+  journeys: [{ id: 'community', entry: '/community', setup: 's', actions: ['open'], expected: ['shown'], knownExclusions: [] }], ...over,
+});
+const opsBranch = (name, files) => {
+  g('checkout', '-q', '-b', name, OPS);
+  for (const [rel, body] of Object.entries(files)) write(rel, body);
+  return commit(name);
+};
 g('checkout', '-q', '-b', 'dev', P);
 write('apps/westayfit/app/new-route.tsx', 'new\n');
 write('apps/westayfit/app/(tabs)/you.tsx', 'you v3\n');
@@ -87,6 +98,12 @@ const C_FUNCTIONS = commit('adds a callable');
 g('checkout', '-q', '-b', 'side', B0);
 write('docs/side.md', 'side\n');
 const C_SIDE = commit('not a descendant of P');
+const OPS_MANIFEST_ONLY = opsBranch('ops-manifest-only', { [MANIFEST_REL]: manifestFor(C) });
+const OPS_STALE_MANIFEST = opsBranch('ops-stale-manifest', { [MANIFEST_REL]: manifestFor(P.replace(/./, (c) => (c === 'a' ? 'b' : 'a'))) });
+const OPS_DRIVER = opsBranch('ops-driver', { '.github/wsf-staging/journeys/community.mjs': 'export const community = 1;\n' });
+const OPS_REGISTRY = opsBranch('ops-registry', { '.github/wsf-staging/journeys/index.mjs': 'export const drivers = {};\n' });
+const OPS_WORKFLOW = opsBranch('ops-workflow', { '.github/workflows/wsf-staging-deploy.yml': 'name: changed\n' });
+const OPS_TOOL = opsBranch('ops-tool', { '.github/wsf-staging/hosted-changed-journeys.mjs': '// changed\n' });
 g('checkout', '-q', 'main');
 
 const approvalPath = path.join(root, 'approval.json');
@@ -207,6 +224,61 @@ test('a serving run that created functions or moved the inventory leaves the fas
   assert.ok(f.reasons.includes('the last run created functions (wsfgamma)'));
   assert.ok(f.reasons.includes('the last run changed the inventory (3 -> 4)'));
   assert.ok(f.reasons.includes('the verifier\'s expected set (3) is not the run\'s AFTER (4)'));
+});
+
+// ---- C1: the manifest is release DATA; the code around it is not ----------------------------
+test('C1: an operational head that changes ONLY the milestone manifest stays fast-path eligible', () => {
+  const r = run({ 'ops-head': OPS_MANIFEST_ONLY });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json._pinInvariants.fastPath.eligible, true, r.json._pinInvariants.fastPath.reasons.join('\n'));
+  assert.deepEqual(r.json._pinInvariants.releaseEnvironment.delta, []);
+  assert.deepEqual(r.json._pinInvariants.milestone, { declared: 'at operational head', milestone: 'FIXTURE-MILESTONE-1', journeys: ['community'] });
+});
+
+for (const [name, head, file] of [
+  ['a driver', () => OPS_DRIVER, '.github/wsf-staging/journeys/community.mjs'],
+  ['the driver registry', () => OPS_REGISTRY, '.github/wsf-staging/journeys/index.mjs'],
+  ['the workflow', () => OPS_WORKFLOW, '.github/workflows/wsf-staging-deploy.yml'],
+  ['the smoke runner', () => OPS_TOOL, '.github/wsf-staging/hosted-changed-journeys.mjs'],
+]) {
+  test(`C1: an operational head that changes ${name} leaves the fast path, named`, () => {
+    const f = reasons({ 'ops-head': head() });
+    assert.equal(f.eligible, false);
+    assert.ok(f.reasons.includes(`the release environment changed since run 7: ${file}`), f.reasons.join('\n'));
+  });
+}
+
+test('C1: a stale manifest at the operational head is refused unless this pin supplies or withdraws one', () => {
+  const r = run({ 'ops-head': OPS_STALE_MANIFEST });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /pass --manifest <file> for [0-9a-f]{8}, or --manifest none/);
+  const none = run({ 'ops-head': OPS_STALE_MANIFEST, manifest: 'none' });
+  assert.equal(none.code, 0, none.err);
+  assert.deepEqual(none.json._pinInvariants.milestone, { declared: 'none', removesManifestAtOpsHead: true });
+  const file = path.join(root, 'next-manifest.json');
+  fs.writeFileSync(file, manifestFor(C));
+  const supplied = run({ 'ops-head': OPS_STALE_MANIFEST, manifest: file });
+  assert.equal(supplied.code, 0, supplied.err);
+  assert.equal(supplied.json._pinInvariants.milestone.declared, 'supplied');
+});
+
+test('C1: a supplied manifest is checked exactly as the pre-deploy gate will check it, plus its rollback SHA', () => {
+  const bad = (name, body, re) => {
+    const file = path.join(root, `${name}.json`);
+    fs.writeFileSync(file, body);
+    const r = run({ manifest: file });
+    assert.equal(r.code, 1, `${name} should be refused`);
+    assert.match(r.err, re);
+    assert.equal(r.text, null);
+  };
+  bad('wrong-product', manifestFor(C_PROTECTED), /would be refused before deploy: the manifest is for/);
+  bad('no-driver', manifestFor(C, { journeys: [{ id: 'kiosk', entry: '/k', setup: 's', actions: ['a'], expected: ['e'], knownExclusions: [] }] }), /no registered driver for journey kiosk/);
+  bad('wrong-rollback', manifestFor(C, { previousKnownGoodSha: B0 }), /previousKnownGoodSha is [0-9a-f]{40}, not the served pin/);
+  bad('invalid', manifestFor(C, { extra: 1 }), /unknown key "extra"/);
+});
+
+test('with no manifest anywhere, the pin declares no member-visible milestone', () => {
+  assert.deepEqual(run().json._pinInvariants.milestone, { declared: 'none', removesManifestAtOpsHead: false });
 });
 
 // ---- refusals: exit 1, nothing written ---------------------------------------------------

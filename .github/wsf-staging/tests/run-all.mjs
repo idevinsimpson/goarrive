@@ -21,6 +21,8 @@ const suites = [
   'milestone-manifest.test.mjs',
   'owner-test-card.test.mjs',
   'hosted-changed-journeys.test.mjs',
+  'check-milestone-manifest.test.mjs',
+  'changed-journey-drivers.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

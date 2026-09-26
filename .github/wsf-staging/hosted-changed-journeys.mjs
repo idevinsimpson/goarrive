@@ -17,18 +17,28 @@
  *   "no registered driver". Never passed.
  * - The browser is launched only when at least one driver will run, and only
  *   after the hosted health marker names the deployed SHA.
+ * - Drivers seed their own synthetic fixtures (journeys/fixture-kit.mjs) under
+ *   this run's `e5c-` tag, tracked in this step's OWN cleanup manifest, which
+ *   the workflow's "Remove changed-journey fixtures" step clears. The Package E
+ *   suite's manifest is never shared: two writers to one manifest could adopt
+ *   or destroy each other's record of what was created.
  *
  * Writes changed-journeys.json (the results document owner-test-card.mjs
  * reads) and owner-test-card.md into WSF_RESULT_DIR/changed-journeys/.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { validateManifest } from './milestone-manifest.mjs';
 import { renderCard } from './owner-test-card.mjs';
+import { createFixtureKit } from './journeys/fixture-kit.mjs';
 
-const DRIVER_TIMEOUT_MS = 120_000;
+const PROJECT_ID = 'westayfit-staging';
+const runTag = `e5c-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+
+const DRIVER_TIMEOUT_MS = 240_000;
 const short = (e) => String(e?.message || e).split('\n')[0].replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').slice(0, 300);
 
 function readEnv(env) {
@@ -49,6 +59,20 @@ async function defaultLaunch() {
   const { chromium } = requireFromApp('@playwright/test');
   return chromium.launch();
 }
+/** Only when a driver will run: the fixture credentials, read and checked here. */
+function defaultFixtures(env) {
+  const token = env.WSF_GOOGLE_ACCESS_TOKEN;
+  const sdkFile = env.WSF_SDK_CONFIG_FILE;
+  const cleanupManifest = env.WSF_CLEANUP_MANIFEST;
+  if (!token) throw new Error('WSF_GOOGLE_ACCESS_TOKEN is required');
+  if (!sdkFile) throw new Error('WSF_SDK_CONFIG_FILE is required');
+  if (!cleanupManifest) throw new Error('WSF_CLEANUP_MANIFEST is required');
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(sdkFile, 'utf8')); } catch { throw new Error('the SDK config file is unreadable'); }
+  const sdk = raw?.result?.sdkConfig ?? raw?.sdkConfig ?? raw?.result ?? raw;
+  if (sdk?.projectId !== PROJECT_ID || typeof sdk?.apiKey !== 'string') throw new Error('the SDK config is not the staging Web App config');
+  return createFixtureKit({ projectId: PROJECT_ID, apiKey: sdk.apiKey, token, runTag, cleanupManifest });
+}
 async function defaultDrivers() {
   return (await import('./journeys/index.mjs')).drivers;
 }
@@ -60,7 +84,7 @@ const blocked = (journeyId, reason) => ({
 
 /**
  * Returns { lines, results } and never throws; `deps` exist so tests can
- * substitute the registry, fetch and the browser.
+ * substitute the registry, fetch, the browser and the fixture kit.
  */
 export async function runHook(env, deps = {}) {
   const lines = [];
@@ -78,6 +102,7 @@ export async function runHook(env, deps = {}) {
     if (problems.length) throw new Error(`the milestone manifest is invalid: ${problems.join('; ')}`);
 
     const registry = await (deps.loadDrivers || defaultDrivers)();
+    const dir = path.join(RESULT_DIR, 'changed-journeys');
     const out = [];
     let servedSha = null;
     if (manifest.productSha !== APPROVED_SHA) {
@@ -92,36 +117,38 @@ export async function runHook(env, deps = {}) {
         } catch { markerOk = false; }
         if (markerOk) servedSha = APPROVED_SHA;
       }
-      const evidenceDir = path.join(RESULT_DIR, 'changed-journeys');
       let browser = null;
+      let fixtures = null;
       try {
         for (const j of manifest.journeys) {
           const driver = registry[j.id];
           if (typeof driver !== 'function') { out.push(blocked(j.id, 'no registered driver')); continue; }
           if (!markerOk) { out.push(blocked(j.id, `the hosted health marker does not name ${APPROVED_SHA.slice(0, 7)}`)); continue; }
+          fixtures ||= (deps.fixtures || defaultFixtures)(env);
           browser ||= await (deps.launch || defaultLaunch)();
-          const context = await browser.newContext();
+          const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'en-US' });
           const page = await context.newPage();
+          const shot = async () => {
+            try {
+              fs.mkdirSync(dir, { recursive: true });
+              await page.screenshot({ path: path.join(dir, `${j.id}.png`), fullPage: true });
+              return `changed-journeys/${j.id}.png`;
+            } catch { return null; }
+          };
           try {
             const r = await Promise.race([
-              driver({ page, baseUrl: STAGING_URL, journey: j }),
+              driver({ page, baseUrl: STAGING_URL, journey: j, fixtures }),
               new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out after ${DRIVER_TIMEOUT_MS / 1000}s`)), DRIVER_TIMEOUT_MS).unref()),
             ]);
             const assertions = (r?.assertions || []).map((a) => ({ expected: String(a.expected), ok: a.ok === true }));
             const ok = assertions.length > 0 && assertions.every((a) => a.ok);
             out.push({
               journeyId: j.id, status: ok ? 'passed' : 'failed', servedMarker: servedSha,
-              setupId: r?.setupId ?? null, actionsPerformed: (r?.actionsPerformed || []).map(String), assertions,
-              reason: ok ? null : assertions.length ? 'an expected assertion did not hold' : 'the driver checked no assertion', artifact: null,
+              setupId: typeof r?.setupId === 'string' ? r.setupId : null, actionsPerformed: (r?.actionsPerformed || []).map(String), assertions,
+              reason: ok ? null : assertions.length ? 'an expected assertion did not hold' : 'the driver checked no assertion', artifact: await shot(),
             });
           } catch (e) {
-            let artifact = null;
-            try {
-              fs.mkdirSync(evidenceDir, { recursive: true });
-              artifact = `changed-journeys/${j.id}.png`;
-              await page.screenshot({ path: path.join(RESULT_DIR, artifact), fullPage: true });
-            } catch { artifact = null; }
-            out.push({ ...blocked(j.id, `the driver threw: ${short(e)}`), status: 'failed', servedMarker: servedSha, artifact });
+            out.push({ ...blocked(j.id, `the driver threw: ${short(e)}`), status: 'failed', servedMarker: servedSha, artifact: await shot() });
           } finally {
             await context.close().catch(() => {});
           }
@@ -132,7 +159,6 @@ export async function runHook(env, deps = {}) {
     }
 
     const results = { schemaVersion: 1, servedSha, results: out };
-    const dir = path.join(RESULT_DIR, 'changed-journeys');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'changed-journeys.json'), `${JSON.stringify(results, null, 2)}\n`);
     const card = renderCard(manifest, results, { stagingUrl: STAGING_URL });
@@ -149,6 +175,7 @@ export async function runHook(env, deps = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const { lines } = await runHook(process.env);
   for (const l of lines) console.log(l);
+  console.log(`CHANGED_JOURNEY_RUN_TAG=${runTag}`);
   console.log('CHANGED_JOURNEY_SMOKE_GATES=nothing (report-only)');
   process.exit(0);
 }

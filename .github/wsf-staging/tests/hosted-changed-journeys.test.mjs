@@ -39,13 +39,15 @@ function spy({ health = `ok ${A.slice(0, 7)}`, healthOk = true, fetchThrows = fa
     calls,
     fetch: async (url) => { calls.fetch.push(url); if (fetchThrows) throw new Error('unreachable'); return { ok: healthOk, text: async () => health }; },
     launch: async () => { calls.launch += 1; return browser; },
+    fixtures: () => { calls.fixtures = (calls.fixtures || 0) + 1; return { kit: 'fake' }; },
   };
 }
 const byId = (r) => Object.fromEntries(r.results.results.map((x) => [x.journeyId, x]));
 
-await test('the shipped registry is empty: no journey can pass until a reviewed driver exists', () => {
-  assert.deepEqual(Object.keys(registered), []);
+await test('the shipped registry holds exactly the reviewed Community and Settings drivers, frozen', () => {
+  assert.deepEqual(Object.keys(registered).sort(), ['community', 'settings']);
   assert.ok(Object.isFrozen(registered));
+  for (const d of Object.values(registered)) assert.equal(typeof d, 'function');
 });
 
 await test('no manifest configured: skipped, no browser, no network, no files', async () => {
@@ -68,6 +70,7 @@ await test('no registered driver: every journey BLOCKED, the browser is never la
   const s = spy();
   const r = await runHook(env, { ...s, loadDrivers: async () => ({}) });
   assert.equal(s.calls.launch, 0, 'nothing to drive must not start a browser');
+  assert.equal(s.calls.fixtures || 0, 0, 'nothing to drive must not mint fixtures');
   assert.equal(s.calls.fetch.length, 0, 'nothing to drive must not touch the network');
   for (const x of r.results.results) {
     assert.equal(x.status, 'blocked');
@@ -110,7 +113,7 @@ await test('the health marker does not name the deployed SHA: BLOCKED, driver ne
   const s = spy({ health: 'ok 1234567' });
   let driven = 0;
   const r = await runHook(env, { ...s, loadDrivers: async () => ({ community: async () => { driven += 1; } }) });
-  assert.equal(driven + s.calls.launch, 0);
+  assert.equal(driven + s.calls.launch + (s.calls.fixtures || 0), 0, 'a wrong build gets no browser and no fixtures');
   assert.equal(r.results.servedSha, null);
   assert.match(byId(r).community.reason, /health marker does not name aaaaaaa/);
 });
@@ -143,6 +146,28 @@ await test('a failing assertion, an empty driver result and a throwing driver ar
   assert.ok(r.lines.includes('CHANGED_JOURNEY_SMOKE=FAILED'));
 });
 
+await test('a driver to run without the fixture credentials is reported as an error, with the browser closed', async () => {
+  const { env } = setup(manifestFor(A, ['community']));
+  const s = spy();
+  delete s.fixtures;
+  const r = await runHook(env, { ...s, loadDrivers: async () => ({ community: async () => ({}) }) });
+  assert.match(r.lines[0], /CHANGED_JOURNEY_SMOKE=error \(WSF_GOOGLE_ACCESS_TOKEN is required\)/);
+  assert.equal(s.calls.launch, 0, 'no browser before the fixtures exist');
+});
+
+await test('the fixture kit is made once per run and passed to every driver', async () => {
+  const { env } = setup(manifestFor(A, ['community', 'you']));
+  const s = spy();
+  const seen = [];
+  await runHook(env, { ...s, loadDrivers: async () => ({
+    community: async ({ fixtures }) => { seen.push(fixtures); return { assertions: [{ expected: 'x', ok: true }] }; },
+    you: async ({ fixtures }) => { seen.push(fixtures); return { assertions: [{ expected: 'x', ok: true }] }; },
+  }) });
+  assert.equal(s.calls.fixtures, 1);
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0], seen[1]);
+});
+
 await test('an invalid manifest or missing environment is reported, not thrown', async () => {
   const bad = setup({ ...manifestFor(A), extra: true });
   const r1 = await runHook(bad.env, { ...spy(), loadDrivers: async () => ({}) });
@@ -155,10 +180,11 @@ await test('an invalid manifest or missing environment is reported, not thrown',
   assert.match(r3.lines[0], /not JSON/);
 });
 
-await test('the CLI always exits 0 and says it gates nothing, with the real (empty) registry', () => {
+await test('the CLI always exits 0 and says it gates nothing, with the real registry', () => {
   const cases = [
     [{}, /CHANGED_JOURNEY_SMOKE=skipped/],
-    [setup(manifestFor(A)).env, /CHANGED_JOURNEY_SMOKE=INCOMPLETE/],
+    // Journey ids with no driver: nothing to drive, so no network, browser or credential.
+    [setup(manifestFor(A, ['kiosk', 'home'])).env, /CHANGED_JOURNEY_SMOKE=INCOMPLETE/],
     [setup('{').env, /CHANGED_JOURNEY_SMOKE=error/],
   ];
   for (const [env, re] of cases) {
