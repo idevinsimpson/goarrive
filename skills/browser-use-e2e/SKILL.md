@@ -9,7 +9,9 @@ GoArrive uses [Browser Use](https://browser-use.com/) for automated, LLM-driven 
 ## Authentication
 
 The API key for Browser Use Cloud is required to initialize the SDK.
-- **API Key:** `bu_blfMah0ZzLlNSqFoUlcHOOQKJ2xxMB0h4J7qvgOh5NA`
+- **API Key:** read from the `BROWSER_USE_API_KEY` environment variable (a local shell export or `.env`, both gitignored, or the runner's secret store). It must never be committed.
+
+> **Security notice.** A Browser Use Cloud key was previously committed to this public repository in plaintext. Removing it from source does not revoke it, and it remains in git history. The account owner must revoke that key in the Browser Use Cloud dashboard and issue a replacement through the environment/secret path above. `.github/wsf-staging/tests/committed-secrets.test.mjs` refuses a literal key here.
 
 ## Usage Instructions
 
@@ -20,12 +22,14 @@ When asked to perform browser-based E2E testing or verify UI/UX flows, follow th
    pip install browser-use-sdk
    ```
 
-2. **Initialize the Client:** Use the provided API key to authenticate the `AsyncBrowserUse` client.
+2. **Initialize the Client:** Authenticate the `AsyncBrowserUse` client with the key from the environment.
    ```python
+   import os
+
    from browser_use_sdk.v3 import AsyncBrowserUse
 
-   # Initialize with the GoArrive API Key
-   client = AsyncBrowserUse(api_key="bu_blfMah0ZzLlNSqFoUlcHOOQKJ2xxMB0h4J7qvgOh5NA")
+   # The key comes from BROWSER_USE_API_KEY, never from this file
+   client = AsyncBrowserUse(api_key=os.environ["BROWSER_USE_API_KEY"])  # never inline the literal key
    ```
 
 3. **Execute Test Tasks:** Pass natural language instructions to the `run()` method to execute the test.

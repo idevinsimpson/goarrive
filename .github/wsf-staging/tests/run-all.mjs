@@ -26,6 +26,7 @@ const suites = [
   'check-served-marker.test.mjs',
   'journey-activation.test.mjs',
   'token-dependency.test.mjs',
+  'committed-secrets.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

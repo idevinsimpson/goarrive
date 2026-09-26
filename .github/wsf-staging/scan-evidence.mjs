@@ -34,6 +34,8 @@ const RULES = [
   { name: 'email-action-link', re: /[?&](?:oobCode|token|idToken|refreshToken)=[^&\s"']+/ },
   { name: 'firebase-custom-token', re: /\beyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}/ },
   { name: 'bearer-header', re: /authorization"?\s*[:=]\s*"?Bearer\s+\S+/i },
+  // Browser Use Cloud API keys (`bu_…`). Environment-variable references or placeholders do not match.
+  { name: 'browser-use-api-key', re: /\bbu_[A-Za-z0-9_-]{20,}/ },
 ];
 
 const TEXTLIKE = new Set(['.json', '.txt', '.log', '.md', '.html', '.htm', '.xml', '.csv', '.yml', '.yaml', '.har', '.zip.txt']);
