@@ -65,7 +65,6 @@ import MovementDetail from '../../components/MovementDetail';
 import MovementForm from '../../components/MovementForm';
 import MovementVariationModal from '../../components/MovementVariationModal';
 import WorkoutDetail from '../../components/WorkoutDetail';
-import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 import PlaybookFolderPage from '../../components/PlaybookFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
@@ -636,7 +635,6 @@ function BuildScreenInner() {
   const [selectedFollowAlong, setSelectedFollowAlong] = useState<any | null>(null);
   const [selectedWorkout, setSelectedWorkout] = useState<any | null>(null);
   const [editWorkout, setEditWorkout] = useState<any | null>(null);
-  const [isWorkoutFormOpen, setIsWorkoutFormOpen] = useState(false);
 
   // Workout folder page — replaces the old modal flow
   const [openWorkoutId, setOpenWorkoutId] = useState<string | null>(null);
