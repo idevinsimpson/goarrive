@@ -150,7 +150,8 @@ A workflow mode that runs the accepted Community and Settings drivers once again
 | Step | What it does | On failure |
 | --- | --- | --- |
 | gate: activation manifest | `check-milestone-manifest.mjs --require journeys/examples/community-settings-parity-1.json`: present, valid, `productSha` = the approved candidate, a driver for every journey | refused before anything else |
-| served marker | `check-served-marker.mjs`: `/health` must name the approved SHA (the verifier's rule), **before authentication** | the job stops with no credential minted and no fixture |
+| gate: served marker | `check-served-marker.mjs` in the **credential-free gate**: `/health` must name the approved SHA (the verifier's rule) | the gate fails, so `config` and the activation job (the only jobs here that can obtain a token) never start: **no credential is minted** |
+| served marker, again | the same check inside the activation job, before its own authentication: a drift check between the gate and execution | the job stops before any fixture |
 | authenticate, run | the existing identity; `hosted-changed-journeys.mjs` seeds the bounded `e5c-` fixture and drives both journeys | a failed or blocked journey is recorded, never passed |
 | cleanup | `cleanup-synthetic.mjs` over the run's own manifest, **blocking** | the step fails; the manifest is kept in the evidence for recovery |
 | card | `owner-test-card.mjs` after cleanup, from the results and the cleaner's receipt | report only |

@@ -42,18 +42,34 @@ function node(script, env) {
  * product defects; `drivers` overrides the registry; `failDeletes` makes the
  * cleanup API refuse deletions.
  */
-async function activation({ health = `Commit ${SERVED.slice(0, 7)}`, bugs = {}, drivers, failDeletes = false } = {}) {
+async function activation({ health = `Commit ${SERVED.slice(0, 7)}`, jobHealth = health, bugs = {}, drivers, failDeletes = false } = {}) {
   const root = tmp();
   const evidence = path.join(root, 'wsf-activation-evidence');
   const changed = path.join(evidence, 'changed-journeys');
-  const site = http.createServer((req, res) => { res.writeHead(req.url === '/health' ? 200 : 404); res.end(req.url === '/health' ? health : ''); });
+  // The gate reads /health first; every later read (the job's drift check, the runner) sees `jobHealth`.
+  let healthReads = 0;
+  const site = http.createServer((req, res) => {
+    if (req.url !== '/health') { res.writeHead(404); res.end(''); return; }
+    healthReads += 1;
+    res.writeHead(200);
+    res.end(healthReads === 1 ? health : jobHealth);
+  });
   await new Promise((r) => site.listen(0, '127.0.0.1', r));
   const siteUrl = `http://127.0.0.1:${site.address().port}`;
   const outcome = {};
   let h = null;
   let fixturesMade = 0;
 
-  // 1. Read the served marker (plain step: it can stop the job).
+  // 0. gate (credential-free): read the served marker. A failure fails the gate, so
+  //    `config` (the first job that can obtain a token) and this job never start.
+  const gateMarker = await node('check-served-marker.mjs', { WSF_APPROVED_SHA: SERVED, WSF_STAGING_URL: siteUrl, WSF_RESULT_DIR: path.join(root, 'gate-marker') });
+  outcome.gate = gateMarker.code === 0 ? 'success' : 'failure';
+  if (outcome.gate !== 'success') {
+    site.close();
+    return { outcome, verdict: null, card: null, fixturesMade, be: null, evidence, changed, jobsStarted: [] };
+  }
+
+  // 1. Read the served marker again in the job (plain step: it can stop the job).
   const marker = await node('check-served-marker.mjs', { WSF_APPROVED_SHA: SERVED, WSF_STAGING_URL: siteUrl, WSF_RESULT_DIR: evidence });
   outcome.marker = marker.code === 0 ? 'success' : 'failure';
 
@@ -114,7 +130,7 @@ async function activation({ health = `Commit ${SERVED.slice(0, 7)}`, bugs = {}, 
     WSF_STAGING_URL: CARD_URL, WSF_MARKER_OUTCOME: outcome.marker, WSF_CLEANUP_OUTCOME: outcome.cleanup, WSF_SCAN_OUTCOME: outcome.scan,
   });
   site.close();
-  return { outcome, verdict, card, fixturesMade, be: h?.be ?? null, evidence, changed, marker };
+  return { outcome, verdict, card, fixturesMade, be: h?.be ?? null, evidence, changed, marker, jobsStarted: ['config', 'journey-activation'] };
 }
 
 await test('SUCCESS PATH (modeled): marker match, both journeys PASSED, cleanup COMPLETE, scan passes → ACTIVATION=PASSED', async () => {
@@ -133,15 +149,29 @@ await test('SUCCESS PATH (modeled): marker match, both journeys PASSED, cleanup 
   }
 });
 
-await test('WRONG MARKER: stops before any credential or fixture, nothing seeded, ACTIVATION=FAILED', async () => {
+await test('A1 WRONG MARKER: fails the GATE; no credentialed job starts, nothing is seeded', async () => {
   const a = await activation({ health: 'Commit 74d1928' });
+  assert.equal(a.outcome.gate, 'failure');
+  assert.deepEqual(a.jobsStarted, [], 'config (the first job that can obtain a token) and the activation job never start');
+  assert.equal(a.fixturesMade, 0);
+  assert.equal(fs.existsSync(a.evidence), false, 'the activation job never ran, so it wrote nothing');
+});
+
+await test('A1 UNREACHABLE MARKER: also fails the gate', async () => {
+  const a = await activation({ health: 'down' });
+  assert.equal(a.outcome.gate, 'failure');
+  assert.deepEqual(a.jobsStarted, []);
+});
+
+await test('DRIFT: the gate saw the served build but the job re-read does not → stops before any fixture, ACTIVATION=FAILED', async () => {
+  const a = await activation({ jobHealth: 'Commit 74d1928' });
+  assert.equal(a.outcome.gate, 'success');
   assert.equal(a.outcome.marker, 'failure');
-  assert.equal(a.outcome.journeys, 'skipped', 'the authenticate and run steps are skipped');
-  assert.equal(a.fixturesMade, 0, 'no fixture kit, so no fixture and no token use');
+  assert.equal(a.outcome.journeys, 'skipped', 'the job\'s authenticate and run steps are skipped');
+  assert.equal(a.fixturesMade, 0);
   assert.equal(fs.existsSync(path.join(a.changed, 'cleanup-manifest.json')), false);
   assert.equal(a.verdict.code, 1);
-  assert.match(a.verdict.out, /served-marker check did not pass/);
-  assert.match(a.verdict.out, /ACTIVATION=FAILED/);
+  assert.match(a.verdict.out, /served-marker check did not pass[\s\S]*ACTIVATION=FAILED/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(a.evidence, 'served-marker.json'), 'utf8')).status, 'mismatch', 'the refusal is itself evidence');
 });
 

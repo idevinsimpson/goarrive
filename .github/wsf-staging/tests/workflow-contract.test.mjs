@@ -1297,4 +1297,40 @@ await test('activation cleanup is blocking, the card follows it, the scan gates 
   assert.equal(/wsf-(player-|privacy-|hosted-)?evidence\b/.test(jobCode('journey-activation').replace(/wsf-activation-evidence/g, '')), false);
 });
 
+// ---- A1 (Director #516): the marker precedes EVERY credential in this mode ------------
+await test('A1: the credential-free gate reads the served marker in journey-activation mode, blocking, after the manifest check', () => {
+  const names = [...jobs.gate.matchAll(/^      - name: (.+)$/gm)].map((m) => m[1].trim());
+  const manifest = names.indexOf('Check the activation manifest against the approved candidate');
+  const marker = names.indexOf('Read the served marker before any credentialed job');
+  assert.ok(manifest >= 0 && marker === manifest + 1, 'the gate reads the marker right after the activation manifest check');
+  const live = stepBlock('gate', 'Read the served marker before any credentialed job').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.match(live, /^\s+if: \$\{\{ inputs\.mode == 'journey-activation' \}\}$/m);
+  assert.match(live, /^\s+run: node \.github\/wsf-staging\/check-served-marker\.mjs$/m);
+  assert.match(live, /^\s+WSF_APPROVED_SHA: \$\{\{ steps\.candidate\.outputs\.app_sha \}\}$/m, 'against the exact approved candidate');
+  assert.equal(/continue-on-error/.test(live), false, 'a wrong marker must fail the gate');
+  assert.equal(/id-token/.test(jobs.gate), false, 'the gate stays credential-free');
+});
+
+await test('A1: in journey-activation mode every job holding id-token depends on the gate, and none can start after it fails', () => {
+  const reached = reachedJobs('journey-activation');
+  const needsOf = (name) => {
+    const m = /^ {4}needs: (.*)$/m.exec(jobs[name]);
+    const raw = m ? m[1].trim() : '';
+    return raw === '' ? [] : raw.startsWith('[') ? raw.replace(/[[\]\s]/g, '').split(',') : [raw];
+  };
+  const dependsOnGate = (name, seen = new Set()) => needsOf(name).some((n) => n === 'gate' || (!seen.has(n) && seen.add(n) && dependsOnGate(n, seen)));
+  const credentialed = Object.keys(jobs).filter((n) => reached[n] && /id-token: write/.test(jobs[n]));
+  assert.deepEqual(credentialed.sort(), ['config', 'journey-activation']);
+  for (const name of credentialed) {
+    assert.ok(dependsOnGate(name), `${name} holds id-token but does not depend on the gate`);
+    const cond = jobCondition(name) || '';
+    assert.equal(/always\(\)|failure\(\)|cancelled\(\)/.test(cond), false, `${name} could start after a failed gate: ${cond}`);
+  }
+});
+
+await test('A1: the activation job re-reads the marker as a drift check before its own authentication', () => {
+  const names = [...jobs['journey-activation'].matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((m) => (m[1] || m[2]).trim());
+  assert.ok(names.indexOf('Read the served marker before any credential or fixture') < names.indexOf('Authenticate to Google Cloud'));
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);

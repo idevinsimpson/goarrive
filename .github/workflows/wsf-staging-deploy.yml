@@ -180,6 +180,20 @@ jobs:
           WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
         run: node .github/wsf-staging/check-milestone-manifest.mjs --require .github/wsf-staging/journeys/examples/community-settings-parity-1.json
 
+      # THE SERVED MARKER, IN THE CREDENTIAL-FREE GATE (Director #516 A1).
+      # `config` needs this job and authenticates, so a wrong or unreadable
+      # marker must fail HERE: then no job in this mode that can obtain a token
+      # can start, and no credential is minted at all. The activation job
+      # reads the marker again before its own authentication, as a drift
+      # check between this gate and its execution.
+      - name: Read the served marker before any credentialed job
+        if: ${{ inputs.mode == 'journey-activation' }}
+        env:
+          WSF_APPROVED_SHA: ${{ steps.candidate.outputs.app_sha }}
+          WSF_STAGING_URL: https://westayfit-staging--staging-4a616y5m.web.app
+          WSF_RESULT_DIR: ${{ runner.temp }}/wsf-gate-marker
+        run: node .github/wsf-staging/check-served-marker.mjs
+
   # -------------------------------------------------------------- config ----
   # Privileged, and deliberately tiny: it reads the staging Web App's public
   # SDK config and nothing else. No application code is checked out here, so
@@ -1166,6 +1180,8 @@ jobs:
         with:
           node-version: 20
 
+      # Defense in depth: the gate already refused a wrong marker before any
+      # credentialed job; this re-read catches drift between the gate and now.
       - name: Read the served marker before any credential or fixture
         id: marker
         env:
