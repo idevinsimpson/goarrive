@@ -1,8 +1,8 @@
 # HOME-NORTHSTAR-PARITY-1: evidence
 
 - **Packet:** Director #497 `5846941982`, W9 ACK `5846952566`. **Base:** development `6deefe7d`.
-- **Product:** `6ba49f10` (one commit). This evidence is its own commit.
-- **Status:** delivered. Not accepted, integrated or staged.
+- **Product:** `6ba49f10` (one commit), evidence `5e8a22ae`. **Successor product `9d27fdb5`** for the Director's visual hold on #514 (`5847715387`, W9 ACK `5847728432`). This evidence is its own commit. See [Visual closure](#visual-closure-on-9d27fdb5).
+- **Status:** delivered. Neither product is accepted, integrated or staged.
 - **Emulator only** (`demo-wsf-local`); nothing is deployed.
 
 ## Source and reference manifest
@@ -19,7 +19,7 @@
 
 - **Identity:**
   - The community name uses the reference's type: 27 px, weight 400, line-height 1.05.
-  - The descriptor slot carries the join policy in the existing label words ("Private community"), because the prototype's free-form line has no canonical field.
+  - The descriptor slot carries the join policy in the existing label words ("Private community"), because the prototype's free-form line has no canonical field. **Superseded on `9d27fdb5`:** see Visual closure.
   - The presence stack has three 29 px discs overlapping by 6 px, then "+N". "+N" counts **visible members not drawn**, and only once the member list came back complete.
   - The two facts sit beside the stack.
 - **Goal card (`.goal-hero`):**
@@ -72,7 +72,7 @@
 
 1. **The prototype's strip and sample labels are omitted.** "PROPOSED · DESIGN PROTOTYPE · SAMPLE DATA" and "Sample data ·" appear nowhere. The fixture's people are labelled as fixture data here and in the manifests.
 2. **Canonical truth replaces sample prose:**
-   - the descriptor is the join policy;
+   - the descriptor is the join policy (**`9d27fdb5`:** "Moving together" instead);
    - the kicker has no "· THIS WEEK" (there is no canonical period word);
    - the pill carries the real window, "Open · Ends Sat, Oct 3".
 3. **Copy pinned by other lanes' specs is kept rather than widened into their files:**
@@ -81,14 +81,14 @@
    - "12 **people** moved today";
    - "You've added 25 squats";
    - the full pill window text (`ui-community-home`, `ui-journey`);
-   - the shared `MomentumRow` format, "added 20 squats · 8m ago", with no right-hand amount and no "(you)", because `ActivityRow` carries no uid;
+   - the shared `MomentumRow` format, "added 20 squats · 8m ago", with no right-hand amount and no "(you)", because `ActivityRow` carries no uid (**`9d27fdb5`:** a Home-local row adds the right-hand amount);
    - "See everyone in this community" below the feed, in place of the heading's "Members ›" (`sprint-w9-members-link-target`).
 
    Changing any of these is a spec-owner decision. The route can take the reference's words the day those contracts move.
 4. **The momentum heading's line box is 26 px, not 31.5 px, and the card has no inner gap.** This keeps the first momentum row whole above the tab bar at 390×844 (the Director's standing guard, `sprint-w8-social-privacy`), which the reference's own row, under its strip, is not. The heading glyphs sit about 5 px higher than the reference's.
 5. **Platform:**
    - font rasterisation (no Avenir Next);
-   - the glyph artwork: no Lucide pulse, history or bar-chart icons on the buttons, the contribution tile keeps the canonical Progress glyph, and the tab bar and MOVE glyphs belong to the shell;
+   - the glyph artwork: no Lucide pulse, history or bar-chart icons on the buttons (**`9d27fdb5`:** both buttons carry native glyphs), the contribution tile keeps the canonical Progress glyph, and the tab bar and MOVE glyphs belong to the shell;
    - the short-height top bar is 62 px where the reference's is 56 px (shell, out of scope).
 
 ## Truth and interaction rows (ungated, in the focused spec)
@@ -132,5 +132,57 @@ The 18 files:
 - Every frame and row here is **Chromium on the Firebase emulators**. Safari and native devices are not measured.
 - On native, the rings use React Native's `experimental_backgroundImage` radial gradients (RN 0.81). That path is **not exercised here**.
 - Safe-area insets are zero in the browser, so on a notched device the frames shift by the device's own inset.
+
+## Visual closure on `9d27fdb5`
+
+Director visual hold #514 `5847715387`, W9 ACK `5847728432`. One commit on `5e8a22ae`, touching only the two reserved files. `6ba49f10` remains immutable for W7's Check 60. The protected-path diff is empty. `LivingWeProgress.tsx` is again untouched.
+
+**The three corrections:**
+
+1. **Communal descriptor.**
+   - **"Moving together"** (testID `wsf-community-descriptor`) sits in the reference's descriptor position whenever the server's goal list is loaded and shows a featured open goal.
+   - It never says "this week": there is no authoritative period word.
+   - **No open goal:** the existing truthful **"Ready to get moving."** line (same testID `wsf-community-human-line`, same contract in `ui-community-home` and `ui-mobile-acceptance`) moves into the slot.
+   - **Goals loading or failed:** the slot keeps its height and makes no claim.
+   - "Private community" is gone from Home.
+2. **Action glyphs.**
+   - **Start moving** carries a **pulse line**; **Already moved** carries a **clock with a return tick**.
+   - The app has no icon package, and its only native glyphs are the shell's tab glyphs, drawn from Views. These two are drawn the same way, locally in the route: no SVG, no font, nothing that can fall back to a missing-glyph box.
+   - Both are decorative, hidden from assistive technology (`aria-hidden`), with testID `wsf-action-glyph`.
+   - Same `href`s, testIDs and accessible names ("Start moving"; "Already moved? Record squats"). Both targets stay 54 px tall. No shell or tab icon changes.
+3. **Momentum row hierarchy.**
+   - On Home only, a local row replaces the shared `MomentumRow`, so the shared component is not expanded. It shows the avatar, the name (or "Anonymous member"), the movement and time as the secondary line, and the **exact `+N unit` right-aligned in green**.
+   - The same `ActivityRow` truths hold: an anonymous contributor keeps their amount, and a hidden one has no row.
+   - **"(you)" is omitted.** `wsfCommunityActivity` entries carry no uid or self marker, so nothing identifies the current member authoritatively.
+   - The secondary line keeps the sentence "added 20 squats · 8m ago". `sprint-w8-community-freshness` (line 297) pins `wsf-momentum-row` to contain `added 20 squats`. **Correction to my ACK:** that named `sprint-w8-social-privacy` as the pin. The pin is in the freshness spec.
+   - Rows are 54 px (reference 60 px). With the heading's 26 px line box (difference 4), this keeps the first row whole above the tab bar at 390×844 (the `sprint-w8-social-privacy` guard), because the right-hand amount made each row taller than the shared one.
+
+**Preserved:** truth states, action destinations, own-versus-shared separation, the matched identity and card geometry, and the short-height fit. The contribution row, momentum eyebrow and heading sit where they did on `6ba49f10`.
+
+**Refreshed matched frames** (`candidate/`, same producer, same fixture, full frame, no crop, no alignment):
+
+| frame | base `6deefe7d` | `6ba49f10` | **`9d27fdb5`** |
+|---|---|---|---|
+| Home 390×844, unaligned | 0.3736 | 0.2889 | **0.2909** |
+| Home 390×640, unaligned | 0.4422 | 0.3121 | **0.3118** |
+| 390×844, diagnostic (reference read 30 px lower, top bar to tab bar) | 0.3730 | 0.1062 | **0.1051** |
+| 390×640, diagnostic (24 px) | 0.4545 | 0.0990 | **0.0961** |
+
+The 844 unaligned share rises by 0.002 because the rows below the first momentum row are offset by the 54-versus-60 row height, and the two frames stay unaligned in that band.
+
+**Results on `9d27fdb5`.** These are the focused spec and the directly affected specs, not a broad restart, per the hold.
+
+| run | result | RAW |
+|---|---|---|
+| matched producer (CANDIDATE) and six truth rows | **8 / 8** | `RAW-matched-and-truth-9d27fdb5.txt` |
+| directly affected specs:<br>community freshness, social privacy, ui-community-home, ui-mobile-acceptance, app-feel-parity-1, focus-return-1, ui-a11y, ui-app-shell | **84 / 84** | `RAW-affected-9d27fdb5.txt` |
+| vitest, whole app | **1042 / 1042** | `RAW-vitest-9d27fdb5.txt` |
+| tsc | **0** | `RAW-tsc-9d27fdb5.txt` |
+
+**New and changed truth rows in the focused spec:**
+- **default:** descriptor "Moving together" and no human line; one glyph on each action, both actions keeping their accessible names; the momentum row shows `+20 squats` and `added 20 squats`, with no `(you)`.
+- **no open goal:** the human line "Ready to get moving." and no descriptor.
+
+The `ui-app-shell` run rewrites `docs/westayfit/app-shell-2026-09-19/*.png`. Those were restored with `git checkout --` and are not in this commit.
 
 `MANIFEST.sha256` lists every file in this directory.

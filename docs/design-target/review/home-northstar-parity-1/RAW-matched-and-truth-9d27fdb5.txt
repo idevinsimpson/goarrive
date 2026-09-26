@@ -1,0 +1,12 @@
+
+Running 8 tests using 1 worker
+
+[1/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:210:9 › HOME-NORTHSTAR-PARITY-1 · matched producer · CANDIDATE › 390x844: the Home route against the frozen original
+[2/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:210:9 › HOME-NORTHSTAR-PARITY-1 · matched producer · CANDIDATE › 390x640: the Home route against the frozen original
+[3/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:269:7 › HOME-NORTHSTAR-PARITY-1 · truth rows › default: the locked hierarchy, confirmed figures only, own part distinct from the shared total
+[4/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:316:7 › HOME-NORTHSTAR-PARITY-1 · truth rows › unknown: a progress read that fails invents no figure, no share and no moved-today line
+[5/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:329:7 › HOME-NORTHSTAR-PARITY-1 · truth rows › last known: a refresh that fails keeps the confirmed figure, says so, and drops the live claims
+[6/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:345:7 › HOME-NORTHSTAR-PARITY-1 · truth rows › reached and still open: the kicker says so on a confirmed figure
+[7/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:355:7 › HOME-NORTHSTAR-PARITY-1 · truth rows › no open goal: no hero, no actions, no invented count
+[8/8] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:368:7 › HOME-NORTHSTAR-PARITY-1 · truth rows › warm return: Home stays mounted -- no loading replacement, no blank -- and reselecting Home is a no-op
+  8 passed (2.4m)

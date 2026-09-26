@@ -1,7 +1,7 @@
 {
   "fixtureOnly": "Every person, name and figure is the frozen reference’s sample data, seeded into the local emulator (demo-wsf-local) for this comparison only. No production read or write.",
   "stage": "CANDIDATE",
-  "commit": "6ba49f10",
+  "commit": "9d27fdb5",
   "viewport": {
     "width": 390,
     "height": 844
@@ -14,12 +14,12 @@
   },
   "candidate": {
     "file": "candidate/CANDIDATE-FIXTURE-home-390x844.png",
-    "sha256": "c832444dd1d69b1756b3294503014580bb28cf2215654001ccb24d75e9495b4a"
+    "sha256": "44146298effa4a78ddb7efbe08e536d25390aa75b6e27233f944f05c6ab4de3b"
   },
   "sideBySide": "candidate/cmp-home-390x844-side-by-side.png",
   "overlay50": "candidate/cmp-home-390x844-overlay-50.png",
   "difference": "candidate/cmp-home-390x844-difference.png",
-  "differingShare": 0.2889,
+  "differingShare": 0.2909,
   "geometry": {
     "name": {
       "top": 95,
@@ -42,14 +42,14 @@
     "startMoving": {
       "top": 516,
       "bottom": 534,
-      "left": 66,
-      "right": 164
+      "left": 80,
+      "right": 178
     },
     "alreadyMoved": {
-      "top": 517,
-      "bottom": 533,
-      "left": 244,
-      "right": 344
+      "top": 509,
+      "bottom": 541,
+      "left": 257,
+      "right": 355
     },
     "contribution": null
   }
