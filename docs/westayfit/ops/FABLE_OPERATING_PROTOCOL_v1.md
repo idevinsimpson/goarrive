@@ -189,3 +189,23 @@ It should contain only:
 - canonical worker inbox map.
 
 Fable reads this comment first, then only active changed heads/inboxes. It must not reconstruct current state by rereading the full historical comment wall.
+
+
+## 16. One active packet per worker
+
+A canonical inbox may contain more than one actionable packet, but a worker executes only one at a time.
+
+Every worker queue has two explicit slots:
+- **ACTIVE NOW** — the single packet the worker is currently executing or independently reviewing;
+- **NEXT** — at most one queued packet that becomes active only after ACTIVE NOW reaches a handoff, verdict, blocker, or completion state.
+
+Rules:
+1. Critical-path order decides ACTIVE NOW. A user-visible accepted or review-ready milestone outranks control-plane, scale, cleanup, or future-scope work unless the secondary packet blocks truth, privacy, data integrity, cross-device behavior, or release safety.
+2. Posting a NEXT packet does not authorize context switching away from ACTIVE NOW.
+3. A worker ACKs NEXT only when it becomes ACTIVE NOW, unless an explicit preparatory read is needed to expose a dependency.
+4. Fable does not create a second wake/check-in for NEXT. The program-level loop promotes NEXT when ACTIVE NOW transitions.
+5. A worker may deliver one packet and immediately begin NEXT only when the transition is recorded and the two packets do not share a reserved write surface.
+6. Independent QA may be queued behind another QA packet; do not run two expensive browser/emulator suites concurrently in the same worker merely because both are ready.
+7. The canonical CURRENT comment records ACTIVE NOW / NEXT only for workers that have more than one actionable packet.
+
+Example: if W7 is already reviewing a member-visible Home milestone and a control-plane activation packet becomes review-ready, Home remains ACTIVE NOW and activation is NEXT. The activation handoff may exist in the inbox, but it must not preempt the visible critical path.

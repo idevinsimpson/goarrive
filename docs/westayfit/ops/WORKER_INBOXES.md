@@ -30,3 +30,10 @@ Rules:
 10. A worker check-in remains active because of actionable owned work, not because unrelated or blocked PRs remain open.
 11. Blocked/reference/evidence/history PRs are removed from the worker's active watch set until a new actionable inbox handoff arrives.
 12. The program-level Fable loop, not every worker, owns global monitoring and reactivation.
+
+
+13. A worker has exactly one **ACTIVE NOW** packet. A second actionable packet is **NEXT**, not concurrent work.
+14. ACTIVE NOW follows the program critical path; member-visible milestone review normally outranks control-plane or scale review unless the latter is a release/truth/privacy blocker.
+15. NEXT receives no separate wake. Fable promotes it only after ACTIVE NOW reaches a recorded transition.
+16. Do not require a second ACK for a queued packet until it is promoted to ACTIVE NOW.
+17. When a worker has both ACTIVE NOW and NEXT, the canonical CURRENT comment records that ordering so a later check-in cannot infer priority from comment timestamps.
