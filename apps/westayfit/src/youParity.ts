@@ -20,6 +20,8 @@ import {
 
 export type YouProfile = {
   displayName: string | null;
+  /** The profile has not been read yet: the name waits in its place, it is not guessed. */
+  pending?: boolean;
   /** "September 2026". A join date is identity, not activity. */
   memberSince: string | null;
 };
