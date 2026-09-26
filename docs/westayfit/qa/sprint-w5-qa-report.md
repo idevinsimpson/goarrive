@@ -2686,3 +2686,22 @@ This was released in Director `5842003820` and L0 `5842371466`. The evidence com
 - A negative count renders as "-3" and "-3 people".
 - The route shouldn't ever pass either value, but Y-F1 on You was closed for the same class of problem.
 - **Smallest fix:** treat a `memberCount` that is not finite or is below 0 as `null` (one helper, used by the fact, the heading and `anonymousRemainder`), and add a test for it.
+
+### K-F1 delta recheck: #496 product `646c9579bc5761a219d76c49f24dd64eaa3e485b` — **PASS**
+
+This follows L0 `5843155084` and Director `5842638933`. The commit sits on `88d5969e`, which is on `db41ffd2`. It changes `communityParityTypes.ts`, `CommunityParityView.tsx` and one test.
+
+**The fix.** A new function, `knownMemberCount`, returns `null` unless the count is a non-negative integer, and normalises `-0` to `0`.
+- The MEMBERS fact and the roster heading both read through it.
+- `anonymousRemainder` calls it internally.
+- The view has no other raw use of `memberCount`; the remainder call passes the raw value into that guarded function.
+
+**Measured**
+- Focused vitest (the Community and Privacy view tests): 42/42.
+- `tsc`: 0.
+- W5 probes: 2/2, saved as `sprint-w5-pr496-kf1-probe.test.tsx.txt`.
+  - NaN, ±Infinity, −3 and 2.5 each show "MEMBERS —" and the "Members" heading, with no remainder and no NaN, ∞, −3, 2.5 or "0 people" anywhere.
+  - Both 0 and −0 show "0" and "0 people" (never "-0").
+  - A real count of 23 with 2 named members still gives "21 members shown without names".
+
+**K-F1 is closed.**
