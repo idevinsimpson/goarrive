@@ -27,6 +27,9 @@ import {
   getDocs,
   doc,
   getDoc,
+  limit,
+  orderBy,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useRouter } from 'expo-router';
@@ -65,11 +68,88 @@ export default function MemberHome() {
   const [loading, setLoading] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [isPending, setIsPending] = useState(true);
+  const [todayWorkouts, setTodayWorkouts] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     if (!user) return;
     fetchMemberData();
+    fetchTodayWorkout();
   }, [user]);
+
+  function todayDateString(): string {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  // Two write paths exist for `scheduledFor`:
+  //   - Single-assign flows write `Timestamp.fromDate(...)` (correct per backend contract).
+  //   - BatchAssignModal historically wrote `YYYY-MM-DD` strings (fixed in #316 for new docs,
+  //     but existing string docs are still live — no backfill).
+  // So: run both a day-range Timestamp query and a string-equality fallback query.
+  // Each is guarded independently — if one throws (e.g. Timestamp query needs an index
+  // that hasn't finished building yet) the other still populates the card.
+  async function fetchTodayWorkout() {
+    if (!user) return;
+    const collected = new Map<string, { id: string; name: string }>();
+
+    // Primary: day-range on the Timestamp field. Requires composite index
+    // (memberId ASC, status ASC, scheduledFor ASC, createdAt ASC).
+    try {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const startOfTomorrow = new Date(startOfDay);
+      startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+      const tsQuery = query(
+        collection(db, 'workout_assignments'),
+        where('memberId', '==', user.uid),
+        where('status', '==', 'scheduled'),
+        where('scheduledFor', '>=', Timestamp.fromDate(startOfDay)),
+        where('scheduledFor', '<', Timestamp.fromDate(startOfTomorrow)),
+        orderBy('scheduledFor', 'asc'),
+        orderBy('createdAt', 'asc'),
+        limit(5)
+      );
+      const tsSnap = await getDocs(tsQuery);
+      tsSnap.docs.forEach((d) => {
+        collected.set(d.id, {
+          id: d.id,
+          name: d.data().workoutName ?? "Today's Workout",
+        });
+      });
+    } catch (err) {
+      console.error('[MemberHome] Timestamp today-workout query failed:', err);
+    }
+
+    // Fallback: legacy string-equality docs (pre-#316 BatchAssignModal writes).
+    // Independent guard so a Timestamp-query failure doesn't blank the card
+    // for members whose assignments still live as strings.
+    try {
+      const strQuery = query(
+        collection(db, 'workout_assignments'),
+        where('memberId', '==', user.uid),
+        where('scheduledFor', '==', todayDateString()),
+        where('status', '==', 'scheduled'),
+        limit(5)
+      );
+      const strSnap = await getDocs(strQuery);
+      strSnap.docs.forEach((d) => {
+        if (!collected.has(d.id)) {
+          collected.set(d.id, {
+            id: d.id,
+            name: d.data().workoutName ?? "Today's Workout",
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[MemberHome] String-equality today-workout query failed:', err);
+    }
+
+    setTodayWorkouts(Array.from(collected.values()).slice(0, 5));
+  }
 
   async function fetchMemberData() {
     try {
@@ -204,6 +284,29 @@ export default function MemberHome() {
           </View>
         ) : (
           <>
+            {/* Start Today's Workout — one card per scheduled assignment for today */}
+            {todayWorkouts.map((w) => (
+              <Pressable
+                key={w.id}
+                style={s.todayCard}
+                onPress={() =>
+                  router.push(
+                    `/(member)/workouts?assignmentId=${w.id}` as any
+                  )
+                }
+              >
+                <View style={s.todayCardHeader}>
+                  <View style={s.todayIconWrap}>
+                    <Text style={s.todayIconText}>▶</Text>
+                  </View>
+                  <View style={s.todayCardInfo}>
+                    <Text style={s.todayCardLabel}>Start Today's Workout</Text>
+                    <Text style={s.todayCardName} numberOfLines={2}>{w.name}</Text>
+                  </View>
+                </View>
+              </Pressable>
+            ))}
+
             {/* Plan Status Card */}
             <View style={s.card}>
               <View style={s.cardHeader}>
@@ -374,6 +477,45 @@ const s = StyleSheet.create({
   },
   welcomeLeft: {
     flex: 1,
+  },
+  todayCard: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  todayCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  todayIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayIconText: {
+    fontSize: 20,
+    color: '#F5A623',
+  },
+  todayCardInfo: {
+    flex: 1,
+  },
+  todayCardLabel: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  todayCardName: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#F0F4F8',
   },
   greeting: {
     fontSize: 24,

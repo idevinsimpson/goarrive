@@ -265,6 +265,16 @@
       ]
     },
     {
+      "collectionGroup": "workout_assignments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduledFor", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "workout_logs",
       "queryScope": "COLLECTION",
       "fields": [
