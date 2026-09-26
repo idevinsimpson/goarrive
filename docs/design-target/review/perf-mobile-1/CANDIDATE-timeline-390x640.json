@@ -1,33 +1,33 @@
 {
   "stage": "CANDIDATE",
-  "commit": "5633057a",
+  "commit": "889e9775",
   "device": "390x640",
   "instrumentation": "every callable answer held 1500 ms after Home settled",
   "journeys": {
     "progress": {
       "shutterMsFromPress": [
-        91,
-        188,
+        86,
+        167,
         602,
-        2998
+        2995
       ],
       "loadingPainted": {}
     },
     "you": {
       "shutterMsFromPress": [
-        85,
-        187,
-        605,
-        2989
+        91,
+        182,
+        603,
+        2987
       ],
       "loadingPainted": {}
     },
     "move": {
       "shutterMsFromPress": [
-        122,
-        241,
-        603,
-        2981
+        108,
+        212,
+        602,
+        2997
       ],
       "loadingPainted": {}
     }
@@ -35,55 +35,55 @@
   "frames": [
     {
       "file": "CANDIDATE-progress-000ms-390x640.png",
-      "sha256": "a6dd9685d8057916ef935d6b1d9c035d0f6026d41eb2ce1f8cebc648b4ed4f99"
+      "sha256": "e3d6693ea786207a6e57bed1b2d2cbc1d0d455fa353a2e4c5d9bfa0b6d00e16c"
     },
     {
       "file": "CANDIDATE-progress-150ms-390x640.png",
-      "sha256": "a6dd9685d8057916ef935d6b1d9c035d0f6026d41eb2ce1f8cebc648b4ed4f99"
+      "sha256": "e3d6693ea786207a6e57bed1b2d2cbc1d0d455fa353a2e4c5d9bfa0b6d00e16c"
     },
     {
       "file": "CANDIDATE-progress-600ms-390x640.png",
-      "sha256": "a6dd9685d8057916ef935d6b1d9c035d0f6026d41eb2ce1f8cebc648b4ed4f99"
+      "sha256": "e3d6693ea786207a6e57bed1b2d2cbc1d0d455fa353a2e4c5d9bfa0b6d00e16c"
     },
     {
       "file": "CANDIDATE-progress-settled-390x640.png",
-      "sha256": "a6dd9685d8057916ef935d6b1d9c035d0f6026d41eb2ce1f8cebc648b4ed4f99"
+      "sha256": "e3d6693ea786207a6e57bed1b2d2cbc1d0d455fa353a2e4c5d9bfa0b6d00e16c"
     },
     {
       "file": "CANDIDATE-you-000ms-390x640.png",
-      "sha256": "f5ff01835981be33fefac44f6f82f10c41b0cd6cb44a9e4eaeb7f07fa4453b92"
+      "sha256": "14f802a234593b4931a5512437691ab6ce9e810d460b2896d690aaa3efe84b31"
     },
     {
       "file": "CANDIDATE-you-150ms-390x640.png",
-      "sha256": "f5ff01835981be33fefac44f6f82f10c41b0cd6cb44a9e4eaeb7f07fa4453b92"
+      "sha256": "14f802a234593b4931a5512437691ab6ce9e810d460b2896d690aaa3efe84b31"
     },
     {
       "file": "CANDIDATE-you-600ms-390x640.png",
-      "sha256": "f5ff01835981be33fefac44f6f82f10c41b0cd6cb44a9e4eaeb7f07fa4453b92"
+      "sha256": "14f802a234593b4931a5512437691ab6ce9e810d460b2896d690aaa3efe84b31"
     },
     {
       "file": "CANDIDATE-you-settled-390x640.png",
-      "sha256": "f5ff01835981be33fefac44f6f82f10c41b0cd6cb44a9e4eaeb7f07fa4453b92"
+      "sha256": "14f802a234593b4931a5512437691ab6ce9e810d460b2896d690aaa3efe84b31"
     },
     {
       "file": "CANDIDATE-move-000ms-390x640.png",
-      "sha256": "904e7d200f8cb4f8b075e66e9243139de09b2bc6661fb4f2b23dbcd9cb57bf6e"
+      "sha256": "f24164814060dd2c8518503e121b7a93298cd903599f1599198ddd35b916b016"
     },
     {
       "file": "CANDIDATE-move-150ms-390x640.png",
-      "sha256": "3b1dce39b06765319ba468872b6272b6db5a8701990ccdaac26253c7fcdbfe7f"
+      "sha256": "80d05f0894358ed25062561b9efe9717d4d104aac40323788bc1abb61c243728"
     },
     {
       "file": "CANDIDATE-move-600ms-390x640.png",
-      "sha256": "f8b95c7cfcc90f0eb914748f92429c490438219c466cd491519220c702d3af45"
+      "sha256": "80d05f0894358ed25062561b9efe9717d4d104aac40323788bc1abb61c243728"
     },
     {
       "file": "CANDIDATE-move-settled-390x640.png",
-      "sha256": "0228f6c61b7fdf1fe0c4fbde23e5646a32d5f7907ba535c964286bbd866ee882"
+      "sha256": "04a99126dcda8fc197bb1cf95abb8ed5b87a74762c9c5c9cc9e991b3d0cc98e7"
     }
   ],
   "video": {
     "file": "CANDIDATE-timeline-390x640.webm",
-    "sha256": "bbb429498c72b0ee05a39cb77e436660aa7bc4a4e9fa24f8ea0471b24388b194"
+    "sha256": "bc96fe7b4090cf7ec67446d48e00079bddda49e94fdea4a87dc40a74f0c32eb1"
   }
 }

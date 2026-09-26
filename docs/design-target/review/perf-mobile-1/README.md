@@ -3,9 +3,9 @@
 - **Packet:** Director #365 `5840360454`; L0 #489 `5840568948`; W9 ACK #489 `5840966421`.
 - **Worker:** W9. PR #494.
 - **Base:** development `0b460ce3f2f0766406100fef14d9a444c8cad43a`.
-- **Product SHA:** `5633057a`.
-  - The product code is identical to `398c70d1`.
-  - `5633057a` adds only two spec-setup changes (see *Changed-dependency set*).
+- **Product SHA: `889e9775`**, the successor to `5633057a`.
+  - `5633057a` was held by the Director (#365 `5841354004`) for three cache corrections (#494 `5841250834`, `5841264164`, `5841341300`); see *Successor* below.
+  - The speed work is unchanged from `5633057a`.
 - **Instrument:** W7's `sprint-w7-perf-mobile-baseline.spec.ts`, blob `245a3357` from `dd7828b9`.
   - It was run unchanged, on the same host and emulators, with the same fixture and viewports, once per build.
   - The raw output is in `RAW-w7-instrument-*.log`.
@@ -21,7 +21,7 @@
 | Progress and You: no full-page replacement when known truth exists; useful before background reads; warm switches stay at 0 calls | **met** | See below. |
 | MOVE: useful known content before reads settle; no duplicate identical `wsfListGoals`; one mounted tab context; Close and return preserve state, focus and history | **met** | See below. |
 | Cold one-community Home: no duplicate identical member or goals calls | **met** | 9 → 7 calls, no identical pair (focused spec and instrument). |
-| Cold Home: loading-frame sequence materially reduced, without fake data | **NOT MET** | See *Limits*, item 1. |
+| Cold Home: loading-frame sequence materially reduced, without fake data | **moved out of cp1** | The Director moved it to PERF-COLD-SNAPSHOT-2 (#489 `5841202778`). See *Limits*, item 1. |
 | Two-account same-document isolation, plus refused-membership eviction | **met** | See below. |
 | Focused fail-before / pass-after only | done | See *Focused spec*. |
 | 390×640 / 390×844 transition timelines for Progress, You and MOVE | done | See *Timelines*. |
@@ -40,49 +40,76 @@ Detail for the met rows:
   - The existing focus and exit specs pass (see *Changed-dependency set*).
 - **Isolation and eviction:** the focused spec records no name of account A painted for B in the same document. A refused community is forgotten and MOVE does not open on it.
 
-## Raw before / after (W7 instrument; base `0b460ce3` → candidate `5633057a`)
+## Raw before / after (W7 instrument; base `0b460ce3` → candidate `889e9775`)
+
+The same instrument on the held `5633057a` is in `RAW-w7-instrument-CANDIDATE-5633057a.log`. Its numbers agree within noise.
 
 | Transition | Useful ms (base → cand) | Settled ms | Callables base | Callables cand | Stages | Loading painted base → cand | Mounts cand | Blocking |
 |---|---|---|---|---|---|---|---|---|
-| W 390x844 pass1 Home->Community | 21 → **22** | 131 → 130 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 0 → 0 | none → **none** | wsf-community-index +1 | False → **False** |
-| W 390x844 pass1 Community->Progress | 80 → **17** | 80 → 17 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-activity-loading → **none** | wsf-activity +1 | True → **False** |
-| W 390x844 pass1 Progress->You | 103 → **12** | 103 → 12 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-you-loading → **none** | wsf-you +1 | True → **False** |
-| W 390x844 pass1 You->Home | 13 → **14** | 106 → 99 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x844 pass2 Home->Community | 6 → **7** | 6 → 7 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x844 pass1 Home->Community | 21 → **23** | 131 → 122 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 0 → 0 | none → **none** | wsf-community-index +1 | False → **False** |
+| W 390x844 pass1 Community->Progress | 80 → **19** | 80 → 19 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-activity-loading → **none** | wsf-activity +1 | True → **False** |
+| W 390x844 pass1 Progress->You | 103 → **11** | 103 → 11 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-you-loading → **none** | wsf-you +1 | True → **False** |
+| W 390x844 pass1 You->Home | 13 → **14** | 106 → 101 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x844 pass2 Home->Community | 6 → **6** | 6 → 6 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
 | W 390x844 pass2 Community->Progress | 5 → **5** | 5 → 5 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x844 pass2 Progress->You | 6 → **5** | 6 → 5 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x844 pass2 You->Home | 6 → **7** | 96 → 99 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x844 MOVE open (from Home) | 121 → **61** | 121 → 90 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyCommunities 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
-| W 390x844 MOVE Close | 185 → **186** | 258 → 279 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | 1 → 1 | none → **none** | none | False → **False** |
-| W 390x844 MOVE open again (from Home) | 138 → **44** | 138 → 50 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
-| W 390x844 submit -> confirmed receipt | 46 → **49** | 46 → 49 | wsfContribute 1 | wsfContribute 1 | 1 → 1 | none → **none** | none | False → **False** |
-| W 390x844 receipt exit ("Back to community") -> return | 26 → **29** | 94 → 123 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x640 pass1 Home->Community | 21 → **24** | 111 → 114 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 0 → 0 | none → **none** | wsf-community-index +1 | False → **False** |
-| W 390x640 pass1 Community->Progress | 74 → **17** | 74 → 17 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-activity-loading → **none** | wsf-activity +1 | True → **False** |
-| W 390x640 pass1 Progress->You | 91 → **12** | 91 → 12 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-you-loading → **none** | wsf-you +1 | True → **False** |
-| W 390x640 pass1 You->Home | 13 → **13** | 94 → 115 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x844 pass2 Progress->You | 6 → **6** | 6 → 6 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x844 pass2 You->Home | 6 → **10** | 96 → 87 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x844 MOVE open (from Home) | 121 → **65** | 121 → 86 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyCommunities 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
+| W 390x844 MOVE Close | 185 → **186** | 258 → 254 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | 1 → 1 | none → **none** | none | False → **False** |
+| W 390x844 MOVE open again (from Home) | 138 → **45** | 138 → 49 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
+| W 390x844 submit -> confirmed receipt | 46 → **53** | 46 → 53 | wsfContribute 1 | wsfContribute 1 | 1 → 1 | none → **none** | none | False → **False** |
+| W 390x844 receipt exit ("Back to community") -> return | 26 → **26** | 94 → 119 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x640 pass1 Home->Community | 21 → **19** | 111 → 124 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 0 → 0 | none → **none** | wsf-community-index +1 | False → **False** |
+| W 390x640 pass1 Community->Progress | 74 → **23** | 74 → 23 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-activity-loading → **none** | wsf-activity +1 | True → **False** |
+| W 390x640 pass1 Progress->You | 91 → **11** | 91 → 11 | wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 0 | 3 → 0 | wsf-you-loading → **none** | wsf-you +1 | True → **False** |
+| W 390x640 pass1 You->Home | 13 → **23** | 94 → 112 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
 | W 390x640 pass2 Home->Community | 5 → **6** | 5 → 6 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x640 pass2 Community->Progress | 5 → **5** | 5 → 5 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x640 pass2 Community->Progress | 5 → **9** | 5 → 9 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
 | W 390x640 pass2 Progress->You | 6 → **6** | 6 → 6 | 0 | 0 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x640 pass2 You->Home | 7 → **6** | 104 → 88 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
-| W 390x640 MOVE open (from Home) | 111 → **44** | 111 → 70 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyCommunities 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
-| W 390x640 MOVE Close | 186 → **186** | 254 → 262 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | 1 → 1 | none → **none** | none | False → **False** |
-| W 390x640 MOVE open again (from Home) | 103 → **44** | 103 → 51 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
-| W 390x640 submit -> confirmed receipt | 56 → **48** | 56 → 48 | wsfContribute 1 | wsfContribute 1 | 1 → 1 | none → **none** | none | False → **False** |
-| W 390x640 receipt exit ("Back to community") -> return | 29 → **29** | 102 → 111 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
-| C n=1 cold Home #1 | 482 → **383** | – | 9: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 2, wsfMyCommunities 2, wsfMyContribution 1 | 7: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 5 → 4 | wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community → wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community | – | – |
-| C n=1 cold Home #2 | 419 → **419** | – | 9: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 2, wsfMyCommunities 2, wsfMyContribution 1 | 7: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 5 → 3 | wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community → wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community | – | – |
-| C n=1 cold Community tab #1 | 331 → **333** | – | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3 → 3 | wsf-community-index-loading → wsf-community-index-loading | – | – |
-| C n=1 cold Community tab #2 | 329 → **322** | – | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3 → 3 | wsf-community-index-loading → wsf-community-index-loading | – | – |
-| C n=3 cold Home #1 | 302 → **281** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 1 → 1 | wsf-home-loading, wsf-home-my-loading → wsf-home-loading, wsf-home-my-loading | – | – |
-| C n=3 cold Home #2 | 262 → **302** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 1 → 1 | wsf-home-loading, wsf-home-my-loading → wsf-home-loading, wsf-home-my-loading | – | – |
-| C n=3 cold Community tab #1 | 290 → **292** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 2 → 2 | wsf-community-index-loading → wsf-community-index-loading | – | – |
-| C n=3 cold Community tab #2 | 335 → **356** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 2 → 2 | wsf-community-index-loading → wsf-community-index-loading | – | – |
+| W 390x640 pass2 You->Home | 7 → **6** | 104 → 92 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
+| W 390x640 MOVE open (from Home) | 111 → **46** | 111 → 71 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyCommunities 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
+| W 390x640 MOVE Close | 186 → **185** | 254 → 265 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 2, wsfListGoals 1, wsfMyContribution 1 | 1 → 1 | none → **none** | none | False → **False** |
+| W 390x640 MOVE open again (from Home) | 103 → **43** | 103 → 47 | wsfGoalPulse 1, wsfListGoals 2, wsfMyCommunities 1, wsfMyContribution 1 | wsfGoalPulse 1, wsfMyContribution 1 | 3 → 1 | wsf-move-working → **none** | wsf-contribute-sheet-panel +1 | True → **False** |
+| W 390x640 submit -> confirmed receipt | 56 → **53** | 56 → 53 | wsfContribute 1 | wsfContribute 1 | 1 → 1 | none → **none** | none | False → **False** |
+| W 390x640 receipt exit ("Back to community") -> return | 29 → **24** | 102 → 97 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListGoals 1, wsfMyContribution 1 | 0 → 0 | none → **none** | none | False → **False** |
+| C n=1 cold Home #1 | 482 → **392** | – | 9: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 2, wsfMyCommunities 2, wsfMyContribution 1 | 7: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 5 → 3 | wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community → wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community | – | – |
+| C n=1 cold Home #2 | 419 → **425** | – | 9: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 2, wsfMyCommunities 2, wsfMyContribution 1 | 7: wsfCommunityActivity 1, wsfCommunityMembers 1, wsfGoalPulse 1, wsfListChallenge 1, wsfListGoals 1, wsfMyCommunities 1, wsfMyContribution 1 | 5 → 4 | wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community → wsf-community-loading, wsf-home-loading, wsf-home-my-loading, wsf-home-opening-community | – | – |
+| C n=1 cold Community tab #1 | 331 → **288** | – | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3 → 3 | wsf-community-index-loading → wsf-community-index-loading | – | – |
+| C n=1 cold Community tab #2 | 329 → **285** | – | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3: wsfGoalRecentAdditions 1, wsfListGoals 1, wsfMyCommunities 1 | 3 → 3 | wsf-community-index-loading → wsf-community-index-loading | – | – |
+| C n=3 cold Home #1 | 302 → **273** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 1 → 1 | wsf-home-loading, wsf-home-my-loading → wsf-home-loading, wsf-home-my-loading | – | – |
+| C n=3 cold Home #2 | 262 → **278** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 1 → 1 | wsf-home-loading, wsf-home-my-loading → wsf-home-loading, wsf-home-my-loading | – | – |
+| C n=3 cold Community tab #1 | 290 → **323** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 2 → 2 | wsf-community-index-loading → wsf-community-index-loading | – | – |
+| C n=3 cold Community tab #2 | 335 → **355** | – | 4: wsfListGoals 3, wsfMyCommunities 1 | 4: wsfListGoals 3, wsfMyCommunities 1 | 2 → 2 | wsf-community-index-loading → wsf-community-index-loading | – | – |
 
 Unchanged by design:
 - **Home return: 5 background calls.** A member's return re-reads Home's figures fresh (RETURN-CONTINUITY). The pulse, members and activity are not facts this layer records, and goals and own parts on a return are read fresh on purpose.
 - **Receipt: `wsfContribute`.** The write is the server's.
 - **Label check:** MOVE's open still reads `wsfMyCommunities` once when the account's answer is older than the 10 s same-load window.
+
+## Successor `889e9775`: the Director's three corrections
+
+**Changes (cache, refusal and refresh logic only):**
+- **Per-key generations plus an account epoch in `memberReads`.** A read records its answer only if nothing advanced the key since it was issued. Superseded by a receipt, it answers with the receipt's value; superseded by a removal, it asks again, fresh.
+- **Receipts:** a receipt always advances the community's goal list. The list is patched when settled and patchable; otherwise it is removed.
+- **Community eviction:** a group → goal-id registry (metadata only) lets `forgetCommunity` reach every recorded own part.
+- **Refusal proof and eviction happen together:** on the contribution poll's not-found, and on Community Home's `wsfListGoals` not-found (load or return), which now shows the refusal, not "last known".
+- **Mounted refresh:** Progress and You recompose from the record on every return, so a receipt shows as MOVE closes.
+
+**W7 truth rows** (`sprint-w7-perf-mobile-verify.spec.ts` at `a5bad071`, run locally; `RAW-w7-truth-rows-*.log`):
+
+| Build | T1 isolation | T2 refusal | T3 receipt on mounted routes | T3b stale read after receipt |
+|---|---|---|---|---|
+| **`889e9775`** | **PASS** | **PASS**: Home "Not a member"; Progress no longer lists it | **PASS**: 55 / 55 | **PASS\***: 55 / 55 |
+| `5633057a` | PASS | measure: Home "Last known" | FAIL: 35 / 35 | FAIL\*: 35 / 35 |
+| `0b460ce3` | PASS | measure: Home "Last known" | FAIL: 35 / 35 | FAIL\*: You 35 |
+
+\*With the exact `a5bad071` file, T3b cannot measure on `889e9775`, because You opens from the record inside the 10 s same-load window (`RAW-w7-truth-rows-889e9775-exact-a5bad071.log`: T1–T3 pass). The T3b rows use a local, labelled one-line variant that waits 11 s before arming the hold. That is W7's stated adjustment (#494 `5841384342`); the variant is not committed.
+
+**Other checks:**
+- **Unit tests:** 18 cases in `tests/memberReads.test.ts`, 7 new: a stale own read after a receipt; a goals read in flight at a receipt; goals and own reads in flight at a refusal; registry eviction after the list is gone; account clearing; a refusal lifted by an authorized answer.
+- vitest **909 / 909**; tsc clean.
+- **Changed-dependency e2e for these corrections:** 22 files, 131 tests, on `889e9775`. **131 / 131 on the first run.** The files are every spec touching refusal, not-member, not-found, Progress or You.
+- **Timelines:** the CANDIDATE frames and WebMs were **recaptured on `889e9775`**; each strip shows that commit. Loading painted is none at every shutter and at both sizes. The BASE frames are unchanged.
 
 ## Focused spec: `apps/westayfit/tests-e2e/sprint-w9-perf-mobile-1.spec.ts`
 
@@ -151,7 +178,7 @@ Every callable answer is held 1.5 s at the network boundary, so "useful before t
    - Calls fell 9 → 7 with no identical pair, and stages fell 5 → 3–4. The useful time is unchanged within noise (353–482 → 383–419 ms here).
    - A cold reload has nothing in memory, and the layer never persists, by its own rule. So the only way to fewer states without fake data is presentation: one continuous loading composition across auth restore, list read and redirect. Three existing specs assert those states by name.
    - This is **proposed, not done**. It is the Director's call whether it belongs in this packet or in COMMUNITY-SETTINGS-PARITY-1.
-2. **Item 6 is evidenced at unit level only,** by `noteConfirmedContribution`. The Check 41B receipt journey returns Home to the server's figure (1,882) on both builds. No e2e isolates the recorded own part after a receipt on Progress: Progress stays mounted and, as on the base, does not re-read on return.
+2. **Item 6 is now evidenced at route level** by W7's T3 and T3b on `889e9775`, as well as at unit level.
 3. **A decision from the record can be up to one session old.**
    - MOVE's one-goal hand-off uses the recorded goal set. A goal that closed since is answered by the flow's own fresh pulse (the closed state); a goal added since appears on the next fresh read (any Home return).
    - A goal refused as not-found forgets its community.
