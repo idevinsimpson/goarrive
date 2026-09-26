@@ -1,0 +1,145 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { ProgressGoal, ProgressReceipt, ProgressState } from '../src/progressParity';
+import { ProgressParityView, type ProgressParityActions } from '../src/ui/ProgressParityView';
+
+/**
+ * PROGRESS-PARITY-1: the pure view rendered into jsdom through
+ * react-native-web. It proves the reference order, one total per unit, YOURS
+ * and SHARED apart, the lifecycle pills, the honest receipt slot, which state
+ * body shows, and that every control only calls its callback.
+ */
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+});
+
+const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+const text = (id: string) => byId(id)?.textContent ?? '';
+const before = (a: string, b: string) =>
+  Boolean(byId(a)!.compareDocumentPosition(byId(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+const OAK = { communityId: 'oak', community: 'Oak Grove Together' };
+const g = (over: Partial<ProgressGoal>): ProgressGoal => ({
+  goalId: 'x',
+  title: 'Goal',
+  ...OAK,
+  unit: 'squats',
+  yourPart: 1,
+  target: 100,
+  sharedTotal: 10,
+  open: true,
+  ...over,
+});
+const OAK_500 = g({ goalId: 'oak-500', title: '500 squats together', yourPart: 25, target: 500, sharedTotal: 241 });
+const HARBOR_150 = g({
+  goalId: 'harbor-150',
+  title: '150 squats this week',
+  communityId: 'harbor',
+  community: 'Harbor Lunch Crew',
+  yourPart: 20,
+  target: 150,
+  sharedTotal: 155,
+});
+const OAK_AUG = g({ goalId: 'oak-aug', title: '1,000 squats in August', yourPart: 60, target: 1000, sharedTotal: 1024, open: false });
+const OAK_JUL = g({ goalId: 'oak-jul', title: '800 squats in July', yourPart: 40, target: 800, sharedTotal: 612, open: false });
+
+const ready = (over: Partial<Extract<ProgressState, { kind: 'ready' }>> = {}): ProgressState => ({
+  kind: 'ready',
+  memberName: 'Alex M.',
+  open: [OAK_500, HARBOR_150],
+  finished: [OAK_AUG, OAK_JUL],
+  partial: false,
+  canStart: true,
+  receipts: null,
+  ...over,
+});
+
+function render(state: ProgressState) {
+  const actions: ProgressParityActions = {
+    onRetry: vi.fn(),
+    onStartMoving: vi.fn(),
+    onOpenCommunity: vi.fn(),
+    onOpenReceipt: vi.fn(),
+  };
+  act(() => {
+    root.render(<ProgressParityView state={state} actions={actions} />);
+  });
+  return actions;
+}
+const click = (id: string) => act(() => byId(id)!.click());
+
+const all = () => container.textContent ?? '';
+describe('W5 carry probes', () => {
+  it('P1 unlike units never blend (17 squats + 5 steps → two totals, no 22)', () => {
+    render(ready({ open: [g({ goalId: 'a', yourPart: 17 }), g({ goalId: 'b', unit: 'steps', yourPart: 5 })], finished: [] }));
+    expect(byId('wsf-activity-total-0')!.textContent).toContain('17');
+    expect(byId('wsf-activity-total-1')!.textContent).toContain('5steps');
+    expect(byId('wsf-activity-total-2')).toBeNull();
+    expect(text('wsf-activity-totals')).not.toContain('22');
+  });
+  it('P2 receipts null → unavailable line, no receipt rows, no time words', () => {
+    render(ready());
+    expect(byId('wsf-activity-receipts-unavailable')).not.toBeNull();
+    expect(container.querySelector('[data-testid^="wsf-activity-receipt-"]:not([data-testid="wsf-activity-receipts-unavailable"])')).toBeNull();
+    expect(text('wsf-activity-receipts')).not.toMatch(/ago|yesterday|just now/);
+  });
+  it('P3 receipts [] (a source answering "none") — what is drawn', () => {
+    render(ready({ receipts: [] }));
+    console.log('P3 receipts=[] text:', JSON.stringify(text('wsf-activity-receipts')));
+  });
+  it('P4 failed: no digit, no totals, Retry calls onRetry only', () => {
+    const a = render({ kind: 'failed', memberName: 'Alex M.' });
+    expect(all()).not.toMatch(/\d/);
+    expect(byId('wsf-activity-totals')).toBeNull();
+    click('wsf-activity-retry');
+    expect(a.onRetry).toHaveBeenCalledTimes(1);
+    expect(a.onStartMoving).not.toHaveBeenCalled();
+  });
+  it('P5 partial with goals: note + Retry, totals only from loaded goals', () => {
+    const a = render(ready({ partial: true, open: [g({ goalId: 'a', yourPart: 7 })], finished: [] }));
+    expect(byId('wsf-activity-partial')).not.toBeNull();
+    expect(text('wsf-activity-totals')).toContain('7');
+    click('wsf-activity-partial-retry');
+    expect(a.onRetry).toHaveBeenCalledTimes(1);
+  });
+  it('P6 partial + nothing loaded + canStart=false — does it assert a community-wide negative?', () => {
+    render(ready({ partial: true, open: [], finished: [], canStart: false }));
+    console.log('P6 noOpenGoal+partial body:', JSON.stringify(text('wsf-activity-empty')));
+  });
+  it('P7 closed + unknown total → CLOSED and Unknown, never reached/unfinished/0', () => {
+    render(ready({ open: [], finished: [g({ goalId: 'c', open: false, sharedTotal: null })] }));
+    const row = text('wsf-activity-goal-c');
+    expect(row).toContain('CLOSED');
+    expect(row).not.toMatch(/REACHED|UNFINISHED/);
+    expect(text('wsf-activity-goal-c-shared')).toBe('SHAREDUnknown');
+  });
+  it('P8 no rank/streak/score/impact language outside the footnote', () => {
+    render(ready());
+    const t = all().replace('No scores, streaks or rankings — just what was recorded.', '');
+    expect(t).not.toMatch(/rank|streak|score|impact|#\d|top \d|best|leader/i);
+  });
+  it('P9 typed props allow a zero-credit goal in the list — what is drawn', () => {
+    render(ready({ open: [g({ goalId: 'z', yourPart: 0 })], finished: [] }));
+    console.log('P9 yourPart=0:', JSON.stringify(text('wsf-activity-goal-z-yours')), JSON.stringify(text('wsf-activity-totals')));
+  });
+  it('P10 firstEligible vs noOpenGoal CTAs are distinct and only call their own callback', () => {
+    const a = render(ready({ open: [], finished: [], canStart: true }));
+    expect(byId('wsf-activity-start')).not.toBeNull(); expect(byId('wsf-activity-open-community')).toBeNull();
+    click('wsf-activity-start'); expect(a.onStartMoving).toHaveBeenCalledTimes(1); expect(a.onOpenCommunity).not.toHaveBeenCalled();
+    const b = render(ready({ open: [], finished: [], canStart: false }));
+    expect(byId('wsf-activity-start')).toBeNull();
+    click('wsf-activity-open-community'); expect(b.onOpenCommunity).toHaveBeenCalledTimes(1); expect(b.onStartMoving).not.toHaveBeenCalled();
+  });
+});
