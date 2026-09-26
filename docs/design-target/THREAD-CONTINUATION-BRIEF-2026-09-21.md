@@ -25,8 +25,8 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
 | **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `8dc65316` / index #509 | `b71cf07f` FAIL → successor `8dc65316`; W5 recheck woken `trig_016FDPDU…` (#395 `5847278911`) | W5 → Director; staging needs index READY |
-| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | Director HOLD `5848893150`: install only `google-auth-library@9.15.1` | **W3 ACTIVE NOW** (`5849107245`) → W7 delta → accept → one re-run |
-| AUTONOMY-STATE-1A | W3 · #519 `6dcd448d` | F1–F4 + one-ball closure delivered (L0 `5849104696`, suites green) | W7 closure recheck → Director; then 1B/1C consult (`5849064684`) |
+| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | Director HOLD `5848893150`: install only `google-auth-library@9.15.1` | **W3 NEXT** after #519 O1/O2 reviewed → W7 delta → accept → one re-run |
+| AUTONOMY-STATE-1A | W3 · #519 `6dcd448d` | F1–F4 PASS (W7 65 `5849103531`); **Director HOLD** `5849116723`: O1 CURRENT body hash, O2 no owner self-review | **W3 ACTIVE NOW** (`5849122564`) → W7 → Director; then 1B/1C consult |
 | **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` | ACCEPTED → integrated `a3127651` → pin #522 → **SERVED run 55**; owner card `5849113235` | owner test feedback |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
