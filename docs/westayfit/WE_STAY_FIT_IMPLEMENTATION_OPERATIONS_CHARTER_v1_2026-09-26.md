@@ -166,14 +166,12 @@ Keep separate:
 
 A release may be visually accepted while one of these remains blocked. Do not translate visual acceptance into "expo ready."
 
-## 11. Current unresolved product decisions
+## 11. Current product decisions and unresolved boundaries
 
-These remain decisions, not implementation defaults:
+### Multi-movement goals — SETTLED
+Different movements may contribute to one defined goal and share one Living WE percentage. The shared goal owns the percentage. The goal must clearly name qualifying movements/actions and what the target measures. Do not silently invent cross-unit equivalencies; any common-unit/conversion rule must be explicit and approved.
 
-### Multi-movement goals
-Lovable can demonstrate several same-unit movements in one goal. Strategic v3.0 still requires a clearly defined goal/unit. Do not ship a general mixed-movement semantic until Devin explicitly settles the common-unit rule and qualifying-action model.
-
-### Activity catalog
+### Activity catalog — still unresolved
 Keep the general community goal/unit catalog separate from the actual FitLife activity menu. Do not infer that a prototype movement is event-approved or that an event shortlist is the complete general product catalog.
 
 ### Camera movement vision
